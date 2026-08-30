@@ -3,7 +3,7 @@
 //! Renders the active team as a compact table with lead + teammates, including
 //! status, elapsed time, step count, and tasks claimed/completed.
 
-use crate::theme::{SPACING_SM, colors};
+use crate::theme::colors;
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -69,7 +69,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let members = app.team_members.clone();
     let lead_session = app.session_id.clone().unwrap_or_default();
-    let lead_steps = app.event_bus.current_step(&lead_session);
+    let lead_steps = app.event_bus.current_tool_calls(&lead_session);
     let lead_elapsed = app
         .storage
         .get_session(&lead_session)
@@ -208,7 +208,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         let steps = member
             .session_id
             .as_deref()
-            .map(|sid| app.event_bus.current_step(sid))
+            .map(|sid| app.event_bus.current_tool_calls(sid))
             .unwrap_or(0);
 
         let (claimed, done) = task_counts.get(&member.agent_id).copied().unwrap_or((0, 0));
@@ -347,8 +347,9 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             // + 2 spaces before button char
             let btn_x: u16 = 115 + 2;
             let kill_x: u16 = btn_x + 4; // button char(2) + 2 spaces
-            app.team_row_button_areas.push(Rect::new(btn_x, 0, 4, 1));
-            app.team_row_kill_areas.push(Rect::new(kill_x, 0, 3, 1));
+            let row = lines.len() as u16;
+            app.team_row_button_areas.push(Rect::new(btn_x, row, 4, 1));
+            app.team_row_kill_areas.push(Rect::new(kill_x, row, 3, 1));
             app.team_row_button_agent_ids.push(member.agent_id.clone());
             app.team_row_kill_agent_ids.push(member.agent_id.clone());
         } else {
@@ -369,40 +370,50 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         )]));
     }
     let total_lines = lines.len() as u16;
-    let visible_lines = area.height.saturating_sub(SPACING_SM); // border space
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(
+            " Team: {}  (lead + {} teammate{}) ",
+            team_name,
+            members.len(),
+            if members.len() == 1 { "" } else { "s" }
+        ))
+        .title_style(
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        )
+        .border_style(Style::default().fg(Color::Blue));
+
+    let inner = block.inner(area);
+    let visible_lines = inner.height;
     app.teams_max_scroll = total_lines.saturating_sub(visible_lines);
     app.teams_scroll_offset = app.teams_scroll_offset.min(app.teams_max_scroll);
+    let scroll = app.teams_scroll_offset;
 
-    let paragraph = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(
-                    " 👥 Team: {}  (lead + {} teammate{}) ",
-                    team_name,
-                    members.len(),
-                    if members.len() == 1 { "" } else { "s" }
-                ))
-                .title_style(
-                    Style::default()
-                        .fg(Color::Blue)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .border_style(Style::default().fg(Color::Blue)),
-        )
-        .scroll((app.teams_scroll_offset, 0));
+    // Render only the visible slice, mirroring the message-window pattern.
+    let window: Vec<Line> = lines
+        .into_iter()
+        .skip(scroll as usize)
+        .take(visible_lines as usize)
+        .collect();
+    let paragraph = Paragraph::new(window).block(block);
 
     frame.render_widget(paragraph, area);
 
     // Adjust stored button areas for scroll/position, keeping IDs in sync.
-    // The Paragraph is rendered with a Block with Borders::ALL, so content
-    // starts at area.x + 1 (left border) and area.y + 1 (top border).
-    let scroll = app.teams_scroll_offset;
+    // The row index captured in each Rect's `y` corresponds to the line's
+    // position in the full (un-sliced) list, so we subtract the scroll offset
+    // and add the block top border.
     let mut shifted_button_areas: Vec<Rect> = Vec::new();
     let mut shifted_button_agent_ids: Vec<String> = Vec::new();
     for (i, r) in app.team_row_button_areas.iter().enumerate() {
-        let y = area.y + 1 + (i as u16 + 2).saturating_sub(scroll);
-        if y >= area.y && y < area.y + area.height && r.width > 0 {
+        if r.width == 0 || r.y < scroll {
+            continue;
+        }
+        let y = area.y + 1 + (r.y - scroll);
+        if y >= area.y && y < area.y + area.height {
             shifted_button_areas.push(Rect::new(area.x + 1 + r.x, y, r.width, 1));
             shifted_button_agent_ids.push(app.team_row_button_agent_ids[i].clone());
         }
@@ -413,8 +424,11 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut shifted_kill_areas: Vec<Rect> = Vec::new();
     let mut shifted_kill_agent_ids: Vec<String> = Vec::new();
     for (i, r) in app.team_row_kill_areas.iter().enumerate() {
-        let y = area.y + 1 + (i as u16 + 2).saturating_sub(scroll);
-        if y >= area.y && y < area.y + area.height && r.width > 0 {
+        if r.width == 0 || r.y < scroll {
+            continue;
+        }
+        let y = area.y + 1 + (r.y - scroll);
+        if y >= area.y && y < area.y + area.height {
             shifted_kill_areas.push(Rect::new(area.x + 1 + r.x, y, r.width, 1));
             shifted_kill_agent_ids.push(app.team_row_kill_agent_ids[i].clone());
         }

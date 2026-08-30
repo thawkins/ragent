@@ -907,6 +907,14 @@ pub struct EventBus {
     /// the same counters — important because the processor and TUI hold
     /// different clones of the same bus.
     steps: Arc<RwLock<HashMap<String, u64>>>,
+    /// Per-session tool-call counters.
+    ///
+    /// Keyed by session ID. The value is the number of individual tool calls
+    /// started for that session. This is separate from [`Self::steps`] because
+    /// a single loop step can contain zero, one, or many tool calls (parallel
+    /// tool calls mode), and UI panels display the tool-call count while log
+    /// tags use the loop-step number.
+    tool_calls: Arc<RwLock<HashMap<String, u64>>>,
 }
 
 impl Event {
@@ -1091,23 +1099,60 @@ impl EventBus {
         Self {
             sender,
             steps: Arc::new(RwLock::new(HashMap::new())),
+            tool_calls: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     /// Set the current step number for a specific agent session.
     ///
     /// Called by the session processor at the start of each loop iteration.
-    /// Pass `0` to clear (reset) the counter for that session.
+    /// Pass `0` to clear (reset) the counter for that session. Clearing the
+    /// step counter also clears the tool-call counter so a fresh run starts
+    /// from zero on both axes.
     pub fn set_step(&self, session_id: &str, step: u64) {
+        {
+            let mut map = self
+                .steps
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if step == 0 {
+                map.remove(session_id);
+            } else {
+                map.insert(session_id.to_string(), step);
+            }
+        }
+        if step == 0 {
+            let mut map = self
+                .tool_calls
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            map.remove(session_id);
+        }
+    }
+
+    /// Increment the tool-call counter for a specific agent session.
+    ///
+    /// Called once for every tool call that starts execution, including calls
+    /// that are later denied by hooks or fail during execution.
+    pub fn increment_tool_calls(&self, session_id: &str) {
         let mut map = self
-            .steps
+            .tool_calls
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if step == 0 {
-            map.remove(session_id);
-        } else {
-            map.insert(session_id.to_string(), step);
-        }
+        let entry = map.entry(session_id.to_string()).or_insert(0);
+        *entry += 1;
+    }
+
+    /// Returns the number of tool calls started for a specific agent session.
+    ///
+    /// Returns `0` if no tool calls have been recorded for this session.
+    #[must_use]
+    pub fn current_tool_calls(&self, session_id: &str) -> u64 {
+        let map = self
+            .tool_calls
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        map.get(session_id).copied().unwrap_or(0)
     }
 
     /// Returns the current step number for a specific agent session.

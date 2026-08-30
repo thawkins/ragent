@@ -19,8 +19,8 @@ use ragent_telemetry::counters as telemetry_counters;
 // State types from app/state.rs
 use crate::app::state::{
     App, BgTaskView, LlmRequestStat, LogLevel, ModelDownloadState, ModelLoadingState,
-    OutputViewState, OutputViewTarget, PlanApprovalState, ProviderSetupStep, QuestionRequest,
-    ResearchViewState,
+    OutputViewLineCache, OutputViewState, OutputViewTarget, PlanApprovalState, ProviderSetupStep,
+    QuestionRequest, ResearchViewState,
 };
 
 // Helpers
@@ -1291,6 +1291,9 @@ impl App {
                         status
                     ),
                 );
+                // Remove the background task from the Agents panel once it
+                // reaches a terminal state.
+                self.bg_tasks.retain(|t| t.id != *task_id);
             }
             Event::TeammateSpawned {
                 ref session_id,
@@ -1861,6 +1864,14 @@ impl App {
             },
             scroll_offset: 0,
             max_scroll: 0,
+            line_cache: OutputViewLineCache {
+                lines: Vec::new(),
+                wrapped_lines: Vec::new(),
+                content_lines: Vec::new(),
+                wrapped_count: 0,
+                cache_width: 0,
+                source_generation: 0,
+            },
         });
     }
 
@@ -1876,25 +1887,25 @@ impl App {
 
     pub(crate) fn jump_output_view_start(&mut self) {
         if let Some(ref mut view) = self.output_view {
-            view.scroll_offset = 0;
+            view.scroll_offset = view.max_scroll;
         }
     }
 
     pub(crate) fn jump_output_view_end(&mut self) {
         if let Some(ref mut view) = self.output_view {
-            view.scroll_offset = view.max_scroll;
+            view.scroll_offset = 0;
         }
     }
 
     pub(crate) fn jump_research_view_start(&mut self) {
         if let Some(ref mut view) = self.research_view {
-            view.scroll_offset = 0;
+            view.scroll_offset = view.max_scroll;
         }
     }
 
     pub(crate) fn jump_research_view_end(&mut self) {
         if let Some(ref mut view) = self.research_view {
-            view.scroll_offset = view.max_scroll;
+            view.scroll_offset = 0;
         }
     }
 
@@ -1925,6 +1936,14 @@ impl App {
             markdown,
             scroll_offset: 0,
             max_scroll: 0,
+            line_cache: crate::app::OutputViewLineCache {
+                lines: Vec::new(),
+                wrapped_lines: Vec::new(),
+                content_lines: Vec::new(),
+                wrapped_count: 0,
+                cache_width: 0,
+                source_generation: 0,
+            },
         });
     }
 

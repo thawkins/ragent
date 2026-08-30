@@ -1463,6 +1463,7 @@ impl SessionProcessor {
                             call_id: tc_clone.id.clone(),
                             tool: tc_clone.name.clone(),
                         });
+                        event_bus.increment_tool_calls(&session_id_str);
                         let pre_hook_result = {
                             crate::hooks::run_pre_tool_use_hooks(
                                 &hook_configs,

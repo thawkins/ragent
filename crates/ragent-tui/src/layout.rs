@@ -2801,11 +2801,6 @@ fn render_research_view_overlay(frame: &mut Frame, app: &mut App) {
 
     let title = format!(" /research open: {} ", sanitize_for_display(&view.name));
     let base = view.base_dir.clone();
-    let lines = markdown_to_lines(
-        &view.markdown,
-        &base,
-        frame.area().width.saturating_sub(4) as usize,
-    );
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -2817,20 +2812,65 @@ fn render_research_view_overlay(frame: &mut Frame, app: &mut App) {
         ))
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(area);
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
 
-    let total = paragraph.line_count(inner.width) as u16;
+    // ── Research-view line cache (mirrors render_messages) ──────────────────
+    //
+    // `markdown_to_lines` already wraps its output to the supplied width, so
+    // the lines it returns are one display row each.  We cache those wrapped
+    // rows and slice the visible window, then render without `.wrap()` so the
+    // scroll geometry and painted rows cannot diverge.
+    let inner_width = inner.width.saturating_sub(2);
+    let cache_width = inner_width;
+    let need_rebuild =
+        view.line_cache.cache_width != cache_width || view.line_cache.lines.is_empty();
+
+    if need_rebuild {
+        let lines = markdown_to_lines(&view.markdown, &base, cache_width as usize);
+        view.line_cache.lines = lines
+            .into_iter()
+            .map(|l| {
+                Line::from(
+                    l.spans
+                        .iter()
+                        .map(|s| Span::styled(s.content.to_string(), s.style))
+                        .collect::<Vec<_>>(),
+                )
+                .style(l.style)
+            })
+            .collect();
+        view.line_cache.cache_width = cache_width;
+        view.line_cache.wrapped_lines = view.line_cache.lines.clone();
+        view.line_cache.content_lines = wrapped_lines_to_strings(&view.line_cache.wrapped_lines);
+        view.line_cache.wrapped_count = view.line_cache.wrapped_lines.len() as u16;
+    }
+
+    let total = view.line_cache.wrapped_count;
     let visible = inner.height;
     view.max_scroll = total.saturating_sub(visible);
     view.scroll_offset = view.scroll_offset.min(view.max_scroll);
+    let scroll_from_top = view.max_scroll.saturating_sub(view.scroll_offset);
 
-    frame.render_widget(paragraph.scroll((view.scroll_offset, 0)), area);
+    // Slice the cached pre-wrapped rows to the visible window.
+    let mut window: Vec<Line<'static>> = Vec::with_capacity(visible as usize + 1);
+    let window_start = scroll_from_top as usize;
+    let window_end = window_start + visible.saturating_add(1) as usize;
+    for (i, line) in view.line_cache.wrapped_lines.iter().enumerate() {
+        if i < window_start {
+            continue;
+        }
+        if i >= window_end {
+            break;
+        }
+        window.push(line.clone());
+    }
+
+    let paragraph = Paragraph::new(window).block(block);
+
+    frame.render_widget(paragraph, area);
 
     if total > visible {
-        let mut sb_state =
-            ScrollbarState::new(view.max_scroll as usize).position(view.scroll_offset as usize);
+        let scroll_position = view.max_scroll.saturating_sub(view.scroll_offset) as usize;
+        let mut sb_state = ScrollbarState::new(view.max_scroll as usize).position(scroll_position);
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             area,
@@ -3936,47 +3976,6 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         ),
     };
 
-    let mut lines: Vec<Line<'_>> = Vec::new();
-
-    if let Some(ref sid) = target_session {
-        let session_messages = if app.session_id.as_deref() == Some(sid.as_str()) {
-            app.messages.clone()
-        } else {
-            app.storage.get_messages(sid).unwrap_or_default()
-        };
-        lines = messages_to_lines(
-            &session_messages,
-            &app.tool_step_map,
-            &app.sid_to_display_name,
-            &app.cwd,
-        );
-    }
-
-    for entry in app.log_entries.iter().filter(|entry| {
-        if let Some((ref team_name, ref agent_id, ref teammate_name)) = team_filter {
-            entry.message.contains(&format!("[{team_name}]"))
-                && (entry.message.contains(agent_id) || entry.message.contains(teammate_name))
-        } else if let Some(ref sid) = target_session {
-            entry.session_id.as_deref() == Some(sid.as_str())
-                || (entry.session_id.is_none() && app.session_id.as_deref() == Some(sid.as_str()))
-        } else {
-            false
-        }
-    }) {
-        let ts = entry.timestamp.format("%H:%M:%S");
-        lines.push(Line::from(vec![
-            Span::styled(format!("{ts} LOG "), Style::default().fg(Color::DarkGray)),
-            Span::raw(entry.message.clone()),
-        ]));
-    }
-
-    if lines.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "No output yet for this target",
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(
@@ -3987,20 +3986,151 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         ))
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(area);
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
 
-    let total = paragraph.line_count(inner.width) as u16;
+    // ── Output-view line cache (mirrors render_messages / render_log_panel) ─
+    //
+    // The cache holds the un-wrapped lines for the current target, the
+    // pre-wrapped styled rows at the cached width, and the plain-text content
+    // projection.  Only rebuild the un-wrapped lines when the source
+    // generation changes (message count/last-edit-seq or log seq), and only
+    // re-wrap when the terminal width changes.
+    let inner_width = inner.width.saturating_sub(2);
+    let w = inner_width.max(1) as usize;
+    let need_rewrap = view.line_cache.cache_width != inner_width;
+
+    // Compute a cheap source-generation key that captures changes to the
+    // displayed messages and log entries.  For the primary session we can use
+    // the in-memory messages (last message edit_seq); for storage-backed
+    // sessions we use the message count plus the last message's edit_seq after
+    // fetching.  `app.log_seq` covers new log entries appended while the view
+    // is open.
+    let current_generation = {
+        let mut generation = app.log_seq;
+        // Mix in target identity so switching targets invalidates the cache.
+        let target_seed = match &target_session {
+            Some(sid) => {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                std::hash::Hasher::write(&mut h, sid.as_bytes());
+                std::hash::Hasher::finish(&h)
+            }
+            None => 0,
+        };
+        generation = generation.wrapping_add(target_seed);
+        if let Some(ref sid) = target_session {
+            let session_messages = if app.session_id.as_deref() == Some(sid.as_str()) {
+                &app.messages
+            } else {
+                // Storage-backed sessions: fetch once here; we still need the
+                // messages to render, so compute generation from the result.
+                // We cache the fetched messages below via `lines`.
+                &app.storage.get_messages(sid).unwrap_or_default()
+            };
+            let msg_count = session_messages.len() as u64;
+            let last_edit_seq = session_messages.last().map(|m| m.edit_seq).unwrap_or(0);
+            generation =
+                generation.wrapping_add(msg_count.wrapping_mul(31).wrapping_add(last_edit_seq));
+        }
+        generation
+    };
+
+    let cache_stale =
+        view.line_cache.source_generation != current_generation || view.line_cache.lines.is_empty();
+
+    if cache_stale || need_rewrap {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+
+        if let Some(ref sid) = target_session {
+            let session_messages = if app.session_id.as_deref() == Some(sid.as_str()) {
+                app.messages.clone()
+            } else {
+                app.storage.get_messages(sid).unwrap_or_default()
+            };
+            lines = messages_to_lines(
+                &session_messages,
+                &app.tool_step_map,
+                &app.sid_to_display_name,
+                &app.cwd,
+            );
+        }
+
+        for entry in app.log_entries.iter().filter(|entry| {
+            if let Some((ref team_name, ref agent_id, ref teammate_name)) = team_filter {
+                entry.message.contains(&format!("[{team_name}]"))
+                    && (entry.message.contains(agent_id) || entry.message.contains(teammate_name))
+            } else if let Some(ref sid) = target_session {
+                entry.session_id.as_deref() == Some(sid.as_str())
+                    || (entry.session_id.is_none()
+                        && app.session_id.as_deref() == Some(sid.as_str()))
+            } else {
+                false
+            }
+        }) {
+            let ts = entry.timestamp.format("%H:%M:%S");
+            lines.push(Line::from(vec![
+                Span::styled(format!("{ts} LOG "), Style::default().fg(Color::DarkGray)),
+                Span::raw(entry.message.clone()),
+            ]));
+        }
+
+        if lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No output yet for this target",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        view.line_cache.lines = lines;
+        view.line_cache.source_generation = current_generation;
+    }
+
+    // Re-wrap when the width changed or the source lines were rebuilt.
+    if cache_stale || need_rewrap {
+        view.line_cache.wrapped_lines = view
+            .line_cache
+            .lines
+            .iter()
+            .flat_map(|l| wrap_line_styled(l, w))
+            .collect();
+        view.line_cache.content_lines = wrapped_lines_to_strings(&view.line_cache.wrapped_lines);
+        view.line_cache.wrapped_count = view.line_cache.wrapped_lines.len() as u16;
+        view.line_cache.cache_width = inner_width;
+    }
+
+    // Compute scroll geometry from the cached wrapped count.
+    let total = view.line_cache.wrapped_count;
     let visible = inner.height;
-    view.max_scroll = total.saturating_sub(visible);
-    view.scroll_offset = view.scroll_offset.min(view.max_scroll);
+    let max_scroll = total.saturating_sub(visible);
+    view.max_scroll = max_scroll;
+    view.scroll_offset = view.scroll_offset.min(max_scroll);
+    let scroll_from_top = max_scroll.saturating_sub(view.scroll_offset);
 
-    frame.render_widget(paragraph.scroll((view.scroll_offset, 0)), area);
+    // ── Scroll-window slice (mirrors render_messages) ───────────────────────
+    //
+    // Handing ratatui the entire wrapped history inside a Paragraph with
+    // `.scroll()` re-runs WordWrapper over every line on every frame and
+    // shifts the tail when whitespace-only rows double-paint.  Slice the
+    // cached pre-wrapped rows to the visible window and render without `.wrap`
+    // so the geometry and paint coordinate systems stay identical.
+    let mut window: Vec<Line<'static>> = Vec::with_capacity(visible as usize + 1);
+    let window_start = scroll_from_top as usize;
+    let window_end = window_start + visible.saturating_add(1) as usize;
+    for (i, line) in view.line_cache.wrapped_lines.iter().enumerate() {
+        if i < window_start {
+            continue;
+        }
+        if i >= window_end {
+            break;
+        }
+        window.push(line.clone());
+    }
+
+    let paragraph = Paragraph::new(window).block(block);
+
+    frame.render_widget(paragraph, area);
 
     if total > visible {
-        let mut sb_state =
-            ScrollbarState::new(view.max_scroll as usize).position(view.scroll_offset as usize);
+        let scroll_position = view.max_scroll.saturating_sub(view.scroll_offset) as usize;
+        let mut sb_state = ScrollbarState::new(view.max_scroll as usize).position(scroll_position);
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             area,

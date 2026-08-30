@@ -1805,6 +1805,14 @@ impl App {
             target: OutputViewTarget::Session { session_id, label },
             scroll_offset: 0,
             max_scroll: 0,
+            line_cache: crate::app::OutputViewLineCache {
+                lines: Vec::new(),
+                wrapped_lines: Vec::new(),
+                content_lines: Vec::new(),
+                wrapped_count: 0,
+                cache_width: 0,
+                source_generation: 0,
+            },
         });
     }
 

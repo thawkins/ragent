@@ -332,6 +332,11 @@ Columns:
 - **status**: `active`, `working`, `idle`, `failed`, `spawning`
 - **elapsed**: Time since teammate was created
 - **steps**: Number of tool calls executed
+
+Note: this count reflects individual tool invocations, not agent loop iterations.
+A single loop step may contain zero or multiple tool calls (for example, when
+parallel tool calls are enabled), so the displayed number may be lower than the
+loop-step counter used internally for log tagging.
 - **claimed**: Number of tasks claimed from the shared task list
 - **done**: Number of tasks completed
 - **[T]**: Click to open teammate's output view

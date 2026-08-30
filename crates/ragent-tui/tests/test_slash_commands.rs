@@ -2406,19 +2406,27 @@ fn test_output_view_paging_shortcuts() {
         },
         scroll_offset: 10,
         max_scroll: 50,
+        line_cache: ragent_tui::app::OutputViewLineCache {
+            lines: Vec::new(),
+            wrapped_lines: Vec::new(),
+            content_lines: Vec::new(),
+            wrapped_count: 0,
+            cache_width: 0,
+            source_generation: 0,
+        },
     });
 
     app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
-    assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 5);
+    assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 15);
 
     app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
     assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 10);
 
     app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL));
-    assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 0);
+    assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 50);
 
     app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL));
-    assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 50);
+    assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 0);
 }
 
 #[test]
@@ -2433,6 +2441,14 @@ fn test_output_view_escape_closes_overlay() {
         },
         scroll_offset: 0,
         max_scroll: 0,
+        line_cache: ragent_tui::app::OutputViewLineCache {
+            lines: Vec::new(),
+            wrapped_lines: Vec::new(),
+            content_lines: Vec::new(),
+            wrapped_count: 0,
+            cache_width: 0,
+            source_generation: 0,
+        },
     });
 
     app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -2452,7 +2468,6 @@ fn test_output_view_team_member_without_session_uses_log_filter() {
         agent_id: None,
         seq: 1,
     });
-
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::TeamMember {
             team_name: "alpha".to_string(),
@@ -2462,6 +2477,14 @@ fn test_output_view_team_member_without_session_uses_log_filter() {
         },
         scroll_offset: 0,
         max_scroll: 0,
+        line_cache: ragent_tui::app::OutputViewLineCache {
+            lines: Vec::new(),
+            wrapped_lines: Vec::new(),
+            content_lines: Vec::new(),
+            wrapped_count: 0,
+            cache_width: 0,
+            source_generation: 0,
+        },
     });
 
     app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));

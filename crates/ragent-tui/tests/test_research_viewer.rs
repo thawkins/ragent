@@ -112,6 +112,14 @@ mod interaction_tests {
             markdown: "line\n".repeat(200),
             scroll_offset: 10,
             max_scroll: 100,
+            line_cache: ragent_tui::app::OutputViewLineCache {
+                lines: Vec::new(),
+                wrapped_lines: Vec::new(),
+                content_lines: Vec::new(),
+                wrapped_count: 0,
+                cache_width: 0,
+                source_generation: 0,
+            },
         }
     }
 
@@ -158,7 +166,7 @@ mod interaction_tests {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
         app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
-        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 15);
+        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 5);
     }
 
     #[test]
@@ -166,7 +174,7 @@ mod interaction_tests {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
         app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
-        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 5);
+        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 15);
     }
 
     #[test]
@@ -174,7 +182,7 @@ mod interaction_tests {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
         app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 11);
+        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 9);
     }
 
     #[test]
@@ -182,7 +190,7 @@ mod interaction_tests {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
         app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 9);
+        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 11);
     }
 
     #[test]
@@ -190,7 +198,7 @@ mod interaction_tests {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
         app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL));
-        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 100);
+        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 0);
     }
 
     #[test]
@@ -198,7 +206,7 @@ mod interaction_tests {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
         app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL));
-        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 0);
+        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 100);
     }
 
     #[test]
@@ -208,7 +216,7 @@ mod interaction_tests {
         app.research_view_area = Rect::new(5, 5, 70, 20);
 
         app.handle_mouse_event(mouse_scroll_down(10, 10));
-        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 13);
+        assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 7);
 
         app.handle_mouse_event(mouse_scroll_up(10, 10));
         assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 10);

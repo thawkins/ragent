@@ -1,5 +1,11 @@
 # Changelog
 
+## Version: 1.0.70
+
+### Changed
+
+- Multiple agent TUI fixes.
+
 ## Version: 1.0.69
 
 ### Changed

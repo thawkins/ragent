@@ -699,4 +699,70 @@ mod app_tests {
         assert!(app.is_current_or_descendant_session("child-1"));
         assert!(!app.is_current_or_descendant_session("child-2"));
     }
+
+    #[test]
+    fn test_background_task_removed_on_completion() {
+        use ragent_agent::event::Event;
+
+        let mut app = test_app();
+        app.handle_event(Event::SessionCreated {
+            session_id: "primary".to_string(),
+        });
+
+        app.handle_event(Event::BackgroundTaskSpawned {
+            session_id: "primary".to_string(),
+            task_id: "bg-1".to_string(),
+            command: "sleep 1".to_string(),
+        });
+        assert_eq!(app.bg_tasks.len(), 1);
+
+        app.handle_event(Event::BackgroundTaskCompleted {
+            session_id: "primary".to_string(),
+            task_id: "bg-1".to_string(),
+            status: "completed".to_string(),
+            exit_code: Some(0),
+        });
+
+        assert!(
+            app.bg_tasks.is_empty(),
+            "terminal bg tasks should be removed from the agents panel"
+        );
+        // Completion log line is preserved in the transcript.
+        assert!(
+            app.log_entries
+                .iter()
+                .any(|e| e.message.contains("Background task completed")
+                    && (e.message.contains("bg-1")
+                        || e.message.contains(&"bg-1"[..8.min("bg-1".len())])))
+        );
+    }
+
+    #[test]
+    fn test_background_task_not_removed_until_completion_event() {
+        use ragent_agent::event::Event;
+
+        let mut app = test_app();
+        app.handle_event(Event::SessionCreated {
+            session_id: "primary".to_string(),
+        });
+
+        app.handle_event(Event::BackgroundTaskSpawned {
+            session_id: "primary".to_string(),
+            task_id: "bg-2".to_string(),
+            command: "sleep 5".to_string(),
+        });
+
+        app.handle_event(Event::BackgroundTaskUpdated {
+            session_id: "primary".to_string(),
+            task_id: "bg-2".to_string(),
+            status: "running".to_string(),
+            progress: None,
+        });
+
+        assert_eq!(
+            app.bg_tasks.len(),
+            1,
+            "running bg tasks must remain visible"
+        );
+    }
 }

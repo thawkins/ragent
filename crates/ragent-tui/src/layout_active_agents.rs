@@ -70,7 +70,7 @@ fn build_task_rows_with_buttons<'a>(
         } else {
             "  ├─ "
         };
-        let steps = event_bus.current_step(&task.child_session_id);
+        let steps = event_bus.current_tool_calls(&task.child_session_id);
         let elapsed = format_elapsed(task.created_at);
         let type_label = if task.background { "bg" } else { "fg" };
         let is_custom = custom_names.contains(&task.agent_name);
@@ -207,7 +207,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
             .or_default()
             .push(task);
     }
-    let primary_steps = app.event_bus.current_step(&primary_session);
+    let primary_steps = app.event_bus.current_tool_calls(&primary_session);
 
     let custom_names: std::collections::HashSet<String> = app
         .custom_agent_defs
@@ -366,14 +366,19 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     }
 
     let total_lines = lines.len() as u16;
-    let paragraph = Paragraph::new(lines);
-
     let visible = area.height;
     let max_scroll = total_lines.saturating_sub(visible);
     app.active_agents_max_scroll = max_scroll;
     let scroll = app.active_agents_scroll_offset.min(max_scroll);
 
-    frame.render_widget(paragraph.scroll((scroll, 0)), area);
+    // Render only the visible slice, mirroring the message-window pattern.
+    let window: Vec<Line> = lines
+        .into_iter()
+        .skip(scroll as usize)
+        .take(visible as usize)
+        .collect();
+    let paragraph = Paragraph::new(window);
+    frame.render_widget(paragraph, area);
 
     // Store button areas shifted by scroll and area position, keeping IDs in
     // sync. Each Rect's `y` holds the row's painted line index in scroll

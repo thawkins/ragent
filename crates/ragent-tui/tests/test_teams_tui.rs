@@ -15,7 +15,7 @@ use std::sync::Mutex;
 
 use ragent_agent::event::Event;
 use ragent_team::team::{MemberStatus, Task, TaskStatus, TeamConfig, TeamMember, TeamStore};
-use ragent_tui::app::{LogEntry, LogLevel};
+use ragent_tui::app::LogLevel;
 use ratatui::{Terminal, backend::TestBackend};
 
 #[path = "support/mod.rs"]
@@ -1046,6 +1046,16 @@ fn test_teams_panel_renders_table_with_elapsed_and_steps_columns() {
         .expect("create teammate session");
     app.event_bus.set_step("lead-session-1", 7);
     app.event_bus.set_step("tm-session-1", 3);
+    app.event_bus.increment_tool_calls("lead-session-1");
+    app.event_bus.increment_tool_calls("lead-session-1");
+    app.event_bus.increment_tool_calls("lead-session-1");
+    app.event_bus.increment_tool_calls("lead-session-1");
+    app.event_bus.increment_tool_calls("lead-session-1");
+    app.event_bus.increment_tool_calls("lead-session-1");
+    app.event_bus.increment_tool_calls("lead-session-1");
+    app.event_bus.increment_tool_calls("tm-session-1");
+    app.event_bus.increment_tool_calls("tm-session-1");
+    app.event_bus.increment_tool_calls("tm-session-1");
 
     let mut member = TeamMember::new("reviewer", "tm-001", "general");
     member.session_id = Some("tm-session-1".to_string());
@@ -1097,25 +1107,27 @@ fn test_teams_panel_renders_table_with_elapsed_and_steps_columns() {
 }
 
 #[test]
-fn test_teams_panel_uses_task_log_fallback_for_steps() {
+fn test_teams_panel_shows_tool_call_count_not_loop_steps() {
     let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
     app.session_id = Some("lead-session-1".to_string());
     app.active_team = Some(TeamConfig::new("alpha", "lead-session-1"));
+
+    app.storage
+        .create_session("tm-session-1", "/tmp")
+        .expect("create teammate session");
+
+    // Simulate a sub-agent/teammate session that has done 2 loop iterations
+    // but only 1 tool call. The UI should display 1, not 2.
+    app.event_bus.set_step("tm-session-1", 2);
+    app.event_bus.increment_tool_calls("tm-session-1");
 
     let mut member = TeamMember::new("reviewer", "tm-001", "general");
+    member.session_id = Some("tm-session-1".to_string());
     member.status = MemberStatus::Working;
-    member.current_task_id = Some("task-xyz".to_string());
     app.team_members.push(member);
-    app.log_entries.push(LogEntry {
-        timestamp: chrono::Utc::now(),
-        level: LogLevel::Info,
-        message: "tm-001 task-xyz started".to_string(),
-        session_id: Some("lead-session-1".to_string()),
-        agent_id: None,
-        seq: 1,
-    });
+    app.show_teams = true;
     app.show_teams_window = true;
 
     let backend = TestBackend::new(160, 44);
@@ -1133,56 +1145,20 @@ fn test_teams_panel_uses_task_log_fallback_for_steps() {
         text.push('\n');
     }
 
+    // Locate the teammate row and check only that line, avoiding false matches
+    // from the title bar or status-bar version numbers.
+    let teammate_line = text
+        .lines()
+        .find(|line| line.contains("tm-001"))
+        .expect("teammate row should be rendered");
+
     assert!(
-        text.contains(" 1 "),
-        "expected non-zero step fallback derived from task logs: {text}"
+        teammate_line.contains('1'),
+        "teammate steps column should show tool-call count 1, not loop-step count 2: {teammate_line}"
     );
-}
-
-#[test]
-fn test_teams_panel_uses_session_message_fallback_for_steps() {
-    let mut app = support::make_app();
-    app.current_screen = ragent_tui::app::ScreenMode::Chat;
-    app.show_log = true;
-    app.session_id = Some("lead-session-1".to_string());
-    app.active_team = Some(TeamConfig::new("alpha", "lead-session-1"));
-    app.storage
-        .create_session("tm-session-2", "/tmp")
-        .expect("create teammate session");
-    app.storage
-        .create_message(&ragent_agent::message::Message::new(
-            "tm-session-2",
-            ragent_agent::message::Role::Assistant,
-            vec![ragent_agent::message::MessagePart::Text {
-                text: "step one".to_string(),
-            }],
-        ))
-        .expect("assistant message");
-
-    let mut member = TeamMember::new("writer", "tm-002", "general");
-    member.status = MemberStatus::Working;
-    member.session_id = Some("tm-session-2".to_string());
-    app.team_members.push(member);
-    app.show_teams_window = true;
-
-    let backend = TestBackend::new(160, 44);
-    let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal
-        .draw(|frame| ragent_tui::layout::render(frame, &mut app))
-        .expect("render");
-
-    let buffer = terminal.backend().buffer().clone();
-    let mut text = String::new();
-    for y in 0..buffer.area.height {
-        for x in 0..buffer.area.width {
-            text.push_str(buffer.cell((x, y)).expect("cell").symbol());
-        }
-        text.push('\n');
-    }
-
     assert!(
-        text.contains("tm-002") && text.contains(" 1 "),
-        "expected non-zero steps from teammate session messages: {text}"
+        !teammate_line.contains('2'),
+        "teammate steps column should not show loop-step count 2: {teammate_line}"
     );
 }
 

@@ -1104,15 +1104,40 @@ pub enum OutputViewTarget {
     },
 }
 
+/// Cached rendered lines for the output-view overlay (mirrors
+/// [`MessageLineGroup`] / [`LogLineGroup`]).
+///
+/// Holds the un-wrapped lines for the current target together with the
+/// pre-wrapped rows at the cached terminal width.  The scroll geometry and
+/// visible-window slice both come from `wrapped_lines`, so the coordinate
+/// systems cannot diverge and whitespace-only rows do not gain phantom rows.
+#[derive(Clone)]
+pub struct OutputViewLineCache {
+    /// Un-wrapped rendered lines for the current target.
+    pub lines: Vec<ratatui::text::Line<'static>>,
+    /// Pre-wrapped styled lines at the cached width (one per display row).
+    pub wrapped_lines: Vec<ratatui::text::Line<'static>>,
+    /// Word-wrapped plain-text content lines (for text-selection copy).
+    pub content_lines: Vec<String>,
+    /// Number of wrapped lines the target occupies at the cached width.
+    pub wrapped_count: u16,
+    /// Terminal inner width when `wrapped_lines` was last computed.
+    pub cache_width: u16,
+    /// Generation key of the source data used to build `lines`.
+    pub source_generation: u64,
+}
+
 /// State for the scrollable output overlay panel.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OutputViewState {
     /// Selected output target.
     pub target: OutputViewTarget,
-    /// Vertical scroll offset from top.
+    /// Vertical scroll offset from bottom (0 = newest content at bottom).
     pub scroll_offset: u16,
     /// Maximum scroll value computed during render.
     pub max_scroll: u16,
+    /// Cached rendered / wrapped lines for this view.
+    pub line_cache: OutputViewLineCache,
 }
 
 /// State for the interactive `/mcp discover` dialog.
@@ -1776,7 +1801,7 @@ pub struct App {
 }
 
 /// State for the `/research open` markdown viewer overlay.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ResearchViewState {
     /// Research item name displayed in the title.
     pub name: String,
@@ -1786,10 +1811,12 @@ pub struct ResearchViewState {
     pub base_dir: std::path::PathBuf,
     /// Full markdown text (frontmatter stripped).
     pub markdown: String,
-    /// Vertical scroll offset from top.
+    /// Vertical scroll offset from bottom (0 = newest content at bottom).
     pub scroll_offset: u16,
     /// Maximum scroll value computed during render.
     pub max_scroll: u16,
+    /// Cached pre-wrapped markdown lines.
+    pub line_cache: crate::app::OutputViewLineCache,
 }
 
 /// State held while waiting for the user to approve or reject a plan.

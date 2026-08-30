@@ -258,6 +258,14 @@ fn test_click_outside_output_view_closes_overlay() {
         },
         scroll_offset: 0,
         max_scroll: 0,
+        line_cache: ragent_tui::app::OutputViewLineCache {
+            lines: Vec::new(),
+            wrapped_lines: Vec::new(),
+            content_lines: Vec::new(),
+            wrapped_count: 0,
+            cache_width: 0,
+            source_generation: 0,
+        },
     });
     app.output_view_area = Rect::new(10, 10, 40, 10);
 
@@ -379,6 +387,14 @@ fn test_output_view_overlay_renders_non_current_session_message() {
         },
         scroll_offset: 0,
         max_scroll: 0,
+        line_cache: ragent_tui::app::OutputViewLineCache {
+            lines: Vec::new(),
+            wrapped_lines: Vec::new(),
+            content_lines: Vec::new(),
+            wrapped_count: 0,
+            cache_width: 0,
+            source_generation: 0,
+        },
     });
 
     let backend = TestBackend::new(120, 40);
@@ -430,7 +446,6 @@ fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
     app.storage
         .create_message(&tool_msg)
         .expect("create tool-call message");
-
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::Session {
             session_id: "tm-s1".to_string(),
@@ -438,6 +453,14 @@ fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
         },
         scroll_offset: 0,
         max_scroll: 0,
+        line_cache: ragent_tui::app::OutputViewLineCache {
+            lines: Vec::new(),
+            wrapped_lines: Vec::new(),
+            content_lines: Vec::new(),
+            wrapped_count: 0,
+            cache_width: 0,
+            source_generation: 0,
+        },
     });
 
     let backend = TestBackend::new(120, 40);
