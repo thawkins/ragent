@@ -394,15 +394,17 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.60** — The core architecture, tool system (~169 tools across 18 categories), TUI,
+**v1.0.70** — The core architecture, tool system (~169 tools across 18 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
-- **Activity-log slash commands** — `/alog on|off|list|show|stats` with config
-  persistence, a status-bar indicator, and best-effort async recording wired
-  into the session processor (v1.0.60)
+- **Multiple agent TUI fixes** — fixes for multi-agent TUI interactions, scroll pinning,
+  active-agents button hit-rects, team panel layout, and idle-CPU hotspots (v1.0.70)
+- **TUI scroll-pinning geometry and idle-CPU hotspots** — corrected scroll-offset semantics
+  for output/research overlays and fixed crossterm reader exit hang and select-loop hot-spin
+  (v1.0.70)
 - **CPU-spin fixes** — Gemini SSE parser infinite loop fixed (`continue` to
   `break`), timed-out bash children now killed via `kill_on_drop`, and the
   TUI idle redraw interval raised from 250 ms to 2 s with dirty-flag gating

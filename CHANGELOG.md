@@ -4,7 +4,8 @@
 
 ### Changed
 
-- Multiple agent TUI fixes.
+- Multiple agent TUI fixes. (commit `a26c8ab5dc444dfecbe0aa2c76525405dee700de`)
+- Fixed TUI scroll-pinning geometry and idle-CPU hotspots. (commit `a570f4beff2cd755b133739d93a6b0bb7b4891a5`)
 
 ## Version: 1.0.69
 

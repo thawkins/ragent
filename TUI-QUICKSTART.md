@@ -4,6 +4,13 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (1.0.70)
+
+- **Multiple agent TUI fixes** — fixes for multi-agent TUI interactions, scroll pinning,
+  active-agents button hit-rects, team panel layout, and idle-CPU hotspots
+- **TUI scroll-pinning geometry and idle-CPU hotspots** — corrected scroll-offset semantics
+  for output/research overlays and fixed crossterm reader exit hang and select-loop hot-spin
+
 ## Highlights (1.0.43)
 
 - **Code index semantic graph** — Four new graph analysis tools
