@@ -743,6 +743,9 @@ pub async fn run_tui(
         // Check for completed /opt LLM results.
         app.poll_pending_opt();
 
+        // Check for completed compaction runs.
+        app.poll_compaction_result();
+
         // Check for completed /swarm LLM decomposition results.
         app.poll_pending_swarm();
 

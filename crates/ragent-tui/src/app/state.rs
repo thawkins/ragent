@@ -1603,6 +1603,9 @@ pub struct App {
     pub bench_mock_outputs: Option<Vec<String>>,
     /// Pending result from an async `/opt` LLM call.
     pub opt_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// Pending result from an async compaction call: the replacement history
+    /// (`[compaction, ...recent]`) on success, or the error message.
+    pub compact_result: Arc<std::sync::Mutex<Option<Result<Vec<Message>, String>>>>,
     /// Whether input history has been modified since last save.
     pub history_dirty: bool,
     /// Deadline after which a dirty history should be flushed to disk.

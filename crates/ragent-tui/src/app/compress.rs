@@ -1,26 +1,31 @@
 //! Compaction command handling for the TUI.
 //!
-//! `/compact` performs a one-shot LLM summarisation of the current session
-//! and replaces the in-memory message list with the resulting compaction
-//! message (FR-009). The legacy `/compress` slash command is a deprecated
-//! alias that forwards to the same path.
+//! `/compact` runs the dedicated compaction runner
+//! ([`ragent_agent::session::processor::SessionProcessor::compact_session`])
+//! — a single no-tools LLM summarisation call — and replaces the in-memory
+//! message list with the returned `[compaction, ...recent]` history (FR-009).
+//! The legacy `/compress` slash command is a deprecated alias that forwards to
+//! the same path.
+//!
+//! The spawned task delivers its outcome through the `compact_result` mutex;
+//! [`App::poll_compaction_result`] drains it on the UI thread and applies the
+//! state transitions (history replacement, status, queued-send dispatch). The
+//! old implementation spawned a full `process_message` agent turn instead,
+//! which re-sent the entire history plus all tool definitions, ran the
+//! AGENTS.md init acknowledgement, and could trigger double summarisation.
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use ragent_agent::{
     agent::ModelRef,
-    event::Event,
-    message::{Message, MessagePart, Role},
+    compaction::CompactionOutcome,
+    message::{Message, Role},
 };
-
-// Prompt optimization templates
 
 // State types from app/state.rs
 use crate::app::state::{App, LogLevel};
 
 // Helpers
-
-// Re-export status types from theme
 
 impl App {
     /// Poll the pending prompt-optimization result and, if ready, push it
@@ -59,17 +64,64 @@ impl App {
         }
     }
 
+    /// Poll the pending compaction result and, if ready, apply the compacted
+    /// history to the in-memory session (or surface the failure), then dispatch
+    /// any user message queued behind an auto-compaction-before-send.
+    pub fn poll_compaction_result(&mut self) {
+        let outcome = {
+            let mut guard = match self.compact_result.lock() {
+                Ok(g) => g,
+                Err(poisoned) => {
+                    tracing::error!("compact_result mutex poisoned, recovering");
+                    poisoned.into_inner()
+                }
+            };
+            guard.take()
+        };
+        let Some(outcome) = outcome else {
+            return;
+        };
+        self.compact_in_progress = false;
+        self.needs_redraw = true;
+
+        let was_auto_compaction = self.auto_compact_in_progress;
+        match outcome {
+            Ok(new_messages) => {
+                self.apply_compaction_messages(new_messages);
+                if was_auto_compaction {
+                    self.auto_compact_in_progress = false;
+                    self.push_log_no_agent(LogLevel::Info, "Auto-compaction completed".to_string());
+                }
+                self.status = "ready".to_string();
+                self.status_set_at = None;
+            }
+            Err(err) => {
+                if was_auto_compaction {
+                    self.auto_compact_in_progress = false;
+                    self.auto_compact_failed = true;
+                    self.pending_send_after_compact = None;
+                    self.push_log_no_agent(
+                        LogLevel::Warn,
+                        "Auto-compaction failed; send blocked for this turn".to_string(),
+                    );
+                }
+                self.status = format!("⚠ compact failed: {err}");
+                self.push_log_no_agent(LogLevel::Error, format!("compaction error: {err}"));
+            }
+        }
+
+        // FR-012-style chaining: once compaction fully completed, send the
+        // message the user typed before auto-compaction was triggered.
+        if let Some((queued_text, queued_images)) = self.pending_send_after_compact.take() {
+            self.dispatch_user_message(queued_text, queued_images);
+        }
+    }
+
     pub(crate) fn start_provider_compaction_for_session(
         &mut self,
         session_id: &str,
         auto_triggered: bool,
     ) -> bool {
-        let compaction_agent =
-            ragent_agent::agent::resolve_agent("compaction", &Default::default())
-                .map(|a| (*a).clone())
-                .unwrap_or_else(|_| self.agent_info.clone());
-
-        let mut agent = compaction_agent;
         let resolved_model = self
             .selected_model
             .as_deref()
@@ -79,16 +131,10 @@ impl App {
                 model_id: m.to_string(),
             })
             .or_else(|| self.agent_info.model.clone());
-        if let Some(model_ref) = resolved_model {
-            agent.model = Some(model_ref);
-        }
-        self.apply_selected_model_and_thinking(&mut agent);
-
-        let summary_prompt =
-            "Summarise the conversation so far into a concise representation that \
-             preserves all important context, decisions, code changes, file paths, \
-             and outstanding tasks. Output only the summary — no preamble."
-                .to_string();
+        let Some(model_ref) = resolved_model else {
+            self.status = "⚠ No model selected — use /model to choose".to_string();
+            return false;
+        };
 
         self.auto_compact_in_progress = auto_triggered;
         self.compact_in_progress = true;
@@ -96,79 +142,51 @@ impl App {
         if auto_triggered {
             self.auto_compact_failed = false;
             self.status = "compacting before send…".to_string();
-            self.push_log_no_agent(
-                LogLevel::Warn,
-                "Auto-compaction triggered (provider fallback)".to_string(),
-            );
+            self.push_log_no_agent(LogLevel::Warn, "Auto-compaction triggered".to_string());
         } else {
             self.status = "compacting…".to_string();
-            self.push_log_no_agent(
-                LogLevel::Info,
-                "Compaction started with provider fallback".to_string(),
-            );
+            self.push_log_no_agent(LogLevel::Info, "Compaction started".to_string());
         }
 
         let processor = self.session_processor.clone();
-        let event_bus = self.event_bus.clone();
+        let compact_result = Arc::clone(&self.compact_result);
         let sid = session_id.to_string();
+        let reason = if auto_triggered { "auto" } else { "manual" };
+        let cancel = Arc::new(AtomicBool::new(false));
         tokio::spawn(async move {
-            match processor
-                .process_message(
-                    &sid,
-                    &summary_prompt,
-                    &agent,
-                    Arc::new(AtomicBool::new(false)),
-                )
+            let outcome = processor
+                .compact_session(&sid, &model_ref, reason, cancel.as_ref())
                 .await
-            {
-                Ok(_) => {
-                    tracing::info!(session_id = %sid, "Compaction LLM call completed");
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "Compaction failed");
-                    event_bus.publish(Event::AgentError {
-                        session_id: sid,
-                        error: format!("Compaction failed: {e}"),
-                    });
-                }
+                .map(|o: CompactionOutcome| o.new_messages)
+                .map_err(|e| e.to_string());
+            if let Ok(mut guard) = compact_result.lock() {
+                *guard = Some(outcome);
+            } else {
+                tracing::error!("compact_result mutex poisoned, result dropped");
             }
         });
         true
     }
 
-    pub(crate) fn apply_compaction_summary(&mut self, session_id: &str, summary: &str) -> bool {
-        if summary.trim().is_empty() {
-            return false;
+    /// Replace the in-memory session history with the compacted form
+    /// (`[compaction_message, ...recent]`). Storage was already replaced by
+    /// [`SessionProcessor::compact_session`]; this only mirrors it into the UI.
+    pub(crate) fn apply_compaction_messages(&mut self, new_messages: Vec<Message>) {
+        if new_messages.is_empty() {
+            return;
         }
-        let summary_msg = Message::new(
-            session_id,
-            Role::Assistant,
-            vec![MessagePart::Text {
-                text: format!("[Conversation compacted]\n\n{}", summary.trim()),
-            }],
-        );
-        if let Err(error) = self.storage.delete_messages(session_id) {
-            self.push_log_no_agent(
-                LogLevel::Warn,
-                format!("Compaction: failed to clear messages: {error}"),
-            );
-            return false;
-        }
-        if let Err(error) = self.storage.create_message(&summary_msg) {
-            self.push_log_no_agent(
-                LogLevel::Warn,
-                format!("Compaction: failed to save summary: {error}"),
-            );
-            return false;
-        }
-        self.messages = vec![summary_msg];
+        let summary_present = new_messages
+            .iter()
+            .any(|m| m.role == Role::Compaction || m.role == Role::Assistant);
+        self.messages = new_messages;
         // Structural change: the cache must be rebuilt from scratch because
         // the whole timeline was replaced by the summary message.
         self.message_line_cache.clear();
-        self.push_log_no_agent(
-            LogLevel::Info,
-            "Compaction: session history replaced with summary".to_string(),
-        );
-        true
+        if summary_present {
+            self.push_log_no_agent(
+                LogLevel::Info,
+                "Compaction: session history replaced with summary".to_string(),
+            );
+        }
     }
 }

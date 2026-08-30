@@ -1,5 +1,52 @@
 # Changelog
 
+## Version: 1.0.69
+
+### Changed
+
+- **Compaction performance rework (`SessionProcessor::compact_session`)** —
+  the TUI `/compact` command and pre-send auto-compaction previously spawned a
+  FULL agent turn for summarisation: whole history, ~169 tool definitions,
+  AGENTS.md init acknowledgement, and thinking config — with the in-loop
+  pre-send trigger able to re-fire the summarisation (up to 3 LLM calls).
+  The new `compact_session` session op (new
+  `crates/ragent-agent/src/session/compaction_ops.rs`) drives the no-tools
+  compaction runner directly: exactly ONE summarisation LLM call, no agent
+  loop, reusing the warm per-(provider, model) client cache via a synthetic
+  subagent `AgentInfo` (`max_steps = 1`, temperature `0.2`). It seeds
+  prior-summary anchoring from the most recent `Role::Compaction` message,
+  resolves the model context window from the provider registry (128k
+  fallback), and returns a `CompactionOutcome` mirroring the runner's.
+- **Compaction storage-ordering fix** — runner compaction messages carried
+  `Utc::now()`, but `Storage::get_messages` orders by `created_at ASC`, so the
+  persisted summary sorted to the END of the next turn's history instead of in
+  front of the kept tail. `compact_session` now backdates the compaction
+  message to `oldest_recent - 1 ms` before the delete + reinsert, keeping
+  chronological order aligned with the conceptual compaction order.
+- **TUI compaction result plumbing** — `compress.rs` deposits the compaction
+  outcome into a `compact_result` mutex instead of relying on the agent-loop
+  event path; new `poll_compaction_result` (called each frame from `lib.rs`)
+  replaces `self.messages`, clears the message render cache and in-progress
+  flags, and dispatches `pending_send_after_compact` on success. On
+  auto-compaction failure the queued send is dropped and the
+  `auto_compact_failed` latch blocks further sends for the turn. The
+  `MessageEnd` summary-application block was removed from `event_handler.rs`;
+  poisoned-mutex recovery is included.
+
+### Tests
+
+- New `crates/ragent-agent/tests/test_compaction_session_ops.rs` — 4 tests:
+  exactly one no-tools LLM call with history deletion/replace verified against
+  in-memory storage, cancel-before-LLM bails, unknown provider errors
+  cleanly, and a mid-run cancel race never produces a second call.
+- New `crates/ragent-tui/tests/test_compaction_result.rs` — 5 tests:
+  no-op on empty, Ok replaces messages and clears the render cache, Err
+  drops the queued send and latches failure, Ok dispatches the queued send,
+  and poisoned-mutex recovery. All 9 new tests pass; the full compaction
+  suite (inline convert/estimator/runner 32, flow 8, integration 5,
+  prompt 3, serializer 9, config 5, storage 2), `cargo fmt --check`, and
+  `cargo check` are clean across `ragent-agent` and `ragent-tui`.
+
 ## Version: 1.0.68
 
 ### Fixed

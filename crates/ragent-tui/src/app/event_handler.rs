@@ -436,7 +436,6 @@ impl App {
                     return;
                 }
                 telemetry_counters::add_sessions_active(-1);
-                let was_auto_compaction = self.auto_compact_in_progress;
                 self.is_processing = false;
                 self.cancel_flag = None;
                 if *reason == FinishReason::Cancelled {
@@ -451,24 +450,11 @@ impl App {
                 self.force_new_message = true;
                 self.push_log_no_agent(LogLevel::Info, format!("response finished ({reason:?})"));
 
-                // After compaction: replace session message history with just the summary.
-                // The summary is the last assistant message in self.messages.
-                if self.compact_in_progress && *reason != FinishReason::Cancelled {
-                    self.compact_in_progress = false;
-                    self.needs_redraw = true;
-                    let summary_text = self
-                        .messages
-                        .iter()
-                        .rev()
-                        .find(|m| m.role == Role::Assistant)
-                        .map(|m| m.text_content());
-                    if let Some(summary) = summary_text {
-                        self.apply_compaction_summary(session_id, &summary);
-                    }
-                } else {
-                    self.compact_in_progress = false;
-                    self.needs_redraw = true;
-                }
+                // Compaction no longer runs through the agent loop
+                // (SessionProcessor::compact_session is a direct runner call),
+                // so no MessageEnd arrives for it. Compaction completion and
+                // queued-send dispatch are handled by poll_compaction_result.
+                self.compact_in_progress = false;
                 // Session title generation has been removed along with the
                 // internal LLM subsystem; sessions default to an empty
                 // title and rely on the user to rename them.
@@ -544,15 +530,13 @@ impl App {
                     }
                 }
 
-                if was_auto_compaction {
-                    self.auto_compact_in_progress = false;
-                    self.push_log_no_agent(LogLevel::Info, "Auto-compaction completed".to_string());
-                    if let Some((queued_text, queued_images)) =
-                        self.pending_send_after_compact.take()
-                    {
-                        self.dispatch_user_message(queued_text, queued_images);
-                    }
-                }
+                // Auto-compaction no longer runs through the agent loop, so a
+                // MessageEnd can only be the init/prepare_client-failure echo
+                // of a compaction attempt and must not dispatch the queued
+                // send. poll_compaction_result handles all compaction
+                // completion paths. Consume the flag so the stale value cannot
+                // leak into a later turn-end.
+                self.auto_compact_in_progress = false;
             }
             Event::PermissionRequested {
                 ref session_id,

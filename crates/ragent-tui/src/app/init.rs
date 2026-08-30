@@ -323,6 +323,7 @@ impl App {
             bench_last_finished_at: None,
             bench_mock_outputs: None,
             opt_result: Arc::new(std::sync::Mutex::new(None)),
+            compact_result: Arc::new(std::sync::Mutex::new(None)),
             db_path,
             history_dirty: false,
             history_save_deadline: None,

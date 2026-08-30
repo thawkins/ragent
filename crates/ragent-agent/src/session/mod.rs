@@ -6,6 +6,7 @@
 
 pub mod archive;
 pub mod cache;
+pub mod compaction_ops;
 pub mod history;
 pub mod loop_steps;
 pub mod permissions;
