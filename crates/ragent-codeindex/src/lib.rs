@@ -67,8 +67,8 @@ use anyhow::{Context, Result};
 use parser::ParserRegistry;
 use search::{FtsIndex, FtsSymbol, SearchResult};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use store::IndexStore;
 use tracing::{debug, warn};
@@ -88,6 +88,11 @@ pub struct CodeIndex {
     parsers: ParserRegistry,
     project_root: PathBuf,
     config: CodeIndexConfig,
+    /// Shared cancellation flag for reindex loops running on detached
+    /// threads. Set via [`CodeIndex::request_stop`] at shutdown so an
+    /// abandoned initial-reindex thread stops burning CPU after the TUI
+    /// exits instead of running until the index completes.
+    reindex_stopping: Arc<AtomicBool>,
     /// Total files to process in the current reindex (0 when idle).
     reindex_total: AtomicU32,
     /// Files processed so far in the current reindex.
@@ -117,6 +122,7 @@ impl CodeIndex {
             parsers,
             project_root: config.project_root.clone(),
             config: config.clone(),
+            reindex_stopping: Arc::new(AtomicBool::new(false)),
             reindex_total: AtomicU32::new(0),
             reindex_done: AtomicU32::new(0),
             cached_index_size: std::sync::Mutex::new(None),
@@ -136,6 +142,7 @@ impl CodeIndex {
             parsers,
             project_root: config.project_root.clone(),
             config: config.clone(),
+            reindex_stopping: Arc::new(AtomicBool::new(false)),
             reindex_total: AtomicU32::new(0),
             reindex_done: AtomicU32::new(0),
             cached_index_size: std::sync::Mutex::new(None),
@@ -855,16 +862,30 @@ impl CodeIndex {
         Ok(result)
     }
 
+    /// Request cancellation of any in-flight full reindex loop.
+    ///
+    /// This only guarantees that the chunk loop exits "soon" (between
+    /// chunks); a reindex that is already past its chunk loop finishes
+    /// normally. Safe to call from any thread at any time.
+    pub fn request_stop(&self) {
+        self.reindex_stopping.store(true, Ordering::Relaxed);
+    }
+
     /// Perform a full re-index: scan the project, diff against stored state,
     /// and update changed files.
     pub fn full_reindex(&self) -> Result<IndexResult> {
         let start = Instant::now();
+        let stop = Arc::clone(&self.reindex_stopping);
 
         // Scan the project directory.
         let scan_start = Instant::now();
         let scanned = scanner::scan_directory(&self.project_root, &self.config.scan_config)?;
         let scan_ms = scan_start.elapsed().as_millis();
         debug!("scanned {} files ({}ms)", scanned.len(), scan_ms);
+        if stop.load(Ordering::Relaxed) {
+            debug!("full_reindex aborted: stop requested after scan");
+            return Err(anyhow::anyhow!("reindex cancelled"));
+        }
 
         // Compute diff against current index.
         let diff_start = Instant::now();
@@ -880,6 +901,10 @@ impl CodeIndex {
             diff.to_remove.len(),
             diff_ms
         );
+        if stop.load(Ordering::Relaxed) {
+            debug!("full_reindex aborted: stop requested after diff");
+            return Err(anyhow::anyhow!("reindex cancelled"));
+        }
 
         // Set progress counters early so the TUI can show the percentage
         // even while apply_diff holds the store lock.
@@ -917,6 +942,10 @@ impl CodeIndex {
         let changed: Vec<&ScannedFile> = diff.to_add.iter().chain(diff.to_update.iter()).collect();
 
         for chunk in changed.chunks(CHUNK_SIZE) {
+            if stop.load(Ordering::Relaxed) {
+                debug!("full_reindex aborted: stop requested");
+                return Err(anyhow::anyhow!("reindex cancelled"));
+            }
             // Phase 1: Parse all files in this chunk with NO locks held.
             let mut parsed_results: Vec<(String, parser::ParsedFile)> = Vec::new();
             for sf in chunk {

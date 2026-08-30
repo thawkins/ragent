@@ -289,3 +289,106 @@ fn test_wrap_row_counts_match_paragraph_line_count() {
 fn truncate_for_log(s: &str) -> String {
     s.chars().take(24).collect()
 }
+// ---------- Whitespace-only wrapped rows must not shift the painted tail ----------
+
+/// ratatui 0.29 re-wraps a whitespace-only input row (e.g. `"  "`) into TWO
+/// painted rows: a blank row plus the row of spaces (`WordWrapper
+/// ::process_input` pushes `vec![]` before draining the pending whitespace,
+/// and trim=false keeps the whitespace run).  The messages window therefore
+/// used to consume one extra painted row per whitespace-only cached row,
+/// shifting the visible tail below the scroll geometry: bottom-pinned showed
+/// the last lines cut off and newly appended lines stayed hidden until the
+/// user scrolled.  Regression: the painted window must end exactly at the
+/// cached tail for a transcript whose window contains whitespace-only rows.
+#[test]
+fn test_pinned_tail_not_shifted_by_whitespace_only_rows() {
+    let mut app = make_app();
+    // Markdown-style content whose wrapping produces whitespace-only cached
+    // rows: blank lines with indentation and trailing-space lines, in (and
+    // just above) the bottom window, then a long tail of further messages.
+    let text = format!(
+        "intro\n  \ntrailing-spaces-line{}        \n  \nmid content A\n  \nmid content B\n  \nTAIL-MARKER",
+        "x".repeat(30)
+    );
+    app.messages.push(Message::new(
+        "session-pinning",
+        Role::User,
+        vec![MessagePart::Text {
+            text: "question".to_string(),
+        }],
+    ));
+    app.messages.push(Message::new(
+        "session-pinning",
+        Role::Assistant,
+        vec![MessagePart::Text { text }],
+    ));
+
+    // Pane: 40 columns x 10 rows -> inner width 38, 8 visible rows.
+    let area = Rect::new(0, 0, 40, 10);
+
+    app.scroll_offset = 0;
+    let rows = render_message_area(&mut app, area);
+    let joined = rows.join("\n");
+    assert!(
+        joined.contains("TAIL-MARKER"),
+        "pinned view must show the newest line; rendered:\n{joined}"
+    );
+
+    // Strict check: the painted inner rows must be exactly the LAST
+    // `visible` cached wrapped rows of the transcript (one painted row per
+    // cached row, in order).  Before the fix, whitespace-only rows painted an
+    // extra blank row and the bottom of the window lost the tail rows.
+    let visible = (area.height - 2) as usize;
+    let cached: Vec<String> = app
+        .message_line_cache
+        .iter()
+        .flat_map(|g| g.wrapped_lines.iter())
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.clone())
+                .collect::<String>()
+        })
+        .collect();
+    let expected: Vec<String> = cached[cached.len() - visible..].to_vec();
+    // Drop the border rows (first and last painted rows) before comparing.
+    let painted_inner: Vec<String> = rows[1..rows.len() - 1]
+        .iter()
+        .map(|r| r.trim_end().to_string())
+        .collect();
+    for (painted, expected_text) in painted_inner.iter().zip(expected.iter()) {
+        let exp_trim = expected_text.trim_end();
+        // Strip the leading border glyph and every trailing border/scrollbar
+        // glyph from the concatenated buffer row.
+        let mut chars: Vec<char> = painted.chars().collect();
+        if matches!(chars.first(), Some('│' | '|')) {
+            chars.remove(0);
+        }
+        let border_glyphs = ['│', '║', '|', '▲', '▼', '█', '▒', '░'];
+        while matches!(chars.last(), Some(c) if border_glyphs.contains(c)) {
+            chars.pop();
+        }
+        let painted_text: String = chars.into_iter().collect();
+        assert_eq!(
+            painted_text.trim_end(),
+            exp_trim,
+            "painted inner row diverged from cached row: painted={painted:?} expected={exp_trim:?}"
+        );
+    }
+
+    // And appending a message while pinned must surface it immediately.
+    app.messages.push(Message::new(
+        "session-pinning",
+        Role::Assistant,
+        vec![MessagePart::Text {
+            text: "APPENDED-VISIBLE-MARKER-2".to_string(),
+        }],
+    ));
+    app.scroll_offset = 0;
+    let rows = render_message_area(&mut app, area);
+    let joined = rows.join("\n");
+    assert!(
+        joined.contains("APPENDED-VISIBLE-MARKER-2"),
+        "appended message must be visible at the bottom without scrolling; rendered:\n{joined}"
+    );
+}

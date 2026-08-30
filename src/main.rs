@@ -222,8 +222,7 @@ fn print_banner() {
 /// # Errors
 ///
 /// Returns an error on configuration, storage, network, or I/O failures.
-#[tokio::main]
-async fn main() -> Result<()> {
+async fn async_main() -> Result<()> {
     // Install the panic hook first so panics during startup are also captured.
     panic_hook::install();
 
@@ -733,7 +732,6 @@ async fn main() -> Result<()> {
                 let session = session_manager.create_session(dir)?;
                 let reader = tokio::io::BufReader::new(tokio::io::stdin());
                 let mut lines = reader.lines();
-                let mut stdout = std::io::stdout().lock();
                 while let Some(line) = lines.next_line().await? {
                     if line.is_empty() {
                         continue;
@@ -747,7 +745,7 @@ async fn main() -> Result<()> {
                         )
                         .await
                     {
-                        Ok(msg) => writeln!(stdout, "{}", msg.text_content())?,
+                        Ok(msg) => writeln!(std::io::stdout().lock(), "{}", msg.text_content())?,
                         Err(e) => tracing::error!(error = %e, "Failed to process message"),
                     }
                 }
@@ -950,8 +948,6 @@ async fn main() -> Result<()> {
             provider: filter,
             ollama_url,
         }) => {
-            let mut stdout = std::io::stdout().lock();
-
             if filter.as_deref() == Some("ollama_cloud") {
                 let api_key = storage
                     .get_provider_auth("ollama_cloud")
@@ -972,23 +968,31 @@ async fn main() -> Result<()> {
                 .await
                 {
                     Ok(models) if models.is_empty() => {
-                        writeln!(stdout, "No models found on Ollama Cloud.")?;
+                        writeln!(std::io::stdout().lock(), "No models found on Ollama Cloud.")?;
                     }
                     Ok(models) => {
-                        writeln!(stdout, "ollama_cloud models:")?;
+                        writeln!(std::io::stdout().lock(), "ollama_cloud models:")?;
                         for m in &models {
-                            writeln!(stdout, "  ollama_cloud/{:<28} {}", m.id, m.name)?;
+                            writeln!(
+                                std::io::stdout().lock(),
+                                "  ollama_cloud/{:<28} {}",
+                                m.id,
+                                m.name
+                            )?;
                         }
                         if api_key.is_empty() {
                             writeln!(
-                                stdout,
+                                std::io::stdout().lock(),
                                 "\nNote: Chat requires an API key. Run `ragent auth \
                                  ollama_cloud <key>` or set OLLAMA_API_KEY."
                             )?;
                         }
                     }
                     Err(e) => {
-                        writeln!(stdout, "Could not connect to Ollama Cloud: {e}")?;
+                        writeln!(
+                            std::io::stdout().lock(),
+                            "Could not connect to Ollama Cloud: {e}"
+                        )?;
                     }
                 }
             } else if filter.as_deref() == Some("openrouter") {
@@ -1007,27 +1011,38 @@ async fn main() -> Result<()> {
                 if let Some(provider) = provider_registry.get("openrouter") {
                     match provider.discover_models().await {
                         Ok(models) if models.is_empty() => {
-                            writeln!(stdout, "No models found on OpenRouter.")?;
+                            writeln!(std::io::stdout().lock(), "No models found on OpenRouter.")?;
                         }
                         Ok(models) => {
-                            writeln!(stdout, "openrouter models:")?;
+                            writeln!(std::io::stdout().lock(), "openrouter models:")?;
                             for ModelInfo { id, name, .. } in &models {
-                                writeln!(stdout, "  openrouter/{:<28} {}", id, name)?;
+                                writeln!(
+                                    std::io::stdout().lock(),
+                                    "  openrouter/{:<28} {}",
+                                    id,
+                                    name
+                                )?;
                             }
                             if api_key.is_empty() {
                                 writeln!(
-                                    stdout,
+                                    std::io::stdout().lock(),
                                     "\nNote: Chat requires an API key. Run `ragent auth \
                                      openrouter <key>` or set OPENROUTER_API_KEY."
                                 )?;
                             }
                         }
                         Err(e) => {
-                            writeln!(stdout, "Could not connect to OpenRouter: {e}")?;
+                            writeln!(
+                                std::io::stdout().lock(),
+                                "Could not connect to OpenRouter: {e}"
+                            )?;
                         }
                     }
                 } else {
-                    writeln!(stdout, "OpenRouter provider is not registered.")?;
+                    writeln!(
+                        std::io::stdout().lock(),
+                        "OpenRouter provider is not registered."
+                    )?;
                 }
             } else if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
                 match ragent_agent::provider::ollama::list_ollama_models(ollama_url.as_deref())
@@ -1035,19 +1050,22 @@ async fn main() -> Result<()> {
                 {
                     Ok(models) if models.is_empty() => {
                         writeln!(
-                            stdout,
+                            std::io::stdout().lock(),
                             "No models found on Ollama server. Pull models with: ollama pull <model>"
                         )?;
                     }
                     Ok(models) => {
-                        writeln!(stdout, "ollama models:")?;
+                        writeln!(std::io::stdout().lock(), "ollama models:")?;
                         for m in &models {
-                            writeln!(stdout, "  ollama/{:<28} {}", m.id, m.name)?;
+                            writeln!(std::io::stdout().lock(), "  ollama/{:<28} {}", m.id, m.name)?;
                         }
                     }
                     Err(e) => {
-                        writeln!(stdout, "Could not connect to Ollama: {e}")?;
-                        writeln!(stdout, "Is Ollama running? Start with: ollama serve")?;
+                        writeln!(std::io::stdout().lock(), "Could not connect to Ollama: {e}")?;
+                        writeln!(
+                            std::io::stdout().lock(),
+                            "Is Ollama running? Start with: ollama serve"
+                        )?;
                     }
                 }
                 if filter.as_deref() != Some("ollama") {
@@ -1057,7 +1075,7 @@ async fn main() -> Result<()> {
                             continue;
                         }
                         for m in &p.models {
-                            writeln!(stdout, "{}/{}", p.id, m.id)?;
+                            writeln!(std::io::stdout().lock(), "{}/{}", p.id, m.id)?;
                         }
                     }
                 }
@@ -1070,11 +1088,14 @@ async fn main() -> Result<()> {
                 };
 
                 if providers.is_empty() {
-                    writeln!(stdout, "No providers found matching filter")?;
+                    writeln!(
+                        std::io::stdout().lock(),
+                        "No providers found matching filter"
+                    )?;
                 } else {
                     for p in &providers {
                         for m in &p.models {
-                            writeln!(stdout, "{}/{}", p.id, m.id)?;
+                            writeln!(std::io::stdout().lock(), "{}/{}", p.id, m.id)?;
                         }
                     }
                 }
@@ -1131,4 +1152,22 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
         }
     }
     Ok(())
+}
+
+/// Wrap the tokio entrypoint so the runtime is shut down with a bounded
+/// grace period instead of the default unbounded drop.
+///
+/// By default, dropping the multi-thread runtime at end of main blocks until
+/// every in-flight `spawn_blocking` task completes. A stray long-running
+/// blocking task (e.g. an abandoned code-index reindex join) therefore kept
+/// the process alive burning CPU after the TUI had already exited. Arming a
+/// `shutdown_timeout` bounds that wait so the prompt returns promptly.
+fn main() -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    let result = runtime.block_on(async_main());
+    // Give leftover blocking tasks 2 seconds, then abandon (not abort) them
+    // and return: outstanding blocking tasks finish in the background while
+    // the process exits normally.
+    runtime.shutdown_timeout(std::time::Duration::from_secs(2));
+    result
 }

@@ -1,5 +1,39 @@
 # Changelog
 
+## Version: 1.0.68
+
+### Fixed
+
+- **Messages pane bottom-pinned view 2 lines short (tail hidden)** — the
+  scroll-window Paragraph re-wrapped the pre-wrapped cache rows with
+  `Wrap { trim: false }`, but ratatui 0.29 word-wraps a whitespace-only row
+  into TWO painted rows (a blank row plus the row of spaces). Markdown and
+  log output routinely contain whitespace-only lines, so the painted tail
+  slid below the scroll geometry: with the scrollbar at the bottom the last
+  ~2 transcript lines were cut off, and lines appended at the bottom stayed
+  invisible until the user scrolled. The messages and log windows now paint
+  the cached rows verbatim (no re-wrap); the scroll window, geometry, and
+  paint share one wrapped-row coordinate system, so the pinned view always
+  ends at the true tail and appended lines appear immediately. Regression
+  test: `test_pinned_tail_not_shifted_by_whitespace_only_rows`.
+- **TUI exit hang (press-a-key-to-exit)** — the crossterm reader ran as a
+  blocking task parked inside `ct_event::read()` with no shutdown path, so at
+  runtime drop tokio's blocking-pool join hung the process after the TUI closed
+  until the next keypress delivered a final event. The reader now uses
+  `ct_event::poll(100ms)` with a cooperative `AtomicBool` stop flag (set after
+  the main loop and by a Drop guard covering early `?` returns), so it exits
+  promptly at shutdown.
+- **TUI select-loop hot-spin on closed reader channel** — the
+  `ct_event_rx.recv()` arm swallowed `None` via `if let Some(...)`, so a closed
+  reader channel resolved immediately forever and spun the loop at 100% CPU.
+  It now mirrors the event-bus arm: `None` is treated as fatal input-source
+  loss and stops the TUI loop.
+- **200% CPU at exit (root cause documented)** — while the process was hung
+  waiting for the keypress, the detached `codeindex-init-reindex` thread
+  (JoinHandle discarded) kept running `full_reindex()` with rayon-parallel
+  hashing, alongside any in-flight worker reindex, burning both cores until
+  the exit-hang fix let the process terminate.
+
 ## Version: 1.0.66
 
 ### Fixed

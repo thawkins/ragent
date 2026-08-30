@@ -180,6 +180,11 @@ fn test_provider_label_prefers_agent_default_over_config_thinking() {
     let label = app
         .provider_model_label()
         .expect("provider label should exist");
+    // Thinking display moved to the dedicated line-1 status-bar indicator
+    // (brain icon); the model label is provider/model only.
     assert!(label.contains("claude-sonnet-4-20250514"));
-    assert!(label.ends_with("[thinking: off]"));
+    assert!(
+        !label.contains("thinking"),
+        "model label should not embed thinking state: {label}"
+    );
 }

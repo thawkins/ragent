@@ -1505,13 +1505,6 @@ impl App {
             .split_once('/')
             .unwrap_or((&model_ref, &model_ref));
 
-        let thinking = self
-            .active_model_entry()
-            .filter(|entry| !entry.thinking_levels.is_empty())
-            .and(self.effective_thinking_level_for_agent(&self.agent_info))
-            .map(|level| format!(" [thinking: {}]", Self::thinking_level_display(level)))
-            .unwrap_or_default();
-
         if provider_id == "router" {
             let label = match (&self.router_current_model, &self.router_current_tier) {
                 (Some(model), Some(tier)) => {
@@ -1519,7 +1512,7 @@ impl App {
                 }
                 _ => "Model Router / router".to_string(),
             };
-            return Some(format!("{}{}", label, thinking));
+            return Some(label);
         }
 
         let provider_name = self
@@ -1533,7 +1526,7 @@ impl App {
                     .map(|p| p.name().to_string())
             })
             .unwrap_or_else(|| provider_id.to_string());
-        Some(format!("{} / {}{}", provider_name, model_id, thinking))
+        Some(format!("{} / {}", provider_name, model_id))
     }
 
     pub(crate) fn active_model_ref_string(&self) -> Option<String> {

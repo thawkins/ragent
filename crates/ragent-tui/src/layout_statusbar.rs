@@ -98,6 +98,34 @@ pub mod indicators {
     pub const EMPTY: &str = "░";
 }
 
+/// Colored service icons for the Line 2 right section.
+///
+/// Each service gets a distinct glyph and a fixed accent color so the
+/// indicators are recognizable at a glance without reading the text label.
+/// The enabled/disabled state is conveyed by the trailing `✓`/`✗` marker
+/// (green/red), while the icon itself keeps its own accent color.
+pub mod service_icons {
+    use ratatui::style::Color;
+
+    /// Code Index — magnifying glass over a document.
+    pub const CODE_INDEX: (&str, Color) = ("🔍", Color::Cyan);
+
+    /// Activity Log — scroll/parchment.
+    pub const ACTIVITY_LOG: (&str, Color) = ("📜", Color::Yellow);
+
+    /// Autopilot — airplane.
+    pub const AUTOPILOT: (&str, Color) = ("✈️", Color::Magenta);
+
+    /// Edit Log — pencil.
+    pub const EDIT_LOG: (&str, Color) = ("✏️", Color::LightBlue);
+
+    /// Telemetry — satellite dish / signal.
+    pub const TELEMETRY: (&str, Color) = ("📡", Color::LightGreen);
+
+    /// YOLO — warning triangle (bold, changes command-validation behaviour).
+    pub const YOLO: (&str, Color) = ("⚠️", Color::LightRed);
+}
+
 /// Spinner frames for animated indicators.
 pub mod spinner {
     /// Spinner animation frames: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
@@ -412,37 +440,18 @@ fn build_line2_left(
         };
 
         spans.push(Span::styled(
-            format!("{} {} ", indicators::HEALTHY, label),
-            Style::default()
-                .fg(colors::TEXT)
-                .add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(
             format!("{} ", icon),
             Style::default()
                 .fg(health_color)
                 .add_modifier(Modifier::BOLD),
         ));
+        spans.push(Span::styled(
+            format!("{} ", label),
+            Style::default()
+                .fg(colors::TEXT)
+                .add_modifier(Modifier::BOLD),
+        ));
     }
-
-    // Context window info
-    let (used, total) = app.token_usage;
-    let ctx_label = match mode {
-        ResponsiveMode::Full => format!("{}/{}", used, total),
-        ResponsiveMode::Compact | ResponsiveMode::Minimal => {
-            let pct = if total > 0 {
-                (used as f32 / total as f32 * 100.0) as u32
-            } else {
-                0
-            };
-            format!("{}%", pct)
-        }
-    };
-
-    spans.push(Span::styled(
-        format!("{:<12} ", ctx_label),
-        Style::default().fg(colors::IN_PROGRESS),
-    ));
 
     // Thinking level indicator
     if let Some(level) = app.selected_thinking_level {
@@ -583,19 +592,29 @@ fn build_line2_right(
     config: &StatusBarConfig,
     _mode: ResponsiveMode,
 ) -> Vec<Span<'static>> {
-    // Push one `Label:{icon} ` indicator span: HEALTHY when `enabled`,
-    // ERROR otherwise. Shared by every service indicator on this line.
-    fn push_indicator(spans: &mut Vec<Span<'static>>, label: &str, enabled: bool, bold: bool) {
-        let (icon, color) = if enabled {
+    // Push one `<icon>✓/✗ ` indicator span: the icon keeps its own accent
+    // color, while the trailing marker conveys enabled (green ✓) vs disabled
+    // (red ✗). Shared by every service indicator on this line.
+    fn push_indicator(
+        spans: &mut Vec<Span<'static>>,
+        icon: (&'static str, Color),
+        enabled: bool,
+        bold: bool,
+    ) {
+        let (marker, color) = if enabled {
             (indicators::SUCCESS, colors::HEALTHY)
         } else {
             (indicators::ERROR, colors::ERROR)
         };
-        let mut style = Style::default().fg(color);
+        let mut style = Style::default().fg(icon.1);
         if bold {
             style = style.add_modifier(Modifier::BOLD);
         }
-        spans.push(Span::styled(format!("{label}:{icon} "), style));
+        spans.push(Span::styled(format!("{} ", icon.0), style));
+        spans.push(Span::styled(
+            format!("{marker} "),
+            Style::default().fg(color),
+        ));
     }
 
     let mut spans = Vec::new();
@@ -605,23 +624,33 @@ fn build_line2_right(
     }
 
     // Code Index status
-    push_indicator(&mut spans, "CodeIdx", app.code_index_enabled, false);
+    push_indicator(
+        &mut spans,
+        service_icons::CODE_INDEX,
+        app.code_index_enabled,
+        false,
+    );
 
     // Activity-log status
     push_indicator(
         &mut spans,
-        "Alog",
+        service_icons::ACTIVITY_LOG,
         ragent_config::activity_log::is_enabled(),
         false,
     );
 
     // Autopilot status
-    push_indicator(&mut spans, "AutoPilot", app.autopilot_enabled, false);
+    push_indicator(
+        &mut spans,
+        service_icons::AUTOPILOT,
+        app.autopilot_enabled,
+        false,
+    );
 
     // Edit-log status
     push_indicator(
         &mut spans,
-        "EditLog",
+        service_icons::EDIT_LOG,
         ragent_tools_core::edit_log::is_edit_log_enabled(),
         false,
     );
@@ -629,13 +658,18 @@ fn build_line2_right(
     // Telemetry (OpenTelemetry metrics export) status
     push_indicator(
         &mut spans,
-        "Telemetry",
+        service_icons::TELEMETRY,
         app.session_processor.telemetry.is_enabled(),
         false,
     );
 
     // YOLO mode status (bold — it changes command-validation behaviour)
-    push_indicator(&mut spans, "YOLO", ragent_config::yolo::is_enabled(), true);
+    push_indicator(
+        &mut spans,
+        service_icons::YOLO,
+        ragent_config::yolo::is_enabled(),
+        true,
+    );
 
     spans
 }

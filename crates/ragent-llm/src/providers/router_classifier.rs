@@ -123,11 +123,7 @@ impl PromptClassifier {
         }
     }
 
-    /// Classify a prompt with error fallback to MEDIUM tier (FR-039).
-    ///
-    /// If the classifier encounters any error (panic, NaN, or Inf in the
-    /// composite score), the method falls back to `Tier::Medium` and returns
-    /// zeroed dimension scores.      /// Build the MEDIUM-tier fallback result shared by the non-finite-score
+    /// Build the MEDIUM-tier fallback result shared by the non-finite-score
     /// guard and the panic guard in [`Self::classify_safe`] (FR-039).
     fn medium_fallback(
         boundaries: &BoundaryConfig,

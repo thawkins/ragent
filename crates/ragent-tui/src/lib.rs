@@ -101,9 +101,15 @@ impl TerminalGuard {
         let _ = disable_raw_mode();
 
         // Drain any buffered terminal events AFTER leaving raw mode
-        // so they don't leak into the shell as garbage characters
-        while ct_event::poll(std::time::Duration::from_millis(10)).unwrap_or(false) {
+        // so they don't leak into the shell as garbage characters.
+        // Bounded: while events keep arriving `poll` returns immediately and
+        // this becomes a tight spin (e.g. held key / paste backlog at quit),
+        // so cap the drain at 64 events.
+        let mut drained = 0u32;
+        while drained < 64 && ct_event::poll(std::time::Duration::from_millis(10)).unwrap_or(false)
+        {
             let _ = ct_event::read();
+            drained += 1;
         }
     }
 }
@@ -627,14 +633,46 @@ pub async fn run_tui(
     // Spawn a dedicated blocking task to read crossterm events and forward
     // them to the async main loop. This lets the TUI sleep until input arrives
     // instead of polling at a fixed 20 Hz cadence (T-002).
+    //
+    // Exit-hang fix: the reader is cooperative. The previous blocking
+    // `ct_event::read()` parked the thread forever with no shutdown path, so
+    // tokio's blocking-pool join at runtime drop hung the process until a
+    // keypress delivered one final event. Now the reader polls at a bounded
+    // interval, checks a stop flag, and exits promptly at TUI shutdown.
     let (ct_event_tx, mut ct_event_rx) = tokio::sync::mpsc::unbounded_channel::<CtEvent>();
-    tokio::task::spawn_blocking(move || {
-        while let Ok(event) = ct_event::read() {
-            if ct_event_tx.send(event).is_err() {
-                break;
-            }
+    let ct_reader_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Drop guard so early `?` returns from the loop body also stop the
+    // reader thread (the explicit post-loop store handles normal exit).
+    struct CtReaderStop(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for CtReaderStop {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-    });
+    }
+    let _ct_reader_stop_guard = CtReaderStop(ct_reader_stop.clone());
+    {
+        let stop = ct_reader_stop.clone();
+        let stop_tx = ct_event_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            loop {
+                if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                match ct_event::poll(std::time::Duration::from_millis(100)) {
+                    Ok(true) => match ct_event::read() {
+                        Ok(event) => {
+                            if stop_tx.send(event).is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    },
+                    Ok(false) => {}
+                    Err(_) => break,
+                }
+            }
+        });
+    }
 
     while app.is_running {
         // Only one autopilot continuation may be dispatched per event-loop
@@ -765,36 +803,46 @@ pub async fn run_tui(
             }
             // Terminal key/mouse events forwarded by the blocking reader task.
             maybe_ct_event = ct_event_rx.recv() => {
-                if let Some(event) = maybe_ct_event {
-                    let mut got_input = false;
-                    match event {
-                        CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
-                        CtEvent::Mouse(mouse)
-                            // Only process mouse events when mouse mode is enabled
-                            if app.mouse_enabled => {
-                                app.handle_mouse_event(mouse); got_input = true;
+                match maybe_ct_event {
+                    Some(event) => {
+                        let mut got_input = false;
+                        match event {
+                            CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
+                            CtEvent::Mouse(mouse)
+                                // Only process mouse events when mouse mode is enabled
+                                if app.mouse_enabled => {
+                                    app.handle_mouse_event(mouse); got_input = true;
+                                }
+                            CtEvent::Paste(text) => {
+                                // Insert pasted text as a single operation.
+                                // Strip carriage returns but preserve newlines,
+                                // and replace any active input selection.
+                                app.handle_paste_text(&text);
+                                got_input = true;
                             }
-                        CtEvent::Paste(text) => {
-                            // Insert pasted text as a single operation.
-                            // Strip carriage returns but preserve newlines,
-                            // and replace any active input selection.
-                            app.handle_paste_text(&text);
-                            got_input = true;
+                            // Re-send EnableMouseCapture after a resize or focus
+                            // regain.  Some terminal emulators (notably VTE-based
+                            // ones like GNOME Terminal and Konsole) reset mouse
+                            // capture mode on these events, causing all mouse
+                            // input to silently stop.  Re-arming here keeps mouse
+                            // events flowing without a restart.
+                            CtEvent::Resize(_, _) | CtEvent::FocusGained => {
+                                let _ = execute!(std::io::stdout(), EnableMouseCapture);
+                                got_input = true;
+                            }
+                            _ => {}
                         }
-                        // Re-send EnableMouseCapture after a resize or focus
-                        // regain.  Some terminal emulators (notably VTE-based
-                        // ones like GNOME Terminal and Konsole) reset mouse
-                        // capture mode on these events, causing all mouse
-                        // input to silently stop.  Re-arming here keeps mouse
-                        // events flowing without a restart.
-                        CtEvent::Resize(_, _) | CtEvent::FocusGained => {
-                            let _ = execute!(std::io::stdout(), EnableMouseCapture);
-                            got_input = true;
+                        if got_input {
+                            app.needs_redraw = true;
                         }
-                        _ => {}
                     }
-                    if got_input {
-                        app.needs_redraw = true;
+                    None => {
+                        // Reader task exited (stop flag or read error). A closed
+                        // channel resolves immediately forever, which would spin
+                        // this select loop at 100% CPU; treat it as a fatal
+                        // input-source loss and stop the loop (hot-spin fix).
+                        tracing::warn!("terminal event reader closed, exiting TUI loop");
+                        app.is_running = false;
                     }
                 }
             }
@@ -819,13 +867,22 @@ pub async fn run_tui(
         }
     }
 
+    // Stop the cooperative crossterm reader before teardown so it cannot
+    // deliver further events or linger in the blocking pool (exit-hang fix).
+    ct_reader_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+
     // -- Safety-net: force exit after 3 seconds if cleanup hangs --
     // Armed FIRST, before any teardown step (history flush, tty restore,
     // storage close): if a wedged tty or blocked write hangs any of those,
     // this timer still guarantees the process exits and the terminal is
     // recoverable (idle-CPU/exit-hang fix).
-    tokio::spawn(async {
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    //
+    // Spawned on a raw OS thread, NOT a tokio task: the async variant was
+    // cancelled the moment the runtime began dropping at end of main —
+    // exactly the hang scenario it exists to escape — leaving abandoned
+    // blocking-pool joins unbounded. A native thread survives runtime drop.
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(3));
         std::process::exit(0);
     });
 
@@ -850,19 +907,24 @@ pub async fn run_tui(
     // Stop the cron scheduler (FR-017: non-blocking background task).
     cron_scheduler.stop();
 
+    // Cancel any in-flight code-index reindex (initial watcher reindex or
+    // fallback one-shot) BEFORE stopping the watcher/worker, so a detached
+    // CPU-bound reindex thread stops spinning between chunks instead of
+    // running for the whole teardown window (exit 200%-CPU fix).
+    if let Some(ref index) = app.code_index {
+        index.request_stop();
+    }
+
     // Stop code index watcher (if running) - this has a Drop impl that calls stop()
     if let Some(session) = app.code_index_watch_session.take() {
         drop(session);
     }
 
-    // Wait for fallback reindex thread to complete (with timeout)
-    if let Some(handle) = code_index_fallback_thread.take() {
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            tokio::task::spawn_blocking(move || handle.join().ok()),
-        )
-        .await;
-    }
+    // Detach the fallback reindex thread instead of joining it: the thread
+    // now observes the cancel flag (set above via index.request_stop()), and
+    // a timed-out spawn_blocking join kept running anyway while runtime drop
+    // then blocked waiting for it at end of main (exit-hang root cause).
+    let _ = code_index_fallback_thread.take();
 
     Ok(())
 }

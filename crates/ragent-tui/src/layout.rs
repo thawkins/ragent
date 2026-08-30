@@ -3369,7 +3369,11 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    let paragraph = Paragraph::new(window).wrap(Wrap { trim: false });
+    // NOTE: no `.wrap(...)` — mirrors render_messages.  The cached log rows
+    // are pre-wrapped to the inner width; re-wrapping whitespace-only rows in
+    // WordWrapper paints an extra blank row each and shifts the visible tail
+    // below the scroll geometry (hidden tail lines at the bottom of the pane).
+    let paragraph = Paragraph::new(window);
 
     frame.render_widget(paragraph, log_inner);
 
@@ -4693,9 +4697,16 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    let paragraph = Paragraph::new(window)
-        .block(messages_block)
-        .wrap(Wrap { trim: false });
+    // NOTE: no `.wrap(...)` here.  The cached rows are already pre-wrapped to
+    // the inner width, and ratatui 0.29 re-wrapping them with `Wrap { trim:
+    // false }` would split whitespace-only rows (a whitespace-only input line
+    // paints as a blank row PLUS a row of spaces) and add one phantom row per
+    // such row to the painted output.  The scroll window and the geometry are
+    // both derived from the cache, so painting must consume exactly one row
+    // per cached row: without `.wrap`, the LineTruncator path renders each
+    // cached row verbatim (rows never exceed the inner width) and the two
+    // coordinate systems cannot diverge.
+    let paragraph = Paragraph::new(window).block(messages_block);
 
     frame.render_widget(paragraph, area);
 

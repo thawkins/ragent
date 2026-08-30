@@ -755,39 +755,40 @@ impl OpenRouterClient {
                         // Tool calls (incremental fragments indexed by `index`).
                         if let Some(tool_calls) = delta["tool_calls"].as_array() {
                             for tc in tool_calls {
-                                let index = tc["index"].as_u64().unwrap_or(0);                                  if let Some(id) = tc["id"].as_str() {
-                                      tool_call_ids.insert(index, id.to_string());
-                                  }
+                                let index = tc["index"].as_u64().unwrap_or(0);
+                                if let Some(id) = tc["id"].as_str() {
+                                    tool_call_ids.insert(index, id.to_string());
+                                }
 
-                                  if let Some(function) = tc.get("function") {
-                                      if let Some(name) = function["name"].as_str() {
-                                          let tc_id = tool_call_ids
-                                              .get(&index)
-                                              .cloned()
-                                              .unwrap_or_else(|| format!("tc_{index}"));
-                                          yield StreamEvent::ToolCallStart {
-                                              id: tc_id,
-                                              name: name.to_string(),
-                                          };
-                                          yielded_event = true;
-                                      }
+                                if let Some(function) = tc.get("function") {
+                                    if let Some(name) = function["name"].as_str() {
+                                        let tc_id = tool_call_ids
+                                            .get(&index)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("tc_{index}"));
+                                        yield StreamEvent::ToolCallStart {
+                                            id: tc_id,
+                                            name: name.to_string(),
+                                        };
+                                        yielded_event = true;
+                                    }
 
-                                      if let Some(args) = function["arguments"].as_str()
-                                          && !args.is_empty()
-                                      {
-                                          let tc_id = tool_call_ids
-                                              .get(&index)
-                                              .cloned()
-                                              .unwrap_or_else(|| format!("tc_{index}"));
-                                          yield StreamEvent::ToolCallDelta {
-                                              id: tc_id,
-                                              args_json: args.to_string(),
-                                          };
-                                          yielded_event = true;
-                                      }
-                                  }
-                              }
-                          }
+                                    if let Some(args) = function["arguments"].as_str()
+                                        && !args.is_empty()
+                                    {
+                                        let tc_id = tool_call_ids
+                                            .get(&index)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("tc_{index}"));
+                                        yield StreamEvent::ToolCallDelta {
+                                            id: tc_id,
+                                            args_json: args.to_string(),
+                                        };
+                                        yielded_event = true;
+                                    }
+                                }
+                            }
+                        }
 
                           // Finish reason: flush open reasoning/tool-call state,
                           // then emit the terminal event.
