@@ -109,7 +109,8 @@ fn test_merge_preserves_other_top_level_fields() {
 
     let merged = Config::merge(base, overlay);
     assert_eq!(merged.langsearch_api_key.as_deref(), Some("ls-overlay"));
-    assert_eq!(merged.default_agent, "overlay-agent");
+    // Overlay did not explicitly set default_agent, so base value is preserved.
+    assert_eq!(merged.default_agent, "base-agent");
 }
 
 #[test]

@@ -639,7 +639,7 @@ impl LlmClient for OllamaClient {
                           if let Some(finish_reason) = choice["finish_reason"].as_str() {
                               // End pending tool calls in index order (see the
                               // openai provider for the rationale).
-                              for (_, id) in &tool_call_ids {
+                              for id in tool_call_ids.values() {
                                   yield StreamEvent::ToolCallEnd { id: id.clone() };
                               }
 
