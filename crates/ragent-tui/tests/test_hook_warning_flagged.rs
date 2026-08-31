@@ -160,7 +160,7 @@ fn test_tool_result_flagged_current_session_logs_marker_and_sets_status() {
     let entry = app.log_entries.last().expect("log entry should be added");
     assert_eq!(entry.level, LogLevel::Error);
     assert!(
-        entry.message.contains("🚩"),
+        entry.message.contains("[flag]"),
         "log should contain the flagged marker, got: {}",
         entry.message
     );

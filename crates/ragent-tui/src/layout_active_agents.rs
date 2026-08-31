@@ -4,7 +4,6 @@
 //! each row showing: agent name, type (primary/background/foreground),
 //! elapsed active time, and step count.
 
-use chrono::Utc;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -16,24 +15,7 @@ use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarStat
 use ragent_agent::task::{TaskEntry, TaskStatus};
 
 use crate::app::App;
-
-/// Format a UTC timestamp as elapsed duration from now (e.g. "2m34s").
-fn format_elapsed(created_at: chrono::DateTime<Utc>) -> String {
-    let secs = (Utc::now() - created_at).num_seconds().max(0);
-    if secs < 60 {
-        format!("{}s", secs)
-    } else if secs < 3600 {
-        format!("{}m{}s", secs / 60, secs % 60)
-    } else {
-        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
-    }
-}
-
-/// Shorten a session/task id to the last 8 chars (the unique suffix).
-fn short_id(id: &str) -> String {
-    let start = id.len().saturating_sub(8);
-    id[start..].to_string()
-}
+use crate::utils::{format_elapsed, short_id};
 
 /// Recursively build agent row lines with Play/Stop and Kill button columns.
 /// `button_areas` and `kill_areas` collect the column x-offsets for each row

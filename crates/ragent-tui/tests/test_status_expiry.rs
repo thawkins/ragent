@@ -145,11 +145,11 @@ fn test_slash_status_expiry_not_armed_for_async() {
     app.session_id = Some("s1".to_string());
 
     // Simulate a slash command that sets an async status.
-    app.status = "⏳ opt/co_star: optimizing…".to_string();
+    app.status = "[wait] opt/co_star: optimizing…".to_string();
     app.arm_status_expiry();
 
     assert!(app.status_set_at.is_none());
-    assert_eq!(app.status, "⏳ opt/co_star: optimizing…");
+    assert_eq!(app.status, "[wait] opt/co_star: optimizing…");
 }
 
 /// The expiry timer should not be armed for error (⚠) statuses.
@@ -157,7 +157,7 @@ fn test_slash_status_expiry_not_armed_for_async() {
 fn test_slash_status_expiry_not_armed_for_error() {
     let mut app = make_app();
 
-    app.status = "⚠ Please provide a task ID prefix: /cancel <id>".to_string();
+    app.status = "[warn] Please provide a task ID prefix: /cancel <id>".to_string();
     app.arm_status_expiry();
 
     assert!(app.status_set_at.is_none());
@@ -200,7 +200,7 @@ fn test_slash_error_status_not_armed() {
     // /cancel with no argument produces an error status.
     app.execute_slash_command("/cancel");
 
-    assert!(app.status.starts_with('⚠'));
+    assert!(app.status.starts_with("[warn]"));
     assert!(
         app.status_set_at.is_none(),
         "error statuses should not arm the expiry timer"
@@ -220,7 +220,7 @@ fn test_research_create_status_is_async_in_progress() {
     app.session_id = Some("s1".to_string());
 
     // Simulate the status the `/research create` handler sets.
-    app.status = "⏳ research: my-topic…".to_string();
+    app.status = "[wait] research: my-topic…".to_string();
     // execute_slash_command calls arm_status_expiry after the inner handler
     // returns; replicate that here.
     app.arm_status_expiry();
@@ -230,7 +230,7 @@ fn test_research_create_status_is_async_in_progress() {
         app.status_set_at.is_none(),
         "research create status should be async-in-progress (⏳) and not armed for auto-expiry"
     );
-    assert_eq!(app.status, "⏳ research: my-topic…");
+    assert_eq!(app.status, "[wait] research: my-topic…");
 
     // Even after the grace period elapses, the status must remain unchanged.
     app.status_set_at = Some(
@@ -240,7 +240,7 @@ fn test_research_create_status_is_async_in_progress() {
     );
     app.poll_status_expiry();
     assert_eq!(
-        app.status, "⏳ research: my-topic…",
+        app.status, "[wait] research: my-topic…",
         "async-in-progress research status must not auto-expire to ready"
     );
 }
@@ -254,7 +254,7 @@ fn test_research_progress_status_is_async_in_progress() {
 
     // Simulate the per-phase running status set by the AgentNotice progress
     // handler while the research session is mid-run.
-    app.status = "⏳ research: my-topic — web (▶) — running".to_string();
+    app.status = "[wait] research: my-topic — web (▶) — running".to_string();
     app.arm_status_expiry();
     assert!(
         app.status_set_at.is_none(),

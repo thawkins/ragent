@@ -131,15 +131,16 @@ pub fn percent_decode_path(s: &str) -> std::path::PathBuf {
     bytes_to_path(&bytes)
 }
 
-#[cfg(unix)]
 fn bytes_to_path(bytes: &[u8]) -> std::path::PathBuf {
-    use std::os::unix::ffi::OsStrExt;
-    std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
-}
-
-#[cfg(not(unix))]
-fn bytes_to_path(bytes: &[u8]) -> std::path::PathBuf {
-    std::path::PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+    }
+    #[cfg(not(unix))]
+    {
+        std::path::PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    }
 }
 
 /// Encode `arboard::ImageData` (raw RGBA pixels) as a PNG saved to a
@@ -225,6 +226,82 @@ pub struct LlmStatsSummary {
     pub avg_prompt_tps: f64,
     /// Average output throughput in tokens per second.
     pub avg_output_tps: f64,
+}
+
+/// Snapshot of every context-window partition for the Context side panel.
+///
+/// FR-012: `total_tokens` is the sum of the four top-level partitions the
+/// model actually receives (`system_prompt` — which itself includes the
+/// [`Self::skills_tokens`], [`Self::memory_tokens`] and
+/// [`Self::agents_md_tokens`] sub-breakdowns — plus tool catalog, tool
+/// metadata/wrapper overhead and the conversation history), so the sub-
+/// partitions are displayed as a breakdown and never added twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextPartitionSnapshot {
+    /// Byte/token estimate of the assembled system prompt (FR-005),
+    /// inclusive of the skills, memory and AGENTS.md sub-partitions below.
+    pub system_prompt_tokens: u64,
+    /// Byte/token estimate of the visible tool catalog definitions (FR-006).
+    pub tool_catalog_tokens: u64,
+    /// Per-tool provider wire-envelope overhead added to the catalog
+    /// (FR-007).
+    pub tool_metadata_tokens: u64,
+    /// Byte/token estimate of the conversation history (FR-008).
+    pub history_tokens: u64,
+    /// Number of messages in the conversation history (FR-008).
+    pub history_message_count: usize,
+    /// Skills context injected into the system prompt (FR-009 sub-partition).
+    pub skills_tokens: u64,
+    /// Memory injections inside the system prompt (FR-009 sub-partition).
+    pub memory_tokens: u64,
+    /// AGENTS.md guideline block inside the system prompt
+    /// (FR-009 sub-partition).
+    pub agents_md_tokens: u64,
+    /// Model context-window capacity when the provider advertises one
+    /// (FR-010); `None` equals "unknown" (FR-011).
+    pub context_window_tokens: Option<usize>,
+}
+
+impl ContextPartitionSnapshot {
+    /// Sum of the top-level partitions sent to the model (FR-012).
+    ///
+    /// The skills/memory/AGENTS.md fields are sub-slices of
+    /// `system_prompt_tokens` and are deliberately excluded from the sum to
+    /// avoid double counting.
+    #[must_use]
+    pub fn total_tokens(&self) -> u64 {
+        self.system_prompt_tokens
+            + self.tool_catalog_tokens
+            + self.tool_metadata_tokens
+            + self.history_tokens
+    }
+
+    /// Remaining context-window headroom in tokens (FR-012), or `None` when
+    /// the model's capacity is unknown (FR-011). Saturates at zero when the
+    /// estimate already exceeds the advertised window.
+    #[must_use]
+    pub fn remaining_tokens(&self) -> Option<u64> {
+        self.context_window_tokens
+            .map(|window| (window as u64).saturating_sub(self.total_tokens()))
+    }
+
+    /// Percentage of the context window consumed by a partition value
+    /// (FR-010), or `None` when the capacity is unknown (FR-011).
+    #[must_use]
+    pub fn percent_of_window(&self, tokens: u64) -> Option<f64> {
+        let window = self.context_window_tokens?;
+        if window == 0 {
+            return None;
+        }
+        Some((tokens as f64 / window as f64) * 100.0)
+    }
+
+    /// Percentage of the context window consumed by all top-level
+    /// partitions (FR-010/FR-012).
+    #[must_use]
+    pub fn total_percent(&self) -> Option<f64> {
+        self.percent_of_window(self.total_tokens())
+    }
 }
 
 /// Which screen the TUI is currently showing.
@@ -776,7 +853,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "research",
-        description: "Research system: /research create|list|open|search|show|delete|archive",
+        description: "Research system: /research create|list|open|search|show|delete|archive|cluster",
     },
     SlashCommandDef {
         trigger: "reverse",
@@ -995,6 +1072,8 @@ pub enum ScrollbarDragPane {
     Memory,
     /// Dragging the Telemetry pane scrollbar.
     Telemetry,
+    /// Dragging the Context pane scrollbar.
+    ContextPanel,
 }
 
 /// Identifies which pane a text selection lives in.
@@ -1012,6 +1091,8 @@ pub enum SelectionPane {
     Memory,
     /// Selection in the Telemetry pane.
     Telemetry,
+    /// Selection in the Context panel.
+    ContextPanel,
     /// Selection in the chat-screen input widget.
     Input,
 }
@@ -1138,6 +1219,28 @@ pub struct OutputViewState {
     pub max_scroll: u16,
     /// Cached rendered / wrapped lines for this view.
     pub line_cache: OutputViewLineCache,
+}
+
+impl OutputViewState {
+    /// Scroll the view by `delta` lines. Positive deltas move toward older
+    /// content (increase offset), negative deltas move toward newer content.
+    pub fn scroll_by(&mut self, delta: i16) {
+        if delta >= 0 {
+            self.scroll_offset = (self.scroll_offset + delta as u16).min(self.max_scroll);
+        } else {
+            self.scroll_offset = self.scroll_offset.saturating_sub((-delta) as u16);
+        }
+    }
+
+    /// Jump to the oldest (top) content.
+    pub fn jump_start(&mut self) {
+        self.scroll_offset = self.max_scroll;
+    }
+
+    /// Jump to the newest (bottom) content.
+    pub fn jump_end(&mut self) {
+        self.scroll_offset = 0;
+    }
 }
 
 /// State for the interactive `/mcp discover` dialog.
@@ -1329,6 +1432,8 @@ pub struct App {
     pub show_memory: bool,
     /// Whether the Telemetry panel is visible (toggled via Alt+O).
     pub show_telemetry: bool,
+    /// Whether the Context panel is visible (toggled via Alt+X).
+    pub show_context_panel: bool,
     /// Log entries displayed in the log panel.
     pub log_entries: Vec<LogEntry>,
     /// Per-entry line cache for the log panel, mirroring
@@ -1370,6 +1475,8 @@ pub struct App {
     pub memory_area: Rect,
     /// Cached area of the Telemetry panel (set during render for mouse hit-testing).
     pub telemetry_area: Rect,
+    /// Cached area of the Context panel (set during render for mouse hit-testing).
+    pub context_panel_area: Rect,
     /// Maximum scroll value for the messages pane (set during render).
     pub message_max_scroll: u16,
     /// Maximum scroll value for the log pane (set during render).
@@ -1382,6 +1489,21 @@ pub struct App {
     pub memory_max_scroll: u16,
     /// Maximum scroll value for the Telemetry pane (set during render).
     pub telemetry_max_scroll: u16,
+    /// Maximum scroll value for the Context panel (set during render).
+    pub context_panel_max_scroll: u16,
+    /// Scroll offset for the Context panel (lines from top).
+    pub context_scroll_offset: u16,
+    /// Cached partition snapshot consumed by the Context panel render
+    /// (T-013/FR-015: disk/SQLite-backed partitions are computed off the UI
+    /// thread and adopted here, so per-frame renders never block).
+    pub context_snapshot_cache: Option<ContextPartitionSnapshot>,
+    /// Deposit box for background context-snapshot computations
+    /// (T-013/FR-015). The blocking task writes its result here; the UI
+    /// thread adopts it in `poll_context_snapshot_refresh`.
+    pub context_snapshot_result: Arc<std::sync::Mutex<Option<ContextPartitionSnapshot>>>,
+    /// Whether a context snapshot refresh is currently running off the UI
+    /// thread (guards against stacking blocking tasks).
+    pub context_refresh_inflight: bool,
     /// Scroll offset for the active-agents subpanel (lines from top).
     pub active_agents_scroll_offset: u16,
     /// Maximum scroll value for the active-agents subpanel (set during render).
@@ -1442,6 +1564,8 @@ pub struct App {
     pub memory_cache_dirty: bool,
     /// Plain-text lines from the last Telemetry pane render (for copy).
     pub telemetry_content_lines: Vec<String>,
+    /// Plain-text lines from the last Context pane render (for copy).
+    pub context_content_lines: Vec<String>,
     /// Cached area of the chat-screen input widget (set during render).
     pub input_area: Rect,
     /// Cached area of the teams subpanel.
@@ -1819,6 +1943,28 @@ pub struct ResearchViewState {
     pub line_cache: crate::app::OutputViewLineCache,
 }
 
+impl ResearchViewState {
+    /// Scroll the view by `delta` lines. Positive deltas move toward older
+    /// content (increase offset), negative deltas move toward newer content.
+    pub fn scroll_by(&mut self, delta: i16) {
+        if delta >= 0 {
+            self.scroll_offset = (self.scroll_offset + delta as u16).min(self.max_scroll);
+        } else {
+            self.scroll_offset = self.scroll_offset.saturating_sub((-delta) as u16);
+        }
+    }
+
+    /// Jump to the oldest (top) content.
+    pub fn jump_start(&mut self) {
+        self.scroll_offset = self.max_scroll;
+    }
+
+    /// Jump to the newest (bottom) content.
+    pub fn jump_end(&mut self) {
+        self.scroll_offset = 0;
+    }
+}
+
 /// State held while waiting for the user to approve or reject a plan.
 #[derive(Debug, Clone)]
 pub struct PlanApprovalState {
@@ -2060,13 +2206,12 @@ impl App {
     /// current status and the instant it was set so [`App::poll_status_expiry`]
     /// can transition it to `"ready"` once the grace period elapses — but only
     /// if nothing else changed the status in the meantime.
-    ///
-    /// No-op for statuses that should persist: async-in-progress (`⏳`) and
-    /// error/warning (`⚠`) states are left untouched.
+    ///      /// No-op for statuses that should persist: async-in-progress (`[wait]`)
+    /// and error/warning (`[warn]`) states are left untouched.
     pub fn arm_status_expiry(&mut self) {
         // Never auto-clear async-in-progress or error states — those need to
         // stay visible until their own completion handler updates them.
-        if self.status.starts_with('⏳') || self.status.starts_with('⚠') {
+        if self.status.starts_with("[wait]") || self.status.starts_with("[warn]") {
             return;
         }
         // "ready" is already the idle state — nothing to transition to.

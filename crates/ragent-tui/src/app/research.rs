@@ -3,6 +3,9 @@
 //! Extracted from `app.rs` in REMPLAN.md M5 / T5.3.
 
 use ragent_agent::event::Event;
+use ragent_agent::storage::Storage;
+use ragent_agent::{agent::ModelRef, event::EventBus, provider::ProviderRegistry};
+use std::sync::Arc;
 
 use crate::research_adapter::TuiResearchObserver;
 
@@ -15,10 +18,110 @@ use crate::app::state::{App, LogLevel};
 
 // Re-export status types from theme
 
+/// Run concept-extraction for a `/research cluster` command end-to-end.
+///
+/// All progress and result events are published directly to `event_bus`; the
+/// caller only has to spawn this future. Returns the written CONCEPTS.md path
+/// on success, or an error string suitable for a final status line.
+async fn run_cluster_extraction(
+    root: &std::path::Path,
+    valid_name: &ragent_research::ResearchName,
+    name: &str,
+    model_ref: ModelRef,
+    model_label: &str,
+    context_window: usize,
+    provider_registry: Arc<ProviderRegistry>,
+    storage: Option<Arc<Storage>>,
+    event_bus: Arc<EventBus>,
+    session_id: String,
+) -> Result<std::path::PathBuf, String> {
+    use crate::research_progress::{SessionPhase, encode_cluster_progress_event};
+
+    let session_id_for_notice = session_id.clone();
+    let publish_progress = |phase: SessionPhase, status: &str, detail: String| {
+        event_bus.publish(Event::AgentNotice {
+            session_id: session_id_for_notice.clone(),
+            message: encode_cluster_progress_event(name, name, phase, status, &detail),
+        });
+    };
+
+    publish_progress(
+        SessionPhase::Setup,
+        "started",
+        "reading sources…".to_string(),
+    );
+
+    let payload = ragent_research::build_cluster_payload(root, valid_name, Some(context_window))
+        .await
+        .map_err(|e| format!("failed to read sources: {e}"))?;
+
+    let file_list = payload.files.join(", ");
+    publish_progress(
+        SessionPhase::Setup,
+        "done",
+        format!(
+            "read {} source file(s): {file_list}. payload: {} / {} bytes (truncated: {})",
+            payload.files.len(),
+            payload.total_bytes,
+            payload.max_bytes,
+            payload.truncated,
+        ),
+    );
+    publish_progress(
+        SessionPhase::Synthesize,
+        "started",
+        format!("sending concept-extraction prompt to {model_label}…"),
+    );
+
+    let prompt = ragent_research::build_concept_extraction_prompt(&payload);
+    let text = ragent_agent::send_one_shot(
+        provider_registry,
+        storage,
+        model_ref,
+        None,
+        prompt,
+        Some(4_096),
+    )
+    .await
+    .map_err(|e| format!("LLM call failed: {e}"))?;
+
+    publish_progress(
+        SessionPhase::Synthesize,
+        "done",
+        format!("LLM returned {} bytes", text.len()),
+    );
+    publish_progress(
+        SessionPhase::Finalize,
+        "started",
+        "writing CONCEPTS.md…".to_string(),
+    );
+
+    let path = ragent_research::write_concepts_md(root, valid_name, &text)
+        .await
+        .map_err(|e| format!("failed to write CONCEPTS.md: {e}"))?;
+
+    publish_progress(
+        SessionPhase::Finalize,
+        "done",
+        format!("wrote CONCEPTS.md ({} bytes)", text.len()),
+    );
+    event_bus.publish(Event::TextDelta {
+        session_id,
+        text: format!(
+            "From: /research cluster\n\n[ok] Concept extraction finished for `{name}`. \
+             Wrote `{path}` ({} bytes).\n\n{text}",
+            text.len(),
+            path = path.display()
+        ),
+    });
+
+    Ok(path)
+}
+
 impl App {
     pub(crate) fn handle_research_command(&mut self, args: &str) {
         use ragent_research::cli::ResearchCliCommand;
-        use ragent_research::{OutputFormat, ResearchManager};
+        use ragent_research::{OutputFormat, ResearchIo, ResearchManager, ResearchName};
         use std::sync::Arc;
 
         let cmd = ResearchCliCommand::parse(args);
@@ -73,13 +176,13 @@ impl App {
                 search_retry_base_delay_ms,
                 search_circuit_breaker_threshold,
             } => {
-                // Use the `⏳` prefix so the status is treated as
+                // Use the `[wait]` prefix so the status is treated as
                 // async-in-progress and NOT auto-expired to "ready" by
                 // [`App::arm_status_expiry`] while the background research
                 // session is still running. The live progress events update
                 // this status per-phase (see the AgentNotice handler), and
                 // the completion notice sets a terminal status.
-                self.status = format!("⏳ research: {name}…");
+                self.status = format!("[wait] research: {name}…");
                 self.push_log_no_agent(
                     LogLevel::Info,
                     if !from_urls.is_empty() {
@@ -386,7 +489,7 @@ impl App {
                             event_bus.publish(Event::TextDelta {
                                 session_id,
                                 text: format!(
-                                    "From: /research delete\n\n✅ Deleted research/{name}."
+                                    "From: /research delete\n\n[ok] Deleted research/{name}."
                                 ),
                             });
                             event_bus.publish(Event::AgentNotice {
@@ -414,7 +517,7 @@ impl App {
                             event_bus.publish(Event::TextDelta {
                                 session_id,
                                 text: format!(
-                                    "From: /research archive\n\n✅ Archived research/{name}."
+                                    "From: /research archive\n\n[ok] Archived research/{name}."
                                 ),
                             });
                         }
@@ -436,6 +539,124 @@ impl App {
                         .unwrap_or_default()
                 ));
             }
+            ResearchCliCommand::Cluster { name, force } => match ResearchName::try_new(&name) {
+                Ok(valid_name) => {
+                    let root = manager.root().to_path_buf();
+                    let item_dir = ResearchIo::item_dir(&root, &valid_name);
+                    let sources_dir = ResearchIo::sources_dir(&root, &valid_name);
+                    if !item_dir.exists() {
+                        self.status = format!("research: cluster '{name}' folder missing");
+                        self.append_assistant_text(&format!(
+                                "From: /research cluster\n\n**Error:** research folder `research/{name}` does not exist."
+                            ));
+                    } else if !sources_dir.exists() || !sources_dir.is_dir() {
+                        self.status = format!("research: cluster '{name}' no sources");
+                        self.append_assistant_text(&format!(
+                                "From: /research cluster\n\n**Error:** `research/{name}/sources/` folder not found."
+                            ));
+                    } else {
+                        let is_empty = match std::fs::read_dir(&sources_dir) {
+                            Ok(entries) => entries.count() == 0,
+                            Err(_) => true,
+                        };
+                        if is_empty {
+                            self.status = format!("research: cluster '{name}' empty sources");
+                            self.append_assistant_text(&format!(
+                                    "From: /research cluster\n\n**Error:** `research/{name}/sources/` is empty."
+                                ));
+                            return;
+                        }
+                        let concepts_path = ResearchIo::concepts_md_path(&root, &valid_name);
+                        if concepts_path.exists() && !force {
+                            self.status = format!("research: cluster '{name}' already clustered");
+                            self.append_assistant_text(&format!(
+                                    "From: /research cluster\n\n**Error:** `research/{name}/CONCEPTS.md` already exists. \
+                                     Re-run with `--force` to overwrite it."
+                                ));
+                            return;
+                        }
+                        let model_ref = self
+                            .selected_model
+                            .as_deref()
+                            .and_then(|s| s.split_once('/'))
+                            .map(|(p, m)| ragent_agent::agent::ModelRef {
+                                provider_id: p.to_string(),
+                                model_id: m.to_string(),
+                            });
+                        let Some(model_ref) = model_ref else {
+                            self.status = format!("research: cluster '{name}' no model selected");
+                            self.append_assistant_text(&format!(
+                                "From: /research cluster\n\n**Error:** no model selected. \
+                                       Choose a provider/model with /provider or /model first."
+                            ));
+                            return;
+                        };
+                        let context_window = self
+                            .selected_model_context_window()
+                            .unwrap_or(ragent_research::DEFAULT_CONTEXT_WINDOW_TOKENS);
+                        let model_label = self.selected_model.clone().unwrap_or_default();
+
+                        self.status = format!("[wait] research: cluster '{name}' reading sources…");
+                        self.append_assistant_text(&format!(
+                            "From: /research cluster\n\n[ok] Request accepted for `{name}` \
+                               (force={force}). Reading sources and preparing payload; \
+                               progress updates will appear below."
+                        ));
+
+                        let provider_registry = self.provider_registry.clone();
+                        let storage = Some(self.storage.clone());
+                        let event_bus = self.event_bus.clone();
+                        let session_id = self
+                            .session_id
+                            .clone()
+                            .unwrap_or_else(|| "cluster".to_string());
+
+                        tokio::spawn(async move {
+                            match run_cluster_extraction(
+                                &root,
+                                &valid_name,
+                                &name,
+                                model_ref,
+                                &model_label,
+                                context_window,
+                                provider_registry,
+                                storage,
+                                event_bus.clone(),
+                                session_id.clone(),
+                            )
+                            .await
+                            {
+                                Ok(_) => {
+                                    event_bus.publish(Event::AgentNotice {
+                                        session_id,
+                                        message: format!(
+                                            "research: cluster '{name}' extraction complete"
+                                        ),
+                                    });
+                                }
+                                Err(e) => {
+                                    event_bus.publish(Event::AgentNotice {
+                                        session_id: session_id.clone(),
+                                        message: format!("research: cluster '{name}' failed: {e}"),
+                                    });
+                                    event_bus.publish(Event::TextDelta {
+                                        session_id,
+                                        text: format!(
+                                            "From: /research cluster\n\n**Error:** {e} for `{name}`"
+                                        ),
+                                    });
+                                }
+                            }
+                        });
+                    }
+                }
+                Err(e) => {
+                    self.status = "research: cluster invalid name".to_string();
+                    self.append_assistant_text(&format!(
+                        "From: /research cluster\n\n**Error:** invalid research name `{name}`: {e}"
+                    ));
+                }
+            },
             ResearchCliCommand::Unknown(sub) => {
                 self.append_assistant_text(&format!(
                     "From: /research\n\n**Error:** unknown subcommand `{sub}`. Try `/research help`."

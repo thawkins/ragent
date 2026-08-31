@@ -160,7 +160,7 @@ fn test_bench_init_all_creates_every_suite_root() {
         .last()
         .expect("bench init all message")
         .text_content();
-    assert!(text.contains("✅ initialized benchmark target."));
+    assert!(text.contains("[ok] initialized benchmark target."));
     assert!(text.contains("[python]"));
     assert!(text.contains("humaneval"));
     assert!(text.contains("bigcodebench"));
@@ -367,7 +367,7 @@ fn test_bench_cancel_requests_shutdown_for_active_run() {
 
     let text = last_message_text(&app);
     assert!(text.contains("Cancellation requested"));
-    assert_eq!(app.status, "⏳ bench: cancellation requested");
+    assert_eq!(app.status, "[wait] bench: cancellation requested");
     assert!(
         app.active_bench_cancel
             .as_ref()

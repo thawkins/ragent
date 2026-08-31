@@ -170,15 +170,19 @@ impl App {
                   } else if self.show_tasks_panel
                       && self.tasks_area.contains((event.column, event.row).into())
                   {
-                      self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_add(3);
-                  } else if self.show_memory
-                      && self.memory_area.contains((event.column, event.row).into())
-                  {
-                      self.memory_scroll_offset = self.memory_scroll_offset.saturating_add(3);                    } else if self.show_telemetry
+                      self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_add(3);                    } else if self.show_memory
+                        && self.memory_area.contains((event.column, event.row).into())
+                    {
+                        self.memory_scroll_offset = self.memory_scroll_offset.saturating_add(3);
+                    } else if self.show_telemetry
                         && self.telemetry_area.contains((event.column, event.row).into())
                     {
                         self.telemetry_scroll_offset =
                             self.telemetry_scroll_offset.saturating_add(3);
+                    } else if self.show_context_panel
+                        && self.context_panel_area.contains((event.column, event.row).into())
+                    {
+                        self.context_scroll_offset = self.context_scroll_offset.saturating_add(3);
                     } else if self.message_area.contains((event.column, event.row).into()) {
                         self.scroll_offset = self.scroll_offset.saturating_add(3);
                     }
@@ -207,19 +211,23 @@ impl App {
                     } else if self.show_tasks_panel
                         && self.tasks_area.contains((event.column, event.row).into())
                     {
-                        self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_sub(3);
-                    } else if self.show_memory
+                        self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_sub(3);                    } else if self.show_memory
                         && self.memory_area.contains((event.column, event.row).into())
                     {
-                        self.memory_scroll_offset = self.memory_scroll_offset.saturating_sub(3);                      } else if self.show_telemetry
-                          && self.telemetry_area.contains((event.column, event.row).into())
-                      {
-                          self.telemetry_scroll_offset =
-                              self.telemetry_scroll_offset.saturating_sub(3);
-                      } else if self.message_area.contains((event.column, event.row).into()) {
-                          self.scroll_offset = self.scroll_offset.saturating_sub(3);
-                      }
-                  }
+                        self.memory_scroll_offset = self.memory_scroll_offset.saturating_sub(3);
+                    } else if self.show_telemetry
+                        && self.telemetry_area.contains((event.column, event.row).into())
+                    {
+                        self.telemetry_scroll_offset =
+                            self.telemetry_scroll_offset.saturating_sub(3);
+                    } else if self.show_context_panel
+                        && self.context_panel_area.contains((event.column, event.row).into())
+                    {
+                        self.context_scroll_offset = self.context_scroll_offset.saturating_sub(3);
+                    } else if self.message_area.contains((event.column, event.row).into()) {
+                        self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                    }
+                }
                   MouseEventKind::Down(MouseButton::Left) => {
                 let pos = (event.column, event.row);
                 if self.agents_button_area.contains(pos.into()) {
@@ -429,19 +437,33 @@ impl App {
                                       // the Log / Profile / TODO panels (FR-013 hit-testing).
                                       self.scrollbar_drag = Some(ScrollbarDragPane::Memory);
                                       self.text_selection = None;
-                                      self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Memory);
-                                  } else if self.show_telemetry
-                                      && self.telemetry_area.height > 0
-                                      && event.column == self.telemetry_area.right().saturating_sub(1)
-                                      && self.telemetry_area.contains(pos.into())
-                                      && self.telemetry_max_scroll > 0
-                                  {
-                                      // Click on the Telemetry panel scrollbar gutter initiates
-                                      // a scrollbar drag, mirroring the other side panels.
-                                      self.scrollbar_drag = Some(ScrollbarDragPane::Telemetry);
-                                      self.text_selection = None;
-                                      self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Telemetry);
-                                  } else {                    // If the file menu is open and the click falls within its popup,
+                                      self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Memory);                                    } else if self.show_telemetry
+                                        && self.telemetry_area.height > 0
+                                        && event.column == self.telemetry_area.right().saturating_sub(1)
+                                        && self.telemetry_area.contains(pos.into())
+                                        && self.telemetry_max_scroll > 0
+                                    {
+                                        // Click on the Telemetry panel scrollbar gutter initiates
+                                        // a scrollbar drag, mirroring the other side panels.
+                                        self.scrollbar_drag = Some(ScrollbarDragPane::Telemetry);
+                                        self.text_selection = None;
+                                        self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Telemetry);
+                                    } else if self.show_context_panel
+                                        && self.context_panel_area.height > 0
+                                        && event.column
+                                            == self.context_panel_area.right().saturating_sub(1)
+                                        && self.context_panel_area.contains(pos.into())
+                                        && self.context_panel_max_scroll > 0
+                                    {
+                                        // Click on the Context panel scrollbar gutter initiates a
+                                        // scrollbar drag, mirroring the other side panels.
+                                        self.scrollbar_drag = Some(ScrollbarDragPane::ContextPanel);
+                                        self.text_selection = None;
+                                        self.apply_scrollbar_drag(
+                                            event.row,
+                                            ScrollbarDragPane::ContextPanel,
+                                        );
+                                    } else {                    // If the file menu is open and the click falls within its popup,
                     // handle file/directory selection via mouse.
                     if let Some(_menu_state) = self.file_menu.as_ref() {
                         // Compute popup rect used by the renderer so clicks map to rows.
@@ -631,6 +653,9 @@ impl App {
             SelectionPane::Telemetry => self
                 .telemetry_max_scroll
                 .saturating_sub(self.telemetry_scroll_offset),
+            SelectionPane::ContextPanel => self
+                .context_panel_max_scroll
+                .saturating_sub(self.context_scroll_offset),
             _ => 0,
         };
         start_row = start_row.saturating_add(scroll_top);
@@ -643,6 +668,7 @@ impl App {
             SelectionPane::Tasks => &self.tasks_content_lines,
             SelectionPane::Memory => &self.memory_content_lines,
             SelectionPane::Telemetry => &self.telemetry_content_lines,
+            SelectionPane::ContextPanel => &self.context_content_lines,
             SelectionPane::Input => {
                 // For input widgets, build a single-line content from app.input
                 let input_text = format!("> {}", self.input);
@@ -680,6 +706,7 @@ impl App {
             SelectionPane::Tasks => self.tasks_area,
             SelectionPane::Memory => self.memory_area,
             SelectionPane::Telemetry => self.telemetry_area,
+            SelectionPane::ContextPanel => self.context_panel_area,
             _ => unreachable!(),
         };
         // Inner area (accounting for borders)
@@ -960,6 +987,8 @@ impl App {
                     } else if self.show_telemetry {
                         self.telemetry_scroll_offset =
                             self.telemetry_scroll_offset.saturating_add(3);
+                    } else if self.show_context_panel {
+                        self.context_scroll_offset = self.context_scroll_offset.saturating_add(3);
                     }
                 }
                 InputAction::LogScrollDown => {
@@ -974,6 +1003,8 @@ impl App {
                     } else if self.show_telemetry {
                         self.telemetry_scroll_offset =
                             self.telemetry_scroll_offset.saturating_sub(3);
+                    } else if self.show_context_panel {
+                        self.context_scroll_offset = self.context_scroll_offset.saturating_sub(3);
                     }
                 }
                 InputAction::ToggleLog => {
@@ -985,6 +1016,7 @@ impl App {
                         self.show_tasks_panel = false;
                         self.show_memory = false;
                         self.show_telemetry = false;
+                        self.show_context_panel = false;
                         self.spool_log_window_history();
                     } else {
                         if self
@@ -1012,6 +1044,7 @@ impl App {
                     let enabled = !self.show_profile;
                     self.set_profile_panel_enabled(enabled);
                     if !enabled {
+                        self.show_context_panel = false;
                         if self
                             .text_selection
                             .as_ref()
@@ -1077,6 +1110,7 @@ impl App {
                         self.show_profile = false;
                         self.show_memory = false;
                         self.show_telemetry = false;
+                        self.show_context_panel = false;
                     } else {
                         // Leaving TODO mode: clear Todo-pane selection state.
                         if self
@@ -1117,6 +1151,7 @@ impl App {
                         self.show_profile = false;
                         self.show_tasks_panel = false;
                         self.show_telemetry = false;
+                        self.show_context_panel = false;
                     } else {
                         if self
                             .text_selection
@@ -1151,6 +1186,7 @@ impl App {
                         self.show_profile = false;
                         self.show_tasks_panel = false;
                         self.show_memory = false;
+                        self.show_context_panel = false;
                     } else {
                         if self
                             .text_selection
@@ -1171,6 +1207,44 @@ impl App {
                         "telemetry panel visible".to_string()
                     } else {
                         "telemetry panel hidden".to_string()
+                    };
+                    self.needs_redraw = true;
+                }
+                InputAction::ToggleContextPanel => {
+                    // Toggle the Context side panel visibility (Alt+X). Mutually
+                    // exclusive with the other side panels so only one occupies the
+                    // side column. On hide, clear any active context-panel text
+                    // selection or context menu.
+                    self.show_context_panel = !self.show_context_panel;
+                    if self.show_context_panel {
+                        self.show_log = false;
+                        self.show_profile = false;
+                        self.show_tasks_panel = false;
+                        self.show_memory = false;
+                        self.show_telemetry = false;
+                        // T-013/FR-015: refresh the snapshot off the UI
+                        // thread as soon as the panel opens.
+                        self.schedule_context_snapshot_refresh();
+                    } else {
+                        if self
+                            .text_selection
+                            .as_ref()
+                            .is_some_and(|s| s.pane == SelectionPane::ContextPanel)
+                        {
+                            self.text_selection = None;
+                        }
+                        if self
+                            .context_menu
+                            .as_ref()
+                            .is_some_and(|m| m.pane == SelectionPane::ContextPanel)
+                        {
+                            self.context_menu = None;
+                        }
+                    }
+                    self.status = if self.show_context_panel {
+                        "context panel visible".to_string()
+                    } else {
+                        "context panel hidden".to_string()
                     };
                     self.needs_redraw = true;
                 }

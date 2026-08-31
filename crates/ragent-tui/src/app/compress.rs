@@ -26,19 +26,14 @@ use ragent_agent::{
 use crate::app::state::{App, LogLevel};
 
 // Helpers
+use crate::app::session_ops::recover_poisoned;
 
 impl App {
     /// Poll the pending prompt-optimization result and, if ready, push it
     /// onto the input buffer (or surface an error in the status line).
     pub fn poll_pending_opt(&mut self) {
         let outcome = {
-            let mut guard = match self.opt_result.lock() {
-                Ok(g) => g,
-                Err(poisoned) => {
-                    tracing::error!("opt_result mutex poisoned, recovering");
-                    poisoned.into_inner()
-                }
-            };
+            let mut guard = recover_poisoned(self.opt_result.lock(), "opt_result");
             guard.take()
         };
         if let Some(outcome) = outcome {
@@ -56,7 +51,7 @@ impl App {
                     self.arm_status_expiry();
                 }
                 Err(msg) => {
-                    self.status = format!("⚠ opt failed: {}", msg);
+                    self.status = format!("[warn] opt failed: {}", msg);
                     self.push_log_no_agent(LogLevel::Warn, format!("opt error: {}", msg));
                 }
             }
@@ -69,13 +64,7 @@ impl App {
     /// any user message queued behind an auto-compaction-before-send.
     pub fn poll_compaction_result(&mut self) {
         let outcome = {
-            let mut guard = match self.compact_result.lock() {
-                Ok(g) => g,
-                Err(poisoned) => {
-                    tracing::error!("compact_result mutex poisoned, recovering");
-                    poisoned.into_inner()
-                }
-            };
+            let mut guard = recover_poisoned(self.compact_result.lock(), "compact_result");
             guard.take()
         };
         let Some(outcome) = outcome else {
@@ -83,6 +72,9 @@ impl App {
         };
         self.compact_in_progress = false;
         self.needs_redraw = true;
+        // T-010/FR-013: compaction rewrote the history, so refresh the
+        // Context panel snapshot off the UI thread.
+        self.schedule_context_snapshot_refresh();
 
         let was_auto_compaction = self.auto_compact_in_progress;
         match outcome {
@@ -105,7 +97,7 @@ impl App {
                         "Auto-compaction failed; send blocked for this turn".to_string(),
                     );
                 }
-                self.status = format!("⚠ compact failed: {err}");
+                self.status = format!("[warn] compact failed: {err}");
                 self.push_log_no_agent(LogLevel::Error, format!("compaction error: {err}"));
             }
         }
@@ -132,7 +124,7 @@ impl App {
             })
             .or_else(|| self.agent_info.model.clone());
         let Some(model_ref) = resolved_model else {
-            self.status = "⚠ No model selected — use /model to choose".to_string();
+            self.status = "[warn] No model selected — use /model to choose".to_string();
             return false;
         };
 

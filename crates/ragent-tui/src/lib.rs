@@ -293,13 +293,13 @@ pub async fn run_tui(
     // -- Render the very first frame so the user sees the TUI immediately --
     app.status = "starting up…".to_string();
     app.force_new_message = true;
-    app.append_assistant_text("⚙️ **Starting up…**");
+    app.append_assistant_text("[spin] **Starting up…**");
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
     // -- Provider health check --
     let t0 = Instant::now();
     app.check_provider_health();
-    app.append_assistant_text("\n✔ Provider health check");
+    app.append_assistant_text("\n[ok] Provider health check");
     app.status = "checking provider…".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
     startup.record("Provider health check", t0.elapsed());
@@ -354,7 +354,10 @@ pub async fn run_tui(
                 app.append_assistant_text(&banner);
                 app.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
                 // app.force_new_message = true;
-                app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
+                app.append_assistant_text(&format!(
+                    "\n[ok] Session created: `{}`",
+                    &session_id[..8]
+                ));
                 // Display the loaded configuration file(s)
                 if app.config_paths.is_empty() {
                     app.append_assistant_text("\nℹ No config file found; using defaults");
@@ -378,7 +381,9 @@ pub async fn run_tui(
                     if app.config_paths.len() > 1 {
                         paths_text = format!("\n  {paths_text}");
                     }
-                    app.append_assistant_text(&format!("\n✔ Loaded config file: `{paths_text}`"));
+                    app.append_assistant_text(&format!(
+                        "\n[ok] Loaded config file: `{paths_text}`"
+                    ));
                 }
                 app.status = "session created".to_string();
                 terminal.draw(|frame| layout::render(frame, &mut app))?;
@@ -427,7 +432,7 @@ pub async fn run_tui(
     if let Err(e) = app.load_history() {
         tracing::warn!("Failed to load input history: {}", e);
     }
-    app.append_assistant_text("\n✔ Input history loaded");
+    app.append_assistant_text("\n[ok] Input history loaded");
     terminal.draw(|frame| layout::render(frame, &mut app))?;
     startup.record("Input history load", t0.elapsed());
 
@@ -506,7 +511,7 @@ pub async fn run_tui(
                                 index: Some(arc_idx),
                                 watch_session,
                                 fallback_thread,
-                                message: "\n✔ Code index: enabled\n".to_string(),
+                                message: "\n[ok] Code index: enabled\n".to_string(),
                                 elapsed: ci_inner_start.elapsed(),
                             }
                         }
@@ -516,7 +521,7 @@ pub async fn run_tui(
                                 index: None,
                                 watch_session: None,
                                 fallback_thread: None,
-                                message: "\n✘ Code index: failed to open\n".to_string(),
+                                message: "\n[err] Code index: failed to open\n".to_string(),
                                 elapsed: ci_inner_start.elapsed(),
                             }
                         }
@@ -527,7 +532,7 @@ pub async fn run_tui(
                         index: None,
                         watch_session: None,
                         fallback_thread: None,
-                        message: "\n✔ Code index: disabled\n".to_string(),
+                        message: "\n[ok] Code index: disabled\n".to_string(),
                         elapsed: ci_inner_start.elapsed(),
                     }
                 }
@@ -591,7 +596,7 @@ pub async fn run_tui(
     // -- Startup complete --
     startup.finish(); // Freeze the wall-clock total so /startup stays stable.
     app.startup_timings = Some(startup);
-    app.append_assistant_text("\n✅ **Ready**\n");
+    app.append_assistant_text("\n[ok] **Ready**\n");
     app.status = "ready".to_string();
     app.status_set_at = None; // Ensure the init exchange response starts a new message bubble
     app.force_new_message = true;
@@ -745,6 +750,9 @@ pub async fn run_tui(
 
         // Check for completed compaction runs.
         app.poll_compaction_result();
+
+        // Adopt background Context panel snapshot refreshes (T-013/FR-015).
+        app.poll_context_snapshot_refresh();
 
         // Check for completed /swarm LLM decomposition results.
         app.poll_pending_swarm();

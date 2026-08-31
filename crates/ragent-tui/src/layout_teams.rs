@@ -16,24 +16,7 @@ use ratatui::widgets::{
 use ragent_team::team::{MemberStatus, TaskStatus, TaskStore, TeamStore};
 
 use crate::app::App;
-
-/// Shorten an agent ID to its last 8 chars (the unique suffix).
-fn short_id(id: &str) -> String {
-    let start = id.len().saturating_sub(8);
-    id[start..].to_string()
-}
-
-/// Format elapsed duration from a UTC timestamp (e.g. "2m34s").
-fn format_elapsed(created_at: DateTime<Utc>) -> String {
-    let secs = (Utc::now() - created_at).num_seconds().max(0);
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m{}s", secs / 60, secs % 60)
-    } else {
-        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
-    }
-}
+use crate::utils::{format_elapsed, short_id};
 
 /// Map a `MemberStatus` to a coloured status label.
 fn status_label(status: &MemberStatus) -> (&'static str, Color) {
@@ -47,6 +30,15 @@ fn status_label(status: &MemberStatus) -> (&'static str, Color) {
         MemberStatus::ShuttingDown => ("stopping", Color::Yellow),
         MemberStatus::Stopped => ("stopped", colors::HINT),
         MemberStatus::Failed => ("failed", Color::Red),
+    }
+}
+
+/// Render a count cell: "-" when zero, otherwise the number.
+fn count_cell(n: u32) -> String {
+    if n == 0 {
+        "-".to_string()
+    } else {
+        n.to_string()
     }
 }
 
@@ -67,7 +59,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         .map(|t| t.name.clone())
         .unwrap_or_else(|| "team".to_string());
 
-    let members = app.team_members.clone();
+    let members = &app.team_members;
     let lead_session = app.session_id.clone().unwrap_or_default();
     let lead_steps = app.event_bus.current_tool_calls(&lead_session);
     let lead_elapsed = app
@@ -169,14 +161,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(format!("{:>7} ", "-"), Style::default().fg(colors::HINT)),
         Span::styled(format!("{:>6} ", "-"), Style::default().fg(colors::HINT)),
         Span::styled(
-            format!(
-                "{:>5} ",
-                if lead_sent > 0 {
-                    lead_sent.to_string()
-                } else {
-                    "-".to_string()
-                }
-            ),
+            format!("{:>5} ", count_cell(lead_sent)),
             Style::default().fg(if lead_sent > 0 {
                 Color::Cyan
             } else {
@@ -184,14 +169,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             }),
         ),
         Span::styled(
-            format!(
-                "{:>5} ",
-                if lead_recv > 0 {
-                    lead_recv.to_string()
-                } else {
-                    "-".to_string()
-                }
-            ),
+            format!("{:>5} ", count_cell(lead_recv)),
             Style::default().fg(if lead_recv > 0 {
                 Color::Cyan
             } else {
@@ -296,25 +274,11 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().fg(if done > 0 { Color::Green } else { colors::HINT }),
             ),
             Span::styled(
-                format!(
-                    "{:>5} ",
-                    if sent > 0 {
-                        sent.to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                ),
+                format!("{:>5} ", count_cell(sent)),
                 Style::default().fg(if sent > 0 { Color::Cyan } else { colors::HINT }),
             ),
             Span::styled(
-                format!(
-                    "{:>5} ",
-                    if recv > 0 {
-                        recv.to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                ),
+                format!("{:>5} ", count_cell(recv)),
                 Style::default().fg(if recv > 0 { Color::Cyan } else { colors::HINT }),
             ),
         ]);

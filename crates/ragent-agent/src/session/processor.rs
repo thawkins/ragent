@@ -524,7 +524,7 @@ impl SessionProcessor {
     ///
     /// Returns `None` when no skill directories exist and no skills would be
     /// discovered, so callers can cheaply skip the system-prompt skill section.
-    pub(crate) fn skill_registry(
+    pub fn skill_registry(
         &self,
         working_dir: &std::path::Path,
         extra_dirs: &[String],

@@ -44,6 +44,7 @@ pub mod adaptive;
 pub mod analysis;
 pub mod cite_checker;
 pub mod cli;
+pub mod cluster;
 pub mod contradiction;
 pub mod corpus_critic;
 pub mod diagram;
@@ -90,6 +91,12 @@ pub use cite_checker::{CitationCheckResult, check_citations};
 pub use cli::{
     FsLocalTool, ResearchCliCommand, render_list_output, render_search_output,
     render_session_event_json, render_show_output, session_event_json,
+};
+pub use cluster::{
+    CONCEPT_EXTRACTION_PROMPT_TEMPLATE, ClusterPayload, DEFAULT_CONTEXT_WINDOW_TOKENS,
+    build_cluster_payload, build_cluster_payload_sync, build_concept_extraction_prompt,
+    estimate_max_payload_bytes, format_concepts_md, resolve_context_window_tokens,
+    write_concepts_md,
 };
 pub use contradiction::{
     ContradictionClaim, ContradictionConfig, ContradictionEdge, ContradictionGraph,

@@ -147,6 +147,14 @@ pub enum ResearchCliCommand {
         /// Research name.
         name: String,
     },
+    /// `ragent research cluster <name> [--force]` — extract the top 10 concepts
+    /// from the web-source documents under `research/<name>/sources/`.
+    Cluster {
+        /// Research name.
+        name: String,
+        /// `--force` to overwrite an existing `CONCEPTS.md`.
+        force: bool,
+    },
     /// Unknown / malformed sub-command — preserves the raw input for an
     /// error message.
     Unknown(String),
@@ -182,6 +190,7 @@ impl ResearchCliCommand {
             "archive" => Self::Archive {
                 name: rest.join(" "),
             },
+            "cluster" => Self::parse_cluster(&rest),
             other => {
                 // Treat as `create <name> <topic…>` if it looks like a name.
                 let name = other.to_string();
@@ -220,12 +229,6 @@ impl ResearchCliCommand {
     }
 
     fn parse_create(rest: &[&str]) -> Self {
-        // Parse: ragent research create <name> <topic> [--from-url <URL>]
-        //        [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep]
-        //        [--tier light|full|dissertation]
-        //        [--format <artifact>] [--sources-dir <path>] [--template <name>]
-        //        [--fetch-concurrently N] [--local-concurrently N] [--fetch-timeout-secs N] [--use-local]
-        //        [--use-specs] [--use-low-relevance]
         let mut i = 0;
         let mut name: Option<String> = None;
         let mut topic_words: Vec<&str> = Vec::new();
@@ -250,166 +253,73 @@ impl ResearchCliCommand {
         let mut use_low_relevance = false;
         let mut no_papers = false;
         let mut use_pdf = false;
+
         while i < rest.len() {
             let arg = rest[i];
             match arg {
-                "--from-url" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        from_urls.push((*v).to_string());
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--from-file" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        from_files.push((*v).to_string());
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--iterations" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        iterations = v.parse().ok();
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--depth" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        depth = Some((*v).to_string());
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--tier" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        tier = Some((*v).to_string());
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--format" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        format = Some((*v).to_string());
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--sources-dir" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        sources_dir = Some((*v).to_string());
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--template" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        template = Some((*v).to_string());
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--fetch-concurrently" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        fetch_concurrency = v.parse().ok();
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--local-concurrently" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        local_concurrency = v.parse().ok();
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--fetch-timeout-secs" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        fetch_timeout_secs = v.parse().ok();
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--web-phase-timeout-secs" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        web_phase_timeout_secs = v.parse().ok();
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--local-phase-timeout-secs" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        local_phase_timeout_secs = v.parse().ok();
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--search-max-retries" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        search_max_retries = v.parse().ok();
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--search-retry-base-delay-ms" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        search_retry_base_delay_ms = v.parse().ok();
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--search-circuit-breaker-threshold" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        search_circuit_breaker_threshold = v.parse().ok();
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                "--use-local" => {
-                    use_local = true;
+                "--from-url"
+                | "--from-file"
+                | "--iterations"
+                | "--depth"
+                | "--tier"
+                | "--format"
+                | "--sources-dir"
+                | "--template"
+                | "--fetch-concurrently"
+                | "--local-concurrently"
+                | "--fetch-timeout-secs"
+                | "--web-phase-timeout-secs"
+                | "--local-phase-timeout-secs"
+                | "--search-max-retries"
+                | "--search-retry-base-delay-ms"
+                | "--search-circuit-breaker-threshold" => {
+                    // Move to the value (if present); the final i += 1 below
+                    // will then step past it.
                     i += 1;
+                    if let Some(v) = rest.get(i) {
+                        match arg {
+                            "--from-url" => from_urls.push((*v).to_string()),
+                            "--from-file" => from_files.push((*v).to_string()),
+                            "--iterations" => iterations = v.parse().ok(),
+                            "--depth" => depth = Some((*v).to_string()),
+                            "--tier" => tier = Some((*v).to_string()),
+                            "--format" => format = Some((*v).to_string()),
+                            "--sources-dir" => sources_dir = Some((*v).to_string()),
+                            "--template" => template = Some((*v).to_string()),
+                            "--fetch-concurrently" => fetch_concurrency = v.parse().ok(),
+                            "--local-concurrently" => local_concurrency = v.parse().ok(),
+                            "--fetch-timeout-secs" => fetch_timeout_secs = v.parse().ok(),
+                            "--web-phase-timeout-secs" => {
+                                web_phase_timeout_secs = v.parse().ok();
+                            }
+                            "--local-phase-timeout-secs" => {
+                                local_phase_timeout_secs = v.parse().ok();
+                            }
+                            "--search-max-retries" => search_max_retries = v.parse().ok(),
+                            "--search-retry-base-delay-ms" => {
+                                search_retry_base_delay_ms = v.parse().ok();
+                            }
+                            "--search-circuit-breaker-threshold" => {
+                                search_circuit_breaker_threshold = v.parse().ok();
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
                 }
-                "--use-specs" => {
-                    use_specs = true;
-                    i += 1;
-                }
-                "--use-low-relevance" => {
-                    use_low_relevance = true;
-                    i += 1;
-                }
-                "--no-papers" => {
-                    no_papers = true;
-                    i += 1;
-                }
-                "--use-pdf" => {
-                    use_pdf = true;
-                    i += 1;
-                }
+                "--use-local" => use_local = true,
+                "--use-specs" => use_specs = true,
+                "--use-low-relevance" => use_low_relevance = true,
+                "--no-papers" => no_papers = true,
+                "--use-pdf" => use_pdf = true,
                 _ => {
                     if name.is_none() {
                         name = Some(arg.to_string());
                     } else {
                         topic_words.push(arg);
                     }
-                    i += 1;
                 }
             }
+            i += 1;
         }
         let Some(name) = name else {
             return Self::Unknown("create".to_string());
@@ -442,58 +352,59 @@ impl ResearchCliCommand {
         }
     }
 
-    fn parse_continue(rest: &[&str]) -> Self {
-        let name = rest
-            .first()
+    fn is_flag(arg: &str) -> bool {
+        arg.starts_with('-')
+    }
+
+    fn first_positional(rest: &[&str]) -> Option<String> {
+        rest.iter()
+            .find(|a| !Self::is_flag(a))
             .map(std::string::ToString::to_string)
-            .unwrap_or_default();
+    }
+
+    fn parse_continue(rest: &[&str]) -> Self {
+        let name = Self::first_positional(rest).unwrap_or_default();
         if name.is_empty() {
             return Self::Unknown("continue".to_string());
         }
-        let message = if rest.len() > 1 {
-            Some(rest[1..].join(" "))
-        } else {
-            None
-        };
+        let message = rest.iter().skip_while(|a| **a != name).nth(1).map(|_| {
+            rest.iter()
+                .skip_while(|a| **a != name)
+                .skip(1)
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" ")
+        });
+        let message = message.filter(|m| !m.is_empty());
         Self::Continue { name, message }
     }
     fn parse_open(rest: &[&str]) -> Self {
-        let name = rest
-            .iter()
-            .find(|a| !a.starts_with("--"))
-            .map(std::string::ToString::to_string)
-            .unwrap_or_default();
-        if name.is_empty() {
-            Self::Unknown("open".to_string())
-        } else {
-            Self::Open { name }
+        match Self::first_positional(rest) {
+            Some(name) => Self::Open { name },
+            None => Self::Unknown("open".to_string()),
         }
     }
 
     fn parse_show(rest: &[&str]) -> Self {
-        let name = rest
-            .iter()
-            .find(|a| !a.starts_with("--"))
-            .map(std::string::ToString::to_string)
-            .unwrap_or_default();
-        if name.is_empty() {
-            Self::Unknown("show".to_string())
-        } else {
-            Self::Show { name }
+        match Self::first_positional(rest) {
+            Some(name) => Self::Show { name },
+            None => Self::Unknown("show".to_string()),
         }
     }
 
     fn parse_delete(rest: &[&str]) -> Self {
-        let yes = rest.iter().any(|a| *a == "--yes" || *a == "-y");
-        let name = rest
-            .iter()
-            .find(|a| !a.starts_with("--") && !a.starts_with('-'))
-            .map(std::string::ToString::to_string)
-            .unwrap_or_default();
-        if name.is_empty() {
-            Self::Unknown("delete".to_string())
-        } else {
-            Self::Delete { name, yes }
+        let yes = rest.contains(&"--yes") || rest.contains(&"-y");
+        match Self::first_positional(rest) {
+            Some(name) => Self::Delete { name, yes },
+            None => Self::Unknown("delete".to_string()),
+        }
+    }
+
+    fn parse_cluster(rest: &[&str]) -> Self {
+        let force = rest.contains(&"--force");
+        match Self::first_positional(rest) {
+            Some(name) => Self::Cluster { name, force },
+            None => Self::Unknown("cluster".to_string()),
         }
     }
 
@@ -536,6 +447,7 @@ impl ResearchCliCommand {
                  show <name>                   Print metadata for a single item.\n\
                  delete <name> [--yes]         Remove a research item (prompts unless --yes).\n\
                  archive <name>                Mark a research item as archived.\n\
+                 cluster <name> [--force]      Extract top 10 concepts from research/<name>/sources/.\n\
                  help                          Show this message.\n\
                \n\
                Output: by default `ragent research` emits machine-readable JSON lines\n\
@@ -1493,6 +1405,36 @@ mod tests {
     }
 
     #[test]
+    fn parse_cluster() {
+        let cmd = ResearchCliCommand::parse("cluster foo");
+        assert!(
+            matches!(cmd, ResearchCliCommand::Cluster { ref name, force: false } if name == "foo")
+        );
+    }
+
+    #[test]
+    fn parse_cluster_with_force() {
+        let cmd = ResearchCliCommand::parse("cluster foo --force");
+        assert!(
+            matches!(cmd, ResearchCliCommand::Cluster { ref name, force: true } if name == "foo")
+        );
+    }
+
+    #[test]
+    fn parse_cluster_force_before_name() {
+        let cmd = ResearchCliCommand::parse("cluster --force foo");
+        assert!(
+            matches!(cmd, ResearchCliCommand::Cluster { ref name, force: true } if name == "foo")
+        );
+    }
+
+    #[test]
+    fn parse_cluster_without_name_becomes_unknown() {
+        let cmd = ResearchCliCommand::parse("cluster");
+        assert!(matches!(cmd, ResearchCliCommand::Unknown(sub) if sub == "cluster"));
+    }
+
+    #[test]
     fn parse_archive() {
         let cmd = ResearchCliCommand::parse("archive foo");
         assert!(matches!(cmd, ResearchCliCommand::Archive { ref name } if name == "foo"));
@@ -1654,7 +1596,7 @@ mod tests {
     fn help_message_contains_documented_subcommands() {
         let h = ResearchCliCommand::build_help_message();
         for sub in [
-            "create", "continue", "list", "open", "search", "show", "delete", "archive",
+            "create", "continue", "list", "open", "search", "show", "delete", "archive", "cluster",
         ] {
             assert!(h.contains(sub), "help missing `{sub}`");
         }

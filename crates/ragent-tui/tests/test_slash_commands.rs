@@ -2838,7 +2838,7 @@ async fn test_slash_opt_co_star_formats_prompt() {
     // With LLM integration the command is async: status shows "optimizing" immediately,
     // and no message is appended until the background task completes.
     assert!(
-        app.status.contains("⏳") && app.status.contains("co_star"),
+        app.status.contains("[wait]") && app.status.contains("co_star"),
         "status should show optimizing with method name: {}",
         app.status
     );
@@ -2853,7 +2853,7 @@ async fn test_slash_opt_crispe_formats_prompt() {
     app.execute_slash_command("/opt crispe Write a blog post intro");
 
     assert!(
-        app.status.contains("⏳") && app.status.contains("crispe"),
+        app.status.contains("[wait]") && app.status.contains("crispe"),
         "status should show optimizing with method name: {}",
         app.status
     );
@@ -2869,7 +2869,7 @@ async fn test_slash_opt_cot_formats_prompt() {
 
     // "cot" is an alias for ChainOfThought whose canonical name is "cot".
     assert!(
-        app.status.contains("⏳") && app.status.contains("cot"),
+        app.status.contains("[wait]") && app.status.contains("cot"),
         "status should show optimizing: {}",
         app.status
     );
@@ -2884,7 +2884,7 @@ async fn test_slash_opt_draw_formats_prompt() {
     app.execute_slash_command("/opt draw A futuristic cityscape at sunset");
 
     assert!(
-        app.status.contains("⏳") && app.status.contains("draw"),
+        app.status.contains("[wait]") && app.status.contains("draw"),
         "status should show optimizing: {}",
         app.status
     );
@@ -2899,7 +2899,7 @@ async fn test_slash_opt_rise_formats_prompt() {
     app.execute_slash_command("/opt rise Summarise this article");
 
     assert!(
-        app.status.contains("⏳") && app.status.contains("rise"),
+        app.status.contains("[wait]") && app.status.contains("rise"),
         "status should show optimizing: {}",
         app.status
     );
@@ -2914,7 +2914,7 @@ async fn test_slash_opt_meta_formats_prompt() {
     app.execute_slash_command("/opt meta Generate a test suite");
 
     assert!(
-        app.status.contains("⏳") && app.status.contains("meta"),
+        app.status.contains("[wait]") && app.status.contains("meta"),
         "status should show optimizing: {}",
         app.status
     );
@@ -2929,7 +2929,7 @@ async fn test_slash_opt_variational_formats_prompt() {
     app.execute_slash_command("/opt variational Write a product description");
 
     assert!(
-        app.status.contains("⏳") && app.status.contains("variational"),
+        app.status.contains("[wait]") && app.status.contains("variational"),
         "status should show optimizing: {}",
         app.status
     );
@@ -2945,7 +2945,7 @@ async fn test_slash_opt_qstar_alias_works() {
 
     // "qstar" alias resolves to canonical name "q_star".
     assert!(
-        app.status.contains("⏳") && app.status.contains("q_star"),
+        app.status.contains("[wait]") && app.status.contains("q_star"),
         "qstar alias should resolve to canonical q_star: {}",
         app.status
     );
@@ -2960,7 +2960,7 @@ async fn test_slash_opt_openai_formats_prompt() {
     app.execute_slash_command("/opt openai Translate text to French");
 
     assert!(
-        app.status.contains("⏳") && app.status.contains("openai"),
+        app.status.contains("[wait]") && app.status.contains("openai"),
         "status should show optimizing: {}",
         app.status
     );
@@ -2975,7 +2975,7 @@ async fn test_slash_opt_claude_formats_prompt() {
     app.execute_slash_command("/opt claude Summarise this meeting transcript");
 
     assert!(
-        app.status.contains("⏳") && app.status.contains("claude"),
+        app.status.contains("[wait]") && app.status.contains("claude"),
         "status should show optimizing: {}",
         app.status
     );
@@ -2991,7 +2991,7 @@ async fn test_slash_opt_microsoft_alias_azure() {
 
     // "azure" alias resolves to canonical name "microsoft".
     assert!(
-        app.status.contains("⏳") && app.status.contains("microsoft"),
+        app.status.contains("[wait]") && app.status.contains("microsoft"),
         "azure alias should resolve to canonical microsoft: {}",
         app.status
     );
@@ -3068,7 +3068,7 @@ async fn test_slash_opt_o1_alias_works() {
 
     // "o1" alias resolves to canonical name "o1_style".
     assert!(
-        app.status.contains("⏳") && app.status.contains("o1_style"),
+        app.status.contains("[wait]") && app.status.contains("o1_style"),
         "o1 alias should resolve to canonical o1_style: {}",
         app.status
     );

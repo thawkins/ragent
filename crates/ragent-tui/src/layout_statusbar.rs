@@ -15,6 +15,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::utils::shorten_middle;
 
 /// Configuration for status bar rendering.
 #[derive(Debug, Clone, Default)]
@@ -124,18 +125,6 @@ pub mod service_icons {
 
     /// YOLO — warning triangle (bold, changes command-validation behaviour).
     pub const YOLO: (&str, Color) = ("⚠️", Color::LightRed);
-}
-
-/// Spinner frames for animated indicators.
-pub mod spinner {
-    /// Spinner animation frames: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
-    pub const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-    /// Get spinner frame for elapsed time (in milliseconds).
-    pub fn frame(elapsed_ms: u64) -> &'static str {
-        let idx = ((elapsed_ms / 45) as usize) % FRAMES.len();
-        FRAMES[idx]
-    }
 }
 
 /// Label abbreviations for compact and minimal modes.
@@ -703,18 +692,7 @@ fn shorten_path(path: &str, max_len: usize) -> String {
     }
 
     // Fall back to truncation: show beginning and end
-    if max_len <= 3 {
-        return "…".to_string();
-    }
-
-    let keep_left = (max_len - 1) / 2;
-    let keep_right = max_len - 1 - keep_left;
-    let left: String = path.chars().take(keep_left).collect();
-    let right: String = path
-        .chars()
-        .skip(path_len.saturating_sub(keep_right))
-        .collect();
-    format!("{left}…{right}")
+    shorten_middle(path, max_len)
 }
 
 #[cfg(test)]

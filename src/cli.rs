@@ -190,6 +190,15 @@ pub enum ResearchCommands {
         #[arg(value_name = "MESSAGE", trailing_var_arg = true, num_args = 0..)]
         message: Vec<String>,
     },
+    /// Extract top 10 concepts from the web-source documents under a research
+    /// item and write them to `CONCEPTS.md`.
+    Cluster {
+        /// Research name
+        name: String,
+        /// Overwrite an existing `CONCEPTS.md` without prompting.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Dispatch `ragent research …` sub-commands to the `ragent-research`
@@ -293,6 +302,7 @@ pub async fn handle_research_command(
                 Some(message.join(" "))
             },
         },
+        ResearchCommands::Cluster { name, force } => ResearchCliCommand::Cluster { name, force },
     };
     match cli_cmd {
         ResearchCliCommand::Help => {
@@ -545,6 +555,120 @@ pub async fn handle_research_command(
                     std::process::exit(1);
                 }
             }
+        }
+        ResearchCliCommand::Cluster { name, force } => {
+            // Mirror the validation performed by the TUI slash-command so the
+            // CLI path fails fast with the same clear diagnostics (FR-009,
+            // FR-010, FR-011, FR-012).
+            use ragent_research::{ResearchIo, ResearchName};
+            let valid_name = match ResearchName::try_new(&name) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("ragent-research: invalid research name `{name}`: {e}");
+                    std::process::exit(2);
+                }
+            };
+            let item_dir = ResearchIo::item_dir(manager.root(), &valid_name);
+            let sources_dir = ResearchIo::sources_dir(manager.root(), &valid_name);
+            if !item_dir.exists() {
+                eprintln!("ragent-research: research folder `research/{name}` does not exist.");
+                std::process::exit(1);
+            }
+            if !sources_dir.exists() || !sources_dir.is_dir() {
+                eprintln!("ragent-research: `research/{name}/sources/` folder not found.");
+                std::process::exit(1);
+            }
+            let is_empty = match std::fs::read_dir(&sources_dir) {
+                Ok(entries) => entries.count() == 0,
+                Err(_) => true,
+            };
+            if is_empty {
+                eprintln!("ragent-research: `research/{name}/sources/` is empty.");
+                std::process::exit(1);
+            }
+            let concepts_path = ResearchIo::concepts_md_path(manager.root(), &valid_name);
+            if concepts_path.exists() && !force {
+                eprintln!(
+                    "ragent-research: `research/{name}/CONCEPTS.md` already exists. \
+                     Re-run with --force to overwrite it."
+                );
+                std::process::exit(1);
+            } // T-003: read the captured source documents and enforce the active
+            // model's context-window budget.
+            let registry = ragent_agent::provider::create_default_registry();
+            let context_window = ragent_research::resolve_context_window_tokens(
+                active_model.as_ref().map(|m| m.provider_id.as_str()),
+                active_model.as_ref().map(|m| m.model_id.as_str()),
+                Some(&registry),
+            )
+            .unwrap_or(ragent_research::DEFAULT_CONTEXT_WINDOW_TOKENS);
+            let payload = match ragent_research::build_cluster_payload(
+                manager.root(),
+                &valid_name,
+                Some(context_window),
+            )
+            .await
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("ragent-research: failed to read sources for `{name}`: {e}");
+                    std::process::exit(1);
+                }
+            };
+            println!("ragent-research: cluster request accepted for `{name}` (force={force}).");
+            println!(
+                "ragent-research: read {} source file(s) (payload: {} / {} bytes, \
+                   context window: {context_window} tokens, truncated: {}).",
+                payload.files.len(),
+                payload.total_bytes,
+                payload.max_bytes,
+                payload.truncated,
+            );
+
+            // T-005: dispatch the fixed concept-extraction prompt to the active
+            // LLM and stream/await the response.
+            let model_ref = match active_model {
+                Some(m) => m,
+                None => {
+                    eprintln!(
+                        "ragent-research: no active model selected. Use --model or configure a default."
+                    );
+                    std::process::exit(1);
+                }
+            };
+            let prompt = ragent_research::build_concept_extraction_prompt(&payload);
+            let response = match ragent_agent::send_one_shot(
+                Arc::new(registry),
+                None,
+                model_ref,
+                None,
+                prompt,
+                Some(4_096),
+            )
+            .await
+            {
+                Ok(text) => text,
+                Err(e) => {
+                    eprintln!("ragent-research: LLM call failed for `{name}`: {e}");
+                    std::process::exit(1);
+                }
+            };
+            println!("ragent-research: concept extraction completed for `{name}`.");
+            let concepts_path =
+                match ragent_research::write_concepts_md(manager.root(), &valid_name, &response)
+                    .await
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("ragent-research: failed to write CONCEPTS.md for `{name}`: {e}");
+                        std::process::exit(1);
+                    }
+                };
+            println!(
+                "ragent-research: wrote `{path}` ({size} bytes).",
+                path = concepts_path.display(),
+                size = response.len()
+            );
         }
         ResearchCliCommand::Unknown(sub) => {
             eprintln!("ragent-research: unknown subcommand '{sub}'. Try `ragent research help`.");

@@ -1,5 +1,52 @@
 # Changelog
 
+## Version: 1.0.71
+
+### Added
+
+- **Context side panel (`Alt+X`, spec `contextpanel`, T-001..T-015)** — new
+  toggleable right-hand panel showing a live, quantified breakdown of the
+  session's context-window occupancy: system prompt (with indented
+  skills/memory/agents.md sub-rows), tool catalog, tool metadata wire
+  overhead, conversation history (tokens + message count), and total against
+  the active model's context window, with percentage bars and free headroom.
+  Token estimates reuse the shared estimator paths (tool catalog via
+  `estimate_tool_definition_bytes`, tool metadata via the per-provider
+  `ToolFormat`-mapped `tool_cache` byte length, history via per-message
+  role+content+40 accounting), so the panel cannot drift from what is
+  actually serialized. FR-015 non-blocking: the disk/SQLite-backed
+  partitions (system-prompt assembly, skill registry, AGENTS.md discovery,
+  structured memory) run on `tokio::task::spawn_blocking` with in-flight
+  coalescing; results are deposited into a mutex and adopted each frame by
+  `poll_context_snapshot_refresh`. The scheduler no-ops when the panel is
+  closed. Panel refresh triggers: open, `MessageEnd` events, post-compaction
+  history rewrite, model/thinking switches.
+- **One-shot agent runner** — new `crates/ragent-agent/src/one_shot.rs`
+  providing a single-turn, no-persistence agent execution path.
+- **Research clustering** — new `crates/ragent-research/src/cluster.rs` with
+  clustering support for research corpus analysis and 14 new context-panel
+  test files plus a research-cluster test suite.
+
+### Fixed
+
+- **Clippy `struct_field_names` (`DiskContextPartitions`)** — renamed the
+  partition fields (dropping the uniform `*_tokens` postfix) and extracted a
+  shared `DiskContextPartitions::into_snapshot` combinator so the sync
+  fallback and the background refresh task build
+  `ContextPartitionSnapshot` through one code path and can never disagree.
+- **Unused import** in `test_context_panel_t013.rs`.
+- **`recover_poisoned` visibility** — narrowed from `pub` to `pub(crate)`
+  (unreachable-pub dead-code lint), now documented with rustdoc.
+
+### Hygiene
+
+- Full CI-equivalent hygiene pass: `cargo check`, `cargo check --tests`,
+  `cargo test` (7,774 tests, 0 failures), dead-code lint with
+  `-D unreachable_pub -D dead_code -D unused_imports`,
+  `scripts/check-dead-code-reasons.sh`, clippy `-D warnings`, `cargo fmt
+  --check`, `cargo audit` (no vulnerabilities; 1 allowed yanked-crate
+  warning), and `cargo deny check` all clean.
+
 ## Version: 1.0.70
 
 ### Changed

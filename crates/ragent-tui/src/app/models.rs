@@ -25,13 +25,9 @@ use crate::app::state::{
 
 // Helpers
 use crate::app::helpers::{sanitize_for_display, try_extract_research_code_block};
+use crate::utils::is_ollama_family;
 
 // Re-export status types from theme
-
-/// Returns true for providers that use Ollama's boolean `think` parameter.
-fn is_ollama_family(provider_id: &str) -> bool {
-    provider_id == "ollama" || provider_id == "ollama_cloud"
-}
 
 /// Returns the model portion of a `provider/model` string, preserving any
 /// vendor slug after the first `/`.
@@ -2300,6 +2296,7 @@ impl App {
             self.show_tasks_panel = false;
             self.show_memory = false;
             self.show_telemetry = false;
+            self.show_context_panel = false;
         }
         self.status = if enabled {
             "profile panel visible".to_string()

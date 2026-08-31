@@ -710,7 +710,7 @@ impl App {
                 self.append_assistant_text(
                     "From: /telemetry on
 
-✅ Telemetry enabled.",
+[ok] Telemetry enabled.",
                 );
                 self.status = "telemetry: enabled".to_string();
             }
@@ -719,7 +719,7 @@ impl App {
                 self.append_assistant_text(
                     "From: /telemetry off
 
-✅ Telemetry disabled.",
+[ok] Telemetry disabled.",
                 );
                 self.status = "telemetry: disabled".to_string();
             }
@@ -1079,7 +1079,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 Ok(log) => log,
                 Err(e) => {
                     return Err(format!(
-                        "From: /alog list\n\n⚠ Failed to open activity log at `{}`: {e}",
+                        "From: /alog list\n\n[warn] Failed to open activity log at `{}`: {e}",
                         alog_path.display(),
                     ));
                 }
@@ -1089,7 +1089,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 Ok(runs) => runs,
                 Err(e) => {
                     return Err(format!(
-                        "From: /alog list\n\n⚠ Failed to list activity-log runs: {e}",
+                        "From: /alog list\n\n[warn] Failed to list activity-log runs: {e}",
                     ));
                 }
             };
@@ -1179,7 +1179,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 Ok(log) => log,
                 Err(e) => {
                     return Err(format!(
-                        "From: /alog status\n\n⚠ Activity log is not openable at `{}`: {e}",
+                        "From: /alog status\n\n[warn] Activity log is not openable at `{}`: {e}",
                         alog_path.display(),
                     ));
                 }
@@ -1191,7 +1191,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 Ok(runs) => runs,
                 Err(e) => {
                     return Err(format!(
-                        "From: /alog status\n\n⚠ Failed to list activity-log runs: {e}",
+                        "From: /alog status\n\n[warn] Failed to list activity-log runs: {e}",
                     ));
                 }
             };
@@ -1297,13 +1297,13 @@ Usage: `/telemetry help|on|off|setup|counters`",
             "on" => match persist_edit_log(true) {
                 Ok(()) => {
                     self.append_assistant_text(
-                        "From: /editlog on\n\n✅ Edit-operation logging enabled.",
+                        "From: /editlog on\n\n[ok] Edit-operation logging enabled.",
                     );
                     self.status = "editlog: enabled".to_string();
                 }
                 Err(e) => {
                     self.append_assistant_text(&format!(
-                        "From: /editlog on\n\n⚠ Failed to persist edit-log state: {e}"
+                        "From: /editlog on\n\n[warn] Failed to persist edit-log state: {e}"
                     ));
                     self.status = format!("editlog: persist failed ({e})");
                 }
@@ -1311,13 +1311,13 @@ Usage: `/telemetry help|on|off|setup|counters`",
             "off" => match persist_edit_log(false) {
                 Ok(()) => {
                     self.append_assistant_text(
-                        "From: /editlog off\n\n✅ Edit-operation logging disabled.",
+                        "From: /editlog off\n\n[ok] Edit-operation logging disabled.",
                     );
                     self.status = "editlog: disabled".to_string();
                 }
                 Err(e) => {
                     self.append_assistant_text(&format!(
-                        "From: /editlog off\n\n⚠ Failed to persist edit-log state: {e}"
+                        "From: /editlog off\n\n[warn] Failed to persist edit-log state: {e}"
                     ));
                     self.status = format!("editlog: persist failed ({e})");
                 }
@@ -1344,7 +1344,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 let working_dir = std::env::current_dir().unwrap_or_default();
                 let cleared = clear_edit_log_contents(&working_dir);
                 self.append_assistant_text(&format!(
-                    "From: /editlog clear\n\n✅ Cleared {cleared} edit-log file{}.",
+                    "From: /editlog clear\n\n[ok] Cleared {cleared} edit-log file{}.",
                     if cleared == 1 { "" } else { "s" }
                 ));
                 self.status = "editlog: cleared".to_string();
@@ -1366,7 +1366,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
         let Some(stats) = edit_log_stats(&working_dir) else {
             self.append_assistant_text(&format!(
-                "From: /editlog show\n\n⚠ Log directory not found: {}.",
+                "From: /editlog show\n\n[warn] Log directory not found: {}.",
                 log_dir.display()
             ));
             self.status = "editlog: no logs".to_string();
@@ -1422,7 +1422,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
         let Some(analysis) = edit_log_analyse(&working_dir) else {
             self.append_assistant_text(&format!(
-                "From: /editlog analyse\n\n⚠ Log directory not found: {}.",
+                "From: /editlog analyse\n\n[warn] Log directory not found: {}.",
                 log_dir.display()
             ));
             self.status = "editlog: no logs".to_string();
@@ -1528,10 +1528,10 @@ Usage: `/telemetry help|on|off|setup|counters`",
         // Call the original implementation moved to an inner function.
         self.execute_slash_command_inner(raw);
 
-        // If the command spawned an async task (status begins with ⏳), defer
+        // If the command spawned an async task (status begins with [wait]), defer
         // the "Finished" log entry — poll_pending_opt will emit it once the
         // background work completes.
-        if self.status.starts_with('⏳') {
+        if self.status.starts_with("[wait]") {
             return;
         }
 
@@ -1709,7 +1709,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 if !self.custom_agent_diagnostics.is_empty() {
                     output.push_str("\n**Diagnostics**\n\n");
                     for diag in &self.custom_agent_diagnostics {
-                        output.push_str(&format!("- ⚠ {}\n", diag));
+                        output.push_str(&format!("- [warn] {}\n", diag));
                     }
                 }
 
@@ -1721,7 +1721,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 "refresh" => {
                     ragent_agent::agent::clear_prompt_context_cache();
                     self.append_assistant_text(
-                                                        "From: /context\n🔄 Context cache cleared — next message will recompute file tree, git status, and README."
+                                                        "From: /context\n[sync] Context cache cleared — next message will recompute file tree, git status, and README."
                                                     );
                     self.push_log_no_agent(LogLevel::Info, "context cache cleared".to_string());
                     self.status = "context refreshed".to_string();
@@ -1803,7 +1803,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                     // detection mirrors Config::load() precedence: defaults <
                     // global < project < env file < RAGENT_CONFIG_CONTENT. Fields
                     // with union/append/OR semantics are annotated "(union)".
-                    output.push_str("\n⚙️  **Resolved Values**\n\n");
+                    output.push_str("\n[spin]  **Resolved Values**\n\n");
 
                     match ragent_agent::Config::load() {
                         Ok(cfg) => {
@@ -1956,7 +1956,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                             }
                         }
                         Err(e) => {
-                            output.push_str(&format!("❌ Failed to load config: {e}\n"));
+                            output.push_str(&format!("[err] Failed to load config: {e}\n"));
                         }
                     }
 
@@ -2025,7 +2025,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 "save" => match ragent_config::Config::backup_global_config(None) {
                     Ok(path) => {
                         self.append_assistant_text(&format!(
-                            "From: /config save\n✅ **Saved backup to:**\n  `{}`",
+                            "From: /config save\n[ok] **Saved backup to:**\n  `{}`",
                             path.display()
                         ));
                         self.push_log_no_agent(
@@ -2036,7 +2036,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                     }
                     Err(e) => {
                         self.append_assistant_text(&format!(
-                            "From: /config save\n❌ **Failed to back up global config:**\n  \
+                            "From: /config save\n[err] **Failed to back up global config:**\n  \
                                  {e}\n\nNo changes were made."
                         ));
                         self.push_log_no_agent(LogLevel::Error, format!("config save: error: {e}"));
@@ -2053,7 +2053,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         Some(d) => d,
                         None => {
                             self.append_assistant_text(
-                                "From: /config list\n❌ **Cannot determine the global config \
+                                "From: /config list\n[err] **Cannot determine the global config \
                                  directory for this platform.**",
                             );
                             self.push_log_no_agent(
@@ -2158,7 +2158,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         Some(d) => d.join("ragent"),
                         None => {
                             self.append_assistant_text(
-                                "From: /init config\n❌ **Cannot determine the global config \
+                                "From: /init config\n[err] **Cannot determine the global config \
                                  directory for this platform.**\n\nPlease set the \
                                  `XDG_CONFIG_HOME` environment variable (Linux) or ensure \
                                  the platform config directory is available.",
@@ -2175,7 +2175,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
                     if config_path.exists() {
                         self.append_assistant_text(&format!(
-                            "From: /init config\n⚠️  **A global config already exists at:**\n\
+                            "From: /init config\n[warn]  **A global config already exists at:**\n\
                              \x20  `{}`\n\n\
                              No changes were made. Edit the file directly to modify your \
                              configuration.",
@@ -2198,7 +2198,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         Ok(j) => j,
                         Err(e) => {
                             self.append_assistant_text(&format!(
-                                "From: /init config\n❌ **Failed to serialise default config: \
+                                "From: /init config\n[err] **Failed to serialise default config: \
                                  {}**",
                                 e
                             ));
@@ -2213,7 +2213,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
                     if let Err(e) = std::fs::create_dir_all(&config_dir) {
                         self.append_assistant_text(&format!(
-                            "From: /init config\n❌ **Failed to create config directory `{}`: \
+                            "From: /init config\n[err] **Failed to create config directory `{}`: \
                              {}**",
                             config_dir.display(),
                             e
@@ -2228,7 +2228,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
                     if let Err(e) = std::fs::write(&config_path, &json) {
                         self.append_assistant_text(&format!(
-                            "From: /init config\n❌ **Failed to write config file `{}`: {}**",
+                            "From: /init config\n[err] **Failed to write config file `{}`: {}**",
                             config_path.display(),
                             e
                         ));
@@ -2241,7 +2241,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                     }
 
                     self.append_assistant_text(&format!(
-                        "From: /init config\n✅ **Default config created at:**\n\
+                        "From: /init config\n[ok] **Default config created at:**\n\
                          \x20  `{}`\n\n\
                          This file contains all default settings. Edit it to configure \
                          providers, agents, permissions, memory, and more.",
@@ -2341,7 +2341,8 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             }
             "cancel" => {
                 if args.is_empty() {
-                    self.status = "⚠ Please provide a task ID prefix: /cancel <id>".to_string();
+                    self.status =
+                        "[warn] Please provide a task ID prefix: /cancel <id>".to_string();
                     self.push_log_no_agent(LogLevel::Warn, "No task ID provided".to_string());
                     return;
                 }
@@ -2353,7 +2354,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     && let Some(flag) = &self.active_bench_cancel
                 {
                     flag.store(true, Ordering::Relaxed);
-                    self.status = "⏳ bench: cancellation requested".to_string();
+                    self.status = "[wait] bench: cancellation requested".to_string();
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!("Benchmark cancellation requested for {}", args),
@@ -2411,7 +2412,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 Ok(ragent_bench::BenchCommand::Cancel) => {
                     if let Some(flag) = &self.active_bench_cancel {
                         flag.store(true, Ordering::Relaxed);
-                        self.status = "⏳ bench: cancellation requested".to_string();
+                        self.status = "[wait] bench: cancellation requested".to_string();
                         self.append_assistant_text(
                             "From: /bench cancel\nCancellation requested for the active benchmark run.\n\nUse `/bench status` to watch it shut down.",
                         );
@@ -2430,7 +2431,8 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     let project_root = match std::env::current_dir() {
                         Ok(path) => path,
                         Err(e) => {
-                            self.status = format!("⚠ Could not resolve current directory: {e}");
+                            self.status =
+                                format!("[warn] Could not resolve current directory: {e}");
                             return;
                         }
                     };
@@ -2452,7 +2454,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             } else {
                                 "initialized benchmark target."
                             };
-                            let mut message = format!("From: /bench init\n✅ {heading}\n\n");
+                            let mut message = format!("From: /bench init\n[ok] {heading}\n\n");
                             for init in &outcomes {
                                 let init_action = if init.verified_only {
                                     "verified"
@@ -2481,9 +2483,9 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             self.status = format!("bench init: {status_target}");
                         }
                         Err(e) => {
-                            self.status = format!("⚠ bench init failed: {e}");
+                            self.status = format!("[warn] bench init failed: {e}");
                             self.force_new_message = true;
-                            self.append_assistant_text(&format!("From: /bench init\n❌ {e}"));
+                            self.append_assistant_text(&format!("From: /bench init\n[err] {e}"));
                         }
                     }
                 }
@@ -2491,8 +2493,8 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     self.start_bench_run(raw, target, options);
                 }
                 Err(e) => {
-                    self.status = format!("⚠ {e}");
-                    self.append_assistant_text(&format!("From: /bench\n❌ {e}"));
+                    self.status = format!("[warn] {e}");
+                    self.append_assistant_text(&format!("From: /bench\n[err] {e}"));
                 }
             },
             "compact" => {
@@ -2529,7 +2531,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 }
                 None => {
                     self.append_assistant_text(
-                        "From: /startup\n⚠ No startup timings recorded for this session.",
+                        "From: /startup\n[warn] No startup timings recorded for this session.",
                     );
                     self.status = "startup: unavailable".to_string();
                 }
@@ -2631,14 +2633,15 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     .map_or((args, ""), |(m, r)| (m, r.trim()));
 
                 if rest.is_empty() {
-                    self.status = "⚠ Please provide a prompt: /opt <method> <prompt>".to_string();
+                    self.status =
+                        "[warn] Please provide a prompt: /opt <method> <prompt>".to_string();
                     return;
                 }
 
                 let method = match method_str.parse::<OptMethod>() {
                     Ok(m) => m,
                     Err(_) => {
-                        self.status = format!("⚠ Unknown optimization method: {}", method_str);
+                        self.status = format!("[warn] Unknown optimization method: {}", method_str);
                         self.push_log_no_agent(
                             LogLevel::Warn,
                             format!("opt: unknown method '{}'", method_str),
@@ -2657,7 +2660,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     Some(pair) => pair,
                     None => {
                         self.status =
-                            "⚠ /opt requires a configured model (use /provider)".to_string();
+                            "[warn] /opt requires a configured model (use /provider)".to_string();
                         return;
                     }
                 };
@@ -2668,7 +2671,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 let user_prompt = rest.to_string();
                 let method_name = method.name().to_string();
 
-                self.status = format!("⏳ opt/{}: optimizing…", method_name);
+                self.status = format!("[wait] opt/{}: optimizing…", method_name);
 
                 tokio::spawn(async move {
                     let completer = RagentCompleter {
@@ -2986,7 +2989,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             },
             "llmstats" => {
                 let Some(model_ref) = self.active_model_ref_string() else {
-                    self.status = "⚠ No active model selected".to_string();
+                    self.status = "[warn] No active model selected".to_string();
                     self.push_log_no_agent(LogLevel::Warn, "llmstats: no active model".to_string());
                     return;
                 };
@@ -3112,12 +3115,12 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 }
                 "show" => {
                     if !self.ensure_session() {
-                        self.status = "⚠ Failed to create session".to_string();
+                        self.status = "[warn] Failed to create session".to_string();
                     } else if let Some(report) = self.active_model_metadata_report() {
                         self.append_assistant_text(&report);
                         self.status = "active model metadata".to_string();
                     } else {
-                        self.status = "⚠ No active model selected".to_string();
+                        self.status = "[warn] No active model selected".to_string();
                     }
                 }
                 _ => {
@@ -3126,7 +3129,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             },
             "thinking" => {
                 if self.selected_model.is_none() {
-                    self.status = "⚠ No model selected — use /model to choose".to_string();
+                    self.status = "[warn] No model selected — use /model to choose".to_string();
                     return;
                 }
 
@@ -3153,12 +3156,12 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
 
                 if supported.is_empty() && level != ThinkingLevel::Off {
                     self.status =
-                        "⚠ Active model does not support configurable thinking".to_string();
+                        "[warn] Active model does not support configurable thinking".to_string();
                     return;
                 }
                 if !supported.is_empty() && !supported.contains(&level) {
                     self.status = format!(
-                        "⚠ Thinking level '{}' is not supported by the active model",
+                        "[warn] Thinking level '{}' is not supported by the active model",
                         Self::thinking_level_display(level)
                     );
                     return;
@@ -3171,7 +3174,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 "show" => {
                     let mut providers = Self::get_configured_providers(&self.storage);
                     if providers.is_empty() {
-                        self.status = "⚠ No configured providers".to_string();
+                        self.status = "[warn] No configured providers".to_string();
                         self.push_log_no_agent(
                             LogLevel::Warn,
                             "provider show: no configured providers".to_string(),
@@ -3195,7 +3198,8 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 "router" => {
                     let providers = Self::get_configured_providers_for_router(&self.storage);
                     if providers.is_empty() {
-                        self.status = "⚠ No concrete providers — configure one first".to_string();
+                        self.status =
+                            "[warn] No concrete providers — configure one first".to_string();
                         self.push_log_no_agent(
                             LogLevel::Warn,
                             "provider router: no concrete providers configured".to_string(),
@@ -3485,7 +3489,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                             self.status = "tools".to_string();
                         } else {
                             self.append_assistant_text(
-                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
+                                                          "From: /tools\n[warn] Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
                                                       );
                             self.status = "tools error".to_string();
                         }
@@ -3496,7 +3500,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                             "off" | "disable" => false,
                             _ => {
                                 self.append_assistant_text(
-                                    "From: /tools\n⚠ Usage: `/tools <switch> on|off`.",
+                                    "From: /tools\n[warn] Usage: `/tools <switch> on|off`.",
                                 );
                                 self.status = "tools error".to_string();
                                 return;
@@ -3505,7 +3509,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
 
                         if !self.set_tool_visibility_state(switch, enabled) {
                             self.append_assistant_text(
-                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
+                                                          "From: /tools\n[warn] Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
                                                       );
                             self.status = "tools error".to_string();
                             return;
@@ -3520,7 +3524,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                                 // picks up the newly-saved file.
                                 self.session_processor.invalidate_config_cache();
                                 self.append_assistant_text(&format!(
-                                    "From: /tools\n✅ `{switch}` visibility is now **{}**.",
+                                    "From: /tools\n[ok] `{switch}` visibility is now **{}**.",
                                     if enabled { "on" } else { "off" }
                                 ));
                                 self.status = format!(
@@ -3530,7 +3534,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                             }
                             Err(e) => {
                                 self.append_assistant_text(&format!(
-                                    "From: /tools\n⚠ `{switch}` visibility changed to **{}**, but saving config failed: {e}",
+                                    "From: /tools\n[warn] `{switch}` visibility changed to **{}**, but saving config failed: {e}",
                                     if enabled { "on" } else { "off" }
                                 ));
                                 self.status = format!(
@@ -3546,7 +3550,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     }
                     _ => {
                         self.append_assistant_text(
-                            "From: /tools\n⚠ Usage: `/tools` | `/tools <switch>` | `/tools <switch> on|off`.",
+                            "From: /tools\n[warn] Usage: `/tools` | `/tools <switch>` | `/tools <switch> on|off`.",
                         );
                         self.status = "tools error".to_string();
                     }
@@ -3852,7 +3856,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 self.ensure_team_manager_for_team(&name, Some(team_dir));
                                 self.push_log_no_agent(
                                     LogLevel::Info,
-                                    format!("🤝 Team '{}' created", name),
+                                    format!("[team] Team '{}' created", name),
                                 );
                                 self.append_assistant_text(&format!(
                                     "From: /team create\nTeam '{}' created.\n\nUse the `team_spawn` tool to add teammates.",
@@ -4044,7 +4048,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             }
                             self.push_log_no_agent(
                                 LogLevel::Info,
-                                format!("🤝 Team '{}' closed for this session", team_name),
+                                format!("[team] Team '{}' closed for this session", team_name),
                             );
                             self.append_assistant_text(&format!(
                                 "From: /team close\nTeam '{}' closed for this session.",
@@ -4100,7 +4104,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     }
                                     self.push_log_no_agent(
                                         LogLevel::Info,
-                                        format!("🗑️  Team '{}' deleted", rest),
+                                        format!("[clr]  Team '{}' deleted", rest),
                                     );
                                     self.append_assistant_text(&format!(
                                         "From: /team delete\nTeam '{}' deleted.",
@@ -4591,7 +4595,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             if removed {
                                 self.push_log_no_agent(
                                     LogLevel::Info,
-                                    format!("🗑️  Team '{team_name}' cleaned up"),
+                                    format!("[clr]  Team '{team_name}' cleaned up"),
                                 );
                                 self.append_assistant_text(&format!(
                                     "From: /team cleanup\nTeam '{team_name}' cleaned up."
@@ -4743,7 +4747,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     if removed {
                                         self.push_log_no_agent(
                                             LogLevel::Info,
-                                            format!("🗑️  Team '{team_name}' force cleaned up"),
+                                            format!("[clr]  Team '{team_name}' force cleaned up"),
                                         );
                                         let mut msg = format!(
                                             "From: /team forcecleanup\nTeam '{team_name}' force cleaned up. The following teammate(s) were deactivated and removed:\n\n"
@@ -4995,7 +4999,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                     Ok(()) => {
                                         self.append_assistant_text(&format!(
                                             "From: /bash add allow\n\n\
-                                            ✅ Added `{entry}` to the **allowlist** \
+                                            [ok] Added `{entry}` to the **allowlist** \
                                             ({scope_label}: `{config_file}`).\n\n\
                                             Commands starting with `{entry}` will no longer \
                                             be blocked by the banned-command check."
@@ -5003,7 +5007,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "From: /bash add allow\n\n❌ Error: {e}"
+                                            "From: /bash add allow\n\n[err] Error: {e}"
                                         ));
                                     }
                                 }
@@ -5013,14 +5017,14 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                     Ok(()) => {
                                         self.append_assistant_text(&format!(
                                             "From: /bash add deny\n\n\
-                                            ✅ Added `{entry}` to the **denylist** \
+                                            [ok] Added `{entry}` to the **denylist** \
                                             ({scope_label}: `{config_file}`).\n\n\
                                             Any command containing `{entry}` will be rejected."
                                         ));
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "From: /bash add deny\n\n❌ Error: {e}"
+                                            "From: /bash add deny\n\n[err] Error: {e}"
                                         ));
                                     }
                                 }
@@ -5030,19 +5034,19 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                     Ok(true) => {
                                         self.append_assistant_text(&format!(
                                             "From: /bash remove allow\n\n\
-                                            ✅ Removed `{entry}` from the **allowlist** \
+                                            [ok] Removed `{entry}` from the **allowlist** \
                                             ({scope_label}: `{config_file}`)."
                                         ));
                                     }
                                     Ok(false) => {
                                         self.append_assistant_text(&format!(
                                             "From: /bash remove allow\n\n\
-                                            ⚠️ `{entry}` was not in the {scope_label} allowlist."
+                                            [warn] `{entry}` was not in the {scope_label} allowlist."
                                         ));
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "From: /bash remove allow\n\n❌ Error: {e}"
+                                            "From: /bash remove allow\n\n[err] Error: {e}"
                                         ));
                                     }
                                 }
@@ -5052,19 +5056,19 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                     Ok(true) => {
                                         self.append_assistant_text(&format!(
                                             "From: /bash remove deny\n\n\
-                                            ✅ Removed `{entry}` from the **denylist** \
+                                            [ok] Removed `{entry}` from the **denylist** \
                                             ({scope_label}: `{config_file}`)."
                                         ));
                                     }
                                     Ok(false) => {
                                         self.append_assistant_text(&format!(
                                             "From: /bash remove deny\n\n\
-                                            ⚠️ `{entry}` was not in the {scope_label} denylist."
+                                            [warn] `{entry}` was not in the {scope_label} denylist."
                                         ));
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "From: /bash remove deny\n\n❌ Error: {e}"
+                                            "From: /bash remove deny\n\n[err] Error: {e}"
                                         ));
                                     }
                                 }
@@ -5243,14 +5247,14 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                     Ok(()) => {
                                         self.append_assistant_text(&format!(
                                                           "From: /dirs add allow\n\n\
-                                                          ✅ Added `{pattern}` to the **allowlist** \
+                                                          [ok] Added `{pattern}` to the **allowlist** \
                                                           ({scope_label}: `{config_file}`).\n\n\
                                                           File operations matching `{pattern}` will be automatically allowed."
                                                       ));
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "From: /dirs add allow\n\n❌ Error: {e}"
+                                            "From: /dirs add allow\n\n[err] Error: {e}"
                                         ));
                                     }
                                 }
@@ -5260,14 +5264,14 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                     Ok(()) => {
                                         self.append_assistant_text(&format!(
                                                           "From: /dirs add deny\n\n\
-                                                          ✅ Added `{pattern}` to the **denylist** \
+                                                          [ok] Added `{pattern}` to the **denylist** \
                                                           ({scope_label}: `{config_file}`).\n\n\
                                                           File operations matching `{pattern}` will be automatically denied."
                                                       ));
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "From: /dirs add deny\n\n❌ Error: {e}"
+                                            "From: /dirs add deny\n\n[err] Error: {e}"
                                         ));
                                     }
                                 }
@@ -5277,19 +5281,19 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                     Ok(true) => {
                                         self.append_assistant_text(&format!(
                                                           "From: /dirs remove allow\n\n\
-                                                          ✅ Removed `{pattern}` from the **allowlist** \
+                                                          [ok] Removed `{pattern}` from the **allowlist** \
                                                           ({scope_label}: `{config_file}`)."
                                                       ));
                                     }
                                     Ok(false) => {
                                         self.append_assistant_text(&format!(
                                                           "From: /dirs remove allow\n\n\
-                                                          ⚠️ `{pattern}` was not in the {scope_label} allowlist."
+                                                          [warn] `{pattern}` was not in the {scope_label} allowlist."
                                                       ));
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "From: /dirs remove allow\n\n❌ Error: {e}"
+                                            "From: /dirs remove allow\n\n[err] Error: {e}"
                                         ));
                                     }
                                 }
@@ -5299,19 +5303,19 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                     Ok(true) => {
                                         self.append_assistant_text(&format!(
                                                           "From: /dirs remove deny\n\n\
-                                                          ✅ Removed `{pattern}` from the **denylist** \
+                                                          [ok] Removed `{pattern}` from the **denylist** \
                                                           ({scope_label}: `{config_file}`)."
                                                       ));
                                     }
                                     Ok(false) => {
                                         self.append_assistant_text(&format!(
                                                           "From: /dirs remove deny\n\n\
-                                                          ⚠️ `{pattern}` was not in the {scope_label} denylist."
+                                                          [warn] `{pattern}` was not in the {scope_label} denylist."
                                                       ));
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "From: /dirs remove deny\n\n❌ Error: {e}"
+                                            "From: /dirs remove deny\n\n[err] Error: {e}"
                                         ));
                                     }
                                 }
@@ -5337,7 +5341,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 match ragent_config::yolo::toggle_persist() {
                     Ok(new_state) => {
                         let label = if new_state {
-                            "ENABLED ⚠️"
+                            "ENABLED [warn]"
                         } else {
                             "disabled"
                         };
@@ -5349,7 +5353,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                  - Dynamic context allowlist — **off**\n\
                                  - MCP config validation — **off**\n\
                                  - Obfuscation detection — **off**\n\n\
-                                 ⚠️  The agent can now execute **any** command without restriction.\n\
+                                 [warn]  The agent can now execute **any** command without restriction.\n\
                                  Use `/yolo` again to re-enable safety checks.\n",
                             );
                         } else {
@@ -5368,9 +5372,9 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                         );
                     }
                     Err(e) => {
-                        self.status = format!("⚠ failed to persist YOLO mode: {e}");
+                        self.status = format!("[warn] failed to persist YOLO mode: {e}");
                         self.append_assistant_text(&format!(
-                            "From: /yolo\n⚠ Failed to persist YOLO mode: {e}\n"
+                            "From: /yolo\n[warn] Failed to persist YOLO mode: {e}\n"
                         ));
                         self.push_log_no_agent(
                             LogLevel::Error,
@@ -5385,11 +5389,11 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
             // This allows users to correct mistakes or backtrack from unhelpful responses.
             "undo" => {
                 if self.session_id.is_none() {
-                    self.status = "⚠ No active session to undo".to_string();
+                    self.status = "[warn] No active session to undo".to_string();
                     return;
                 }
                 if self.messages.is_empty() {
-                    self.status = "⚠ No messages to undo".to_string();
+                    self.status = "[warn] No messages to undo".to_string();
                     return;
                 }
 
@@ -5424,7 +5428,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                         );
                     }
                     None => {
-                        self.status = "⚠ No user message found to undo".to_string();
+                        self.status = "[warn] No user message found to undo".to_string();
                         self.push_log_no_agent(
                             LogLevel::Warn,
                             "Undo: no user message found in conversation".to_string(),
@@ -5437,13 +5441,13 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
             // The name is persisted in session metadata and appears in session lists.
             "name" => {
                 if self.session_id.is_none() {
-                    self.status = "⚠ No active session to name".to_string();
+                    self.status = "[warn] No active session to name".to_string();
                     return;
                 }
 
                 let name = args.trim();
                 let Some(session_id) = self.session_id.clone() else {
-                    self.status = "⚠ No active session to name".to_string();
+                    self.status = "[warn] No active session to name".to_string();
                     return;
                 };
 
@@ -5459,7 +5463,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                             );
                         }
                         Err(e) => {
-                            self.status = format!("⚠ Failed to clear session name: {}", e);
+                            self.status = format!("[warn] Failed to clear session name: {}", e);
                             self.push_log_no_agent(
                                 LogLevel::Error,
                                 format!("Failed to clear session name: {}", e),
@@ -5478,7 +5482,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                             );
                         }
                         Err(e) => {
-                            self.status = format!("⚠ Failed to set session name: {}", e);
+                            self.status = format!("[warn] Failed to set session name: {}", e);
                             self.push_log_no_agent(
                                 LogLevel::Error,
                                 format!("Failed to set session name: {}", e),
@@ -5528,7 +5532,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                         if self.swarm_state.is_some() {
                             self.status =
-                                "⚠ A swarm is already active — use /swarm cancel first".to_string();
+                                "[warn] A swarm is already active — use /swarm cancel first"
+                                    .to_string();
                             return;
                         }
 
@@ -5552,12 +5557,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             Some(pair) => pair,
                             None => {
                                 self.status =
-                                    "⚠ /swarm requires a configured model — use /model".to_string();
+                                    "[warn] /swarm requires a configured model — use /model"
+                                        .to_string();
                                 return;
                             }
                         };
 
-                        self.status = "⏳ swarm: decomposing goal…".to_string();
+                        self.status = "[wait] swarm: decomposing goal…".to_string();
                         self.push_log_no_agent(
                             LogLevel::Info,
                             format!(
@@ -6311,7 +6317,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     .session_processor
                                     .spec_manager
                                     .set(Arc::new(SpecManager::new(&specs_root)));
-                                self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                      "From: /spec activate\n\n✅ **{}** is now the active spec.\n\n\
+                                self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                      "From: /spec activate\n\n[ok] **{}** is now the active spec.\n\n\
                                                                                                                                                                                                                                                                                                                                                                                        Status: {}\n\
                                                                                                                                                                                                                                                                                                                                                                                        Title: {}\n\
                                                                                                                                                                                                                                                                                                                                                                                        Requirements: {}\n\
@@ -6338,7 +6344,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             let _ = rt.block_on(async {
                                 self.session_processor.active_spec.write().await.take()
                             });
-                            self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                  "From: /spec deactivate\n\n✅ Spec **{}** deactivated. Agent prompts will no longer include spec context.",
+                            self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                  "From: /spec deactivate\n\n[ok] Spec **{}** deactivated. Agent prompts will no longer include spec context.",
                                                                                                                                                                                                                                                                                                                                                                                   prev
                                                                                                                                                                                                                                                                                                                                                                               ));
                             self.status = "spec: deactivated".to_string();
@@ -6381,7 +6387,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     event_bus.publish(ragent_agent::event::Event::TextDelta {
                                         session_id,
                                         text: format!(
-                                            "From: /spec delete\n\n✅ Deleted specs/{}.",
+                                            "From: /spec delete\n\n[ok] Deleted specs/{}.",
                                             spec_id
                                         ),
                                     });
@@ -6460,7 +6466,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     let total =
                                         req_to_total.get(req.id.as_str()).map_or(0, |v| v.len());
                                     let covered = completed > 0 && completed == total;
-                                    let symbol = if covered { "✅" } else { "⚪" };
+                                    let symbol = if covered { "[ok]" } else { "⚪" };
                                     let detail = if total > 0 {
                                         format!(
                                             " ({} of {} linked tasks completed)",
@@ -6483,10 +6489,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                         format!("[{}]", task.linked_requirements.join(", "))
                                     };
                                     let symbol = match task.status {
-                                        ragent_specs::spec::TaskStatus::Completed => "✅",
-                                        ragent_specs::spec::TaskStatus::InProgress => "🔄",
-                                        ragent_specs::spec::TaskStatus::Blocked => "🚫",
-                                        ragent_specs::spec::TaskStatus::Pending => "⏳",
+                                        ragent_specs::spec::TaskStatus::Completed => "[ok]",
+                                        ragent_specs::spec::TaskStatus::InProgress => "[sync]",
+                                        ragent_specs::spec::TaskStatus::Blocked => "[stop]",
+                                        ragent_specs::spec::TaskStatus::Pending => "[wait]",
                                     };
                                     lines.push(format!(
                                         "{} `{}` — {} ({}) {}",
@@ -6582,7 +6588,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     | ragent_specs::spec::SpecStatus::Verified
                             ) {
                                 self.append_assistant_text(&format!(
-                                                          "From: /spec impl\n\n⚠️ Spec **{}** is already marked as **{}**.\n\n\
+                                                          "From: /spec impl\n\n[warn] Spec **{}** is already marked as **{}**.\n\n\
                                                            To re-implement, first transition the spec back to `approved` or `in_progress`:\n\
                                                            `/spec status {} approved`",
                                                           spec_id, status.as_str(), spec_id
@@ -7501,7 +7507,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     self.role_mode = None;
                     self.status = "mode: normal".to_string();
                     self.append_assistant_text(
-                        "From: /mode\n✅ Role mode cleared — back to normal mode.",
+                        "From: /mode\n[ok] Role mode cleared — back to normal mode.",
                     );
                     self.push_log_no_agent(LogLevel::Info, "role mode cleared".to_string());
                 } else if let Some(mode) = RoleMode::from_str(&sub) {
@@ -7556,7 +7562,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                             Err(e) => {
                                 output.push_str(&format!(
-                                    "⚠️ Could not read structured memories: {e}\n\n"
+                                    "[warn] Could not read structured memories: {e}\n\n"
                                 ));
                             }
                         }
@@ -7595,7 +7601,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 }
                             }
                             Err(e) => {
-                                output.push_str(&format!("⚠️ Could not list memories: {e}\n"));
+                                output.push_str(&format!("[warn] Could not list memories: {e}\n"));
                             }
                         }
 
@@ -7622,7 +7628,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         Ok(h) => h,
                         Err(_) => {
                             self.append_assistant_text(
-                                "From: /github login\n❌ Async runtime not available.",
+                                "From: /github login\n[err] Async runtime not available.",
                             );
                             return;
                         }
@@ -7638,7 +7644,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         Ok(f) => f,
                         Err(e) => {
                             self.append_assistant_text(&format!(
-                                "From: /github login\n❌ Device flow failed: {e}"
+                                "From: /github login\n[err] Device flow failed: {e}"
                             ));
                             return;
                         }
@@ -7719,20 +7725,22 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     });
                 }
                 "logout" => match ragent_agent::github::auth::delete_token() {
-                    Ok(_) => self.append_assistant_text("From: /github\n✅ GitHub token removed."),
+                    Ok(_) => {
+                        self.append_assistant_text("From: /github\n[ok] GitHub token removed.")
+                    }
                     Err(e) => self.append_assistant_text(&format!(
-                        "From: /github\n❌ Failed to remove token: {e}"
+                        "From: /github\n[err] Failed to remove token: {e}"
                     )),
                 },
                 "status" | "" => match ragent_agent::github::auth::load_token() {
                     Some(_) => {
                         self.append_assistant_text(
-                                                  "From: /github\n✅ GitHub token configured. (GITHUB_TOKEN env or ~/.ragent/github_token)",
+                                                  "From: /github\n[ok] GitHub token configured. (GITHUB_TOKEN env or ~/.ragent/github_token)",
                                               );
                     }
                     None => {
                         self.append_assistant_text(
-                                                  "From: /github\n❌ No GitHub token configured.\n\nRun `/github login` to authenticate via OAuth device flow.",
+                                                  "From: /github\n[err] No GitHub token configured.\n\nRun `/github login` to authenticate via OAuth device flow.",
                                               );
                     }
                 },
@@ -7766,14 +7774,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     let storage = &self.storage;
                     let mut msgs = Vec::new();
                     if let Err(e) = ragent_agent::gitlab::auth::delete_token(storage.as_ref()) {
-                        msgs.push(format!("❌ Failed to remove token: {e}"));
+                        msgs.push(format!("[err] Failed to remove token: {e}"));
                     }
                     if let Err(e) = ragent_agent::gitlab::auth::delete_config(storage.as_ref()) {
-                        msgs.push(format!("❌ Failed to remove config: {e}"));
+                        msgs.push(format!("[err] Failed to remove config: {e}"));
                     }
                     if msgs.is_empty() {
                         self.append_assistant_text(
-                            "From: /gitlab\n✅ GitLab configuration and token removed.",
+                            "From: /gitlab\n[ok] GitLab configuration and token removed.",
                         );
                     } else {
                         self.append_assistant_text(&format!("From: /gitlab\n{}", msgs.join("\n")));
@@ -7786,26 +7794,26 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     match (config, token) {
                         (Some(cfg), Some(_)) => {
                             self.append_assistant_text(&format!(
-                                "From: /gitlab\n✅ GitLab configured\n\n\
+                                "From: /gitlab\n[ok] GitLab configured\n\n\
                                  **Instance**: {}  \n\
                                  **Username**: {}  \n\
-                                 **Token**: ✅ configured",
+                                 **Token**: [ok] configured",
                                 cfg.instance_url, cfg.username
                             ));
                         }
                         (Some(cfg), None) => {
                             self.append_assistant_text(&format!(
-                                "From: /gitlab\n⚠️  GitLab partially configured\n\n\
+                                "From: /gitlab\n[warn]  GitLab partially configured\n\n\
                                  **Instance**: {}  \n\
                                  **Username**: {}  \n\
-                                 **Token**: ❌ not set\n\n\
+                                 **Token**: [err] not set\n\n\
                                  Run `/gitlab setup` to complete configuration.",
                                 cfg.instance_url, cfg.username
                             ));
                         }
                         _ => {
                             self.append_assistant_text(
-                                "From: /gitlab\n❌ GitLab not configured.\n\n\
+                                "From: /gitlab\n[err] GitLab not configured.\n\n\
                                  Run `/gitlab setup` to configure instance URL, username, and token.",
                             );
                         }
@@ -7835,7 +7843,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                     ragent_agent::event::Event::AgentError {
                                                         session_id: sid,
                                                         error: format!(
-                                                            "✅ Updated to v{}! Please restart ragent to use the new version.",
+                                                            "[ok] Updated to v{}! Please restart ragent to use the new version.",
                                                             info.version
                                                         ),
                                                     },
@@ -7845,7 +7853,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                             event_bus.publish(
                                                 ragent_agent::event::Event::AgentError {
                                                     session_id: sid,
-                                                    error: format!("❌ Install failed: {e}"),
+                                                    error: format!("[err] Install failed: {e}"),
                                                 },
                                             );
                                         }
@@ -7855,7 +7863,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     event_bus.publish(ragent_agent::event::Event::AgentError {
                                             session_id: sid,
                                             error: format!(
-                                                "⚠️  Update v{} found but no binary available for this platform.\n\nVisit https://github.com/thawkins/ragent/releases to download manually.",
+                                                "[warn]  Update v{} found but no binary available for this platform.\n\nVisit https://github.com/thawkins/ragent/releases to download manually.",
                                                 info.version
                                             ),
                                         });
@@ -7865,7 +7873,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 event_bus.publish(ragent_agent::event::Event::AgentError {
                                     session_id: sid,
                                     error: format!(
-                                        "✅ Already up to date (v{}).",
+                                        "[ok] Already up to date (v{}).",
                                         ragent_agent::updater::CURRENT_VERSION
                                     ),
                                 });
@@ -7897,7 +7905,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 event_bus.publish(ragent_agent::event::Event::AgentError {
                                     session_id: sid,
                                     error: format!(
-                                        "✅ ragent is up to date (v{}).",
+                                        "[ok] ragent is up to date (v{}).",
                                         ragent_agent::updater::CURRENT_VERSION
                                     ),
                                 });
@@ -7928,7 +7936,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         .output()
                         .map(|o| o.status.success())
                         .unwrap_or(false);
-                    lines.push(format!("{} git", if git_ok { "✅" } else { "❌" }));
+                    lines.push(format!("{} git", if git_ok { "[ok]" } else { "[err]" }));
 
                     // Check ripgrep
                     let rg_ok = std::process::Command::new("rg")
@@ -7939,9 +7947,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     lines.push(format!(
                         "{} ripgrep (rg)",
                         if rg_ok {
-                            "✅"
+                            "[ok]"
                         } else {
-                            "❌ ripgrep not found — install at https://github.com/BurntSushi/ripgrep"
+                            "[err] ripgrep not found — install at https://github.com/BurntSushi/ripgrep"
                         }
                     ));
 
@@ -7950,9 +7958,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     lines.push(format!(
                         "{} GitHub token",
                         if gh_ok {
-                            "✅"
+                            "[ok]"
                         } else {
-                            "⚠️  no GitHub token — run /github login"
+                            "[warn]  no GitHub token — run /github login"
                         }
                     ));
 
@@ -7970,7 +7978,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     };
                     lines.push(format!(
                         "{} ragent config ({})",
-                        if config_ok { "✅" } else { "❌" },
+                        if config_ok { "[ok]" } else { "[err]" },
                         config_detail
                     ));
 
@@ -7982,9 +7990,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     lines.push(format!(
                         "{} storage database\n  {} ({})",
                         if storage_detail.starts_with("SQLite error") {
-                            "❌"
+                            "[err]"
                         } else {
-                            "✅"
+                            "[ok]"
                         },
                         storage_detail,
                         db_path.display()
@@ -7998,21 +8006,21 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             ProviderSource::AutoDiscovered => "auto-discovered",
                         };
                         let health_icon = match provider_health.load(Ordering::Relaxed) {
-                            1 => " ✅ reachable",
-                            2 => " ❌ unreachable",
-                            _ => " ⏳ health check pending",
+                            1 => " [ok] reachable",
+                            2 => " [err] unreachable",
+                            _ => " [wait] health check pending",
                         };
                         let model_line = selected_model
                             .as_deref()
                             .map(|m| format!("model={m}"))
                             .unwrap_or_else(|| "no explicit model".to_string());
                         lines.push(format!(
-                            "✅ provider: {} ({} via {prov_source})\n  {model_line}{health_icon}",
+                            "[ok] provider: {} ({} via {prov_source})\n  {model_line}{health_icon}",
                             prov.name, prov.id
                         ));
                     } else {
                         lines.push(format!(
-                            "⚠️  no provider configured — run /provider or set an API-key env var"
+                            "[warn]  no provider configured — run /provider or set an API-key env var"
                         ));
                     }
 
@@ -8025,7 +8033,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     };
                     lines.push(format!(
                         "{} memory directory (~/.ragent/memory/)",
-                        if memory_dir_ok { "✅" } else { "❌" }
+                        if memory_dir_ok { "[ok]" } else { "[err]" }
                     ));
 
                     // Check memory system config
@@ -8035,7 +8043,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     lines.push(format!(
                         "{} memory system (blocks={}, structured={}, semantic={})",
                         if memory_config.enabled {
-                            "✅"
+                            "[ok]"
                         } else {
                             "ℹ️  disabled"
                         },
@@ -8061,7 +8069,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         std::fs::create_dir_all(working_dir.join(".ragent")).is_ok();
                     lines.push(format!(
                         "{} project .ragent/ directory",
-                        if project_ragent_ok { "✅" } else { "❌" }
+                        if project_ragent_ok { "[ok]" } else { "[err]" }
                     ));
 
                     // Check AGENTS.md / instruction files
@@ -8079,7 +8087,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             } else {
                                 ""
                             };
-                            lines.push(format!("✅ project guidelines loaded: {rel}{source}"));
+                            lines.push(format!("[ok] project guidelines loaded: {rel}{source}"));
                         }
                         None => {
                             lines.push(format!(
@@ -8095,7 +8103,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     lines.push(format!(
                         "{} MCP servers configured",
                         if mcp_configured {
-                            "✅"
+                            "[ok]"
                         } else {
                             "ℹ️  no MCP servers configured (optional)"
                         }
@@ -8104,7 +8112,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     // Check tool registry
                     let registry = ragent_agent::tool::create_default_registry();
                     let tool_count = registry.list().len();
-                    lines.push(format!("✅ tool registry loaded ({} tools)", tool_count));
+                    lines.push(format!("[ok] tool registry loaded ({} tools)", tool_count));
 
                     // Check code index
                     if code_index_enabled {
@@ -8112,7 +8120,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             match idx.try_status() {
                                 Some(stats) => {
                                     lines.push(format!(
-                                        "✅ code index: {} files, {} symbols, {:.1} KB",
+                                        "[ok] code index: {} files, {} symbols, {:.1} KB",
                                         stats.files_indexed,
                                         stats.total_symbols,
                                         stats.index_size_bytes as f64 / 1024.0
@@ -8120,12 +8128,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 }
                                 None => {
                                     lines.push(format!(
-                                        "⏳ code index: enabled, status busy/locked"
+                                        "[wait] code index: enabled, status busy/locked"
                                     ));
                                 }
                             }
                         } else {
-                            lines.push(format!("⚠️  code index: enabled but no index instance"));
+                            lines
+                                .push(format!("[warn]  code index: enabled but no index instance"));
                         }
                     } else {
                         lines.push(format!(
@@ -8136,10 +8145,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     // Check for update
                     lines.push("\n**Checking for updates…**".to_string());
                     let update_msg = match ragent_agent::updater::check_for_update().await {
-                        Some(info) => format!("⚠️  Update available: v{}", info.version),
+                        Some(info) => format!("[warn]  Update available: v{}", info.version),
                         None => {
                             format!(
-                                "✅ Up to date (v{})",
+                                "[ok] Up to date (v{})",
                                 ragent_agent::updater::CURRENT_VERSION
                             )
                         }
@@ -8163,7 +8172,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     if self.webapi_server.is_some() {
                         let addr = self.webapi_addr.clone();
                         self.append_assistant_text(&format!(
-                                "⚠️ Web API is already running at http://{addr}\n\nRun `/webapi disable` to stop it."
+                                "[warn] Web API is already running at http://{addr}\n\nRun `/webapi disable` to stop it."
                             ));
                     } else {
                         use rand::Rng;
@@ -8203,7 +8212,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.webapi_server = Some(handle);
 
                         self.append_assistant_text(&format!(
-                                                      "✅ **Web API enabled** at `http://{addr}`\n\n\
+                                                      "[ok] **Web API enabled** at `http://{addr}`\n\n\
                                                           **Bearer Token:**\n```\n{token}\n```\n\
                                                           Include this token in all API requests (except `/health`):\n\
                                                           ```\nAuthorization: Bearer {token}\n```\n\n\
@@ -8344,9 +8353,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let mut total = 0usize;
                         for r in &results {
                             let returned = if r.returned_results {
-                                "✅ yes"
+                                "[ok] yes"
                             } else {
-                                "❌ no"
+                                "[err] no"
                             };
                             output.push_str(&format!(
                                 "| {:<10} | {} | {:>5} |\n",
@@ -8379,9 +8388,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                           |--------|:-------:|:------:|:------:|\n",
                         );
                         for e in engines {
-                            let enabled = if e.enabled { "✅ yes" } else { "❌ no" };
-                            let in_use = if e.in_use { "✅ yes" } else { "❌ no" };
-                            let failed = if e.failed { "⚠️ yes" } else { "✅ no" };
+                            let enabled = if e.enabled { "[ok] yes" } else { "[err] no" };
+                            let in_use = if e.in_use { "[ok] yes" } else { "[err] no" };
+                            let failed = if e.failed { "[warn] yes" } else { "[ok] no" };
                             output.push_str(&format!(
                                 "| {:<10} | {} | {} | {} |\n",
                                 e.name, enabled, in_use, failed
@@ -8401,7 +8410,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     _ => {
                         self.append_assistant_text(
                                           "From: /websearch\n\
-                                          ⚠ Unknown subcommand. Use `/websearch help` for available commands.",
+                                          [warn] Unknown subcommand. Use `/websearch help` for available commands.",
                                       );
                         self.status = "websearch: unknown".to_string();
                     }
@@ -8414,14 +8423,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     "on" => {
                         self.mouse_enabled = true;
                         self.append_assistant_text(
-                                                      "From: /mouse on\n✅ **Mouse support enabled.**\n\nYou can now use the mouse for scrolling, clicking, and selection."
+                                                      "From: /mouse on\n[ok] **Mouse support enabled.**\n\nYou can now use the mouse for scrolling, clicking, and selection."
                                                   );
                         self.status = "mouse: enabled".to_string();
                     }
                     "off" => {
                         self.mouse_enabled = false;
                         self.append_assistant_text(
-                                        "From: /mouse off\n✅ **Mouse support disabled.**\n\nKeyboard-only mode active. All mouse interactions are now disabled.\n\nKeyboard shortcuts:\n• Alt+Up/Down: Focus teammates\n• Tab: Navigate UI elements\n• Enter: Select/activate\n• Esc: Close dialogs\n• Ctrl+C: Copy selection\n• Ctrl+V: Paste"
+                                        "From: /mouse off\n[ok] **Mouse support disabled.**\n\nKeyboard-only mode active. All mouse interactions are now disabled.\n\nKeyboard shortcuts:\n• Alt+Up/Down: Focus teammates\n• Tab: Navigate UI elements\n• Enter: Select/activate\n• Esc: Close dialogs\n• Ctrl+C: Copy selection\n• Ctrl+V: Paste"
                                     );
                         self.status = "mouse: disabled (keyboard-only mode)".to_string();
                     }
@@ -8466,19 +8475,19 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                         Ok(session) => {
                                             self.code_index_watch_session = Some(session);
                                             self.append_assistant_text(
-                                                "✅ **Code index** is already active. File watcher started.",
+                                                "[ok] **Code index** is already active. File watcher started.",
                                             );
                                         }
                                         Err(e) => {
                                             self.append_assistant_text(&format!(
-                                                "✅ **Code index** is already active.\n\n⚠️ Could not start file watcher: {e}",
+                                                "[ok] **Code index** is already active.\n\n[warn] Could not start file watcher: {e}",
                                             ));
                                         }
                                     }
                                 }
                             } else {
                                 self.append_assistant_text(
-                                    "✅ **Code index** is already active and enabled.",
+                                    "[ok] **Code index** is already active and enabled.",
                                 );
                             }
                         } else {
@@ -8508,12 +8517,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     }
                                     self.set_code_index(Some(arc_idx));
                                     self.append_assistant_text(
-                                        "✅ **Code index:** enabled and activated. Background reindex in progress.",
+                                        "[ok] **Code index:** enabled and activated. Background reindex in progress.",
                                     );
                                 }
                                 Err(e) => {
                                     self.append_assistant_text(&format!(
-                                        "❌ **Code index:** could not open index: {e}",
+                                        "[err] **Code index:** could not open index: {e}",
                                     ));
                                 }
                             }
@@ -8527,7 +8536,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                             Err(e) => {
                                 self.append_assistant_text(&format!(
-                                    "⚠️ **Code index:** enabled in memory, but saving config failed: {e}",
+                                    "[warn] **Code index:** enabled in memory, but saving config failed: {e}",
                                 ));
                                 self.status = "codeindex: on (unsaved)".to_string();
                                 self.push_log_no_agent(
@@ -8576,7 +8585,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                             Err(e) => {
                                 self.append_assistant_text(&format!(
-                                    "⚠️ **Code index:** disabled in memory, but saving config failed: {e}",
+                                    "[warn] **Code index:** disabled in memory, but saving config failed: {e}",
                                 ));
                                 self.status = "codeindex: off (unsaved)".to_string();
                                 self.push_log_no_agent(
@@ -8744,12 +8753,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     "reindex" => {
                         if let Some(idx) = self.code_index.clone() {
                             self.append_assistant_text(
-                                "🔄 **Re-indexing codebase...** scanning files and extracting symbols.",
+                                "[sync] **Re-indexing codebase...** scanning files and extracting symbols.",
                             );
                             match idx.full_reindex() {
                                 Ok(result) => {
                                     self.append_assistant_text(&format!(
-                                        "✅ Re-index complete: +{} ~{} -{} files, {} symbols in {}ms.",
+                                        "[ok] Re-index complete: +{} ~{} -{} files, {} symbols in {}ms.",
                                         result.files_added,
                                         result.files_updated,
                                         result.files_removed,
@@ -8762,13 +8771,15 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     );
                                 }
                                 Err(e) => {
-                                    self.append_assistant_text(&format!("❌ Re-index failed: {e}"));
+                                    self.append_assistant_text(&format!(
+                                        "[err] Re-index failed: {e}"
+                                    ));
                                     self.status = "codeindex: reindex failed".to_string();
                                 }
                             }
                         } else {
                             self.append_assistant_text(
-                                "⚠️ Code index is not active. Enable it first with `/codeindex on`.",
+                                "[warn] Code index is not active. Enable it first with `/codeindex on`.",
                             );
                             self.status = "codeindex: not active".to_string();
                         }
@@ -8904,7 +8915,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             // FR-015: empty-graph guard.
                             if idx.graph_edge_count().unwrap_or(0) == 0 {
                                 self.append_assistant_text(
-                                    "⚠️ No graph data available. \
+                                    "[warn] No graph data available. \
                                      Run `/codeindex graph build` first to build \
                                      the semantic edge graph.",
                                 );
@@ -8934,7 +8945,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "❌ God nodes query failed: {e}"
+                                            "[err] God nodes query failed: {e}"
                                         ));
                                         self.status = "codeindex: godnodes failed".to_string();
                                     }
@@ -8942,7 +8953,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         } else {
                             self.append_assistant_text(
-                                "⚠️ Code index is not active. Enable it first with `/codeindex on`.",
+                                "[warn] Code index is not active. Enable it first with `/codeindex on`.",
                             );
                             self.status = "codeindex: not active".to_string();
                         }
@@ -8958,7 +8969,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             // FR-015: empty-graph guard.
                             if idx.graph_edge_count().unwrap_or(0) == 0 {
                                 self.append_assistant_text(
-                                    "⚠️ No graph data available. \
+                                    "[warn] No graph data available. \
                                      Run `/codeindex graph build` first to build \
                                      the semantic edge graph.",
                                 );
@@ -9018,13 +9029,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     }
                                     Ok(None) => {
                                         self.append_assistant_text(&format!(
-                                            "⚠️ Symbol `{symbol}` not found in the index."
+                                            "[warn] Symbol `{symbol}` not found in the index."
                                         ));
                                         self.status = "codeindex: explain (not found)".to_string();
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "❌ Explain query failed: {e}"
+                                            "[err] Explain query failed: {e}"
                                         ));
                                         self.status = "codeindex: explain failed".to_string();
                                     }
@@ -9032,7 +9043,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         } else {
                             self.append_assistant_text(
-                                "⚠️ Code index is not active. Enable it first with `/codeindex on`.",
+                                "[warn] Code index is not active. Enable it first with `/codeindex on`.",
                             );
                             self.status = "codeindex: not active".to_string();
                         }
@@ -9052,7 +9063,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             // FR-015: empty-graph guard.
                             if idx.graph_edge_count().unwrap_or(0) == 0 {
                                 self.append_assistant_text(
-                                    "⚠️ No graph data available. \
+                                    "[warn] No graph data available. \
                                      Run `/codeindex graph build` first to build \
                                      the semantic edge graph.",
                                 );
@@ -9084,13 +9095,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     }
                                     Ok(None) => {
                                         self.append_assistant_text(&format!(
-                                            "⚠️ No path found between `{from}` and `{to}`."
+                                            "[warn] No path found between `{from}` and `{to}`."
                                         ));
                                         self.status = "codeindex: path (no path)".to_string();
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "❌ Path query failed: {e}"
+                                            "[err] Path query failed: {e}"
                                         ));
                                         self.status = "codeindex: path failed".to_string();
                                     }
@@ -9098,7 +9109,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         } else {
                             self.append_assistant_text(
-                                "⚠️ Code index is not active. Enable it first with `/codeindex on`.",
+                                "[warn] Code index is not active. Enable it first with `/codeindex on`.",
                             );
                             self.status = "codeindex: not active".to_string();
                         }
@@ -9108,7 +9119,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             // FR-015: empty-graph guard.
                             if idx.graph_edge_count().unwrap_or(0) == 0 {
                                 self.append_assistant_text(
-                                    "⚠️ No graph data available. \
+                                    "[warn] No graph data available. \
                                      Run `/codeindex graph build` first to build \
                                      the semantic edge graph.",
                                 );
@@ -9118,7 +9129,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     Ok(communities) => {
                                         if communities.is_empty() {
                                             self.append_assistant_text(
-                                                "⚠️ No communities detected. \
+                                                "[warn] No communities detected. \
                                                  Run `/codeindex graph build` first.",
                                             );
                                             self.status =
@@ -9143,7 +9154,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "❌ Community detection failed: {e}"
+                                            "[err] Community detection failed: {e}"
                                         ));
                                         self.status = "codeindex: communities failed".to_string();
                                     }
@@ -9151,7 +9162,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         } else {
                             self.append_assistant_text(
-                                "⚠️ Code index is not active. Enable it first with `/codeindex on`.",
+                                "[warn] Code index is not active. Enable it first with `/codeindex on`.",
                             );
                             self.status = "codeindex: not active".to_string();
                         }
@@ -9344,7 +9355,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                                                                                                                                       }
                                                                                                                                                                       Err(e) => {
                                                                                                                                                                           self.append_assistant_text(&format!(
-                                                                                                                                                                              "From: /router\n⚠ Failed to parse provider.router: {}",
+                                                                                                                                                                              "From: /router\n[warn] Failed to parse provider.router: {}",
                                                                                                                                                                               e
                                                                                                                                                                           ));
                                                                                                                                                                           self.status = "router: reload parse error".to_string();
@@ -9353,7 +9364,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                     }
                                                     None => {
                                                         self.append_assistant_text(
-                                                                                                                                                                      "From: /router\n⚠ No `provider.router` section found in ragent.json. \
+                                                                                                                                                                      "From: /router\n[warn] No `provider.router` section found in ragent.json. \
                                                                                                                                                                        Add a `router` object under `provider` to configure the router.",
                                                                                                                                                                   );
                                                         self.status =
@@ -9363,7 +9374,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                             }
                                             Err(e) => {
                                                 self.append_assistant_text(&format!(
-                                                                                                                                                              "From: /router\n⚠ Failed to parse ragent.json: {}",
+                                                                                                                                                              "From: /router\n[warn] Failed to parse ragent.json: {}",
                                                                                                                                                               e
                                                                                                                                                           ));
                                                 self.status =
@@ -9373,7 +9384,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     }
                                     Err(e) => {
                                         self.append_assistant_text(&format!(
-                                            "From: /router\n⚠ Failed to read {}: {}",
+                                            "From: /router\n[warn] Failed to read {}: {}",
                                             path.display(),
                                             e
                                         ));
@@ -9383,7 +9394,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                             None => {
                                 self.append_assistant_text(
-                                                                                                                                              "From: /router\n⚠ No ragent.json found. Create `.ragent/ragent.json` with a `provider.router` section.",
+                                                                                                                                              "From: /router\n[warn] No ragent.json found. Create `.ragent/ragent.json` with a `provider.router` section.",
                                                                                                                                           );
                                 self.status = "router: reload failed".to_string();
                             }
@@ -9490,7 +9501,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             self.status = "router: weights".to_string();
                         } else {
                             self.append_assistant_text(
-                                                                          "From: /router\n⚠ Per-dimension weight override is not yet supported. \
+                                                                          "From: /router\n[warn] Per-dimension weight override is not yet supported. \
                                                                            Configure `provider.router.weights` in `ragent.json`.",
                                                                       );
                             self.status = "router: weights not supported".to_string();
@@ -9508,7 +9519,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             self.status = "router: boundaries".to_string();
                         } else {
                             self.append_assistant_text(
-                                                                          "From: /router\n⚠ Boundary override is not yet supported. \
+                                                                          "From: /router\n[warn] Boundary override is not yet supported. \
                                                                            Configure `provider.router.boundaries` in `ragent.json`.",
                                                                       );
                             self.status = "router: boundaries not supported".to_string();
@@ -9544,7 +9555,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                     _ => {
                         self.append_assistant_text(
-                                                                                                  "From: /router\n⚠ Unknown subcommand. Use `/router help` for available commands.",
+                                                                                                  "From: /router\n[warn] Unknown subcommand. Use `/router help` for available commands.",
                                                                                               );
                         self.status = "router: unknown".to_string();
                     }
@@ -9574,11 +9585,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     // Check provider/model are configured
                     if self.configured_provider.is_none() {
                         self.status =
-                            "⚠ No provider configured — use /provider to set up".to_string();
+                            "[warn] No provider configured — use /provider to set up".to_string();
                         return;
                     }
                     if self.selected_model.is_none() {
-                        self.status = "⚠ No model selected — use /model to choose".to_string();
+                        self.status = "[warn] No model selected — use /model to choose".to_string();
                         return;
                     }
                     // Ensure a session exists
@@ -9721,10 +9732,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     output.push_str(&format!("## Tasks ({} items)\n\n", tasks.len()));
                     for task in &tasks {
                         let status_icon = match task.status.as_str() {
-                            "pending" => "⏳",
-                            "in_progress" => "🔄",
-                            "done" | "completed" => "✅",
-                            "blocked" => "🚫",
+                            "pending" => "[wait]",
+                            "in_progress" => "[sync]",
+                            "done" | "completed" => "[ok]",
+                            "blocked" => "[stop]",
                             _ => "❓",
                         };
                         output.push_str(&format!(
@@ -9810,7 +9821,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "help" => self.handle_cron_help(),
             _ => {
                 self.append_assistant_text(&format!(
-                    "From: /cron\n⚠ Unknown sub-command '{sub}'. Use `/cron help` for usage."
+                    "From: /cron\n[warn] Unknown sub-command '{sub}'. Use `/cron help` for usage."
                 ));
                 self.status = "cron: unknown".to_string();
             }
@@ -9884,7 +9895,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             Some(p) => p,
             None => {
                 self.append_assistant_text(
-                    "From: /cron add\n⚠ The prompt must be enclosed in double quotes.\n\n\
+                    "From: /cron add\n[warn] The prompt must be enclosed in double quotes.\n\n\
                      Example: `/cron add nightly general every 30m \"Run tests\"`",
                 );
                 self.status = "cron: add missing prompt".to_string();
@@ -9898,7 +9909,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             Some((n, r)) => (n.trim(), r.trim()),
             None => {
                 self.append_assistant_text(
-                    "From: /cron add\n⚠ Missing agent and schedule expression.\n\n\
+                    "From: /cron add\n[warn] Missing agent and schedule expression.\n\n\
                      Format: `<cronname> <agent> <schedule> \"<prompt>\"`\n\
                      Example: `/cron add nightly general every 30m \"Run tests\"`",
                 );
@@ -9911,7 +9922,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             Some((a, s)) => (a.trim(), s.trim()),
             None => {
                 self.append_assistant_text(
-                    "From: /cron add\n⚠ Missing schedule expression.\n\n\
+                    "From: /cron add\n[warn] Missing schedule expression.\n\n\
                      Format: `<cronname> <agent> <schedule> \"<prompt>\"`\n\
                      Example: `/cron add nightly general every 30m \"Run tests\"`",
                 );
@@ -9922,7 +9933,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
         if cronname.is_empty() || agent_type.is_empty() || schedule_expr.is_empty() {
             self.append_assistant_text(
-                "From: /cron add\n⚠ cronname, agent, and schedule expression are all required.",
+                "From: /cron add\n[warn] cronname, agent, and schedule expression are all required.",
             );
             self.status = "cron: add missing fields".to_string();
             return;
@@ -9934,7 +9945,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             Ok(p) => p,
             Err(e) => {
                 self.append_assistant_text(&format!(
-                    "From: /cron add\n❌ Failed to parse schedule `{schedule_expr}`:\n  {e}"
+                    "From: /cron add\n[err] Failed to parse schedule `{schedule_expr}`:\n  {e}"
                 ));
                 self.status = "cron: add parse error".to_string();
                 return;
@@ -9953,14 +9964,16 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
         // Insert into storage.
         if let Err(e) = self.storage.insert_cron_event(&event) {
-            self.append_assistant_text(&format!("From: /cron add\n❌ Failed to store event: {e}"));
+            self.append_assistant_text(&format!(
+                "From: /cron add\n[err] Failed to store event: {e}"
+            ));
             self.status = "cron: add store error".to_string();
             return;
         }
 
         let desc = event.schedule.human_readable();
         self.append_assistant_text(&format!(
-            "From: /cron add\n✅ Scheduled event created.\n\n\
+            "From: /cron add\n[ok] Scheduled event created.\n\n\
              | Field | Value |\n|---|---|\n\
              | ID | `{}` |\n\
              | Agent | `{}` |\n\
@@ -9996,7 +10009,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         match self.storage.delete_cron_event(event_id) {
             Ok(true) => {
                 self.append_assistant_text(&format!(
-                    "From: /cron remove\n✅ Event `{}` removed.",
+                    "From: /cron remove\n[ok] Event `{}` removed.",
                     event_id
                 ));
                 self.push_log_no_agent(
@@ -10007,14 +10020,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
             Ok(false) => {
                 self.append_assistant_text(&format!(
-                    "From: /cron remove\n⚠ Event `{}` not found.",
+                    "From: /cron remove\n[warn] Event `{}` not found.",
                     event_id
                 ));
                 self.status = "cron: not found".to_string();
             }
             Err(e) => {
                 self.append_assistant_text(&format!(
-                    "From: /cron remove\n❌ Failed to remove event: {e}"
+                    "From: /cron remove\n[err] Failed to remove event: {e}"
                 ));
                 self.status = "cron: remove error".to_string();
             }
@@ -10039,7 +10052,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
         match self.storage.set_cron_event_enabled(event_id, enabled) {
             Ok(true) => {
-                let mark = if enabled { "✅" } else { "⏸️" };
+                let mark = if enabled { "[ok]" } else { "[pause]️" };
                 self.append_assistant_text(&format!(
                     "From: /cron {action}\n{mark} Event `{}` {}.",
                     event_id,
@@ -10053,14 +10066,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
             Ok(false) => {
                 self.append_assistant_text(&format!(
-                    "From: /cron {action}\n⚠ Event `{}` not found.",
+                    "From: /cron {action}\n[warn] Event `{}` not found.",
                     event_id
                 ));
                 self.status = "cron: not found".to_string();
             }
             Err(e) => {
                 self.append_assistant_text(&format!(
-                    "From: /cron {action}\n❌ Failed to update event: {e}"
+                    "From: /cron {action}\n[err] Failed to update event: {e}"
                 ));
                 self.status = format!("cron: {action} error");
             }
@@ -10109,7 +10122,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
             Err(e) => {
                 self.append_assistant_text(&format!(
-                    "From: /cron list\n❌ Failed to list events: {e}"
+                    "From: /cron list\n[err] Failed to list events: {e}"
                 ));
                 self.status = "cron: list error".to_string();
             }
@@ -10181,14 +10194,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
             Ok(None) => {
                 self.append_assistant_text(&format!(
-                    "From: /cron detail\n\n⚠ Event `{}` not found.",
+                    "From: /cron detail\n\n[warn] Event `{}` not found.",
                     event_id
                 ));
                 self.status = "cron: detail not found".to_string();
             }
             Err(e) => {
                 self.append_assistant_text(&format!(
-                    "From: /cron detail\n❌ Failed to fetch event: {e}"
+                    "From: /cron detail\n[err] Failed to fetch event: {e}"
                 ));
                 self.status = "cron: detail error".to_string();
             }
@@ -10232,8 +10245,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 entry.prompt.clone()
             };
             let outcome_icon = match entry.outcome.as_str() {
-                "success" => "✅",
-                "error" => "❌",
+                "success" => "[ok]",
+                "error" => "[err]",
                 "skipped" => "⏭️",
                 _ => "•",
             };
@@ -10281,7 +10294,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "help" => self.handle_triggers_help(),
             _ => {
                 self.append_assistant_text(&format!(
-                    "From: /triggers\n⚠ Unknown sub-command '{sub}'. Use `/triggers help` for usage."
+                    "From: /triggers\n[warn] Unknown sub-command '{sub}'. Use `/triggers help` for usage."
                 ));
                 self.status = "triggers: unknown".to_string();
             }
@@ -10364,7 +10377,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             runtime.disable_rule(rule_id)
         };
         if found {
-            let mark = if enabled { "✅" } else { "⏸️" };
+            let mark = if enabled { "[ok]" } else { "[pause]️" };
             let action = if enabled { "enabled" } else { "disabled" };
             self.append_assistant_text(&format!(
                 "From: /triggers\n{mark} Rule `{}` {action}.",
@@ -10377,7 +10390,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             self.status = format!("triggers: {action}");
         } else {
             self.append_assistant_text(&format!(
-                "From: /triggers\n⚠ Rule `{}` not found.",
+                "From: /triggers\n[warn] Rule `{}` not found.",
                 rule_id
             ));
             self.status = "triggers: not found".to_string();
@@ -10400,7 +10413,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         let runtime = self.trigger_runtime.as_ref().unwrap();
         if runtime.remove_rule(rule_id) {
             self.append_assistant_text(&format!(
-                "From: /triggers remove\n🗑️ Rule `{}` removed.",
+                "From: /triggers remove\n[clr] Rule `{}` removed.",
                 rule_id
             ));
             self.push_log_no_agent(
@@ -10410,7 +10423,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             self.status = "triggers: removed".to_string();
         } else {
             self.append_assistant_text(&format!(
-                "From: /triggers remove\n⚠ Rule `{}` not found.",
+                "From: /triggers remove\n[warn] Rule `{}` not found.",
                 rule_id
             ));
             self.status = "triggers: not found".to_string();
@@ -10507,7 +10520,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         let log_dir = cwd.join("log");
         if let Err(e) = fs::create_dir_all(&log_dir) {
             self.append_assistant_text(&format!(
-                "From: /bug-report\n⚠ Failed to create log directory: {e}"
+                "From: /bug-report\n[warn] Failed to create log directory: {e}"
             ));
             self.status = "bug-report: mkdir error".to_string();
             return;
@@ -10624,7 +10637,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 let role = match msg.role {
                     ragent_types::Role::User => "👤 User",
                     ragent_types::Role::Assistant => "🤖 Assistant",
-                    ragent_types::Role::Compaction => "⚙️ Compaction",
+                    ragent_types::Role::Compaction => "[spin] Compaction",
                 };
                 let content = redact_secrets(&msg.text_content());
                 // Truncate long messages for the report
@@ -10664,7 +10677,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             Ok(mut file) => {
                 if let Err(e) = file.write_all(report.as_bytes()) {
                     self.append_assistant_text(&format!(
-                        "From: /bug-report\n⚠ Failed to write report: {e}"
+                        "From: /bug-report\n[warn] Failed to write report: {e}"
                     ));
                     self.status = "bug-report: write error".to_string();
                     return;
@@ -10672,7 +10685,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
             Err(e) => {
                 self.append_assistant_text(&format!(
-                    "From: /bug-report\n⚠ Failed to create report file: {e}"
+                    "From: /bug-report\n[warn] Failed to create report file: {e}"
                 ));
                 self.status = "bug-report: create error".to_string();
                 return;
@@ -10684,7 +10697,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             .unwrap_or(&output_path)
             .display();
         self.append_assistant_text(&format!(
-            "From: /bug-report\n\n✅ Bug report generated: `{}`\n\n\
+            "From: /bug-report\n\n[ok] Bug report generated: `{}`\n\n\
              The report contains:\n\
              - Session metadata\n\
              - Agent and model configuration\n\
@@ -10692,7 +10705,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
              - Token usage summary\n\
              - Last 50 log entries (redacted)\n\
              - Session transcript (redacted, truncated)\n\n\
-             ⚠️  **Sensitivity warning**: This report may contain sensitive information\n\
+             [warn]  **Sensitivity warning**: This report may contain sensitive information\n\
              despite redaction. Review before sharing.",
             rel_path
         ));
@@ -10720,7 +10733,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "help" => self.handle_inbox_help(),
             _ => {
                 self.append_assistant_text(&format!(
-                    "From: /inbox\n⚠ Unknown sub-command '{sub}'. Use `/inbox help` for usage."
+                    "From: /inbox\n[warn] Unknown sub-command '{sub}'. Use `/inbox help` for usage."
                 ));
                 self.status = "inbox: unknown".to_string();
             }
@@ -10734,7 +10747,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             Ok(entries) => entries,
             Err(e) => {
                 self.append_assistant_text(&format!(
-                    "From: /inbox list\n\n⚠ Failed to read inbox: {e}"
+                    "From: /inbox list\n\n[warn] Failed to read inbox: {e}"
                 ));
                 self.status = "inbox: read error".to_string();
                 return;
@@ -10794,9 +10807,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         match ragent_agent::loop_state::update_inbox_entry_status(&data_dir, entry_id, new_status) {
             Ok(true) => {
                 let mark = if new_status == "claimed" {
-                    "✅"
+                    "[ok]"
                 } else {
-                    "🗑️"
+                    "[clr]"
                 };
                 self.append_assistant_text(&format!(
                     "From: /inbox\n{mark} Entry `{}` marked as {new_status}.",
@@ -10810,13 +10823,15 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
             Ok(false) => {
                 self.append_assistant_text(&format!(
-                    "From: /inbox\n⚠ Entry `{}` not found in inbox.",
+                    "From: /inbox\n[warn] Entry `{}` not found in inbox.",
                     entry_id
                 ));
                 self.status = "inbox: not found".to_string();
             }
             Err(e) => {
-                self.append_assistant_text(&format!("From: /inbox\n⚠ Failed to update inbox: {e}"));
+                self.append_assistant_text(&format!(
+                    "From: /inbox\n[warn] Failed to update inbox: {e}"
+                ));
                 self.status = "inbox: write error".to_string();
             }
         }
@@ -10828,14 +10843,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         match ragent_agent::loop_state::clear_inbox(&data_dir) {
             Ok(count) => {
                 self.append_assistant_text(&format!(
-                    "From: /inbox clear\n🗑️ Cleared {count} finding(s) from the inbox."
+                    "From: /inbox clear\n[clr] Cleared {count} finding(s) from the inbox."
                 ));
                 self.push_log_no_agent(LogLevel::Info, format!("inbox: cleared {count} entries"));
                 self.status = "inbox: cleared".to_string();
             }
             Err(e) => {
                 self.append_assistant_text(&format!(
-                    "From: /inbox clear\n⚠ Failed to clear inbox: {e}"
+                    "From: /inbox clear\n[warn] Failed to clear inbox: {e}"
                 ));
                 self.status = "inbox: clear error".to_string();
             }

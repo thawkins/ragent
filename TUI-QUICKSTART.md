@@ -642,6 +642,37 @@ Remember that we prefer tracing over println in this project
 
 The scrollbar gutter runs along the right edge of the panel.
 
+## Context panel — `Alt+X`
+
+Press **`Alt+X`** to toggle the **Context panel** on the right side of the
+screen. It shows a live, quantified breakdown of what currently occupies the
+active session's context window:
+
+- **System prompt** — the assembled prompt sent to the model (agent prompt,
+  project context, memory injection, skills catalog), with indented
+  sub-rows for the `skills`, `memory` and `agents.md` contributions.
+- **Tool catalog** — the serialised size of the tool definitions (names,
+  descriptions, parameter schemas) visible to the model.
+- **Tool metadata** — the per-tool JSON wire-envelope overhead added on top
+  of the raw catalog.
+- **History** — the conversation history token estimate and message count.
+- **Total** — the sum of the top-level partitions, plus the remaining
+  free headroom.
+
+Each row shows the estimate in tokens (byte-count proxy) and a percentage bar
+of the active model's advertised context window. When the provider does not
+report a window size, rows show `unknown` alongside the absolute counts.
+Values refresh automatically after messages, tool calls, model switches and
+compaction.
+
+### Interacting with the Context panel
+
+- **`Scroll`** with the mouse wheel.
+- **`Drag`** the scrollbar thumb.
+- Press **`Alt+X`** again to hide the panel.
+
+The Context panel is display-only: its contents are never sent to the model.
+
 ---
 
 ## Side panel quick reference
@@ -653,6 +684,7 @@ The scrollbar gutter runs along the right edge of the panel.
 | `Alt+T` | TASKS    | Session tasks and status                         |
 | `Alt+M` | Memory    | Project/user memory and structured-memory summary |
 | `Alt+O` | Telemetry | OpenTelemetry metrics and counters                |
+| `Alt+X` | Context   | Token breakdown of the context window             |
 
 Log and Profile can be shown together (Log above, Profile below). The other
 panels are mutually exclusive: opening one closes the others.
@@ -676,6 +708,7 @@ shortcut again to close the panel.
 | `Alt+T`                       | Toggle TASKS panel                           |
 | `Alt+M`                       | Toggle Memory panel                         |
 | `Alt+O`                       | Toggle Telemetry panel                      |
+| `Alt+X`                       | Toggle Context panel                        |
 | `Alt+V`                       | Paste image from clipboard                  |
 | `Alt+Y`                       | Toggle YOLO mode on/off                     |
 | `@`                           | Open file mention picker                    |

@@ -15,9 +15,9 @@ impl App {
 
         let task_count = decomposition.tasks.len();
         if task_count == 0 {
-            self.status = "⚠ swarm: LLM returned 0 subtasks".to_string();
+            self.status = "[warn] swarm: LLM returned 0 subtasks".to_string();
             self.append_assistant_text(
-                "From: /swarm\n## ⚠ No subtasks\n\nThe LLM returned an empty task list.\n",
+                "From: /swarm\n## [warn] No subtasks\n\nThe LLM returned an empty task list.\n",
             );
             return;
         }
@@ -100,7 +100,7 @@ impl App {
                 self.spawn_swarm_teammates(&team_name, &decomposition, &store.dir);
             }
             Err(e) => {
-                self.status = format!("⚠ swarm: team creation failed: {e}");
+                self.status = format!("[warn] swarm: team creation failed: {e}");
                 self.push_log_no_agent(LogLevel::Warn, format!("Swarm team creation failed: {e}"));
             }
         }
@@ -278,10 +278,10 @@ impl App {
         if let Some(ref tl) = tasks {
             for task in &tl.tasks {
                 let status_icon = match task.status {
-                    team::TaskStatus::Completed => "✅",
-                    team::TaskStatus::InProgress => "🔄",
-                    team::TaskStatus::Pending => "⏳",
-                    team::TaskStatus::Cancelled => "❌",
+                    team::TaskStatus::Completed => "[ok]",
+                    team::TaskStatus::InProgress => "[sync]",
+                    team::TaskStatus::Pending => "[wait]",
+                    team::TaskStatus::Cancelled => "[err]",
                 };
                 let assigned = task.assigned_to.as_deref().unwrap_or("—");
                 let deps = if task.depends_on.is_empty() {
@@ -302,7 +302,7 @@ impl App {
                     st.depends_on.join(", ")
                 };
                 output.push_str(&format!(
-                    "| {} | {} | ⏳ | — | {} |\n",
+                    "| {} | {} | [wait] | — | {} |\n",
                     st.id, st.title, deps
                 ));
             }
@@ -628,9 +628,9 @@ impl App {
                         output.push_str("| ID | Title | Status |\n|----|-------|--------|\n");
                         for task in &tl.tasks {
                             let icon = match task.status {
-                                team::TaskStatus::Completed => "✅",
-                                team::TaskStatus::Cancelled => "❌",
-                                _ => "⚠️",
+                                team::TaskStatus::Completed => "[ok]",
+                                team::TaskStatus::Cancelled => "[err]",
+                                _ => "[warn]",
                             };
                             output.push_str(&format!(
                                 "| {} | {} | {} |\n",

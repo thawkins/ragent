@@ -2,7 +2,50 @@
 //!
 //! Provides common layout helper functions used across the UI components.
 
+use chrono::{DateTime, Utc};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+
+/// Returns true for providers that use Ollama's boolean `think` parameter.
+pub fn is_ollama_family(provider_id: &str) -> bool {
+    provider_id == "ollama" || provider_id == "ollama_cloud"
+}
+
+/// Format a UTC timestamp as elapsed duration from now (e.g. "2m34s").
+pub fn format_elapsed(created_at: DateTime<Utc>) -> String {
+    let secs = (Utc::now() - created_at).num_seconds().max(0);
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m{}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
+/// Shorten a session/task id to the last 8 chars (the unique suffix).
+pub fn short_id(id: &str) -> String {
+    let start = id.len().saturating_sub(8);
+    id[start..].to_string()
+}
+
+/// Shorten a string by keeping the start and end, inserting an ellipsis in the middle.
+///
+/// Returns the original string unchanged if it fits within `max_chars`. For a budget of
+/// one character returns the single ellipsis glyph.
+pub fn shorten_middle(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return s.to_string();
+    }
+    if max_chars <= 1 {
+        return "…".to_string();
+    }
+    let keep_left = (max_chars - 1) / 2;
+    let keep_right = max_chars - 1 - keep_left;
+    let left: String = s.chars().take(keep_left).collect();
+    let right: String = s.chars().skip(total.saturating_sub(keep_right)).collect();
+    format!("{left}…{right}")
+}
 
 /// Responsive layout constraints based on terminal width.
 #[derive(Debug, Clone, Copy)]

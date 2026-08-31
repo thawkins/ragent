@@ -10,6 +10,7 @@ use crate::app::state::{App, LogLevel};
 // Helpers
 
 // Re-export status types from theme
+use crate::app::session_ops::recover_poisoned;
 
 impl App {
     /// Whether the active benchmark run has outlived the staleness cap.
@@ -65,7 +66,7 @@ impl App {
                 ),
             );
             self.append_assistant_text(
-                "⚠️ **Benchmark watchdog**\n\nThe benchmark run did not finish within the \
+                "[warn] **Benchmark watchdog**\n\nThe benchmark run did not finish within the \
                  watchdog window and was detached. It may still be wedged in the background; \
                  check process state before retrying.",
             );
@@ -78,19 +79,13 @@ impl App {
                 .and_then(|handle| handle.snapshot())
         {
             self.status = format!(
-                "⏳ bench: {} {}/{}",
+                "[wait] bench: {} {}/{}",
                 progress.suite_id, progress.completed_cases, progress.total_cases
             );
         }
         self.drain_bench_progress_events();
         let outcome = {
-            let mut guard = match self.bench_result.lock() {
-                Ok(g) => g,
-                Err(poisoned) => {
-                    tracing::error!("bench_result mutex poisoned, recovering");
-                    poisoned.into_inner()
-                }
-            };
+            let mut guard = recover_poisoned(self.bench_result.lock(), "bench_result");
             guard.take()
         };
         let Some(outcome) = outcome else { return };
@@ -131,9 +126,9 @@ impl App {
             Err(msg) => {
                 self.bench_last_summary = Some(format!("Benchmark run failed: {msg}"));
                 self.bench_last_finished_at = Some(chrono::Utc::now());
-                self.status = format!("⚠ bench failed: {msg}");
+                self.status = format!("[warn] bench failed: {msg}");
                 self.force_new_message = true;
-                self.append_assistant_text(&format!("From: /bench run\n❌ {msg}"));
+                self.append_assistant_text(&format!("From: /bench run\n[err] {msg}"));
                 self.push_log_no_agent(LogLevel::Warn, format!("bench error: {msg}"));
             }
         }
@@ -158,7 +153,7 @@ impl App {
                 total_cases,
             } => {
                 format!(
-                    "From: /bench run\n⏳ Running `{suite_id}` [{language}] — {total_cases} case(s)."
+                    "From: /bench run\n[wait] Running `{suite_id}` [{language}] — {total_cases} case(s)."
                 )
             }
             ragent_bench::BenchRunEvent::CaseFinished {
@@ -167,7 +162,7 @@ impl App {
                 case_id,
                 status,
             } => {
-                let icon = if status == "passed" { "✅" } else { "❌" };
+                let icon = if status == "passed" { "[ok]" } else { "[err]" };
                 format!(
                     "From: /bench run\n{icon} `{suite_id}` [{language}] case `{case_id}` -> `{status}`."
                 )
@@ -193,7 +188,7 @@ impl App {
                 } else {
                     "Loading benchmark data for"
                 };
-                format!("From: /bench init\n⏳ {action} `{suite_id}` [{language}]…")
+                format!("From: /bench init\n[wait] {action} `{suite_id}` [{language}]…")
             }
             ragent_bench::BenchInitProgressEvent::Finished {
                 suite_id,
@@ -205,7 +200,7 @@ impl App {
             } => {
                 let action = if *verify_only { "Verified" } else { "Loaded" };
                 format!(
-                    "From: /bench init\n✅ {action} `{suite_id}` [{language}] at `{}` ({} case(s)).",
+                    "From: /bench init\n[ok] {action} `{suite_id}` [{language}] at `{}` ({} case(s)).",
                     data_root.display(),
                     case_count
                 )
@@ -374,14 +369,15 @@ impl App {
         options: ragent_bench::BenchRunOptions,
     ) {
         if self.active_bench_task_id.is_some() {
-            self.status = "⚠ A benchmark run is already active.".to_string();
+            self.status = "[warn] A benchmark run is already active.".to_string();
             return;
         }
 
         let selected_model = match self.selected_model.as_deref() {
             Some(model) => model,
             None => {
-                self.status = "⚠ /bench run requires a configured model — use /model".to_string();
+                self.status =
+                    "[warn] /bench run requires a configured model — use /model".to_string();
                 return;
             }
         };
@@ -395,7 +391,7 @@ impl App {
         ) {
             Ok(selection) => selection,
             Err(e) => {
-                self.status = format!("⚠ Invalid model selection: {e}");
+                self.status = format!("[warn] Invalid model selection: {e}");
                 return;
             }
         };
@@ -403,14 +399,14 @@ impl App {
         let project_root = match std::env::current_dir() {
             Ok(path) => path,
             Err(e) => {
-                self.status = format!("⚠ Could not resolve current directory: {e}");
+                self.status = format!("[warn] Could not resolve current directory: {e}");
                 return;
             }
         };
 
         if let Err(e) = ragent_bench::validate_run_prerequisites(&project_root, &target, &options) {
-            self.status = format!("⚠ {e}");
-            self.append_assistant_text(&format!("From: /bench run\n❌ {e}"));
+            self.status = format!("[warn] {e}");
+            self.append_assistant_text(&format!("From: /bench run\n[err] {e}"));
             return;
         }
 
@@ -430,10 +426,10 @@ impl App {
         self.active_bench_started_at = Some(chrono::Utc::now());
         self.active_bench_cancel = Some(cancel.clone());
         self.active_bench_progress = Some(progress.clone());
-        self.status = "⏳ bench: running…".to_string();
+        self.status = "[wait] bench: running…".to_string();
         self.push_log_no_agent(LogLevel::Info, format!("benchmark task started: {task_id}"));
         self.append_assistant_text(&format!(
-            "From: /bench run\n⏳ Started benchmark run for `{}` on `{}/{}.`\n\n- **Task ID:** `{}`\n- **Use:** `/bench status` for progress, `/bench cancel` to stop, `/bench open last` after completion.",
+            "From: /bench run\n[wait] Started benchmark run for `{}` on `{}/{}.`\n\n- **Task ID:** `{}`\n- **Use:** `/bench status` for progress, `/bench cancel` to stop, `/bench open last` after completion.",
             target_label,
             selection.provider_id,
             selection.model_id,

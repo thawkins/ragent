@@ -216,27 +216,27 @@ fn test_indicators_module_exists() {
 
 #[test]
 fn test_spinner_frames_available() {
-    use ragent_tui::layout_statusbar::spinner;
-    assert!(!spinner::FRAMES.is_empty());
-    assert_eq!(spinner::FRAMES.len(), 10);
-    assert_eq!(spinner::FRAMES[0], "⠋");
+    use ragent_tui::theme::accessibility;
+    assert!(!accessibility::SPINNER_FRAMES.is_empty());
+    assert_eq!(accessibility::SPINNER_FRAMES.len(), 10);
+    assert_eq!(accessibility::SPINNER_FRAMES[0], "⠋");
 }
 
 #[test]
 fn test_spinner_frame_selection() {
-    use ragent_tui::layout_statusbar::spinner;
+    use ragent_tui::theme::accessibility;
     // Frame should cycle through all 10 frames
-    let frame0 = spinner::frame(0);
-    let frame45 = spinner::frame(45);
-    let frame90 = spinner::frame(90);
-    let frame450 = spinner::frame(450);
-    let frame495 = spinner::frame(495);
+    let frame0 = accessibility::spinner_frame(0, 45);
+    let frame45 = accessibility::spinner_frame(45, 45);
+    let frame90 = accessibility::spinner_frame(90, 45);
+    let frame450 = accessibility::spinner_frame(450, 45);
+    let frame495 = accessibility::spinner_frame(495, 45);
 
-    assert_eq!(frame0, spinner::FRAMES[0]);
-    assert_eq!(frame45, spinner::FRAMES[1]);
-    assert_eq!(frame90, spinner::FRAMES[2]);
-    assert_eq!(frame450, spinner::FRAMES[0]); // Wraps around at 450ms (10*45)
-    assert_eq!(frame495, spinner::FRAMES[1]);
+    assert_eq!(frame0, accessibility::SPINNER_FRAMES[0]);
+    assert_eq!(frame45, accessibility::SPINNER_FRAMES[1]);
+    assert_eq!(frame90, accessibility::SPINNER_FRAMES[2]);
+    assert_eq!(frame450, accessibility::SPINNER_FRAMES[0]); // Wraps around at 450ms (10*45)
+    assert_eq!(frame495, accessibility::SPINNER_FRAMES[1]);
 }
 
 #[test]

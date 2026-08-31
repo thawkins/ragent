@@ -275,6 +275,8 @@ pub const ICON_FAILED: &str = "✗ ";
 pub const ICON_SELECTED: &str = "▸ ";
 /// Unselected indicator (space)
 pub const ICON_UNSELECTED: &str = "  ";
+/// Attachment chip prefix used in the input bar and image attachment lines.
+pub const ICON_ATTACHMENT: &str = "[attach]";
 
 /// Focus indicator constants module for keyboard navigation.
 pub mod focus {

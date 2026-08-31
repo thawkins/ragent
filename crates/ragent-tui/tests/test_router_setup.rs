@@ -658,7 +658,10 @@ fn test_router_setup_empty_state_when_no_providers() {
     }
     app.execute_slash_command("/provider router");
     assert!(app.provider_setup.is_none());
-    assert_eq!(app.status, "⚠ No concrete providers — configure one first");
+    assert_eq!(
+        app.status,
+        "[warn] No concrete providers — configure one first"
+    );
 }
 
 #[test]

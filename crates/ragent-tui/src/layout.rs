@@ -29,7 +29,9 @@ use ratatui::{
 use crate::layout_active_agents::render_active_agents_subpanel;
 
 use crate::theme;
-use crate::utils::{ResponsiveBreakpoint, centered_rect, centered_rect_max, is_below_minimum_size};
+use crate::utils::{
+    ResponsiveBreakpoint, centered_rect, centered_rect_max, is_below_minimum_size, shorten_middle,
+};
 
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 use ragent_storage::storage::MemoryRow;
@@ -42,26 +44,6 @@ use crate::widgets::message_widget::{
     canonical_tool_name, capitalize_tool_name, is_agent_notice, read_line_range,
     render_agent_notice_lines, tool_inline_diff, tool_input_summary, tool_result_summary,
 };
-
-fn shorten_middle(s: &str, max_chars: usize) -> String {
-    let total = s.chars().count();
-    if total <= max_chars {
-        return s.to_string();
-    }
-    if max_chars <= 1 {
-        return "…".to_string();
-    }
-    let keep_left = (max_chars - 1) / 2;
-    let keep_right = max_chars - 1 - keep_left;
-    let left: String = s.chars().take(keep_left).collect();
-    let right: String = s.chars().skip(total.saturating_sub(keep_right)).collect();
-    format!("{left}…{right}")
-}
-
-/// Saturating addition for `u16` wrapped line counts (FR-003).
-fn total_wrapping_add(a: u16, b: u16) -> u16 {
-    a.saturating_add(b)
-}
 
 /// Padding applied to each side of a content-sized table column.
 const COLUMN_PADDING_CHARS: usize = 1;
@@ -2308,6 +2290,76 @@ fn wrapped_lines_to_strings(wrapped: &[Line<'_>]) -> Vec<String> {
         .collect()
 }
 
+/// Slice a flat pre-wrapped line list to the visible window.
+///
+/// `scroll_from_top` is the offset into the wrapped-row coordinate space from
+/// the oldest/top of the content; `visible` is the number of rows available on
+/// screen. The result is suitable for passing to [`Paragraph::new`] without
+/// `.wrap()` because every row is already wrapped to the inner width.
+fn slice_flat_wrapped_window(
+    lines: &[Line<'static>],
+    scroll_from_top: u16,
+    visible: u16,
+) -> Vec<Line<'static>> {
+    let mut window = Vec::with_capacity(visible as usize + 1);
+    let window_start = scroll_from_top as usize;
+    let window_end = window_start + visible.saturating_add(1) as usize;
+    for (i, line) in lines.iter().enumerate() {
+        if i < window_start {
+            continue;
+        }
+        if i >= window_end {
+            break;
+        }
+        window.push(line.clone());
+    }
+    window
+}
+
+/// Slice a grouped pre-wrapped line cache to the visible window.
+///
+/// Groups are used by the messages/log caches where each source item can span
+/// multiple wrapped rows. The function walks groups in order, accumulating a
+/// running wrapped-row count so the final slice is in the same coordinate space
+/// as the scroll geometry.
+fn slice_group_wrapped_window<G>(
+    groups: &[G],
+    scroll_from_top: u16,
+    visible: u16,
+    get_lines: impl Fn(&G) -> &[Line<'static>],
+) -> Vec<Line<'static>> {
+    let mut window = Vec::with_capacity(visible as usize + 1);
+    let window_end = scroll_from_top.saturating_add(visible.saturating_add(1));
+    let mut skipped: u16 = 0;
+    'outer: for group in groups.iter() {
+        let wrapped_lines = get_lines(group);
+        let group_len = wrapped_lines.len() as u16;
+        let group_start = skipped;
+        let group_end = skipped.saturating_add(group_len);
+        skipped = group_end;
+        if group_end <= scroll_from_top || group_start >= window_end {
+            continue;
+        }
+        let (start_in_group, end_in_group) = if group_start >= scroll_from_top {
+            (0, group_len)
+        } else {
+            (scroll_from_top - group_start, group_len)
+        };
+        let end_in_group = end_in_group.min(window_end - group_start);
+        for (li, line) in wrapped_lines.iter().enumerate() {
+            let li = li as u16;
+            if li < start_in_group {
+                continue;
+            }
+            if li >= end_in_group {
+                continue 'outer;
+            }
+            window.push(line.clone());
+        }
+    }
+    window
+}
+
 fn input_lines_with_kb_selection(
     input: &str,
     inner_width: usize,
@@ -2533,6 +2585,214 @@ fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
 }
+
+/// Compact a byte/token estimate into a human-friendly short form for the
+/// Context panel rows (e.g. `123`, `12.3k`, `1.2M`).
+fn format_tokens(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 1_000 {
+        format!("{:.1}k", tokens as f64 / 1_000.0)
+    } else {
+        tokens.to_string()
+    }
+}
+
+/// Render the Context side panel (toggled via `Alt+X`, contextpanel spec).
+///
+/// FR-018: titled "Context" with a border consistent with the active theme.
+/// FR-005..FR-012: lists every context partition with its byte/token estimate
+/// and a percentage bar of the model's context window; shows "unknown" for
+/// ratios (FR-011) and lists zero-size partitions with a count of `0`
+/// (FR-017). Values come from [`App::context_partition_snapshot`], which is
+/// re-evaluated on every frame while the panel is open so the display stays
+/// current without re-opening it (FR-014).
+fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            " Context ",
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    app.context_panel_area = area;
+
+    // T-013/FR-015: consume the cached snapshot populated by the background
+    // refresh (falling back to a synchronous computation on the first frame
+    // while the async refresh is still running), so per-frame renders never
+    // perform disk or SQLite I/O on the UI thread.
+    let snapshot = app.context_effective_snapshot();
+    let total = snapshot.total_tokens();
+
+    // Compact percentage bars sized to leave room for the 14-char label and
+    // the value/percent columns even on narrow terminals.
+    let bar_width = inner.width.saturating_sub(34).min(10).max(3) as usize;
+
+    let header_style = Style::default()
+        .fg(Color::LightCyan)
+        .add_modifier(Modifier::BOLD);
+    let label_style = Style::default().fg(Color::White);
+    let value_style = Style::default().fg(Color::LightCyan);
+    let sub_label_style = Style::default().fg(Color::DarkGray);
+    let dim_value_style = Style::default().fg(Color::Gray);
+    let warn_style = Style::default().fg(Color::LightYellow);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // FR-010/FR-011 partition rows: label, estimated tokens, percentage bar.
+    // Sub-partitions are rendered indented as a breakdown of the system prompt.
+    struct Row {
+        label: &'static str,
+        tokens: u64,
+        sub: bool,
+    }
+    let rows = [
+        Row {
+            label: "System prompt",
+            tokens: snapshot.system_prompt_tokens,
+            sub: false,
+        },
+        Row {
+            label: "skills",
+            tokens: snapshot.skills_tokens,
+            sub: true,
+        },
+        Row {
+            label: "memory",
+            tokens: snapshot.memory_tokens,
+            sub: true,
+        },
+        Row {
+            label: "agents.md",
+            tokens: snapshot.agents_md_tokens,
+            sub: true,
+        },
+        Row {
+            label: "Tool catalog",
+            tokens: snapshot.tool_catalog_tokens,
+            sub: false,
+        },
+        Row {
+            label: "Tool metadata",
+            tokens: snapshot.tool_metadata_tokens,
+            sub: false,
+        },
+        Row {
+            label: "History",
+            tokens: snapshot.history_tokens,
+            sub: false,
+        },
+    ];
+
+    for row in rows {
+        let label = if row.sub {
+            format!("   {}", row.label)
+        } else {
+            row.label.to_string()
+        };
+        let row_style = if row.sub {
+            sub_label_style
+        } else {
+            label_style
+        };
+        match snapshot.percent_of_window(row.tokens) {
+            Some(pct) => {
+                let bar =
+                    crate::theme::accessibility::progress_bar((pct / 100.0) as f32, bar_width);
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{label:<14}"), row_style),
+                    Span::styled(format!("{:>8}tk ", format_tokens(row.tokens)), value_style),
+                    Span::styled(bar, dim_value_style),
+                    Span::styled(format!("{:4.0}%", pct), value_style),
+                ]));
+            }
+            None => {
+                // FR-011: no advertised capacity - show absolute counts and
+                // "unknown" for the ratio.
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{label:<14}"), row_style),
+                    Span::styled(format!("{:>8}tk ", format_tokens(row.tokens)), value_style),
+                    Span::styled("unknown".to_string(), sub_label_style),
+                ]));
+            }
+        }
+    }
+
+    // FR-008: message count is displayed alongside the history partition.
+    lines.push(Line::from(Span::styled(
+        format!("   {} messages", snapshot.history_message_count),
+        sub_label_style,
+    )));
+    lines.push(Line::from(""));
+
+    // FR-012 total and remaining headroom.
+    let total_label = String::from("Total");
+    match snapshot.total_percent() {
+        Some(pct) => {
+            let bar = crate::theme::accessibility::progress_bar((pct / 100.0) as f32, bar_width);
+            lines.push(Line::from(vec![
+                Span::styled(format!("{total_label:<14}"), header_style),
+                Span::styled(format!("{:>8}tk ", format_tokens(total)), value_style),
+                Span::styled(bar, dim_value_style),
+                Span::styled(format!("{:4.0}%", pct), value_style),
+            ]));
+        }
+        None => {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{total_label:<14}"), header_style),
+                Span::styled(format!("{:>8}tk ", format_tokens(total)), value_style),
+                Span::styled("unknown".to_string(), sub_label_style),
+            ]));
+        }
+    }
+    match snapshot.remaining_tokens() {
+        Some(remaining) => {
+            let style = if remaining == 0 {
+                warn_style
+            } else {
+                value_style
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{:<14}", "Free"), label_style),
+                Span::styled(format_tokens(remaining), style),
+            ]));
+        }
+        None => {
+            lines.push(Line::from(Span::styled(
+                "Free: unknown".to_string(),
+                sub_label_style,
+            )));
+        }
+    }
+
+    // Cache plain-text content for text selection copy, matching the other
+    // side panels' wrapping behaviour.
+    let context_inner_width = inner.width as usize;
+    app.context_content_lines = build_wrapped_content_lines(&lines, context_inner_width);
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total_lines = paragraph.line_count(inner.width) as u16;
+    let visible_height = inner.height;
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    app.context_panel_max_scroll = max_scroll;
+    let scroll = app.context_scroll_offset.min(max_scroll);
+    let paragraph = paragraph.scroll((scroll, 0));
+    frame.render_widget(paragraph, inner);
+
+    // Render scrollbar when content overflows.
+    if total_lines > visible_height {
+        let mut scrollbar_state =
+            ScrollbarState::new(max_scroll as usize).position(scroll as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
+}
 // ---------------------------------------------------------------------------
 // Chat screen
 // ---------------------------------------------------------------------------
@@ -2589,6 +2849,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         || app.show_tasks_panel
         || app.show_memory
         || app.show_telemetry
+        || app.show_context_panel
     {
         let (msg_pct, log_pct) = breakpoint.log_split();
         let h_chunks = Layout::default()
@@ -2643,6 +2904,22 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
             app.telemetry_area = h_chunks[1];
             render_telemetry_panel(frame, app, h_chunks[1]);
             apply_selection_highlight(frame, app, SelectionPane::Telemetry, h_chunks[1]);
+        } else if app.show_context_panel {
+            // The Context panel is mutually exclusive with the other side
+            // panels (contextpanel FR-012/FR-003), so it renders alone in the
+            // side column. Clearing the other side-panel areas keeps mouse
+            // hit-testing and scrollbar drag dispatch from targeting a panel
+            // that is not visible.
+            app.log_area = Rect::default();
+            app.profile_area = Rect::default();
+            app.active_agents_area = Rect::default();
+            app.teams_area = Rect::default();
+            app.tasks_area = Rect::default();
+            app.memory_area = Rect::default();
+            app.telemetry_area = Rect::default();
+            app.context_panel_area = h_chunks[1];
+            render_context_panel(frame, app, h_chunks[1]);
+            apply_selection_highlight(frame, app, SelectionPane::ContextPanel, h_chunks[1]);
         } else {
             match (app.show_log, app.show_profile) {
                 (true, true) => {
@@ -2688,6 +2965,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         app.tasks_area = Rect::default();
         app.memory_area = Rect::default();
         app.telemetry_area = Rect::default();
+        app.context_panel_area = Rect::default();
         app.active_agents_area = Rect::default();
         app.teams_area = Rect::default();
         render_messages(frame, app, chunks[2]);
@@ -2851,18 +3129,8 @@ fn render_research_view_overlay(frame: &mut Frame, app: &mut App) {
     let scroll_from_top = view.max_scroll.saturating_sub(view.scroll_offset);
 
     // Slice the cached pre-wrapped rows to the visible window.
-    let mut window: Vec<Line<'static>> = Vec::with_capacity(visible as usize + 1);
-    let window_start = scroll_from_top as usize;
-    let window_end = window_start + visible.saturating_add(1) as usize;
-    for (i, line) in view.line_cache.wrapped_lines.iter().enumerate() {
-        if i < window_start {
-            continue;
-        }
-        if i >= window_end {
-            break;
-        }
-        window.push(line.clone());
-    }
+    let window =
+        slice_flat_wrapped_window(&view.line_cache.wrapped_lines, scroll_from_top, visible);
 
     let paragraph = Paragraph::new(window).block(block);
 
@@ -3198,7 +3466,10 @@ fn render_model_download_popup(frame: &mut Frame, app: &App) {
     let elapsed = state.started_at.elapsed().as_secs();
     let lines: Vec<Line<'_>> = vec![
         Line::from(Span::styled(
-            format!("Downloading {}", shorten_middle(&state.model_id, 32)),
+            format!(
+                "Downloading {}",
+                crate::utils::shorten_middle(&state.model_id, 32)
+            ),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -3359,7 +3630,7 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut total_wrapped: u16 = 0;
     for group in app.log_line_cache.iter() {
         all_content_lines.extend(group.content_lines.iter().cloned());
-        total_wrapped = total_wrapping_add(total_wrapped, group.wrapped_count);
+        total_wrapped = total_wrapped.saturating_add(group.wrapped_count);
     }
 
     // Store the flattened content lines for text-selection copy.
@@ -3373,41 +3644,15 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let scroll = app.log_scroll_offset.min(max_scroll);
     let scroll_from_top = max_scroll.saturating_sub(scroll);
 
-    // ── Scroll-window slice (idle-CPU fix, mirrors render_messages) ──────
-    //
     // Slice the cached pre-wrapped log rows to the visible window instead of
     // handing ratatui the entire log history inside one Paragraph with
     // .scroll(), which re-wraps and re-measures every line on every frame.
     // Both the slice and the scroll geometry are in wrapped-row coordinates,
     // so the pinned view always shows the newest entries.
-    let mut window: Vec<Line<'static>> = Vec::with_capacity(visible_height as usize + 1);
-    let mut skipped: u16 = 0;
-    let window_end = scroll_from_top.saturating_add(visible_height.saturating_add(1));
-    'outer: for group in app.log_line_cache.iter() {
-        let group_len = group.wrapped_lines.len() as u16;
-        let group_start = skipped;
-        let group_end = skipped.saturating_add(group_len);
-        skipped = group_end;
-        if group_end <= scroll_from_top || group_start >= window_end {
-            continue;
-        }
-        let (start_in_group, end_in_group) = if group_start >= scroll_from_top {
-            (0, group_len)
-        } else {
-            (scroll_from_top - group_start, group_len)
-        };
-        let end_in_group = end_in_group.min(window_end - group_start);
-        for (li, line) in group.wrapped_lines.iter().enumerate() {
-            let li = li as u16;
-            if li < start_in_group {
-                continue;
-            }
-            if li >= end_in_group {
-                continue 'outer;
-            }
-            window.push(line.clone());
-        }
-    }
+    let window =
+        slice_group_wrapped_window(&app.log_line_cache, scroll_from_top, visible_height, |g| {
+            &g.wrapped_lines
+        });
 
     // NOTE: no `.wrap(...)` — mirrors render_messages.  The cached log rows
     // are pre-wrapped to the inner width; re-wrapping whitespace-only rows in
@@ -3999,12 +4244,11 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
     let need_rewrap = view.line_cache.cache_width != inner_width;
 
     // Compute a cheap source-generation key that captures changes to the
-    // displayed messages and log entries.  For the primary session we can use
+    // displayed messages and log entries.  For the primary session we use
     // the in-memory messages (last message edit_seq); for storage-backed
-    // sessions we use the message count plus the last message's edit_seq after
-    // fetching.  `app.log_seq` covers new log entries appended while the view
-    // is open.
-    let current_generation = {
+    // sessions we fetch once and derive generation from the same result.
+    // `app.log_seq` covers new log entries appended while the view is open.
+    let (current_generation, session_messages) = {
         let mut generation = app.log_seq;
         // Mix in target identity so switching targets invalidates the cache.
         let target_seed = match &target_session {
@@ -4016,21 +4260,42 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
             None => 0,
         };
         generation = generation.wrapping_add(target_seed);
-        if let Some(ref sid) = target_session {
-            let session_messages = if app.session_id.as_deref() == Some(sid.as_str()) {
-                &app.messages
-            } else {
-                // Storage-backed sessions: fetch once here; we still need the
-                // messages to render, so compute generation from the result.
-                // We cache the fetched messages below via `lines`.
-                &app.storage.get_messages(sid).unwrap_or_default()
-            };
-            let msg_count = session_messages.len() as u64;
-            let last_edit_seq = session_messages.last().map(|m| m.edit_seq).unwrap_or(0);
+
+        let session_messages: Option<std::borrow::Cow<'_, [Message]>> =
+            target_session.as_ref().map(|sid| {
+                if app.session_id.as_deref() == Some(sid.as_str()) {
+                    // Borrow the in-memory transcript without cloning; the
+                    // overlay only reads it for this frame.
+                    std::borrow::Cow::Borrowed(app.messages.as_slice())
+                } else {
+                    // Storage-backed sessions: fetch once here; derive
+                    // generation and render from the same result. Surface DB
+                    // errors instead of silently showing "No output yet".
+                    match app.storage.get_messages(sid) {
+                        Ok(msgs) => std::borrow::Cow::Owned(msgs),
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                session_id = %sid,
+                                "Failed to load session messages for output view"
+                            );
+                            std::borrow::Cow::Owned(vec![Message::assistant_text(
+                                sid.clone(),
+                                format!("[warn] Failed to load output: {e}"),
+                            )])
+                        }
+                    }
+                }
+            });
+
+        if let Some(ref msgs) = session_messages {
+            let msg_count = msgs.len() as u64;
+            let last_edit_seq = msgs.last().map(|m| m.edit_seq).unwrap_or(0);
             generation =
                 generation.wrapping_add(msg_count.wrapping_mul(31).wrapping_add(last_edit_seq));
         }
-        generation
+
+        (generation, session_messages)
     };
 
     let cache_stale =
@@ -4039,14 +4304,9 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
     if cache_stale || need_rewrap {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
-        if let Some(ref sid) = target_session {
-            let session_messages = if app.session_id.as_deref() == Some(sid.as_str()) {
-                app.messages.clone()
-            } else {
-                app.storage.get_messages(sid).unwrap_or_default()
-            };
+        if let Some(ref msgs) = session_messages {
             lines = messages_to_lines(
-                &session_messages,
+                msgs.as_ref(),
                 &app.tool_step_map,
                 &app.sid_to_display_name,
                 &app.cwd,
@@ -4104,25 +4364,10 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
     view.scroll_offset = view.scroll_offset.min(max_scroll);
     let scroll_from_top = max_scroll.saturating_sub(view.scroll_offset);
 
-    // ── Scroll-window slice (mirrors render_messages) ───────────────────────
-    //
-    // Handing ratatui the entire wrapped history inside a Paragraph with
-    // `.scroll()` re-runs WordWrapper over every line on every frame and
-    // shifts the tail when whitespace-only rows double-paint.  Slice the
-    // cached pre-wrapped rows to the visible window and render without `.wrap`
+    // Slice the cached pre-wrapped rows to the visible window and render without `.wrap`
     // so the geometry and paint coordinate systems stay identical.
-    let mut window: Vec<Line<'static>> = Vec::with_capacity(visible as usize + 1);
-    let window_start = scroll_from_top as usize;
-    let window_end = window_start + visible.saturating_add(1) as usize;
-    for (i, line) in view.line_cache.wrapped_lines.iter().enumerate() {
-        if i < window_start {
-            continue;
-        }
-        if i >= window_end {
-            break;
-        }
-        window.push(line.clone());
-    }
+    let window =
+        slice_flat_wrapped_window(&view.line_cache.wrapped_lines, scroll_from_top, visible);
 
     let paragraph = Paragraph::new(window).block(block);
 
@@ -4248,7 +4493,7 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
             MemberStatus::Spawning => ("◌", Color::Yellow),
             MemberStatus::Blocked => ("◈", Color::DarkGray),
             MemberStatus::PlanPending => ("◎", Color::Magenta),
-            MemberStatus::Suspended => ("⏸", Color::DarkGray),
+            MemberStatus::Suspended => ("[pause]", Color::DarkGray),
             MemberStatus::ShuttingDown => ("◌", Color::Yellow),
             MemberStatus::Stopped => ("○", Color::DarkGray),
             MemberStatus::Failed => ("✗", Color::Red),
@@ -4581,13 +4826,13 @@ fn messages_to_lines(
                                 .unwrap_or_default();
                             if summary.is_empty() {
                                 lines.push(Line::from(Span::styled(
-                                    "  └ ✅ Task complete",
+                                    "  └ [ok] Task complete",
                                     Style::default().fg(Color::Green),
                                 )));
                             } else {
                                 for line in summary.lines() {
                                     lines.push(Line::from(Span::styled(
-                                        format!("  └ ✅ {line}"),
+                                        format!("  └ [ok] {line}"),
                                         Style::default().fg(Color::Green),
                                     )));
                                 }
@@ -4626,7 +4871,7 @@ fn messages_to_lines(
                         .and_then(|n| n.to_str())
                         .unwrap_or("image");
                     lines.push(Line::from(Span::styled(
-                        format!("  📎 [image: {}]", name),
+                        format!("  {} [image: {}]", theme::ICON_ATTACHMENT, name),
                         Style::default().fg(Color::Yellow),
                     )));
                 }
@@ -4748,7 +4993,7 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut total_wrapped: u16 = 0;
     for group in app.message_line_cache.iter() {
         all_content_lines.extend(group.content_lines.iter().cloned());
-        total_wrapped = total_wrapping_add(total_wrapped, group.wrapped_count);
+        total_wrapped = total_wrapped.saturating_add(group.wrapped_count);
     }
 
     // Store the flattened content lines for text-selection copy.
@@ -4798,34 +5043,10 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // the scroll geometry are both expressed in the same wrapped-row
     // coordinate system, the pinned-bottom view always shows the true tail
     // of the transcript and newly appended messages stay visible.
-    let mut window: Vec<Line<'static>> = Vec::with_capacity(visible as usize + 1);
-    let mut skipped: u16 = 0;
-    let window_end = scroll_from_top.saturating_add(visible.saturating_add(1));
-    'outer: for group in app.message_line_cache.iter() {
-        let group_len = group.wrapped_lines.len() as u16;
-        let group_start = skipped;
-        let group_end = skipped.saturating_add(group_len);
-        skipped = group_end;
-        if group_end <= scroll_from_top || group_start >= window_end {
-            continue;
-        }
-        let (start_in_group, end_in_group) = if group_start >= scroll_from_top {
-            (0, group_len)
-        } else {
-            (scroll_from_top - group_start, group_len)
-        };
-        let end_in_group = end_in_group.min(window_end - group_start);
-        for (li, line) in group.wrapped_lines.iter().enumerate() {
-            let li = li as u16;
-            if li < start_in_group {
-                continue;
-            }
-            if li >= end_in_group {
-                continue 'outer;
-            }
-            window.push(line.clone());
-        }
-    }
+    let window =
+        slice_group_wrapped_window(&app.message_line_cache, scroll_from_top, visible, |g| {
+            &g.wrapped_lines
+        });
 
     // NOTE: no `.wrap(...)` here.  The cached rows are already pre-wrapped to
     // the inner width, and ratatui 0.29 re-wrapping them with `Wrap { trim:
@@ -4882,7 +5103,7 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
             .filter_map(|p| {
                 p.file_name()
                     .and_then(|n| n.to_str())
-                    .map(|s| format!("📎{s}"))
+                    .map(|s| format!("{}{s}", theme::ICON_ATTACHMENT))
             })
             .collect();
         (
@@ -4958,6 +5179,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+P", "Toggle profiler panel visibility"),
     ("Alt+T", "Toggle Tasks panel visibility"),
     ("Alt+O", "Toggle telemetry panel visibility"),
+    ("Alt+X", "Toggle context panel visibility"),
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),
     // ── Sending ─────────────────────────────────────────────────────────
     ("Enter", "Send message / confirm"),
@@ -5162,11 +5384,11 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
     let queue_depth = app.permission_queue.len();
     let title_suffix = if queue_depth > 1 {
         format!(
-            "⚠️  Permission Required {} ({} queued)",
+            "[warn]  Permission Required {} ({} queued)",
             countdown_text, queue_depth
         )
     } else {
-        format!("⚠️  Permission Required {}", countdown_text)
+        format!("[warn]  Permission Required {}", countdown_text)
     };
 
     let block = Block::default()
@@ -5783,13 +6005,13 @@ mod tests {
         assert!(
             rendered
                 .iter()
-                .any(|line| line.contains("  └ ✅ First line.")),
+                .any(|line| line.contains("  └ [ok] First line.")),
             "Expected first summary line on its own rendered line: {rendered:?}"
         );
         assert!(
             rendered
                 .iter()
-                .any(|line| line.contains("  └ ✅ Second line.")),
+                .any(|line| line.contains("  └ [ok] Second line.")),
             "Expected second summary line on its own rendered line: {rendered:?}"
         );
         assert!(

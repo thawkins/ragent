@@ -6,15 +6,11 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ragent_types::ThinkingLevel;
 
-/// Returns true for providers that use Ollama's boolean `think` parameter.
-fn is_ollama_family(provider_id: &str) -> bool {
-    provider_id == "ollama" || provider_id == "ollama_cloud"
-}
-
 use crate::app::{
     App, ConfiguredProvider, ContextAction, ModelPickerEntry, PROVIDER_LIST, ProviderSetupStep,
     ProviderSource,
 };
+use crate::utils::is_ollama_family;
 use ragent_llm::providers::router_config::Tier;
 
 fn cursor_byte_pos(s: &str, char_index: usize) -> usize {
@@ -135,6 +131,8 @@ pub enum InputAction {
     ToggleMemory,
     /// Toggle the Telemetry side panel visibility (Alt+O).
     ToggleTelemetry,
+    /// Toggle the Context side panel visibility (Alt+X).
+    ToggleContextPanel,
     /// Toggle YOLO mode (Alt+Y).
     ToggleYolo,
     /// Toggle edit-operation logging (Alt+E).
@@ -734,6 +732,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleTelemetry)
         }
+        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleContextPanel)
+        }
         KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleYolo)
         }
@@ -935,7 +936,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         let providers = App::get_configured_providers_for_router(&app.storage);
                         if providers.is_empty() {
                             app.status =
-                                "⚠ No concrete providers — configure one first".to_string();
+                                "[warn] No concrete providers — configure one first".to_string();
                             app.push_log_no_agent(
                                 crate::app::LogLevel::Warn,
                                 "provider router: no concrete providers configured".to_string(),
@@ -1072,7 +1073,8 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     // router cluster setup panel, mirroring `/provider router`.
                     let providers = App::get_configured_providers_for_router(&app.storage);
                     if providers.is_empty() {
-                        app.status = "⚠ No concrete providers — configure one first".to_string();
+                        app.status =
+                            "[warn] No concrete providers — configure one first".to_string();
                         app.push_log_no_agent(
                             crate::app::LogLevel::Warn,
                             "provider router: no concrete providers configured".to_string(),
@@ -1230,7 +1232,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Char('c') => {
                 crate::clipboard::set_clipboard_text(&user_code);
-                app.status = "✔ Device code copied to clipboard".to_string();
+                app.status = "[ok] Device code copied to clipboard".to_string();
                 app.provider_setup = Some(ProviderSetupStep::DeviceFlowPending {
                     flow,
                     user_code,
@@ -1667,7 +1669,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     app.provider_health
                         .store(0, std::sync::atomic::Ordering::Relaxed);
                 }
-                app.status = format!("✔ Provider {} reset — credentials removed", pname);
+                app.status = format!("[ok] Provider {} reset — credentials removed", pname);
                 app.provider_setup = None;
             }
             _ => {
@@ -1939,7 +1941,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             app.session_processor.invalidate_config_cache();
                             app.provider_setup = None;
                             app.append_assistant_text(
-                                "From: /telemetry setup\n✅ **Telemetry configuration saved.**\n\nSettings take effect on the next ragent start, or immediately if the telemetry subsystem is already running.",
+                                "From: /telemetry setup\n[ok] **Telemetry configuration saved.**\n\nSettings take effect on the next ragent start, or immediately if the telemetry subsystem is already running.",
                             );
                             app.status = "telemetry: saved".to_string();
                         }
@@ -2154,7 +2156,7 @@ fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
                     event_bus.publish(ragent_agent::event::Event::AgentError {
                         session_id: sid,
                         error: format!(
-                            "✅ GitLab configured successfully!\n\n\
+                            "[ok] GitLab configured successfully!\n\n\
                              **Instance**: {instance_url}\n\
                              **Username**: {username}\n\
                              **Token**: saved (encrypted)"
@@ -2164,7 +2166,7 @@ fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
                     event_bus.publish(ragent_agent::event::Event::AgentError {
                         session_id: sid,
                         error: format!(
-                            "⚠️ GitLab authenticated as {username} but failed to save: {}",
+                            "[warn] GitLab authenticated as {username} but failed to save: {}",
                             errors.join(", ")
                         ),
                     });

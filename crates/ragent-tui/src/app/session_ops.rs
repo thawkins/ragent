@@ -1,6 +1,6 @@
 //! Session, team, and miscellaneous operations for the TUI.
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, LockResult, MutexGuard};
 
 use ratatui::layout::Rect;
 
@@ -8,17 +8,20 @@ use ragent_agent::{
     event::Event,
     mcp::discovery::DiscoveredMcpServer,
     message::{Message, MessagePart, Role},
+    session::processor::estimate_tool_definition_bytes,
 };
+use ragent_llm::provider::tool_cache::{ToolFormat, cached_tools};
 use ragent_team::team::TeamStore;
+use ragent_tools_core::{Tool, ToolContext};
 
 // Prompt optimization templates
 
 // State types from app/state.rs
 use crate::app::state::{
-    App, ContextAction, FileMenuEntry, FileMenuState, LlmRequestStat, LlmStatsSummary, LogEntry,
-    LogLevel, OutputViewState, OutputViewTarget, ProviderSetupStep, ScreenMode, ScrollbarDragPane,
-    SelectionPane, TextSelection, atomic_config_update, is_image_path, percent_decode_path,
-    save_clipboard_image_to_temp,
+    App, ContextAction, ContextPartitionSnapshot, FileMenuEntry, FileMenuState, LlmRequestStat,
+    LlmStatsSummary, LogEntry, LogLevel, OutputViewState, OutputViewTarget, ProviderSetupStep,
+    ScreenMode, ScrollbarDragPane, SelectionPane, TextSelection, atomic_config_update,
+    is_image_path, percent_decode_path, save_clipboard_image_to_temp,
 };
 
 // Helpers
@@ -26,6 +29,105 @@ use crate::app::helpers::{MentionSpan, short_session_id};
 
 // Re-export status types from theme
 use crate::theme::{StatusCategory, StatusMessage};
+
+/// Recover from a poisoned mutex, logging the incident and returning the
+/// guarded value so the caller can keep running.
+pub(crate) fn recover_poisoned<'a, T>(
+    result: LockResult<MutexGuard<'a, T>>,
+    name: &str,
+) -> MutexGuard<'a, T> {
+    match result {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("{name} mutex poisoned, recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// Disk/SQLite-backed context partitions computed off the UI thread
+/// (T-013/FR-015).
+///
+/// Performs exactly the I/O-bound work behind the Context panel's system
+/// prompt, skills, memory and AGENTS.md partitions: skill-registry loading,
+/// AGENTS.md discovery, structured-memory reads and the system-prompt
+/// assembly. Runs on `tokio::task::spawn_blocking` from
+/// [`App::schedule_context_snapshot_refresh`]; the synchronous
+/// [`App::context_partition_snapshot`] fallback uses the same helper so the
+/// two paths can never disagree.
+fn compute_disk_context_partitions(
+    working_dir: &std::path::Path,
+    agent: &ragent_agent::agent::AgentInfo,
+    storage: &ragent_agent::storage::Storage,
+    config: &ragent_agent::Config,
+    session_processor: &ragent_agent::session::processor::SessionProcessor,
+) -> DiskContextPartitions {
+    // C-001: the skill registry is mtime-cached on the processor, so this
+    // only touches the skills directories when they change.
+    let skills = session_processor.skill_registry(working_dir, &config.skill_dirs);
+    let memory_config = config.memory.clone();
+    let prompt = ragent_agent::agent::build_system_prompt_with_storage_and_memory_and_config(
+        agent,
+        working_dir,
+        "",
+        skills.as_ref(),
+        None,
+        None,
+        None,
+        Some(storage),
+        Some(&memory_config),
+        None,
+        Some(config),
+    );
+    let (agents_md, _) = ragent_agent::agent::collect_agents_md_content_with_discovery(working_dir);
+    let memory = ragent_agent::agent::build_memory_prompt_section(
+        working_dir,
+        Some(storage),
+        Some(&config.memory),
+    );
+    let skills_section = skills
+        .as_ref()
+        .map(|registry| ragent_agent::agent::skills_prompt_section(registry, agent))
+        .unwrap_or_default();
+    DiskContextPartitions {
+        system_prompt: prompt.len() as u64,
+        skills: skills_section.len() as u64,
+        memory: memory.len() as u64,
+        agents_md: agents_md.len() as u64,
+    }
+}
+
+/// The disk/SQLite-backed subset of context partitions returned by
+/// [`compute_disk_context_partitions`].
+struct DiskContextPartitions {
+    system_prompt: u64,
+    skills: u64,
+    memory: u64,
+    agents_md: u64,
+}
+
+impl DiskContextPartitions {
+    fn into_snapshot(
+        self,
+        tool_catalog_tokens: u64,
+        tool_metadata_tokens: u64,
+        history_tokens: u64,
+        history_message_count: usize,
+        context_window_tokens: Option<usize>,
+    ) -> ContextPartitionSnapshot {
+        ContextPartitionSnapshot {
+            system_prompt_tokens: self.system_prompt,
+            tool_catalog_tokens,
+            tool_metadata_tokens,
+            history_tokens,
+            history_message_count,
+            skills_tokens: self.skills,
+            memory_tokens: self.memory,
+            agents_md_tokens: self.agents_md,
+            context_window_tokens,
+        }
+    }
+}
 
 impl App {
     /// Clone the current agent info, apply the selected model/thinking settings,
@@ -54,6 +156,366 @@ impl App {
                     .ok()
                     .filter(|k| !k.is_empty())
             })
+    }
+
+    /// Compute the token size of the visible toolset catalog.
+    ///
+    /// FR-006: returns the byte/char estimate for every tool currently exposed
+    /// to the model (name + description + parameter schema), using the same
+    /// shared estimator as the agent request-size path so the panel stays in
+    /// sync with what the LLM actually receives. The estimator is a byte
+    /// count; the context panel treats it as a proxy for token count because
+    /// exact tokenisation depends on the active provider.
+    pub fn tool_catalog_token_count(&self) -> u64 {
+        let defs = self.session_processor.tool_registry.definitions();
+        estimate_tool_definition_bytes(&defs)
+    }
+
+    /// Return the provider id of the model that will serve the next request.
+    ///
+    /// Mirrors the resolution order used by
+    /// [`App::apply_selected_model_and_thinking`]: the user's selected model
+    /// wins, then the agent's pinned/unpinned model, then the first provider
+    /// in the registry that advertises a default model.
+    fn active_provider_id(&self) -> Option<String> {
+        if let Some(model_str) = self.selected_model.as_deref()
+            && let Some((provider, _)) = model_str.split_once('/')
+        {
+            return Some(provider.to_string());
+        }
+        if let Some(model) = &self.agent_info.model {
+            return Some(model.provider_id.clone());
+        }
+        ragent_agent::agent::resolve_default_model(&self.agent_info, &self.provider_registry)
+            .map(|m| m.provider_id)
+    }
+
+    /// Resolve the LLM tool wire format for a provider id.
+    ///
+    /// Providers that share an OpenAI-compatible envelope (including the
+    /// router, which forwards to a concrete backend) map to
+    /// [`ToolFormat::OpenAi`]; Anthropic, Gemini, Bedrock and HuggingFace use
+    /// their own shapes.
+    fn tool_format_for_provider(provider_id: &str) -> ToolFormat {
+        match provider_id {
+            "anthropic" => ToolFormat::Anthropic,
+            "gemini" => ToolFormat::Gemini,
+            "bedrock" => ToolFormat::Bedrock,
+            "huggingface" => ToolFormat::HuggingFace,
+            _ => ToolFormat::OpenAi,
+        }
+    }
+
+    /// Compute the token size of the toolset metadata/wrapper overhead.
+    ///
+    /// FR-007: measures the extra per-tool bytes the provider wire envelope
+    /// adds beyond the raw tool definitions — JSON envelope keys (e.g.
+    /// `"type":"function","input_schema":`), wrapper objects, and list
+    /// separators. The estimate is derived from the same shared provider tool
+    /// serialisation cache the LLM clients use (`ragent_llm`'s `tool_cache`),
+    /// so it always reflects what is actually sent on the wire for the active
+    /// provider's format. Computed as the serialised wire byte length minus
+    /// the raw definition bytes from [`App::tool_catalog_token_count`],
+    /// saturating at zero; treated as a token-count proxy like the rest of
+    /// the context panel.
+    pub fn tool_metadata_token_count(&self) -> u64 {
+        let defs = self.session_processor.tool_registry.definitions();
+        let catalog_bytes = estimate_tool_definition_bytes(&defs);
+        let format = Self::tool_format_for_provider(
+            self.active_provider_id()
+                .unwrap_or_else(|| "openai".into())
+                .as_str(),
+        );
+        let wire_bytes = cached_tools(format, &defs).byte_len as u64;
+        wire_bytes.saturating_sub(catalog_bytes)
+    }
+
+    /// Compute the token size of the conversation history held in the active
+    /// session.
+    ///
+    /// FR-008: sums the same per-message byte accounting used by the agent
+    /// request-size estimator (`estimate_request_bytes_with_tool_bytes`):
+    /// role label length + a fixed ~40-byte per-message JSON overhead plus
+    /// each content part — text, reasoning, tool-call identifier/input and
+    /// tool-result output. The estimate is a byte count treated as a
+    /// token-count proxy, consistent with the rest of the context panel.
+    pub fn conversation_history_token_count(&self) -> u64 {
+        self.messages
+            .iter()
+            .map(|msg| {
+                let content_len: usize = msg
+                    .parts
+                    .iter()
+                    .map(|part| match part {
+                        MessagePart::Text { text } => text.len(),
+                        MessagePart::Reasoning { text } => text.len(),
+                        MessagePart::ToolCall { call_id, state, .. } => {
+                            call_id.len()
+                                + state.input.to_string().len()
+                                + state.output.as_ref().map_or(0, |v| v.to_string().len())
+                                + state.error.as_ref().map_or(0, String::len)
+                        }
+                        MessagePart::Image(_) => 0,
+                    })
+                    .sum();
+                msg.role.to_string().len() + content_len + 40
+            })
+            .sum::<usize>() as u64
+    }
+
+    /// Return the number of messages currently held in the active session's
+    /// conversation history (FR-008).
+    pub fn conversation_message_count(&self) -> usize {
+        self.messages.len()
+    }
+
+    /// Compute the token size of the assembled system prompt.
+    ///
+    /// FR-005: returns the byte length of the system prompt the agent loop
+    /// would assemble for the next turn — base agent prompt, project context
+    /// (working directory, AGENTS.md, git status, README), memory injections
+    /// and the skills catalog. The file tree is intentionally omitted
+    /// (empty) because it is rendered from the TUI's own cached snapshot and
+    /// the builder only appends a non-empty tree; the estimate therefore
+    /// tracks the stable prompt core. Treated as a token-count proxy like
+    /// the other context panel partitions.
+    pub fn system_prompt_token_count(&self) -> u64 {
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let config = self.current_config();
+        let memory_config = config.memory.clone();
+        let skills = self
+            .session_processor
+            .skill_registry(&working_dir, &config.skill_dirs);
+        let agent = self.prepare_agent_for_dispatch();
+        let prompt = ragent_agent::agent::build_system_prompt_with_storage_and_memory_and_config(
+            &agent,
+            &working_dir,
+            "",
+            skills.as_ref(),
+            None,
+            None,
+            None,
+            Some(&self.storage),
+            Some(&memory_config),
+            None,
+            Some(&config),
+        );
+        prompt.len() as u64
+    }
+
+    /// Compute the token size of the project-guideline (`AGENTS.md`) block
+    /// the system prompt carries.
+    ///
+    /// FR-009: this is a sub-partition of the assembled system prompt (see
+    /// [`App::system_prompt_token_count`]), surfaced separately so the panel
+    /// can show where the prompt's weight comes from. Uses the same
+    /// discovery-and-load precedence as the prompt builder.
+    pub fn agents_md_token_count(&self) -> u64 {
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let (content, _) =
+            ragent_agent::agent::collect_agents_md_content_with_discovery(&working_dir);
+        content.len() as u64
+    }
+
+    /// Compute the token size of the memory injections the system prompt
+    /// carries (structured memories, MEMORY.md blocks, project analysis).
+    ///
+    /// FR-009: sub-partition of the assembled system prompt; the same
+    /// section builder the agent loop passes through `spawn_blocking` is
+    /// measured here synchronously.
+    pub fn memory_injection_token_count(&self) -> u64 {
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let config = self.current_config();
+        ragent_agent::agent::build_memory_prompt_section(
+            &working_dir,
+            Some(&self.storage),
+            Some(&config.memory),
+        )
+        .len() as u64
+    }
+
+    /// Compute the token size of the skills context injected into the system
+    /// prompt.
+    ///
+    /// FR-009: sub-partition of the assembled system prompt, measured via the
+    /// shared [`ragent_agent::agent::skills_prompt_section`] formatter so it
+    /// can never drift from what the model actually receives. Zero when no
+    /// agent-invocable skills resolve for the active agent.
+    pub fn skills_token_count(&self) -> u64 {
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let config = self.current_config();
+        let Some(registry) = self
+            .session_processor
+            .skill_registry(&working_dir, &config.skill_dirs)
+        else {
+            return 0;
+        };
+        let agent = self.agent_info.clone();
+        ragent_agent::agent::skills_prompt_section(&registry, &agent).len() as u64
+    }
+
+    /// Return the context-window capacity (tokens) of the model that will
+    /// serve the next request.
+    ///
+    /// FR-010/FR-011: resolves the active model the same way as
+    /// [`App::active_provider_id`] (selected model, then agent model, then
+    /// the first registry default) and queries the provider registry's
+    /// static catalog for its context window. Falls back to the cached
+    /// context window recorded during model selection for dynamically
+    /// discovered models that the registry does not list. Returns `None`
+    /// when the provider does not advertise a limit — the panel shows
+    /// "unknown" percentages rather than guessing (FR-011).
+    pub fn active_context_window_tokens(&self) -> Option<usize> {
+        if let Some(model_str) = self.selected_model.as_deref()
+            && let Some((provider_id, model_id)) = model_str.split_once('/')
+            && let Some(window) = self
+                .provider_registry
+                .resolve_model(provider_id, model_id)
+                .map(|m| m.context_window)
+                .filter(|w| *w > 0)
+        {
+            return Some(window);
+        }
+        if let Some(model) = &self.agent_info.model
+            && let Some(window) = self
+                .provider_registry
+                .resolve_model(&model.provider_id, &model.model_id)
+                .map(|m| m.context_window)
+                .filter(|w| *w > 0)
+        {
+            return Some(window);
+        }
+        self.selected_model_ctx_window.filter(|w| *w > 0)
+    }
+
+    /// Collect a snapshot of every context partition for the Context panel.
+    ///
+    /// FR-012: gathers all top-level partitions (system prompt, tool catalog,
+    /// tool metadata wrapper, conversation history), the sub-partition
+    /// breakdown of the system prompt (skills, memory, AGENTS.md) and the
+    /// model's context-window capacity (FR-010/FR-011) in one call so the
+    /// panel renders from a consistent instant.
+    ///
+    /// T-013/FR-015: disk- and SQLite-backed partitions (system prompt build,
+    /// AGENTS.md discovery, memory section, skill registry) make this
+    /// unsuitable for per-frame renders on the UI thread. The panel render
+    /// path uses the cached snapshot from [`App::context_snapshot_cache`]
+    /// instead; this method is the synchronous fallback (first frame) and the
+    /// reference implementation the blocking refresh task mirrors via
+    /// [`compute_disk_context_partitions`].
+    pub fn context_partition_snapshot(&self) -> ContextPartitionSnapshot {
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let config = self.current_config();
+        // Pre-compute the UI-thread-safe partitions (registry caches only)
+        // before handing the disk/SQLite-bound work to the shared helper.
+        let history_tokens = self.conversation_history_token_count();
+        let history_message_count = self.conversation_message_count();
+        let tool_catalog_tokens = self.tool_catalog_token_count();
+        let tool_metadata_tokens = self.tool_metadata_token_count();
+        let context_window_tokens = self.active_context_window_tokens();
+
+        let disk = compute_disk_context_partitions(
+            &working_dir,
+            &self.prepare_agent_for_dispatch(),
+            &self.storage,
+            &config,
+            &self.session_processor,
+        );
+        disk.into_snapshot(
+            tool_catalog_tokens,
+            tool_metadata_tokens,
+            history_tokens,
+            history_message_count,
+            context_window_tokens,
+        )
+    }
+
+    /// Schedule a background refresh of the Context panel snapshot.
+    ///
+    /// T-013/FR-015: the disk- and SQLite-bound partition computations never
+    /// run on the UI thread. This spawns [`compute_disk_context_partitions`]
+    /// on `tokio::task::spawn_blocking`, combining its result with the
+    /// UI-thread-safe partitions captured here. Calls are coalesced: while a
+    /// refresh is in flight, further scheduling is a no-op. The finished
+    /// snapshot is deposited into [`App::context_snapshot_result`] and
+    /// adopted by [`App::poll_context_snapshot_refresh`] on a later frame.
+    pub fn schedule_context_snapshot_refresh(&mut self) {
+        // Only schedule when the panel is actually open: the snapshot exists
+        // purely for the panel render, and skipping while closed also keeps
+        // non-TUI code paths that poll without a tokio reactor (unit tests,
+        // headless flows) from reaching `spawn_blocking` needlessly.
+        if self.context_refresh_inflight || !self.show_context_panel {
+            return;
+        }
+        self.context_refresh_inflight = true;
+
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let agent = self.prepare_agent_for_dispatch();
+        let storage = Arc::clone(&self.storage);
+        let session_processor = Arc::clone(&self.session_processor);
+        // Cheap, cache-backed partitions captured on the UI thread.
+        let history_tokens = self.conversation_history_token_count();
+        let history_message_count = self.conversation_message_count();
+        let tool_catalog_tokens = self.tool_catalog_token_count();
+        let tool_metadata_tokens = self.tool_metadata_token_count();
+        let context_window_tokens = self.active_context_window_tokens();
+        let result_slot = Arc::clone(&self.context_snapshot_result);
+
+        tokio::task::spawn_blocking(move || {
+            let config = match ragent_agent::Config::load() {
+                Ok(cfg) => cfg,
+                Err(_) => ragent_agent::Config::default(),
+            };
+            let disk = compute_disk_context_partitions(
+                &working_dir,
+                &agent,
+                &storage,
+                &config,
+                &session_processor,
+            );
+            let snapshot = disk.into_snapshot(
+                tool_catalog_tokens,
+                tool_metadata_tokens,
+                history_tokens,
+                history_message_count,
+                context_window_tokens,
+            );
+            if let Ok(mut guard) = result_slot.lock() {
+                *guard = Some(snapshot);
+            } else {
+                tracing::error!("context_snapshot_result mutex poisoned, snapshot dropped");
+            }
+        });
+    }
+
+    /// Adopt a completed background context snapshot, if one has landed.
+    ///
+    /// T-013/FR-015: called from the TUI main loop every frame. Drains
+    /// [`App::context_snapshot_result`], stores the snapshot in the render
+    /// cache, clears the in-flight latch and flags a redraw.
+    pub fn poll_context_snapshot_refresh(&mut self) {
+        let deposited = {
+            let mut guard = recover_poisoned(
+                self.context_snapshot_result.lock(),
+                "context_snapshot_result",
+            );
+            guard.take()
+        };
+        if let Some(snapshot) = deposited {
+            self.context_snapshot_cache = Some(snapshot);
+            self.context_refresh_inflight = false;
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Snapshot for the Context panel render: the cached background result
+    /// when available, else the synchronous computation as a first-frame
+    /// fallback (the async refresh then replaces it with identical values).
+    pub fn context_effective_snapshot(&self) -> ContextPartitionSnapshot {
+        if let Some(snapshot) = &self.context_snapshot_cache {
+            return *snapshot;
+        }
+        self.context_partition_snapshot()
     }
 
     pub(crate) fn should_auto_compact_before_send(&self) -> bool {
@@ -85,11 +547,11 @@ impl App {
 
     pub(crate) fn start_compaction(&mut self, auto_triggered: bool) -> bool {
         if self.session_id.is_none() {
-            self.status = "⚠ No active session to compact".to_string();
+            self.status = "[warn] No active session to compact".to_string();
             return false;
         }
         if self.messages.is_empty() {
-            self.status = "⚠ No messages to compact".to_string();
+            self.status = "[warn] No messages to compact".to_string();
             return false;
         }
         let sid = self.session_id.clone().unwrap_or_default();
@@ -99,23 +561,23 @@ impl App {
     /// Run a shell command (input started with `!`) and render its output in
     /// the chat panel, then dispatch the output to the model for review.
     ///
-    /// The command is executed via `sh -c` in a spawned tokio task so the UI
-    /// stays responsive. The command and its combined stdout/stderr are shown
-    /// in the chat — first as a user message showing the command, then the
-    /// output is published as an agent notice so the user can see what the
-    /// command produced — and the model is asked to review the output for
-    /// errors and resolve them as required.
+    /// The command is executed through [`ragent_tools_core::bash::BashTool`]
+    /// so it passes through the same 7-layer security model (safe-command
+    /// whitelist, banned/denied patterns, directory-escape prevention, syntax
+    /// validation, obfuscation detection, and user allow/deny lists) and the
+    /// default 120-second timeout used by the regular `bash` tool. This keeps
+    /// bang commands (`! ...`) from bypassing ragent's shell protections.
     pub(crate) fn dispatch_bang_command(&mut self, raw: String) {
         // Strip the leading `!` and trim surrounding whitespace.
         let command = raw.strip_prefix('!').unwrap_or(&raw).trim().to_string();
         if command.is_empty() {
-            self.status = "⚠ Empty shell command".to_string();
+            self.status = "[warn] Empty shell command".to_string();
             return;
         }
 
         self.auto_compact_failed = false;
         let Some(sid) = self.session_id.clone() else {
-            self.status = "⚠ No active session".to_string();
+            self.status = "[warn] No active session".to_string();
             return;
         };
 
@@ -141,23 +603,26 @@ impl App {
         let event_bus = self.event_bus.clone();
         let flag = Arc::new(AtomicBool::new(false));
         self.cancel_flag = Some(flag.clone());
-        tokio::spawn(async move {
-            // Run the command on a blocking thread to avoid stalling the
-            // async runtime.
-            let output = tokio::task::spawn_blocking(move || {
-                std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(&command)
-                    .output()
-            })
-            .await;
 
-            let combined = match output {
-                Ok(Ok(out)) => {
-                    ragent_agent::bang_command::combine_command_output(&out.stdout, &out.stderr)
-                }
-                Ok(Err(e)) => format!("failed to execute command: {e}"),
-                Err(e) => format!("internal error: {e}"),
+        // Build a minimal tool context so the validated `bash` tool can run
+        // the command with the same security and timeout as a normal tool call.
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let tool_ctx = ToolContext {
+            session_id: sid.clone(),
+            working_dir,
+            event_bus: event_bus.clone(),
+            read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+        };
+
+        tokio::spawn(async move {
+            let input = serde_json::json!({"command": command, "timeout": 120});
+            let combined = match ragent_tools_core::bash::BashTool
+                .execute(input, &tool_ctx)
+                .await
+            {
+                Ok(out) => out.content,
+                Err(e) => format!("failed to execute command: {e}"),
             };
 
             // Render the shell command output in the chat panel so the user
@@ -185,7 +650,7 @@ impl App {
     ) {
         self.auto_compact_failed = false;
         let Some(sid) = self.session_id.clone() else {
-            self.status = "⚠ No active session".to_string();
+            self.status = "[warn] No active session".to_string();
             return;
         };
 
@@ -196,7 +661,7 @@ impl App {
                 .iter()
                 .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
                 .collect();
-            format!("[📎 {}] {}", names.join(", "), text)
+            format!("[attach {}] {}", names.join(", "), text)
         };
         let msg = Message::user_text(&sid, &display_text);
         self.messages.push(msg);
@@ -373,6 +838,7 @@ impl App {
             SelectionPane::Memory => self.memory_area,
             SelectionPane::Telemetry => self.telemetry_area,
             SelectionPane::Input => self.input_area,
+            SelectionPane::ContextPanel => self.context_panel_area,
         }
     }
 
@@ -1429,6 +1895,11 @@ impl App {
             && self.telemetry_area.contains(pos)
         {
             Some(SelectionPane::Telemetry)
+        } else if self.show_context_panel
+            && self.context_panel_area.area() > 0
+            && self.context_panel_area.contains(pos)
+        {
+            Some(SelectionPane::ContextPanel)
         } else if self.input_area.area() > 0 && self.input_area.contains(pos) {
             Some(SelectionPane::Input)
         } else {
@@ -1507,7 +1978,10 @@ impl App {
                     self.warn_if_path_outside_safe_scope(&path);
                     self.push_log_no_agent(
                         LogLevel::Info,
-                        format!("📎 Image attached from clipboard path: {}", path.display()),
+                        format!(
+                            "[attach] Image attached from clipboard path: {}",
+                            path.display()
+                        ),
                     );
                     self.pending_attachments.push(path);
                     return;
@@ -1521,7 +1995,7 @@ impl App {
                 Ok(path) => {
                     self.push_log_no_agent(
                         LogLevel::Info,
-                        format!("📎 Image saved from clipboard: {}", path.display()),
+                        format!("[attach] Image saved from clipboard: {}", path.display()),
                     );
                     self.pending_attachments.push(path);
                 }
@@ -1558,8 +2032,8 @@ impl App {
             self.push_log_no_agent(
                 LogLevel::Warn,
                 format!(
-                    "⚠ Clipboard image path is outside the working directory and home: {}. \
-                     Attaching anyway.",
+                    "[warn] Clipboard image path is outside the working directory and home: {}. \
+                       Attaching anyway.",
                     path.display()
                 ),
             );
@@ -1613,6 +2087,9 @@ impl App {
             ScrollbarDragPane::Tasks => (self.tasks_area, self.tasks_max_scroll),
             ScrollbarDragPane::Memory => (self.memory_area, self.memory_max_scroll),
             ScrollbarDragPane::Telemetry => (self.telemetry_area, self.telemetry_max_scroll),
+            ScrollbarDragPane::ContextPanel => {
+                (self.context_panel_area, self.context_panel_max_scroll)
+            }
         };
         if area.height <= 1 || max_scroll == 0 {
             return;
@@ -1642,9 +2119,9 @@ impl App {
             | ScrollbarDragPane::Log
             | ScrollbarDragPane::Profile
             | ScrollbarDragPane::Tasks => ((1.0 - fraction) * max_scroll as f32).round() as u16,
-            ScrollbarDragPane::Memory | ScrollbarDragPane::Telemetry => {
-                (fraction * max_scroll as f32).round() as u16
-            }
+            ScrollbarDragPane::Memory
+            | ScrollbarDragPane::Telemetry
+            | ScrollbarDragPane::ContextPanel => (fraction * max_scroll as f32).round() as u16,
         };
 
         match pane {
@@ -1654,6 +2131,7 @@ impl App {
             ScrollbarDragPane::Tasks => self.tasks_scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Memory => self.memory_scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Telemetry => self.telemetry_scroll_offset = offset.min(max_scroll),
+            ScrollbarDragPane::ContextPanel => self.context_scroll_offset = offset.min(max_scroll),
         }
     }
 

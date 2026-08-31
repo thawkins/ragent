@@ -25,6 +25,7 @@ use crate::app::state::{
 
 // Helpers
 use crate::app::helpers::{short_session_id, summarise_error};
+use crate::app::session_ops::recover_poisoned;
 use crate::widgets::message_widget::truncate_str;
 
 // Re-export status types from theme
@@ -34,13 +35,7 @@ impl App {
     /// team summary (or surface an error) into the chat log.
     pub(crate) fn poll_pending_swarm(&mut self) {
         let outcome = {
-            let mut guard = match self.swarm_result.lock() {
-                Ok(g) => g,
-                Err(poisoned) => {
-                    tracing::error!("swarm_result mutex poisoned, recovering");
-                    poisoned.into_inner()
-                }
-            };
+            let mut guard = recover_poisoned(self.swarm_result.lock(), "swarm_result");
             guard.take()
         };
         let Some(outcome) = outcome else { return };
@@ -55,9 +50,9 @@ impl App {
                         self.execute_swarm_decomposition(decomposition);
                     }
                     Err(msg) => {
-                        self.status = "⚠ swarm: decomposition parse error".to_string();
+                        self.status = "[warn] swarm: decomposition parse error".to_string();
                         self.append_assistant_text(&format!(
-                            "From: /swarm\n## ❌ Decomposition Failed\n\n{}\n",
+                            "From: /swarm\n## [err] Decomposition Failed\n\n{}\n",
                             msg
                         ));
                         self.push_log_no_agent(
@@ -68,9 +63,9 @@ impl App {
                 }
             }
             Err(msg) => {
-                self.status = format!("⚠ swarm failed: {}", msg);
+                self.status = format!("[warn] swarm failed: {}", msg);
                 self.append_assistant_text(&format!(
-                    "From: /swarm\n## ❌ Swarm Error\n\n{}\n",
+                    "From: /swarm\n## [err] Swarm Error\n\n{}\n",
                     msg
                 ));
                 self.push_log_no_agent(LogLevel::Warn, format!("Swarm error: {}", msg));
@@ -449,6 +444,10 @@ impl App {
                 }
                 self.force_new_message = true;
                 self.push_log_no_agent(LogLevel::Info, format!("response finished ({reason:?})"));
+                // T-010/FR-013: the conversation changed, so refresh the
+                // Context panel snapshot off the UI thread (no-op when the
+                // panel is closed or a refresh is already in flight).
+                self.schedule_context_snapshot_refresh();
 
                 // Compaction no longer runs through the agent loop
                 // (SessionProcessor::compact_session is a direct runner call),
@@ -721,8 +720,9 @@ impl App {
                 // plain text.  Normal LLM streaming text bypasses markdown
                 // rendering (it arrives in fragments), but the agent_complete
                 // summary is a complete, self-contained message.
-                let rendered = self
-                    .render_markdown_unconditionally(&format!("✅ **Task Complete**\n\n{summary}"));
+                let rendered = self.render_markdown_unconditionally(&format!(
+                    "[ok] **Task Complete**\n\n{summary}"
+                ));
                 self.force_new_message = true;
                 self.append_assistant_text(&rendered);
             }
@@ -746,9 +746,8 @@ impl App {
                             decoded.phase.as_str(),
                             crate::app::helpers::sanitize_for_display(&decoded.detail)
                         ),
-                    );
-                    // Keep the status bar in sync with the running phase.
-                    // The `⏳` prefix marks this as async-in-progress so
+                    ); // Keep the status bar in sync with the running phase.
+                    // The `[wait]` prefix marks this as async-in-progress so
                     // [`App::arm_status_expiry`] will not auto-clear it to
                     // "ready" while the background research is still running.
                     // Errors outside the web phase surface as a warning
@@ -756,10 +755,10 @@ impl App {
                     if decoded.status == crate::research_progress::StepStatus::Error
                         && decoded.phase != crate::research_progress::SessionPhase::Web
                     {
-                        self.status = format!("⚠ research: {}", decoded.detail);
+                        self.status = format!("[warn] research: {}", decoded.detail);
                     } else if decoded.total_sources.is_none() {
                         self.status = format!(
-                            "⏳ research: {} — {} ({}) — running",
+                            "[wait] research: {} — {} ({}) — running",
                             decoded.name,
                             decoded.phase.as_str(),
                             decoded.status.icon(),
@@ -795,9 +794,8 @@ impl App {
                             decoded.pdf_count,
                             decoded.youtube_count,
                             decoded.excluded_count,
-                        );
-                        // The final progress event marks the run complete.
-                        // Drop the `⏳` in-progress status for a terminal
+                        ); // The final progress event marks the run complete.
+                        // Drop the `[wait]` in-progress status for a terminal
                         // message and arm the auto-expiry timer so it
                         // transitions to "ready" after the grace period.
                         let mut status =
@@ -820,6 +818,13 @@ impl App {
                             status.push_str(&format!(", {} excluded", decoded.excluded_count));
                         }
                         self.status = status;
+                        self.arm_status_expiry();
+                    } else if decoded.phase == crate::research_progress::SessionPhase::Finalize
+                        && decoded.status == crate::research_progress::StepStatus::Done
+                    {
+                        // `/research cluster` does not carry a source count;
+                        // its final progress event is a finalize/done step.
+                        self.status = format!("research: {} extraction complete", decoded.name);
                         self.arm_status_expiry();
                     }
                     let name_for_refresh = decoded.name.clone();
@@ -854,7 +859,7 @@ impl App {
                 self.push_log_no_agent(LogLevel::Error, format!("agent error: {}", error)); // Clean summary for the status bar and chat panel
                 let summary = summarise_error(error);
                 self.status = format!("error: {}", summary);
-                self.append_assistant_text(&format!("⚠ {}", summary));
+                self.append_assistant_text(&format!("[warn] {}", summary));
             }
             Event::TokenUsage {
                 ref session_id,
@@ -916,7 +921,7 @@ impl App {
                 ref stderr,
             } if self.is_current_session(session_id) => {
                 // Show a short transient toast in the status bar.  We deliberately
-                // omit the "⚠" prefix so that `arm_status_expiry()` will
+                // omit the "[warn]" prefix so that `arm_status_expiry()` will
                 // auto-clear the toast after the standard grace period.
                 let short_reason = if stderr.len() > 80 {
                     let mut end = 80;
@@ -940,10 +945,13 @@ impl App {
                 ref hook_command,
                 ref reason,
             } if self.is_current_session(session_id) => {
-                self.status = format!("⚠ {} flagged", tool);
+                self.status = format!("[warn] {} flagged", tool);
                 self.push_log_no_agent(
                     LogLevel::Error,
-                    format!("🚩 tool {} flagged by {}: {}", tool, hook_command, reason),
+                    format!(
+                        "[flag] tool {} flagged by {}: {}",
+                        tool, hook_command, reason
+                    ),
                 );
             }
             Event::QuotaUpdate {
@@ -1134,9 +1142,9 @@ impl App {
                 };
                 self.active_tasks.push(entry);
                 let (icon, kind) = if background {
-                    ("⚙️", "Background")
+                    ("[bg]", "Background")
                 } else {
-                    ("🔄", "Foreground")
+                    ("[fg]", "Foreground")
                 };
                 self.push_log_no_agent(
                     LogLevel::Info,
@@ -1166,7 +1174,7 @@ impl App {
                     }
                     self.active_tasks.remove(idx);
                 }
-                let icon = if success { "✅" } else { "❌" };
+                let icon = if success { "[ok]" } else { "[err]" };
                 let suffix = match finish_reason.as_str() {
                     "continued" => " (truncated; continuation retry recovered the tail)",
                     "truncated" => " (TRUNCATED by provider; report is incomplete)",
@@ -1192,7 +1200,10 @@ impl App {
                 }
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("🚫 Task cancelled ({})", &task_id[..8.min(task_id.len())]),
+                    format!(
+                        "[cancel] Task cancelled ({})",
+                        &task_id[..8.min(task_id.len())]
+                    ),
                 );
             }
             Event::SubagentSuspended {
@@ -1205,7 +1216,10 @@ impl App {
                 }
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("⏸ Task suspended ({})", &task_id[..8.min(task_id.len())]),
+                    format!(
+                        "[pause] Task suspended ({})",
+                        &task_id[..8.min(task_id.len())]
+                    ),
                 );
             }
             Event::SubagentResumed {
@@ -1233,7 +1247,11 @@ impl App {
                 let label = if force { "Force-killed" } else { "Killed" };
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("💀 {} task ({})", label, &task_id[..8.min(task_id.len())]),
+                    format!(
+                        "[kill] {} task ({})",
+                        label,
+                        &task_id[..8.min(task_id.len())]
+                    ),
                 );
             }
             Event::BackgroundTaskSpawned {
@@ -1252,7 +1270,7 @@ impl App {
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!(
-                        "⚙️  Background task started: {} ({})",
+                        "[bg]  Background task started: {} ({})",
                         &task_id[..8.min(task_id.len())],
                         command
                     ),
@@ -1281,7 +1299,11 @@ impl App {
                     task.status = status.clone();
                     task.completed_at = Some(chrono::Utc::now());
                 }
-                let icon = if status == "completed" { "✅" } else { "❌" };
+                let icon = if status == "completed" {
+                    "[ok]"
+                } else {
+                    "[err]"
+                };
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!(
@@ -1342,7 +1364,7 @@ impl App {
                 self.show_teams = true;
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("🤝 [{team_name}] Spawned teammate '{teammate_name}' ({agent_id})"),
+                    format!("[team] [{team_name}] Spawned teammate '{teammate_name}' ({agent_id})"),
                 );
             }
             Event::TeammateMessage {
@@ -1443,7 +1465,7 @@ impl App {
                 };
                 self.push_log_no_agent(
                     LogLevel::Error,
-                    format!("❌ [{team_name}] Teammate {agent_id} failed: {short_err}"),
+                    format!("[err] [{team_name}] Teammate {agent_id} failed: {short_err}"),
                 );
             }
             Event::TeamTaskClaimed {
@@ -1488,7 +1510,7 @@ impl App {
                 }
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("✅ [{team_name}] {agent_id} completed task {task_id}"),
+                    format!("[ok] [{team_name}] {agent_id} completed task {task_id}"),
                 );
             }
             Event::TeamCleanedUp {
@@ -1509,7 +1531,7 @@ impl App {
                 }
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("🗑️  Team '{team_name}' cleaned up"),
+                    format!("[clr] Team '{team_name}' cleaned up"),
                 );
             }
             Event::ShellCwdChanged {
@@ -1687,7 +1709,7 @@ impl App {
                     if self.is_current_session(session_id) {
                         self.status = format!("download failed: {}", model_id);
                         self.append_assistant_text(&format!(
-                                        "⚠️ **Model download failed**\n\nProvider: `{}`\nModel: `{}`\nError: {}",
+                                        "[warn] **Model download failed**\n\nProvider: `{}`\nModel: `{}`\nError: {}",
                                         display_name, model_id, err
                                     ));
                     }
@@ -1707,7 +1729,7 @@ impl App {
                 ref error,
             } => {
                 let summary = format!(
-                    "⚠️ **{} failed to start**\n\nCommand: `{}`\nError: {}\n\nstdout:\n```\n{}\n```\n\nstderr:\n```\n{}\n```",
+                    "[warn] **{} failed to start**\n\nCommand: `{}`\nError: {}\n\nstdout:\n```\n{}\n```\n\nstderr:\n```\n{}\n```",
                     service, command_path, error, stdout, stderr
                 );
                 self.push_log_no_agent(LogLevel::Error, summary.clone());
@@ -1753,7 +1775,7 @@ impl App {
                     "GitHub authentication successful".to_string(),
                 );
                 self.append_assistant_text(
-                    "From: /github login\n✅ GitHub authentication successful! Token saved to ~/.ragent/github_token.",
+                    "From: /github login\n[ok] GitHub authentication successful! Token saved to ~/.ragent/github_token.",
                 );
                 self.status = "GitHub authenticated".to_string();
             } else {
@@ -1761,7 +1783,7 @@ impl App {
                     .clone()
                     .unwrap_or_else(|| "GitHub login failed.".to_string());
                 self.push_log_no_agent(LogLevel::Warn, format!("GitHub login failed: {msg}"));
-                self.append_assistant_text(&format!("From: /github login\n❌ {msg}"));
+                self.append_assistant_text(&format!("From: /github login\n[err] {msg}"));
                 self.status = "GitHub login failed".to_string();
             }
         }
@@ -1877,45 +1899,37 @@ impl App {
 
     pub(crate) fn scroll_output_view_by(&mut self, delta: i16) {
         if let Some(ref mut view) = self.output_view {
-            if delta >= 0 {
-                view.scroll_offset = (view.scroll_offset + delta as u16).min(view.max_scroll);
-            } else {
-                view.scroll_offset = view.scroll_offset.saturating_sub((-delta) as u16);
-            }
+            view.scroll_by(delta);
         }
     }
 
     pub(crate) fn jump_output_view_start(&mut self) {
         if let Some(ref mut view) = self.output_view {
-            view.scroll_offset = view.max_scroll;
+            view.jump_start();
         }
     }
 
     pub(crate) fn jump_output_view_end(&mut self) {
         if let Some(ref mut view) = self.output_view {
-            view.scroll_offset = 0;
+            view.jump_end();
         }
     }
 
     pub(crate) fn jump_research_view_start(&mut self) {
         if let Some(ref mut view) = self.research_view {
-            view.scroll_offset = view.max_scroll;
+            view.jump_start();
         }
     }
 
     pub(crate) fn jump_research_view_end(&mut self) {
         if let Some(ref mut view) = self.research_view {
-            view.scroll_offset = 0;
+            view.jump_end();
         }
     }
 
     pub(crate) fn scroll_research_view_by(&mut self, delta: i16) {
         if let Some(ref mut view) = self.research_view {
-            if delta >= 0 {
-                view.scroll_offset = (view.scroll_offset + delta as u16).min(view.max_scroll);
-            } else {
-                view.scroll_offset = view.scroll_offset.saturating_sub((-delta) as u16);
-            }
+            view.scroll_by(delta);
         }
     }
 
@@ -2492,7 +2506,7 @@ impl App {
             None => {
                 self.spec_impl_state = None;
                 self.append_assistant_text(&format!(
-                    "From: /spec impl\n\n⚠️ Invalid spec ID `{}` — run stopped.",
+                    "From: /spec impl\n\n[warn] Invalid spec ID `{}` — run stopped.",
                     state.spec_id,
                 ));
                 return;
@@ -2506,7 +2520,7 @@ impl App {
             Err(e) => {
                 self.spec_impl_state = None;
                 self.append_assistant_text(&format!(
-                    "From: /spec impl\n\n⚠️ Failed to read spec `{}` after task {}: {}",
+                    "From: /spec impl\n\n[warn] Failed to read spec `{}` after task {}: {}",
                     state.spec_id, state.current_rank, e,
                 ));
                 return;
@@ -2534,7 +2548,7 @@ impl App {
         if task_status == ragent_specs::spec::TaskStatus::Blocked {
             self.spec_impl_state = None;
             self.append_assistant_text(&format!(
-                "From: /spec impl\n\n🚫 Task **{}** ({}/{}) is **blocked** — run stopped.\n\n\
+                "From: /spec impl\n\n[stop] Task **{}** ({}/{}) is **blocked** — run stopped.\n\n\
                  Re-run `/spec impl {}` to resume from this task.",
                 current_task_id, state.current_rank, state.total, state.spec_id,
             ));
@@ -2561,7 +2575,7 @@ impl App {
             }) {
                 self.spec_impl_state = None;
                 self.append_assistant_text(&format!(
-                    "From: /spec impl\n\n⚠️ Failed to auto-complete task **{}**: {e}",
+                    "From: /spec impl\n\n[warn] Failed to auto-complete task **{}**: {e}",
                     current_task_id,
                 ));
                 return;
@@ -2615,7 +2629,7 @@ impl App {
             None => {
                 self.spec_impl_state = None;
                 self.append_assistant_text(&format!(
-                    "From: /spec impl\n\n⚠️ No task at rank {} — run stopped.",
+                    "From: /spec impl\n\n[warn] No task at rank {} — run stopped.",
                     next_rank,
                 ));
                 return;
@@ -2627,7 +2641,7 @@ impl App {
             s.current_rank = next_rank;
         }
         self.append_assistant_text(&format!(
-            "From: /spec impl\n\n✅ Task **{}** completed ({}/{}). Next: **{}**.",
+            "From: /spec impl\n\n[ok] Task **{}** completed ({}/{}). Next: **{}**.",
             current_task_id, state.current_rank, state.total, next_task_id,
         ));
         self.dispatch_spec_impl_task(prompt, &state.spec_id, next_rank, state.total);

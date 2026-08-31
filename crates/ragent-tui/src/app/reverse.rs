@@ -200,7 +200,7 @@ impl App {
     /// Handle the `/reverse` slash command (FR-001, FR-004, FR-009, FR-010,
     /// FR-018).
     ///
-    /// Parses the repo identifier, validates auth, shows a `⏳`-prefixed
+    /// Parses the repo identifier, validates auth, shows a `[wait]`-prefixed
     /// status, then spawns an async task that fetches repo metadata + tree +
     /// README, builds a context block, and dispatches it to the LLM via
     /// `process_message`.
@@ -236,7 +236,7 @@ impl App {
         let depth: u32 = match validate_depth(parsed.depth.as_deref()) {
             Ok(n) => n,
             Err(msg) => {
-                self.append_assistant_text(&format!("From: /reverse\n\n❌ **{msg}**"));
+                self.append_assistant_text(&format!("From: /reverse\n\n[err] **{msg}**"));
                 self.status = "reverse: invalid depth".to_string();
                 return;
             }
@@ -246,7 +246,7 @@ impl App {
             VcsProvider::GitHub { .. } => {
                 if ragent_agent::github::auth::load_token().is_none() {
                     self.append_assistant_text(
-                        "From: /reverse\n\n❌ **No GitHub token configured.**\n\n\
+                        "From: /reverse\n\n[err] **No GitHub token configured.**\n\n\
                          Run `/github login` to authenticate, then re-run `/reverse`.",
                     );
                     self.status = "reverse: no token".to_string();
@@ -258,7 +258,7 @@ impl App {
                 let token = self.resolve_gitlab_token_for_reverse();
                 if token.is_none() {
                     self.append_assistant_text(
-                        "From: /reverse\n\n❌ **No GitLab token configured.**\n\n\
+                        "From: /reverse\n\n[err] **No GitLab token configured.**\n\n\
                          Run `/gitlab setup` to configure your GitLab instance and \
                          Personal Access Token, or set the `GITLAB_TOKEN` environment \
                          variable.",
@@ -276,7 +276,7 @@ impl App {
         }
 
         // FR-017: status messages and log entries include the provider label.
-        self.status = format!("⏳ reverse: {provider_label}: {repo_id}…");
+        self.status = format!("[wait] reverse: {provider_label}: {repo_id}…");
         self.push_log_no_agent(
             LogLevel::Info,
             format!("reverse: fetching {repo_id} via {provider_label}"),
@@ -295,7 +295,7 @@ impl App {
         let sid = self.session_id.clone().unwrap_or_default();
         let context_msg = Message::user_text(
             &sid,
-            format!("⏳ Reverse-engineering {provider_label}: {repo_id}…"),
+            format!("[wait] Reverse-engineering {provider_label}: {repo_id}…"),
         );
         self.messages.push(context_msg);
 
@@ -325,7 +325,7 @@ impl App {
 
         // FR-017: user feedback includes the provider label.
         self.append_assistant_text(&format!(
-            "From: /reverse\n\n⏳ **Fetching {repo_id} via {provider_label}…**\n\n\
+            "From: /reverse\n\n[wait] **Fetching {repo_id} via {provider_label}…**\n\n\
              Gathering repository metadata, file tree, and README, then generating \
              a synthetic creation prompt."
         ));

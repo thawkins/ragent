@@ -77,6 +77,13 @@ impl ResearchIo {
         Self::item_dir(research_root, name).join("CORPA.md")
     }
 
+    /// Compute the path of the `CONCEPTS.md` file produced by the `cluster`
+    /// sub-command for a research item (FR-007).
+    #[must_use]
+    pub fn concepts_md_path(research_root: &Path, name: &ResearchName) -> PathBuf {
+        Self::item_dir(research_root, name).join("CONCEPTS.md")
+    }
+
     /// Compute the path of the `sources/` subdirectory for a research item.
     #[must_use]
     pub fn sources_dir(research_root: &Path, name: &ResearchName) -> PathBuf {

@@ -49,7 +49,7 @@ impl StepStatus {
         match self {
             Self::Started => "▶",
             Self::Done => "✓",
-            Self::Error => "⚠",
+            Self::Error => "!",
             Self::Excluded => "−",
             Self::Skipped => "○",
         }
@@ -176,9 +176,11 @@ impl ResearchProgress {
     /// Render the tracker as a markdown log list for the message window.
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str(&format!("🔬 Research Progress — `{}`\n", self.name));
+        out.push_str(&format!("[research] Research Progress — `{}`\n", self.name));
         out.push_str(&format!("Topic: {}\n", self.topic));
         out.push('\n');
+        let prefix_len = "  XX running  — ".chars().count();
+        let continuation = " ".repeat(prefix_len);
         for step in &self.steps {
             let prefix = format!("  {} {:<8} — ", step.status.icon(), step.phase);
             let lines: Vec<&str> = step.detail.lines().collect();
@@ -190,7 +192,6 @@ impl ResearchProgress {
             out.push_str(&prefix);
             out.push_str(lines[0]);
             out.push('\n');
-            let continuation = " ".repeat(prefix.chars().count());
             for line in lines.iter().skip(1) {
                 out.push_str(&continuation);
                 out.push_str(line);
@@ -201,7 +202,7 @@ impl ResearchProgress {
             && let Some(total) = self.total_sources
         {
             out.push('\n');
-            let mut line = format!("✅ Complete — {total} source(s)");
+            let mut line = format!("[ok] Complete — {total} source(s)");
             let mut extras = Vec::new();
             if self.pdf_count > 0 {
                 extras.push(format!(
@@ -231,7 +232,7 @@ impl ResearchProgress {
         } else if self.fetched_count > 0 || self.failed_count > 0 || self.excluded_live > 0 {
             out.push('\n');
             out.push_str(&format!(
-                "📊 Web fetch totals: {} fetched, {} failed{}",
+                "[totals] Web fetch totals: {} fetched, {} failed{}",
                 self.fetched_count,
                 self.failed_count,
                 if self.excluded_live > 0 {
@@ -260,6 +261,37 @@ struct ProgressPayload {
     pdf_count: usize,
     youtube_count: usize,
     excluded_count: usize,
+}
+
+fn encode_payload(payload: ProgressPayload) -> String {
+    let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+    format!("{PROGRESS_SENTINEL}{json}")
+}
+
+/// Encode a simple cluster-run progress update as a sentinel-prefixed
+/// `AgentNotice` message.
+///
+/// This is a lightweight alternative to [`encode_progress_event`] for the
+/// `/research cluster` command, which does not use a full research session but
+/// still needs live phase/status reporting (FR-013).
+pub fn encode_cluster_progress_event(
+    name: &str,
+    topic: &str,
+    phase: SessionPhase,
+    status: &str,
+    detail: &str,
+) -> String {
+    encode_payload(ProgressPayload {
+        name: name.to_string(),
+        topic: topic.to_string(),
+        phase: phase.as_str().to_string(),
+        status: status.to_string(),
+        detail: detail.to_string(),
+        total_sources: None,
+        pdf_count: 0,
+        youtube_count: 0,
+        excluded_count: 0,
+    })
 }
 
 /// Encode a [`SessionEvent`] plus run metadata as a sentinel-prefixed
@@ -789,8 +821,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
         youtube_count,
         excluded_count,
     };
-    let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
-    format!("{PROGRESS_SENTINEL}{json}")
+    encode_payload(payload)
 }
 
 /// Map a pipeline-step name to the session phase that owns it.
@@ -1116,6 +1147,25 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_cluster_progress_event_roundtrip() {
+        let encoded = encode_cluster_progress_event(
+            "rust-async",
+            "async rust",
+            SessionPhase::Synthesize,
+            "started",
+            "sending concept-extraction prompt to gemini/gemini-2.0-flash…",
+        );
+        assert!(encoded.starts_with(PROGRESS_SENTINEL));
+        let decoded = decode_progress_event(&encoded).expect("decode cluster progress");
+        assert_eq!(decoded.name, "rust-async");
+        assert_eq!(decoded.topic, "async rust");
+        assert_eq!(decoded.phase, SessionPhase::Synthesize);
+        assert_eq!(decoded.status, StepStatus::Started);
+        assert!(decoded.detail.contains("concept-extraction prompt"));
+        assert!(decoded.total_sources.is_none());
+    }
+
+    #[test]
     fn test_progress_apply_appends_then_completes() {
         let mut p = ResearchProgress::new("n", "t");
         p.apply(SessionPhase::Web, StepStatus::Started, "searching the web");
@@ -1144,10 +1194,10 @@ mod tests {
         p.apply(SessionPhase::Web, StepStatus::Done, "3 source(s) captured");
         p.finish(3, 0, 0, 0);
         let rendered = p.render();
-        assert!(rendered.contains("🔬 Research Progress"));
+        assert!(rendered.contains("[research] Research Progress"));
         assert!(rendered.contains("✓ setup"));
         assert!(rendered.contains("✓ web"));
-        assert!(rendered.contains("✅ Complete — 3 source(s)"));
+        assert!(rendered.contains("[ok] Complete — 3 source(s)"));
         assert!(rendered.contains("/research open rust-async"));
     }
 
@@ -1209,7 +1259,7 @@ fn test_failed_urls_rolled_into_totals_line() {
         "rendered output should not contain per-URL failure lines:\n{rendered}"
     );
     assert!(
-        rendered.contains("📊 Web fetch totals: 2 fetched, 2 failed"),
+        rendered.contains("[totals] Web fetch totals: 2 fetched, 2 failed"),
         "rendered output should show the totals line:\n{rendered}"
     );
     assert_eq!(
@@ -1245,7 +1295,7 @@ fn test_complete_message_replaces_totals_line() {
         "totals line should be replaced by the complete line:\n{rendered}"
     );
     assert!(
-        rendered.contains("✅ Complete — 1 source(s)"),
+        rendered.contains("[ok] Complete — 1 source(s)"),
         "rendered output should show the final complete line:\n{rendered}"
     );
 }

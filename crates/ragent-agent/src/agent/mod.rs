@@ -2166,6 +2166,52 @@ pub fn build_memory_prompt_section(
     out
 }
 
+/// Format the skills section injected into the system prompt for an agent.
+///
+/// Returns the full `## Available Skills` block exactly as
+/// [`build_system_prompt_with_storage`] appends it (without the trailing
+/// blank line, which the builder adds), or an empty string when the
+/// resolved skill list is empty. Exposed so the TUI context panel can
+/// measure the skills context partition (contextpanel FR-009) without
+/// duplicating the format.
+#[must_use]
+pub fn skills_prompt_section(registry: &crate::skill::SkillRegistry, agent: &AgentInfo) -> String {
+    let catalog = registry.catalog();
+    let skill_entries: Vec<&crate::skill::SkillCatalogEntry> = if agent.skills.is_empty() {
+        // No agent-specific skills configured: show all agent-invocable skills
+        catalog.iter().filter(|e| e.agent_invocable).collect()
+    } else {
+        // Agent has specific skills configured: filter to those names
+        catalog
+            .iter()
+            .filter(|e| e.agent_invocable && agent.skills.contains(&e.name))
+            .collect()
+    };
+
+    if skill_entries.is_empty() {
+        return String::new();
+    }
+
+    let mut section = String::from(
+        "## Available Skills\n\n\
+         You can invoke the following skills by including `/skillname` \
+         (with optional arguments) in your response when contextually \
+         appropriate:\n\n",
+    );
+    for entry in &skill_entries {
+        let hint = entry
+            .argument_hint
+            .as_deref()
+            .map(|h| format!(" {h}"))
+            .unwrap_or_default();
+        section.push_str(&format!(
+            "- `/{}{}`  — {}\n",
+            entry.name, hint, entry.description
+        ));
+    }
+    section
+}
+
 /// Build a system prompt for the given agent using cached context.#[must_use]
 pub fn build_system_prompt(
     agent: &AgentInfo,
@@ -2500,36 +2546,9 @@ fn build_system_prompt_with_storage_inner(
     // of full skill bodies. Bodies are loaded on demand when a skill is
     // invoked, cached per-session in `SessionProcessor::skill_body_cache`.
     if let Some(registry) = skills {
-        let catalog = registry.catalog();
-        let skill_entries: Vec<&crate::skill::SkillCatalogEntry> = if agent.skills.is_empty() {
-            // No agent-specific skills configured: show all agent-invocable skills
-            catalog.iter().filter(|e| e.agent_invocable).collect()
-        } else {
-            // Agent has specific skills configured: filter to those names
-            catalog
-                .iter()
-                .filter(|e| e.agent_invocable && agent.skills.contains(&e.name))
-                .collect()
-        };
-
-        if !skill_entries.is_empty() {
-            prompt.push_str("## Available Skills\n\n");
-            prompt.push_str(
-                "You can invoke the following skills by including `/skillname` \
-                 (with optional arguments) in your response when contextually \
-                 appropriate:\n\n",
-            );
-            for entry in &skill_entries {
-                let hint = entry
-                    .argument_hint
-                    .as_deref()
-                    .map(|h| format!(" {h}"))
-                    .unwrap_or_default();
-                prompt.push_str(&format!(
-                    "- `/{}{}`  — {}\n",
-                    entry.name, hint, entry.description
-                ));
-            }
+        let section = skills_prompt_section(registry, agent);
+        if !section.is_empty() {
+            prompt.push_str(&section);
             prompt.push('\n');
         }
     }

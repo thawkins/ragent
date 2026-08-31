@@ -74,3 +74,7 @@ pub use ragent_llm::{
     ModelInfo, OllamaCloudProvider, OllamaProvider, OpenAiProvider, Provider, ProviderInfo,
     ProviderRegistry, UsageInfo, create_default_registry,
 };
+
+pub mod one_shot;
+
+pub use crate::one_shot::send_one_shot;
