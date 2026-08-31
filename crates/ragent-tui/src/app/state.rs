@@ -287,13 +287,15 @@ impl ContextPartitionSnapshot {
 
     /// Percentage of the context window consumed by a partition value
     /// (FR-010), or `None` when the capacity is unknown (FR-011).
+    /// The result is capped at 100% so the panel never displays values
+    /// above 100% when the estimator briefly exceeds the advertised window.
     #[must_use]
     pub fn percent_of_window(&self, tokens: u64) -> Option<f64> {
         let window = self.context_window_tokens?;
         if window == 0 {
             return None;
         }
-        Some((tokens as f64 / window as f64) * 100.0)
+        Some(((tokens as f64 / window as f64) * 100.0).min(100.0))
     }
 
     /// Percentage of the context window consumed by all top-level

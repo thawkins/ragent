@@ -90,10 +90,10 @@ fn compute_disk_context_partitions(
         .map(|registry| ragent_agent::agent::skills_prompt_section(registry, agent))
         .unwrap_or_default();
     DiskContextPartitions {
-        system_prompt: prompt.len() as u64,
-        skills: skills_section.len() as u64,
-        memory: memory.len() as u64,
-        agents_md: agents_md.len() as u64,
+        system_prompt: bytes_to_tokens(prompt.len()),
+        skills: bytes_to_tokens(skills_section.len()),
+        memory: bytes_to_tokens(memory.len()),
+        agents_md: bytes_to_tokens(agents_md.len()),
     }
 }
 
@@ -129,6 +129,21 @@ impl DiskContextPartitions {
     }
 }
 
+/// Approximate token count from a UTF-8 byte length (contextpanel FR-005..FR-012).
+///
+/// The context panel's partition estimates are byte-based (serialised JSON
+/// lengths of the system prompt, tool catalog, wire envelope and history).
+/// They are converted to token estimates with the standard ~4-bytes-per-token
+/// heuristic for mixed English/code/JSON content so the panel percentages are
+/// directly comparable with the provider-reported prompt tokens the status
+/// bar's `ctx:` indicator shows from the last `TokenUsage` event.
+const BYTES_PER_TOKEN: u64 = 4;
+
+#[inline]
+fn bytes_to_tokens(bytes: usize) -> u64 {
+    bytes as u64 / BYTES_PER_TOKEN
+}
+
 impl App {
     /// Clone the current agent info, apply the selected model/thinking settings,
     /// and inject the role-mode system prompt addition when active.
@@ -160,15 +175,15 @@ impl App {
 
     /// Compute the token size of the visible toolset catalog.
     ///
-    /// FR-006: returns the byte/char estimate for every tool currently exposed
+    /// FR-006: returns the token estimate for every tool currently exposed
     /// to the model (name + description + parameter schema), using the same
     /// shared estimator as the agent request-size path so the panel stays in
-    /// sync with what the LLM actually receives. The estimator is a byte
-    /// count; the context panel treats it as a proxy for token count because
+    /// sync with what the LLM actually receives. The estimator yields a byte
+    /// count which is converted to tokens via [`BYTES_PER_TOKEN`] because
     /// exact tokenisation depends on the active provider.
     pub fn tool_catalog_token_count(&self) -> u64 {
         let defs = self.session_processor.tool_registry.definitions();
-        estimate_tool_definition_bytes(&defs)
+        bytes_to_tokens(estimate_tool_definition_bytes(&defs) as usize)
     }
 
     /// Return the provider id of the model that will serve the next request.
@@ -216,8 +231,8 @@ impl App {
     /// so it always reflects what is actually sent on the wire for the active
     /// provider's format. Computed as the serialised wire byte length minus
     /// the raw definition bytes from [`App::tool_catalog_token_count`],
-    /// saturating at zero; treated as a token-count proxy like the rest of
-    /// the context panel.
+    /// saturating at zero; converted to tokens via [`BYTES_PER_TOKEN`] like
+    /// the rest of the context panel.
     pub fn tool_metadata_token_count(&self) -> u64 {
         let defs = self.session_processor.tool_registry.definitions();
         let catalog_bytes = estimate_tool_definition_bytes(&defs);
@@ -227,7 +242,7 @@ impl App {
                 .as_str(),
         );
         let wire_bytes = cached_tools(format, &defs).byte_len as u64;
-        wire_bytes.saturating_sub(catalog_bytes)
+        bytes_to_tokens(wire_bytes.saturating_sub(catalog_bytes) as usize)
     }
 
     /// Compute the token size of the conversation history held in the active
@@ -237,30 +252,33 @@ impl App {
     /// request-size estimator (`estimate_request_bytes_with_tool_bytes`):
     /// role label length + a fixed ~40-byte per-message JSON overhead plus
     /// each content part — text, reasoning, tool-call identifier/input and
-    /// tool-result output. The estimate is a byte count treated as a
-    /// token-count proxy, consistent with the rest of the context panel.
+    /// tool-result output. The byte total is converted with the
+    /// [`BYTES_PER_TOKEN`] heuristic so the estimate is comparable with
+    /// provider-reported prompt tokens.
     pub fn conversation_history_token_count(&self) -> u64 {
-        self.messages
-            .iter()
-            .map(|msg| {
-                let content_len: usize = msg
-                    .parts
-                    .iter()
-                    .map(|part| match part {
-                        MessagePart::Text { text } => text.len(),
-                        MessagePart::Reasoning { text } => text.len(),
-                        MessagePart::ToolCall { call_id, state, .. } => {
-                            call_id.len()
-                                + state.input.to_string().len()
-                                + state.output.as_ref().map_or(0, |v| v.to_string().len())
-                                + state.error.as_ref().map_or(0, String::len)
-                        }
-                        MessagePart::Image(_) => 0,
-                    })
-                    .sum();
-                msg.role.to_string().len() + content_len + 40
-            })
-            .sum::<usize>() as u64
+        bytes_to_tokens(
+            self.messages
+                .iter()
+                .map(|msg| {
+                    let content_len: usize = msg
+                        .parts
+                        .iter()
+                        .map(|part| match part {
+                            MessagePart::Text { text } => text.len(),
+                            MessagePart::Reasoning { text } => text.len(),
+                            MessagePart::ToolCall { call_id, state, .. } => {
+                                call_id.len()
+                                    + state.input.to_string().len()
+                                    + state.output.as_ref().map_or(0, |v| v.to_string().len())
+                                    + state.error.as_ref().map_or(0, String::len)
+                            }
+                            MessagePart::Image(_) => 0,
+                        })
+                        .sum();
+                    msg.role.to_string().len() + content_len + 40
+                })
+                .sum::<usize>(),
+        )
     }
 
     /// Return the number of messages currently held in the active session's
@@ -271,14 +289,14 @@ impl App {
 
     /// Compute the token size of the assembled system prompt.
     ///
-    /// FR-005: returns the byte length of the system prompt the agent loop
-    /// would assemble for the next turn — base agent prompt, project context
-    /// (working directory, AGENTS.md, git status, README), memory injections
-    /// and the skills catalog. The file tree is intentionally omitted
-    /// (empty) because it is rendered from the TUI's own cached snapshot and
-    /// the builder only appends a non-empty tree; the estimate therefore
-    /// tracks the stable prompt core. Treated as a token-count proxy like
-    /// the other context panel partitions.
+    /// FR-005: returns an estimated token size of the system prompt the agent
+    /// loop would assemble for the next turn — base agent prompt, project
+    /// context (working directory, AGENTS.md, git status, README), memory
+    /// injections and the skills catalog. The file tree is intentionally
+    /// omitted (empty) because it is rendered from the TUI's own cached
+    /// snapshot and the builder only appends a non-empty tree; the estimate
+    /// therefore tracks the stable prompt core. The assembled prompt's byte
+    /// length is converted to tokens via [`BYTES_PER_TOKEN`].
     pub fn system_prompt_token_count(&self) -> u64 {
         let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let config = self.current_config();
@@ -300,7 +318,7 @@ impl App {
             None,
             Some(&config),
         );
-        prompt.len() as u64
+        bytes_to_tokens(prompt.len())
     }
 
     /// Compute the token size of the project-guideline (`AGENTS.md`) block
@@ -314,7 +332,7 @@ impl App {
         let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let (content, _) =
             ragent_agent::agent::collect_agents_md_content_with_discovery(&working_dir);
-        content.len() as u64
+        bytes_to_tokens(content.len())
     }
 
     /// Compute the token size of the memory injections the system prompt
@@ -326,12 +344,14 @@ impl App {
     pub fn memory_injection_token_count(&self) -> u64 {
         let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let config = self.current_config();
-        ragent_agent::agent::build_memory_prompt_section(
-            &working_dir,
-            Some(&self.storage),
-            Some(&config.memory),
+        bytes_to_tokens(
+            ragent_agent::agent::build_memory_prompt_section(
+                &working_dir,
+                Some(&self.storage),
+                Some(&config.memory),
+            )
+            .len(),
         )
-        .len() as u64
     }
 
     /// Compute the token size of the skills context injected into the system
@@ -351,7 +371,7 @@ impl App {
             return 0;
         };
         let agent = self.agent_info.clone();
-        ragent_agent::agent::skills_prompt_section(&registry, &agent).len() as u64
+        bytes_to_tokens(ragent_agent::agent::skills_prompt_section(&registry, &agent).len())
     }
 
     /// Return the context-window capacity (tokens) of the model that will
@@ -1551,14 +1571,14 @@ impl App {
             }
         }
         for (step, substep, tool, icon) in restored_logs {
-            let short_sid = self
+            let _short_sid = self
                 .session_id
                 .as_deref()
                 .map(short_session_id)
                 .unwrap_or_default();
             self.push_log_no_agent(
                 LogLevel::Tool,
-                format!("[{short_sid}:{step}.{substep}] {tool} {icon} (restored)"),
+                format!("[{step}.{substep}] {tool} {icon} (restored)"),
             );
         }
 

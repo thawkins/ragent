@@ -1,5 +1,7 @@
 ## 1. Think Before Coding
 
+CRITICAL: whilst thinking is a good thing, overthinking is not, be concise, dont repeat thinking about small impact items, proceed to action when possible. Overthinking burns tokens, pushes costs up and significantly impacts performance and ROI. 
+
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
 
 Before implementing:

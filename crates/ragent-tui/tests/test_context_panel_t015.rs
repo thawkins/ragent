@@ -102,8 +102,22 @@ fn test_headroom_saturates_for_each_partition_class() {
     let over_history = snapshot(0, 0, 0, 500_000, 0, 0, 0, Some(128_000));
     for snap in [over_system, over_catalog, over_history] {
         assert_eq!(snap.remaining_tokens(), Some(0), "must saturate at zero");
-        assert!(snap.total_percent().expect("window known") > 100.0);
+        assert_eq!(
+            snap.total_percent(),
+            Some(100.0),
+            "percentage must cap at 100%"
+        );
     }
+}
+
+#[test]
+fn test_percent_of_window_caps_at_100() {
+    // FR-010: the panel must never display a usage percentage above 100%,
+    // even when the estimator exceeds the advertised context window.
+    let snap = snapshot(200_000, 0, 0, 0, 0, 0, 0, Some(128_000));
+    assert_eq!(snap.percent_of_window(200_000), Some(100.0));
+    let snap2 = snapshot(0, 0, 0, 300_000, 0, 0, 0, Some(128_000));
+    assert_eq!(snap2.total_percent(), Some(100.0));
 }
 
 #[test]

@@ -104,6 +104,9 @@ pub enum ResearchError {
         /// Failed claims, each prefixed with `CITATION_VERIFICATION_FAILED`.
         claims: Vec<String>,
     },
+    /// The configured analysis provider is not available.
+    #[error("research provider not available: {0}")]
+    ProviderNotAvailable(String),
 }
 
 /// Result alias for [`ResearchManager`].

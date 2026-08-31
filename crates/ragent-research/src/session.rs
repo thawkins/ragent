@@ -832,6 +832,9 @@ pub struct ResearchSession {
     analysis: Arc<dyn AnalysisEngine>,
     planner: Option<Arc<dyn Planner>>,
     critic: Option<Arc<dyn Critic>>,
+    /// Optional JSONL run log shared with the web gatherer. Used to persist
+    /// synthesis and post-processing events in addition to web URL outcomes.
+    gather_log: Option<Arc<std::sync::Mutex<crate::gather_log::GatherLog>>>,
     /// Model used for the analysis, persisted into the `RESEARCH.md`
     /// frontmatter as `Model:` (e.g. `anthropic/claude-sonnet-4`).
     model: Option<String>,
@@ -888,6 +891,7 @@ impl ResearchSession {
             analysis,
             planner: None,
             critic: None,
+            gather_log: None,
             model: None,
             summarizer: None,
         }
@@ -927,10 +931,14 @@ impl ResearchSession {
     }
 
     /// Attach a JSONL gather log (`GatherLog`) to the web gatherer so every
-    /// candidate URL and its capture/rejection outcome is recorded.
+    /// candidate URL and its capture/rejection outcome is recorded. Also keep
+    /// a shared reference on the session so synthesis/post-processing events
+    /// can be persisted to the same file.
     /// No-op when web gathering is not wired.
     #[must_use]
     pub fn with_gather_log(mut self, log: crate::gather_log::GatherLog) -> Self {
+        let shared = Arc::new(std::sync::Mutex::new(log.clone()));
+        self.gather_log = Some(shared.clone());
         if let Some(web) = self.web.take() {
             self.web = Some(web.with_gather_log(log));
         }
@@ -956,6 +964,24 @@ mod fallback;
 mod topic;
 
 impl ResearchSession {
+    /// Append a structured event to the JSONL run log, when one is attached.
+    /// Failures are best-effort: they are reported via `tracing::warn` and never
+    /// abort the research session.
+    fn log_run_event(&self, event: &str, payload: serde_json::Value) {
+        let Some(log) = &self.gather_log else {
+            return;
+        };
+        let record = serde_json::json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "event": event,
+            "payload": payload,
+        });
+        let lock = log.lock().unwrap_or_else(|p| p.into_inner());
+        if let Err(e) = lock.log_event(&record) {
+            tracing::warn!(error = %e, event, "research: run log write failed");
+        }
+    }
+
     /// Run a complete research session end-to-end. The flow is:
     ///
     /// 1. Validate name + emit the setup phase.
@@ -999,11 +1025,20 @@ impl ResearchSession {
                 .map(|p| p.display().to_string())
                 .collect(),
         });
-
         let mut topic = config.input.topic.clone();
         let mut sources = Vec::new();
         let mut web_queries = Vec::new();
         let mut item_title = title.to_string();
+
+        // Fail fast when an LLM engine is wired but its provider is not
+        // registered. Without this check the run gathers sources for ~40s
+        // before the synthesis step silently falls back to the mechanical
+        // digest (FR-005 follow-up).
+        if !self.analysis_is_noop() {
+            if let Err(e) = self.analysis.validate_provider() {
+                return Err(ResearchError::ProviderNotAvailable(e.to_string()));
+            }
+        }
 
         // ── --from-url pre-step ──────────────────────────────────────────
         self.fetch_from_url_seeds(
@@ -1390,6 +1425,13 @@ impl ResearchSession {
         // Decide which fallback path we'll take *before* calling the engine
         // so we can attribute the resulting summary correctly in the UI.
         let has_llm_engine = !self.analysis_is_noop();
+        self.log_run_event(
+            "synthesize_start",
+            serde_json::json!({
+                "sources": synthesis_sources.len(),
+                "has_llm_engine": has_llm_engine,
+            }),
+        );
         let (mut analysis, synth_outcome, synth_detail) =
             match self.synthesize(&name, &topic, &synthesis_sources).await {
                 Ok((result, engine_outcome)) => {
@@ -1424,11 +1466,52 @@ impl ResearchSession {
                     )
                 }
             };
-
         observer.on_event(SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult {
             outcome: synth_outcome,
             detail: synth_detail.clone(),
         }));
+
+        // Persist the synthesis outcome to the run log so offline post-mortems
+        // can see whether the LLM engine failed and why.
+        self.log_run_event(
+            "synthesize_result",
+            serde_json::json!({
+                "outcome": synth_outcome.as_str(),
+                "detail": synth_detail,
+                "sources": synthesis_sources.len(),
+            }),
+        );
+
+        // Populate empty analysis fields with deterministic fallback content
+        // before the audit and patcher run. The mechanical digest is the
+        // narrative that actually ships when the LLM engine fails or is not
+        // wired, so auditing an empty analysis produced a 0/100 verdict that
+        // contradicted the document (FINDINGS.md P0).
+        let had_llm_analysis = synth_outcome == SynthesizeOutcome::Llm;
+        if analysis.summary.is_empty() {
+            analysis.summary = default_summary(&synthesis_sources, &topic);
+        }
+        if analysis.findings.is_empty() {
+            analysis.findings = default_findings(&synthesis_sources, &topic);
+        }
+        if analysis.cross_references.is_empty() {
+            analysis.cross_references = cross_references_from(&synthesis_sources);
+        }
+        if analysis.open_questions.is_empty() && !had_llm_analysis {
+            analysis.open_questions = default_open_questions(&synthesis_sources, &topic);
+        }
+        if analysis.top_implications.is_empty() && !had_llm_analysis {
+            analysis.top_implications = default_top_implications(&analysis.findings, &topic);
+        }
+        if let Some(err) = &synth_detail {
+            analysis.summary = format!(
+                "_Synthesis engine failed ({}): {} — the fallback mechanical digest is shown below._\n\n{}",
+                synth_outcome.as_str(),
+                err,
+                analysis.summary
+            );
+        }
+
         // Run the deterministic 4-critic audit against the final narrative and
         // emit the structured report for the UI and the assembled document.
         let synthesis_audit = crate::synthesis::build_synthesis_audit(
@@ -1443,6 +1526,15 @@ impl ResearchSession {
         observer.on_event(SessionEvent::Synthesis(SynthesisEvent::SynthesisAudit {
             audit: synthesis_audit.clone(),
         }));
+        self.log_run_event(
+            "synthesis_audit",
+            serde_json::json!({
+                "overall_score": synthesis_audit.overall_score,
+                "recommendation": synthesis_audit.recommendation,
+                "sources_used": synthesis_audit.sources_used,
+                "critic_reports": synthesis_audit.critic_reports.len(),
+            }),
+        );
 
         if let Some(step) = router.next_step()
             && step == RunStep::Synthesize

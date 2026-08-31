@@ -72,14 +72,15 @@ impl App {
         };
         self.compact_in_progress = false;
         self.needs_redraw = true;
-        // T-010/FR-013: compaction rewrote the history, so refresh the
-        // Context panel snapshot off the UI thread.
-        self.schedule_context_snapshot_refresh();
-
         let was_auto_compaction = self.auto_compact_in_progress;
         match outcome {
             Ok(new_messages) => {
                 self.apply_compaction_messages(new_messages);
+                // T-010/FR-013: schedule the Context panel snapshot refresh
+                // AFTER the in-memory history has been replaced, so the
+                // captured conversation token count reflects the compacted
+                // history rather than the old, larger one.
+                self.schedule_context_snapshot_refresh();
                 if was_auto_compaction {
                     self.auto_compact_in_progress = false;
                     self.push_log_no_agent(LogLevel::Info, "Auto-compaction completed".to_string());

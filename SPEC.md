@@ -4,9 +4,9 @@
 <h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
 
 <p style="margin-top: 4em; font-size: 1.1em;">
-      <strong>Version:</strong> 1.0.70</p>
+      <strong>Version:</strong> 1.0.72</p>
     <p style="font-size: 1.1em;">
-      <strong>Date:</strong> 2026-09-02
+      <strong>Date:</strong> 2026-08-31
     </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;

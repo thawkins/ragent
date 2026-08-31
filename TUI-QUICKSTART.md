@@ -4,6 +4,11 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (1.0.72)
+
+- **Token counting fixes** — fix issues in token counting across the TUI context panel
+  and related estimator paths
+
 ## Highlights (1.0.70)
 
 - **Multiple agent TUI fixes** — fixes for multi-agent TUI interactions, scroll pinning,
@@ -648,6 +653,9 @@ Press **`Alt+X`** to toggle the **Context panel** on the right side of the
 screen. It shows a live, quantified breakdown of what currently occupies the
 active session's context window:
 
+- **Context window** — the advertised capacity of the currently selected
+  model, shown directly above the **System prompt** row so the denominator
+  for every percentage is explicit.
 - **System prompt** — the assembled prompt sent to the model (agent prompt,
   project context, memory injection, skills catalog), with indented
   sub-rows for the `skills`, `memory` and `agents.md` contributions.
@@ -659,7 +667,10 @@ active session's context window:
 - **Total** — the sum of the top-level partitions, plus the remaining
   free headroom.
 
-Each row shows the estimate in tokens (byte-count proxy) and a percentage bar
+Each row shows the estimate in tokens (raw byte count converted with the
+standard ~4-bytes-per-token heuristic, so it stays comparable with the
+`ctx:` indicator in the status bar, which shows the provider-reported prompt
+tokens from the last turn) and a percentage bar
 of the active model's advertised context window. When the provider does not
 report a window size, rows show `unknown` alongside the absolute counts.
 Values refresh automatically after messages, tool calls, model switches and

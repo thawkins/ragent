@@ -96,6 +96,14 @@ pub trait AnalysisEngine: Send + Sync {
         false
     }
 
+    /// Validate that the engine's configured provider/model is available
+    /// before the expensive gathering phase runs. The default implementation
+    /// succeeds; LLM-backed engines override this to check the provider
+    /// registry.
+    fn validate_provider(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// Analyze the provided sources and topic, returning structured content
     /// plus an [`AnalysisOutcome`] that tells the caller whether the result
     /// came from a clean LLM parse or from the deterministic fallback path
@@ -156,6 +164,10 @@ impl AnalysisEngine for NoopAnalysisEngine {
 
     fn is_noop_marker(&self) -> bool {
         true
+    }
+
+    fn validate_provider(&self) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 
@@ -295,6 +307,17 @@ impl LlmAnalysisEngine {
 
 #[async_trait::async_trait]
 impl AnalysisEngine for LlmAnalysisEngine {
+    fn validate_provider(&self) -> anyhow::Result<()> {
+        if self.provider_registry.get(&self.provider_id).is_none() {
+            anyhow::bail!(
+                "unknown provider '{}' for model '{}'",
+                self.provider_id,
+                self.model_id
+            );
+        }
+        Ok(())
+    }
+
     async fn analyze(&self, topic: &str, sources: &[SourceBody]) -> anyhow::Result<AnalysisResult> {
         let (result, _) = self.analyze_with_outcome(topic, sources).await?;
         Ok(result)

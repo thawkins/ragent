@@ -2118,6 +2118,8 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
             body,
             relevance,
             oa_recovery,
+            language,
+            author,
             ..
         } => {
             let recovery_note = match oa_recovery {
@@ -2136,6 +2138,8 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
                 "# Web source\n\n\
                  - URL: {url}\n\
                  - Title: {title}\n\
+                 - Author(s): {author}\n\
+                 - Language: {language}\n\
                  - Published (UTC): {published}\n\
                  - Captured (UTC): {captured}\n\
                  - Relevance: {relevance}\n\
@@ -2143,6 +2147,8 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
                  ```text\n{body}\n```\n",
                 url = url,
                 title = title,
+                author = author.as_deref().unwrap_or("—"),
+                language = language.as_deref().unwrap_or("—"),
                 published = published_at.map_or_else(|| "—".to_string(), |dt| dt.to_rfc3339()),
                 captured = captured_at.to_rfc3339(),
                 relevance = if relevance.is_empty() {
@@ -3191,14 +3197,40 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: Some("English".into()),
+            oa_recovery: None,
+            author: Some("Alice Writer".into()),
+        };
+        let out = render_supporting_file(&source).expect("web must produce a body");
+        assert!(out.contains("# Web source"));
+        assert!(out.contains("URL: https://example.com"));
+        assert!(out.contains("Author(s): Alice Writer"));
+        assert!(out.contains("Language: English"));
+        assert!(out.contains("page body content"));
+    }
+
+    #[test]
+    fn render_supporting_file_web_block_shows_dash_for_missing_author_and_language() {
+        let source = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
+            body: "page body content".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
             language: None,
             oa_recovery: None,
             author: None,
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
-        assert!(out.contains("# Web source"));
-        assert!(out.contains("URL: https://example.com"));
-        assert!(out.contains("page body content"));
+        assert!(out.contains("Author(s): —"));
+        assert!(out.contains("Language: —"));
     }
 
     #[test]

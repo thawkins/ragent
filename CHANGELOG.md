@@ -1,5 +1,20 @@
 # Changelog
 
+## Version: 1.0.72
+
+### Fixed
+
+- **Token counting fixes** — fix issues in token counting across the TUI context panel
+  and related estimator paths.
+
+### Hygiene
+
+- Full CI-equivalent hygiene pass: `cargo check`, `cargo check --tests`,
+  `cargo test`, dead-code lint with `-D unreachable_pub -D dead_code -D unused_imports`,
+  `scripts/check-dead-code-reasons.sh`, clippy `-D warnings`, `cargo fmt
+  --check`, `cargo audit` (no vulnerabilities; 1 allowed yanked-crate
+  warning), and `cargo deny check` all clean.
+
 ## Version: 1.0.71
 
 ### Added
@@ -26,9 +41,19 @@
 - **Research clustering** — new `crates/ragent-research/src/cluster.rs` with
   clustering support for research corpus analysis and 14 new context-panel
   test files plus a research-cluster test suite.
+- **Context panel model-capacity row** — a dedicated "Context window" line
+  is now rendered directly above the "System prompt" row so the denominator
+  behind every percentage is explicit.
 
 ### Fixed
 
+- **Context panel ">100% full" percentages for local Ollama models** — the
+  parameter-size heuristic used to advertise context windows (8k for 3B,
+  32k for 7B/8B, 64k for 32B) was far too conservative for modern local
+  models such as Llama 3.2 1B/3B, Phi4-mini, Qwen2.5 and Gemma 2, which
+  support 128k contexts. Ollama (local and cloud) now advertises 131,072
+  tokens for any model with at least 1B parameters, with a 32k fallback for
+  sub-1B models.
 - **Clippy `struct_field_names` (`DiskContextPartitions`)** — renamed the
   partition fields (dropping the uniform `*_tokens` postfix) and extracted a
   shared `DiskContextPartitions::into_snapshot` combinator so the sync

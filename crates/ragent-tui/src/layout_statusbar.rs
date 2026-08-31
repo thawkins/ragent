@@ -461,7 +461,9 @@ fn build_line2_left(
     spans
 }
 
-/// Build Line 2 center section: Token usage + progress bar
+/// Build Line 2 center section: Rate-limit quota progress bar (when available).
+/// Token count and context-window usage are shown in the Context side panel
+/// instead of the status bar.
 fn build_line2_center(
     app: &App,
     _config: &StatusBarConfig,
@@ -469,13 +471,9 @@ fn build_line2_center(
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
-    fn format_kilobytes(bytes: u64) -> String {
-        format!("{:.1}KB", bytes as f64 / 1024.0)
-    }
-
-    // Use quota_percent from rate-limit headers if available, otherwise show cumulative token count
-    let display_text = if let Some(quota) = app.quota_percent {
-        // Rate limit quota percentage (from provider headers)
+    // Only render a center indicator when the provider reports a rate-limit
+    // quota percentage. All other usage metrics live in the Context panel.
+    if let Some(quota) = app.quota_percent {
         let percent = quota as u32;
         let color = if percent >= 95 {
             colors::ERROR
@@ -500,75 +498,9 @@ fn build_line2_center(
             ResponsiveMode::Minimal => format!("{}%", percent),
         };
 
-        (label, color)
-    } else {
-        // Fallback: show cumulative token usage count
-        let (input_total, output_total) = app.token_usage;
-        let total = input_total.saturating_add(output_total);
-
-        let label = match mode {
-            ResponsiveMode::Full => format!("tokens: {}", total),
-            ResponsiveMode::Compact => format!("{}", total),
-            ResponsiveMode::Minimal => format!("{}", total),
-        };
-
-        (label, colors::TEXT)
-    };
-
-    spans.push(Span::styled(
-        display_text.0,
-        Style::default()
-            .fg(display_text.1)
-            .add_modifier(Modifier::BOLD),
-    ));
-
-    // Context window percentage from the most recent request.
-    if let Some(ctx_detail) = app.context_window_display() {
-        let ctx_pct = ctx_detail
-            .split_whitespace()
-            .next()
-            .and_then(|p| p.trim_end_matches('%').parse::<u32>().ok())
-            .unwrap_or(0);
-
-        let ctx_color = if ctx_pct >= 95 {
-            colors::ERROR
-        } else if ctx_pct >= 80 {
-            colors::WARNING
-        } else {
-            colors::HEALTHY
-        };
-
-        let ctx_label = match mode {
-            ResponsiveMode::Full => format!(" | ctx: {ctx_detail}"),
-            ResponsiveMode::Compact => format!(" | ctx: {ctx_detail}"),
-            ResponsiveMode::Minimal => format!(" {}%", ctx_pct),
-        };
-
-        spans.push(Span::styled(ctx_label, Style::default().fg(ctx_color)));
-    }
-
-    if app.stream_out_bytes > 0 || app.stream_in_bytes > 0 {
-        let io_label = match mode {
-            ResponsiveMode::Full => format!(
-                " | io: ↑{} ↓{}",
-                format_kilobytes(app.stream_out_bytes),
-                format_kilobytes(app.stream_in_bytes)
-            ),
-            ResponsiveMode::Compact => format!(
-                " | ↑{} ↓{}",
-                format_kilobytes(app.stream_out_bytes),
-                format_kilobytes(app.stream_in_bytes)
-            ),
-            ResponsiveMode::Minimal => format!(
-                " ↑{} ↓{}",
-                app.stream_out_bytes / 1024,
-                app.stream_in_bytes / 1024
-            ),
-        };
-
         spans.push(Span::styled(
-            io_label,
-            Style::default().fg(colors::IN_PROGRESS),
+            label,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
         ));
     }
 

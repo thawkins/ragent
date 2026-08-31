@@ -212,6 +212,16 @@ fn parse_usize_value(value: &Value) -> Option<usize> {
         })
 }
 
+/// Estimates the context window size based on parameter count.
+///
+/// Modern local/remote Ollama models (Llama 3.2 1B/3B, Phi4-mini, Qwen2.5,
+/// Gemma 2, etc.) commonly support 128k-token contexts regardless of
+/// parameter size. The old size-based tiers under-reported capacity for
+/// current small models and caused the TUI context panel to display
+/// nonsensical ">100% full" percentages. We default to 128k for any model
+/// with at least 1B parameters, falling back to 32k only for sub-1B models.
+/// When the server returns explicit `context_length`/`num_ctx` metadata in
+/// `OllamaShowResponse`, that value takes precedence over this heuristic.
 fn estimate_context_window(parameter_size: &str) -> usize {
     let size = parameter_size
         .trim_end_matches('B')
@@ -219,15 +229,7 @@ fn estimate_context_window(parameter_size: &str) -> usize {
         .parse::<f64>()
         .unwrap_or(7.0);
 
-    if size >= 70.0 {
-        131_072
-    } else if size >= 30.0 {
-        65_536
-    } else if size >= 7.0 {
-        32_768
-    } else {
-        8_192
-    }
+    if size >= 1.0 { 131_072 } else { 32_768 }
 }
 
 fn format_model_name(name: &str, details: &OllamaModelDetails) -> String {

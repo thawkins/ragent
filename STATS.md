@@ -1,6 +1,6 @@
 # Project Statistics
 
-**Version:** 1.0.70
+**Version:** 1.0.72
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
@@ -11,7 +11,7 @@
 |---|---|
 | Total Rust lines | 379,961 |
 | Total Rust files | 935 |
-| Tests defined | 7,374 |
+| Tests defined | 7,774 |
 | Test files | 404 |
 | Test binaries | ~420 (399 integration test files + 18 lib/bin targets) |
 | Benchmark files | 13 |

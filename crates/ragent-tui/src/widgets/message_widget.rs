@@ -2809,7 +2809,7 @@ impl<'a> MessageWidget<'a> {
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
-                        .map(|(sid, step, substep)| format!("[{sid}:{step}.{substep}] "))
+                        .map(|(_sid, step, substep)| format!("[{step}.{substep}] "))
                         .unwrap_or_default();
                     let (indicator, ind_style, name_style) = match state.status {
                         ToolCallStatus::Completed => (

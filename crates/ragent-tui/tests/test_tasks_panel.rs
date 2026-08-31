@@ -39,6 +39,46 @@ fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
     text
 }
 
+/// Check whether the rendered buffer contains a phrase, tolerating line breaks
+/// inside the phrase. Ratatui wraps long lines at word boundaries, so a phrase
+/// split across rows appears as the phrase with a newline inserted. Collapsing
+/// all whitespace runs recovers the original substring.
+fn buffer_contains_phrase(text: &str, phrase: &str) -> bool {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed.contains(phrase)
+}
+
+/// Render the app and extract only the text inside the TASKS panel border.
+/// This excludes the border glyphs that get appended to wrapped rows and
+/// would otherwise break multi-line phrase matching.
+fn tasks_panel_inner_text(app: &mut App, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame| layout::render(frame, app))
+        .expect("render tasks panel");
+
+    let buffer = terminal.backend().buffer();
+    let area = app.tasks_area;
+    if area.width <= 2 || area.height <= 2 {
+        return String::new();
+    }
+    let inner = ratatui::layout::Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width - 2,
+        height: area.height - 2,
+    };
+    let mut text = String::new();
+    for y in inner.y..inner.y + inner.height {
+        for x in inner.x..inner.x + inner.width {
+            text.push_str(buffer[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    text
+}
+
 /// Helper: create a session (if needed) and a task with the given fields
 /// using `create_task` (which supports all Task-model columns).
 fn create_task(
@@ -316,9 +356,9 @@ fn test_tasks_panel_blocked_by_annotation() {
         &["blocker"],
     );
 
-    let text = render_app_to_string(&mut app, 120, 40);
+    let text = tasks_panel_inner_text(&mut app, 120, 40);
     assert!(
-        text.contains("[blocked by #blocker]"),
+        buffer_contains_phrase(&text, "[blocked by #blocker]"),
         "should show '[blocked by #blocker]' annotation; got:\n{text}"
     );
 }
@@ -356,9 +396,9 @@ fn test_tasks_panel_completed_blocker_no_annotation() {
         &["done-blocker"],
     );
 
-    let text = render_app_to_string(&mut app, 120, 40);
+    let text = tasks_panel_inner_text(&mut app, 120, 40);
     assert!(
-        !text.contains("[blocked by"),
+        !buffer_contains_phrase(&text, "[blocked by"),
         "should NOT show blocked-by annotation when all blockers completed; got:\n{text}"
     );
 }
@@ -403,10 +443,14 @@ fn test_tasks_panel_multiple_blockers() {
         &["b1", "b2"],
     );
 
-    let text = render_app_to_string(&mut app, 120, 40);
+    let text = tasks_panel_inner_text(&mut app, 120, 40);
     assert!(
         text.contains("#b1") && text.contains("#b2"),
         "should show both blocker IDs; got:\n{text}"
+    );
+    assert!(
+        buffer_contains_phrase(&text, "[blocked by #b1, #b2]"),
+        "should show combined blocked-by annotation; got:\n{text}"
     );
 }
 

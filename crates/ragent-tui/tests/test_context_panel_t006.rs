@@ -72,8 +72,11 @@ fn test_conversation_history_counts_tool_call_payloads() {
         }],
     ));
     let count = app.conversation_history_token_count();
+    // The raw byte accounting is (role label + call_id + wire JSON of the
+    // tool input/output + 40), ~200 bytes here; after the ~4-bytes-per-token
+    // conversion the estimate still exceeds 25 tokens.
     assert!(
-        count > 100,
+        count > 25,
         "tool-call input/output should contribute to history size; got {count}"
     );
 }

@@ -367,3 +367,23 @@ fn default_top_implications_pads_with_generics_when_fewer_than_five() {
     assert_eq!(out[0], "One explicit implication");
     assert!(out[1].contains("topic"));
 }
+
+#[test]
+fn default_findings_includes_dated_web_sources() {
+    let mut s = web_source(
+        "Dated Article",
+        "https://dated.example",
+        "relevant body text",
+    );
+    if let Source::Web { published_at, .. } = &mut s {
+        *published_at = Some(chrono::Utc::now());
+    }
+    let out = default_findings(&[s], "topic");
+    assert_eq!(
+        out.len(),
+        1,
+        "dated web sources must not be silently dropped from findings"
+    );
+    assert!(out[0].contains("Dated Article"));
+    assert!(out[0].contains("[#1]"));
+}

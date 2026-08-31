@@ -2629,6 +2629,11 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let snapshot = app.context_effective_snapshot();
     let total = snapshot.total_tokens();
 
+    // Push the content down by two blank lines under the border/title and add
+    // a 4-space left margin so the partition rows read more cleanly.
+    let margin_left: String = "    ".to_string();
+    let blank_line = Line::from("");
+
     // Compact percentage bars sized to leave room for the 14-char label and
     // the value/percent columns even on narrow terminals.
     let bar_width = inner.width.saturating_sub(34).min(10).max(3) as usize;
@@ -2643,6 +2648,71 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let warn_style = Style::default().fg(Color::LightYellow);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // Drop content two blank lines below the title/border.
+    lines.push(blank_line.clone());
+    lines.push(blank_line.clone());
+
+    // FR-010/FR-011: show the selected model's advertised context-window
+    // capacity as a top-level row so the percentage values below have a clear
+    // denominator. Rendered above the "System prompt" row.
+    let model_context_label = "Model context";
+    match snapshot.context_window_tokens {
+        Some(window) => {
+            let pct = snapshot.percent_of_window(window as u64).unwrap_or(100.0);
+            let bar = crate::theme::accessibility::progress_bar((pct / 100.0) as f32, bar_width);
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{margin_left}{model_context_label:<14}"),
+                    label_style,
+                ),
+                Span::styled(
+                    format!("{:>8}tk ", format_tokens(window as u64)),
+                    value_style,
+                ),
+                Span::styled(bar, dim_value_style),
+                Span::styled(format!("{:4.0}%", pct), value_style),
+            ]));
+        }
+        None => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{margin_left}{model_context_label:<14}"),
+                    label_style,
+                ),
+                Span::styled("    unknown".to_string(), sub_label_style),
+            ]));
+        }
+    }
+    lines.push(blank_line.clone());
+
+    // FR-010/FR-011: show the selected model's advertised context-window
+    // capacity directly above the "System prompt" row so the denominator for
+    // every percentage below is unambiguous.
+    let context_window_label = "Context window";
+    match snapshot.context_window_tokens {
+        Some(window) => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{margin_left}{context_window_label:<14}"),
+                    label_style,
+                ),
+                Span::styled(
+                    format!("{:>8}tk", format_tokens(window as u64)),
+                    value_style,
+                ),
+            ]));
+        }
+        None => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{margin_left}{context_window_label:<14}"),
+                    label_style,
+                ),
+                Span::styled("unknown".to_string(), sub_label_style),
+            ]));
+        }
+    }
 
     // FR-010/FR-011 partition rows: label, estimated tokens, percentage bar.
     // Sub-partitions are rendered indented as a breakdown of the system prompt.
@@ -2705,7 +2775,7 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                 let bar =
                     crate::theme::accessibility::progress_bar((pct / 100.0) as f32, bar_width);
                 lines.push(Line::from(vec![
-                    Span::styled(format!("{label:<14}"), row_style),
+                    Span::styled(format!("{margin_left}{label:<14}"), row_style),
                     Span::styled(format!("{:>8}tk ", format_tokens(row.tokens)), value_style),
                     Span::styled(bar, dim_value_style),
                     Span::styled(format!("{:4.0}%", pct), value_style),
@@ -2715,7 +2785,7 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                 // FR-011: no advertised capacity - show absolute counts and
                 // "unknown" for the ratio.
                 lines.push(Line::from(vec![
-                    Span::styled(format!("{label:<14}"), row_style),
+                    Span::styled(format!("{margin_left}{label:<14}"), row_style),
                     Span::styled(format!("{:>8}tk ", format_tokens(row.tokens)), value_style),
                     Span::styled("unknown".to_string(), sub_label_style),
                 ]));
@@ -2725,10 +2795,13 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // FR-008: message count is displayed alongside the history partition.
     lines.push(Line::from(Span::styled(
-        format!("   {} messages", snapshot.history_message_count),
+        format!(
+            "{margin_left}   {} messages",
+            snapshot.history_message_count
+        ),
         sub_label_style,
     )));
-    lines.push(Line::from(""));
+    lines.push(blank_line.clone());
 
     // FR-012 total and remaining headroom.
     let total_label = String::from("Total");
@@ -2736,7 +2809,7 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         Some(pct) => {
             let bar = crate::theme::accessibility::progress_bar((pct / 100.0) as f32, bar_width);
             lines.push(Line::from(vec![
-                Span::styled(format!("{total_label:<14}"), header_style),
+                Span::styled(format!("{margin_left}{total_label:<14}"), header_style),
                 Span::styled(format!("{:>8}tk ", format_tokens(total)), value_style),
                 Span::styled(bar, dim_value_style),
                 Span::styled(format!("{:4.0}%", pct), value_style),
@@ -2744,7 +2817,7 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         }
         None => {
             lines.push(Line::from(vec![
-                Span::styled(format!("{total_label:<14}"), header_style),
+                Span::styled(format!("{margin_left}{total_label:<14}"), header_style),
                 Span::styled(format!("{:>8}tk ", format_tokens(total)), value_style),
                 Span::styled("unknown".to_string(), sub_label_style),
             ]));
@@ -2758,17 +2831,33 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                 value_style
             };
             lines.push(Line::from(vec![
-                Span::styled(format!("{:<14}", "Free"), label_style),
+                Span::styled(format!("{margin_left}{:<14}", "Free"), label_style),
                 Span::styled(format_tokens(remaining), style),
             ]));
         }
         None => {
             lines.push(Line::from(Span::styled(
-                "Free: unknown".to_string(),
+                format!("{margin_left}Free: unknown"),
                 sub_label_style,
             )));
         }
     }
+
+    // Render network I/O metrics two lines below the context information.
+    lines.push(blank_line.clone());
+    lines.push(blank_line.clone());
+    fn format_kilobytes(bytes: u64) -> String {
+        format!("{:.1}KB", bytes as f64 / 1024.0)
+    }
+    let io_label = format!(
+        "io: ↑{} ↓{}",
+        format_kilobytes(app.stream_out_bytes),
+        format_kilobytes(app.stream_in_bytes)
+    );
+    lines.push(Line::from(Span::styled(
+        format!("{margin_left}{io_label}"),
+        value_style,
+    )));
 
     // Cache plain-text content for text selection copy, matching the other
     // side panels' wrapping behaviour.
@@ -4572,7 +4661,10 @@ fn message_to_lines(
 fn messages_to_lines(
     messages: &[Message],
     tool_step_map: &std::collections::HashMap<String, (String, u32, u32)>,
-    sid_to_display: &std::collections::HashMap<String, String>,
+    #[allow(clippy::used_underscore_binding)] _sid_to_display: &std::collections::HashMap<
+        String,
+        String,
+    >,
     cwd: &str,
 ) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -4623,13 +4715,8 @@ fn messages_to_lines(
                     call_id,
                     state,
                 } => {
-                    let step_tag = if let Some((sid, step, substep)) = tool_step_map.get(call_id) {
-                        // Look up display name from app
-                        let display = sid_to_display
-                            .get(sid)
-                            .cloned()
-                            .unwrap_or_else(|| sid.clone());
-                        format!("[{display}:{step}.{substep}] ")
+                    let step_tag = if let Some((_sid, step, substep)) = tool_step_map.get(call_id) {
+                        format!("[{step}.{substep}] ")
                     } else {
                         String::new()
                     };

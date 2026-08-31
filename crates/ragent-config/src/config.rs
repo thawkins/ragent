@@ -12,16 +12,18 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// M-025: a cached resolved [`Config`] plus the mtimes of the on-disk config
-/// files that contributed to it. The cache is valid while none of those
-/// mtimes change; the env-var overrides (`RAGENT_CONFIG` /
-/// `RAGENT_CONFIG_CONTENT`) bypass the cache entirely because env vars have
-/// no mtime to track.
+/// M-025: a cached resolved [`Config`] plus the mtimes and sizes of the
+/// on-disk config files that contributed to it. The cache is valid while
+/// none of those mtimes or sizes change; the env-var overrides
+/// (`RAGENT_CONFIG` / `RAGENT_CONFIG_CONTENT`) bypass the cache entirely
+/// because env vars have no mtime to track. Size is tracked because file
+/// system mtimes can be coarse (1 second granularity), so two writes within
+/// the same second would otherwise return a stale config.
 struct CachedConfigFile {
     /// The resolved config.
     config: Config,
-    /// `(path, mtime)` for each on-disk config file that contributed.
-    mtimes: Vec<(PathBuf, std::time::SystemTime)>,
+    /// `(path, mtime, size)` for each on-disk config file that contributed.
+    mtimes: Vec<(PathBuf, std::time::SystemTime, u64)>,
     /// The cwd the cache was built for (the project config path is relative).
     cwd: PathBuf,
 }
@@ -1265,70 +1267,75 @@ impl Config {
     /// println!("default agent: {}", config.default_agent);
     /// ```
     pub fn load() -> anyhow::Result<Self> {
-        // M-025: cache the resolved config keyed by the mtimes of the on-disk
-        // config files (and the project cwd, since the project config path is
-        // relative) so hot uncached callers (per-turn prompt build, gitlab
-        // tool auth, slash-menu) do not re-read/re-parse on every call. The
-        // cache is bypassed when either env-var override is present.
+        // M-025: cache the resolved config keyed by the mtimes and sizes of
+        // the on-disk config files (and the project cwd, since the project
+        // config path is relative) so hot uncached callers (per-turn prompt
+        // build, gitlab tool auth, slash-menu) do not re-read/re-parse on every
+        // call. The cache is bypassed when either env-var override is present.
         let env_overrides = std::env::var_os("RAGENT_CONFIG").is_some()
             || std::env::var_os("RAGENT_CONFIG_CONTENT").is_some();
 
-        if !env_overrides {
-            use std::sync::OnceLock;
-            static CACHE: OnceLock<std::sync::Mutex<Option<CachedConfigFile>>> = OnceLock::new();
-            let cache = CACHE.get_or_init(|| std::sync::Mutex::new(None));
-            // The project config path (`.ragent/ragent.json`) is relative to
-            // the current working directory, which can change (e.g. in tests);
-            // include it in the cache key so a stale entry is never returned.
-            let cwd = std::env::current_dir().unwrap_or_default();
-            let global_path = dirs::config_dir().map(|d| d.join("ragent").join("ragent.json"));
-            let project_path = PathBuf::from(".ragent").join("ragent.json");
-            let candidates: Vec<PathBuf> = [global_path.clone(), Some(project_path.clone())]
-                .into_iter()
-                .flatten()
-                .collect();
-
-            // Fast path: cached, same cwd, and every file mtime unchanged.
-            {
-                let guard = cache
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if let Some(cached) = guard.as_ref()
-                    && cached.cwd == cwd
-                    && cached.mtimes.iter().all(|(path, mt)| {
-                        std::fs::metadata(path)
-                            .and_then(|m| m.modified())
-                            .is_ok_and(|current| current == *mt)
-                    })
-                {
-                    return Ok(cached.config.clone());
-                }
-            }
-
-            // Cache miss / invalid: read each candidate that exists.
-            let mut mtimes: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
-            for path in &candidates {
-                if path.exists()
-                    && let Ok(mt) = std::fs::metadata(path).and_then(|m| m.modified())
-                {
-                    mtimes.push((path.clone(), mt));
-                }
-            }
-            let cfg = Self::load_uncached();
-            if let Ok(cfg) = &cfg {
-                let mut guard = cache
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                *guard = Some(CachedConfigFile {
-                    config: cfg.clone(),
-                    mtimes,
-                    cwd,
-                });
-            }
-            cfg
-        } else {
-            Self::load_uncached()
+        if env_overrides {
+            return Self::load_uncached();
         }
+
+        use std::sync::OnceLock;
+        static CACHE: OnceLock<std::sync::Mutex<Option<CachedConfigFile>>> = OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::Mutex::new(None));
+        // The project config path (`.ragent/ragent.json`) is relative to the
+        // current working directory, which can change (e.g. in tests); include
+        // it in the cache key so a stale entry is never returned.
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let global_path = dirs::config_dir().map(|d| d.join("ragent").join("ragent.json"));
+        let project_path = PathBuf::from(".ragent").join("ragent.json");
+        let candidates: Vec<PathBuf> = [global_path.clone(), Some(project_path.clone())]
+            .into_iter()
+            .flatten()
+            .collect();
+
+        // Fast path: cached, same cwd, and every file mtime and size unchanged.
+        // Size is included because filesystem mtimes can be coarse (1 second
+        // granularity), so two writes within the same second would otherwise
+        // be served a stale config.
+        {
+            let guard = cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(cached) = guard.as_ref()
+                && cached.cwd == cwd
+                && cached.mtimes.iter().all(|(path, mt, size)| {
+                    std::fs::metadata(path).is_ok_and(|m| {
+                        m.modified().is_ok_and(|current| current == *mt) && m.len() == *size
+                    })
+                })
+            {
+                return Ok(cached.config.clone());
+            }
+        }
+
+        // Cache miss / invalid: read each candidate that exists and record both
+        // its mtime and size for the next fast-path check.
+        let mut mtimes: Vec<(PathBuf, std::time::SystemTime, u64)> = Vec::new();
+        for path in &candidates {
+            if path.exists()
+                && let Ok(meta) = std::fs::metadata(path)
+                && let Ok(mt) = meta.modified()
+            {
+                mtimes.push((path.clone(), mt, meta.len()));
+            }
+        }
+        let cfg = Self::load_uncached();
+        if let Ok(cfg) = &cfg {
+            let mut guard = cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *guard = Some(CachedConfigFile {
+                config: cfg.clone(),
+                mtimes,
+                cwd,
+            });
+        }
+        cfg
     }
 
     /// The uncached config loader (the real work behind [`Config::load`]).

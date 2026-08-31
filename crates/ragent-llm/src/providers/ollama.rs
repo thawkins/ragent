@@ -152,6 +152,13 @@ struct OllamaModelDetails {
 }
 
 /// Estimates the context window size based on parameter count.
+///
+/// Modern local models (Llama 3.2 1B/3B, Phi4-mini, Qwen2.5, Gemma 2, etc.)
+/// commonly support 128k-token contexts regardless of parameter size. The
+/// old size-based tiers (8k/32k/64k/128k) under-report capacity for current
+/// small models and caused the TUI context panel to display nonsensical
+/// ">100% full" percentages. We now default to 128k for any model with at
+/// least 1B parameters, falling back to 32k only for sub-1B models.
 fn estimate_context_window(parameter_size: &str) -> usize {
     let size = parameter_size
         .trim_end_matches('B')
@@ -159,15 +166,7 @@ fn estimate_context_window(parameter_size: &str) -> usize {
         .parse::<f64>()
         .unwrap_or(7.0);
 
-    if size >= 70.0 {
-        131_072
-    } else if size >= 30.0 {
-        65_536
-    } else if size >= 7.0 {
-        32_768
-    } else {
-        8_192
-    }
+    if size >= 1.0 { 131_072 } else { 32_768 }
 }
 
 #[async_trait::async_trait]
@@ -776,10 +775,14 @@ mod tests {
 
     #[test]
     fn test_estimate_context_window() {
+        // Modern local models support 128k regardless of parameter size.
         assert_eq!(estimate_context_window("70B"), 131_072);
-        assert_eq!(estimate_context_window("8B"), 32_768);
-        assert_eq!(estimate_context_window("3B"), 8_192);
-        assert_eq!(estimate_context_window("32B"), 65_536);
+        assert_eq!(estimate_context_window("8B"), 131_072);
+        assert_eq!(estimate_context_window("3B"), 131_072);
+        assert_eq!(estimate_context_window("32B"), 131_072);
+        assert_eq!(estimate_context_window("1B"), 131_072);
+        // Sub-1B models get a conservative 32k fallback.
+        assert_eq!(estimate_context_window("0.5B"), 32_768);
     }
 
     #[test]

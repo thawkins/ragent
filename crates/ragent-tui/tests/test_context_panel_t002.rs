@@ -90,7 +90,9 @@ fn test_panel_renders_title_and_border() {
 #[test]
 fn test_panel_lists_partitions_and_totals() {
     // FR-005..FR-012: the required partition labels and total row render.
-    let backend = render_with_context_panel(100, 30);
+    // Height is kept at 40 so the newly-added "Context window" capacity row
+    // still leaves room for the "Total" row on modest terminals.
+    let backend = render_with_context_panel(100, 40);
     let buffer = &backend.buffer();
     let rendered: String = (0..buffer.area.height)
         .map(|y| {
@@ -101,6 +103,8 @@ fn test_panel_lists_partitions_and_totals() {
         })
         .collect();
     for expected in [
+        "Model context",
+        "Context window",
         "System prompt",
         "Tool catalog",
         "Tool metadata",

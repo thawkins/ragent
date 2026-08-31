@@ -306,19 +306,10 @@ impl App {
                 if let Some(args_json) = self.pending_tool_args.remove(call_id) {
                     let _ = self.update_tool_call_input(call_id, &args_json);
                 }
-
                 self.status = format!("running: {}", tool);
-                let display_name = self
-                    .sid_to_display_name
-                    .get(&short_sid)
-                    .cloned()
-                    .unwrap_or(short_sid);
                 self.push_log_no_agent(
                     LogLevel::Tool,
-                    format!(
-                        "[{display_name}:{step}.{current_substep}] tool call: {}",
-                        tool
-                    ),
+                    format!("[{step}.{current_substep}] tool call: {}", tool),
                 );
                 self.needs_redraw = true;
             }
@@ -340,14 +331,7 @@ impl App {
                 let step_tag = self
                     .tool_step_map
                     .get(call_id)
-                    .map(|(sid, step, substep)| {
-                        let name = self
-                            .sid_to_display_name
-                            .get(sid)
-                            .cloned()
-                            .unwrap_or_else(|| sid.clone());
-                        format!("[{name}:{step}.{substep}] ")
-                    })
+                    .map(|(_sid, step, substep)| format!("[{step}.{substep}] "))
                     .unwrap_or_default();
                 if let Some(err) = error {
                     self.push_log_no_agent(
@@ -363,6 +347,10 @@ impl App {
                         format!("{}tool {} completed ({}ms)", step_tag, tool, duration_ms),
                     );
                 }
+                // T-010/FR-013: the tool-call state changed, so refresh the
+                // Context panel snapshot off the UI thread (no-op when the
+                // panel is closed or a refresh is already in flight).
+                self.schedule_context_snapshot_refresh();
                 self.needs_redraw = true;
             }
             Event::ToolCallBatch {
@@ -397,6 +385,9 @@ impl App {
                         entry.duration_ms,
                     );
                 }
+                // T-010/FR-013: atomic batch finalized multiple tool calls,
+                // so refresh the Context panel snapshot off the UI thread.
+                self.schedule_context_snapshot_refresh();
                 self.needs_redraw = true;
             }
             Event::MessageStart {
@@ -1016,18 +1007,10 @@ impl App {
                 if !applied {
                     self.pending_tool_args.insert(call_id.clone(), args.clone());
                 }
-
                 let step_tag = self
                     .tool_step_map
                     .get(call_id)
-                    .map(|(sid, step, substep)| {
-                        let display = self
-                            .sid_to_display_name
-                            .get(sid)
-                            .cloned()
-                            .unwrap_or_else(|| sid.clone());
-                        format!("[{display}:{step}.{substep}] ")
-                    })
+                    .map(|(_sid, step, substep)| format!("[{step}.{substep}] "))
                     .unwrap_or_default();
                 // Pretty-print JSON args as a single truncated log entry
                 // (H-009) rather than one entry per line, which both avoided
@@ -1080,14 +1063,7 @@ impl App {
                 let step_tag = self
                     .tool_step_map
                     .get(call_id)
-                    .map(|(sid, step, substep)| {
-                        let display = self
-                            .sid_to_display_name
-                            .get(sid)
-                            .cloned()
-                            .unwrap_or_else(|| sid.clone());
-                        format!("[{display}:{step}.{substep}] ")
-                    })
+                    .map(|(_sid, step, substep)| format!("[{step}.{substep}] "))
                     .unwrap_or_default();
                 let icon = if success { "✓" } else { "✗" };
                 let display_content = truncate_str(content, 2516);
@@ -1102,6 +1078,9 @@ impl App {
                 if matches!(tool.as_str(), "task_create" | "task_update") {
                     self.tasks_cache_dirty = true;
                 }
+                // T-010/FR-013: the tool result changed the conversation
+                // history/tool-call payload, so refresh the Context panel.
+                self.schedule_context_snapshot_refresh();
                 self.needs_redraw = true;
             }
             Event::SubagentStart {

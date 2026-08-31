@@ -509,3 +509,250 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
         "session must emit a SynthesizeResult event"
     );
 }
+
+#[tokio::test]
+async fn session_renders_synthesis_error_note_and_fallback_findings() {
+    use async_trait::async_trait;
+    use ragent_research::{
+        AnalysisEngine, AnalysisResult, InputConfig, LocalConfig, LocalGatherer, LocalTool,
+        ResearchManager, ResearchSession, SessionConfig, WebConfig,
+    };
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    struct FailingEngine;
+
+    #[async_trait]
+    impl AnalysisEngine for FailingEngine {
+        async fn analyze(
+            &self,
+            _topic: &str,
+            _sources: &[ragent_research::SourceBody],
+        ) -> anyhow::Result<AnalysisResult> {
+            Err(anyhow::anyhow!("provider returned 502"))
+        }
+    }
+
+    struct FakeLocal {
+        files: HashMap<PathBuf, String>,
+    }
+
+    #[async_trait]
+    impl LocalTool for FakeLocal {
+        async fn glob(&self, _root: &Path, pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
+            let ext = pattern.rsplit('.').next().unwrap_or("");
+            Ok(self
+                .files
+                .keys()
+                .filter(|p| p.extension().is_some_and(|e| e == ext))
+                .cloned()
+                .collect())
+        }
+        async fn grep(
+            &self,
+            path: &Path,
+            terms: &[String],
+        ) -> anyhow::Result<Vec<ragent_research::GrepMatch>> {
+            let body = self.files.get(path).cloned().unwrap_or_default();
+            let mut out = Vec::new();
+            for (i, line) in body.lines().enumerate() {
+                let l = line.to_lowercase();
+                if terms.iter().any(|t| l.contains(t)) {
+                    out.push(ragent_research::GrepMatch {
+                        line: i + 1,
+                        text: line.to_string(),
+                    });
+                }
+            }
+            Ok(out)
+        }
+        async fn read(&self, path: &Path) -> anyhow::Result<String> {
+            self.files
+                .get(path)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("missing"))
+        }
+        async fn list_specs(&self, _root: &Path) -> anyhow::Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        async fn spec_title(&self, _root: &Path, _id: &str) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+    }
+
+    let tmp = TempDir::new().unwrap();
+    let research_root = tmp.path().join("research");
+    tokio::fs::create_dir_all(&research_root).await.unwrap();
+    let f = tmp.path().join("notes.md");
+    tokio::fs::write(&f, "Rust async programming is great.")
+        .await
+        .unwrap();
+
+    let manager = ResearchManager::new(&research_root);
+    let local_tool = Arc::new(FakeLocal {
+        files: HashMap::from([(f.clone(), "Rust async programming is great.".into())]),
+    });
+    let local = LocalGatherer::new(local_tool);
+    let session = ResearchSession::new(manager, None, Some(local), Arc::new(FailingEngine));
+
+    let config = SessionConfig {
+        input: InputConfig {
+            topic: "Rust async".into(),
+            ..InputConfig::default()
+        },
+        web: WebConfig {
+            max_web_results: 5,
+            ..WebConfig::default()
+        },
+        local: LocalConfig {
+            max_local_sources: 5,
+            disable_local: false,
+            ..LocalConfig::default()
+        },
+        analysis: ragent_research::AnalysisConfig {
+            depth: Some(ragent_research::Depth::Shallow),
+            ..ragent_research::AnalysisConfig::default()
+        },
+        ..SessionConfig::default()
+    };
+    session
+        .run(
+            "rust-async",
+            "Rust Async",
+            &config,
+            Arc::new(ragent_research::NoopObserver),
+        )
+        .await
+        .unwrap();
+
+    let body = tokio::fs::read_to_string(research_root.join("rust-async/RESEARCH.md"))
+        .await
+        .unwrap();
+    assert!(
+        body.contains("Synthesis engine failed"),
+        "RESEARCH.md should surface the synthesis error note\n{body}"
+    );
+    assert!(
+        body.contains("provider returned 502"),
+        "RESEARCH.md should include the provider error detail\n{body}"
+    );
+    assert!(
+        body.contains("## Findings"),
+        "RESEARCH.md should still contain a Findings section from the fallback\n{body}"
+    );
+
+    // The CORPA.md companion must contain a synthesis audit that reflects the
+    // fallback narrative (not the pre-fallback empty analysis).
+    let corpa = tokio::fs::read_to_string(research_root.join("rust-async/CORPA.md"))
+        .await
+        .unwrap();
+    assert!(
+        corpa.contains("## Synthesis Audit"),
+        "CORPA.md should contain a synthesis audit section\n{corpa}"
+    );
+    assert!(
+        !corpa.contains("No findings were produced"),
+        "CORPA.md audit must not report zero findings when the fallback produced them\n{corpa}"
+    );
+}
+
+#[tokio::test]
+async fn session_persists_synthesize_result_to_run_log() {
+    use async_trait::async_trait;
+    use ragent_research::{
+        AnalysisEngine, AnalysisResult, InputConfig, LocalConfig, LocalGatherer, LocalTool,
+        ResearchManager, ResearchSession, SessionConfig, WebConfig,
+    };
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    struct EmptyEngine;
+
+    #[async_trait]
+    impl AnalysisEngine for EmptyEngine {
+        async fn analyze(
+            &self,
+            _topic: &str,
+            _sources: &[ragent_research::SourceBody],
+        ) -> anyhow::Result<AnalysisResult> {
+            Ok(AnalysisResult::default())
+        }
+    }
+
+    struct NoLocal;
+    #[async_trait]
+    impl LocalTool for NoLocal {
+        async fn glob(&self, _root: &Path, _pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
+            Ok(Vec::new())
+        }
+        async fn grep(
+            &self,
+            _path: &Path,
+            _terms: &[String],
+        ) -> anyhow::Result<Vec<ragent_research::GrepMatch>> {
+            Ok(Vec::new())
+        }
+        async fn read(&self, _path: &Path) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+        async fn list_specs(&self, _root: &Path) -> anyhow::Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        async fn spec_title(&self, _root: &Path, _id: &str) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+    }
+
+    let tmp = TempDir::new().unwrap();
+    let research_root = tmp.path().join("research");
+    let log_dir = tmp.path().join("logs").join("research");
+    tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+    let manager = ResearchManager::new(&research_root);
+    let local = LocalGatherer::new(Arc::new(NoLocal));
+    let log = ragent_research::gather_log::GatherLog::new(&log_dir, "log-run").unwrap();
+    let session = ResearchSession::new(manager, None, Some(local), Arc::new(EmptyEngine))
+        .with_gather_log(log);
+
+    let config = SessionConfig {
+        input: InputConfig {
+            topic: "Rust lifetimes".into(),
+            ..InputConfig::default()
+        },
+        web: WebConfig {
+            max_web_results: 5,
+            ..WebConfig::default()
+        },
+        local: LocalConfig {
+            max_local_sources: 5,
+            disable_local: false,
+            ..LocalConfig::default()
+        },
+        analysis: ragent_research::AnalysisConfig {
+            depth: Some(ragent_research::Depth::Shallow),
+            ..ragent_research::AnalysisConfig::default()
+        },
+        ..SessionConfig::default()
+    };
+    session
+        .run(
+            "log-run",
+            "Log Run",
+            &config,
+            Arc::new(ragent_research::NoopObserver),
+        )
+        .await
+        .unwrap();
+
+    let entries: Vec<String> = std::fs::read_dir(&log_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+        .map(|p| std::fs::read_to_string(p).unwrap())
+        .collect();
+    assert!(
+        entries.iter().any(|e| e.contains("synthesize_result")),
+        "run log must contain a synthesize_result event"
+    );
+}

@@ -25,6 +25,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 /// JSONL logger for one web-gathering pass.
+#[derive(Clone)]
 ///
 /// Owns the log file path; construct via [`GatherLog::new`], then append
 /// records with [`GatherLog::log_url`] and marker events with

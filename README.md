@@ -394,12 +394,14 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.70** — The core architecture, tool system (~169 tools across 18 categories), TUI,
+**v1.0.72** — The core architecture, tool system (~169 tools across 18 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- **Token counting fixes** — fix issues in token counting across the TUI context panel
+  and related estimator paths (v1.0.72)
 - **Multiple agent TUI fixes** — fixes for multi-agent TUI interactions, scroll pinning,
   active-agents button hit-rects, team panel layout, and idle-CPU hotspots (v1.0.70)
 - **TUI scroll-pinning geometry and idle-CPU hotspots** — corrected scroll-offset semantics

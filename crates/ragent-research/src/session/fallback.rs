@@ -141,11 +141,7 @@ pub(crate) fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
     // supporting file.
     for (idx, src) in web.iter().enumerate() {
         if let Source::Web {
-            published_at: None,
-            title,
-            url,
-            body,
-            ..
+            title, url, body, ..
         } = src
         {
             let label = if title.is_empty() {
