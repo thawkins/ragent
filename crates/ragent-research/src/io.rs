@@ -25,6 +25,7 @@
 use crate::research_name::ResearchName;
 use crate::source::Source;
 use chrono::{DateTime, Utc};
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::fs;
@@ -312,9 +313,10 @@ impl ResearchIo {
                 _ => ("—".to_string(), "—".to_string()),
             };
             let captured = source.captured_at().to_rfc3339();
-            out.push_str(&format!(
-                "| {n} | {kind} | {media} | {language} | {path} | {title} | {author} | {published} | {relevance} | {search_tool} | {search_engine} | {captured} |\n"
-            ));
+            let _ = writeln!(
+                out,
+                "| {n} | {kind} | {media} | {language} | {path} | {title} | {author} | {published} | {relevance} | {search_tool} | {search_engine} | {captured} |"
+            );
         }
         out
     }
@@ -340,14 +342,15 @@ impl ResearchIo {
              |------|-------|--------|---------------|----------------|\n",
         );
         for item in items {
-            out.push_str(&format!(
-                "| {} | {} | {} | {} | {} |\n",
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | {} |",
                 item.name,
                 sanitize_inline(&item.title),
                 item.status.as_str(),
                 item.created_at.to_rfc3339(),
                 item.modified_at.to_rfc3339(),
-            ));
+            );
         }
         out.push_str(&format!(
             "\n_Generated {} · {} items._\n",
@@ -395,13 +398,14 @@ fn sanitize_inline(s: &str) -> String {
 /// offset of the leading `\n` that ends the fence line, or `None` if no
 /// valid opening fence is present.
 fn find_yaml_open(content: &str) -> Option<usize> {
-    if let Some(rest) = content.strip_prefix("---") {
-        // Fence must be on its own line.
+    let trimmed = content.trim_start();
+    trimmed.strip_prefix("---").and_then(|rest| {
         if rest.starts_with('\n') {
-            return Some(0);
+            Some(content.len() - trimmed.len())
+        } else {
+            None
         }
-    }
-    None
+    })
 }
 
 /// Find the byte offset of the closing `---` fence within `content`, where

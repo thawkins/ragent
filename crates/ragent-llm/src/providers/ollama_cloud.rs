@@ -202,13 +202,13 @@ impl OllamaShowResponse {
 fn parse_usize_value(value: &Value) -> Option<usize> {
     value
         .as_u64()
-        .and_then(|value| usize::try_from(value).ok())
+        .and_then(|n| usize::try_from(n).ok())
         .or_else(|| {
             value
                 .as_str()
                 .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .and_then(|value| value.parse::<usize>().ok())
+                .filter(|s| !s.is_empty())
+                .and_then(|s| s.parse::<usize>().ok())
         })
 }
 
@@ -227,7 +227,13 @@ fn estimate_context_window(parameter_size: &str) -> usize {
         .trim_end_matches('B')
         .trim_end_matches('b')
         .parse::<f64>()
-        .unwrap_or(7.0);
+        .unwrap_or_else(|_| {
+            tracing::warn!(
+                parameter_size,
+                "failed to parse Ollama Cloud parameter size; defaulting context window to 128k"
+            );
+            7.0
+        });
 
     if size >= 1.0 { 131_072 } else { 32_768 }
 }
@@ -514,9 +520,7 @@ impl LlmClient for OllamaCloudClient {
             has_tools = !request.tools.is_empty(),
             tool_count = request.tools.len(),
             "Ollama Cloud request"
-        );
-
-        // Log the full request body at warn level so it appears in the log even without RUST_LOG=debug
+        ); // Log the full request body at debug level (visible when RUST_LOG=debug or when tools are present).
         if tracing::enabled!(tracing::Level::DEBUG) || !request.tools.is_empty() {
             let body_preview = serde_json::to_string(&body).unwrap_or_default();
             let preview_len = body_preview.len().min(800);
@@ -618,10 +622,8 @@ impl LlmClient for OllamaCloudClient {
                             tracing::warn!(model=%model_name, line=%data, error=%e, "Ollama Cloud: failed to parse stream line");
                             continue;
                         }
-                    };
-
-                    // Log key stream lines for diagnostics (first 5 + any with tool_calls or done)
-                    line_count += 1;
+                    };                      // Log key stream lines for diagnostics (first 3 + any with tool_calls or done)
+                      line_count += 1;
                     let has_tool_calls = parsed
                         .get("message")
                         .and_then(|m| m.get("tool_calls"))

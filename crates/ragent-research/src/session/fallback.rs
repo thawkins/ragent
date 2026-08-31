@@ -11,6 +11,28 @@ use crate::document::CrossReference;
 use crate::source::{LocalSourceKind, Source};
 use regex::Regex;
 
+/// Append a `\n\n<header> <top-3 items joined by '; '> (and N more).` block
+/// to `out`. Items after the third are summarised as a count. Does nothing
+/// when `items` is empty.
+fn append_top_three_list(out: &mut String, header: &str, items: &[impl AsRef<str>]) {
+    if items.is_empty() {
+        return;
+    }
+    out.push_str("\n\n");
+    out.push_str(header);
+    out.push(' ');
+    for (i, item) in items.iter().take(3).enumerate() {
+        if i > 0 {
+            out.push_str("; ");
+        }
+        out.push_str(item.as_ref());
+    }
+    if items.len() > 3 {
+        out.push_str(&format!(" (and {} more)", items.len() - 3));
+    }
+    out.push('.');
+}
+
 /// Build a mechanical summary string listing how many sources of each kind
 /// were captured, plus the top-3 titles/paths/spec-ids.
 pub(crate) fn default_summary(sources: &[Source], topic: &str) -> String {
@@ -44,55 +66,35 @@ pub(crate) fn default_summary(sources: &[Source], topic: &str) -> String {
     );
 
     // Web: name the top 3 by title so the reader knows what was actually pulled in.
-    if !web.is_empty() {
-        out.push_str("\n\n**Web sources:** ");
-        let titles: Vec<String> = web
-            .iter()
-            .filter_map(|s| match s {
-                Source::Web { title, url, .. } if !title.is_empty() => Some(title.clone()),
-                Source::Web { url, .. } => Some(url.clone()),
-                _ => None,
-            })
-            .take(3)
-            .collect();
-        out.push_str(&titles.join("; "));
-        if web.len() > 3 {
-            out.push_str(&format!(" (and {} more)", web.len() - 3));
-        }
-        out.push('.');
-    }
+    let web_titles: Vec<String> = web
+        .iter()
+        .filter_map(|s| match s {
+            Source::Web { title, url, .. } if !title.is_empty() => Some(title.clone()),
+            Source::Web { url, .. } => Some(url.clone()),
+            _ => None,
+        })
+        .collect();
+    append_top_three_list(&mut out, "**Web sources:**", &web_titles);
 
     // Local: name the top 3 paths so the reader knows which files were pulled in.
-    if !local.is_empty() {
-        out.push_str("\n\n**Local files:** ");
-        let paths: Vec<String> = local
-            .iter()
-            .filter_map(|s| match s {
-                Source::Local { path, .. } => Some(path.clone()),
-                _ => None,
-            })
-            .take(3)
-            .collect();
-        out.push_str(&paths.join("; "));
-        if local.len() > 3 {
-            out.push_str(&format!(" (and {} more)", local.len() - 3));
-        }
-        out.push('.');
-    }
+    let local_paths: Vec<String> = local
+        .iter()
+        .filter_map(|s| match s {
+            Source::Local { path, .. } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    append_top_three_list(&mut out, "**Local files:**", &local_paths);
 
     // Specs: name each spec so the reader sees which prior specs informed this research.
-    if !specs.is_empty() {
-        out.push_str("\n\n**Prior specs cross-referenced:** ");
-        let ids: Vec<String> = specs
-            .iter()
-            .filter_map(|s| match s {
-                Source::Spec { spec_id, .. } => Some(spec_id.clone()),
-                _ => None,
-            })
-            .collect();
-        out.push_str(&ids.join(", "));
-        out.push('.');
-    }
+    let spec_ids: Vec<String> = specs
+        .iter()
+        .filter_map(|s| match s {
+            Source::Spec { spec_id, .. } => Some(spec_id.clone()),
+            _ => None,
+        })
+        .collect();
+    append_top_three_list(&mut out, "**Prior specs cross-referenced:**", &spec_ids);
 
     out.push_str(
         "\n\n_No LLM analysis was applied to these sources — the section above is a mechanical digest. Re-run with a configured model for a synthesized analysis._",

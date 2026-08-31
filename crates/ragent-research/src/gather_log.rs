@@ -138,8 +138,7 @@ impl GatherLog {
 /// Restrict a research name to filesystem-safe characters (alphanumeric,
 /// `-` and `_`); everything else becomes `-`. Truncated to 64 characters.
 fn sanitize(name: &str) -> String {
-    let mut out: String = name
-        .chars()
+    name.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
                 c
@@ -147,9 +146,8 @@ fn sanitize(name: &str) -> String {
                 '-'
             }
         })
-        .collect();
-    out.truncate(64);
-    out
+        .take(64)
+        .collect()
 }
 
 #[cfg(test)]

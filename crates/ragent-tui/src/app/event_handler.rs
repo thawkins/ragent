@@ -2181,6 +2181,8 @@ impl App {
                 vec![MessagePart::Text { text: rendered }],
             );
             self.messages.push(msg);
+            // T-010/FR-013: message count changed; refresh the Context panel.
+            self.schedule_context_snapshot_refresh();
         }
     }
 
@@ -2208,6 +2210,8 @@ impl App {
             );
             self.messages.push(msg);
             self.trim_messages_if_needed();
+            // T-010/FR-013: message count changed; refresh the Context panel.
+            self.schedule_context_snapshot_refresh();
         }
     }
 
@@ -2249,6 +2253,8 @@ impl App {
             );
             self.messages.push(msg);
             self.trim_messages_if_needed();
+            // T-010/FR-013: message count changed; refresh the Context panel.
+            self.schedule_context_snapshot_refresh();
         }
     }
 

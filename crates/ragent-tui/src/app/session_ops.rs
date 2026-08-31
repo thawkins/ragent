@@ -605,6 +605,9 @@ impl App {
         let display_text = format!("$ {command}");
         let msg = Message::user_text(&sid, &display_text);
         self.messages.push(msg);
+        // T-010/FR-013: user message added; refresh the Context panel so the
+        // history message count stays current while the panel is open.
+        self.schedule_context_snapshot_refresh();
         self.add_to_history(raw.clone());
         self.input.clear();
         self.input_cursor = 0;
@@ -685,6 +688,9 @@ impl App {
         };
         let msg = Message::user_text(&sid, &display_text);
         self.messages.push(msg);
+        // T-010/FR-013: user message added; refresh the Context panel so the
+        // history message count stays current while the panel is open.
+        self.schedule_context_snapshot_refresh();
         self.add_to_history(text.clone());
         self.input.clear();
         self.input_cursor = 0;

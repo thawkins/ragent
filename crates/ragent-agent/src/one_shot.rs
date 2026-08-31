@@ -12,6 +12,7 @@ use futures::StreamExt;
 use ragent_llm::ProviderRegistry;
 use ragent_llm::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
 use ragent_storage::Storage;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::agent::ModelRef;
@@ -133,7 +134,9 @@ pub async fn send_one_shot(
                     bail!("LLM stream error: {message}")
                 }
                 StreamEvent::Finish { .. } => break,
-                _ => {}
+                _ => {
+                    warn!(?event, "unexpected stream event in one-shot call");
+                }
             }
         }
         Ok(chunks.join(""))

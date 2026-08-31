@@ -343,29 +343,30 @@ impl AnalysisEngine for LlmAnalysisEngine {
         sources: &[SourceBody],
     ) -> anyhow::Result<(AnalysisResult, AnalysisOutcome)> {
         // E-001: collapse each source body to the configured budget.
-        let prepared: Vec<SourceBody> = if let Some(budget) = self.source_summary_budget {
-            let summarizer = HeuristicSummarizer;
-            summarize_source_bodies(sources, &summarizer, budget)
+        let summarized: Vec<SourceBody>;
+        let prepared: &[SourceBody] = if let Some(budget) = self.source_summary_budget {
+            summarized = summarize_source_bodies(sources, &HeuristicSummarizer, budget);
+            &summarized
         } else {
-            sources.to_vec()
+            sources
         };
 
         // E-002: decide whether to chunk.
         let threshold = self.synthesis_chunk_threshold;
-        let total = total_body_chars(&prepared);
+        let total = total_body_chars(prepared);
         let needs_chunking = threshold.is_some_and(|t| total > t);
 
         if !needs_chunking {
             // Single-call path (legacy behavior).
-            let text = self.stream_synthesis(topic, &prepared).await?;
-            return Ok(parse_analysis_response_with_outcome(&text, &prepared));
+            let text = self.stream_synthesis(topic, prepared).await?;
+            return Ok(parse_analysis_response_with_outcome(&text, prepared));
         }
 
         // Chunked path: split sources, send each chunk, merge results.
         let chunk_size = self
             .synthesis_chunk_size
             .unwrap_or(Self::DEFAULT_CHUNK_SIZE);
-        let chunks = chunk_source_bodies(&prepared, chunk_size);
+        let chunks = chunk_source_bodies(prepared, chunk_size);
         tracing::info!(
             chunks = chunks.len(),
             total_body_chars = total,
@@ -410,9 +411,9 @@ impl LlmAnalysisEngine {
     /// `None` is returned so the feature degrades gracefully without an LLM.
     pub async fn summarize_subject(&self, body: &str) -> Option<(String, String)> {
         let provider = self.provider_registry.get(&self.provider_id)?;
-        let api_key = self.api_key.clone().unwrap_or_default();
+        let api_key = self.api_key.as_deref().unwrap_or("");
         let client = match provider
-            .create_client(&api_key, self.base_url.as_deref(), &HashMap::new())
+            .create_client(api_key, self.base_url.as_deref(), &HashMap::new())
             .await
         {
             Ok(c) => c,
@@ -495,10 +496,9 @@ impl LlmAnalysisEngine {
             .provider_registry
             .get(&self.provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown provider '{}'", self.provider_id))?;
-
-        let api_key = self.api_key.clone().unwrap_or_default();
+        let api_key = self.api_key.as_deref().unwrap_or("");
         let client = provider
-            .create_client(&api_key, self.base_url.as_deref(), &HashMap::new())
+            .create_client(api_key, self.base_url.as_deref(), &HashMap::new())
             .await
             .map_err(|e| {
                 anyhow::anyhow!(

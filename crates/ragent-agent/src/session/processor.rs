@@ -1444,7 +1444,6 @@ impl SessionProcessor {
                     let registry = self.tool_registry.clone();
                     let permission_checker = self.permission_checker.clone();
                     let event_bus = self.event_bus.clone();
-                    let event_bus_clone = self.event_bus.clone();
                     let session_id_str = session_id.to_string();
                     let session_id_for_perm = session_id.to_string();
                     let hook_working_dir = turn.working_dir.clone();
@@ -1531,9 +1530,22 @@ impl SessionProcessor {
                                     .unwrap_or_else(|_| serde_json::json!({}))
                             }
                         };
-                        let _permit = crate::resource::acquire_tool_permit()
-                            .await
-                            .map_err(|e| anyhow::anyhow!("tool permit: {e}"));
+                        let _permit = match crate::resource::acquire_tool_permit().await {
+                            Ok(permit) => permit,
+                            Err(e) => {
+                                let err_msg = format!("tool permit acquisition failed: {e}");
+                                return (
+                                    tc_clone.clone(),
+                                    tool_input,
+                                    ToolCallStatus::Error,
+                                    None,
+                                    Some(err_msg),
+                                    0u64,
+                                    String::new(),
+                                    None,
+                                );
+                            }
+                        };
                         let start = Instant::now();
                         let tool_input_for_post_hook = serde_json::to_string(&tool_input)
                             .unwrap_or_else(|_| tc_clone.args_json.clone());
@@ -1807,7 +1819,7 @@ impl SessionProcessor {
                                 success,
                                 &sid,
                                 &storage_clone,
-                                &event_bus_clone,
+                                &event_bus,
                                 &hook_working_dir,
                             );
                         }
@@ -2575,27 +2587,6 @@ impl SessionProcessor {
             "No API key found for provider '{provider_id}'. Set the appropriate environment variable \
              or run `ragent auth {provider_id} <key>` to store one."
         )
-    }
-}
-
-/// P-12: hash a [`serde_json::Value`] into the supplied hasher using its
-/// serialised bytes, avoiding the `Value::to_string()` allocation that the
-/// interim-save hash previously paid for every tool-call input/output on
-/// every loop step.
-///
-/// Falls back to hashing the `Value`'s `Debug` representation if
-/// serialisation fails (effectively never for valid `Value`s, but keeps the
-/// hash total — every code path contributes ��� so the change-detection
-/// logic stays sound).
-///
-/// Retained as a utility: the interim-save gate now uses the non-tool-call
-/// part count alone (M-008), which made the per-step hash redundant.
-#[allow(dead_code)]
-fn hash_value<H: std::hash::Hasher>(hasher: &mut H, value: &Value) {
-    use std::hash::Hash;
-    match serde_json::to_vec(value) {
-        Ok(bytes) => bytes.hash(hasher),
-        Err(_) => format!("{value:?}").hash(hasher),
     }
 }
 

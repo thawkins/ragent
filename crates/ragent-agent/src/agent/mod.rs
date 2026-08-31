@@ -1592,7 +1592,7 @@ impl InstructionFileDiscovery {
     /// were actually loaded for instructions versus merely found.
     pub fn format_summary(&self) -> String {
         let mut lines = Vec::new();
-        lines.push("📋 Instruction File Discovery".to_string());
+        lines.push("Instruction File Discovery".to_string());
         lines.push(format!(
             "  Searched for: {}",
             self.searched_names.join(", ")
@@ -1604,14 +1604,14 @@ impl InstructionFileDiscovery {
 
         if self.all_discovered_files.is_empty() {
             lines.push(String::new());
-            lines.push("⚠️  No instruction files found".to_string());
+            lines.push("[!] No instruction files found".to_string());
             lines.push("  No instructions were loaded for this session.".to_string());
         } else {
             if let Some(ref gdir) = self.global_dir {
                 lines.push(format!("  Global directory: {}", gdir.display()));
             }
             lines.push(format!(
-                "📁 Discovered {} file(s):",
+                "Discovered {} file(s):",
                 self.all_discovered_files.len()
             ));
             for file in &self.all_discovered_files {
@@ -1626,8 +1626,8 @@ impl InstructionFileDiscovery {
                     .map_or(false, |gd| file.starts_with(gd));
                 let source = if is_global { "global" } else { "local" };
                 let is_loaded = self.loaded_file.as_ref() == Some(file);
-                let marker = if is_loaded { " ✅ LOADED" } else { "" };
-                lines.push(format!("   • {} ({}){}", rel, source, marker));
+                let marker = if is_loaded { " [loaded]" } else { "" };
+                lines.push(format!("   - {} ({}){}", rel, source, marker));
             }
             lines.push(String::new());
             if let Some(ref loaded) = self.loaded_file {
@@ -1642,13 +1642,13 @@ impl InstructionFileDiscovery {
                     "project root takes priority"
                 };
                 lines.push(format!(
-                    "✅ Instructions loaded from: {} ({})",
+                    "[loaded] Instructions loaded from: {} ({})",
                     rel, priority_note
                 ));
             }
             if self.all_discovered_files.len() > 1 {
                 lines.push(
-                                        "ℹ️  Additional instruction files were discovered but ignored: only one file is loaded per session.".to_string(),
+                                        "[i] Additional instruction files were discovered but ignored: only one file is loaded per session.".to_string(),
                                     );
                 lines.push("\n".to_string());
             }
@@ -2177,6 +2177,17 @@ pub fn build_memory_prompt_section(
 #[must_use]
 pub fn skills_prompt_section(registry: &crate::skill::SkillRegistry, agent: &AgentInfo) -> String {
     let catalog = registry.catalog();
+    let is_empty = if agent.skills.is_empty() {
+        !catalog.iter().any(|e| e.agent_invocable)
+    } else {
+        !catalog
+            .iter()
+            .any(|e| e.agent_invocable && agent.skills.contains(&e.name))
+    };
+    if is_empty {
+        return String::new();
+    }
+
     let skill_entries: Vec<&crate::skill::SkillCatalogEntry> = if agent.skills.is_empty() {
         // No agent-specific skills configured: show all agent-invocable skills
         catalog.iter().filter(|e| e.agent_invocable).collect()
@@ -2187,10 +2198,6 @@ pub fn skills_prompt_section(registry: &crate::skill::SkillRegistry, agent: &Age
             .filter(|e| e.agent_invocable && agent.skills.contains(&e.name))
             .collect()
     };
-
-    if skill_entries.is_empty() {
-        return String::new();
-    }
 
     let mut section = String::from(
         "## Available Skills\n\n\

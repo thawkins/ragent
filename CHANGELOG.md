@@ -1,5 +1,28 @@
 # Changelog
 
+## Version: 1.0.73
+
+### Changed
+
+- Safe `/simplify` refactorings across multiple crates to reduce verbosity,
+  remove unnecessary allocations, and improve clarity while preserving
+  behavior:
+  - `crates/ragent-research/src/gather_log.rs`: simplified `sanitize` to use
+    `.take(64)` instead of collecting then truncating.
+  - `crates/ragent-research/src/io.rs`: use `writeln!` for Markdown table
+    construction and make frontmatter parsing tolerate leading whitespace.
+  - `crates/ragent-research/src/session/fallback.rs`: extracted a shared
+    `append_top_three_list` helper for the default summary sources.
+  - `crates/ragent-agent/src/agent/mod.rs`: replaced emoji markers with ASCII
+    equivalents in `InstructionFileDiscovery::format_summary` and added an
+    early emptiness check in `skills_prompt_section`.
+  - Earlier safe simplifications in `crates/ragent-agent/src/one_shot.rs`,
+    `crates/ragent-agent/src/session/processor.rs`,
+    `crates/ragent-config/src/config.rs`,
+    `crates/ragent-llm/src/providers/ollama.rs`,
+    `crates/ragent-llm/src/providers/ollama_cloud.rs`, and
+    `crates/ragent-research/src/analysis.rs`.
+
 ## Version: 1.0.72
 
 ### Fixed

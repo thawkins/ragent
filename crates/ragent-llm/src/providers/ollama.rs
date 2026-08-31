@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 
 use super::thinking::{
@@ -164,7 +164,13 @@ fn estimate_context_window(parameter_size: &str) -> usize {
         .trim_end_matches('B')
         .trim_end_matches('b')
         .parse::<f64>()
-        .unwrap_or(7.0);
+        .unwrap_or_else(|_| {
+            tracing::warn!(
+                parameter_size,
+                "failed to parse Ollama parameter size; defaulting context window to 128k"
+            );
+            7.0
+        });
 
     if size >= 1.0 { 131_072 } else { 32_768 }
 }
@@ -464,11 +470,10 @@ impl LlmClient for OllamaClient {
             .unwrap_or("unknown")
             .to_string();
         let stream = response.bytes_stream();
-
         let event_stream = async_stream::stream! {
-            let mut buffer = String::new();
-            let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
-            let mut stream_done = false;
+              let mut buffer = String::new();
+              let mut tool_call_ids: BTreeMap<u64, String> = BTreeMap::new();
+              let mut stream_done = false;
             let mut yielded_event = false;
 
             futures::pin_mut!(stream);
@@ -529,14 +534,15 @@ impl LlmClient for OllamaClient {
                     if data == "[DONE]" {
                         stream_done = true;
                         break;
-                    }
+                    }                      let parsed: Value = match serde_json::from_str(data) {
+                          Ok(v) => v,
+                          Err(e) => {
+                              tracing::warn!(line = %data, error = %e, "failed to parse Ollama SSE line");
+                              continue;
+                          }
+                      };
 
-                    let parsed: Value = match serde_json::from_str(data) {
-                        Ok(v) => v,
-                        Err(_) => continue,
-                    };
-
-                    // Usage info
+                      // Usage info
                     if let Some(usage) = parsed.get("usage")
                         && !usage.is_null()
                     {
@@ -629,17 +635,15 @@ impl LlmClient for OllamaClient {
                             }
                         }
 
-                        // Finish reason
-                        if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                            // End pending tool calls in index order (see the
-                            // openai provider for the rationale).
-                            let mut ends: Vec<(u64, String)> = tool_call_ids.drain().collect();
-                            ends.sort_unstable_by_key(|(idx, _)| *idx);
-                            for (_, id) in ends {
-                                yield StreamEvent::ToolCallEnd { id };
-                            }
+                          // Finish reason
+                          if let Some(finish_reason) = choice["finish_reason"].as_str() {
+                              // End pending tool calls in index order (see the
+                              // openai provider for the rationale).
+                              for (_, id) in &tool_call_ids {
+                                  yield StreamEvent::ToolCallEnd { id: id.clone() };
+                              }
 
-                            let reason = match finish_reason {
+                              let reason = match finish_reason {
                                 "tool_calls" => FinishReason::ToolUse,
                                 "length" => FinishReason::Length,
                                 "content_filter" => FinishReason::ContentFilter,

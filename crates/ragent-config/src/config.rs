@@ -1829,11 +1829,7 @@ impl Config {
         if overlay.username.is_some() {
             base.username = overlay.username;
         }
-        if overlay.specified_default_agent
-            || overlay.default_agent != default_agent_name()
-                && (overlay.default_agent != default_agent_name()
-                    || base.default_agent == default_agent_name())
-        {
+        if overlay.specified_default_agent {
             base.default_agent = overlay.default_agent;
         }
         // Merge provider config deeply so partial overlays do not discard model,
@@ -2575,7 +2571,7 @@ pub struct BrowserConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cdp_endpoint: Option<String>,
     /// Default headless mode for the `setup` action (default: `true`).
-    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    #[serde(default = "default_true", skip_serializing_if = "std::ops::Not::not")]
     pub default_headless: bool,
 }
 
@@ -2586,16 +2582,6 @@ impl Default for BrowserConfig {
             default_headless: true,
         }
     }
-}
-
-/// Return `true` if the value is `true` — used for `skip_serializing_if`.
-fn is_true(v: &bool) -> bool {
-    *v
-}
-
-/// Return `true` if the value is `false` — used for `skip_serializing_if`.
-fn is_false(v: &bool) -> bool {
-    !*v
 }
 
 /// External messaging channel configuration for the `send_channel_message` tool
@@ -2725,43 +2711,43 @@ impl GmailConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SddConfig {
     /// Enable `[NEEDS CLARIFICATION]` marker detection and reporting (FR-002).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub clarification_markers: bool,
     /// Embed quality checklists in spec and plan templates (FR-006).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub quality_checklists: bool,
     /// Generate and parse `CONSTITUTION.md` architectural-principles artifact (FR-007).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub constitution: bool,
     /// Enable Phase -1 pre-implementation gate validation (FR-008).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub phase_minus_one_gates: bool,
     /// Create a git branch per spec (FR-009).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub branch_per_spec: bool,
     /// Link research artifacts into SPEC.md frontmatter (FR-010).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub research_artifacts: bool,
     /// Generate `data-model.md` during `/spec plan` (FR-011).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub data_model: bool,
     /// Generate `contracts/` directory during `/spec plan` (FR-012).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub contracts: bool,
     /// Generate `quickstart.md` validation scenarios (FR-013).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub quickstart: bool,
     /// Enforce test-first file creation ordering in plans (FR-014).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub test_first_ordering: bool,
     /// Run ambiguity, contradiction, and gap consistency checks (FR-015).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub consistency_checks: bool,
     /// Enable constitutional amendment process with dated changelog (FR-016).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub amendment_process: bool,
     /// Enable production feedback loop (`FEEDBACK.md` surfacing) (FR-017).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub feedback_loop: bool,
 }
 
@@ -2831,37 +2817,37 @@ impl SddConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PieGapConfig {
     /// Enable dynamic trigger rules (G-01, FR-002).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub triggers: bool,
     /// Enable MCP notification push events (G-02, FR-003).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub mcp_notifications: bool,
     /// Enable stateful loops + triage inbox (G-03, FR-004).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub inbox: bool,
     /// Enable lifecycle hooks (G-04, FR-005).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hooks: bool,
     /// Enable portable session archive export/import (G-05, FR-006).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archive: bool,
     /// Enable bug report generation (G-06, FR-007).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bug_report: bool,
     /// Enable reusable prompt templates (G-07, FR-008).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub templates: bool,
     /// Enable goal-based autonomous stop hook (G-10, FR-011).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub goal: bool,
     /// Enable browser-based web UI (G-12, FR-013).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub web_ui: bool,
     /// Enable `/undo` slash command (G-13, FR-014).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub undo: bool,
     /// Enable `/name` session naming (G-14, FR-015).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub session_naming: bool,
 }
 
@@ -2924,7 +2910,7 @@ impl PieGapConfig {
 pub struct ResearchConfig {
     /// Enable open-access recovery via Unpaywall and Europe PMC for short
     /// scholarly sources (FR-011).
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub open_access_recovery: bool,
     /// Contact email required by Unpaywall's terms of service (FR-012).
     #[serde(default, skip_serializing_if = "Option::is_none")]
