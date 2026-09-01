@@ -1,5 +1,25 @@
 # Changelog
 
+## Version: 1.0.75
+
+### Changed
+
+- Version bump to 1.0.75.
+
+## Version: 1.0.74
+
+### Fixed
+
+- **Clippy `for_kv_map` warning in Ollama provider** — replaced
+  `for (_, id) in &tool_call_ids` with `for id in tool_call_ids.values()` in
+  `crates/ragent-llm/src/providers/ollama.rs` to satisfy the `for_kv_map`
+  lint. (commit `d338c25b`)
+- **LangSearch config merge test expectation** — corrected
+  `test_merge_preserves_other_top_level_fields` in
+  `crates/ragent-config/tests/test_langsearch_api_key.rs`; the overlay did not
+  explicitly set `default_agent`, so the base value is now expected to be
+  preserved. (commit `d338c25b`)
+
 ## Version: 1.0.73
 
 ### Changed
@@ -23,20 +43,55 @@
     `crates/ragent-llm/src/providers/ollama_cloud.rs`, and
     `crates/ragent-research/src/analysis.rs`.
 
+### Added
+
+- **Sub-agent / teammate step visibility in TUI step log** —
+  `crates/ragent-tui/src/app/event_handler.rs` and
+  `crates/ragent-tui/src/app/session_ops.rs` now track active task and team
+  member sessions; tool calls from tracked sub-agents/teammates are logged with
+  an `[agent-tag]` prefix and a rebuilt step counter, so lagged event-bus
+  bursts no longer undercount visible steps. (commit `2a8a5850`)
+
+### Fixed
+
+- **`SessionProcessor` tool-permit handling** — the per-tool permit acquisition
+  result is now matched instead of silently ignored, and the tool call returns
+  an explicit error tuple when a permit cannot be acquired. (commit `2a8a5850`)
+- **One-shot runner diagnostics** — unexpected stream events during
+  `send_one_shot` now emit a `warn!` log instead of being silently dropped.
+  (commit `2a8a5850`)
+
 ## Version: 1.0.72
 
 ### Fixed
 
-- **Token counting fixes** — fix issues in token counting across the TUI context panel
-  and related estimator paths.
+- **Token counting fixes** — corrected the TUI context panel to use a
+  consistent `bytes_to_tokens()` conversion (4 bytes per token) at every
+  estimator boundary, aligning panel percentages with the status-bar usage
+  figure instead of raw byte counts. (commit `94b35acb`)
 
-### Hygiene
+### Added
 
-- Full CI-equivalent hygiene pass: `cargo check`, `cargo check --tests`,
-  `cargo test`, dead-code lint with `-D unreachable_pub -D dead_code -D unused_imports`,
-  `scripts/check-dead-code-reasons.sh`, clippy `-D warnings`, `cargo fmt
-  --check`, `cargo audit` (no vulnerabilities; 1 allowed yanked-crate
-  warning), and `cargo deny check` all clean.
+- **Config file size is now tracked in the cached loader** — `Config::load`
+  records `(path, mtime, size)` for each on-disk candidate because filesystem
+  mtimes can be coarse (1-second granularity); two writes within the same
+  second no longer return a stale cached config. (commit `94b35acb`)
+- **Research session CLI options** — `ragent-research/src/session.rs` gained
+  `--tier`, `--use-local`, `--use-specs`, `--use-low-relevance`, `--no-papers`,
+  and `--use-pdf` flags for finer-grained control over research runs.
+  (commit `94b35acb`)
+
+### Changed
+
+- **Ollama context-window heuristic** — local and cloud Ollama providers now
+  advertise 131,072 tokens for any model with at least 1B parameters (32k
+  fallback for sub-1B models), replacing the old size-based tiers that
+  under-reported capacity for modern small models. (commit `94b35acb`)
+
+### Tests
+
+- New research tests in `crates/ragent-research/tests/test_analysis_engine.rs`,
+  `test_research_integration.rs`, and `test_session_fallback.rs`. (commit `94b35acb`)
 
 ## Version: 1.0.71
 

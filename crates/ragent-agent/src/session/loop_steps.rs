@@ -42,8 +42,8 @@ use crate::session::history::{
 use crate::session::processor::SessionProcessor;
 use crate::session::prompt_builders::{
     TOOL_CALLING_GUIDANCE, build_codeindex_guidance_section_active,
-    build_codeindex_guidance_section_disabled, build_detailed_tool_reference_section,
-    build_tool_reference_section,
+    build_codeindex_guidance_section_disabled, build_detailed_tool_reference_from_defs,
+    build_tool_reference_from_defs,
 };
 use crate::session::stream_buffer::StreamBuffer;
 use crate::tool::TeamContext;
@@ -418,20 +418,25 @@ impl SessionProcessor {
         };
 
         let is_subagent = agent.mode == crate::agent::AgentMode::Subagent;
-        let tool_reference = if is_subagent {
-            let cache = self.system_prompt_cache();
-            cache
-                .get_tool_reference(&self.tool_registry, |registry| {
-                    build_detailed_tool_reference_section(registry)
-                })
-                .unwrap_or_else(|| build_detailed_tool_reference_section(&self.tool_registry))
+        let allowed_set = crate::tool::build_allowed_tool_set(agent.allowed_tools.as_deref());
+        let effective_defs: Arc<Vec<ToolDefinition>> = if allowed_set.is_empty() {
+            self.system_prompt_cache()
+                .get_tool_definitions(&self.tool_registry)
+                .unwrap_or_else(|| self.tool_registry.definitions())
         } else {
-            let cache = self.system_prompt_cache();
-            cache
-                .get_tool_reference(&self.tool_registry, |registry| {
-                    build_tool_reference_section(registry)
-                })
-                .unwrap_or_default()
+            let all_defs = self.tool_registry.definitions();
+            Arc::new(
+                all_defs
+                    .iter()
+                    .filter(|d| crate::tool::is_allowed_tool(&d.name, &allowed_set))
+                    .cloned()
+                    .collect(),
+            )
+        };
+        let tool_reference = if is_subagent {
+            build_detailed_tool_reference_from_defs(&effective_defs)
+        } else {
+            build_tool_reference_from_defs(&effective_defs)
         };
         if !initiatives_section.is_empty() {
             system_prompt.push_str(&initiatives_section);

@@ -4,10 +4,23 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (1.0.74)
+
+- **Clippy `for_kv_map` fix** — Ollama provider iteration now uses `values()`
+  instead of destructuring a key-value pair, and the LangSearch merge test
+  expectation was corrected.
+
+## Highlights (1.0.73)
+
+- **Sub-agent / teammate step visibility** — TUI step log now shows tool calls
+  from tracked sub-agents and teammates with an `[agent-tag]` prefix; lagged
+  event-bus bursts are rebuilt so visible steps stay in sync with the Agents/Teams
+  panel counts.
+
 ## Highlights (1.0.72)
 
-- **Token counting fixes** — fix issues in token counting across the TUI context panel
-  and related estimator paths
+- **Token counting fixes** — TUI context panel percentages now use a consistent
+  bytes-to-tokens conversion so they align with the status-bar usage figure.
 
 ## Highlights (1.0.70)
 

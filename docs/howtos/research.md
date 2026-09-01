@@ -317,7 +317,25 @@ section 11 for viewer controls.
 /research open rust-async
 ```
 
-### 4.6 `/research search <query>`
+### 4.6 `/research cluster <name>`
+
+Extract up to 20 core concepts from the captured sources of an existing
+research item and write them to `research/<name>/CONCEPTS.md`. The command reads
+every `web-*.md` and `local-*.md` source in the item's `sources/` directory,
+builds a context-window-aware payload, and asks the active model for a structured
+concept list. Sources are truncated individually if the combined payload exceeds
+the model's context budget.
+
+```text
+/research cluster rust-async
+```
+
+The output is a markdown file with a `# Concepts` heading, followed by one
+section per concept (`## Concept Name`) containing a short definition and key
+evidence bullets. The companion is rewritten on every run and uses the same
+source indices as `RESEARCH.md`.
+
+### 4.7 `/research search <query>`
 
 Full-text search across all `RESEARCH.md` files. Returns matching item names,
 titles, and snippets. The search returns up to 25 results.
@@ -327,7 +345,7 @@ titles, and snippets. The search returns up to 25 results.
 /research search async runtime tokio
 ```
 
-### 4.7 `/research delete <name> --yes`
+### 4.8 `/research delete <name> --yes`
 
 Permanently delete a research item and its `sources/` directory. The `--yes`
 flag is required; without it the command prompts and refuses.
@@ -336,7 +354,7 @@ flag is required; without it the command prompts and refuses.
 /research delete rust-async --yes
 ```
 
-### 4.8 `/research archive <name>`
+### 4.9 `/research archive <name>`
 
 Mark an item as `archived`. Archived items are hidden from default `list`
 output but kept on disk. Use `/research list --all` to see archived items.
@@ -345,7 +363,7 @@ output but kept on disk. Use `/research list --all` to see archived items.
 /research archive rust-async
 ```
 
-### 4.9 `/research continue <name> [message]`
+### 4.10 `/research continue <name> [message]`
 
 Resume an in-progress item. Loads state and appends a follow-up sub-question
 to the plan. The optional message is added to the plan as a new sub-question.

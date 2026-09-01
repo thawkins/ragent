@@ -1233,6 +1233,7 @@ Type `/` in the input to open an autocomplete menu:
 | `/codeindex communities` | Run community detection and list communities |
 | `/codeindex godnodes [n]` | Show top-N most-connected symbols |
 | `/codeindex help` | Show code index help |
+| `/context` | Toggle the `Alt+X` context panel (live context-window breakdown) |
 | `/cron add \|remove\|enable\|disable\|list\|detail\|log\|help` | Schedule and manage recurring agent runs |
 | `/spec create <name> <title> [--from-research <name>]` | Create a new spec (SPEC.md + PLAN.md + TESTPLAN.md) |
 | `/spec specify <name> <feature> [--from-research <name>]` | Generate SPEC.md only (EARS spec with clarification markers) |
@@ -1352,6 +1353,7 @@ Notes:
 | `Tab` / `Shift+Tab` | Cycle agents |
 | `PageUp/PageDown` | Scroll messages |
 | `Ctrl+PageUp/Down` | Scroll log panel |
+| `Alt+X` | Toggle the live context-window panel |
 | `Ctrl+C` | Abort / exit |
 
 ---

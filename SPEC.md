@@ -4,10 +4,10 @@
 <h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
 
 <p style="margin-top: 4em; font-size: 1.1em;">
-      <strong>Version:</strong> 1.0.72</p>
-    <p style="font-size: 1.1em;">
-      <strong>Date:</strong> 2026-08-31
-    </p>
+        <strong>Version:</strong> 1.0.74</p>
+      <p style="font-size: 1.1em;">
+        <strong>Date:</strong> 2026-09-01
+      </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
   </p>
@@ -101,14 +101,31 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.58). The core architecture, tool system,
+Ragent is in **beta** (v1.0.74). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.44 → v1.0.58):**
+**Current Release Highlights (v1.0.44 → v1.0.74):**
+- **Clippy `for_kv_map` fix** — Ollama provider iteration now uses `values()`
+  instead of destructuring a key-value pair; the LangSearch merge test
+  expectation was also corrected (v1.0.74)
+- **Sub-agent / teammate step visibility** — TUI step log now shows tool calls
+  from tracked sub-agents and teammates with an `[agent-tag]` prefix; rebuilt
+  step tags for lagged event-bus bursts prevent undercounting (v1.0.73)
+- **Tool-permit handling fix** — `SessionProcessor` now surfaces an explicit
+  error when the per-tool resource permit cannot be acquired (v1.0.73)
+- **Token counting fixes** — TUI context panel percentages now use a consistent
+  bytes-to-tokens conversion so they align with the status-bar usage figure
+  (v1.0.72)
+- **Context side panel** — toggleable `Alt+X` panel showing live, quantified
+  context-window occupancy, with non-blocking refresh (v1.0.71)
+- **Research clustering** — `/research cluster` concept extraction and a new
+  `cluster.rs` payload builder (v1.0.71)
+- **One-shot agent runner** — lightweight, provider-agnostic single-prompt
+  execution path without spinning up a full agent loop (v1.0.71)
 - **Code index semantic graph** — New `codeindex_godnodes`, `codeindex_path`,
   `codeindex_explain`, and `codeindex_communities` tools; typed edge graph with
   `calls`, `imports`, `inherits`, `references`, `mixes_in`, `implements` edges;

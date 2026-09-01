@@ -34,6 +34,9 @@ pub mod skillgen;
 mod slash;
 mod swarm;
 
+/// Shared helpers for listing installed team blueprints.
+pub mod blueprints;
+
 // Re-export status types from theme for use in app
 pub use crate::theme::{StatusCategory, StatusHistory, StatusMessage};
 

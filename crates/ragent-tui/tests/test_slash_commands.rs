@@ -1857,6 +1857,139 @@ fn test_slash_unknown_command_shows_error() {
     );
 }
 
+// ── /blueprints command ─────────────────────────────────────────────
+
+fn write_temp_blueprint(dir: &std::path::Path, name: &str, readme: &str, teammates: usize) {
+    let bp_dir = dir
+        .join(".ragent")
+        .join("blueprints")
+        .join("teams")
+        .join(name);
+    std::fs::create_dir_all(&bp_dir).expect("create blueprint dir");
+    std::fs::write(bp_dir.join("README.md"), readme).expect("write README");
+
+    let teammate_values: Vec<serde_json::Value> = (0..teammates)
+        .map(|i| {
+            serde_json::json!({
+                "teammate_name": format!("mate-{i}"),
+                "agent_type": "general",
+                "prompt": "help"
+            })
+        })
+        .collect();
+    std::fs::write(
+        bp_dir.join("spawn-prompts.json"),
+        serde_json::to_string(&teammate_values).expect("serialize teammates"),
+    )
+    .expect("write spawn-prompts");
+
+    std::fs::write(
+        bp_dir.join("task-seed.json"),
+        serde_json::to_string(&Vec::<serde_json::Value>::new()).expect("serialize tasks"),
+    )
+    .expect("write task-seed");
+}
+
+#[test]
+fn test_blueprints_list_empty() {
+    let _guard = enter_with_cwd();
+    let mut app = make_app();
+    app.execute_slash_command("/blueprints");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("From: /blueprints"),
+        "list should show header: {text}"
+    );
+    assert!(
+        text.contains("No blueprints found"),
+        "empty list should say so: {text}"
+    );
+    assert_eq!(app.status, "blueprints: list");
+}
+
+#[test]
+fn test_blueprints_list_installed() {
+    let guard = enter_with_cwd();
+    write_temp_blueprint(&guard.path(), "demo", "# Demo\nA demo blueprint", 2);
+
+    let mut app = make_app();
+    app.execute_slash_command("/blueprints list");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("## Installed Team Blueprints"),
+        "list should show table header: {text}"
+    );
+    assert!(
+        text.contains("`demo`"),
+        "list should include demo blueprint: {text}"
+    );
+    assert!(
+        text.contains("A demo blueprint"),
+        "list should include description: {text}"
+    );
+    assert_eq!(app.status, "blueprints: list");
+}
+
+#[test]
+fn test_blueprints_help() {
+    let _guard = enter_with_cwd();
+    let mut app = make_app();
+    app.execute_slash_command("/blueprints help");
+    assert_eq!(app.status, "blueprints: help");
+}
+
+#[test]
+fn test_blueprints_detail() {
+    let guard = enter_with_cwd();
+    write_temp_blueprint(&guard.path(), "demo", "# Demo\nA demo blueprint", 1);
+
+    let mut app = make_app();
+    app.execute_slash_command("/blueprints demo");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("From: /blueprints demo"),
+        "detail header: {text}"
+    );
+    assert!(
+        text.contains("## Blueprint: `demo`"),
+        "detail title: {text}"
+    );
+    assert!(
+        text.contains("A demo blueprint"),
+        "detail description: {text}"
+    );
+    assert!(text.contains("### Teammates"), "detail teammates: {text}");
+    assert_eq!(app.status, "blueprints: demo");
+}
+
+#[test]
+fn test_blueprints_unknown_name() {
+    let _guard = enter_with_cwd();
+    let mut app = make_app();
+    app.execute_slash_command("/blueprints missing");
+    assert_eq!(app.status, "Blueprint 'missing' not found");
+    assert!(app.log_entries.iter().any(|e| e.level == LogLevel::Warn));
+}
+
+#[test]
+fn test_team_blueprint_still_works_after_refactor() {
+    let guard = enter_with_cwd();
+    write_temp_blueprint(&guard.path(), "demo", "# Demo\nA demo blueprint", 1);
+
+    let mut app = make_app();
+    app.execute_slash_command("/team blueprint demo");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("From: /team blueprint demo"),
+        "team blueprint detail header: {text}"
+    );
+    assert!(
+        text.contains("## Blueprint: `demo`"),
+        "team blueprint title: {text}"
+    );
+    assert_eq!(app.status, "team: blueprint demo");
+}
+
 // ── input clearing ──────────────────────────────────────────────────
 
 #[test]

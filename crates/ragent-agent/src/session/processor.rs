@@ -53,8 +53,8 @@ pub use crate::session::permissions::check_permission_with_prompt;
 pub use crate::session::prompt_builders::build_detailed_tool_reference_section;
 
 /// Maximum wall-clock time a single tool call may run before the watchdog
-/// aborts it and terminates the agent run (1000 seconds).
-const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(1000); // ≈ 16m 40s
+/// aborts it and terminates the agent run (2000 seconds).
+const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(2000); // ≈ 33m 20s
 
 /// Nudge injected when a sub-agent's loop terminates with a short text-only
 /// response after prior tool-use steps. The model often produces narration
@@ -1279,6 +1279,16 @@ impl SessionProcessor {
                 // once per tool call. The cloned value is also reused by the
                 // auto-spec-task-update block below (P-10).
                 let active_spec_id = self.active_spec.read().await.clone();
+                // FR-??? (skill allowed_tools): build the allowed tool set once
+                // per step so we can reject disallowed tool calls at runtime.
+                // An empty restriction list means no restriction.
+                let allowed_tool_set =
+                    crate::tool::build_allowed_tool_set(agent.allowed_tools.as_deref());
+                let _has_tool_restriction = !allowed_tool_set.is_empty()
+                    && agent
+                        .allowed_tools
+                        .as_ref()
+                        .map_or(false, |v| !v.is_empty());
                 let base_tool_ctx = ToolContext {
                     session_id: session_id.to_string(),
                     working_dir: turn.working_dir.clone(),

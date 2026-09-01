@@ -159,6 +159,17 @@ pub(crate) fn extract_command_name(command: &str) -> String {
 /// `agent_complete`), `task_*` (T-011, FR-017),
 /// and `ask_user`.
 pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
+    is_hardwired_codeindex_tool(tool_name)
+        || tool_name.starts_with("team_")
+        || AUTO_APPROVED_AGENT_TOOLS.contains(&tool_name)
+        || tool_name.starts_with("task_")
+        || tool_name == "ask_user"
+        || tool_name == "model_info"
+}
+
+/// Return `true` for the read-only codeindex tools that are always allowed
+/// regardless of skill restrictions.
+pub(crate) fn is_hardwired_codeindex_tool(tool_name: &str) -> bool {
     const AUTO_APPROVED_CODEINDEX_TOOLS: &[&str] = &[
         "codeindex_search",
         "codeindex_symbols",
@@ -167,20 +178,27 @@ pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
         "codeindex_status",
         "codeindex_reindex",
     ];
-    const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
-        "new_agent",
-        "cancel_agent",
-        "list_agents",
-        "wait_agents",
-        "agent_complete",
-    ];
     AUTO_APPROVED_CODEINDEX_TOOLS.contains(&tool_name)
-        || tool_name.starts_with("team_")
-        || AUTO_APPROVED_AGENT_TOOLS.contains(&tool_name)
-        || tool_name.starts_with("task_")
-        || tool_name == "ask_user"
-        || tool_name == "model_info"
 }
+
+const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
+    "new_agent",
+    "cancel_agent",
+    "list_agents",
+    "wait_agents",
+    "agent_complete",
+];
+
+/// Tools that are always available to an agent even when a skill's
+/// `allowed_tools` list is being enforced. These are essential control and
+/// introspection tools that must not be removed from the LLM's tool list.
+pub(crate) const SKILL_ALWAYS_ALLOWED_TOOLS: &[&str] = &[
+    "think",
+    "question",
+    "ask_user",
+    "agent_complete",
+    "model_info",
+];
 
 /// Check permission for a tool execution, prompting the user if necessary.
 ///

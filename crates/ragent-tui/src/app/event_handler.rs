@@ -274,9 +274,14 @@ impl App {
                 ref session_id,
                 ref call_id,
                 ref tool,
-            } if self.is_current_session(session_id) => {
-                self.stream_in_bytes += (call_id.len() + tool.len()) as u64;
-                telemetry_counters::increment_tool_invocations(1);
+            } if self.is_current_session(session_id)
+                || self.is_tracked_agent_session(session_id) =>
+            {
+                let is_primary = self.is_current_session(session_id);
+                if is_primary {
+                    self.stream_in_bytes += (call_id.len() + tool.len()) as u64;
+                    telemetry_counters::increment_tool_invocations(1);
+                }
                 // Get the current step count from the event bus (single source of truth)
                 let step = self.event_bus.current_step(session_id) as u32;
                 let short_sid = short_session_id(session_id);
@@ -300,16 +305,36 @@ impl App {
                 let current_substep = *substep;
                 self.tool_step_map
                     .insert(call_id.clone(), (short_sid.clone(), step, current_substep));
-                self.add_tool_call_part(tool, call_id);
+                if is_primary {
+                    self.add_tool_call_part(tool, call_id);
 
-                // If args were received before the start event, apply them now.
-                if let Some(args_json) = self.pending_tool_args.remove(call_id) {
-                    let _ = self.update_tool_call_input(call_id, &args_json);
+                    // If args were received before the start event, apply them now.
+                    if let Some(args_json) = self.pending_tool_args.remove(call_id) {
+                        let _ = self.update_tool_call_input(call_id, &args_json);
+                    }
+                    self.status = format!("running: {}", tool);
                 }
-                self.status = format!("running: {}", tool);
-                self.push_log_no_agent(
+                // Log the step for the primary session AND for every tracked
+                // sub-agent/teammate session so the Agents/Teams panels' step
+                // count (one per ToolCallStart) is visible in the log.
+                let agent_tag = if is_primary {
+                    None
+                } else {
+                    self.agent_log_tag(session_id)
+                };
+                let agent_prefix = agent_tag
+                    .as_ref()
+                    .map(|tag| format!("[{tag}] "))
+                    .unwrap_or_default();
+                self.push_log_for(
                     LogLevel::Tool,
-                    format!("[{step}.{current_substep}] tool call: {}", tool),
+                    format!("{agent_prefix}[{step}.{current_substep}] tool call: {tool}"),
+                    agent_tag,
+                    if is_primary {
+                        None
+                    } else {
+                        Some(session_id.clone())
+                    },
                 );
                 self.needs_redraw = true;
             }
@@ -319,75 +344,163 @@ impl App {
                 ref tool,
                 ref error,
                 duration_ms,
-            } if self.is_current_session(session_id) => {
-                telemetry_counters::set_tool_duration_last(duration_ms as f64);
-                self.update_tool_call_status(
-                    call_id,
-                    error.is_none(),
-                    error.as_deref(),
-                    duration_ms,
-                );
-                self.set_status_working("processing");
+            } if self.is_current_session(session_id)
+                || self.is_tracked_agent_session(session_id) =>
+            {
+                let is_primary = self.is_current_session(session_id);
+                if is_primary {
+                    telemetry_counters::set_tool_duration_last(duration_ms as f64);
+                    self.update_tool_call_status(
+                        call_id,
+                        error.is_none(),
+                        error.as_deref(),
+                        duration_ms,
+                    );
+                    self.set_status_working("processing");
+                }
                 let step_tag = self
                     .tool_step_map
                     .get(call_id)
                     .map(|(_sid, step, substep)| format!("[{step}.{substep}] "))
                     .unwrap_or_default();
+                let agent_tag = if is_primary {
+                    None
+                } else {
+                    self.agent_log_tag(session_id)
+                };
+                let agent_prefix = agent_tag
+                    .as_ref()
+                    .map(|tag| format!("[{tag}] "))
+                    .unwrap_or_default();
                 if let Some(err) = error {
-                    self.push_log_no_agent(
+                    self.push_log_for(
                         LogLevel::Error,
                         format!(
-                            "{}tool {} failed: {} ({}ms)",
-                            step_tag, tool, err, duration_ms
+                            "{agent_prefix}{step_tag}tool {tool} failed: {err} ({duration_ms}ms)"
                         ),
+                        agent_tag,
+                        if is_primary {
+                            None
+                        } else {
+                            Some(session_id.clone())
+                        },
                     );
                 } else {
-                    self.push_log_no_agent(
+                    let message =
+                        format!("{agent_prefix}{step_tag}tool {tool} completed ({duration_ms}ms)");
+                    self.push_log_for(
                         LogLevel::Tool,
-                        format!("{}tool {} completed ({}ms)", step_tag, tool, duration_ms),
+                        message,
+                        agent_tag,
+                        if is_primary {
+                            None
+                        } else {
+                            Some(session_id.clone())
+                        },
                     );
                 }
-                // T-010/FR-013: the tool-call state changed, so refresh the
-                // Context panel snapshot off the UI thread (no-op when the
-                // panel is closed or a refresh is already in flight).
-                self.schedule_context_snapshot_refresh();
+                if is_primary {
+                    // T-010/FR-013: the tool-call state changed, so refresh the
+                    // Context panel snapshot off the UI thread (no-op when the
+                    // panel is closed or a refresh is already in flight).
+                    self.schedule_context_snapshot_refresh();
+                }
                 self.needs_redraw = true;
             }
             Event::ToolCallBatch {
                 ref session_id,
                 ref calls,
                 ..
-            } if self.is_current_session(session_id) => {
+            } if self.is_current_session(session_id)
+                || self.is_tracked_agent_session(session_id) =>
+            {
+                let is_primary = self.is_current_session(session_id);
                 // Atomic fallback: if per-call ToolCallStart/End events were
                 // dropped by the broadcast bridge during a burst, the batch
                 // still carries the final status/duration for every call.
                 for entry in calls {
-                    if !self.find_tool_call_part(&entry.call_id) {
-                        self.add_tool_call_part(&entry.tool, &entry.call_id);
+                    // If the ToolCallStart event was dropped we never tagged
+                    // the call with a step/substep, so the log would show one
+                    // fewer "tool call" line than the Agents/Teams panels'
+                    // step count (which counts every ToolCallStart). Rebuild
+                    // the tag and log the missing line now.
+                    if !self.tool_step_map.contains_key(&entry.call_id) {
+                        let step = self.event_bus.current_step(session_id) as u32;
+                        let short_sid = short_session_id(session_id);
+                        let last_step = self
+                            .last_step_per_session
+                            .get(session_id)
+                            .copied()
+                            .unwrap_or(0);
+                        if step != last_step {
+                            self.substep_counter_per_session
+                                .insert(session_id.clone(), 0);
+                            self.last_step_per_session.insert(session_id.clone(), step);
+                        }
+                        let substep = self
+                            .substep_counter_per_session
+                            .entry(session_id.clone())
+                            .or_insert(0);
+                        *substep += 1;
+                        let current_substep = *substep;
+                        self.tool_step_map.insert(
+                            entry.call_id.clone(),
+                            (short_sid.clone(), step, current_substep),
+                        );
+                        let agent_tag = if is_primary {
+                            None
+                        } else {
+                            self.agent_log_tag(session_id)
+                        };
+                        let agent_prefix = agent_tag
+                            .as_ref()
+                            .map(|tag| format!("[{tag}] "))
+                            .unwrap_or_default();
+                        let message = format!(
+                            "{agent_prefix}[{step}.{current_substep}] tool call: {}",
+                            entry.tool
+                        );
+                        self.push_log_for(
+                            LogLevel::Tool,
+                            message,
+                            agent_tag,
+                            if is_primary {
+                                None
+                            } else {
+                                Some(session_id.clone())
+                            },
+                        );
                     }
-                    // If the start event was dropped we never consumed the
-                    // pending ToolCallArgs, so the newly-created part would
-                    // render with a missing input summary. Apply any pending
-                    // args now so the header shows the path/command/etc.
-                    if let Some(args_json) = self.pending_tool_args.remove(&entry.call_id) {
-                        let _ = self.update_tool_call_input(&entry.call_id, &args_json);
+                    if is_primary {
+                        if !self.find_tool_call_part(&entry.call_id) {
+                            self.add_tool_call_part(&entry.tool, &entry.call_id);
+                        }
+                        // If the start event was dropped we never consumed the
+                        // pending ToolCallArgs, so the newly-created part would
+                        // render with a missing input summary. Apply any pending
+                        // args now so the header shows the path/command/etc.
+                        if let Some(args_json) = self.pending_tool_args.remove(&entry.call_id) {
+                            let _ = self.update_tool_call_input(&entry.call_id, &args_json);
+                        }
+                        // The batch entry now carries the call's raw JSON args, so
+                        // apply them as a fallback when the per-call ToolCallArgs
+                        // event never arrived (e.g. the broadcast→mpsc bridge task
+                        // aborted after a Lagged error racing a permission prompt).
+                        // Pending args already applied above take precedence.
+                        let _ = self.update_tool_call_input(&entry.call_id, &entry.args);
+                        self.update_tool_call_status(
+                            &entry.call_id,
+                            entry.success,
+                            entry.error.as_deref(),
+                            entry.duration_ms,
+                        );
                     }
-                    // The batch entry now carries the call's raw JSON args, so
-                    // apply them as a fallback when the per-call ToolCallArgs
-                    // event never arrived (e.g. the broadcast→mpsc bridge task
-                    // aborted after a Lagged error racing a permission prompt).
-                    // Pending args already applied above take precedence.
-                    let _ = self.update_tool_call_input(&entry.call_id, &entry.args);
-                    self.update_tool_call_status(
-                        &entry.call_id,
-                        entry.success,
-                        entry.error.as_deref(),
-                        entry.duration_ms,
-                    );
                 }
-                // T-010/FR-013: atomic batch finalized multiple tool calls,
-                // so refresh the Context panel snapshot off the UI thread.
-                self.schedule_context_snapshot_refresh();
+                if is_primary {
+                    // T-010/FR-013: atomic batch finalized multiple tool calls,
+                    // so refresh the Context panel snapshot off the UI thread.
+                    self.schedule_context_snapshot_refresh();
+                }
                 self.needs_redraw = true;
             }
             Event::MessageStart {
@@ -1125,14 +1238,17 @@ impl App {
                 } else {
                     ("[fg]", "Foreground")
                 };
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!("{} {} task started: {} ({})", icon, kind, task_id, agent),
+                    None,
+                    Some(child_session_id.clone()),
                 );
             }
             Event::SubagentComplete {
                 ref session_id,
                 ref task_id,
+                ref child_session_id,
                 ref summary,
                 ref finish_reason,
                 success,
@@ -1159,7 +1275,7 @@ impl App {
                     "truncated" => " (TRUNCATED by provider; report is incomplete)",
                     _ => "",
                 };
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!(
                         "{} Task completed{} ({}): {}",
@@ -1168,6 +1284,8 @@ impl App {
                         &task_id[..8.min(task_id.len())],
                         summary
                     ),
+                    None,
+                    Some(child_session_id.clone()),
                 );
             }
             Event::SubagentCancelled {
@@ -1175,62 +1293,79 @@ impl App {
                 ref task_id,
             } if self.is_current_or_descendant_session(session_id) => {
                 if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
+                    let child_session_id = self.active_tasks[idx].child_session_id.clone();
                     self.active_tasks.remove(idx);
+                    self.push_log_for(
+                        LogLevel::Info,
+                        format!(
+                            "[cancel] Task cancelled ({})",
+                            &task_id[..8.min(task_id.len())]
+                        ),
+                        None,
+                        Some(child_session_id),
+                    );
+                } else {
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!(
+                            "[cancel] Task cancelled ({})",
+                            &task_id[..8.min(task_id.len())]
+                        ),
+                    );
                 }
-                self.push_log_no_agent(
-                    LogLevel::Info,
-                    format!(
-                        "[cancel] Task cancelled ({})",
-                        &task_id[..8.min(task_id.len())]
-                    ),
-                );
             }
             Event::SubagentSuspended {
                 ref session_id,
                 ref task_id,
-                child_session_id: _,
+                ref child_session_id,
             } if self.is_current_or_descendant_session(session_id) => {
                 if let Some(task) = self.active_tasks.iter_mut().find(|t| t.id == *task_id) {
                     task.status = ragent_agent::task::TaskStatus::Suspended;
                 }
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!(
                         "[pause] Task suspended ({})",
                         &task_id[..8.min(task_id.len())]
                     ),
+                    None,
+                    Some(child_session_id.clone()),
                 );
             }
             Event::SubagentResumed {
                 ref session_id,
                 ref task_id,
-                child_session_id: _,
+                ref child_session_id,
             } if self.is_current_or_descendant_session(session_id) => {
                 if let Some(task) = self.active_tasks.iter_mut().find(|t| t.id == *task_id) {
                     task.status = ragent_agent::task::TaskStatus::Running;
                 }
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!("▷ Task resumed ({})", &task_id[..8.min(task_id.len())]),
+                    None,
+                    Some(child_session_id.clone()),
                 );
             }
             Event::SubagentKilled {
                 ref session_id,
                 ref task_id,
+                ref child_session_id,
                 force,
-                child_session_id: _,
             } if self.is_current_or_descendant_session(session_id) => {
                 if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
                     self.active_tasks.remove(idx);
                 }
                 let label = if force { "Force-killed" } else { "Killed" };
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!(
                         "[kill] {} task ({})",
                         label,
                         &task_id[..8.min(task_id.len())]
                     ),
+                    None,
+                    Some(child_session_id.clone()),
                 );
             }
             Event::BackgroundTaskSpawned {
@@ -1315,7 +1450,7 @@ impl App {
                 // Always refresh the stored values (session id, status, current task)
                 // from disk so races between UI hydration and spawn events don't
                 // leave the UI showing an outdated state.
-                if let Some(m) = self
+                let teammate_session_id = if let Some(m) = self
                     .team_members
                     .iter_mut()
                     .find(|m| m.agent_id == *agent_id)
@@ -1330,7 +1465,8 @@ impl App {
                     {
                         m.session_id = stored.session_id.clone();
                         m.status = stored.status.clone();
-                        m.current_task_id = stored.current_task_id.clone(); // Map this teammate's session short_sid → a unique display
+                        m.current_task_id = stored.current_task_id.clone();
+                        // Map this teammate's session short_sid → a unique display
                         // label (name + agent id) so tool step tags and panels can
                         // distinguish teammates with the same name.
                         if let Some(ref sid) = stored.session_id {
@@ -1339,11 +1475,16 @@ impl App {
                             self.sid_to_display_name.insert(short_sid, display_name);
                         }
                     }
-                }
+                    m.session_id.clone()
+                } else {
+                    None
+                };
                 self.show_teams = true;
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!("[team] [{team_name}] Spawned teammate '{teammate_name}' ({agent_id})"),
+                    None,
+                    teammate_session_id,
                 );
             }
             Event::TeammateMessage {
@@ -1365,9 +1506,11 @@ impl App {
                     let counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
                     counts.1 = counts.1.saturating_add(1);
                 }
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!("📨 [{team_name}] {from} → {to} ({message_type}): {preview}"),
+                    None,
+                    self.team_member_session_id_by_agent_id(from),
                 );
             }
             Event::TeammateP2PMessage {
@@ -1387,9 +1530,11 @@ impl App {
                 // Track received count for recipient.
                 let to_counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
                 to_counts.1 = to_counts.1.saturating_add(1);
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!("🔀 [{team_name}] P2P {from} → {to} ({message_type}): {preview}"),
+                    None,
+                    self.team_member_session_id_by_agent_id(from),
                 );
             }
             Event::TeammateIdle {
@@ -1409,9 +1554,11 @@ impl App {
                 if let Some(tm) = self.session_processor.team_manager.get() {
                     tm.record_progress(agent_id);
                 }
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!("💤 [{team_name}] Teammate {agent_id} is idle"),
+                    None,
+                    self.team_member_session_id_by_agent_id(agent_id),
                 );
             }
             Event::TeammateFailed {
@@ -1442,9 +1589,11 @@ impl App {
                 } else {
                     error.to_string()
                 };
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Error,
                     format!("[err] [{team_name}] Teammate {agent_id} failed: {short_err}"),
+                    None,
+                    self.team_member_session_id_by_agent_id(agent_id),
                 );
             }
             Event::TeamTaskClaimed {
@@ -1465,9 +1614,11 @@ impl App {
                 if let Some(tm) = self.session_processor.team_manager.get() {
                     tm.record_progress(agent_id);
                 }
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!("📋 [{team_name}] {agent_id} claimed task {task_id}"),
+                    None,
+                    self.team_member_session_id_by_agent_id(agent_id),
                 );
             }
             Event::TeamTaskCompleted {
@@ -1487,9 +1638,11 @@ impl App {
                 if let Some(tm) = self.session_processor.team_manager.get() {
                     tm.record_progress(agent_id);
                 }
-                self.push_log_no_agent(
+                self.push_log_for(
                     LogLevel::Info,
                     format!("[ok] [{team_name}] {agent_id} completed task {task_id}"),
+                    None,
+                    self.team_member_session_id_by_agent_id(agent_id),
                 );
             }
             Event::TeamCleanedUp {
@@ -2086,6 +2239,50 @@ impl App {
 
     pub(crate) fn is_current_session(&self, session_id: &str) -> bool {
         self.session_id.as_deref() == Some(session_id)
+    }
+
+    /// Returns the session id for a team member by agent id, if known.
+    /// Used to attribute team-related log entries to the teammate's own
+    /// output-view overlay.
+    pub(crate) fn team_member_session_id_by_agent_id(&self, agent_id: &str) -> Option<String> {
+        self.team_members
+            .iter()
+            .find(|m| m.agent_id == agent_id)
+            .and_then(|m| m.session_id.clone())
+    }
+
+    /// Returns `true` when the session belongs to a tracked sub-agent task or
+    /// team member rendered in the Agents / Teams panels.
+    ///
+    /// Used to mirror tool-call activity for those sessions into the shared
+    /// log so the panels' step count (one per `ToolCallStart`) is auditable.
+    pub(crate) fn is_tracked_agent_session(&self, session_id: &str) -> bool {
+        self.active_tasks
+            .iter()
+            .any(|t| t.child_session_id == session_id)
+            || self
+                .team_members
+                .iter()
+                .any(|m| m.session_id.as_deref() == Some(session_id))
+    }
+
+    /// Returns the display tag used to attribute log lines to a tracked
+    /// sub-agent task or team member, if any.
+    ///
+    /// Team members take precedence over sub-agent tasks when a session is
+    /// registered in both (teammates also appear as sub-agent tasks).
+    pub(crate) fn agent_log_tag(&self, session_id: &str) -> Option<String> {
+        if let Some(member) = self
+            .team_members
+            .iter()
+            .find(|m| m.session_id.as_deref() == Some(session_id))
+        {
+            return Some(member.name.clone());
+        }
+        self.active_tasks
+            .iter()
+            .find(|t| t.child_session_id == session_id)
+            .map(|t| t.id.clone())
     }
 
     /// Returns `true` for the primary session or any session that is a

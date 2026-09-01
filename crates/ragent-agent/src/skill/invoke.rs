@@ -29,12 +29,14 @@ pub fn parse_model_ref(model_str: &str) -> Option<crate::agent::ModelRef> {
 ///
 /// The active session model overrides built-in agent defaults unless the agent
 /// profile explicitly pinned its model. An explicit skill-level `model:` then
-/// takes highest priority over both.
+/// takes highest priority over both. The skill's `allowed_tools` are enforced
+/// for the duration of the skill run by setting them on the returned agent.
 #[must_use]
 pub fn resolve_inline_skill_agent(
     base_agent: &Arc<crate::agent::AgentInfo>,
     active_model: Option<&str>,
     skill_model: Option<&str>,
+    allowed_tools: &[String],
 ) -> Arc<crate::agent::AgentInfo> {
     let mut changed = false;
     let mut new_model = None;
@@ -54,12 +56,18 @@ pub fn resolve_inline_skill_agent(
         changed = true;
     }
 
-    if !changed {
+    let needs_tool_restriction = !allowed_tools.is_empty();
+    if !changed && !needs_tool_restriction {
         return Arc::clone(base_agent);
     }
 
     let mut agent = Arc::clone(base_agent);
-    Arc::make_mut(&mut agent).model = new_model;
+    if changed {
+        Arc::make_mut(&mut agent).model = new_model;
+    }
+    if needs_tool_restriction {
+        Arc::make_mut(&mut agent).allowed_tools = Some(allowed_tools.to_vec());
+    }
     agent
 }
 
@@ -296,6 +304,10 @@ pub fn resolve_forked_skill_agent(
         && let Some(model_ref) = parse_model_ref(model_str)
     {
         Arc::make_mut(&mut agent).model = Some(model_ref);
+    }
+
+    if !invocation.allowed_tools.is_empty() {
+        Arc::make_mut(&mut agent).allowed_tools = Some(invocation.allowed_tools.clone());
     }
 
     Ok(agent)

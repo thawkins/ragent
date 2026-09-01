@@ -7,13 +7,14 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustc_hash::FxHasher;
 
 use crate::agent::AgentInfo;
-use crate::llm::ChatMessage;
+use crate::llm::{ChatMessage, ToolDefinition};
 use crate::tool::{TeamContext, ToolRegistry};
 use ragent_types::ThinkingConfig;
 
@@ -105,6 +106,8 @@ pub struct SystemPromptCache {
     agent_prompts: Mutex<HashMap<AgentPromptKey, Cached<String>>>,
     /// Tool reference section - changes only on tool registration
     tool_reference: Mutex<Cached<String>>,
+    /// Sorted tool definition cache - changes only on tool registration
+    tool_definitions: Mutex<Option<(u64, Arc<Vec<ToolDefinition>>)>>,
     /// Codeindex guidance section - changes only on index state change
     codeindex_guidance: Mutex<Cached<String>>,
     /// Team guidance section - changes only on team membership change
@@ -143,6 +146,7 @@ impl SystemPromptCache {
         Self {
             agent_prompts: Mutex::new(HashMap::new()),
             tool_reference: Mutex::new(Cached::new()),
+            tool_definitions: Mutex::new(None),
             codeindex_guidance: Mutex::new(Cached::new()),
             team_guidance: Mutex::new(Cached::new()),
             cache_version: AtomicU64::new(current_cache_version()),
@@ -214,9 +218,13 @@ impl SystemPromptCache {
     }
 
     /// Get or compute the cached tool reference section.
-    pub fn get_tool_reference<F>(&self, tool_registry: &ToolRegistry, compute: F) -> Option<String>
+    pub fn get_tool_reference<F>(
+        &self,
+        tool_registry: &ToolRegistry,
+        compute_reference: F,
+    ) -> Option<String>
     where
-        F: FnOnce(&ToolRegistry) -> String,
+        F: FnOnce(&[ToolDefinition]) -> String,
     {
         self.refresh_version();
         let version = self.version();
@@ -236,11 +244,31 @@ impl SystemPromptCache {
         }
 
         // Compute and cache
-        let value = compute(tool_registry);
+        let defs = tool_registry.definitions();
+        let value = compute_reference(&defs);
         cache.set(value.clone());
         *last_version = current_version;
 
         Some(value)
+    }
+
+    /// Get or compute the cached sorted tool definitions.
+    pub fn get_tool_definitions(
+        &self,
+        tool_registry: &ToolRegistry,
+    ) -> Option<Arc<Vec<ToolDefinition>>> {
+        let current_version = tool_registry.version();
+        let mut cache = self.tool_definitions.lock().ok()?;
+
+        if let Some((version, defs)) = cache.as_ref() {
+            if *version == current_version {
+                return Some(Arc::clone(defs));
+            }
+        }
+
+        let defs = tool_registry.definitions();
+        *cache = Some((current_version, Arc::clone(&defs)));
+        Some(defs)
     }
 
     /// Get or compute the cached codeindex guidance section.

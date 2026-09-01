@@ -5,6 +5,8 @@
 //! the codebase-index guidance (active vs. disabled), the compact and detailed
 //! tool-reference listings, and the universal tool-calling directive.
 
+use crate::llm::ToolDefinition;
+
 /// Universal tool-calling guidance injected into every session's system prompt.
 ///
 /// Previously this was an Ollama-specific constant (`OLLAMA_TOOL_GUIDANCE`),
@@ -87,8 +89,14 @@ pub(crate) fn build_codeindex_guidance_section_disabled() -> String {
 ///
 /// Injected into every session's system prompt so the model always knows the exact tool names
 /// available. This prevents hallucinated tool names (e.g. calling "search" instead of "grep").
+#[allow(dead_code)]
 pub(crate) fn build_tool_reference_section(registry: &crate::tool::ToolRegistry) -> String {
-    let defs = registry.definitions();
+    build_tool_reference_from_defs(&registry.definitions())
+}
+
+/// Build a concise system-prompt tool reference from a pre-filtered list of
+/// definitions. Used when an agent's `allowed_tools` restricts the visible set.
+pub(crate) fn build_tool_reference_from_defs(defs: &[ToolDefinition]) -> String {
     if defs.is_empty() {
         return String::new();
     }
@@ -114,7 +122,12 @@ pub(crate) fn build_tool_reference_section(registry: &crate::tool::ToolRegistry)
 /// agent's system prompt carries, without relying on the model to infer
 /// parameter names or required fields from the API schema alone.
 pub fn build_detailed_tool_reference_section(registry: &crate::tool::ToolRegistry) -> String {
-    let defs = registry.definitions();
+    build_detailed_tool_reference_from_defs(&registry.definitions())
+}
+
+/// Build a detailed tool-reference section from a pre-filtered list of
+/// definitions. Used when an agent's `allowed_tools` restricts the visible set.
+pub fn build_detailed_tool_reference_from_defs(defs: &[ToolDefinition]) -> String {
     if defs.is_empty() {
         return String::new();
     }

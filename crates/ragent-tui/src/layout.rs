@@ -4394,9 +4394,13 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         if let Some(ref msgs) = session_messages {
+            // Build a step map from the message transcript itself so that
+            // storage-backed sessions (sub-agents / teammates) get the same
+            // [N.M] step/parallel-tool prefixes as the primary live session.
+            let local_step_map = build_step_map_for_messages(msgs.as_ref());
             lines = messages_to_lines(
                 msgs.as_ref(),
-                &app.tool_step_map,
+                &local_step_map,
                 &app.sid_to_display_name,
                 &app.cwd,
             );
@@ -4652,6 +4656,45 @@ fn message_to_lines(
         sid_to_display,
         cwd,
     )
+}
+
+/// Build a `(call_id -> (short_sid, step, substep))` map from the
+/// message transcript itself. This lets storage-backed sessions (sub-agents,
+/// teammates, resumed sessions) render the same `[N.M]` step/parallel-tool
+/// prefixes as the primary live session, without relying on the transient
+/// in-memory `tool_step_map` populated from `ToolCallStart` events.
+fn build_step_map_for_messages(
+    messages: &[Message],
+) -> std::collections::HashMap<String, (String, u32, u32)> {
+    let mut map = std::collections::HashMap::new();
+    let mut step = 0u32;
+    for msg in messages {
+        if msg.role != Role::Assistant {
+            continue;
+        }
+        let tool_call_count = msg
+            .parts
+            .iter()
+            .filter(|p| matches!(p, MessagePart::ToolCall { .. }))
+            .count();
+        if tool_call_count == 0 {
+            continue;
+        }
+        step += 1;
+        let mut substep = 0u32;
+        for part in &msg.parts {
+            if let MessagePart::ToolCall { call_id, .. } = part {
+                substep += 1;
+                let short_sid = {
+                    let s = &msg.session_id;
+                    let start = s.char_indices().rev().nth(7).map(|(i, _)| i).unwrap_or(0);
+                    s[start..].to_string()
+                };
+                map.insert(call_id.clone(), (short_sid, step, substep));
+            }
+        }
+    }
+    map
 }
 
 /// Render a slice of messages into formatted lines using the rich format

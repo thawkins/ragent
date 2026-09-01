@@ -9,6 +9,7 @@ use ragent_team::team::{
 use ragent_types::ThinkingLevel;
 use ragent_types::strutil::truncate_bytes;
 
+use crate::app::blueprints::{self};
 use ragent_config::OtelConfig;
 use ragent_telemetry::counters::{TelemetryCountersContent, current_values};
 
@@ -135,6 +136,9 @@ impl App {
                     "status".to_string(),
                     "task".to_string(),
                 ]
+            }
+            "blueprints" => {
+                vec!["help".to_string(), "list".to_string()]
             }
             "reverse" => {
                 vec![
@@ -3657,6 +3661,9 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 self.tasks_cache_dirty = true;
                 self.needs_redraw = true;
             }
+            "blueprints" => {
+                handle_blueprints_command(self, args);
+            }
             "mcp" => {
                 let mcp_args: Vec<&str> = args.split_whitespace().collect();
                 let sub = mcp_args.first().copied().unwrap_or("");
@@ -4131,229 +4138,24 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     }
                     "blueprint" | "blueprints" => {
                         let working_dir = std::env::current_dir().unwrap_or_default();
-
-                        // Collect all blueprint directories from project-local and global paths.
-                        let mut blueprint_dirs: Vec<(String, std::path::PathBuf, String)> =
-                            Vec::new();
-                        let mut seen_names: std::collections::HashSet<String> =
-                            std::collections::HashSet::new();
-
-                        // Walk up to find project .ragent/blueprints/teams/
-                        let mut cur_opt: Option<&std::path::Path> = Some(working_dir.as_path());
-                        while let Some(cur) = cur_opt {
-                            let bp_root = cur.join(".ragent").join("blueprints").join("teams");
-                            if bp_root.is_dir() {
-                                if let Ok(entries) = std::fs::read_dir(&bp_root) {
-                                    for entry in entries.flatten() {
-                                        if entry.path().is_dir() {
-                                            let name =
-                                                entry.file_name().to_string_lossy().to_string();
-                                            if seen_names.insert(name.clone()) {
-                                                blueprint_dirs.push((
-                                                    name,
-                                                    entry.path(),
-                                                    "project".to_string(),
-                                                ));
-                                            }
-                                        }
-                                    }
-                                }
-                                break;
-                            }
-                            cur_opt = cur.parent();
-                        }
-                        // Global blueprints
-                        if let Some(home) = dirs::home_dir() {
-                            let bp_root = home.join(".ragent").join("blueprints").join("teams");
-                            if bp_root.is_dir() {
-                                if let Ok(entries) = std::fs::read_dir(&bp_root) {
-                                    for entry in entries.flatten() {
-                                        if entry.path().is_dir() {
-                                            let name =
-                                                entry.file_name().to_string_lossy().to_string();
-                                            if seen_names.insert(name.clone()) {
-                                                blueprint_dirs.push((
-                                                    name,
-                                                    entry.path(),
-                                                    "global".to_string(),
-                                                ));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        blueprint_dirs.sort_by(|a, b| a.0.cmp(&b.0));
+                        let blueprint_dirs = blueprints::list_installed_blueprints(&working_dir);
 
                         if rest.is_empty() {
-                            // List all blueprints as a markdown table.
-                            let mut output = String::from(
-                                "From: /team blueprint\n\n## Installed Team Blueprints\n\n",
+                            let output = blueprints::render_blueprint_list(
+                                &blueprint_dirs,
+                                "/team blueprint",
                             );
-                            if blueprint_dirs.is_empty() {
-                                output.push_str("No blueprints found.\n\nInstall blueprints to:\n- `[project]/.ragent/blueprints/teams/<name>/`\n- `~/.ragent/blueprints/teams/<name>/`\n");
-                            } else {
-                                output.push_str(
-                                    "| Blueprint | Scope | Teammates | Tasks | Description |\n",
-                                );
-                                output.push_str(
-                                    "|-----------|-------|-----------|-------|-------------|\n",
-                                );
-                                for (name, path, scope) in &blueprint_dirs {
-                                    // Count teammates from spawn-prompts.json
-                                    let teammate_count =
-                                        std::fs::read_to_string(path.join("spawn-prompts.json"))
-                                            .ok()
-                                            .and_then(|raw| {
-                                                serde_json::from_str::<serde_json::Value>(&raw).ok()
-                                            })
-                                            .and_then(|v| v.as_array().map(|a| a.len()))
-                                            .unwrap_or(0);
-                                    // Count tasks from task-seed.json
-                                    let task_count =
-                                        std::fs::read_to_string(path.join("task-seed.json"))
-                                            .ok()
-                                            .and_then(|raw| {
-                                                serde_json::from_str::<serde_json::Value>(&raw).ok()
-                                            })
-                                            .and_then(|v| v.as_array().map(|a| a.len()))
-                                            .unwrap_or(0);
-                                    // Description from first line of README.md (skip heading)
-                                    let desc = std::fs::read_to_string(path.join("README.md"))
-                                        .ok()
-                                        .and_then(|raw| {
-                                            raw.lines()
-                                                .find(|l| {
-                                                    !l.trim().is_empty() && !l.starts_with('#')
-                                                })
-                                                .map(|l| l.trim().to_string())
-                                        })
-                                        .unwrap_or_else(|| "-".to_string());
-                                    output.push_str(&format!(
-                                        "| `{}` | {} | {} | {} | {} |\n",
-                                        name, scope, teammate_count, task_count, desc
-                                    ));
-                                }
-                            }
                             self.append_assistant_text(&output);
                             self.status = "team: blueprints".to_string();
+                        } else if let Some(output) = blueprints::render_blueprint_detail(
+                            &blueprint_dirs,
+                            rest.trim(),
+                            "/team blueprint",
+                        ) {
+                            self.append_assistant_text(&output);
+                            self.status = format!("team: blueprint {}", rest.trim());
                         } else {
-                            // Show detailed summary for a specific blueprint.
-                            let bp_name = rest.trim();
-                            let found = blueprint_dirs.iter().find(|(n, _, _)| n == bp_name);
-                            if let Some((name, path, scope)) = found {
-                                let mut output = format!(
-                                    "From: /team blueprint {name}\n\n## Blueprint: `{name}`\n\n**Scope:** {scope}  \n**Path:** `{}`\n\n",
-                                    path.display()
-                                );
-
-                                // README.md
-                                if let Ok(readme) = std::fs::read_to_string(path.join("README.md"))
-                                {
-                                    output.push_str("### Description\n\n");
-                                    output.push_str(&readme);
-                                    output.push_str("\n\n");
-                                }
-
-                                // Teammates from spawn-prompts.json
-                                if let Ok(raw) =
-                                    std::fs::read_to_string(path.join("spawn-prompts.json"))
-                                {
-                                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw)
-                                    {
-                                        if let Some(items) = val.as_array() {
-                                            output.push_str("### Teammates\n\n");
-                                            output.push_str("| Name | Type | Prompt |\n");
-                                            output.push_str("|------|------|--------|\n");
-                                            for item in items {
-                                                let tname = item
-                                                    .get("teammate_name")
-                                                    .or_else(|| {
-                                                        item.get("args")
-                                                            .and_then(|a| a.get("teammate_name"))
-                                                    })
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("auto");
-                                                let atype = item
-                                                    .get("agent_type")
-                                                    .or_else(|| {
-                                                        item.get("args")
-                                                            .and_then(|a| a.get("agent_type"))
-                                                    })
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("general");
-                                                let prompt = item
-                                                    .get("prompt")
-                                                    .or_else(|| {
-                                                        item.get("args")
-                                                            .and_then(|a| a.get("prompt"))
-                                                    })
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("-");
-                                                // Truncate long prompts for the table
-                                                let prompt_short =
-                                                    ragent_types::truncate_bytes(prompt, 77);
-                                                output.push_str(&format!(
-                                                    "| `{}` | {} | {} |\n",
-                                                    tname, atype, prompt_short
-                                                ));
-                                            }
-                                            output.push('\n');
-                                        }
-                                    }
-                                }
-
-                                // Tasks from task-seed.json
-                                if let Ok(raw) =
-                                    std::fs::read_to_string(path.join("task-seed.json"))
-                                {
-                                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw)
-                                    {
-                                        if let Some(items) = val.as_array() {
-                                            output.push_str("### Seed Tasks\n\n");
-                                            output.push_str("| Title | Description |\n");
-                                            output.push_str("|-------|-------------|\n");
-                                            for item in items {
-                                                let title = item
-                                                    .get("title")
-                                                    .or_else(|| {
-                                                        item.get("input")
-                                                            .and_then(|a| a.get("title"))
-                                                    })
-                                                    .or_else(|| {
-                                                        item.get("args")
-                                                            .and_then(|a| a.get("title"))
-                                                    })
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("-");
-                                                let desc = item
-                                                    .get("description")
-                                                    .or_else(|| {
-                                                        item.get("input")
-                                                            .and_then(|a| a.get("description"))
-                                                    })
-                                                    .or_else(|| {
-                                                        item.get("args")
-                                                            .and_then(|a| a.get("description"))
-                                                    })
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("-");
-                                                output.push_str(&format!(
-                                                    "| {} | {} |\n",
-                                                    title, desc
-                                                ));
-                                            }
-                                            output.push('\n');
-                                        }
-                                    }
-                                }
-
-                                output.push_str(&format!("**Usage:** `/team create {name}`\n"));
-                                self.append_assistant_text(&output);
-                                self.status = format!("team: blueprint {name}");
-                            } else {
-                                self.status = format!("Blueprint '{}' not found", bp_name);
-                            }
+                            self.status = format!("Blueprint '{}' not found", rest.trim());
                         }
                     }
                     "message" => {
@@ -9618,6 +9420,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         &Arc::new(self.agent_info.clone()),
                         self.selected_model.as_deref(),
                         skill.model.as_deref(),
+                        &skill.allowed_tools,
                     );
 
                     self.status = format!("invoking skill /{}…", cmd);
@@ -11226,6 +11029,41 @@ fn create_spec_impl_session_tasks(
         spec_task_to_session,
         session_task_to_milestone,
     )
+}
+
+/// Handle the `/blueprints` slash command for listing installed team blueprints.
+///
+/// Usage:
+/// - `/blueprints` or `/blueprints list` — list all installed blueprints
+/// - `/blueprints help` — show the list (same as no args)
+/// - `/blueprints <name>` — show detailed summary of a specific blueprint
+fn handle_blueprints_command(app: &mut App, args: &str) {
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    let blueprint_dirs = blueprints::list_installed_blueprints(&working_dir);
+    let sub = args.split_whitespace().next().unwrap_or("").trim();
+
+    match sub {
+        "" | "list" | "help" => {
+            let output = blueprints::render_blueprint_list(&blueprint_dirs, "/blueprints");
+            app.append_assistant_text(&output);
+            app.status = if sub == "help" {
+                "blueprints: help".to_string()
+            } else {
+                "blueprints: list".to_string()
+            };
+        }
+        _ => {
+            if let Some(output) =
+                blueprints::render_blueprint_detail(&blueprint_dirs, sub, "/blueprints")
+            {
+                app.append_assistant_text(&output);
+                app.status = format!("blueprints: {}", sub);
+            } else {
+                app.status = format!("Blueprint '{}' not found", sub);
+                app.push_log_no_agent(LogLevel::Warn, format!("blueprint not found: {}", sub));
+            }
+        }
+    }
 }
 
 /// Handle the `/template` slash command for listing and applying reusable prompt templates.

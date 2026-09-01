@@ -452,6 +452,12 @@ pub struct AgentInfo {
     /// Skill names this agent should preload into its prompt context.
     #[serde(default)]
     pub skills: Vec<String>,
+    /// Tool names this agent is allowed to use. When set, the agent loop
+    /// filters the tool definitions sent to the LLM and rejects calls to
+    /// tools outside this list (plus a small set of always-allowed control
+    /// tools). Populated from skill `allowed_tools` for skill invocations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
     /// Persistent memory scope for this agent.
     #[serde(default)]
     pub memory: crate::team::config::MemoryScope,
@@ -515,6 +521,7 @@ impl AgentInfo {
             permission: Vec::new(),
             max_steps: None,
             skills: Vec::new(),
+            allowed_tools: None,
             memory: crate::team::config::MemoryScope::None,
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
@@ -584,6 +591,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: Some(ThinkingConfig::off()),
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -610,6 +618,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -633,6 +642,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -656,6 +666,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -679,6 +690,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -700,6 +712,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -721,6 +734,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         // ── Domain-specific agents ───────────────────────────────────────
@@ -760,6 +774,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -798,6 +813,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -836,6 +852,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -872,6 +889,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -904,6 +922,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -939,6 +958,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -974,6 +994,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -1011,6 +1032,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -1048,6 +1070,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
         AgentInfo {
@@ -1086,6 +1109,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            allowed_tools: None,
             stall_timeout_secs: None,
         },
     ]

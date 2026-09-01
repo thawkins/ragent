@@ -547,6 +547,7 @@ pub fn record_to_agent_info(
         thinking: payload.thinking,
         options: std::sync::Arc::new(options),
         model_pinned,
+        allowed_tools: None,
         stall_timeout_secs: None,
     };
 

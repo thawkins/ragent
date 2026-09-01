@@ -973,6 +973,7 @@ impl App {
             "status" => Some("[clear]".to_string()),
             "alog" => Some("[help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes]".to_string()),
             "log" => Some("[clear subagents|panics|research|editlog|help]".to_string()),
+            "blueprints" => Some("[help|list|<name>]".to_string()),
             "help" => Some("[<command>]".to_string()),
             "quit" | "exit" => None,
             "clear" => None,
@@ -2196,11 +2197,19 @@ impl App {
         }
     }
 
-    /// Push a log entry at the given level, tagging it with an optional agent id
-    /// and the current session id. When the log panel is visible, the entry is
-    /// also appended to the log-window spool file under the project's `log/`
-    /// directory.
-    pub(crate) fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
+    /// Push a log entry at the given level, tagging it with an optional agent
+    /// id and an optional explicit session id. When `session_id` is `None`, the
+    /// entry is stamped with the primary TUI session id so it appears in the
+    /// main log panel and the primary output-view overlay. Tracked sub-agent
+    /// and teammate events should pass the child/teammate session id so the
+    /// per-agent output-view overlay can include their activity.
+    pub(crate) fn push_log_for(
+        &mut self,
+        level: LogLevel,
+        message: String,
+        agent_id: Option<String>,
+        session_id: Option<String>,
+    ) {
         // C-008: stamp each entry with its own monotonic sequence number so a
         // new log line only invalidates the *new* group in `log_line_cache`,
         // not the whole cache (the cache compares against `entry.seq`).
@@ -2209,7 +2218,7 @@ impl App {
             timestamp: chrono::Utc::now(),
             level,
             message: message.clone(),
-            session_id: self.session_id.clone(),
+            session_id: session_id.or_else(|| self.session_id.clone()),
             agent_id,
             seq: self.log_seq,
         };
@@ -2232,6 +2241,12 @@ impl App {
                 self.append_log_entry_to_spool(path, level, &message);
             }
         }
+    }
+
+    /// Convenience wrapper for [`push_log_for`](Self::push_log_for) that stamps
+    /// the entry with the primary TUI session id.
+    pub(crate) fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
+        self.push_log_for(level, message, agent_id, None);
     }
 
     /// R-10: Trim `messages` and `message_line_cache` to `MAX_TUI_MESSAGES`

@@ -22,7 +22,7 @@ fn test_resolve_inline_skill_agent_inherits_active_model_for_unpinned_agent() {
     let base_agent: Arc<AgentInfo> =
         resolve_agent("general", &Default::default()).expect("resolve general agent");
 
-    let resolved = resolve_inline_skill_agent(&base_agent, Some("copilot/gpt-5.4"), None);
+    let resolved = resolve_inline_skill_agent(&base_agent, Some("copilot/gpt-5.4"), None, &[]);
     let model = resolved
         .model
         .as_ref()
@@ -44,7 +44,7 @@ fn test_resolve_inline_skill_agent_preserves_pinned_model() {
         Arc::new(a)
     };
 
-    let resolved = resolve_inline_skill_agent(&base_agent, Some("copilot/gpt-5.4"), None);
+    let resolved = resolve_inline_skill_agent(&base_agent, Some("copilot/gpt-5.4"), None, &[]);
     let model = resolved
         .model
         .as_ref()
@@ -59,8 +59,12 @@ fn test_resolve_inline_skill_agent_prefers_explicit_skill_model() {
     let base_agent: Arc<AgentInfo> =
         resolve_agent("general", &Default::default()).expect("resolve general agent");
 
-    let resolved =
-        resolve_inline_skill_agent(&base_agent, Some("copilot/gpt-5.4"), Some("openai:gpt-4o"));
+    let resolved = resolve_inline_skill_agent(
+        &base_agent,
+        Some("copilot/gpt-5.4"),
+        Some("openai:gpt-4o"),
+        &[],
+    );
     let model = resolved
         .model
         .as_ref()

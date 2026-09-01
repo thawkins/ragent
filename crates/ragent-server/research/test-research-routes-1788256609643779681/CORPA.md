@@ -1,0 +1,43 @@
+# Corpus Analysis Companion (CORPA.md)
+
+Quality-assurance companion document for `test topic for post`. Generated together with `RESEARCH.md`; the `[#N]` source indices reference the Sources Reference table at the bottom of this file.
+
+## Contradiction Graph
+
+_(no contradictions detected among the gathered sources)_
+
+## Synthesis Audit
+
+**Overall score:** 62/100
+
+**Recommendation:** Proceed with caution — issues: No research dimensions (loci) were detected, so coverage cannot be judged.; No contradictions detected; no logic conflicts to resolve.; Finding 1 does not cite any source; Finding 1 contains a paragraph longer than 1200 characters.
+
+Synthesis audit for 'test topic for post' scored 62/100 across critics [coverage=50 logic=100 evidence=0 readability=100]; 0/0 sources cited.
+
+| Critic | Score | Status | Issue / Gap Summary |
+|--------|-------|--------|---------------------|
+| coverage | 50 | review | No research dimensions (loci) were detected, so coverage cannot be judged. |
+| logic | 100 | pass | No contradictions detected; no logic conflicts to resolve. |
+| evidence | 0 | review | Finding 1 does not cite any source |
+| readability | 100 | pass | Finding 1 contains a paragraph longer than 1200 characters |
+
+## Corpus Critic
+
+**Overall score:** 0/100 (review)
+
+**Subscores:** coverage 0 | evidence 0 | balance 0 | tension 0
+
+**Issues:**
+- No sources were gathered; corpus cannot be judged.
+
+**Evidence gaps:**
+- Gather at least one source for 'test topic for post'
+
+**Recommendations:**
+- Check network/API keys and retry the web-gathering phase.
+
+## Sources Reference
+
+| # | Type | Media | Language | Path/URL | Title | Author | Published | Relevance | Search tool | Engine | Captured |
+|---|------|-------|----------|----------|-------|--------|-----------|-----------|-------------|--------|----------|
+| 1 | other | — | — | — | No sources captured | — | — | (no gathering run) | — | — | 2026-09-01T09:56:49.831791650+00:00 |

@@ -969,6 +969,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "alog",
         description: "Activity log: /alog help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes",
     },
+    SlashCommandDef {
+        trigger: "blueprints",
+        description: "List installed team blueprints: /blueprints help|list",
+    },
 ];
 /// A single entry in the slash-command autocomplete menu.
 #[derive(Debug, Clone)]

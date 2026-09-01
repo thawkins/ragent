@@ -394,19 +394,29 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.72** — The core architecture, tool system (~169 tools across 18 categories), TUI,
+**v1.0.74** — The core architecture, tool system (~169 tools across 18 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
-- **Token counting fixes** — fix issues in token counting across the TUI context panel
-  and related estimator paths (v1.0.72)
-- **Multiple agent TUI fixes** — fixes for multi-agent TUI interactions, scroll pinning,
-  active-agents button hit-rects, team panel layout, and idle-CPU hotspots (v1.0.70)
-- **TUI scroll-pinning geometry and idle-CPU hotspots** — corrected scroll-offset semantics
-  for output/research overlays and fixed crossterm reader exit hang and select-loop hot-spin
-  (v1.0.70)
+- **Clippy `for_kv_map` fix** — Ollama provider iteration now uses `values()`
+  instead of destructuring a key-value pair; the LangSearch merge test
+  expectation was also corrected (v1.0.74)
+- **Sub-agent / teammate step visibility** — TUI step log now shows tool calls
+  from tracked sub-agents and teammates with an `[agent-tag]` prefix; rebuilt
+  step tags for lagged event-bus bursts prevent undercounting (v1.0.73)
+- **Tool-permit handling fix** — `SessionProcessor` now surfaces an explicit
+  error when the per-tool resource permit cannot be acquired (v1.0.73)
+- **Token counting fixes** — TUI context panel percentages now use a consistent
+  bytes-to-tokens conversion so they align with the status-bar usage figure
+  (v1.0.72)
+- **Context side panel** — toggleable `Alt+X` panel showing live, quantified
+  context-window occupancy (v1.0.71)
+- **Research clustering** — `/research cluster` concept extraction and a new
+  `cluster.rs` payload builder (v1.0.71)
+- **One-shot agent runner** — lightweight, provider-agnostic single-prompt
+  execution path without spinning up a full agent loop (v1.0.71)
 - **CPU-spin fixes** — Gemini SSE parser infinite loop fixed (`continue` to
   `break`), timed-out bash children now killed via `kill_on_drop`, and the
   TUI idle redraw interval raised from 250 ms to 2 s with dirty-flag gating

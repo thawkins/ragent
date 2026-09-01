@@ -487,6 +487,12 @@ fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
         all_text.contains("echo hi"),
         "output overlay should include tool input summary, got:\n{all_text}"
     );
+    // The tool call should be annotated with a [step.substep] prefix derived
+    // from the message transcript itself, matching the primary chat window.
+    assert!(
+        all_text.contains("[1.1]"),
+        "output overlay should include [1.1] step indicator for tool call, got:\n{all_text}"
+    );
 }
 
 // ---------- Selection normalization ----------

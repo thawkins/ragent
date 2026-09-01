@@ -1148,6 +1148,44 @@ fn register_extracted_vcs_tools(registry: &ToolRegistry) {
     }
 }
 
+/// Return a `HashSet` of allowed tool names from a skill's `allowed_tools`
+/// list, including the small set of always-allowed control tools.
+pub(crate) fn build_allowed_tool_set(allowed: Option<&[impl AsRef<str>]>) -> HashSet<String> {
+    let mut set = HashSet::new();
+    if let Some(names) = allowed {
+        for name in names {
+            set.insert(name.as_ref().to_string());
+        }
+    } else {
+        return set;
+    }
+    for name in crate::session::permissions::SKILL_ALWAYS_ALLOWED_TOOLS {
+        set.insert(name.to_string());
+    }
+    for name in [
+        "codeindex_search",
+        "codeindex_symbols",
+        "codeindex_references",
+        "codeindex_dependencies",
+        "codeindex_status",
+        "codeindex_reindex",
+        "codeindex_explain",
+        "codeindex_path",
+        "codeindex_communities",
+        "codeindex_godnodes",
+    ] {
+        set.insert(name.to_string());
+    }
+    set
+}
+
+/// Return `true` if a tool name is allowed by the given allowed set.
+/// The set already includes always-allowed tools from
+/// [`build_allowed_tool_set`].
+pub(crate) fn is_allowed_tool(tool_name: &str, allowed: &HashSet<String>) -> bool {
+    allowed.contains(tool_name)
+}
+
 /// A registry that maps tool names to their implementations.
 ///
 /// Tools are registered by name and can be looked up, listed, or exported
