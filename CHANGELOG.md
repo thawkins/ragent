@@ -4,6 +4,12 @@
 
 ### Added
 
+## Version: 1.0.77
+
+### Changed
+
+- Version bump to 1.0.77.
+
 ## Version: 1.0.76
 
 ### Changed
