@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for the OpenAlex backend request builder and response parser.
 //!
 //! These tests exercise

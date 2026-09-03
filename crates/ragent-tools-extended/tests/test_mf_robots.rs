@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `masterfetch::robots` — robots.txt fetch + parse +
 //! per-domain cache (T-010, FR-028, NFR-003).
 //!
@@ -387,7 +388,11 @@ fn test_cache_get_missing_domain_returns_none() {
 fn test_cache_expired_entry_returns_none() {
     let mut cache = RobotsCache::new();
     let rules = parse_robots_txt("User-agent: *\nDisallow: /private/\n");
-    let expired = Instant::now().checked_sub(ROBOTS_CACHE_TTL).unwrap() - Duration::from_secs(1);
+    let expired = Instant::now()
+        .checked_sub(ROBOTS_CACHE_TTL)
+        .unwrap()
+        .checked_sub(Duration::from_secs(1))
+        .unwrap();
     cache.insert_with_timestamp("example.com", rules, expired);
     assert!(cache.get("example.com").is_none());
 }
@@ -434,7 +439,11 @@ fn test_cache_evict_single_domain() {
 #[test]
 fn test_cache_clear_expired_removes_only_stale() {
     let mut cache = RobotsCache::new();
-    let expired = Instant::now().checked_sub(ROBOTS_CACHE_TTL).unwrap() - Duration::from_secs(10);
+    let expired = Instant::now()
+        .checked_sub(ROBOTS_CACHE_TTL)
+        .unwrap()
+        .checked_sub(Duration::from_secs(10))
+        .unwrap();
     cache.insert_with_timestamp("old.com", RobotsRules::default(), expired);
     cache.insert("new.com", RobotsRules::default());
     let removed = cache.clear_expired();

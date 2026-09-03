@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `codeindex_path` tool (spec graphCI, T-013).
 //!
 //! Covers FR-012 (shortest path between two symbols) and FR-017 (non-blocking

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `masterfetch::pdf` — PDF text and title extraction.
 //!
 //! These tests generate minimal PDFs with `printpdf` and exercise the

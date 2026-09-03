@@ -95,7 +95,7 @@ fn pruned_tool_results_zero_omits_all() {
     ];
     let proj = Projection::replay(&events);
     let pruned = proj.pruned_tool_results(0);
-    assert!(pruned.is_empty());
+    assert_eq!(pruned, Vec::new());
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn pruned_tool_results_preserves_full_projection() {
 #[test]
 fn pruned_tool_results_empty_run() {
     let proj = Projection::empty();
-    assert!(proj.pruned_tool_results(5).is_empty());
+    assert_eq!(proj.pruned_tool_results(5), Vec::new());
 }
 
 #[test]

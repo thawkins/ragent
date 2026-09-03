@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `masterfetch::urlnorm` — URL normalisation (T-029,
 //! FR-027, NFR-003).
 //!

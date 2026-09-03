@@ -22,7 +22,10 @@ use crate::web_gatherer::{
     DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD, DEFAULT_SEARCH_MAX_RETRIES,
     DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
 };
-use crate::{DEFAULT_LOCAL_CONCURRENCY, DEFAULT_MAX_LOCAL_SOURCES, DEFAULT_OA_MIN_FULL_TEXT_CHARS};
+use crate::{
+    DEFAULT_LOCAL_CONCURRENCY, DEFAULT_MAX_LOCAL_SOURCES, DEFAULT_OA_MIN_FULL_TEXT_CHARS,
+    DEFAULT_WEB_PHASE_TIMEOUT_SECS,
+};
 
 /// Front-end-agnostic inputs for a single research run.
 ///
@@ -160,7 +163,9 @@ pub fn build_session_config(
             use_low_relevance: req.use_low_relevance,
             disable_scholarly: req.no_scholarly,
             use_pdf_web_sources: req.use_pdf,
-            web_phase_timeout_secs: req.web_phase_timeout_secs,
+            web_phase_timeout_secs: req
+                .web_phase_timeout_secs
+                .or(Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS)),
         },
         local: LocalConfig {
             max_local_sources: req.max_local_sources.unwrap_or(DEFAULT_MAX_LOCAL_SOURCES),
@@ -197,6 +202,7 @@ pub fn build_session_config(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::session::DEFAULT_WEB_PHASE_TIMEOUT_SECS;
 
@@ -296,5 +302,32 @@ mod tests {
             DEFAULT_OA_MIN_FULL_TEXT_CHARS
         );
         assert_eq!(cfg.engine.tier, Tier::Full);
+    }
+
+    #[test]
+    fn build_session_config_zero_web_phase_timeout_disables_deadline() {
+        let req = ResearchRunRequest {
+            name: "test".into(),
+            topic: "topic".into(),
+            web_phase_timeout_secs: Some(0),
+            ..ResearchRunRequest::default()
+        };
+        let cfg = build_session_config(&req, None);
+        assert_eq!(
+            cfg.web.web_phase_timeout_secs,
+            Some(0),
+            "Some(0) must be preserved as the disabled-deadline sentinel"
+        );
+    }
+
+    #[test]
+    fn build_session_config_default_web_phase_timeout_is_60() {
+        let req = ResearchRunRequest::new("test", "topic");
+        let cfg = build_session_config(&req, None);
+        assert_eq!(
+            cfg.web.web_phase_timeout_secs,
+            Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS),
+            "default web_phase_timeout must be 60 seconds (NFR-003)"
+        );
     }
 }

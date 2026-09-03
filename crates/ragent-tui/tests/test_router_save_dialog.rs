@@ -99,7 +99,10 @@ fn test_router_save_confirm_persists_and_activates() {
         .and_then(|t| t.get("models"))
         .and_then(|m| m.as_array())
         .expect("SIMPLE tier models");
-    assert!(!simple.is_empty());
+    assert!(
+        !simple.is_empty(),
+        "SIMPLE tier must contain at least one model"
+    );
 
     let _ = std::fs::remove_file(&config_path);
 }

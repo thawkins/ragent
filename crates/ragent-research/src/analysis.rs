@@ -492,6 +492,42 @@ impl LlmAnalysisEngine {
         topic: &str,
         sources: &[SourceBody],
     ) -> anyhow::Result<String> {
+        let prompt = SynthesisPromptBuilder::new(topic)
+            .sources(sources)
+            .output_format(self.output_format.unwrap_or(OutputFormat::Report))
+            .build();
+        // T-008 / FR-009: allow a configurable analysis persona. When
+        // `config.persona` is supplied via `ragent.json`
+        // (`research.analysis_persona`), it overrides the default
+        // "careful research analyst" system message. The default persona is
+        // preserved when `persona` is `None`, so the legacy behavior is
+        // unchanged for callers that don't wire the new config in.
+        let system_persona: Option<String> = self.persona.clone().or_else(|| {
+            Some(
+                "You are a careful research analyst. Read the provided sources and produce a structured markdown analysis. Use only the evidence in the sources; do not invent facts."
+                    .to_string(),
+            )
+        });
+        self.complete_raw(&prompt, system_persona.as_deref(), 8192)
+            .await
+    }
+
+    /// Send a raw prompt to the wired provider/model and return the full
+    /// response text. This is the shared low-level completion path for the
+    /// synthesis stream and the `/research create` concept-extraction step:
+    /// it resolves the provider client from the registry, streams the reply,
+    /// and accumulates the text deltas into one string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the provider is unknown, the client cannot be
+    /// created, or the stream reports a provider-level error.
+    pub async fn complete_raw(
+        &self,
+        prompt: &str,
+        system: Option<&str>,
+        max_tokens: u32,
+    ) -> anyhow::Result<String> {
         let provider = self
             .provider_registry
             .get(&self.provider_id)
@@ -508,33 +544,17 @@ impl LlmAnalysisEngine {
                 )
             })?;
 
-        let prompt = SynthesisPromptBuilder::new(topic)
-            .sources(sources)
-            .output_format(self.output_format.unwrap_or(OutputFormat::Report))
-            .build();
-        // T-008 / FR-009: allow a configurable analysis persona. When
-        // `config.persona` is supplied via `ragent.json`
-        // (`research.analysis_persona`), it overrides the default
-        // "careful research analyst" system message. The default persona is
-        // preserved when `persona` is `None`, so the legacy behavior is
-        // unchanged for callers that don't wire the new config in.
-        let system_persona: std::sync::Arc<str> = match &self.persona {
-            Some(p) => std::sync::Arc::from(p.as_str()),
-            None => std::sync::Arc::from(
-                "You are a careful research analyst. Read the provided sources and produce a structured markdown analysis. Use only the evidence in the sources; do not invent facts.",
-            ),
-        };
         let request = ChatRequest {
             model: self.model_id.clone(),
             messages: Arc::new(vec![ChatMessage {
                 role: "user".to_string(),
-                content: ChatContent::Text(prompt),
+                content: ChatContent::Text(prompt.to_string()),
             }]),
             tools: Arc::new(vec![]),
             temperature: Some(0.2),
             top_p: Some(1.0),
-            max_tokens: Some(8192),
-            system: Some(system_persona),
+            max_tokens: Some(max_tokens),
+            system: system.map(std::sync::Arc::from),
             options: HashMap::new(),
             session_id: None,
             request_id: None,
@@ -851,6 +871,7 @@ fn renumber_findings(findings: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::parser::{
         mechanical_fallback_findings, parse_analysis_response, parse_bullet_list,
         parse_numbered_list, reorder_findings_by_dependency, truncate_body,

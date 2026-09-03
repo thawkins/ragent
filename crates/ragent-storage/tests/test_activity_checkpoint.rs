@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for recording checkpoint events (maka spec T-008, FR-008).
 //!
 //! FR-008: "Where the operator configures automatic checkpointing, the system

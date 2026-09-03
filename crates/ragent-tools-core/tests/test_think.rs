@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `ragent-tools-core` `ThinkTool`.
 //!
 //! Relocated from the inline `#[cfg(test)]` module in `src/think.rs`

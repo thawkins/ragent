@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Backward-compatibility verification for existing `codeindex_*` tools
 //! (spec graphCI, T-029, FR-006).
 //!
@@ -154,7 +155,7 @@ fn test_total_codeindex_tool_count_is_ten() {
     let count = EXISTING_TOOLS.len() + NEW_TOOLS.len();
     for name in EXISTING_TOOLS.iter().chain(NEW_TOOLS.iter()) {
         assert!(
-            registry.contains(*name),
+            registry.contains(name),
             "tool `{name}` should be registered"
         );
     }

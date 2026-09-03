@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for `masterfetch::search::duckduckgo` — `DuckDuckGo` keyless search
 //! backend (T-013, FR-008, NFR-003).
 //!

@@ -2004,9 +2004,19 @@ fn char_wrap(text: &str, width: usize) -> Vec<String> {
 ///
 /// This produces the same line breaks as ratatui's `Paragraph::wrap(Wrap { trim: false })`
 /// so that mouse selection coordinates map correctly to content lines.
-fn build_wrapped_content_lines(lines: &[Line<'_>], inner_width: usize) -> Vec<String> {
+///
+/// The second return vector contains, for each input `Line`, the index of its
+/// first wrapped line in the returned content. This lets callers translate
+/// unwrapped line numbers (e.g. the indices stored for the Memory panel cursor)
+/// into wrapped line coordinates.
+fn build_wrapped_content_lines_with_starts(
+    lines: &[Line<'_>],
+    inner_width: usize,
+) -> (Vec<String>, Vec<usize>) {
     let mut result = Vec::new();
+    let mut starts = Vec::with_capacity(lines.len());
     for line in lines {
+        starts.push(result.len());
         let text = line
             .spans
             .iter()
@@ -2049,7 +2059,28 @@ fn build_wrapped_content_lines(lines: &[Line<'_>], inner_width: usize) -> Vec<St
             line_start = break_pos;
         }
     }
-    result
+    (result, starts)
+}
+
+/// Convenience wrapper that returns only the wrapped text lines.
+fn build_wrapped_content_lines(lines: &[Line<'_>], inner_width: usize) -> Vec<String> {
+    build_wrapped_content_lines_with_starts(lines, inner_width).0
+}
+
+/// Apply a background highlight to every span in a line.
+///
+/// Used to render the Alt+M panel's block cursor on the selected memory row
+/// without losing the per-span foreground colours.
+fn highlight_line(line: Line<'_>, bg: Color) -> Line<'_> {
+    let highlighted_spans: Vec<Span> = line
+        .spans
+        .into_iter()
+        .map(|span| {
+            let style = span.style.bg(bg);
+            Span::styled(span.content.to_string(), style)
+        })
+        .collect();
+    Line::from(highlighted_spans).style(line.style)
 }
 
 fn input_cursor_display_pos(
@@ -2654,39 +2685,6 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     lines.push(blank_line.clone());
 
     // FR-010/FR-011: show the selected model's advertised context-window
-    // capacity as a top-level row so the percentage values below have a clear
-    // denominator. Rendered above the "System prompt" row.
-    let model_context_label = "Model context";
-    match snapshot.context_window_tokens {
-        Some(window) => {
-            let pct = snapshot.percent_of_window(window as u64).unwrap_or(100.0);
-            let bar = crate::theme::accessibility::progress_bar((pct / 100.0) as f32, bar_width);
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{margin_left}{model_context_label:<14}"),
-                    label_style,
-                ),
-                Span::styled(
-                    format!("{:>8}tk ", format_tokens(window as u64)),
-                    value_style,
-                ),
-                Span::styled(bar, dim_value_style),
-                Span::styled(format!("{:4.0}%", pct), value_style),
-            ]));
-        }
-        None => {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{margin_left}{model_context_label:<14}"),
-                    label_style,
-                ),
-                Span::styled("    unknown".to_string(), sub_label_style),
-            ]));
-        }
-    }
-    lines.push(blank_line.clone());
-
-    // FR-010/FR-011: show the selected model's advertised context-window
     // capacity directly above the "System prompt" row so the denominator for
     // every percentage below is unambiguous.
     let context_window_label = "Context window";
@@ -2710,6 +2708,37 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                     label_style,
                 ),
                 Span::styled("unknown".to_string(), sub_label_style),
+            ]));
+        }
+    }
+
+    // Provider-reported size of the context actually sent to the model on
+    // the most recent turn (from the last TokenUsage event). Zero until the
+    // first LLM request of the session completes.
+    let sent_label = "Sent to model";
+    let sent = snapshot.last_input_tokens;
+    match snapshot.percent_of_window(sent) {
+        Some(pct) if sent > 0 => {
+            let bar = crate::theme::accessibility::progress_bar((pct / 100.0) as f32, bar_width);
+            lines.push(Line::from(vec![
+                Span::styled(format!("{margin_left}{sent_label:<14}"), label_style),
+                Span::styled(format!("{:>8}tk ", format_tokens(sent)), value_style),
+                Span::styled(bar, dim_value_style),
+                Span::styled(format!("{:4.0}%", pct), value_style),
+            ]));
+        }
+        Some(_) => {
+            // No turn has completed yet: show the zero count without a bar.
+            lines.push(Line::from(vec![
+                Span::styled(format!("{margin_left}{sent_label:<14}"), sub_label_style),
+                Span::styled(format!("{:>8}tk", format_tokens(sent)), sub_label_style),
+            ]));
+        }
+        None => {
+            // FR-011: no advertised capacity - show the absolute count only.
+            lines.push(Line::from(vec![
+                Span::styled(format!("{margin_left}{sent_label:<14}"), label_style),
+                Span::styled(format!("{:>8}tk", format_tokens(sent)), value_style),
             ]));
         }
     }
@@ -3147,13 +3176,163 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     } else {
         app.output_view_area = Rect::default();
     }
-
     // Research markdown viewer overlay (above output view).
     if app.research_view.is_some() {
         render_research_view_overlay(frame, app);
     } else {
         app.research_view_area = Rect::default();
     }
+
+    // Memory delete confirmation modal overlay.
+    if app.pending_memory_delete.is_some() {
+        render_memory_delete_dialog(frame, app);
+    }
+
+    // Full-memory overlay (above research view).
+    if app.memory_view.is_some() {
+        render_memory_view_overlay(frame, app);
+    } else {
+        app.memory_view_area = Rect::default();
+    }
+}
+
+/// Render the full-memory overlay opened from the Alt+M panel.
+fn render_memory_view_overlay(frame: &mut Frame, app: &mut App) {
+    let area = centered_rect(90, 80, frame.area());
+    app.memory_view_area = area;
+    frame.render_widget(Clear, area);
+
+    let Some(view) = app.memory_view.as_mut() else {
+        return;
+    };
+
+    let title = format!(" Memory #{} — {} ", view.row.id, view.row.category);
+    let base = app.cwd_path.clone();
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Magenta));
+    let inner = block.inner(area);
+
+    // ── Memory-view line cache (mirrors research view) ────────────────────
+    let inner_width = inner.width.saturating_sub(2);
+    let cache_width = inner_width;
+    let need_rebuild =
+        view.line_cache.cache_width != cache_width || view.line_cache.lines.is_empty();
+
+    if need_rebuild {
+        let mut lines: Vec<Line<'_>> = Vec::new();
+        lines.push(Line::from(vec![
+            Span::styled("ID: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{}", view.row.id)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("Category: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(view.row.category.clone()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("Confidence: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:.2}", view.row.confidence)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("Source: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(view.row.source.clone()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("Updated: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(view.row.updated_at.clone()),
+        ]));
+        lines.push(Line::raw(""));
+        lines.push(Line::from(vec![Span::styled(
+            "Content:",
+            Style::default().fg(Color::DarkGray),
+        )]));
+
+        let content_lines = markdown_to_lines(&view.row.content, &base, cache_width as usize);
+        lines.extend(content_lines.into_iter().map(|l| {
+            Line::from(
+                l.spans
+                    .iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>(),
+            )
+            .style(l.style)
+        }));
+
+        view.line_cache.lines = lines;
+        view.line_cache.cache_width = cache_width;
+        view.line_cache.wrapped_lines = view.line_cache.lines.clone();
+        view.line_cache.content_lines = wrapped_lines_to_strings(&view.line_cache.wrapped_lines);
+        view.line_cache.wrapped_count = view.line_cache.wrapped_lines.len() as u16;
+    }
+
+    let total = view.line_cache.wrapped_count;
+    let visible = inner.height;
+    view.max_scroll = total.saturating_sub(visible);
+    view.scroll_offset = view.scroll_offset.min(view.max_scroll);
+    let scroll_from_top = view.max_scroll.saturating_sub(view.scroll_offset);
+
+    let window =
+        slice_flat_wrapped_window(&view.line_cache.wrapped_lines, scroll_from_top, visible);
+
+    frame.render_widget(Paragraph::new(window).block(block), area);
+
+    if total > visible {
+        let scroll_position = view.max_scroll.saturating_sub(view.scroll_offset) as usize;
+        let mut sb_state = ScrollbarState::new(view.max_scroll as usize).position(scroll_position);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            area,
+            &mut sb_state,
+        );
+    }
+}
+
+/// Render the Alt+M memory delete confirmation modal.
+fn render_memory_delete_dialog(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 30, frame.area());
+    frame.render_widget(Clear, area);
+
+    let Some(ref pending) = app.pending_memory_delete else {
+        return;
+    };
+
+    let lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            "Delete Memory?",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(format!("Memory ID: {}", pending.id)),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("Preview: {}", pending.preview),
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Enter confirm  Esc cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Confirm Delete ")
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Center);
+    frame.render_widget(paragraph, area);
 }
 
 /// Render the `/research open` markdown viewer overlay.
@@ -3616,8 +3795,8 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
-
     let log_inner = inner;
+
     app.active_agents_area = Rect::default();
     app.teams_area = Rect::default();
 
@@ -3891,7 +4070,6 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(block, area);
     app.tasks_area = area;
 
-    // Resolve the session to display tasks for. Fall back to the primary
     // session id when no specific agent session is selected, mirroring the
     // log panel's session-resolution logic.
     let session_id = app
@@ -4046,10 +4224,10 @@ fn render_profile_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    app.profile_area = area;
 
     let snapshot = ragent_agent::session::profiler::agent_loop_profiler().snapshot();
     if !snapshot.enabled {
-        app.profile_max_scroll = 0;
         app.profile_content_lines = vec!["Profiler is disabled".to_string()];
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
@@ -4141,11 +4319,17 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     app.memory_area = area;
 
     let mut lines: Vec<Line<'_>> = Vec::new();
+    // Track which rendered line corresponds to each selectable memory row so
+    // cursor navigation can scroll the selection into view.
+    app.memory_row_line_indices.clear();
+    app.memory_row_count = 0;
 
-    // M-032: use the cwd cached in `App` (it cannot change at runtime) instead
-    // of calling `std::env::current_dir()` (a syscall) on every rendered frame
-    // while the memory panel is visible.
-    let project_dir = &app.cwd;
+    // M-032: use the real cwd cached in `App` (it cannot change at runtime)
+    // instead of calling `std::env::current_dir()` (a syscall) on every
+    // rendered frame while the memory panel is visible.  We intentionally use
+    // `cwd_path` rather than `cwd` because `cwd` is `~`-collapsed for display
+    // and would not match the real project keys stored in the memories table.
+    let project_dir = &app.cwd_path;
 
     // Refresh the cached memory data only when dirty, avoiding per-frame
     // N+1 SQLite queries (count + list + N x get_memory_tags).  The cache
@@ -4168,7 +4352,13 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         }
         app.memory_cache_count = count;
         app.memory_cache_entries = entries;
+        // Sort the panel rows by category then id so the visual order and
+        // the cursor index both use the same deterministic ordering.
+        app.memory_cache_entries
+            .sort_by(|a, b| a.category.cmp(&b.category).then(a.id.cmp(&b.id)));
         app.memory_cache_dirty = false;
+        // Cursor may now be out of bounds; clamp it on the next render after
+        // `memory_row_count` is recomputed below.
     }
 
     let count = app.memory_cache_count;
@@ -4180,6 +4370,13 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             Style::default().fg(Color::DarkGray),
         ),
         Span::raw(format!("{count}")),
+        Span::styled(
+            format!(
+                " ({} bytes)",
+                entries.iter().map(|r| r.content.len()).sum::<usize>()
+            ),
+            Style::default().fg(Color::DarkGray),
+        ),
     ]));
     lines.push(Line::raw(""));
 
@@ -4208,7 +4405,13 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             )));
             for row in rows {
                 let preview = truncate_bytes(&row.content, 80);
-                lines.push(Line::from(vec![
+                let bytes = row.content.len();
+                // Record the line index of this memory's preview row so the
+                // cursor can scroll it into view.
+                app.memory_row_line_indices.push(lines.len());
+                app.memory_row_count += 1;
+                let is_selected = app.memory_row_count.saturating_sub(1) == app.memory_cursor;
+                let preview_line = Line::from(vec![
                     Span::styled(format!("#{}", row.id), Style::default().fg(Color::DarkGray)),
                     Span::raw(" "),
                     Span::styled(
@@ -4216,8 +4419,15 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                         Style::default().fg(Color::Yellow),
                     ),
                     Span::raw(" "),
+                    Span::styled(format!("{}b", bytes), Style::default().fg(Color::DarkGray)),
+                    Span::raw(" "),
                     Span::raw(preview),
-                ]));
+                ]);
+                lines.push(if is_selected {
+                    highlight_line(preview_line, Color::Rgb(50, 50, 80))
+                } else {
+                    preview_line
+                });
 
                 // Tags were pre-fetched during the cache refresh; fetch them
                 // here for display.  This is still O(N) SQLite queries, but
@@ -4240,10 +4450,31 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             }
             lines.push(Line::raw(""));
         }
+
+        // Keyboard hint for the interactive cursor (FR-016).
+        lines.push(Line::from(Span::styled(
+            "^v select  Enter open  Delete delete",
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        // Ensure the cursor index remains valid after a refresh or deletion.
+        if app.memory_row_count > 0 {
+            app.memory_cursor = app.memory_cursor.min(app.memory_row_count - 1);
+        } else {
+            app.memory_cursor = 0;
+        }
     }
 
     let memory_inner_width = inner.width as usize;
-    app.memory_content_lines = build_wrapped_content_lines(&lines, memory_inner_width);
+    let (wrapped_lines, wrapped_starts) =
+        build_wrapped_content_lines_with_starts(&lines, memory_inner_width);
+    app.memory_content_lines = wrapped_lines;
+    // The indices stored above are unwrapped `lines` positions; translate them
+    // to wrapped-line coordinates so the cursor-scroll math uses the same unit
+    // as the rendered panel height.
+    for raw_idx in &mut app.memory_row_line_indices {
+        *raw_idx = wrapped_starts.get(*raw_idx).copied().unwrap_or(0);
+    }
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     let total_lines = paragraph.line_count(inner.width) as u16;

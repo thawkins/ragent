@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Manual verification test cases for the Hyperresearch pipeline (T-022).
 //!
 //! These tests exercise the post-implementation Hyperresearch features in a
@@ -52,6 +53,7 @@ fn base_document() -> ResearchDocument {
         top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
+        concepts: None,
         contradiction_graph: None,
         loci: None,
         depth_investigation: None,

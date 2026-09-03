@@ -71,7 +71,10 @@ fn test_broker_env_vars_paths_are_distinct() {
         .and_then(|n| n.to_str())
         .expect("helper has a file name");
     assert!(
-        name.starts_with("ragent_askpass_") && name.ends_with(".sh"),
+        name.starts_with("ragent_askpass_")
+            && std::path::Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("sh")),
         "helper filename should be ragent_askpass_<stamp>.sh, got {name}"
     );
     assert!(reqdir.is_dir(), "request dir must exist");

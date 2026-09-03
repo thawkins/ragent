@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Regression tests for the sub-agent report-truncation fix.
 //!
 //! Two failure modes from live use are covered:

@@ -241,7 +241,7 @@ fn test_remove_char_range_entire_string() {
     app.input = "🌍🦀".into();
     app.input_cursor = 2;
     app.remove_input_char_range(0, 2);
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert_eq!(app.input_cursor, 0);
 }
 

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `masterfetch::links` — outgoing-link classification
 //! (T-032, FR-007, NFR-003).
 //!

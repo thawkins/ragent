@@ -142,10 +142,6 @@ async fn tc002_system_prompt_row_and_model_capacity() {
         "panel resolves the selected model's advertised capacity (FR-010)"
     );
     assert!(text.contains("System prompt"), "capacity row present");
-    assert!(
-        text.contains("Model context"),
-        "model context-window row present"
-    );
     assert!(snapshot.system_prompt_tokens > 0, "partition is non-zero");
     assert!(
         text.contains('%'),

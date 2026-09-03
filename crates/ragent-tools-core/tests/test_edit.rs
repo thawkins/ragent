@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `ragent-tools-core` edit helpers.
 //!
 //! Relocated from the inline `#[cfg(test)]` module in `src/edit.rs`
@@ -11,7 +12,7 @@
 use ragent_tools_core::{Tool, ToolContext, ToolOutput, check_path_within_root_cached};
 
 mod replace {
-    pub(crate) use ragent_tools_core::replace::{
+    pub use ragent_tools_core::replace::{
         CascadeFail, CascadeMatch, FindDiag, FindError, MatchLane, decode_escapes,
         disambiguation_hint, find_flexible_replacement_range, find_replacement_cascade,
         format_match_failure, length_note, not_found_hint,
@@ -19,20 +20,18 @@ mod replace {
 }
 
 mod file_lock {
-    pub(crate) use ragent_tools_core::file_lock::lock_file;
+    pub use ragent_tools_core::file_lock::lock_file;
 }
 
 mod path_util {
-    pub(crate) use ragent_tools_core::path_util::resolve_path;
+    pub use ragent_tools_core::path_util::resolve_path;
 }
 
 #[path = "../src/edit_common.rs"]
 mod edit_common;
 
 mod edit_log {
-    pub(crate) use ragent_tools_core::edit_log::{
-        EntryExtras, log_edit_operation, log_edit_operation_ex,
-    };
+    pub use ragent_tools_core::edit_log::{EntryExtras, log_edit_operation, log_edit_operation_ex};
 }
 
 #[path = "../src/edit.rs"]

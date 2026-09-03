@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the renewed `EditTool` (editrenewal spec).
 //!
 //! The renewed `edit` tool uses **strict exact-match** replacement (FR-004):
@@ -599,7 +600,10 @@ async fn test_edit_log_success_writes_jsonl() {
         .filter_map(|e| e.ok())
         .filter(|e| {
             let s = e.file_name().to_string_lossy().to_string();
-            s.starts_with("edits-") && s.ends_with(".jsonl")
+            s.starts_with("edits-")
+                && std::path::Path::new(&s)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
         })
         .collect();
     assert!(
@@ -655,7 +659,10 @@ async fn test_edit_log_dry_run_writes_jsonl() {
         .filter_map(|e| e.ok())
         .filter(|e| {
             let s = e.file_name().to_string_lossy().to_string();
-            s.starts_with("edits-") && s.ends_with(".jsonl")
+            s.starts_with("edits-")
+                && std::path::Path::new(&s)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
         })
         .collect();
     assert!(
@@ -705,7 +712,10 @@ async fn test_edit_log_failure_writes_jsonl() {
         .filter_map(|e| e.ok())
         .filter(|e| {
             let s = e.file_name().to_string_lossy().to_string();
-            s.starts_with("edits-") && s.ends_with(".jsonl")
+            s.starts_with("edits-")
+                && std::path::Path::new(&s)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
         })
         .collect();
     assert!(
@@ -907,9 +917,12 @@ async fn test_edit_multi_match_error_lists_offsets_and_lines() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_edit_log_captures_match_lane_for_flexible_fallback() {
     // P4.12: the edit-log should record which matcher lane produced the
     // outcome so future analyses can quantify fallback frequency.
+    // Guard held across await on purpose: edit-log tests run serialised to
+    // avoid one test clearing logs another just wrote.
     let _guard = LOG_TEST_MUTEX.lock().unwrap();
     let tmp = TempDir::new().unwrap();
     set_edit_log_enabled(true);
@@ -920,10 +933,9 @@ async fn test_edit_log_captures_match_lane_for_flexible_fallback() {
         "old_string": "alpha beta",
         "new_string": "X",
     });
-    EditTool
-        .execute(input, &ctx(tmp.path()))
-        .await
-        .expect("flexible fallback should succeed");
+    let result = EditTool.execute(input, &ctx(tmp.path())).await;
+    set_edit_log_enabled(false);
+    result.expect("flexible fallback should succeed");
 
     let log_dir = tmp.path().join("log").join("editlog");
     let files: Vec<_> = std::fs::read_dir(&log_dir)
@@ -931,17 +943,22 @@ async fn test_edit_log_captures_match_lane_for_flexible_fallback() {
         .filter_map(|e| e.ok())
         .filter(|e| {
             let s = e.file_name().to_string_lossy().to_string();
-            s.starts_with("edits-") && s.ends_with(".jsonl")
+            s.starts_with("edits-")
+                && std::path::Path::new(&s)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
         })
         .collect();
-    assert!(!files.is_empty());
+    assert!(
+        !files.is_empty(),
+        "log directory should contain an edits jsonl file"
+    );
     let content = std::fs::read_to_string(files[0].path()).unwrap();
     let entry: serde_json::Value = serde_json::from_str(content.lines().next().unwrap()).unwrap();
     assert_eq!(entry["tool"], "edit");
     assert_eq!(entry["match_lane"], "flexible");
     assert_eq!(entry["outcome"], "success");
 
-    set_edit_log_enabled(false);
     clear_edit_logs(tmp.path());
 }
 

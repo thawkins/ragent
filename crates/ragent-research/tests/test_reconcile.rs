@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for cross-locus reconcile and source tensions (T-009).
 //!
 //! Migrated from `crates/ragent-research/src/reconcile.rs` inline tests
@@ -77,7 +78,7 @@ fn reconcile_finds_shared_sources() {
     assert_eq!(rec.pairs.len(), 1);
     assert_eq!(rec.pairs[0].shared_sources, 2);
     let mut got = rec.pairs[0].shared_source_indices.clone();
-    got.sort();
+    got.sort_unstable();
     assert_eq!(got, vec![2, 3]);
     assert_eq!(rec.pairs[0].conflicting_edges, 0);
 }

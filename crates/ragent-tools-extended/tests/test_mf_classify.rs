@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for `masterfetch::crawl::classify` — content-adaptive page
 //! classification and extraction (T-018, FR-012, FR-029, NFR-003).
 //!
@@ -293,13 +294,13 @@ fn test_list_dedup_by_resolved_url() {
     );
     assert_eq!(result.page_type, PageType::List);
     // Count unique link lines.
-    let link_lines: Vec<&str> = result
+    let link_lines = result
         .content
         .lines()
         .filter(|l| l.starts_with("* ["))
-        .collect();
+        .count();
     // Should have 20 unique URLs (page/1 appears twice but deduped).
-    assert_eq!(link_lines.len(), 20);
+    assert_eq!(link_lines, 20);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Regression test for the recurring "wait_agents reports truncated output"
 //! complaint.
 //!
@@ -46,11 +47,11 @@ struct PanicProvider;
 
 #[async_trait::async_trait]
 impl Provider for PanicProvider {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "panic"
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Panic Provider"
     }
 

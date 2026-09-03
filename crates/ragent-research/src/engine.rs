@@ -177,6 +177,7 @@ impl GatherObserver for StateGatherForwarder {
                 body_preview,
                 language,
                 oa_recovery,
+                media_type,
             } => {
                 self.observer.on_event(SessionEvent::WebCaptured {
                     url,
@@ -186,9 +187,51 @@ impl GatherObserver for StateGatherForwarder {
                     body_preview,
                     language,
                     oa_recovery,
+                    media_type,
                 });
             }
-            _ => {}
+            GatherEvent::SearchReturnedNoHits
+            | GatherEvent::SearchRetrying { .. }
+            | GatherEvent::SearchCircuitOpen { .. }
+            | GatherEvent::WidthSweepSummary { .. } => {
+                // Retry/circuit diagnostics and the summary are surfaced by
+                // the session-level forwarder; the engine only needs the
+                // sources delivered via SourceCaptured.
+            }
+            GatherEvent::VaultSufficient { .. } => {
+                // Vault-only short-circuit: forwarded as a diagnostic in the
+                // session forwarder; the iterative engine only needs to know
+                // the gather returned sources.
+            }
+            GatherEvent::PhaseStarted { deadline_secs } => {
+                // FR-009: forward the effective web-phase deadline as a
+                // `web_phase_start` RunStep so UI layers can render a live
+                // countdown, matching the session-level forwarder.
+                self.observer.on_event(SessionEvent::RunStep {
+                    step: "web_phase_start".to_string(),
+                    status: crate::run_manifest::StepStatus::InProgress
+                        .as_str()
+                        .to_string(),
+                    detail: Some(format!("web phase deadline: {deadline_secs}s")),
+                });
+            }
+            GatherEvent::PhaseTimedOut {
+                deadline_secs,
+                captured,
+            } => {
+                // Phase deadline truncation: surface the same `web_deadline`
+                // RunStep diagnostic the session forwarder emits so the TUI
+                // shows the deadline was reached and how many sources were
+                // kept. The engine keeps the partial sources it already
+                // received via SourceCaptured.
+                self.observer.on_event(SessionEvent::RunStep {
+                    step: "web_deadline".to_string(),
+                    status: crate::run_manifest::StepStatus::Skipped.as_str().to_string(),
+                    detail: Some(format!(
+                        "web phase deadline of {deadline_secs}s reached; proceeding with {captured} captured source(s)"
+                    )),
+                });
+            }
         }
     }
 }
@@ -201,6 +244,10 @@ pub struct IterativeEngine {
     analysis: Arc<dyn AnalysisEngine>,
     critic: Arc<dyn Critic>,
     config: EngineConfig,
+    /// Per-iteration web-phase budget (FR-006). When set, each iteration's
+    /// web-gathering phase is bounded by a fresh wall-clock deadline computed
+    /// at the start of that iteration; `None` disables the deadline.
+    web_phase_deadline: Option<std::time::Duration>,
 }
 
 impl std::fmt::Debug for IterativeEngine {
@@ -228,7 +275,18 @@ impl IterativeEngine {
             analysis,
             critic,
             config,
+            web_phase_deadline: None,
         }
+    }
+
+    /// Bound each iteration's web-gathering phase by a wall-clock deadline
+    /// (FR-006). The timeout is converted to a fresh `Instant` at the start of
+    /// every iteration, so a multi-iteration run gets the full budget per
+    /// iteration; `None` (or a zero duration) disables the deadline.
+    #[must_use]
+    pub fn with_phase_deadline(mut self, timeout: Option<std::time::Duration>) -> Self {
+        self.web_phase_deadline = timeout.filter(|d| !d.is_zero());
+        self
     }
 
     /// Run the iterative loop from scratch for `topic`, returning the final
@@ -342,6 +400,11 @@ impl IterativeEngine {
         let forwarder = StateGatherForwarder {
             observer: observer.clone(),
         };
+        // FR-006: fresh deadline per iteration so every iteration's web
+        // gathering gets the full configured budget.
+        let phase_deadline = self
+            .web_phase_deadline
+            .map(|timeout| std::time::Instant::now() + timeout);
 
         let questions: std::collections::HashMap<String, String> = pending
             .iter()
@@ -367,7 +430,7 @@ impl IterativeEngine {
                         id.clone(),
                         question.clone(),
                         engine
-                            .gather_for_question(&question, max_sources, &forwarder)
+                            .gather_for_question(&question, max_sources, &forwarder, phase_deadline)
                             .await,
                     )
                 }
@@ -401,6 +464,7 @@ impl IterativeEngine {
                                 body,
                                 language,
                                 oa_recovery,
+                                media_type,
                                 ..
                             } = &src
                             {
@@ -424,6 +488,7 @@ impl IterativeEngine {
                                     body_preview,
                                     language: lang,
                                     oa_recovery: oa_recovery.clone(),
+                                    media_type: media_type.clone(),
                                 });
                             }
                             state.add_source(src);
@@ -456,9 +521,12 @@ impl IterativeEngine {
         question: &str,
         max_sources: usize,
         forwarder: &StateGatherForwarder,
+        phase_deadline: Option<std::time::Instant>,
     ) -> Result<Vec<Source>, WebGatherError> {
         if let Some(web) = &self.web {
-            web.gather_with_observer(question, max_sources, Some(forwarder))
+            web.clone()
+                .with_phase_deadline(phase_deadline)
+                .gather_with_observer(question, max_sources, Some(forwarder))
                 .await
                 .map(|r| r.sources)
         } else {
@@ -504,6 +572,7 @@ impl IterativeEngine {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::analysis::NoopAnalysisEngine;
     use crate::planner::HeuristicPlanner;

@@ -217,7 +217,10 @@ fn test_indicators_module_exists() {
 #[test]
 fn test_spinner_frames_available() {
     use ragent_tui::theme::accessibility;
-    assert!(!accessibility::SPINNER_FRAMES.is_empty());
+    assert!(
+        !accessibility::SPINNER_FRAMES.is_empty(),
+        "spinner frames should not be empty"
+    );
     assert_eq!(accessibility::SPINNER_FRAMES.len(), 10);
     assert_eq!(accessibility::SPINNER_FRAMES[0], "⠋");
 }
@@ -264,13 +267,34 @@ fn test_all_indicators_present() {
     use ragent_tui::layout_statusbar::indicators;
 
     // Verify all indicator constants exist
-    assert!(!indicators::HEALTHY.is_empty());
-    assert!(!indicators::PARTIAL.is_empty());
-    assert!(!indicators::ERROR.is_empty());
-    assert!(!indicators::SUCCESS.is_empty());
-    assert!(!indicators::DIVERGED.is_empty());
-    assert!(!indicators::BUSY.is_empty());
-    assert!(!indicators::UNKNOWN.is_empty());
+    assert!(
+        !indicators::HEALTHY.is_empty(),
+        "HEALTHY indicator should not be empty"
+    );
+    assert!(
+        !indicators::PARTIAL.is_empty(),
+        "PARTIAL indicator should not be empty"
+    );
+    assert!(
+        !indicators::ERROR.is_empty(),
+        "ERROR indicator should not be empty"
+    );
+    assert!(
+        !indicators::SUCCESS.is_empty(),
+        "SUCCESS indicator should not be empty"
+    );
+    assert!(
+        !indicators::DIVERGED.is_empty(),
+        "DIVERGED indicator should not be empty"
+    );
+    assert!(
+        !indicators::BUSY.is_empty(),
+        "BUSY indicator should not be empty"
+    );
+    assert!(
+        !indicators::UNKNOWN.is_empty(),
+        "UNKNOWN indicator should not be empty"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

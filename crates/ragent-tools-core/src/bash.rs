@@ -32,7 +32,7 @@ use crate::event::Event;
 ///
 /// Replaces any character that is not alphanumeric or `-` with `_` so that
 /// the result is safe to embed directly in a file path.
-pub(crate) fn safe_session_id(session_id: &str) -> String {
+pub fn safe_session_id(session_id: &str) -> String {
     session_id
         .chars()
         .map(|c| {
@@ -242,7 +242,7 @@ fn to_posix_path(path: &str) -> String {
 ///
 /// The result can be placed between single quotes in a shell script without
 /// allowing metacharacters or quote injection to alter the surrounding syntax.
-pub(crate) fn sh_quote_single(s: &str) -> String {
+pub fn sh_quote_single(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
@@ -250,7 +250,7 @@ pub(crate) fn sh_quote_single(s: &str) -> String {
 ///
 /// In PowerShell single-quoted strings, the only special character is the
 /// single quote itself, which must be doubled to escape it.
-pub(crate) fn ps_quote_single(s: &str) -> String {
+pub fn ps_quote_single(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
@@ -895,7 +895,7 @@ async fn validate_bash_syntax(cmd: &str) -> Result<()> {
 /// 3. Saves exported variables via `export -p`.
 /// 4. Appends `RAGENT_PWD=<cwd>` as an unambiguous marker.
 /// 5. Cleans up the temporary script file.
-pub(crate) fn build_posix_wrapper(state_file: &str, script_file: &str) -> String {
+pub fn build_posix_wrapper(state_file: &str, script_file: &str) -> String {
     // Use forward slashes even on Windows (Git Bash understands them)
     let state_file_posix = if is_windows() {
         to_posix_path(state_file)
@@ -938,7 +938,7 @@ pub(crate) fn build_posix_wrapper(state_file: &str, script_file: &str) -> String
 /// 4. Persists user-set environment variables to the state script.
 /// 5. Appends the `RAGENT_PWD` marker.
 /// 6. Cleans up the temporary script file.
-pub(crate) fn build_powershell_wrapper(state_file: &str, script_file: &str) -> String {
+pub fn build_powershell_wrapper(state_file: &str, script_file: &str) -> String {
     // Escape the file paths so malicious characters in session IDs or temp
     // directories cannot break out of the generated wrapper script.
     let state_quoted = ps_quote_single(state_file);

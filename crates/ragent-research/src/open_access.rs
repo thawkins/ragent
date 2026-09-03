@@ -429,10 +429,8 @@ mod tests {
 
     #[tokio::test]
     async fn query_unpaywall_parses_best_oa_location() {
-        let encoded_doi =
-            form_urlencoded::byte_serialize("10.1234/example".as_bytes()).collect::<String>();
-        let encoded_email =
-            form_urlencoded::byte_serialize("oa@example.com".as_bytes()).collect::<String>();
+        let encoded_doi = form_urlencoded::byte_serialize(b"10.1234/example").collect::<String>();
+        let encoded_email = form_urlencoded::byte_serialize(b"oa@example.com").collect::<String>();
         let url = format!("https://api.unpaywall.org/v2/{encoded_doi}?email={encoded_email}");
         let json = serde_json::json!({
             "is_oa": true,
@@ -445,7 +443,7 @@ mod tests {
         })
         .to_string();
         let client = FakeClient {
-            responses: [(url.to_string(), json)].into_iter().collect(),
+            responses: std::iter::once((url.to_string(), json)).collect(),
         };
         let result = query_unpaywall("10.1234/example", Some("oa@example.com"), &client)
             .await
@@ -459,14 +457,12 @@ mod tests {
 
     #[tokio::test]
     async fn query_unpaywall_returns_none_when_not_oa() {
-        let encoded_doi =
-            form_urlencoded::byte_serialize("10.1234/example".as_bytes()).collect::<String>();
-        let encoded_email =
-            form_urlencoded::byte_serialize("oa@example.com".as_bytes()).collect::<String>();
+        let encoded_doi = form_urlencoded::byte_serialize(b"10.1234/example").collect::<String>();
+        let encoded_email = form_urlencoded::byte_serialize(b"oa@example.com").collect::<String>();
         let url = format!("https://api.unpaywall.org/v2/{encoded_doi}?email={encoded_email}");
         let json = serde_json::json!({ "is_oa": false }).to_string();
         let client = FakeClient {
-            responses: [(url.to_string(), json)].into_iter().collect(),
+            responses: std::iter::once((url.to_string(), json)).collect(),
         };
         let result = query_unpaywall("10.1234/example", Some("oa@example.com"), &client)
             .await
@@ -476,8 +472,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_europepmc_prefers_open_access_pdf() {
-        let encoded_doi =
-            form_urlencoded::byte_serialize("10.1234/example".as_bytes()).collect::<String>();
+        let encoded_doi = form_urlencoded::byte_serialize(b"10.1234/example").collect::<String>();
         let url = format!(
             "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query={encoded_doi}&format=json&resultType=core"
         );
@@ -496,7 +491,7 @@ mod tests {
         })
         .to_string();
         let client = FakeClient {
-            responses: [(url.to_string(), json)].into_iter().collect(),
+            responses: std::iter::once((url.to_string(), json)).collect(),
         };
         let result = query_europepmc("10.1234/example", &client).await.unwrap();
         assert_eq!(
@@ -509,15 +504,12 @@ mod tests {
     async fn recover_open_access_prefers_unpaywall_then_europepmc() {
         let unpaywall_url = format!(
             "https://api.unpaywall.org/v2/{encoded_doi}?email={encoded_email}",
-            encoded_doi =
-                form_urlencoded::byte_serialize("10.1234/example".as_bytes()).collect::<String>(),
-            encoded_email =
-                form_urlencoded::byte_serialize("oa@example.com".as_bytes()).collect::<String>()
+            encoded_doi = form_urlencoded::byte_serialize(b"10.1234/example").collect::<String>(),
+            encoded_email = form_urlencoded::byte_serialize(b"oa@example.com").collect::<String>()
         );
         let europepmc_url = format!(
             "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query={encoded_doi}&format=json&resultType=core",
-            encoded_doi =
-                form_urlencoded::byte_serialize("10.1234/example".as_bytes()).collect::<String>()
+            encoded_doi = form_urlencoded::byte_serialize(b"10.1234/example").collect::<String>()
         );
         let client = FakeClient {
             responses: [

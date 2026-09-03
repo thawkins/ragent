@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for community detection (spec graphCI, T-010).
 //!
 //! Covers FR-013 (community detection via label propagation) and FR-019

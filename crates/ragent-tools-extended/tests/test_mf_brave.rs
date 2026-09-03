@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for `masterfetch::search::brave` — Brave keyless search backend
 //! (T-014, FR-008, NFR-003).
 //!

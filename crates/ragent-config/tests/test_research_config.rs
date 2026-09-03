@@ -31,7 +31,10 @@ fn research_config_deserializes_all_fields() {
         Some("researcher@example.com")
     );
     assert_eq!(config.research.oa_min_full_text_chars, 2000);
-    assert!(!config.research.is_empty());
+    assert!(
+        !config.research.is_empty(),
+        "expected non-empty config.research"
+    );
 }
 
 #[test]

@@ -339,6 +339,7 @@ pub fn audit_readability(analysis: &AnalysisResult) -> ReadabilityAudit {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::analysis::AnalysisResult;
 

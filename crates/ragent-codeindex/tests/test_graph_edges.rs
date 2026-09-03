@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for BFS shortest-path traversal (spec graphCI, T-008).
 
 use chrono::Utc;

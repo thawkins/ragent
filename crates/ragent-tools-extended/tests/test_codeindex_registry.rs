@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for registering new graph tools in the tool registry (spec graphCI, T-027, FR-006).
 //!
 //! FR-006: The existing codeindex tools shall remain registered and

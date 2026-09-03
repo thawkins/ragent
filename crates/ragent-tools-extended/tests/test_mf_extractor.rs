@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `masterfetch::extractor` — content extraction chain
 //! (T-005, FR-002, NFR-003).
 //!

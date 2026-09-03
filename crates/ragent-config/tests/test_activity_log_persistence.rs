@@ -61,7 +61,7 @@ fn test_activity_log_defaults_to_true() {
     // "default_true")]` yields `true`. The derived `Default` impl (used by
     // `Config::default()`) zeroes bools to `false`, so we test the serde
     // deserialisation path instead, which is the one used at startup.
-    let json = r#"{}"#;
+    let json = "{}";
     let config: Config = serde_json::from_str(json).expect("parse config");
     assert!(
         config.activity_log,

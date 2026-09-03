@@ -19,7 +19,10 @@ fn test_parse_minimal_frontmatter() {
     assert!(skill.description.is_none());
     assert!(skill.user_invocable);
     assert!(!skill.disable_model_invocation);
-    assert!(skill.allowed_tools.is_empty());
+    assert!(
+        skill.allowed_tools.is_empty(),
+        "allowed_tools should default empty"
+    );
     assert_eq!(skill.body.trim(), "Hello world");
     assert_eq!(skill.scope, SkillScope::Project);
 }
@@ -291,7 +294,7 @@ fn test_empty_body() {
     )
     .expect("should parse empty body");
 
-    assert!(skill.body.is_empty());
+    assert!(skill.body.is_empty(), "body should be empty");
 }
 
 #[test]

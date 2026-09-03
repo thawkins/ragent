@@ -94,8 +94,10 @@ pub use cli::{
 };
 pub use cluster::{
     CONCEPT_EXTRACTION_PROMPT_TEMPLATE, ClusterPayload, DEFAULT_CONTEXT_WINDOW_TOKENS,
-    build_cluster_payload, build_cluster_payload_sync, build_concept_extraction_prompt,
-    estimate_max_payload_bytes, format_concepts_md, resolve_context_window_tokens,
+    WebSourceMeta, build_cluster_payload, build_cluster_payload_sync,
+    build_concept_extraction_prompt, build_concepts_payload_from_bodies,
+    concepts_section_for_research, estimate_max_payload_bytes, format_concepts_md,
+    format_concepts_md_with_sources, load_web_source_metadata, resolve_context_window_tokens,
     write_concepts_md,
 };
 pub use contradiction::{
@@ -155,9 +157,10 @@ pub use run_manifest::{
 pub use run_request::{ResearchRunRequest, build_session_config};
 pub use scoreboard::{GradeBand, METER_CELLS, render_meter_bar};
 pub use session::{
-    AnalysisConfig, AnalysisEvent, InputConfig, LocalConfig, NoopObserver, OutputConfig,
-    ResearchSession, ResilienceConfig, RunEngineConfig, RunOutcome, SessionConfig, SessionEvent,
-    SessionObserver, SessionPhase, SynthesisEvent, SynthesizeOutcome, WebConfig,
+    AnalysisConfig, AnalysisEvent, DEFAULT_WEB_PHASE_TIMEOUT_SECS, InputConfig, LocalConfig,
+    NoopObserver, OutputConfig, ResearchSession, ResilienceConfig, RunEngineConfig, RunOutcome,
+    SessionConfig, SessionEvent, SessionObserver, SessionPhase, SynthesisEvent, SynthesizeOutcome,
+    WebConfig,
 };
 pub use source::{LocalSourceKind, Source};
 pub use source_registry::{BuiltinSourceRegistry, ResearchSourceKind, SourceRegistry};

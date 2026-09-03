@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Regression tests for C-002: path-traversal protection in file tools.
 //!
 //! Verifies that the hardened `check_path_within_root` rejects `..`, absolute

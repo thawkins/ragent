@@ -502,7 +502,7 @@ fn test_router_setup_save_persists_cluster_and_enables_router() {
         .and_then(|t| t.get("models"))
         .and_then(|m| m.as_array())
         .expect("SIMPLE tier models");
-    assert!(!simple.is_empty());
+    assert!(!simple.is_empty(), "SIMPLE tier must contain a model");
 }
 
 #[test]
@@ -1344,7 +1344,11 @@ fn test_router_setup_delete_on_last_model_adjusts_index() {
             active_bucket_index,
             ..
         } => {
-            assert!(draft_config.tiers["SIMPLE"].models.is_empty());
+            assert_eq!(
+                draft_config.tiers["SIMPLE"].models.len(),
+                0,
+                "SIMPLE tier should be empty after deletion"
+            );
             assert_eq!(*active_bucket_index, 0);
         }
         _ => panic!("expected SetupRouter"),

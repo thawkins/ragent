@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for rejecting mutation of committed events (maka spec T-016, FR-010).
 //!
 //! FR-010: "If an attempt is made to delete or mutate an already-committed

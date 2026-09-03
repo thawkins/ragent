@@ -424,7 +424,7 @@ mod tests {
         let cached = build_bedrock(&[]);
         let value = cached.bedrock_tool_config_object();
         let tools = value["tools"].as_array().unwrap();
-        assert!(tools.is_empty());
+        assert!(tools.is_empty(), "tools should be empty");
     }
 
     #[test]

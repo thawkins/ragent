@@ -912,7 +912,7 @@ mod tests {
     fn test_context_length_parses_alternate_model_info_keys() {
         let response: OllamaShowResponse = serde_json::from_value(json!({
             "model_info": {
-                "llama.context_window": 1048576
+                "llama.context_window": 1_048_576
             },
             "capabilities": []
         }))

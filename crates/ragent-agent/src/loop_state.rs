@@ -432,15 +432,21 @@ mod tests {
     #[test]
     fn test_parse_tags_empty_output() {
         let parsed = parse_tags("");
-        assert!(parsed.loop_state.is_empty());
-        assert!(parsed.inbox_entries.is_empty());
+        assert!(parsed.loop_state.is_empty(), "loop_state should be empty");
+        assert!(
+            parsed.inbox_entries.is_empty(),
+            "inbox_entries should be empty"
+        );
     }
 
     #[test]
     fn test_parse_tags_no_tags() {
         let parsed = parse_tags("Just some text without any tags.");
-        assert!(parsed.loop_state.is_empty());
-        assert!(parsed.inbox_entries.is_empty());
+        assert!(parsed.loop_state.is_empty(), "loop_state should be empty");
+        assert!(
+            parsed.inbox_entries.is_empty(),
+            "inbox_entries should be empty"
+        );
     }
 
     #[test]
@@ -448,7 +454,10 @@ mod tests {
         let output = "Some work done.\n<loop-state>\nRemember to check X.\n</loop-state>\nDone.";
         let parsed = parse_tags(output);
         assert_eq!(parsed.loop_state, "Remember to check X.");
-        assert!(parsed.inbox_entries.is_empty());
+        assert!(
+            parsed.inbox_entries.is_empty(),
+            "inbox_entries should be empty"
+        );
     }
 
     #[test]
@@ -504,7 +513,7 @@ mod tests {
     #[test]
     fn test_parse_tags_malformed_no_close() {
         let parsed = parse_tags("<loop-state>no close tag");
-        assert!(parsed.loop_state.is_empty());
+        assert!(parsed.loop_state.is_empty(), "loop_state should be empty");
     }
 
     #[test]
@@ -583,7 +592,7 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         let loaded = LoopState::load(&dir, "nonexistent").unwrap();
-        assert!(loaded.content.is_empty());
+        assert!(loaded.content.is_empty(), "loaded content should be empty");
     }
 
     #[test]
@@ -638,7 +647,7 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         let read = read_inbox(&dir).unwrap();
-        assert!(read.is_empty());
+        assert!(read.is_empty(), "read should be empty");
     }
 
     #[test]

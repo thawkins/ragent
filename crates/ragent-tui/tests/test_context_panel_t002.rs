@@ -103,7 +103,6 @@ fn test_panel_lists_partitions_and_totals() {
         })
         .collect();
     for expected in [
-        "Model context",
         "Context window",
         "System prompt",
         "Tool catalog",
@@ -162,5 +161,66 @@ fn test_panel_percent_or_unknown_labels() {
     assert!(
         rendered.contains('%') || rendered.contains("unknown"),
         "percentage values must render when the context window is known"
+    );
+}
+#[test]
+fn test_panel_shows_sent_to_model_row() {
+    // The provider-reported input tokens of the last LLM request
+    // (App::last_input_tokens) render as a "Sent to model" row directly
+    // below the "Context window" capacity row, with a percentage of the
+    // advertised window.
+    let mut app = support::make_app();
+    app.show_context_panel = true;
+    app.selected_model_ctx_window = Some(200_000);
+    app.last_input_tokens = 45_000;
+    let backend = ratatui::backend::TestBackend::new(100, 40);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| ragent_tui::layout::render(frame, &mut app))
+        .expect("draw");
+    let buffer = &terminal.backend().buffer();
+    let rendered: String = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .filter_map(|x| buffer.cell((x, y)))
+                .map(|c| c.symbol().to_string())
+                .collect::<String>()
+        })
+        .collect();
+    assert!(
+        rendered.contains("Sent to model"),
+        "panel must show the 'Sent to model' row; rendered:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("45.0ktk"),
+        "panel must show the provider-reported input token count; rendered:\n{rendered}"
+    );
+}
+
+#[test]
+fn test_panel_sent_to_model_zero_before_first_turn() {
+    // Before any TokenUsage event the row shows a dimmed 0tk count without
+    // a percentage bar.
+    let mut app = support::make_app();
+    app.show_context_panel = true;
+    app.selected_model_ctx_window = Some(200_000);
+    app.last_input_tokens = 0;
+    let backend = ratatui::backend::TestBackend::new(100, 40);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| ragent_tui::layout::render(frame, &mut app))
+        .expect("draw");
+    let buffer = &terminal.backend().buffer();
+    let rendered: String = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .filter_map(|x| buffer.cell((x, y)))
+                .map(|c| c.symbol().to_string())
+                .collect::<String>()
+        })
+        .collect();
+    assert!(
+        rendered.contains("Sent to model"),
+        "panel must show the 'Sent to model' row even before the first turn"
     );
 }

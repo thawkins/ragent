@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `browser` tool — JCODEPLAN M4 (T-033).
 //!
 //! Covers:
@@ -662,7 +663,7 @@ async fn test_cdp_eval() {
         .expect("eval should succeed");
 
     assert!(
-        output.content.contains("3"),
+        output.content.contains('3'),
         "eval 1+2 should return 3: {}",
         output.content
     );

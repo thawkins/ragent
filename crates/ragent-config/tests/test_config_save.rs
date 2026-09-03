@@ -140,7 +140,13 @@ fn test_backup_does_not_overwrite_existing_backups() {
     let leftover_tmps: Vec<_> = fs::read_dir(&saves_dir)
         .expect("read saves")
         .filter_map(Result::ok)
-        .filter(|e| e.file_name().to_str().is_some_and(|n| n.ends_with(".tmp")))
+        .filter(|e| {
+            e.file_name().to_str().is_some_and(|n| {
+                std::path::Path::new(n)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp"))
+            })
+        })
         .collect();
     assert!(
         leftover_tmps.is_empty(),

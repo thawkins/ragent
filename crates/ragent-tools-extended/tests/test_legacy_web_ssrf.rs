@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Regression tests for C-001: SSRF guard on legacy `http_request` and `webfetch` tools.
 //!
 //! Verifies that both tools reject private IP ranges, localhost, cloud metadata,

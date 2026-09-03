@@ -24,6 +24,7 @@ const fn sample_doc(item: ResearchItem) -> ResearchDocument {
         top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
+        concepts: None,
         contradiction_graph: None,
         loci: None,
         depth_investigation: None,

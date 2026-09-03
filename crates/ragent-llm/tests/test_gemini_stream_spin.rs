@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Regression test for the Gemini stream parser infinite-loop bug.
 //!
 //! The Gemini provider's streaming parser had a `continue` in the inner

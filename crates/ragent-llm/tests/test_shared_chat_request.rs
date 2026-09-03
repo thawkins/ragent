@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `SharedChatRequest` type
 //! (`AgentPerf` T-009 / FR-014).
 

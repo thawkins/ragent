@@ -756,8 +756,15 @@ fn test_render_memory_panel_with_populated_project_memory() {
     );
     assert!(
         text.contains("zebra-tango-mango"),
-        "panel should render the project memory content; got:
-{text}"
+        "panel should render the project memory content; got:\n{text}"
+    );
+    assert!(
+        text.contains("Structured memories: 1 (37 bytes)"),
+        "panel should report the memory count and total bytes; got:\n{text}"
+    );
+    assert!(
+        text.contains("37b Unique"),
+        "panel should render the per-memory byte size next to the preview; got:\n{text}"
     );
 }
 
@@ -993,8 +1000,8 @@ async fn test_memory_store_tool_content_appears_in_memory_panel() {
         "panel must render a memory written by memory_store using the same project key as the panel; got:\n{text}"
     );
     assert!(
-        text.contains("Structured memories: 1"),
-        "panel should report the single stored memory; got:\n{text}"
+        text.contains("Structured memories: 1 (62 bytes)"),
+        "panel should report the single stored memory and its byte size; got:\n{text}"
     );
 }
 
@@ -1055,5 +1062,386 @@ fn test_render_memory_panel_omits_tags_line_when_memory_has_no_tags() {
     assert!(
         !text.contains("tags:"),
         "panel should not render a tags line for tag-less memory; got:\n{text}"
+    );
+}
+
+#[test]
+fn test_memory_stored_event_marks_panel_cache_dirty() {
+    // When `memory_store` writes a new structured memory, the tool emits
+    // `Event::MemoryStored`.  The TUI event handler must mark the panel cache
+    // dirty so the next Alt+M render shows the new row instead of stale data.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    app.session_id = Some("sess-dirty".to_string());
+    app.show_memory = true;
+    app.current_screen = ScreenMode::Chat;
+
+    // First render primes the cache with the empty state.
+    let first = render_app_to_string(&mut app, 140, 40);
+    assert!(first.contains("(no memories for this project)"));
+    assert!(
+        !app.memory_cache_dirty,
+        "cache should be clean after render"
+    );
+
+    // Simulate the tool emitting MemoryStored for the current session.
+    app.handle_event(ragent_agent::event::Event::MemoryStored {
+        session_id: "sess-dirty".to_string(),
+        id: 1,
+        category: "fact".to_string(),
+    });
+    assert!(
+        app.memory_cache_dirty,
+        "MemoryStored must mark the panel cache dirty"
+    );
+}
+
+#[test]
+fn test_memory_panel_refreshes_after_stored_event() {
+    // End-to-end: the MemoryStored event path causes the panel to refresh
+    // from SQLite even though the cache was previously clean.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    app.session_id = Some("sess-refresh".to_string());
+    app.show_memory = true;
+    app.current_screen = ScreenMode::Chat;
+
+    // Prime empty cache.
+    let _ = render_app_to_string(&mut app, 140, 40);
+
+    // Store a memory directly in SQLite (the tool path would also emit an event).
+    seed_project_memory(
+        &app.storage,
+        dir.path(),
+        "New memory appears after event: event-freshen",
+    );
+
+    // Simulate the event that the tool would emit.
+    app.handle_event(ragent_agent::event::Event::MemoryStored {
+        session_id: "sess-refresh".to_string(),
+        id: 1,
+        category: "fact".to_string(),
+    });
+
+    let text = render_app_to_string(&mut app, 140, 40);
+    assert!(
+        text.contains("event-freshen"),
+        "panel should render the newly stored memory after the event; got:\n{text}"
+    );
+}
+
+#[test]
+fn test_render_memory_panel_uses_real_cwd_path_not_tilde_display() {
+    // Regression: `App::new` collapses `$HOME` to `~` in `app.cwd` for the
+    // status bar.  The Memory panel must use the real filesystem path (`cwd_path`)
+    // as the project key, otherwise memories stored with the real full path
+    // are invisible when launched from under `$HOME`.
+    let dir = TempDir::new().expect("tempdir");
+    let real_path = dir.path().to_path_buf();
+    let _guard = with_cwd(&real_path);
+
+    let mut app = make_app();
+    // Simulate the real-world situation: cwd is `~`-collapsed for display,
+    // but the storage layer records memories against the real full path.
+    app.cwd = "~/Projects/ragent".to_string();
+    app.cwd_path = real_path.clone();
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_tasks_panel = false;
+    app.current_screen = ScreenMode::Chat;
+
+    // Force the cache to refresh from SQLite using the (possibly wrong) cwd.
+    app.memory_cache_dirty = true;
+
+    seed_project_memory_with_tags(
+        &app.storage,
+        &real_path,
+        "Tilde-path regression marker: hotel-india-juliet",
+        &["regression".to_string()],
+    );
+
+    let text = render_app_to_string(&mut app, 140, 40);
+    assert!(
+        text.contains("Structured memories: 1 (48 bytes)"),
+        "panel count should reflect the real-path memory, got:\n{text}"
+    );
+    assert!(
+        text.contains("hotel-india-juliet"),
+        "panel should render memory stored under the real project path even when cwd is ~-collapsed; got:\n{text}"
+    );
+    assert!(
+        text.contains("tags: regression"),
+        "panel should render the tags for the real-path memory; got:\n{text}"
+    );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FR-016: interactive cursor, open, and delete in the Alt+M panel
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_memory_cursor_down_and_up_moves_selection() {
+    // Cursor Down/Up in the visible Memory panel changes memory_cursor and
+    // keeps it clamped to the number of rows.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    seed_project_memory(&app.storage, dir.path(), "First memory: alpha");
+    seed_project_memory(&app.storage, dir.path(), "Second memory: beta");
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_tasks_panel = false;
+    app.current_screen = ScreenMode::Chat;
+
+    let _ = render_app_to_string(&mut app, 140, 40);
+    assert_eq!(app.memory_row_count, 2);
+    assert_eq!(app.memory_cursor, 0);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(app.memory_cursor, 1);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    // Cannot move past the last row.
+    assert_eq!(app.memory_cursor, 1);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    assert_eq!(app.memory_cursor, 0);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    // Cannot move above the first row.
+    assert_eq!(app.memory_cursor, 0);
+}
+
+#[test]
+fn test_memory_enter_with_non_empty_input_sends_message() {
+    // Regression: when the Memory panel is visible and the main prompt input
+    // contains text, Enter must submit the message rather than opening the
+    // selected memory.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    seed_project_memory(
+        &app.storage,
+        dir.path(),
+        "Full view content marker: gamma-omega",
+    );
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_tasks_panel = false;
+    app.current_screen = ScreenMode::Chat;
+    app.input = "send this message".to_string();
+
+    let _ = render_app_to_string(&mut app, 140, 40);
+    assert_eq!(app.memory_row_count, 1);
+
+    let action =
+        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        matches!(action, Some(InputAction::SendMessage(ref text)) if text == "send this message"),
+        "Enter with a non-empty prompt must send the message, not open memory, got: {action:?}"
+    );
+}
+
+#[test]
+fn test_memory_enter_opens_full_memory_view() {
+    // Pressing Enter on the selected memory opens the full-memory overlay.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    seed_project_memory_with_tags(
+        &app.storage,
+        dir.path(),
+        "Full view content marker: gamma-omega",
+        &["test-tag".to_string()],
+    );
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_tasks_panel = false;
+    app.current_screen = ScreenMode::Chat;
+
+    let _ = render_app_to_string(&mut app, 140, 40);
+    assert_eq!(app.memory_row_count, 1);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        app.memory_view.is_some(),
+        "Enter on a selected memory must open the memory view overlay"
+    );
+    let view = app.memory_view.as_ref().unwrap();
+    assert_eq!(view.row.id, 1);
+    assert!(view.row.content.contains("gamma-omega"));
+}
+
+#[test]
+fn test_memory_delete_shows_confirmation_and_cancel_clears_it() {
+    // Pressing Delete on a selected memory shows a confirmation dialog; Esc
+    // cancels it without deleting.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    seed_project_memory(&app.storage, dir.path(), "Delete candidate: zeta");
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_tasks_panel = false;
+    app.current_screen = ScreenMode::Chat;
+
+    let _ = render_app_to_string(&mut app, 140, 40);
+    assert_eq!(app.memory_row_count, 1);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    assert!(
+        app.pending_memory_delete.is_some(),
+        "Delete must show the confirmation dialog"
+    );
+    assert_eq!(app.pending_memory_delete.as_ref().unwrap().id, 1);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(
+        app.pending_memory_delete.is_none(),
+        "Esc must cancel the confirmation dialog"
+    );
+
+    // Memory must still be present.
+    app.memory_cache_dirty = true;
+    let text = render_app_to_string(&mut app, 140, 40);
+    assert!(
+        text.contains("zeta"),
+        "cancelling delete must keep the memory"
+    );
+}
+
+#[test]
+fn test_memory_delete_confirmation_deletes_memory() {
+    // Confirming the delete dialog removes the memory and refreshes the panel.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    seed_project_memory(&app.storage, dir.path(), "Delete me: eta");
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_tasks_panel = false;
+    app.current_screen = ScreenMode::Chat;
+
+    let _ = render_app_to_string(&mut app, 140, 40);
+    assert_eq!(app.memory_row_count, 1);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(
+        app.pending_memory_delete.is_none(),
+        "confirming delete must clear the dialog"
+    );
+    assert!(app.memory_cache_dirty, "delete must mark the cache dirty");
+
+    let text = render_app_to_string(&mut app, 140, 40);
+    assert!(
+        !text.contains("Delete me: eta"),
+        "memory content must disappear after confirmed delete"
+    );
+    assert!(
+        text.contains("(no memories for this project)"),
+        "panel should show the empty placeholder after deletion"
+    );
+}
+
+#[test]
+fn test_memory_cursor_scrolls_selection_into_view_with_wrapped_lines() {
+    // Regression for the block-cursor scrolling bug: the cursor is tracked in
+    // wrapped-line coordinates, so as soon as the selected memory preview would
+    // fall below the visible area the panel scrolls. We use long memory
+    // content that wraps to multiple lines and a small panel so the mismatch
+    // between wrapped and unwrapped indices is observable.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    // Create enough long memories to exceed the panel height.
+    for i in 0..10usize {
+        seed_project_memory(
+            &app.storage,
+            dir.path(),
+            &format!("overflow cursor memory {i}: {} ", "x".repeat(120)),
+        );
+    }
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_tasks_panel = false;
+    app.current_screen = ScreenMode::Chat;
+
+    // Render at a width that causes each preview to wrap to ~3 lines, with a
+    // panel height that shows only a few rows.
+    let _ = render_app_to_string(&mut app, 60, 12);
+    let initial_scroll = app.memory_scroll_offset;
+
+    // Move the cursor down several rows.
+    for _ in 0..6 {
+        app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+
+    let cursor_line = app
+        .memory_row_line_indices
+        .get(app.memory_cursor)
+        .copied()
+        .unwrap_or(0);
+    let visible = app.memory_area.height as usize;
+    assert!(
+        app.memory_scroll_offset > initial_scroll,
+        "cursor navigation must scroll the panel down to keep the selection visible"
+    );
+    assert!(
+        cursor_line < app.memory_scroll_offset as usize + visible,
+        "selected memory cursor must remain inside the visible window"
+    );
+}
+
+#[test]
+fn test_memory_cursor_scrolls_selection_into_view() {
+    // Moving the cursor to a row below the visible area adjusts the scroll
+    // offset so the selected row remains visible.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    for i in 0..30u32 {
+        seed_project_memory(
+            &app.storage,
+            dir.path(),
+            &format!("overflow cursor memory {i}"),
+        );
+    }
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_tasks_panel = false;
+    app.current_screen = ScreenMode::Chat;
+
+    let _ = render_app_to_string(&mut app, 120, 12);
+    let initial_scroll = app.memory_scroll_offset;
+
+    // Move the cursor to the last row.
+    for _ in 0..29 {
+        app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+
+    assert!(
+        app.memory_scroll_offset > initial_scroll,
+        "cursor navigation must scroll the panel down to keep the selection visible"
     );
 }

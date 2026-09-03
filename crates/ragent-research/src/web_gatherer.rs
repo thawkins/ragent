@@ -46,7 +46,7 @@ use crate::open_access::{
 };
 use crate::source::Source;
 use crate::source_vault::SourceVault;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod classify;
 mod decomposer;
@@ -446,6 +446,10 @@ pub enum GatherEvent {
         /// from a legal OA copy instead of fetched from the original URL
         /// (FR-015).
         oa_recovery: Option<Box<crate::open_access::RecoveredOpenAccess>>,
+        /// Classified content type of the captured page (`"page"`, `"pdf"`,
+        /// or `"youtube"`) so the UI can aggregate captures by file type
+        /// without re-classifying the URL.
+        media_type: String,
     },
     /// The underlying search tool returned an error.
     SearchFailed {
@@ -522,6 +526,24 @@ pub enum GatherEvent {
         required: usize,
         /// Tier that was requested for this run.
         tier: String,
+    },
+    /// The web-gathering phase is about to start with an active phase
+    /// deadline (FR-009). Emitted exactly once at the start of
+    /// [`WebGatherer::gather_with_observer`] when a deadline is configured, so
+    /// UI layers can render a live countdown. Never emitted when the deadline
+    /// is disabled (`--web-time 0`).
+    PhaseStarted {
+        /// Effective deadline for this phase, in seconds.
+        deadline_secs: u64,
+    },
+    /// The optional phase deadline passed before the gather pass finished.
+    /// Everything captured so far is returned as a partial [`GatherResult`]
+    /// and the run proceeds to analysis/synthesis with those sources.
+    PhaseTimedOut {
+        /// Configured deadline in seconds.
+        deadline_secs: u64,
+        /// Number of sources already captured when the deadline fired.
+        captured: usize,
     },
 }
 
@@ -600,6 +622,12 @@ pub struct WebGatherer {
     oa_min_full_text_chars: usize,
     /// HTTP client used for Unpaywall/Europe PMC queries.
     oa_client: Option<Arc<dyn OpenAccessClient>>,
+    /// Optional wall-clock deadline for the whole gather pass. When set,
+    /// [`WebGatherer::gather_with_observer`] stops issuing searches and stops
+    /// waiting for fetch completions once the deadline passes, returning
+    /// everything captured so far as a partial [`GatherResult`] instead of
+    /// blocking indefinitely. `None` (the default) means no deadline.
+    phase_deadline: Option<Instant>,
 }
 
 impl std::fmt::Debug for WebGatherer {
@@ -621,6 +649,7 @@ impl std::fmt::Debug for WebGatherer {
             .field("open_access_recovery", &self.open_access_recovery)
             .field("oa_min_full_text_chars", &self.oa_min_full_text_chars)
             .field("has_contact_email", &self.contact_email.is_some())
+            .field("has_phase_deadline", &self.phase_deadline.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -650,7 +679,28 @@ impl WebGatherer {
             contact_email: None,
             oa_min_full_text_chars: DEFAULT_OA_MIN_FULL_TEXT_CHARS,
             oa_client: Some(Arc::new(ReqwestOpenAccessClient::new(None))),
+            phase_deadline: None,
         }
+    }
+
+    /// Set an optional wall-clock deadline for the whole gather pass.
+    ///
+    /// When the deadline passes, no new work is started (FR-008): the
+    /// decomposer call, the wait for each sub-query search result, and the
+    /// wait for each in-flight fetch completion are all bounded by the
+    /// remaining budget, and truncation breaks the search and fetch loops
+    /// before any further search or fetch is polled. Because fetches already
+    /// in flight are cancelled on drop, the worst-case overshoot beyond the
+    /// deadline is the completion of at most one bounded wait — a fetch
+    /// future that has already been polled and resolves just as the deadline
+    /// elapses is still recorded; nothing newer is initiated. Everything
+    /// captured up to that point is returned as a partial [`GatherResult`] so
+    /// the caller can proceed to analysis/synthesis with whatever was
+    /// gathered.
+    #[must_use]
+    pub fn with_phase_deadline(mut self, deadline: Option<Instant>) -> Self {
+        self.phase_deadline = deadline;
+        self
     }
 
     /// Attach a persistent source vault (Milestone T-004). When a vault is
@@ -777,6 +827,11 @@ impl WebGatherer {
     /// when a search returns many hits, at the cost of more in-flight HTTP
     /// connections and memory.  The default is [`DEFAULT_FETCH_CONCURRENCY`]
     /// (10).
+    ///
+    /// This also bounds the deadline overshoot (FR-008): at most
+    /// `fetch_concurrency` fetches are ever in flight, and truncation by the
+    /// phase deadline cancels the rest, so the phase never starts a fetch
+    /// after the deadline.
     #[must_use]
     pub fn with_fetch_concurrency(mut self, n: usize) -> Self {
         self.fetch_concurrency = n.max(1);
@@ -789,6 +844,10 @@ impl WebGatherer {
     /// skipped, so one slow URL cannot stall the whole gather pass. The default
     /// is [`DEFAULT_FETCH_TIMEOUT`] (30 seconds). A zero duration is treated
     /// as the default.
+    ///
+    /// Together with the phase deadline (FR-008) this bounds the worst-case
+    /// overshoot: a fetch already in flight when the deadline elapses runs at
+    /// most to its own timeout, and no new fetch is started after truncation.
     #[must_use]
     pub fn with_fetch_timeout(mut self, timeout: Duration) -> Self {
         self.fetch_timeout = if timeout.is_zero() {
@@ -1058,6 +1117,7 @@ impl WebGatherer {
                     body_preview,
                     language: "UNKNOWN".to_string(),
                     oa_recovery: None,
+                    media_type: source.media_type().to_string(),
                 });
             }
             self.log_url_outcome(
@@ -1114,6 +1174,18 @@ impl WebGatherer {
     /// position rather than completion timing. The returned [`GatherResult`]
     /// lists the sub-queries that were used so the caller can persist them in
     /// `RESEARCH.md`.
+    ///
+    /// # Deadline behaviour (`--web-time`, FR-008)
+    ///
+    /// When [`WebGatherer::with_phase_deadline`] set a deadline, every await
+    /// point in this method is bounded by the remaining budget: the decomposer
+    /// call, each search-result wait, and each fetch-completion wait. After
+    /// the deadline elapses no new search or fetch is started; the loops break
+    /// and everything captured so far is returned as a partial result. The
+    /// worst-case overshoot beyond the deadline is the completion of at most
+    /// the fetches already in flight at truncation — in-flight requests are
+    /// cancelled on drop, and each is itself capped by `fetch_timeout` — so
+    /// the phase never runs unbounded past the deadline.
     pub async fn gather_with_observer(
         &self,
         topic: &str,
@@ -1128,6 +1200,94 @@ impl WebGatherer {
         }
 
         tracing::info!(topic, max_results, "research: starting web-gathering phase");
+
+        // Phase deadline (H-001 / --web-time): when set, the gather pass
+        // becomes best-effort. Once the deadline passes we stop issuing new
+        // searches and stop waiting for fetch completions, returning
+        // everything captured so far as a partial result so the session can
+        // proceed to analysis/synthesis with whatever was gathered.
+        let deadline = self.phase_deadline;
+        let deadline_secs = deadline
+            .map(|d| {
+                d.saturating_duration_since(std::time::Instant::now())
+                    .as_secs()
+            })
+            .unwrap_or(0);
+        // Phase-start notification (FR-009): emitted exactly once, before any
+        // search or fetch work, whenever a deadline is configured so UI layers
+        // can start a live countdown. The payload carries the *configured*
+        // budget (deadline - Instant::now() at the moment the phase begins),
+        // floored at 1 so a just-created deadline never reports 0s and is
+        // always distinguishable from the deadline-disabled sentinel.
+        // `deadline_secs == 0` unambiguously means the deadline is disabled
+        // and no phase-start event is emitted at all.
+        if deadline.is_some()
+            && let Some(obs) = observer
+        {
+            obs.on_event(GatherEvent::PhaseStarted {
+                deadline_secs: deadline_secs.max(1),
+            });
+        }
+        // Deadline emission is single-shot (FR-004): `truncated` may be set by
+        // several bounded waits (decomposer, search loop, fetch loop), but the
+        // `PhaseTimedOut` event fires exactly once, from the single terminal
+        // site at the end of the gather pass, carrying the final captured
+        // count. Interim sites only set the flag and break their loops.
+        //
+        // No-new-work guarantee (FR-008): all three await points below —
+        // (a) the decomposer call, (b) each `results.next()` in the search
+        // loop, and (c) each `stream.next()` in the fetch loop — are wrapped
+        // in `tokio::time::timeout(remaining(), ..)` via `next_bounded!` or an
+        // explicit call. Once the deadline elapses, `truncated` is set and
+        // both loops break before polling any further search or fetch, so no
+        // new search or fetch is initiated after the deadline. In-flight
+        // futures are cancelled on drop, which cancels the underlying
+        // request; the worst-case overshoot is therefore bounded by the
+        // completion of the bounded waits already resolved at truncation
+        // (at most one in-flight fetch, itself capped by `fetch_timeout`).
+        let mut truncated = false;
+        let remaining = || {
+            deadline.map_or_else(
+                || std::time::Duration::from_secs(u64::MAX / 2),
+                |d| d.saturating_duration_since(std::time::Instant::now()),
+            )
+        };
+        // Await the next stream item, but bound the wait by the phase
+        // deadline so a stalled search/fetch cannot outlive the budget. The
+        // abandoned futures are cancelled on drop, which cancels the
+        // underlying request.
+        //
+        // This macro is the mechanism behind the no-new-work guarantee
+        // (FR-008): every stream wait in the search and fetch loops is
+        // deadline-bounded, so after the deadline elapses the loops see
+        // `truncated` and break instead of polling more work.
+        macro_rules! next_bounded {
+            ($stream:expr) => {
+                match tokio::time::timeout(remaining(), $stream.next()).await {
+                    Ok(item) => item,
+                    Err(_) => {
+                        truncated = true;
+                        None
+                    }
+                }
+            };
+        }
+        // Single terminal emission site (FR-004): called once after the
+        // gather loops unwind, with the final captured count. Interim
+        // truncation sites set `truncated` and break without emitting.
+        let emit_deadline_event = |observer: Option<&dyn GatherObserver>, captured: usize| {
+            if let Some(obs) = observer {
+                obs.on_event(GatherEvent::PhaseTimedOut {
+                    deadline_secs,
+                    captured,
+                });
+            }
+            tracing::warn!(
+                deadline_secs,
+                captured,
+                "research: web phase deadline reached; proceeding with sources gathered so far"
+            );
+        };
 
         if let Some(log) = &self.gather_log
             && let Err(e) = log
@@ -1198,22 +1358,40 @@ impl WebGatherer {
         // Determine the set of sub-queries.  If no decomposer is configured
         // we still treat the original topic as a single query so callers see
         // a consistent [`GatherResult`].
-        let queries: Vec<String> = match &self.decomposer {
-            Some(d) => match d.decompose(topic).await {
-                Ok(qs) if !qs.is_empty() => qs,
-                Ok(_) => {
-                    tracing::warn!("research: decomposer returned empty queries; using topic");
-                    vec![topic.to_string()]
+        let queries: Vec<String> = if truncated {
+            Vec::new()
+        } else {
+            match &self.decomposer {
+                Some(d) => {
+                    // Bound decomposition by the remaining phase budget; a
+                    // stalled LLM decomposer must not consume the whole
+                    // budget or outlive it. When the deadline elapses here,
+                    // `truncated` short-circuits into an empty query set, so
+                    // no sub-query search is issued at all (FR-008: no new
+                    // work after the deadline).
+                    match tokio::time::timeout(remaining(), d.decompose(topic)).await {
+                        Ok(Ok(qs)) if !qs.is_empty() => qs,
+                        Ok(Ok(_)) => {
+                            tracing::warn!(
+                                "research: decomposer returned empty queries; using topic"
+                            );
+                            vec![topic.to_string()]
+                        }
+                        Ok(Err(e)) => {
+                            tracing::warn!(
+                                error = %e,
+                                "research: query decomposition failed; falling back to single query"
+                            );
+                            vec![topic.to_string()]
+                        }
+                        Err(_) => {
+                            truncated = true;
+                            Vec::new()
+                        }
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "research: query decomposition failed; falling back to single query"
-                    );
-                    vec![topic.to_string()]
-                }
-            },
-            None => vec![topic.to_string()],
+                None => vec![topic.to_string()],
+            }
         };
 
         if let Some(obs) = observer {
@@ -1352,7 +1530,15 @@ impl WebGatherer {
         };
         let mut circuit_open_emitted = false;
 
-        while let Some((idx, outcome)) = results.next().await {
+        while let Some((idx, outcome)) = next_bounded!(results) {
+            // Deadline reached while waiting for the next sub-query search:
+            // stop issuing further searches and move on with what we have.
+            // No further search is polled, and none is newly started
+            // (FR-008). The `PhaseTimedOut` event is emitted once at the
+            // terminal site.
+            if truncated {
+                break;
+            }
             let query = queries
                 .get(idx)
                 .cloned()
@@ -1584,6 +1770,14 @@ impl WebGatherer {
         // collected `(index, Option<Source>)` pairs are re-sorted into the
         // original search-ranking order afterwards so `web-NN.md` supporting
         // file names track hit position rather than completion timing.
+        //
+        // Overshoot bound (FR-008): only `fetch_concurrency` fetch futures
+        // are polled at any moment; `buffer_unordered` does not start a new
+        // fetch until an in-flight one resolves. When the deadline truncates
+        // the loop, the stream (and with it every queued future) is dropped
+        // and the in-flight requests are cancelled, so the phase's overshoot
+        // past the deadline is at most the completion time of the bounded
+        // wait that observed the deadline — never a fresh fetch.
         let fetch_concurrency = self.fetch_concurrency.max(1);
         let fetch_tool = self.fetch.clone();
         let fetch_timeout = self.fetch_timeout;
@@ -1654,7 +1848,15 @@ impl WebGatherer {
             });
         let mut collected: Vec<(usize, Option<Source>)> = Vec::with_capacity(max_results);
         let mut stream = futures::stream::iter(fetch_futures).buffer_unordered(fetch_concurrency);
-        while let Some((index, query, hit, result, language_fallback)) = stream.next().await {
+        while let Some((index, query, hit, result, language_fallback)) = next_bounded!(stream) {
+            // Deadline reached while waiting for the next fetch completion:
+            // abandon the remaining in-flight fetches (they are cancelled on
+            // drop) and keep everything captured so far. No further fetch is
+            // polled, and none is newly started (FR-008). The `PhaseTimedOut`
+            // event is emitted once at the terminal site.
+            if truncated {
+                break;
+            }
             match result {
                 Ok(Ok(page)) => {
                     let scholarly = page.page_type.as_deref() == Some("scholarly");
@@ -1871,6 +2073,12 @@ impl WebGatherer {
                                 .map(str::to_uppercase)
                                 .unwrap_or_else(|| "UNKNOWN".to_string()),
                             oa_recovery: oa_recovery.clone(),
+                            media_type: classify_web_source(
+                                &page.url,
+                                page.content_type.as_deref(),
+                            )
+                            .as_str()
+                            .to_string(),
                         });
                     }
                     log_captured(
@@ -1988,8 +2196,12 @@ impl WebGatherer {
             pdf_count,
             youtube_count,
             excluded_count,
+            truncated,
             "research: web-gathering phase complete"
         );
+        if truncated {
+            emit_deadline_event(observer, sources.len());
+        }
         if let Some(log) = &self.gather_log
             && let Err(e) =
                 log.lock()
@@ -2070,6 +2282,7 @@ fn web_body_path(index: usize) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::source_vault::{NewVaultSource, SourceVault};
     use std::sync::Mutex;
@@ -2210,7 +2423,7 @@ mod tests {
                 published_at: None,
                 url: "https://good.example".into(),
                 title: "Rust async runtime guide".into(),
-                body: body256("body good").into(),
+                body: body256("body good"),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -2223,7 +2436,7 @@ mod tests {
                 published_at: None,
                 url: "https://bad.example".into(),
                 title: "completely unrelated shopping page".into(),
-                body: body256("body bad").into(),
+                body: body256("body bad"),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -2568,7 +2781,7 @@ mod tests {
                 published_at: None,
                 url: "https://bad.example".into(),
                 title: "completely unrelated page".into(),
-                body: body256("body").into(),
+                body: body256("body"),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -2721,7 +2934,7 @@ mod tests {
                     published_at: None,
                     url: url.into(),
                     title: format!("Title {url}"),
-                    body: body256("body").into(),
+                    body: body256("body"),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -2772,7 +2985,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: body256("b").into(),
+                    body: body256("b"),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -2826,7 +3039,7 @@ mod tests {
                 published_at: None,
                 url: "https://a.example".into(),
                 title: "A — resolved".into(),
-                body: body256("body a").into(),
+                body: body256("body a"),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -2839,7 +3052,7 @@ mod tests {
                 published_at: None,
                 url: "https://b.example".into(),
                 title: "B — resolved".into(),
-                body: body256("body b").into(),
+                body: body256("body b"),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -2852,7 +3065,7 @@ mod tests {
                 published_at: None,
                 url: "https://c.example".into(),
                 title: String::new(), // empty title should fall back to search hit title
-                body: body256("body c").into(),
+                body: body256("body c"),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -2915,7 +3128,7 @@ mod tests {
                 published_at: None,
                 url: "https://ok".into(),
                 title: "OK".into(),
-                body: body256("b").into(),
+                body: body256("b"),
 
                 content_type: None,
                 page_type: None,
@@ -3029,7 +3242,7 @@ mod tests {
                     published_at: None,
                     url: u.into(),
                     title: u.into(),
-                    body: body256("b").into(),
+                    body: body256("b"),
 
                     content_type: None,
                     page_type: None,
@@ -3088,7 +3301,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: body256("b").into(),
+                    body: body256("b"),
 
                     content_type: None,
                     page_type: None,
@@ -3179,7 +3392,7 @@ mod tests {
                 published_at: None,
                 url: "https://ok".into(),
                 title: "OK".into(),
-                body: body256("b").into(),
+                body: body256("b"),
 
                 content_type: None,
                 page_type: None,
@@ -3694,7 +3907,7 @@ mod tests {
                 published_at: None,
                 url: "https://fr.example".into(),
                 title: "Article".into(),
-                body: body256("corps de texte").into(),
+                body: body256("corps de texte"),
                 content_type: None,
                 page_type: None,
                 language: Some("French".into()),
@@ -3722,7 +3935,7 @@ mod tests {
                 published_at: None,
                 url: "https://es.example".into(),
                 title: "Página".into(),
-                body: body256("cuerpo").into(),
+                body: body256("cuerpo"),
                 content_type: None,
                 page_type: None,
                 language: Some("Spanish".into()),
@@ -3771,7 +3984,7 @@ mod tests {
             WebFetchedPage {
                 url: "https://example.com/paper.pdf".into(),
                 title: "PDF".into(),
-                body: body256("pdf body").into(),
+                body: body256("pdf body"),
                 content_type: Some("application/pdf".into()),
                 page_type: Some("pdf".into()),
                 published_at: None,
@@ -3784,7 +3997,7 @@ mod tests {
             WebFetchedPage {
                 url: "https://www.youtube.com/watch?v=abc123".into(),
                 title: "YouTube".into(),
-                body: body256("youtube transcript").into(),
+                body: body256("youtube transcript"),
                 content_type: Some("text/html".into()),
                 page_type: Some("youtube".into()),
                 published_at: None,
@@ -3843,7 +4056,7 @@ mod tests {
                 published_at: None,
                 url: "https://retry.example".into(),
                 title: "Rust async runtime".into(),
-                body: body256("body").into(),
+                body: body256("body"),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -3884,7 +4097,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: body256("b").into(),
+                    body: body256("b"),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -3943,7 +4156,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: body256("b").into(),
+                    body: body256("b"),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -4007,7 +4220,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: body256("b").into(),
+                    body: body256("b"),
                     content_type: None,
                     page_type: None,
                     language: None,

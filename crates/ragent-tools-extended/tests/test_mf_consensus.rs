@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for `masterfetch::search::consensus` — cross-engine merge,
 //! dedup, ranking, related-query mining, and fetch hints (T-015 / T-036,
 //! FR-008, FR-009, NFR-003).

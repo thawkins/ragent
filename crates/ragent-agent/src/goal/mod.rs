@@ -383,9 +383,7 @@ mod tests {
     #[test]
     fn test_parse_evaluation_yes() {
         // Test the parsing logic directly
-        let text = r#"SATISFIED: YES
-CONFIDENCE: 0.95
-REASONING: All tests have passed and the feature is implemented."#;
+        let text = "SATISFIED: YES\nCONFIDENCE: 0.95\nREASONING: All tests have passed and the feature is implemented.";
 
         let mut satisfied = false;
         let mut confidence = None;

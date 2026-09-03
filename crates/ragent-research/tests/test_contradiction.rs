@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the contradiction-graph builder (T-007).
 //!
 //! Migrated from `crates/ragent-research/src/contradiction.rs` inline tests
@@ -134,12 +135,8 @@ fn graph_deduplicates_pairs() {
         ),
     ];
     let graph = build_contradiction_graph(&sources);
-    let pairs: Vec<_> = graph
-        .edges
-        .iter()
-        .map(|e| (e.claim_a.source_index, e.claim_b.source_index))
-        .collect();
-    assert_eq!(pairs.len(), 1);
+    let count = graph.edges.len();
+    assert_eq!(count, 1);
 }
 
 #[test]

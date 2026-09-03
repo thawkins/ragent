@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for `finance::providers::yahoo` normalization and
 //! `yfinance_rs` response mapping.
 //!

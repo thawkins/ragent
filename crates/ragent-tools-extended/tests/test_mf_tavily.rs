@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for the Tavily backend request builder and response parser.
 //!
 //! These tests exercise [`ragent_tools_extended::masterfetch::search::tavily`]

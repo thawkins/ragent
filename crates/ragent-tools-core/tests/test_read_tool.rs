@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `read` tool, especially the `num_lines` parameter.
 
 use serde_json::json;

@@ -84,6 +84,7 @@ impl GatherObserver for GatherEventForwarder {
                 body_preview,
                 language,
                 oa_recovery,
+                media_type,
             } => {
                 // Forward inline so the UI shows each successfully retrieved
                 // URL as it arrives, rather than only at the end of the
@@ -96,6 +97,7 @@ impl GatherObserver for GatherEventForwarder {
                     body_preview,
                     language,
                     oa_recovery,
+                    media_type,
                 });
             }
             // H-002/H-003: retry and circuit-breaker events are forwarded as
@@ -158,6 +160,30 @@ impl GatherObserver for GatherEventForwarder {
                         .to_string(),
                     detail: Some(format!(
                         "vault has {count} sources (required {required} for {tier} tier); skipping new fetches"
+                    )),
+                });
+            }
+            GatherEvent::PhaseStarted { deadline_secs } => {
+                // FR-009: surface the effective web-phase deadline at the
+                // start of the gather phase so UI layers can render a live
+                // countdown from the stored wall-clock deadline.
+                self.observer.on_event(SessionEvent::RunStep {
+                    step: "web_phase_start".to_string(),
+                    status: crate::run_manifest::StepStatus::InProgress
+                        .as_str()
+                        .to_string(),
+                    detail: Some(format!("web phase deadline: {deadline_secs}s")),
+                });
+            }
+            GatherEvent::PhaseTimedOut {
+                deadline_secs,
+                captured,
+            } => {
+                self.observer.on_event(SessionEvent::RunStep {
+                    step: "web_deadline".to_string(),
+                    status: crate::run_manifest::StepStatus::Skipped.as_str().to_string(),
+                    detail: Some(format!(
+                        "web phase deadline of {deadline_secs}s reached; proceeding with {captured} captured source(s)"
                     )),
                 });
             }
@@ -272,12 +298,13 @@ pub struct WebConfig {
 }
 
 /// Default wall-clock budget for the entire web-gathering phase
-/// ([`WebConfig::web_phase_timeout_secs`]). 180 seconds comfortably exceeds
-/// the worst case for a healthy gather pass (hundreds of candidates at
-/// `DEFAULT_FETCH_CONCURRENCY` and a 30 s per-fetch timeout) while still
-/// guaranteeing that a stalled search backend, OA lookup, or LLM decomposer
-/// cannot wedge the session without emitting any progress.
-pub const DEFAULT_WEB_PHASE_TIMEOUT_SECS: u64 = 180;
+/// ([`WebConfig::web_phase_timeout_secs`]). 60 seconds keeps `/research
+/// create` responsive by default: when the budget elapses the gatherer stops
+/// issuing new searches and fetches and returns everything captured so far,
+/// so the run proceeds to analysis/synthesis with the partial source set.
+/// Override per run with `--web-time N` (`--web-phase-timeout-secs N`), or
+/// disable with `--web-time 0`.
+pub const DEFAULT_WEB_PHASE_TIMEOUT_SECS: u64 = 60;
 
 /// Local/spec gathering knobs for a research session.
 #[derive(Debug, Clone)]
@@ -628,6 +655,9 @@ pub enum SessionEvent {
         language: String,
         /// Open-access recovery info, if applicable.
         oa_recovery: Option<Box<crate::open_access::RecoveredOpenAccess>>,
+        /// Classified content type (`"page"`, `"pdf"`, or `"youtube"`) so the
+        /// UI can aggregate captures by file type.
+        media_type: String,
     },
     /// The `--from-url` primary page was fetched.
     FromUrlBodyPreview {
@@ -844,6 +874,11 @@ pub struct ResearchSession {
     /// (`derive_topic_from_url_body`) that scrapes the first substantive
     /// sentence of the cleaned body.
     summarizer: Option<Arc<LlmAnalysisEngine>>,
+    /// Optional LLM engine used by the `/research create` pipeline to extract
+    /// the cross-source concept list rendered as the `## Concepts` section
+    /// directly above `## Findings` in `RESEARCH.md`. When absent (or when the
+    /// extraction call fails), the section is omitted from the document.
+    concepts_engine: Option<Arc<LlmAnalysisEngine>>,
 }
 
 impl std::fmt::Debug for ResearchSession {
@@ -894,6 +929,7 @@ impl ResearchSession {
             gather_log: None,
             model: None,
             summarizer: None,
+            concepts_engine: None,
         }
     }
 
@@ -913,6 +949,18 @@ impl ResearchSession {
     #[must_use]
     pub fn with_summarizer(mut self, summarizer: Arc<LlmAnalysisEngine>) -> Self {
         self.summarizer = Some(summarizer);
+        self
+    }
+
+    /// Attach an LLM engine used by the `/research create` pipeline to extract
+    /// the cross-source concept list rendered as the `## Concepts` section in
+    /// `RESEARCH.md` (spec researchcluster). Callers typically pass the same
+    /// [`LlmAnalysisEngine`] Arc wired for synthesis. When unset, the session
+    /// skips the concept-extraction step entirely and `RESEARCH.md` renders
+    /// without a `## Concepts` section.
+    #[must_use]
+    pub fn with_concepts_engine(mut self, engine: Arc<LlmAnalysisEngine>) -> Self {
+        self.concepts_engine = Some(engine);
         self
     }
 
@@ -1630,6 +1678,15 @@ impl ResearchSession {
             readability_audit = ra;
         }
 
+        // ── Concepts (spec researchcluster) ──────────────────────────────
+        // Extract the cross-source concept list from the same gathered corpus
+        // the synthesis step consumed. The section renders directly above
+        // `## Findings` in `RESEARCH.md`. When no concepts engine is wired
+        // (or the extraction fails), the section is omitted entirely.
+        let concepts_section = self
+            .extract_concepts_section(&name, &synthesis_sources, &observer)
+            .await;
+
         // ── Assemble ─────────────────────────────────────────────────────
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::Assemble,
@@ -1759,6 +1816,7 @@ impl ResearchSession {
             } else {
                 Some(polish_result)
             },
+            concepts: concepts_section,
             readability_audit: if readability_audit.is_empty() {
                 None
             } else {
@@ -1903,6 +1961,7 @@ impl ResearchSession {
                         .as_deref()
                         .map(str::to_uppercase)
                         .unwrap_or_else(|| "UNKNOWN".to_string());
+                    let src_media_type = src.media_type();
                     let body_preview = Self::body_preview(src_body);
                     observer.on_event(SessionEvent::FromUrlBodyPreview {
                         url: src_url.to_string(),
@@ -1916,6 +1975,7 @@ impl ResearchSession {
                         body_preview: String::new(),
                         language: src_language,
                         oa_recovery: None,
+                        media_type: src_media_type.to_string(),
                     });
                     // Topic derivation only runs on the first URL (idx == 0)
                     // when no explicit topic was provided. Subsequent URLs are
@@ -2123,6 +2183,13 @@ impl ResearchSession {
         let web_fut = async {
             if let Some(web) = &self.web {
                 let web_budget = config.web.max_web_results.max(config.budget_web_results());
+                // H-001 / --web-time: convert the optional phase timeout into
+                // a wall-clock deadline. When the deadline passes the
+                // gatherer returns a partial result with everything captured
+                // so far (plus a `web_deadline` RunStep diagnostic) instead
+                // of discarding the phase, so analysis/synthesis still runs
+                // over the partial source set. `--web-time 0` disables the
+                // deadline entirely.
                 let web = web
                     .clone()
                     .with_fetch_concurrency(config.web.fetch_concurrency)
@@ -2142,33 +2209,23 @@ impl ResearchSession {
                         config.resilience.contact_email.clone(),
                     )
                     .with_oa_min_full_text_chars(config.resilience.oa_min_full_text_chars)
-                    .with_sufficient_sources(config.engine.tier.sufficient_sources());
+                    .with_sufficient_sources(config.engine.tier.sufficient_sources())
+                    .with_phase_deadline(
+                        config
+                            .web
+                            .web_phase_timeout_secs
+                            .filter(|secs| *secs > 0)
+                            .map(|secs| {
+                                std::time::Instant::now() + std::time::Duration::from_secs(secs)
+                            }),
+                    );
                 let forwarder = GatherEventForwarder {
                     observer: observer.clone(),
                 };
-                let gather = async {
-                    web.gather_with_observer(topic, web_budget, Some(&forwarder))
-                        .instrument(tracing::info_span!("research_phase", phase = "web"))
-                        .await
-                };
-                // H-001: wrap the entire web phase in an optional timeout.
-                let result = if let Some(secs) = config.web.web_phase_timeout_secs {
-                    match tokio::time::timeout(std::time::Duration::from_secs(secs), gather).await {
-                        Ok(r) => r,
-                        Err(_) => {
-                            observer.on_event(SessionEvent::WebSearchFailed {
-                                error: format!("web phase timed out after {secs}s"),
-                            });
-                            tracing::warn!(
-                                timeout_secs = secs,
-                                "research: web phase timed out; continuing with no web sources"
-                            );
-                            Ok(crate::web_gatherer::GatherResult::empty())
-                        }
-                    }
-                } else {
-                    gather.await
-                };
+                let result = web
+                    .gather_with_observer(topic, web_budget, Some(&forwarder))
+                    .instrument(tracing::info_span!("research_phase", phase = "web"))
+                    .await;
                 match result {
                     Ok(result) => Ok(result),
                     Err(e) => {
@@ -2254,6 +2311,15 @@ impl ResearchSession {
             self.analysis.clone(),
             critic,
             config.engine_config(),
+        )
+        // FR-006: the iterative path must honour the same web-phase deadline
+        // as the overlapped single-pass path. `Some(0)` disables it.
+        .with_phase_deadline(
+            config
+                .web
+                .web_phase_timeout_secs
+                .filter(|secs| *secs > 0)
+                .map(std::time::Duration::from_secs),
         );
         let state = engine
             .run(topic, observer)
@@ -2279,44 +2345,123 @@ impl ResearchSession {
         topic: &str,
         sources: &[Source],
     ) -> anyhow::Result<(AnalysisResult, AnalysisOutcome)> {
-        // Prefer the inline `body` field on each source — it's the captured
-        // text from the gatherer and is always populated for fresh sessions.
-        // Fall back to reading the on-disk supporting file for items loaded
-        // from disk that predate the body field.
         let research_root = self.manager.root().to_path_buf();
         let name = name.clone();
         let sources = sources.to_vec();
         let bodies = tokio::task::spawn_blocking(move || {
             build_source_bodies(&sources, |src| -> Option<String> {
-                if let Some(inline) = src.body()
-                    && !inline.is_empty()
-                {
-                    return Some(inline.to_string());
-                }
-                match src {
-                    Source::Web { body_path, .. }
-                    | Source::Local { body_path, .. }
-                    | Source::Other { body_path, .. } => {
-                        let path = ResearchIo::item_dir(&research_root, &name).join(body_path);
-                        match std::fs::read_to_string(&path) {
-                            Ok(body) => Some(body),
-                            Err(e) => {
-                                tracing::warn!(
-                                    path = %path.display(),
-                                    error = %e,
-                                    "research: could not read supporting file for synthesis"
-                                );
-                                None
-                            }
-                        }
-                    }
-                    Source::Spec { relevance, .. } => Some(relevance.clone()),
-                }
+                read_source_body(&research_root, &name, src)
             })
         })
         .await
         .map_err(|e| anyhow::anyhow!("synthesis body loading failed: {e}"))?;
         self.analysis.analyze_with_outcome(topic, &bodies).await
+    }
+
+    /// Extract the cross-source concept list for the `## Concepts` section
+    /// (spec researchcluster).
+    ///
+    /// When no concepts engine is wired the step is skipped silently and
+    /// `None` is returned. When wired, the gathered source bodies are
+    /// assembled into a context-bounded payload (each block headed with the
+    /// 1-based References Index position), the fixed concept-extraction
+    /// prompt is dispatched through [`LlmAnalysisEngine::complete_raw`], and
+    /// the response is normalized by
+    /// [`crate::cluster::concepts_section_for_research`]. Any failure is
+    /// logged and reported via a `RunStep` event, but never aborts the run —
+    /// the document simply renders without the section.
+    async fn extract_concepts_section(
+        &self,
+        name: &ResearchName,
+        sources: &[Source],
+        observer: &Arc<dyn SessionObserver>,
+    ) -> Option<String> {
+        let Some(engine) = &self.concepts_engine else {
+            return None;
+        };
+        observer.on_event(SessionEvent::RunStep {
+            step: "concepts".to_string(),
+            status: "started".to_string(),
+            detail: None,
+        });
+        let result = self.extract_concepts_inner(name, sources, engine).await;
+        match result {
+            Ok(Some(section)) => {
+                observer.on_event(SessionEvent::RunStep {
+                    step: "concepts".to_string(),
+                    status: "completed".to_string(),
+                    detail: Some(format!(
+                        "{} concept section(s) extracted",
+                        section.matches("\n### ").count()
+                            + usize::from(section.starts_with("### "))
+                    )),
+                });
+                Some(section)
+            }
+            Ok(None) => {
+                observer.on_event(SessionEvent::RunStep {
+                    step: "concepts".to_string(),
+                    status: "skipped".to_string(),
+                    detail: Some("model returned no concept sections".to_string()),
+                });
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "research: concept extraction failed; omitting section"
+                );
+                observer.on_event(SessionEvent::RunStep {
+                    step: "concepts".to_string(),
+                    status: "failed".to_string(),
+                    detail: Some(e.to_string()),
+                });
+                None
+            }
+        }
+    }
+
+    /// Build the concept-extraction payload from `sources`, call the LLM, and
+    /// normalize the response. Shared by [`Self::extract_concepts_section`].
+    async fn extract_concepts_inner(
+        &self,
+        name: &ResearchName,
+        sources: &[Source],
+        engine: &LlmAnalysisEngine,
+    ) -> anyhow::Result<Option<String>> {
+        let research_root = self.manager.root().to_path_buf();
+        let name = name.clone();
+        let sources = sources.to_vec();
+        let web_index_map = build_web_index_map(&sources);
+        let bodies = tokio::task::spawn_blocking(move || {
+            build_source_bodies(&sources, |src| -> Option<String> {
+                read_source_body(&research_root, &name, src)
+            })
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("concepts body loading failed: {e}"))?;
+
+        let max_bytes = crate::cluster::estimate_max_payload_bytes(
+            crate::cluster::DEFAULT_CONTEXT_WINDOW_TOKENS,
+        );
+        let payload = crate::cluster::build_concepts_payload_from_bodies(&bodies, max_bytes);
+        let prompt = crate::cluster::CONCEPT_EXTRACTION_PROMPT_TEMPLATE
+            .replace("[INSERT_DOCUMENTS_HERE]", &payload);
+        let raw = engine
+            .complete_raw(
+                &prompt,
+                Some(
+                    "You are a careful research analyst. Use only the evidence in the provided source documents; do not invent facts.",
+                ),
+                8192,
+            )
+            .await?; // Map supporting-file numbers (web-NN.md) to the combined 1-based
+        // References Index position so filename-style citations in the model
+        // output resolve against `RESEARCH.md`.
+        Ok(crate::cluster::concepts_section_for_research(
+            &raw,
+            &web_index_map,
+        ))
     }
 }
 
@@ -2341,6 +2486,64 @@ pub struct RunOutcome {
 }
 
 // ── Free helpers ─────────────────────────────────────────────────────────
+
+/// Map web supporting-file numbers (`sources/web-NN.md`) to the combined
+/// 1-based References Index position of each web source in `sources`, so
+/// filename-style citations (`web-NN`) emitted by the concept-extraction LLM
+/// can be rewritten to `[#N]` markers that resolve against `RESEARCH.md`.
+fn build_web_index_map(sources: &[Source]) -> std::collections::HashMap<usize, usize> {
+    static WEB_FILE_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let web_file_re =
+        WEB_FILE_RE.get_or_init(|| regex::Regex::new(r"web-(\d+)\.md$").expect("valid regex"));
+    let mut map = std::collections::HashMap::new();
+    for (i, src) in sources.iter().enumerate() {
+        if let Source::Web { body_path, .. } = src {
+            let path_str = body_path.to_string_lossy();
+            if let Some(caps) = web_file_re.captures(&path_str)
+                && let Ok(file_no) = caps[1].parse::<usize>()
+            {
+                map.insert(file_no, i + 1);
+            }
+        }
+    }
+    map
+}
+
+/// Resolve the captured body text for one source, shared by the synthesis and
+/// concept-extraction steps: prefer the inline `body` field (always populated
+/// for fresh sessions), fall back to the on-disk supporting file for items
+/// loaded from disk that predate the body field, and use the spec relevance
+/// note for `Source::Spec` entries.
+fn read_source_body(
+    research_root: &std::path::Path,
+    name: &ResearchName,
+    src: &Source,
+) -> Option<String> {
+    if let Some(inline) = src.body()
+        && !inline.is_empty()
+    {
+        return Some(inline.to_string());
+    }
+    match src {
+        Source::Web { body_path, .. }
+        | Source::Local { body_path, .. }
+        | Source::Other { body_path, .. } => {
+            let path = ResearchIo::item_dir(research_root, name).join(body_path);
+            match std::fs::read_to_string(&path) {
+                Ok(body) => Some(body),
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "research: could not read supporting file for synthesis"
+                    );
+                    None
+                }
+            }
+        }
+        Source::Spec { relevance, .. } => Some(relevance.clone()),
+    }
+}
 
 /// Select the top `cap` sources by relevance rank (Milestone E-003).
 ///
@@ -2400,6 +2603,7 @@ use topic::{clean_site_title, derive_topic_from_url_body};
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::local_gatherer::{GrepMatch, LocalTool};
     use crate::web_gatherer::{
@@ -2536,7 +2740,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: body256("body").into(),
+                        body: body256("body"),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -2623,7 +2827,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: body256("b").into(),
+                    body: body256("b"),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -2724,7 +2928,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: "Example".into(),
-                    body: body256("body").into(),
+                    body: body256("body"),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -3088,7 +3292,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: "Fetched Page Title".into(),
-                    body: body256("body text").into(),
+                    body: body256("body text"),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -3668,7 +3872,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: body256("web body").into(),
+                        body: body256("web body"),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -3834,7 +4038,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: body256("web body").into(),
+                        body: body256("web body"),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -3954,7 +4158,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: body256("web body").into(),
+                        body: body256("web body"),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -4072,7 +4276,7 @@ mod tests {
                         published_at: None,
                         url: url.to_string(),
                         title: "Extra Page".into(),
-                        body: body256("Extra page body.").into(),
+                        body: body256("Extra page body."),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -4236,12 +4440,12 @@ mod tests {
             })
             .collect();
         assert!(
-            web_urls.iter().any(|u| *u == "https://example.com/first"),
+            web_urls.contains(&"https://example.com/first"),
             "first URL must be in sources: {:?}",
             web_urls
         );
         assert!(
-            web_urls.iter().any(|u| *u == "https://example.com/second"),
+            web_urls.contains(&"https://example.com/second"),
             "second URL must be in sources: {:?}",
             web_urls
         );
@@ -4604,12 +4808,12 @@ mod tests {
     // ── Milestone H-001: per-phase timeout tests ──────────────────────
 
     #[tokio::test]
-    async fn h001_web_phase_timeout_aborts_slow_web_gather() {
+    async fn h001_web_phase_timeout_keeps_partial_sources_and_proceeds() {
         use crate::web_gatherer::{
             WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
         };
 
-        // Search returns hits immediately but fetch sleeps 60s.
+        // Search returns one hit immediately but fetch sleeps 60s.
         struct SlowFetch;
         #[async_trait]
         impl WebFetchTool for SlowFetch {
@@ -4683,13 +4887,14 @@ mod tests {
         let outcome = session.run("h001timeout", "Test", &cfg, obs.clone()).await;
         assert!(outcome.is_ok(), "run should complete even with timeout");
         let events = obs.0.lock().unwrap();
-        // The web phase timeout should emit a WebSearchFailed event.
+        // The web phase deadline should emit a `web_deadline` RunStep
+        // diagnostic instead of discarding the phase.
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                SessionEvent::WebSearchFailed { error } if error.contains("timed out")
+                SessionEvent::RunStep { step, .. } if step == "web_deadline"
             )),
-            "expected WebSearchFailed with 'timed out', got {events:?}"
+            "expected RunStep web_deadline event, got {events:?}"
         );
     }
 
@@ -4798,7 +5003,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: "t".into(),
-                    body: body256("b").into(),
+                    body: body256("b"),
                     content_type: None,
                     page_type: None,
                     language: None,

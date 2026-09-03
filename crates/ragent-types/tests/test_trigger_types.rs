@@ -70,7 +70,7 @@ fn test_envelope_creation_populates_fields() {
         TriggerActionKind::InjectSummary,
         false,
     );
-    assert!(!env.id.is_empty());
+    assert_ne!(env.id, String::new());
     assert_eq!(env.source_kind, TriggerSourceKind::McpNotification);
     assert_eq!(env.source_id, "mcp-server-1");
     assert_eq!(env.summary, "Build completed");

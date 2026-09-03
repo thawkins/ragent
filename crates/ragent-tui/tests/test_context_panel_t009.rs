@@ -23,6 +23,7 @@ fn snapshot(
         memory_tokens: 0,
         agents_md_tokens: 0,
         context_window_tokens: window,
+        last_input_tokens: 0,
     }
 }
 

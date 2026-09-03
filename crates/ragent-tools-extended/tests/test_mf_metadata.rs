@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `masterfetch::metadata` — metadata extraction
 //! (T-031, FR-006, NFR-003).
 //!

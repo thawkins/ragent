@@ -59,7 +59,7 @@ pub fn best_exact_or_similarity_sample(
 
 /// Normalize code-like content for text-based comparisons.
 #[must_use]
-pub(crate) fn normalized_code(value: &str) -> String {
+pub fn normalized_code(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 

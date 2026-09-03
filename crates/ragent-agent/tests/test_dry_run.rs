@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the dry-run readiness report (T-022).
 //!
 //! These tests exercise the public [`run_dry_run`] function against temporary

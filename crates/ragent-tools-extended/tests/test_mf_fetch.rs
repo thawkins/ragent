@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `mf_fetch` tool — HTTP fetch, extraction, envelope
 //! signals, caching, robots, and graceful degradation (FR-002 through FR-007,
 //! FR-019, FR-025, FR-026, FR-028, FR-029, FR-030, NFR-003).

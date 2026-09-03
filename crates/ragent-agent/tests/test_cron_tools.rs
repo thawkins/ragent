@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the cron scheduler tools (`cron_add`, `cron_remove`, `cron_list`,
 //! `cron_enable`, `cron_disable`).
 //!

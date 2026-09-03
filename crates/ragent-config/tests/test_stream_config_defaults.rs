@@ -60,7 +60,11 @@ fn test_stream_config_default_constructor_uses_shorter_stall_timeout() {
 #[test]
 fn test_stream_config_validate_accepts_defaults() {
     let config = StreamConfig::default();
-    assert!(config.validate().is_empty(), "defaults should validate");
+    assert_eq!(
+        config.validate(),
+        Vec::<String>::new(),
+        "defaults should validate"
+    );
 }
 
 #[test]

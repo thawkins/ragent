@@ -110,6 +110,7 @@ fn merged_chunk_results_produce_valid_diagram_and_cross_references() {
         top_implications: merged.top_implications,
         cross_references: merged.cross_references,
         open_questions: merged.open_questions,
+        concepts: None,
         contradiction_graph: None,
         loci: None,
         depth_investigation: None,

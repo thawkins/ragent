@@ -953,6 +953,15 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
         deadline = deadline.min(now + Duration::from_secs(1));
     }
 
+    // Active web-phase deadline countdown updates every second (FR-010).
+    let active_web_deadline = app
+        .research_progress
+        .iter()
+        .find(|p| !p.done && p.web_phase_deadline.is_some_and(|d| d > now));
+    if active_web_deadline.is_some() {
+        deadline = deadline.min(now + Duration::from_secs(1));
+    }
+
     // Smooth updates for active spinners / progress / autopilot continue.
     // The latches below are guarded by self-healing staleness caps (see the
     // constants above): the event bus is broadcast, so a burst can make the
@@ -1002,4 +1011,11 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
     deadline = deadline.min(last_draw + Duration::from_millis(IDLE_REDRAW_INTERVAL_MS));
 
     deadline
+}
+
+/// Test-only wrapper around [`compute_next_deadline`] so integration tests in
+/// `tests/` can assert deadline policy without relying on `pub(crate)`
+/// visibility.
+pub fn compute_next_deadline_test(app: &App, last_draw: std::time::Instant) -> std::time::Instant {
+    compute_next_deadline(app, last_draw)
 }

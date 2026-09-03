@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for resume of an interrupted run (maka spec T-014, FR-006, FR-013).
 //!
 //! FR-006: "While a run is in the 'interrupted' state, the system shall expose

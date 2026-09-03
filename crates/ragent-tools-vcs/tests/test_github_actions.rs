@@ -6,7 +6,11 @@ use ragent_tools_vcs::github::github_actions::extract_context_ranges;
 fn test_extract_context_ranges_no_matches() {
     let lines = vec!["all good", "nothing here", "just info"];
     let ranges = extract_context_ranges(&lines);
-    assert!(ranges.is_empty(), "expected no ranges for clean log");
+    assert_eq!(
+        ranges,
+        Vec::<(usize, usize)>::new(),
+        "expected no ranges for clean log"
+    );
 }
 
 #[test]

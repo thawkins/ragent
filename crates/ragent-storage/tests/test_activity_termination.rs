@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for recording termination events on interruption (maka spec T-007,
 //! FR-003).
 //!

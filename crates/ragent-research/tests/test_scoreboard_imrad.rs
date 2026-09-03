@@ -33,6 +33,7 @@ fn empty_doc(item: ResearchItem) -> ResearchDocument {
         top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
+        concepts: None,
         contradiction_graph: None,
         loci: None,
         depth_investigation: None,
@@ -341,7 +342,7 @@ fn test_imrad_data_quality_summary_untouched_by_scoreboard() {
         .find("## Contradiction Graph")
         .expect("CORPA.md must carry the Contradiction Graph section");
     assert!(
-        assembled.body.find("### Contradiction Graph").is_none(),
+        !assembled.body.contains("### Contradiction Graph"),
         "IMRaD RESEARCH.md must no longer carry the Contradiction Graph subsection"
     );
     assert!(

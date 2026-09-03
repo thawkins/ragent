@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! External integration tests for the code-index scanner utilities.
 
 use ragent_codeindex::scanner::{count_lines, detect_language, hash_content, is_binary};

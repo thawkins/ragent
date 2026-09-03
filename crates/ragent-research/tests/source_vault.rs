@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the Hyperresearch source vault (T-003).
 //!
 //! These tests exercise the public [`ragent_research::source_vault`] API using

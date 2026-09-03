@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the agent-loop profiler.
 
 #![allow(clippy::float_cmp)] // integer millisecond values are represented exactly

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration test for the Wikipedia search backend hitting the live API.
 //!
 //! This test is `#[ignore]` by default to avoid network dependencies in CI.

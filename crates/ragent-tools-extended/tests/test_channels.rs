@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `send_channel_message` tool — JCODEPLAN M7 (T-061/T-062).
 //!
 //! Covers:

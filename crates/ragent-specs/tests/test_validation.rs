@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for spec validation: sections, requirements, EARS templates, and reports.
 
 use ragent_specs::spec::{EarsTemplate, Spec, SpecId};

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for optional retention limit / archival (maka spec T-010, FR-016,
 //! NFR-003).
 //!
@@ -130,9 +131,9 @@ fn archive_run_returns_jsonl_and_expires() {
 
     let jsonl = log.archive_run(&run, "retention").expect("archive");
     // The JSONL contains the original events plus the lifecycle expiry event.
-    let lines: Vec<&str> = jsonl.lines().collect();
+    let line_count = jsonl.lines().count();
     assert!(
-        lines.len() >= 4,
+        line_count >= 4,
         "archive includes original events + lifecycle event"
     );
     // Run is expired (gone from the store).
@@ -240,5 +241,5 @@ fn expired_run_does_not_affect_other_runs() {
     // run_b is untouched.
     assert_eq!(log.count(&run_b).unwrap(), 2);
     assert_eq!(log.run_status(&run_b).unwrap(), RunStatus::Completed);
-    assert!(log.read_run(&run_b).unwrap().len() == 2);
+    assert_eq!(log.read_run(&run_b).unwrap().len(), 2);
 }

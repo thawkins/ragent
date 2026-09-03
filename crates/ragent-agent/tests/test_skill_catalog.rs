@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for `SkillRegistry::catalog()` (T-007).
 
 use ragent_agent::skill::{SkillCatalogEntry, SkillInfo, SkillRegistry, SkillScope};

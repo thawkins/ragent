@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for web-gatherer title cleaning, relevance scoring, and
 //! classification helpers extracted from `web_gatherer.rs` (Milestone F-002).
 

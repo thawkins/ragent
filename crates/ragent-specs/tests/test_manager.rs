@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the spec manager: filters, sorting, and status transitions.
 
 use ragent_specs::manager::{SortBy, SpecFilter, SpecManager, is_valid_transition};
@@ -16,8 +17,10 @@ async fn test_manager_real_project_discover() {
         !specs.is_empty(),
         "Should discover at least one spec in the project"
     );
-    let ids: Vec<&str> = specs.iter().map(|s| s.id.as_str()).collect();
-    assert!(ids.contains(&"testspec"), "Should find testspec");
+    assert!(
+        specs.iter().any(|s| s.id.as_str() == "testspec"),
+        "Should find testspec"
+    );
 }
 
 #[tokio::test]

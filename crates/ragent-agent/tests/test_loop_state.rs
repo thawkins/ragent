@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the stateful loop cron mode (spec `piegap` T-005).
 //!
 //! Tests the `<loop-state>` / `<inbox>` tag protocol, state file persistence,
@@ -319,8 +320,8 @@ fn test_inbox_jsonl_format() {
     assert_eq!(parsed["content"], "test finding");
     assert_eq!(parsed["source_event_id"], "event-fmt");
     assert_eq!(parsed["status"], "open");
-    assert!(parsed["id"].as_str().unwrap().len() > 0);
-    assert!(parsed["timestamp"].as_str().unwrap().len() > 0);
+    assert!(!parsed["id"].as_str().unwrap().is_empty());
+    assert!(!parsed["timestamp"].as_str().unwrap().is_empty());
 
     fs::remove_dir_all(&dir).ok();
 }

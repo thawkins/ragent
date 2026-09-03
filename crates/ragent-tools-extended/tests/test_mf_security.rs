@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for `masterfetch::security` — SSRF protection (T-028, FR-019,
 //! NFR-003).
 //!

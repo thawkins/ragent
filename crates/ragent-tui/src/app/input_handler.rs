@@ -1152,6 +1152,9 @@ impl App {
                         self.show_tasks_panel = false;
                         self.show_telemetry = false;
                         self.show_context_panel = false;
+                        // Reset cursor to the first memory whenever the panel is opened.
+                        self.memory_cursor = 0;
+                        self.memory_scroll_offset = 0;
                     } else {
                         if self
                             .text_selection
@@ -1174,6 +1177,43 @@ impl App {
                         "memory panel hidden".to_string()
                     };
                     self.needs_redraw = true;
+                }
+                InputAction::MemoryCursorUp => {
+                    self.move_memory_cursor(-1);
+                }
+                InputAction::MemoryCursorDown => {
+                    self.move_memory_cursor(1);
+                }
+                InputAction::OpenMemoryView => {
+                    self.open_memory_view_from_cursor();
+                }
+                InputAction::PromptMemoryDelete => {
+                    self.prompt_memory_delete_from_cursor();
+                }
+                InputAction::ConfirmMemoryDelete => {
+                    self.confirm_memory_delete();
+                }
+                InputAction::CancelMemoryDelete => {
+                    self.pending_memory_delete = None;
+                    self.status = "memory delete cancelled".to_string();
+                }
+                InputAction::MemoryViewPageUp => {
+                    self.scroll_memory_view_by(5);
+                }
+                InputAction::MemoryViewPageDown => {
+                    self.scroll_memory_view_by(-5);
+                }
+                InputAction::MemoryViewToStart => {
+                    self.jump_memory_view_start();
+                }
+                InputAction::MemoryViewToEnd => {
+                    self.jump_memory_view_end();
+                }
+                InputAction::MemoryViewLineUp => {
+                    self.scroll_memory_view_by(1);
+                }
+                InputAction::MemoryViewLineDown => {
+                    self.scroll_memory_view_by(-1);
                 }
                 InputAction::ToggleTelemetry => {
                     // Toggle the Telemetry side panel visibility (Alt+O). Mirrors
@@ -1574,5 +1614,127 @@ impl App {
         }
         self.assert_ui_invariants();
         self.debug_log_input_transition("key", &before_input, before_cursor);
+    }
+}
+
+impl App {
+    /// Move the Memory panel cursor by `delta` rows and scroll the panel so
+    /// the selected row stays visible.
+    pub(crate) fn move_memory_cursor(&mut self, delta: i16) {
+        let count = self.memory_row_count;
+        if count == 0 {
+            self.memory_cursor = 0;
+            return;
+        }
+        let new_cursor = if delta < 0 {
+            self.memory_cursor.saturating_sub((-delta) as usize)
+        } else {
+            (self.memory_cursor + delta as usize).min(count - 1)
+        };
+        self.memory_cursor = new_cursor;
+        self.scroll_memory_cursor_into_view();
+        self.needs_redraw = true;
+    }
+
+    /// Scroll the Memory panel so the cursor's preview line is within the
+    /// visible window. Uses the line indices computed by `render_memory_panel`.
+    fn scroll_memory_cursor_into_view(&mut self) {
+        let line = self
+            .memory_row_line_indices
+            .get(self.memory_cursor)
+            .copied()
+            .unwrap_or(0);
+        let visible = self.memory_area.height as usize;
+        if visible == 0 {
+            return;
+        }
+        let max_scroll = self.memory_max_scroll as usize;
+        let scroll = self.memory_scroll_offset as usize;
+        if line < scroll {
+            self.memory_scroll_offset = line as u16;
+        } else if line >= scroll + visible {
+            let target = (line + 1).saturating_sub(visible).min(max_scroll);
+            self.memory_scroll_offset = target as u16;
+        }
+    }
+
+    /// Open the memory currently under the Alt+M cursor in the full-memory
+    /// overlay view.
+    pub(crate) fn open_memory_view_from_cursor(&mut self) {
+        let count = self.memory_row_count;
+        if count == 0 {
+            self.status = "no memory selected".to_string();
+            return;
+        }
+        let idx = self.memory_cursor.min(count - 1);
+        let Some(row) = self.memory_cache_entries.get(idx).cloned() else {
+            self.status = "memory not found".to_string();
+            return;
+        };
+        self.memory_view = Some(crate::app::MemoryViewState {
+            row,
+            scroll_offset: 0,
+            max_scroll: 0,
+            line_cache: crate::app::OutputViewLineCache {
+                lines: Vec::new(),
+                wrapped_lines: Vec::new(),
+                content_lines: Vec::new(),
+                wrapped_count: 0,
+                cache_width: 0,
+                source_generation: 0,
+            },
+        });
+        self.needs_redraw = true;
+    }
+
+    /// Show the delete-confirmation dialog for the memory under the cursor.
+    pub(crate) fn prompt_memory_delete_from_cursor(&mut self) {
+        let count = self.memory_row_count;
+        if count == 0 {
+            self.status = "no memory selected".to_string();
+            return;
+        }
+        let idx = self.memory_cursor.min(count - 1);
+        let Some(row) = self.memory_cache_entries.get(idx) else {
+            self.status = "memory not found".to_string();
+            return;
+        };
+        let preview = ragent_types::strutil::truncate_bytes(&row.content, 60);
+        self.pending_memory_delete = Some(crate::app::PendingMemoryDelete {
+            id: row.id,
+            preview,
+        });
+        self.needs_redraw = true;
+    }
+
+    /// Confirm and execute a pending memory deletion.
+    pub(crate) fn confirm_memory_delete(&mut self) {
+        let Some(pending) = self.pending_memory_delete.take() else {
+            return;
+        };
+        match self.storage.delete_memory(pending.id) {
+            Ok(true) => {
+                self.memory_cache_dirty = true;
+                // Clamp cursor so it remains valid after refresh.
+                if self.memory_row_count > 0 {
+                    self.memory_cursor = self.memory_cursor.min(self.memory_row_count - 1);
+                } else {
+                    self.memory_cursor = 0;
+                }
+                self.status = format!("memory #{} deleted", pending.id);
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("memory #{} deleted from panel", pending.id),
+                );
+            }
+            Ok(false) => {
+                self.status = format!("memory #{} not found", pending.id);
+            }
+            Err(e) => {
+                self.status = format!("failed to delete memory #{}: {e}", pending.id);
+                self.push_log_no_agent(LogLevel::Error, format!("memory delete failed: {e}"));
+            }
+        }
+        self.needs_redraw = true;
     }
 }

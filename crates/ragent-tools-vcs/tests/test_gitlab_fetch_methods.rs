@@ -91,7 +91,7 @@ async fn test_fetch_project_metadata_null_description() {
 
     assert_eq!(md.description, "");
     assert_eq!(md.language, "");
-    assert!(md.topics.is_empty());
+    assert_eq!(md.topics, Vec::<String>::new());
     assert_eq!(md.stargazers_count, 0);
 }
 
@@ -247,7 +247,7 @@ async fn test_fetch_repository_tree_empty() {
     let client = client(&server);
     let tree = client.fetch_repository_tree("group/project").await.unwrap();
 
-    assert!(tree.is_empty());
+    assert_eq!(tree, Vec::<String>::new());
 }
 
 #[tokio::test]

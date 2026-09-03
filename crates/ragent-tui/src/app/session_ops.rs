@@ -32,7 +32,7 @@ use crate::theme::{StatusCategory, StatusMessage};
 
 /// Recover from a poisoned mutex, logging the incident and returning the
 /// guarded value so the caller can keep running.
-pub(crate) fn recover_poisoned<'a, T>(
+pub fn recover_poisoned<'a, T>(
     result: LockResult<MutexGuard<'a, T>>,
     name: &str,
 ) -> MutexGuard<'a, T> {
@@ -114,6 +114,7 @@ impl DiskContextPartitions {
         history_tokens: u64,
         history_message_count: usize,
         context_window_tokens: Option<usize>,
+        last_input_tokens: u64,
     ) -> ContextPartitionSnapshot {
         ContextPartitionSnapshot {
             system_prompt_tokens: self.system_prompt,
@@ -125,6 +126,7 @@ impl DiskContextPartitions {
             memory_tokens: self.memory,
             agents_md_tokens: self.agents_md,
             context_window_tokens,
+            last_input_tokens,
         }
     }
 }
@@ -433,6 +435,7 @@ impl App {
         let tool_catalog_tokens = self.tool_catalog_token_count();
         let tool_metadata_tokens = self.tool_metadata_token_count();
         let context_window_tokens = self.active_context_window_tokens();
+        let last_input_tokens = self.last_input_tokens;
 
         let disk = compute_disk_context_partitions(
             &working_dir,
@@ -447,6 +450,7 @@ impl App {
             history_tokens,
             history_message_count,
             context_window_tokens,
+            last_input_tokens,
         )
     }
 
@@ -479,6 +483,7 @@ impl App {
         let tool_catalog_tokens = self.tool_catalog_token_count();
         let tool_metadata_tokens = self.tool_metadata_token_count();
         let context_window_tokens = self.active_context_window_tokens();
+        let last_input_tokens = self.last_input_tokens;
         let result_slot = Arc::clone(&self.context_snapshot_result);
 
         tokio::task::spawn_blocking(move || {
@@ -499,6 +504,7 @@ impl App {
                 history_tokens,
                 history_message_count,
                 context_window_tokens,
+                last_input_tokens,
             );
             if let Ok(mut guard) = result_slot.lock() {
                 *guard = Some(snapshot);

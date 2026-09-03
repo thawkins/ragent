@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `apply_patch` Codex-style patch tool.
 //!
 //! Following EDITPLAN Milestone 1 (T4), hunk context matching is **strict
@@ -259,7 +260,10 @@ fn read_log_lines(log_dir: &std::path::Path) -> Vec<serde_json::Value> {
         .filter_map(|e| e.ok())
         .filter(|e| {
             let s = e.file_name().to_string_lossy().to_string();
-            s.starts_with("edits-") && s.ends_with(".jsonl")
+            s.starts_with("edits-")
+                && std::path::Path::new(&s)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
         })
         .collect();
     assert!(

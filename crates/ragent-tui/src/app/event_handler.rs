@@ -891,7 +891,12 @@ impl App {
                         };
                         last
                     };
-                    progress.apply(decoded.phase, decoded.status, decoded.detail);
+                    progress.apply_with_capture(
+                        decoded.phase,
+                        decoded.status,
+                        decoded.detail.clone(),
+                        decoded.capture.clone(),
+                    );
                     if let Some(total) = decoded.total_sources {
                         progress.finish(
                             total,
@@ -982,6 +987,11 @@ impl App {
                         input_tokens, output_tokens, self.token_usage.0, self.token_usage.1
                     ),
                 );
+                // T-010/FR-013: the reported input tokens are the actual
+                // context size sent to the model this turn ("Sent to model"
+                // row), so refresh the Context panel snapshot immediately.
+                self.schedule_context_snapshot_refresh();
+                self.needs_redraw = true;
             }
             Event::RunCostSummary {
                 ref session_id,
@@ -1675,6 +1685,18 @@ impl App {
             Event::UserInput { ref session_id, .. } if self.is_current_session(session_id) => {
                 self.set_status_working("processing");
             }
+            // ── Structured-memory cache invalidation ───────────────────────
+            // Memory tools modify the SQLite store directly, so the TUI panel
+            // cache must be marked stale when these events arrive.  The next
+            // `render_memory_panel` call will then refresh from disk.
+            Event::MemoryStored { ref session_id, .. }
+            | Event::MemoryRecalled { ref session_id, .. }
+            | Event::MemoryForgotten { ref session_id, .. }
+            | Event::MemorySearched { ref session_id, .. }
+                if self.is_current_session(session_id) =>
+            {
+                self.memory_cache_dirty = true;
+            }
             // ── Provider model-list loading (spinner popup) ──────────────────
             Event::ProviderLoadingStarted {
                 ref provider_id,
@@ -2065,6 +2087,24 @@ impl App {
         }
     }
 
+    pub(crate) fn scroll_memory_view_by(&mut self, delta: i16) {
+        if let Some(ref mut view) = self.memory_view {
+            view.scroll_by(delta);
+        }
+    }
+
+    pub(crate) fn jump_memory_view_start(&mut self) {
+        if let Some(ref mut view) = self.memory_view {
+            view.jump_start();
+        }
+    }
+
+    pub(crate) fn jump_memory_view_end(&mut self) {
+        if let Some(ref mut view) = self.memory_view {
+            view.jump_end();
+        }
+    }
+
     pub(crate) fn open_research_view(
         &mut self,
         name: String,
@@ -2309,7 +2349,10 @@ impl App {
             return;
         };
         let rendered = self.render_markdown_to_ascii(&progress.render());
-        const HEADER: &str = "🔬 Research Progress";
+        // Must match the first line emitted by `ResearchProgress::render`
+        // ("[research] Research Progress — `{name}`") so the existing
+        // message is replaced in place instead of duplicating per event.
+        const HEADER: &str = "[research] Research Progress";
         // Each research run gets its own message in the window, tagged with
         // the run name so older runs stay visible alongside the latest one.
         // We look for an existing assistant message whose first text part

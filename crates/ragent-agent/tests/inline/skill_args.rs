@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 #[test]
 fn test_parse_empty() {
-    assert!(parse_args("").is_empty());
+    assert!(parse_args("").is_empty(), "empty input yields empty args");
 }
 
 #[test]
@@ -49,7 +49,10 @@ fn test_parse_mixed_quotes() {
 
 #[test]
 fn test_parse_only_whitespace() {
-    assert!(parse_args("   ").is_empty());
+    assert!(
+        parse_args("   ").is_empty(),
+        "whitespace-only input yields empty args"
+    );
 }
 
 // --- substitute_args tests ---

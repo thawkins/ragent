@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the background task service (M3, T-021/T-023).
 //!
 //! These exercise [`ragent_agent::background::BackgroundTaskService`]:

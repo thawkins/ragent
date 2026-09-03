@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! todo2tasks T-002: tests for the additive SQLite migration that adds
 //! `active_form`, `owner`, `metadata` (TEXT JSON), and `blocked_by`
 //! (TEXT JSON array) columns to the `todos` table.

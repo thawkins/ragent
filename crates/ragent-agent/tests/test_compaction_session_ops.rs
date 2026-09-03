@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for [`SessionProcessor::compact_session`] — the dedicated
 //! compaction runner entry point used by the TUI `/compact` command and
 //! pre-send auto-compaction.

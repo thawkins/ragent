@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `initiative` tool (JCODEPLAN M8 T-070).
 
 use ragent_agent::event::EventBus;

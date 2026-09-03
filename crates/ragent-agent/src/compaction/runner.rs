@@ -592,11 +592,31 @@ fn cap_head_transcript(head_transcript: &str) -> String {
     }
     let marker = "[Earlier conversation omitted due to length]\n\n";
     let keep_len = MAX_COMPACTION_PROMPT_CHARS.saturating_sub(marker.len());
-    let truncated = &head_transcript[head_transcript.len() - keep_len..];
+    // Byte indexes must be snapped to UTF-8 char boundaries: the byte offset
+    // `len - keep_len` can land inside a multi-byte character (e.g. box-drawing
+    // glyphs in tool output), which would panic on slice.
+    let cut = floor_char_boundary(head_transcript, head_transcript.len() - keep_len);
+    let truncated = &head_transcript[cut..];
     // Try to start at a message boundary so we don't cut mid-message.
     let boundary = truncated.find("\n\n").unwrap_or(0);
     let truncated = &truncated[boundary..];
     format!("{marker}{truncated}")
+}
+
+/// Byte index of the UTF-8 character boundary at or before `index`.
+///
+/// Equivalent to nightly's `str::floor_char_boundary`; implemented locally
+/// because that API is not yet stable. `index` must be `<= s.len()`.
+#[must_use]
+fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
 }
 
 #[cfg(test)]

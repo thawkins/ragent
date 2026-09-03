@@ -8,7 +8,7 @@ async fn test_health_endpoint_route_exists() {
     // This test verifies the /health route is registered
     // Full testing requires a complete AppState which is complex to construct
     // The route is tested in the main application via the TUI integration
-    assert!(true, "Health endpoint route is registered in router()");
+    let _ = ragent_server::routes::router as fn(ragent_server::routes::AppState) -> _;
 }
 
 #[tokio::test]
@@ -57,10 +57,6 @@ async fn test_serve_dir_feature_enabled() {
     // Verify tower-http fs feature is enabled by checking ServeDir can be imported
     // This is a compile-time check - if the feature wasn't enabled, compilation would fail
     use tower_http::services::ServeDir;
-    let _path = std::path::PathBuf::from("/tmp");
-    let _serve = ServeDir::new(_path);
-    assert!(
-        true,
-        "ServeDir is available (tower-http fs feature enabled)"
-    );
+    let path = std::path::PathBuf::from("/tmp");
+    let _serve = ServeDir::new(path);
 }

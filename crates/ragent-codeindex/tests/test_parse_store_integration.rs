@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration test M2.5: scan → parse → store end-to-end pipeline.
 //!
 //! Creates temp directories with Rust source files, scans them, parses

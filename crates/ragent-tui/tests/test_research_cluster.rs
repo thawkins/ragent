@@ -74,8 +74,10 @@ fn make_app() -> App {
 
 struct CwdGuard {
     prev: std::path::PathBuf,
-    _lock: MutexGuard<'static, ()>,
-    _temp: Option<tempfile::TempDir>,
+    #[allow(dead_code)]
+    lock: MutexGuard<'static, ()>,
+    #[allow(dead_code)]
+    temp: Option<tempfile::TempDir>,
 }
 
 impl Drop for CwdGuard {
@@ -98,14 +100,14 @@ fn cwd_lock() -> MutexGuard<'static, ()> {
 }
 
 fn enter_with_cwd() -> CwdGuard {
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let prev = std::env::current_dir().expect("current dir");
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::env::set_current_dir(temp.path()).expect("set_current_dir");
     CwdGuard {
         prev,
-        _lock,
-        _temp: Some(temp),
+        lock,
+        temp: Some(temp),
     }
 }
 

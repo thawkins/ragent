@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for provider thinking adapter payload mapping.
 
 use std::collections::HashMap;

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Regression tests for C-003: shell command injection via state-file quoting.
 //!
 //! These tests ensure that malicious session IDs and temporary paths cannot
@@ -24,11 +25,10 @@ mod shim {
     /// Stub canonical-path cache.
     #[derive(Clone, Copy, Default)]
     pub struct CanonicalPathCache;
-
     impl CanonicalPathCache {
         /// Create a stub cache.
         pub fn new() -> Self {
-            CanonicalPathCache
+            Self
         }
     }
 
@@ -76,8 +76,8 @@ mod shim {
         pub struct EventBus;
         impl EventBus {
             /// Create a stub bus.
-            pub fn new(_capacity: usize) -> EventBus {
-                EventBus
+            pub fn new(_capacity: usize) -> Self {
+                Self
             }
             /// Publish a stub event (no-op).
             pub fn publish(&self, _event: Event) {}
@@ -126,7 +126,7 @@ mod shim {
 
         impl AskPassBroker {
             /// Start a stub broker (always returns None).
-            pub fn start(_session_id: &str) -> Option<AskPassBroker> {
+            pub fn start(_session_id: &str) -> Option<Self> {
                 None
             }
             /// Stub env vars (empty).

@@ -396,6 +396,28 @@ kept in a companion file at `research/<name>/CORPA.md`; it includes a
 `Sources Reference` copy of the References Index so `[#N]` citations resolve
 in both documents.
 
+While the run is gathering, the pinned **Research Progress** message in the
+message window does not list each captured URL (that previously flooded the
+window). Instead it maintains a compact summary table with one row per
+backend search engine (duckduckgo, brave, openalex, wikipedia, tavily, ...)
+showing the counts of captured files by type (`page` / `pdf` / `yt`) and a
+`languages` cell listing every currently acquired language with its article
+count:
+
+```text
+[captures] Captured sources by search engine:
++----------+------+-----+----+-------+---------------------+
+| engine   | page | pdf | yt | total | languages           |
++----------+------+-----+----+-------+---------------------+
+| brave    |    3 |   0 |  0 |     3 | ENGLISH:2, FRENCH:1 |
+| openalex |    0 |   1 |  0 |     1 | ENGLISH:1           |
++----------+------+-----+----+-------+---------------------+
+```
+
+A `total` row aggregates every engine. Per-URL capture lines still appear in
+the log panel (not the message window) so individual fetch failures remain
+traceable.
+
 > Note: web research uses keyless search by default; a `TAVILY_API_KEY` or
 > `LANGSEARCH_API_KEY` can be configured in `ragent.json` for higher-quality
 > results.
@@ -667,8 +689,12 @@ screen. It shows a live, quantified breakdown of what currently occupies the
 active session's context window:
 
 - **Context window** — the advertised capacity of the currently selected
-  model, shown directly above the **System prompt** row so the denominator
+  model, shown directly above the **Sent to model** row so the denominator
   for every percentage is explicit.
+- **Sent to model** — the provider-reported input tokens of the most recent
+  LLM request, i.e. the actual context size the model received last turn
+  (the same figure the `ctx:` status-bar indicator shows). It updates as
+  each message is sent and stays at `0tk` until the first turn completes.
 - **System prompt** — the assembled prompt sent to the model (agent prompt,
   project context, memory injection, skills catalog), with indented
   sub-rows for the `skills`, `memory` and `agents.md` contributions.

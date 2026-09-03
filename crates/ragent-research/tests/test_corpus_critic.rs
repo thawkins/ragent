@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the corpus critic and gap-fill queries (T-010).
 //!
 //! Migrated from `crates/ragent-research/src/corpus_critic.rs` inline tests

@@ -9,7 +9,7 @@ fn test_panic_guard_reports_outside_container() {
 
 #[test]
 fn test_panic_guard_active_inside_container() {
-    let observed = panic_guard::run(|| panic_guard::is_active());
+    let observed = panic_guard::run(panic_guard::is_active);
     assert!(matches!(observed, Ok(true)));
     assert!(!panic_guard::is_active());
 }
@@ -37,7 +37,7 @@ fn test_panic_guard_returns_value_on_success() {
 #[test]
 fn test_panic_guard_nested_and_thread_local() {
     // Spawned thread must see its own flag (false) while the parent is active.
-    let handle = std::thread::spawn(|| panic_guard::is_active());
+    let handle = std::thread::spawn(panic_guard::is_active);
     let observed_in_thread = handle.join().expect("thread join");
     assert!(!observed_in_thread);
 

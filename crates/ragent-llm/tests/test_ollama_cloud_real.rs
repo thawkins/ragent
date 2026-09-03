@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Real Ollama Cloud model discovery tests.
 //!
 //! Note: `std::env::remove_var` is `unsafe` in Rust 2024; the workspace

@@ -254,6 +254,6 @@ mod interaction_tests {
         app.research_view = Some(make_research_view());
         app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
         assert!(app.research_view.is_some());
-        assert!(app.input.is_empty());
+        assert_eq!(app.input, "");
     }
 }

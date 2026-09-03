@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn test_parse_aws_credentials_ini_basic() {
-        let contents = r#"
+        let contents = "
 [default]
 aws_access_key_id = AKIAIOSFODNN7EXAMPLE
 aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
@@ -310,7 +310,7 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 aws_access_key_id = AKIAI44QH8DHBEXAMPLE
 aws_secret_access_key = je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY
 region = eu-west-1
-"#;
+";
         let profiles = parse_aws_credentials_ini(contents);
         assert_eq!(profiles.len(), 2);
 
@@ -330,12 +330,12 @@ region = eu-west-1
 
     #[test]
     fn test_parse_aws_credentials_ini_with_session_token() {
-        let contents = r#"
+        let contents = "
 [sts-role]
 aws_access_key_id = AKIAIOSFODNN7EXAMPLE
 aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 aws_session_token = FwoGZXIvYXdzEBYaDExampleToken
-"#;
+";
         let profiles = parse_aws_credentials_ini(contents);
         let sts = profiles.get("sts-role").unwrap();
         assert_eq!(
@@ -346,13 +346,13 @@ aws_session_token = FwoGZXIvYXdzEBYaDExampleToken
 
     #[test]
     fn test_parse_aws_credentials_ini_comments() {
-        let contents = r#"
+        let contents = "
 # This is a comment
 [default]
 ; This is also a comment
 aws_access_key_id = AKIAIOSFODNN7EXAMPLE
 aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-"#;
+";
         let profiles = parse_aws_credentials_ini(contents);
         assert_eq!(profiles.len(), 1);
         assert_eq!(
@@ -369,7 +369,7 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
         // Without any env vars or config, we get the default
         // (env vars may or may not be set in the test environment)
         let region = resolve_region(&options);
-        assert!(!region.is_empty());
+        assert_ne!(region, String::new());
     }
 
     #[test]
@@ -379,7 +379,7 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
         // Options take effect only if env vars are not set
         let region = resolve_region(&options);
         // If env vars are set, they override; otherwise we get the options value
-        assert!(!region.is_empty());
+        assert_ne!(region, String::new());
     }
 
     #[test]
@@ -389,7 +389,7 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
         // Note: if AWS_REGION or AWS_BEDROCK_REGION is set in the test env,
         // the result will differ. This test validates non-empty result.
         let region = resolve_region(&options);
-        assert!(!region.is_empty());
+        assert_ne!(region, String::new());
     }
 
     #[test]
@@ -411,12 +411,12 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 
     #[test]
     fn test_parse_ini_unknown_keys_ignored() {
-        let contents = r#"
+        let contents = "
 [default]
 aws_access_key_id = AKIAIOSFODNN7EXAMPLE
 aws_secret_access_key = secret
 custom_key = ignored
-"#;
+";
         let profiles = parse_aws_credentials_ini(contents);
         assert_eq!(profiles.len(), 1);
         assert_eq!(

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the persisted run-cost summary table (FR-018).
 //!
 //! FR-018 requires that run-cost summaries are stored separately from the

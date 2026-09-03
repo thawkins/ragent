@@ -1,3 +1,4 @@
+#![allow(clippy::field_reassign_with_default)]
 //! Integration tests for the `sdd` config block (FR-019 / T-035).
 
 use ragent_config::{Config, SddConfig};
@@ -24,8 +25,8 @@ fn default_sdd_config_has_all_flags_disabled() {
 #[test]
 fn top_level_config_defaults_sdd_when_absent() {
     let cfg: Config = serde_json::from_str("{}").expect("parse");
+    assert!(cfg.sdd.is_empty(), "default sdd should be empty");
     assert_eq!(cfg.sdd, SddConfig::default());
-    assert!(cfg.sdd.is_empty());
 }
 
 #[test]
@@ -44,7 +45,7 @@ fn top_level_config_parses_sdd_block() {
     // Unmentioned flags stay false
     assert!(!cfg.sdd.quality_checklists);
     assert!(!cfg.sdd.data_model);
-    assert!(!cfg.sdd.is_empty());
+    assert!(!cfg.sdd.is_empty(), "expected non-empty cfg.sdd");
 }
 
 #[test]
@@ -234,7 +235,7 @@ fn sdd_merge_all_flags_from_overlay() {
     assert!(base.constitution);
     assert!(base.quickstart);
     assert!(base.consistency_checks);
-    assert!(!base.is_empty());
+    assert!(!base.is_empty(), "expected non-empty base");
 }
 
 #[test]
@@ -250,5 +251,5 @@ fn sdd_merge_preserves_base_flags_when_overlay_empty() {
         "base flag should survive merge with empty overlay"
     );
     assert!(base.contracts);
-    assert!(!base.is_empty());
+    assert!(!base.is_empty(), "expected non-empty base");
 }

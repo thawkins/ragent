@@ -121,7 +121,8 @@ pub fn build_research_session(
     // fetched/extracted body. We reuse the same provider/model wiring as the
     // analysis engine so it works for every configured provider (including
     // local Ollama); when no model is configured the session falls back to
-    // the local heuristics.
+    // the local heuristics. The same Arc also drives the `/research create`
+    // concept-extraction step, so only one engine is constructed.
     let summarizer = match (provider_registry.clone(), active_model.clone()) {
         (Some(reg), Some(m)) => {
             let api_key = storage
@@ -141,7 +142,9 @@ pub fn build_research_session(
         .with_planner(planner)
         .with_critic(critic);
     let session = match summarizer {
-        Some(sum) => session.with_summarizer(sum),
+        Some(sum) => session
+            .with_summarizer(sum.clone())
+            .with_concepts_engine(sum),
         None => session,
     };
     let session = match research_name.map(|n| {
@@ -1902,5 +1905,8 @@ fn test_parse_mf_search_metadata_falls_back_to_source_field() {
 #[test]
 fn test_parse_mf_search_metadata_returns_empty_on_missing_results() {
     let hits = parse_mf_search_metadata(&serde_json::json!({"query": "x"}), "mf_search");
-    assert!(hits.is_empty());
+    assert!(
+        hits.is_empty(),
+        "no in-project files should match an unrelated topic"
+    );
 }

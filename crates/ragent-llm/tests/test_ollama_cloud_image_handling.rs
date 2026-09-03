@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Regression tests for Ollama Cloud image serialization.
 //!
 //! The Ollama Cloud native `/api/chat` endpoint rejects requests where a model

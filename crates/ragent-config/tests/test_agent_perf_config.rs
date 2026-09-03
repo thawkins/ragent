@@ -22,7 +22,7 @@ fn validate_rejects_too_short_step_budget() {
         ..AgentPerfConfig::default()
     };
     let problems = cfg.validate();
-    assert!(!problems.is_empty());
+    assert!(!problems.is_empty(), "expected non-empty problems");
     assert!(problems[0].contains("step_budget_secs"));
 }
 
@@ -33,14 +33,14 @@ fn validate_rejects_zero_concurrent_tools() {
         ..AgentPerfConfig::default()
     };
     let problems = cfg.validate();
-    assert!(!problems.is_empty());
+    assert!(!problems.is_empty(), "expected non-empty problems");
     assert!(problems[0].contains("max_concurrent_tools"));
 }
 
 #[test]
 fn validate_accepts_default_config() {
     let cfg = AgentPerfConfig::default();
-    assert!(cfg.validate().is_empty());
+    assert_eq!(cfg.validate(), Vec::<String>::new());
 }
 
 #[test]

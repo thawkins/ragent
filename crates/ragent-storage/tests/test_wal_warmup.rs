@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Regression tests for the startup FTS warm-up lock contention (PERF).
 //!
 //! The message-search FTS index is rebuilt at startup on a *separate*

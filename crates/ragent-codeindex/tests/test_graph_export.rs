@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for graph export: `graph.json` and `GRAPH_REPORT.md` (spec graphCI, T-011).
 //!
 //! Covers FR-010 (export to graph.json + GRAPH_REPORT.md) and FR-020

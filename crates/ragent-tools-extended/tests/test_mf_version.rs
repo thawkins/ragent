@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `mf_version` tool — version info (T-025, FR-017,
 //! FR-022, FR-026, NFR-003).
 //!

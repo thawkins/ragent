@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the legacy `edit`/`multiedit` aliases and deprecation warnings
 //! (editrenewal FR-012, T-015).
 //!

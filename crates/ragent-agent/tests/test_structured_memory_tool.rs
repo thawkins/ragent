@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `memory_store` structured-memory tool.
 //!
 //! These tests verify that the tool correctly persists memories to SQLite,

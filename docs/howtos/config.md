@@ -859,7 +859,8 @@ retrieval, auto-extraction, decay, and cross-project sharing.
       "dimensions": 384
     },
     "retrieval": {
-      "max_memories_per_prompt": 5,
+      "max_memories_per_prompt": 100,
+      "max_memory_tokens": 4000,
       "recency_weight": 0.3,
       "relevance_weight": 0.7
     },
@@ -901,7 +902,8 @@ retrieval, auto-extraction, decay, and cross-project sharing.
 
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
-| `max_memories_per_prompt` | `usize` | `5` | Max structured memories injected into the system prompt. |
+| `max_memories_per_prompt` | `usize` | `100` | Maximum structured memories fetched from SQLite for the system prompt. Acts as a safety cap. |
+| `max_memory_tokens` | `Option<usize>` | `4000` | Approximate token budget for the injected memory section. `null` disables the budget (uses only the row cap). |
 | `recency_weight` | `f64` | `0.3` | Weight for recency when ranking (0.0-1.0). |
 | `relevance_weight` | `f64` | `0.7` | Weight for relevance when ranking (0.0-1.0). |
 
@@ -1517,88 +1519,87 @@ need all of these — every section has defaults, so an empty `{}` is valid.
       "command": "cargo build --release",
       "description": "Build release binary"
     }
-  },
-
-  "mcp": {
-    "filesystem": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/docs"]
-    }
-  },
-
-  "instructions": [
-    "Always use rustfmt before writing Rust files."
-  ],
-
-  "skill_dirs": ["~/my-skills"],
-
-  "experimental": {
-    "parallel_tool_calls": false,
-    "max_background_agents": 8,
-    "background_agent_timeout": 3600
-  },
-
-  "bash": {
-    "allowlist": ["curl", "wget"],
-    "denylist": ["git push --force"]
-  },
-
-  "dirs": {
-    "allowlist": ["src/**", "tests/**"],
-    "denylist": ["secrets/**", ".env"]
-  },
-
-  "tool_visibility": {
-    "office": true,
-    "github": true,
-    "gitlab": false,
-    "teams": true,
-    "agents": true,
-    "plan": true
-  },
-
-  "code_index": {
-    "enabled": true,
-    "max_file_size": 1048576,
-    "extra_exclude_dirs": ["vendor"]
-  },
-
-  "stream": {
-    "initial_response_timeout_secs": 300,
-    "timeout_secs": 120,
-    "max_retries": 4,
-    "retry_backoff_secs": 2
-  },
-
-  "memory": {
-    "enabled": true,
-    "tier": "core",
-    "structured": { "enabled": true },
-    "semantic": {
-      "enabled": false,
-      "model": "all-MiniLM-L6-v2",
-      "dimensions": 384
+  },    "mcp": {
+      "filesystem": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/docs"]
+      }
     },
-    "retrieval": {
-      "max_memories_per_prompt": 5,
-      "recency_weight": 0.3,
-      "relevance_weight": 0.7
+
+    "instructions": [
+      "Always use rustfmt before writing Rust files."
+    ],
+
+    "skill_dirs": ["~/my-skills"],
+
+    "experimental": {
+      "parallel_tool_calls": false,
+      "max_background_agents": 8,
+      "background_agent_timeout": 3600
     },
-    "auto_extract": {
-      "enabled": false,
-      "require_confirmation": true
+
+    "bash": {
+      "allowlist": ["curl", "wget"],
+      "denylist": ["git push --force"]
     },
-    "decay": {
-      "factor": 0.95,
-      "min_confidence": 0.1
+
+    "dirs": {
+      "allowlist": ["src/**", "tests/**"],
+      "denylist": ["secrets/**", ".env"]
     },
-    "cross_project": {
-      "enabled": false,
-      "search_global": true,
-      "project_override": true
-    }
-  },
+
+    "tool_visibility": {
+      "office": true,
+      "github": true,
+      "gitlab": false,
+      "teams": true,
+      "agents": true,
+      "plan": true
+    },
+
+    "code_index": {
+      "enabled": true,
+      "max_file_size": 1048576,
+      "extra_exclude_dirs": ["vendor"]
+    },
+
+    "stream": {
+      "initial_response_timeout_secs": 300,
+      "timeout_secs": 120,
+      "max_retries": 4,
+      "retry_backoff_secs": 2
+    },
+
+    "memory": {
+      "enabled": true,
+      "tier": "core",
+      "structured": { "enabled": true },
+      "semantic": {
+        "enabled": false,
+        "model": "all-MiniLM-L6-v2",
+        "dimensions": 384
+      },
+      "retrieval": {
+        "max_memories_per_prompt": 100,
+        "max_memory_tokens": 4000,
+        "recency_weight": 0.3,
+        "relevance_weight": 0.7
+      },
+      "auto_extract": {
+        "enabled": false,
+        "require_confirmation": true
+      },
+      "decay": {
+        "factor": 0.95,
+        "min_confidence": 0.1
+      },
+      "cross_project": {
+        "enabled": false,
+        "search_global": true,
+        "project_override": true
+      }
+    },
 
   "compaction": {
     "auto": true,

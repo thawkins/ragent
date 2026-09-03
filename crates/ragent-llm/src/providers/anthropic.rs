@@ -635,7 +635,7 @@ mod tests {
         let entry = json!({
             "id": "claude-sonnet-4-20250514",
             "display_name": "Claude Sonnet 4",
-            "context_window": 250000,
+            "context_window": 250_000,
             "max_output_tokens": 32000,
             "capabilities": {
                 "thinking": {

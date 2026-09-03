@@ -641,7 +641,7 @@ mod tests {
     fn test_format_browser_result_eval() {
         let value = json!({ "expression": "1+1", "result": 2 });
         let text = format_browser_result("eval", &value);
-        assert!(text.contains("2"));
+        assert!(text.contains('2'));
     }
 
     #[test]

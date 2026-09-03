@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 #![allow(missing_docs)]
 
 use ragent_codeindex::CodeIndex;

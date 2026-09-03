@@ -52,7 +52,7 @@ pub async fn run_orchestration_example() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(clap::Subcommand)]
+#[derive(clap::Subcommand, Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum ResearchCommands {
     /// Run a gathering session and create a research item.
@@ -126,8 +126,9 @@ pub enum ResearchCommands {
         fetch_timeout_secs: Option<u64>,
         /// Optional wall-clock timeout for the entire web-gathering phase in
         /// seconds (Milestone H-001). When set, the phase is aborted if it
-        /// exceeds this duration and a diagnostic is emitted.
-        #[arg(long, value_name = "N")]
+        /// exceeds this duration and a diagnostic is emitted. `--web-time` is
+        /// the preferred short alias.
+        #[arg(long, value_name = "N", visible_alias = "web-time")]
         web_phase_timeout_secs: Option<u64>,
         /// Optional wall-clock timeout for the entire local-gathering phase in
         /// seconds (Milestone H-001).
@@ -676,4 +677,77 @@ pub async fn handle_research_command(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::ResearchCommands;
+
+    /// Wrapper so `ResearchCommands` can be parsed as a standalone CLI in tests.
+    #[derive(Parser, Debug)]
+    struct TestCli {
+        #[command(subcommand)]
+        command: ResearchCommands,
+    }
+
+    #[test]
+    fn web_time_alias_parses_to_web_phase_timeout() {
+        // Flags must precede the trailing-var-arg topic, otherwise clap
+        // consumes them as positional topic words.
+        let cli = TestCli::parse_from([
+            "research",
+            "create",
+            "--web-time",
+            "90",
+            "my-name",
+            "my topic",
+        ]);
+        match cli.command {
+            ResearchCommands::Create {
+                web_phase_timeout_secs,
+                ..
+            } => assert_eq!(web_phase_timeout_secs, Some(90)),
+            other => panic!("expected Create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn web_time_zero_disables_deadline() {
+        let cli = TestCli::parse_from([
+            "research",
+            "create",
+            "--web-time",
+            "0",
+            "my-name",
+            "my topic",
+        ]);
+        match cli.command {
+            ResearchCommands::Create {
+                web_phase_timeout_secs,
+                ..
+            } => assert_eq!(web_phase_timeout_secs, Some(0)),
+            other => panic!("expected Create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn long_form_web_phase_timeout_still_parses() {
+        let cli = TestCli::parse_from([
+            "research",
+            "create",
+            "--web-phase-timeout-secs",
+            "120",
+            "my-name",
+            "my topic",
+        ]);
+        match cli.command {
+            ResearchCommands::Create {
+                web_phase_timeout_secs,
+                ..
+            } => assert_eq!(web_phase_timeout_secs, Some(120)),
+            other => panic!("expected Create, got {other:?}"),
+        }
+    }
 }

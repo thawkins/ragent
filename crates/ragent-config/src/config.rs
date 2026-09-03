@@ -2299,9 +2299,22 @@ fn default_semantic_dimensions() -> usize {
 /// Retrieval configuration for injecting memories into the system prompt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetrievalConfig {
-    /// Maximum number of structured memories to inject into the system prompt.
+    /// Maximum number of structured memories to consider for injection into
+    /// the system prompt.
+    ///
+    /// This is a safety cap on how many rows are fetched from SQLite. Within
+    /// that set, rows are included until [`max_memory_tokens`] is reached.
     #[serde(default = "default_max_memories_per_prompt")]
     pub max_memories_per_prompt: usize,
+    /// Approximate token budget for the memory section injected into the
+    /// system prompt.
+    ///
+    /// When `Some(n)`, memories are appended newest/highest-confidence first
+    /// until adding the next row would exceed `n` tokens. Any remaining rows
+    /// are dropped and a truncation note is appended. When `None`, the
+    /// `max_memories_per_prompt` count cap applies with no token budget.
+    #[serde(default = "default_max_memory_tokens")]
+    pub max_memory_tokens: Option<usize>,
     /// Weight for recency when ranking memories (0.0–1.0).
     #[serde(default = "default_recency_weight")]
     pub recency_weight: f64,
@@ -2314,6 +2327,7 @@ impl Default for RetrievalConfig {
     fn default() -> Self {
         Self {
             max_memories_per_prompt: default_max_memories_per_prompt(),
+            max_memory_tokens: default_max_memory_tokens(),
             recency_weight: default_recency_weight(),
             relevance_weight: default_relevance_weight(),
         }
@@ -2325,7 +2339,11 @@ fn default_memory_tier() -> String {
 }
 
 fn default_max_memories_per_prompt() -> usize {
-    5
+    100
+}
+
+fn default_max_memory_tokens() -> Option<usize> {
+    Some(4_000)
 }
 
 fn default_recency_weight() -> f64 {

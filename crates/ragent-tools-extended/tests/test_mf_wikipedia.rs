@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for the Wikipedia search backend's pure functions.
 //!
 //! These tests exercise `build_search_request`, `parse_search_response`,

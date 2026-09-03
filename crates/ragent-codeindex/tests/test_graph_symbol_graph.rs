@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `SymbolGraph` struct and public API (spec graphCI, T-003).
 
 use chrono::Utc;

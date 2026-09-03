@@ -2144,6 +2144,11 @@ fn collect_agents_md_content(working_dir: &Path) -> String {
 /// memory blocks, legacy MEMORY.md, PROJECT_ANALYSIS.md, and SQLite
 /// structured memories).
 ///
+/// Memories are ranked by the storage layer (`updated_at DESC, confidence
+/// DESC`) and injected until either the configured token budget or the row
+/// safety cap is reached. A truncation note is appended when rows are
+/// omitted because of the budget.
+///
 /// Extracted from [`build_system_prompt_with_storage`] so the async
 /// `process_user_message` path can pre-compute it via
 /// `tokio::task::spawn_blocking` and hand the result in as
@@ -2160,10 +2165,14 @@ pub fn build_memory_prompt_section(
 
     // Load relevant structured memories from SQLite.
     if let Some(sqlite_storage) = storage {
-        let max = memory_config
+        let max_rows = memory_config
             .map(|c| c.retrieval.max_memories_per_prompt)
-            .unwrap_or(5);
-        if let Ok(memories) = sqlite_storage.list_memories_for_project(working_dir, max)
+            .unwrap_or_else(default_max_memories_per_prompt);
+        let budget = memory_config
+            .and_then(|c| c.retrieval.max_memory_tokens)
+            .filter(|&b| b > 0);
+
+        if let Ok(memories) = sqlite_storage.list_memories_for_project(working_dir, max_rows)
             && !memories.is_empty()
         {
             out.push_str("## Relevant Memories\n");
@@ -2173,21 +2182,51 @@ pub fn build_memory_prompt_section(
             let tags_map = sqlite_storage
                 .get_memory_tags_batched(&ids)
                 .unwrap_or_default();
-            for mem in &memories {
+
+            let mut used_tokens: usize = 0;
+            let header_estimate =
+                crate::compaction::estimator::estimate_text_tokens("## Relevant Memories\n");
+            // Reserve header tokens so the budget applies to content only.
+            used_tokens = used_tokens.saturating_add(header_estimate);
+
+            let mut omitted = 0usize;
+            for (kept, mem) in memories.iter().enumerate() {
                 let mem_tags: Vec<String> = tags_map.get(&mem.id).cloned().unwrap_or_default();
-                out.push_str(&format!(
+                let mut entry = format!(
                     "- [{}] {} (confidence: {:.2})\n",
                     mem.category, mem.content, mem.confidence,
-                ));
+                );
                 if !mem_tags.is_empty() {
-                    out.push_str(&format!("  tags: {}\n", mem_tags.join(", ")));
+                    entry.push_str(&format!("  tags: {}\n", mem_tags.join(", ")));
                 }
+                let entry_tokens = crate::compaction::estimator::estimate_text_tokens(&entry);
+
+                if let Some(budget) = budget {
+                    if used_tokens.saturating_add(entry_tokens) > budget {
+                        omitted = memories.len() - kept;
+                        break;
+                    }
+                }
+                out.push_str(&entry);
+                used_tokens = used_tokens.saturating_add(entry_tokens);
+            }
+
+            if omitted > 0 {
+                out.push_str(&format!(
+                    "_({} more memory/memories omitted to stay within the {}-token budget)_\n",
+                    omitted,
+                    budget.unwrap(),
+                ));
             }
             out.push('\n');
         }
     }
 
     out
+}
+
+fn default_max_memories_per_prompt() -> usize {
+    100
 }
 
 /// Format the skills section injected into the system prompt for an agent.

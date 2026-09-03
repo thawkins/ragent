@@ -983,6 +983,7 @@ pub fn render_document_for(
         top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
+        concepts: None,
         contradiction_graph: None,
         loci: None,
         depth_investigation: None,
@@ -1043,6 +1044,7 @@ fn supporting_index(prefix: &str, prefix_sources: &[Source]) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
     use tempfile::TempDir;
 
@@ -1313,6 +1315,7 @@ mod tests {
             top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
+            concepts: None,
             contradiction_graph: None,
             loci: None,
             depth_investigation: None,
@@ -1597,6 +1600,7 @@ mod tests {
             top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
+            concepts: None,
             contradiction_graph: None,
             loci: None,
             depth_investigation: None,
@@ -1664,6 +1668,7 @@ mod frontmatter_tests {
             top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
+            concepts: None,
             contradiction_graph: None,
             loci: None,
             depth_investigation: None,

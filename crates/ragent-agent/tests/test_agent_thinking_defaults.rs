@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for agent/config thinking fallback precedence.
 
 use ragent_agent::Config;

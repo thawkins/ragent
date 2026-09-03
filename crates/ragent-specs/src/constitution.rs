@@ -510,9 +510,9 @@ mod tests {
     #[test]
     fn test_empty_constitution() {
         let c = Constitution::empty();
-        assert!(c.is_empty());
-        assert!(c.articles.is_empty());
-        assert!(c.amendments.is_empty());
+        assert!(c.is_empty(), "constitution should be empty");
+        assert!(c.articles.is_empty(), "articles should be empty");
+        assert!(c.amendments.is_empty(), "amendments should be empty");
     }
 
     #[test]
@@ -577,7 +577,7 @@ No premature abstractions.
     fn test_parse_no_articles() {
         let md = "# Constitution\n\nSome intro text.\n";
         let c = parse_constitution(md);
-        assert!(c.articles.is_empty());
+        assert!(c.articles.is_empty(), "articles should be empty");
     }
 
     #[test]
@@ -609,7 +609,7 @@ Prefer small libraries.
     fn test_no_amendment_log() {
         let md = "# Constitution\n\n## Article 1: Library-First\n\nBody.\n";
         let c = parse_constitution(md);
-        assert!(c.amendments.is_empty());
+        assert!(c.amendments.is_empty(), "amendments should be empty");
     }
 
     #[test]
@@ -882,7 +882,10 @@ Body.
 | 2025-02-01 | Article 1 | Clarified | Breaking      |
 ";
         let c = parse_constitution(md);
-        assert!(c.validate_amendments().is_empty());
+        assert!(
+            c.validate_amendments().is_empty(),
+            "amendment validation should be empty"
+        );
     }
 
     #[test]
@@ -934,7 +937,10 @@ Body.
     fn test_validate_amendments_no_amendments() {
         let md = "# Constitution\n\n## Article 1: Library-First\n\nBody.\n";
         let c = parse_constitution(md);
-        assert!(c.validate_amendments().is_empty());
+        assert!(
+            c.validate_amendments().is_empty(),
+            "amendment validation should be empty"
+        );
     }
 
     #[test]

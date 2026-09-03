@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `MultiEditTool` (WSPLAN Milestone 3).
 //!
 //! Covers: two edits in one file, edits across two files, overlap detection,
@@ -618,9 +619,12 @@ fn wait_for_edit_log_file(log_dir: &std::path::Path) -> Option<std::path::PathBu
     for _ in 0..50 {
         if let Ok(entries) = std::fs::read_dir(log_dir) {
             let found = entries.flatten().map(|e| e.path()).find(|p| {
-                p.file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with("edits-") && n.ends_with(".jsonl"))
+                p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                    n.starts_with("edits-")
+                        && std::path::Path::new(n)
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
+                })
             });
             if found.is_some() {
                 return found;

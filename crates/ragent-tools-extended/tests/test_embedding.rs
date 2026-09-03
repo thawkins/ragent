@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! External tests for `tests` from `crates/ragent-tools-extended/src/memory/embedding.rs`
 //!
 //! Relocated from the inline `#[cfg(test)]` module.

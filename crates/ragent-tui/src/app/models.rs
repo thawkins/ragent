@@ -155,7 +155,7 @@ impl App {
         if let Some(research) = try_extract_research_code_block(text) {
             return Some(research);
         }
-        if text.starts_with("🔬 Research Progress") {
+        if text.starts_with("[research] Research Progress") {
             return Some(sanitize_for_display(text));
         }
         None

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests validating that `SessionProcessor::storage_op`
 //! runs its closure on a `tokio::task::spawn_blocking` thread
 //! (`AgentPerf` T-012 / FR-010 / FR-011).

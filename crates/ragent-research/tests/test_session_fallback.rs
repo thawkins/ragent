@@ -266,7 +266,7 @@ fn body_excerpt_strips_trailing_markdown_fences() {
 fn body_excerpt_strips_leading_markdown_fences() {
     let body = "```text\nThis is the real content that should appear first.\n```";
     let excerpt = body_excerpt(body, 200);
-    assert!(!excerpt.starts_with("`"));
+    assert!(!excerpt.starts_with('`'));
     assert!(excerpt.starts_with("This is the real content"));
 }
 

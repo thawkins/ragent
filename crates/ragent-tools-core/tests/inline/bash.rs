@@ -274,7 +274,9 @@ fn test_posix_wrapper_structure() {
 fn test_script_file_path_bash_extension() {
     let path = script_file_path("test", &ShellType::Bash).unwrap();
     assert!(
-        path.ends_with(".sh"),
+        std::path::Path::new(&path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("sh")),
         "Bash script should have .sh extension: {path}"
     );
 }
@@ -283,7 +285,9 @@ fn test_script_file_path_bash_extension() {
 fn test_script_file_path_powershell_extension() {
     let path = script_file_path("test", &ShellType::PowerShell(PathBuf::from("pwsh.exe"))).unwrap();
     assert!(
-        path.ends_with(".ps1"),
+        std::path::Path::new(&path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("ps1")),
         "PowerShell script should have .ps1 extension: {path}"
     );
 }
@@ -292,7 +296,9 @@ fn test_script_file_path_powershell_extension() {
 fn test_script_file_path_gitbash_extension() {
     let path = script_file_path("test", &ShellType::GitBash(PathBuf::from("bash.exe"))).unwrap();
     assert!(
-        path.ends_with(".sh"),
+        std::path::Path::new(&path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("sh")),
         "Git Bash script should have .sh extension: {path}"
     );
 }

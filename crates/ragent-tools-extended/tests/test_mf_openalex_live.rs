@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration test for the OpenAlex backend hitting the live OpenAlex API.
 //!
 //! This test is `#[ignore]` by default because it requires network access.

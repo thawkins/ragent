@@ -751,7 +751,10 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].spec.id.as_str(), "search-test");
         assert_eq!(results[0].score, 3); // spec(2) + plan(1)
-        assert!(!results[0].snippets.is_empty());
+        assert!(
+            !results[0].snippets.is_empty(),
+            "first result should have snippets"
+        );
     }
 
     #[tokio::test]

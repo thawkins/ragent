@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for `masterfetch::envelope` — page-type detection, source-type
 //! classification, and freshness computation (T-033, FR-003, FR-029, FR-030,
 //! NFR-003).

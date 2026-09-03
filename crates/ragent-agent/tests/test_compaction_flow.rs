@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Compaction flow tests for T-012.
 //!
 //! This file consolidates the T-012 test scenarios that are *not* already

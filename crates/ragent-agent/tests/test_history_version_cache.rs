@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the history-version cache.
 //!
 //! Validates that `AgentPerf` T-007 / FR-006 — the agent loop skips

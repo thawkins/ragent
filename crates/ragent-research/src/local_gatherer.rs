@@ -644,6 +644,7 @@ pub fn derive_terms(topic: &str, fallback: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -807,7 +808,12 @@ mod tests {
                 body_path.as_path(),
                 PathBuf::from(format!("sources/local-{:02}.md", i + 1)).as_path()
             );
-            assert!(path.ends_with(".rs"));
+            assert!(
+                std::path::Path::new(path)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("rs")),
+                "path should end with .rs: {path}"
+            );
         }
     }
 

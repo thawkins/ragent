@@ -497,7 +497,7 @@ mod tests {
         m.fail_step(RunStep::ContradictionGraph, None);
 
         m.resume();
-        assert_eq!(m.started_at.is_some(), true);
+        assert!(m.started_at.is_some());
         assert_eq!(m.completed_at, None);
         // The failed contradiction_graph step is the first non-completed step,
         // so the resume cursor should point at it (the run may attempt to redo

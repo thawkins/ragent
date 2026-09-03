@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration test verifying the `masterfetch` visibility switch hides/shows
 //! all six `mf_*` tools via `effective_hidden_tools()` (T-038, FR-021, NFR-003).
 //!

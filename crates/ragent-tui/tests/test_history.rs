@@ -80,7 +80,7 @@ fn test_save_history_empty_entries() {
     app.save_history().unwrap();
 
     let content = std::fs::read_to_string(&file).unwrap();
-    assert!(content.is_empty());
+    assert_eq!(content, "");
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn test_load_history_missing_file_is_ok() {
 
     // Should succeed silently — the file simply doesn't exist yet.
     assert!(app.load_history().is_ok());
-    assert!(app.input_history.is_empty());
+    assert_eq!(app.input_history.len(), 0);
 }
 
 #[test]

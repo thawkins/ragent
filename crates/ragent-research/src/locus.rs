@@ -256,6 +256,7 @@ fn dimension_label(keyword: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::source::Source;
     use std::path::PathBuf;

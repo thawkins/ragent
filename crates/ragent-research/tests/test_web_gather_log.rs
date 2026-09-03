@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the web-gather URL instrumentation log (`GatherLog`) wired
 //! through `WebGatherer::with_gather_log`.
 

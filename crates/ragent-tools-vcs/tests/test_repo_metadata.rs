@@ -37,7 +37,7 @@ fn test_from_response_null_description_and_language() {
     let md = RepoMetadata::from_response(&value);
     assert_eq!(md.description, "");
     assert_eq!(md.language, "");
-    assert!(md.topics.is_empty());
+    assert_eq!(md.topics, Vec::<String>::new());
     assert_eq!(md.stargazers_count, 0);
     assert_eq!(md.default_branch, "main");
 }
@@ -48,7 +48,7 @@ fn test_from_response_missing_fields_default() {
     let md = RepoMetadata::from_response(&value);
     assert_eq!(md.description, "");
     assert_eq!(md.language, "");
-    assert!(md.topics.is_empty());
+    assert_eq!(md.topics, Vec::<String>::new());
     assert_eq!(md.stargazers_count, 0);
     assert_eq!(md.default_branch, "");
 }
@@ -63,7 +63,7 @@ fn test_from_response_empty_topics_array() {
         "default_branch": "master",
     });
     let md = RepoMetadata::from_response(&value);
-    assert!(md.topics.is_empty());
+    assert_eq!(md.topics, Vec::<String>::new());
     assert_eq!(md.language, "Python");
     assert_eq!(md.default_branch, "master");
 }

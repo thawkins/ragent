@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the branch-per-spec git workflow (FR-009, T-018).
 
 use ragent_specs::SpecCommand;

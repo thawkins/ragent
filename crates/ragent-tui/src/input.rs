@@ -129,6 +129,30 @@ pub enum InputAction {
     ToggleTasksPanel,
     /// Toggle the Memory side panel visibility (Alt+M).
     ToggleMemory,
+    /// Move the Memory panel cursor up.
+    MemoryCursorUp,
+    /// Move the Memory panel cursor down.
+    MemoryCursorDown,
+    /// Open the selected memory in a full overlay.
+    OpenMemoryView,
+    /// Prompt to delete the selected memory (shows confirmation).
+    PromptMemoryDelete,
+    /// Confirm the pending memory delete (Enter on confirmation dialog).
+    ConfirmMemoryDelete,
+    /// Cancel the pending memory delete (Esc on confirmation dialog).
+    CancelMemoryDelete,
+    /// Scroll the memory view overlay upward.
+    MemoryViewPageUp,
+    /// Scroll the memory view overlay downward.
+    MemoryViewPageDown,
+    /// Jump the memory view overlay to the start.
+    MemoryViewToStart,
+    /// Jump the memory view overlay to the end.
+    MemoryViewToEnd,
+    /// Scroll the memory view overlay up by one line.
+    MemoryViewLineUp,
+    /// Scroll the memory view overlay down by one line.
+    MemoryViewLineDown,
     /// Toggle the Telemetry side panel visibility (Alt+O).
     ToggleTelemetry,
     /// Toggle the Context side panel visibility (Alt+X).
@@ -188,6 +212,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     }
     if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
         return Some(InputAction::ConfirmQuit);
+    }
+
+    // If a memory delete confirmation modal is active, intercept Enter/Esc
+    // before any other dialog so the confirmation always takes precedence.
+    if app.pending_memory_delete.is_some() {
+        match key.code {
+            KeyCode::Enter => return Some(InputAction::ConfirmMemoryDelete),
+            KeyCode::Esc => return Some(InputAction::CancelMemoryDelete),
+            _ => return None,
+        }
     }
 
     // If a router save confirmation modal is active, intercept Enter/Esc
@@ -385,6 +419,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             _ => None,
         };
+    }
+
+    // If a memory delete confirmation modal is active, intercept Enter/Esc
+    // before any other dialog so the confirmation always takes precedence.
+    if app.pending_memory_delete.is_some() {
+        match key.code {
+            KeyCode::Enter => return Some(InputAction::ConfirmMemoryDelete),
+            KeyCode::Esc => return Some(InputAction::CancelMemoryDelete),
+            _ => return None,
+        }
     }
 
     // If a router save confirmation modal is active, intercept Enter/Esc
@@ -611,6 +655,26 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         };
     }
 
+    if app.memory_view.is_some() {
+        return match key.code {
+            KeyCode::PageUp if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(InputAction::MemoryViewToStart)
+            }
+            KeyCode::PageDown if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(InputAction::MemoryViewToEnd)
+            }
+            KeyCode::PageUp => Some(InputAction::MemoryViewPageUp),
+            KeyCode::PageDown => Some(InputAction::MemoryViewPageDown),
+            KeyCode::Up => Some(InputAction::MemoryViewLineUp),
+            KeyCode::Down => Some(InputAction::MemoryViewLineDown),
+            KeyCode::Esc => {
+                app.memory_view = None;
+                None
+            }
+            _ => None,
+        };
+    }
+
     if app.output_view.is_some() {
         return match key.code {
             KeyCode::PageUp if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -648,6 +712,13 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             app.clear_kb_selection();
             app.insert_char_at_cursor('\n');
             None
+        }
+        KeyCode::Enter if app.show_memory && app.input.is_empty() => {
+            // With the Memory side panel visible and an empty prompt, Enter
+            // opens the selected memory. When the prompt has text, Enter
+            // falls through to the normal send path so the memory panel
+            // does not intercept message submission.
+            Some(InputAction::OpenMemoryView)
         }
         KeyCode::Enter => {
             if app.is_input_blocked() {
@@ -727,6 +798,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleMemory)
         }
+        // Memory panel cursor navigation: when the panel is visible, Up/Down
+        // move the block cursor through memories instead of navigating input
+        // history (FR-016).
+        KeyCode::Up if app.show_memory => Some(InputAction::MemoryCursorUp),
+        KeyCode::Down if app.show_memory => Some(InputAction::MemoryCursorDown),
+        // Open / delete the selected memory when the Memory panel is focused.
         // Alt+O toggles the Telemetry side panel (placed before generic char-insert
         // handling so the `o` is never inserted into the input buffer — NFR-002).
         KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::ALT) => {
@@ -765,6 +842,22 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             None
         }
+        KeyCode::Delete => {
+            // Delete removes the active selection, otherwise the character
+            // under the cursor (forward delete).  When the Memory panel is
+            // focused and the prompt is empty, Delete prompts to delete the
+            // selected memory instead.
+            if app.show_memory && app.input.is_empty() {
+                Some(InputAction::PromptMemoryDelete)
+            } else if let Some((start, end)) = app.kb_selection_char_range() {
+                app.remove_input_char_range(start, end);
+                app.kb_select_anchor = None;
+                None
+            } else {
+                app.delete_next_char();
+                None
+            }
+        }
         KeyCode::Left
             if key.modifiers.contains(KeyModifiers::CONTROL)
                 && key.modifiers.contains(KeyModifiers::SHIFT) =>
@@ -799,7 +892,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::Right => Some(InputAction::MoveCursorRight),
         KeyCode::Home => Some(InputAction::MoveCursorHome),
         KeyCode::End => Some(InputAction::MoveCursorEnd),
-        KeyCode::Delete => Some(InputAction::Delete),
         KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => Some(InputAction::ScrollUp),
         KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
             Some(InputAction::ScrollDown)

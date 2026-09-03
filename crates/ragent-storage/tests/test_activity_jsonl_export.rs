@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for JSON Lines export of a run's complete event log (maka spec
 //! T-020, NFR-004).
 //!

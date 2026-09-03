@@ -31,6 +31,7 @@ fn snapshot(
         memory_tokens: memory,
         agents_md_tokens: agents_md,
         context_window_tokens: window,
+        last_input_tokens: 0,
     }
 }
 

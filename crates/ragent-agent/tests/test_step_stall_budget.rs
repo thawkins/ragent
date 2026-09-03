@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the per-step wall-clock budget and per-stream
 //! stall timeout (`AgentPerf` T-014 / FR-017 / FR-018 / FR-020).
 //!

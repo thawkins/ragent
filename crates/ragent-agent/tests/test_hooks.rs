@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for PreToolUse and PostToolUse hook exit-code semantics (T-001, T-002, T-003, T-005).
 
 use ragent_agent::hooks::{

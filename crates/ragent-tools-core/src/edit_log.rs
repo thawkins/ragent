@@ -548,7 +548,7 @@ pub struct EditLogStats {
 /// which makes every failure appear unique in the `/editlog show` rollup.
 /// This helper removes any path-like token so that failures with the same
 /// underlying reason are counted together.
-pub(crate) fn normalize_outcome(outcome: &str) -> String {
+pub fn normalize_outcome(outcome: &str) -> String {
     static PATH_RE: OnceLock<Regex> = OnceLock::new();
     let re = PATH_RE.get_or_init(|| {
         // Match a run of non-whitespace characters that contains a path
@@ -864,7 +864,10 @@ mod tests {
         assert!(detect_old_str_risks("line\n  indented").contains(&OldStrRisk::EscapedWhitespace));
         assert!(detect_old_str_risks("line\n\nline").contains(&OldStrRisk::ContainsBlankLines));
         assert!(detect_old_str_risks("a\r\nb\nc").contains(&OldStrRisk::MixedLineEndings));
-        assert!(detect_old_str_risks("plain ascii text.").is_empty());
+        assert!(
+            detect_old_str_risks("plain ascii text.").is_empty(),
+            "plain ascii should have no risks"
+        );
     }
 
     #[test]

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the yfinance tool registration and visibility.
 
 use ragent_tools_extended::create_extended_registry;

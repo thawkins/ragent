@@ -150,7 +150,10 @@ fn test_get_configured_providers_preferred_first() {
         .expect("store preferred");
 
     let configured = App::get_configured_providers(&storage);
-    assert!(!configured.is_empty());
+    assert!(
+        !configured.is_empty(),
+        "at least one provider should be configured"
+    );
     // The preferred provider should appear first.
     assert_eq!(
         configured[0].id, "openai",

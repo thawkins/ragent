@@ -783,7 +783,10 @@ mod tests {
         assert_eq!(tasks[0].id, "T-001");
         assert_eq!(tasks[0].effort, Effort::S);
         assert_eq!(tasks[0].priority, Priority::Critical);
-        assert!(tasks[0].dependencies.is_empty());
+        assert!(
+            tasks[0].dependencies.is_empty(),
+            "first task should have no dependencies"
+        );
         assert_eq!(tasks[1].dependencies, vec!["T-001"]);
         assert_eq!(tasks[2].dependencies, vec!["T-002"]);
     }
@@ -970,7 +973,7 @@ mod tests {
     #[test]
     fn test_topological_sort_empty() {
         let order = resolve_execution_order(&[]).unwrap();
-        assert!(order.is_empty());
+        assert!(order.is_empty(), "order should be empty");
     }
 
     #[test]
@@ -1159,7 +1162,7 @@ mod tests {
     fn test_parse_gates_section_missing() {
         let md = "## Tasks\n\n| ID | Title |\n|---|---|\n| T-001 | Foo |";
         let gates = PlanParser::parse_phase_minus_one_gates(md);
-        assert!(gates.is_empty());
+        assert!(gates.is_empty(), "gates should be empty");
         assert!(!gates.is_all_checked());
         assert!(!gates.has_all_required_gates());
         assert_eq!(gates.unchecked_required_gates().len(), 3);

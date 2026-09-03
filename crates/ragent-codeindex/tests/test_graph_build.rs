@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for `CodeIndex::build_graph()` (spec graphCI, T-016).
 //!
 //! Covers FR-009 (graph build reports edge counts distinguishing EXTRACTED

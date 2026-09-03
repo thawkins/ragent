@@ -14,7 +14,8 @@ use ragent_types::event::EventBus;
 use ragent_types::message::{Message, Role};
 
 use crate::compaction::runner::{
-    build_compaction_message, build_summary_request, compact, select, summarize_via_client,
+    MAX_COMPACTION_PROMPT_CHARS, build_compaction_message, build_summary_request,
+    cap_head_transcript, compact, floor_char_boundary, select, summarize_via_client,
 };
 
 fn user_msg(text: &str) -> Message {
@@ -360,4 +361,49 @@ async fn test_compact_publishes_started_and_finished_events() {
     }
     assert!(saw_started, "expected CompressionStarted event");
     assert!(saw_finished, "expected CompressionFinished event");
+}
+
+#[test]
+fn test_cap_head_transcript_short_input_returned_unchanged() {
+    let text = "short transcript".to_string();
+    assert_eq!(cap_head_transcript(&text), text);
+}
+
+#[test]
+fn test_cap_head_transcript_truncates_long_ascii_with_marker() {
+    // 2x the cap of ASCII content must be truncated with a marker prefix and
+    // still end at the newest content.
+    let text = "x".repeat(2 * MAX_COMPACTION_PROMPT_CHARS);
+    let out = cap_head_transcript(&text);
+    assert!(out.starts_with("[Earlier conversation omitted due to length]\n\n"));
+    assert!(out.len() <= MAX_COMPACTION_PROMPT_CHARS);
+}
+
+#[test]
+fn test_cap_head_transcript_does_not_panic_on_multibyte_boundary() {
+    // Regression: the naive `len - keep_len` byte cut can land inside a
+    // multi-byte UTF-8 character (the box-drawing glyph used by the TUI is
+    // 3 bytes) and panic with "byte index is not a char boundary".
+    let unit = format!("{}\n", "\u{2500}".repeat(100)); // 100 x '─' + '\n'
+    let text = unit.repeat(MAX_COMPACTION_PROMPT_CHARS / unit.len() + 4);
+    assert!(text.len() > MAX_COMPACTION_PROMPT_CHARS);
+    let out = cap_head_transcript(&text);
+    assert!(out.starts_with("[Earlier conversation omitted due to length]\n\n"));
+    // Result must still be valid UTF-8 (it is a String by construction) and
+    // must not lose the trailing content.
+    assert!(out.ends_with('\n'));
+}
+
+#[test]
+fn test_floor_char_boundary_snaps_back_to_char_start() {
+    // '─' is 3 bytes (E2 94 80). Indexes 1 and 2 inside it must snap to 0.
+    let s = "\u{2500}\u{2500}";
+    assert_eq!(floor_char_boundary(s, 0), 0);
+    assert_eq!(floor_char_boundary(s, 1), 0);
+    assert_eq!(floor_char_boundary(s, 2), 0);
+    assert_eq!(floor_char_boundary(s, 3), 3);
+    assert_eq!(floor_char_boundary(s, 4), 3);
+    assert_eq!(floor_char_boundary(s, 6), 6);
+    // Past-the-end indexes clamp to len.
+    assert_eq!(floor_char_boundary(s, 100), 6);
 }

@@ -1,3 +1,5 @@
+#![allow(clippy::assert_is_empty)]
+#![allow(clippy::await_holding_lock)]
 //! Tests for the busy-state fallback for graph tools (spec graphCI, T-023, FR-017).
 //!
 //! FR-017: While a background reindex is in progress and the SQLite store lock

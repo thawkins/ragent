@@ -617,6 +617,7 @@ fn cap_title(title: &str, limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::research_name::ResearchName;
 

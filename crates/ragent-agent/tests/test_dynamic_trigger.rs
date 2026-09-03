@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for dynamic trigger rules (spec `piegap` FR-002 / T-002).
 //!
 //! These tests verify the dynamic trigger engine's public API: parsing,
@@ -204,7 +205,7 @@ async fn test_poll_fires_matching_rule() {
     assert_eq!(fired, 1);
     assert_eq!(dispatcher.count(), 1);
     assert_eq!(dispatcher.dispatched()[0].0, "run tests");
-    assert_eq!(dispatcher.dispatched()[0].1, false);
+    assert!(!dispatcher.dispatched()[0].1);
 }
 
 #[tokio::test]
@@ -303,7 +304,7 @@ async fn test_poll_promote_to_chat_propagated() {
 
     let fired = engine.poll_once().await;
     assert_eq!(fired, 1);
-    assert_eq!(dispatcher.dispatched()[0].1, true); // promote_to_chat = true
+    assert!(dispatcher.dispatched()[0].1); // promote_to_chat = true
 }
 
 #[tokio::test]

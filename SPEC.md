@@ -1640,6 +1640,18 @@ Every `RESEARCH.md` contains:
   it ends with a `## Sources Reference` copy of the References Index table so
   `[#N]` source indices resolve in both files.
 
+  When an LLM is configured, `/research create` also runs a concept-extraction
+  step (spec researchcluster) after synthesis: the gathered corpus is assembled
+  into a context-bounded payload whose blocks are headed `--- [#N] Title ---`
+  with `N` equal to the References Index position, and the model returns a
+  numbered concept list (`### N. Name` subsections with `[#N]` citations).
+  The normalized list is rendered as `## Concepts` directly above `## Findings`
+  (report layout) or `### Concepts` directly above `### Findings` inside
+  Results (IMRaD layout). When no LLM engine is wired, or the extraction call
+  fails or returns no sections, the section is omitted entirely and the run
+  completes normally; the step is surfaced in the UI as a `concepts` `RunStep`
+  event (started / completed / skipped / failed).
+
 ### 11.5 Slash Commands
 
 | Command | Purpose |
@@ -1720,7 +1732,23 @@ The `POST /research` request body mirrors `ResearchRunRequest`:
 `local_concurrency`, `fetch_timeout_secs`, `web_phase_timeout_secs`,
 `local_phase_timeout_secs`, `search_max_retries`, `search_retry_base_delay_ms`,
 `search_circuit_breaker_threshold`, `max_web_results`, `max_local_sources`,
-`max_synthesis_sources`.
+`max_synthesis_sources`. `web_phase_timeout_secs` (CLI `--web-time`) defaults
+to 60 seconds (`DEFAULT_WEB_PHASE_TIMEOUT_SECS`); a value of `0` disables the
+deadline and allows the web phase to run to natural completion (FR-007). When
+the web-gathering phase exceeds the deadline the run ingests everything gathered
+so far and proceeds to analysis/synthesis with the partial source set, emitting
+a single `web_deadline` `RunStep` diagnostic that carries the effective deadline
+and the number of sources captured (FR-004). No new search or fetch is started
+after the deadline: the decomposer call, each sub-query search-result wait, and
+each in-flight fetch-completion wait are all deadline-bounded, so the worst-case
+overshoot beyond the deadline is the completion of the fetches already in flight
+at truncation, each further capped by `fetch_timeout_secs` (FR-008). At the
+start of a web-gathering phase the system emits a `web_phase_start` `RunStep`
+carrying the remaining effective deadline in seconds; the TUI renders this as a
+live `web:M:SS` countdown in the status-bar wait segment, computed from a stored
+wall-clock `Instant` at render time and updated at least once per second while
+the phase is active (FR-009, FR-010, FR-013). The same deadline is applied to
+every iteration of the iterative research engine (FR-006).
 
 ---
 # Part IV: Agent Customization & Extension

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for compaction role handling in storage.
 
 use ragent_storage::storage::Storage;

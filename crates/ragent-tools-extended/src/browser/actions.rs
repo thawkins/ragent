@@ -867,7 +867,7 @@ mod tests {
         let text = html_to_text(html);
         assert!(text.contains("Title"));
         assert!(text.contains("Hello & world"));
-        assert!(!text.contains("<"));
+        assert!(!text.contains('<'));
     }
 
     #[test]

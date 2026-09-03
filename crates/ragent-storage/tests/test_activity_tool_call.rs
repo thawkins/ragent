@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for recording tool-call and tool-result events (maka spec T-005,
 //! FR-004).
 //!

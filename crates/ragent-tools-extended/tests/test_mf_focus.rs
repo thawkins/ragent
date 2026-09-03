@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for `masterfetch::focus` — BM25 query-focused content
 //! filtering (T-009 / T-034, FR-004, NFR-003).
 //!

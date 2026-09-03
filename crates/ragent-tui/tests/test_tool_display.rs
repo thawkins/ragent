@@ -203,7 +203,7 @@ fn test_make_relative_path_with_tilde() {
     // This test may fail in CI without HOME set, but documents expected behavior
     let result = make_relative_path("~/project/file.txt", "~/project");
     // Result depends on HOME environment variable
-    assert!(!result.is_empty());
+    assert_ne!(result, String::new());
 }
 
 // =============================================================================

@@ -33,6 +33,7 @@ fn doc_with_template(template_body: Option<&str>) -> ResearchDocument {
         top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: vec!["Does the template survive alongside the standard sections?".into()],
+        concepts: None,
         contradiction_graph: None,
         loci: None,
         depth_investigation: None,

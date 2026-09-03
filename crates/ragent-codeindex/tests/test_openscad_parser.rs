@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! External tests for `tests` from `crates/ragent-codeindex/src/parser/openscad.rs`
 //!
 //! Relocated from the inline `#[cfg(test)]` module.

@@ -143,6 +143,13 @@ pub struct ResearchDocument {
     /// Optional readability audit produced by the final audit step (FR-005, T-015).
     /// When `None` the report layout omits the readability audit section.
     pub readability_audit: Option<crate::readability::ReadabilityAudit>,
+    /// Optional concept-extraction section produced by the `/research create`
+    /// pipeline (spec researchcluster). The raw markdown is the normalized
+    /// LLM concept list: `### N. Name` subsections with `[#N]` citations that
+    /// resolve against the References Index. Rendered as `## Concepts`
+    /// directly above `## Findings` (report layout) or `### Concepts` directly
+    /// above `### Findings` (IMRaD layout); omitted entirely when `None`.
+    pub concepts: Option<String>,
     /// Optional template body loaded from `research/_templates/<name>.md`
     /// (FR-020). When supplied, the template is used as the skeleton and
     /// `{{title}}`, `{{topic}}`, `{{date}}` placeholders are substituted
@@ -1406,6 +1413,17 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push_str(&dq_summary);
     }
 
+    // ── Concepts (spec researchcluster) ────────────────────────────────
+    // LLM-extracted concept list from the gathered corpus, rendered directly
+    // above Findings so the reader sees the cross-source theme map before the
+    // per-finding detail. Omitted entirely when concept extraction did not
+    // run (no LLM engine wired, or the extraction produced no sections).
+    if let Some(concepts) = &doc.concepts {
+        body.push_str("## Concepts\n\n");
+        body.push_str(concepts.trim());
+        body.push_str("\n\n");
+    }
+
     // -- Findings ---------------------------------------------------------
     body.push_str("## Findings\n\n");
     if doc.findings.is_empty() {
@@ -1574,6 +1592,15 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
                  Empty sections below indicate that the corresponding evidence was not yet \
                  produced by the gathering pass.\n\n",
     );
+
+    // ── Concepts (spec researchcluster) ────────────────────────────────
+    // In the IMRaD layout the concept list is a Results sub-section rendered
+    // directly above the Findings subsection.
+    if let Some(concepts) = &doc.concepts {
+        body.push_str("### Concepts\n\n");
+        body.push_str(concepts.trim());
+        body.push_str("\n\n");
+    }
 
     // -- Results (FR-008) -----------------------------------------------
     body.push_str("## Results\n\n");
@@ -1751,6 +1778,7 @@ fn placeholder_document(
         top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
+        concepts: None,
         contradiction_graph: None,
         loci: None,
         depth_investigation: None,
@@ -2573,6 +2601,7 @@ pub fn render_bibliography(sources: &[Source]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::source::Source;
     use std::path::PathBuf;
@@ -2593,6 +2622,7 @@ mod tests {
             top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
+            concepts: None,
             contradiction_graph: None,
             loci: None,
             depth_investigation: None,
@@ -2616,7 +2646,7 @@ mod tests {
     #[test]
     fn assemble_document_renders_contradiction_graph_section() {
         use crate::contradiction::{ContradictionClaim, ContradictionEdge, ContradictionGraph};
-        let sources = vec![
+        let sources = [
             Source::Web {
                 url: "https://a.example".into(),
                 title: "A".into(),
@@ -3005,7 +3035,7 @@ mod tests {
 
     #[test]
     fn render_search_engine_summary_counts_pages_pdfs_videos() {
-        let sources = vec![
+        let sources = [
             web_source("duckduckgo, brave", "page"),
             web_source("duckduckgo", "page"),
             web_source("brave", "pdf"),
@@ -3032,7 +3062,7 @@ mod tests {
     #[test]
     fn render_search_engine_summary_empty_when_no_engine_field() {
         // Web sources with empty search_engine should produce no table.
-        let sources = vec![web_source("", "page")];
+        let sources = [web_source("", "page")];
         let table = render_search_engine_summary(&sources);
         assert!(table.is_empty());
     }
@@ -3942,7 +3972,7 @@ mod tests {
         use crate::synthesis::{CriticReport, SynthesisAudit};
         use std::path::PathBuf;
 
-        let sources = vec![
+        let sources = [
             Source::Web {
                 url: "https://a.example".into(),
                 title: "A".into(),
@@ -4060,7 +4090,7 @@ mod tests {
         };
 
         let mut doc = sample_doc(sample_item());
-        doc.item.sources = sources;
+        doc.item.sources = sources.to_vec();
         doc.contradiction_graph = Some(graph);
         doc.source_tensions = Some(tensions);
         doc.cross_locus_reconcile = Some(reconcile);

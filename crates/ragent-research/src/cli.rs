@@ -83,11 +83,11 @@ pub enum ResearchCliCommand {
         /// one slow URL cannot stall the whole gather pass. The default is
         /// 30 seconds.
         fetch_timeout_secs: Option<u64>,
-        /// `--web-phase-timeout-secs N` — optional wall-clock timeout for the
-        /// entire web-gathering phase (Milestone H-001). When set, the phase
-        /// is aborted if it exceeds `N` seconds and a diagnostic is emitted so
-        /// a slow search/fetch cannot stall the session. When `None`, no
-        /// phase-level timeout is applied.
+        /// `--web-phase-timeout-secs N` / `--web-time N` — optional
+        /// wall-clock timeout for the entire web-gathering phase (Milestone
+        /// H-001). When the deadline passes, everything gathered so far is
+        /// ingested and the run proceeds to analysis/synthesis. `0` disables
+        /// the timeout.
         web_phase_timeout_secs: Option<u64>,
         /// `--local-phase-timeout-secs N` — optional wall-clock timeout for the
         /// entire local-gathering phase (Milestone H-001). When set, the phase
@@ -269,6 +269,7 @@ impl ResearchCliCommand {
                 | "--local-concurrently"
                 | "--fetch-timeout-secs"
                 | "--web-phase-timeout-secs"
+                | "--web-time"
                 | "--local-phase-timeout-secs"
                 | "--search-max-retries"
                 | "--search-retry-base-delay-ms"
@@ -289,7 +290,7 @@ impl ResearchCliCommand {
                             "--fetch-concurrently" => fetch_concurrency = v.parse().ok(),
                             "--local-concurrently" => local_concurrency = v.parse().ok(),
                             "--fetch-timeout-secs" => fetch_timeout_secs = v.parse().ok(),
-                            "--web-phase-timeout-secs" => {
+                            "--web-phase-timeout-secs" | "--web-time" => {
                                 web_phase_timeout_secs = v.parse().ok();
                             }
                             "--local-phase-timeout-secs" => {
@@ -419,7 +420,8 @@ impl ResearchCliCommand {
                SUBCOMMANDS:\n\
                                    create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep] [--tier light|full|dissertation]\n\
                                          [--format report|executive-summary|comparison-table|source-bibliography|imrad]\n\
-                                         [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--use-pdf] [--no-papers]\n\
+                                         [--sources-dir <path>] [--template <name>]                                          [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--use-pdf] [--no-papers]
+                                          [--web-time <secs>] [--web-phase-timeout-secs <secs>]\n\
                                          Run an information-gathering session and write RESEARCH.md.\n\
                                            --from-url            Fetch one or more URLs and use their content as the research subject\n\
                                                                  in place of (or alongside) an explicit topic. Each page is captured\n\
@@ -435,6 +437,10 @@ impl ResearchCliCommand {
                                          --format              Select the output artifact format. Values: report, executive-summary, comparison-table, source-bibliography, imrad (default: report).\n\
                                          --fetch-concurrently  Override the maximum number of candidate pages fetched\n\
                                                                in parallel during the web-gathering phase (default 10).\n\
+                                         --web-time            Wall-clock timeout in seconds for the whole web-gathering\n\
+                                                               phase (alias of --web-phase-timeout-secs; default 60). When\n\
+                                                               the deadline passes, everything gathered so far is ingested\n\
+                                                               and the run continues to analysis/synthesis. `0` disables.\n\
                                          --use-local           Enable local-file scanning (in-project + extras).\n\
                                          --use-specs           Enable prior-spec cross-referencing.\n\
                                          --use-low-relevance   Keep low-relevance web sources instead of filtering them out.\n\
@@ -483,6 +489,7 @@ pub fn session_event_json(event: &crate::session::SessionEvent) -> String {
             body_preview,
             language,
             oa_recovery,
+            media_type,
         } => {
             let mut payload = serde_json::Map::new();
             payload.insert("url".into(), serde_json::json!(url));
@@ -491,6 +498,7 @@ pub fn session_event_json(event: &crate::session::SessionEvent) -> String {
             payload.insert("search_engine".into(), serde_json::json!(search_engine));
             payload.insert("body_preview".into(), serde_json::json!(body_preview));
             payload.insert("language".into(), serde_json::json!(language));
+            payload.insert("media_type".into(), serde_json::json!(media_type));
             if let Some(r) = oa_recovery.as_ref() {
                 payload.insert(
                     "oa_recovery".into(),
@@ -1671,6 +1679,7 @@ mod tests {
             search_engine: "openalex".into(),
             body_preview: String::new(),
             language: "ENGLISH".into(),
+            media_type: "page".into(),
             oa_recovery: Some(Box::new(RecoveredOpenAccess {
                 url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC123456/".into(),
                 source: RecoverySource::EuropePmc,
@@ -1695,6 +1704,7 @@ mod tests {
             search_engine: String::new(),
             body_preview: String::new(),
             language: "UNKNOWN".into(),
+            media_type: "page".into(),
             oa_recovery: None,
         };
         let line = render_session_event_json(&event);

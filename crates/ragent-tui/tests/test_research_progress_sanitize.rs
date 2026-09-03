@@ -46,6 +46,7 @@ fn test_encode_progress_event_sanitizes_web_captured() {
             search_engine: String::new(),
             body_preview: String::new(),
             language: "UNKNOWN".to_string(),
+            media_type: "page".to_string(),
             oa_recovery: None,
         },
     );
@@ -94,7 +95,7 @@ fn test_encode_progress_event_sanitizes_fetch_failed() {
 #[test]
 fn test_render_markdown_to_ascii_bypasses_research_progress() {
     let mut app = support::make_app();
-    let input = "🔬 Research Progress — `run`\nTopic: topic\n\n  ✓ web     — captured https://example.com — Title";
+    let input = "[research] Research Progress — `run`\nTopic: topic\n\n  ✓ web     — captured https://example.com — Title";
     let output = app.render_markdown_to_ascii(input);
     assert_eq!(
         output, input,

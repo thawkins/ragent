@@ -165,6 +165,7 @@ fn build_plan_from_dimensions(topic: &str, count: usize) -> ChapterPlan {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
 
     #[test]

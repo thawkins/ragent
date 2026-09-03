@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `gmail` tool — JCODEPLAN M7 (T-060/T-062).
 //!
 //! Covers:

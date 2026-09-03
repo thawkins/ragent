@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for `/spec` slash-command parsing.
 
 use ragent_specs::SpecCommand;

@@ -363,8 +363,9 @@ fn build_line1_center(
     spans
 }
 
-/// Build Line 1 right section: Session status
-fn build_line1_right(
+/// Build Line 1 right section: Session status plus optional live web-phase
+/// deadline countdown.
+pub fn build_line1_right(
     app: &App,
     _config: &StatusBarConfig,
     _mode: ResponsiveMode,
@@ -380,6 +381,31 @@ fn build_line1_right(
         ));
     } else {
         spans.push(Span::styled("Ready ", Style::default().fg(colors::HEALTHY)));
+    }
+
+    // Live web-phase deadline countdown (FR-010, FR-011, FR-013). If a
+    // `/research create` web phase has a stored deadline, show the remaining
+    // wall-clock time formatted as M:SS in the top-right wait segment. The
+    // ResearchProgress tracker clears the deadline when the web phase ends or
+    // the run finishes.
+    if let Some(deadline) = app
+        .research_progress
+        .iter()
+        .filter(|p| !p.done)
+        .find_map(|p| p.web_phase_deadline)
+    {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if !remaining.is_zero() {
+            let total_secs = remaining.as_secs();
+            let minutes = total_secs / 60;
+            let seconds = total_secs % 60;
+            spans.push(Span::styled(
+                format!("web:{minutes}:{seconds:02} "),
+                Style::default()
+                    .fg(colors::IN_PROGRESS)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
     }
 
     spans

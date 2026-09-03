@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `cron_events` CRUD storage methods (spec agentchron T-006).
 //!
 //! These tests verify that all fields of a [`CronEvent`] round-trip through

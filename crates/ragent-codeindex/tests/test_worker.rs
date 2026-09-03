@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! External integration tests for the code-index background worker.
 
 use ragent_codeindex::CodeIndex;

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! External tests for `tests` from `crates/ragent-agent/src/memory/visualisation.rs`
 //!
 //! Relocated from the inline `#[cfg(test)]` module.

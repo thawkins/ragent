@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Regression for the 2026-08-20 /research create panic: html2text
 //! `WrappedBlock::flush_word` "attempt to subtract with overflow".
 //!

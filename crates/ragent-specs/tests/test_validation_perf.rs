@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Performance benchmark for NFR-001.
 //!
 //! Verifies that `validate_with_flags` with all SDD checks enabled completes

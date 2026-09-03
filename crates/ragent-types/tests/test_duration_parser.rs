@@ -206,10 +206,10 @@ fn test_duration_unknown_unit_error_lists_aliases() {
     let err = parse_duration("5s").unwrap_err();
     let msg = err.to_string();
     // The canonical short forms should appear in the alias list
-    assert!(msg.contains("m"), "error should list 'm': {msg}");
-    assert!(msg.contains("h"), "error should list 'h': {msg}");
-    assert!(msg.contains("d"), "error should list 'd': {msg}");
-    assert!(msg.contains("w"), "error should list 'w': {msg}");
+    assert!(msg.contains('m'), "error should list 'm': {msg}");
+    assert!(msg.contains('h'), "error should list 'h': {msg}");
+    assert!(msg.contains('d'), "error should list 'd': {msg}");
+    assert!(msg.contains('w'), "error should list 'w': {msg}");
     assert!(msg.contains("mo"), "error should list 'mo': {msg}");
 }
 

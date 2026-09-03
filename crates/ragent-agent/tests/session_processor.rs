@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! External tests for `session::processor` helpers, migrated from the inline
 //! `#[cfg(test)] mod tests` block that previously lived at the bottom of
 //! `processor.rs` (REMPLAN.md M6 / T6.6).

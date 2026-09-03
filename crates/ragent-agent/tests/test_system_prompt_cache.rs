@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the system-prompt component cache.
 //!
 //! Validates that [`SessionProcessor::system_prompt_cache`] (added as part

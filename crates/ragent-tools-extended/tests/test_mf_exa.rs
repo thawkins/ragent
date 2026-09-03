@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for the Exa backend request builder (T-004, FR-003).
 //!
 //! These tests exercise
@@ -86,8 +87,8 @@ fn test_build_request_body_includes_start_date_for_freshness_day() {
     let date = body["startPublishedDate"].as_str().unwrap();
     // Should be an ISO 8601 date string: YYYY-MM-DD
     assert_eq!(date.len(), 10);
-    assert!(date.chars().nth(4) == Some('-'));
-    assert!(date.chars().nth(7) == Some('-'));
+    assert_eq!(date.chars().nth(4), Some('-'));
+    assert_eq!(date.chars().nth(7), Some('-'));
 }
 
 #[test]

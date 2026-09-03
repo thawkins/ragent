@@ -173,7 +173,7 @@ Run a research session and write `RESEARCH.md`. This is the primary command.
   [--sources-dir <path>] [--template <name>]
   [--fetch-concurrently N] [--local-concurrently N]
   [--fetch-timeout-secs N]
-  [--web-phase-timeout-secs N] [--local-phase-timeout-secs N]
+  [--web-time N] [--web-phase-timeout-secs N] [--local-phase-timeout-secs N]
   [--search-max-retries N] [--search-retry-base-delay-ms N]
   [--search-circuit-breaker-threshold N]
   [--use-local] [--use-specs] [--use-low-relevance] [--no-papers] [--use-pdf]
@@ -272,7 +272,7 @@ Keep low-relevance sources that would normally be filtered:
 Customise fetch concurrency and timeouts for slow networks:
 
 ```text
-/research create slow-net "Distributed consensus algorithms" --fetch-concurrently 4 --fetch-timeout-secs 60 --web-phase-timeout-secs 300
+/research create slow-net "Distributed consensus algorithms" --fetch-concurrently 4 --fetch-timeout-secs 60 --web-time 300
 ```
 
 Use a custom template:
@@ -317,7 +317,34 @@ section 11 for viewer controls.
 /research open rust-async
 ```
 
-### 4.6 `/research cluster <name>`
+### 4.6 Concepts section in `/research create`
+
+When `/research create` runs with an LLM configured, a concept-extraction step
+runs automatically after synthesis. The gathered corpus is sent to the model
+as a context-bounded payload (each source block headed `--- [#N] Title ---`,
+where `N` is the source's position in the References Index), and the numbered
+concept list it returns is embedded in `RESEARCH.md` as a `## Concepts`
+section directly above `## Findings`:
+
+```markdown
+## Concepts
+
+### 1. Semantic Scholarly Search
+
+**Definition:** Retrieval that understands research questions rather than
+exact keywords.
+
+**Key Evidence:**
+- hybrid retrieval across 200M+ papers ([#6])
+```
+
+`[#N]` citations resolve against the References Index at the bottom of
+`RESEARCH.md`, exactly like the Findings citations. The section is omitted
+when no LLM is configured, the extraction fails, or the model returns no
+concept sections; the step is visible in the progress output as a `concepts`
+step (started / completed / skipped / failed).
+
+### 4.7 `/research cluster <name>`
 
 Extract up to 20 core concepts from the captured sources of an existing
 research item and write them to `research/<name>/CONCEPTS.md`. The command reads
@@ -331,11 +358,30 @@ the model's context budget.
 ```
 
 The output is a markdown file with a `# Concepts` heading, followed by one
-section per concept (`## Concept Name`) containing a short definition and key
-evidence bullets. The companion is rewritten on every run and uses the same
-source indices as `RESEARCH.md`.
+numbered section per concept (`## 1. Concept Name`, `## 2. Next Concept`, ...)
+containing a short definition and key evidence bullets. Inline citations use
+the same `[#N]` style as `RESEARCH.md`; each concept that cites captured
+sources gains a `**WebSources:**` block listing those sources in the same
+format as the `**Sources:**` lists under `## Findings` in `RESEARCH.md`:
 
-### 4.7 `/research search <query>`
+```markdown
+## 3. Semantic Scholarly Search
+
+**Definition:** Retrieval that understands research questions rather than
+exact keywords.
+
+**Key Evidence:**
+- hybrid retrieval across 200M+ papers ([#6])
+
+**WebSources:**
+- [6] Paperguide: AI Search — [https://example.com/...](https://example.com/...) (published 2025-05-26)
+```
+
+The companion is rewritten on every run and uses the same source indices as
+`RESEARCH.md`. Concept headings are renumbered sequentially on write, even if
+the model emits them out of order or unnumbered.
+
+### 4.8 `/research search <query>`
 
 Full-text search across all `RESEARCH.md` files. Returns matching item names,
 titles, and snippets. The search returns up to 25 results.
@@ -345,7 +391,7 @@ titles, and snippets. The search returns up to 25 results.
 /research search async runtime tokio
 ```
 
-### 4.8 `/research delete <name> --yes`
+### 4.9 `/research delete <name> --yes`
 
 Permanently delete a research item and its `sources/` directory. The `--yes`
 flag is required; without it the command prompts and refuses.
@@ -587,7 +633,7 @@ These flags control the performance and resilience of the gathering phases.
 | `--fetch-concurrently N` | 10 | Number of candidate pages fetched in parallel during web gathering. `0` is clamped to `1`. |
 | `--local-concurrently N` | 8 | Parallel local-file scoring tasks. `0` is clamped to `1`. |
 | `--fetch-timeout-secs N` | 30 | Per-page fetch timeout. Pages exceeding this are treated as fetch failures. |
-| `--web-phase-timeout-secs N` | none | Wall-clock timeout for the entire web phase. Aborts if exceeded. |
+| `--web-time N` | 60 | Wall-clock timeout for the entire web phase (alias of `--web-phase-timeout-secs`). When the deadline passes, everything gathered so far is ingested and the run continues to analysis/synthesis with the partial source set. `0` disables the deadline. No new search or fetch is started after the deadline; the worst-case overshoot is bounded by the in-flight fetches' own `--fetch-timeout-secs`. |
 | `--local-phase-timeout-secs N` | none | Wall-clock timeout for the entire local phase. Aborts if exceeded. |
 | `--search-max-retries N` | 2 | Retries per failed sub-query. `0` disables retries. |
 | `--search-retry-base-delay-ms N` | 200 | First retry delay in ms, doubled each retry (200, 400, 800...). |
@@ -598,10 +644,11 @@ These flags control the performance and resilience of the gathering phases.
 
 ### Performance tuning examples
 
-For a slow network, reduce concurrency and increase timeouts:
+For a slow network, reduce concurrency and increase timeouts (including the
+60-second web phase deadline):
 
 ```text
-/research create slow-net "Distributed systems" --fetch-concurrently 4 --fetch-timeout-secs 60 --web-phase-timeout-secs 600
+/research create slow-net "Distributed systems" --fetch-concurrently 4 --fetch-timeout-secs 60 --web-time 600
 ```
 
 For a fast network with many expected results, increase concurrency:
@@ -717,13 +764,43 @@ When a research session runs, the TUI shows progress in three places:
 1. **Status bar** — a transient line such as
    `research: rust-async -- web -- running`. It updates per phase and
    becomes `research: rust-async complete -- 12 sources` when finished.
+   While the web phase is active, the top-right status segment also shows a
+   live `web:M:SS` countdown from the phase deadline (see below).
 2. **Message window** — a pinned `Research Progress -- rust-async` log
    lists each phase (setup, web, local, specs, synthesize, assemble,
-   finalize), captured sources, and audit results.
+   finalize) and audit results. Captured web sources are aggregated into a
+   per-engine summary table (counts by media type and per-language article
+   counts) instead of one line per URL, keeping the window compact while
+   sources stream in.
 3. **Log panel** — every progress event is logged at `Info` level.
 
 Research runs in the background; you can continue typing or start other
 work while it gathers.
+
+### Web-phase deadline countdown and timeout notice
+
+When a `/research create` run enters its web-gathering phase, the TUI status
+bar shows a live countdown in the top-right wait segment, for example
+`web:0:45`. The countdown is computed from a stored wall-clock deadline at
+render time, so it stays accurate even if the event loop skips redraws or
+receives a burst of events (FR-010, FR-013). It updates at least once per second
+while the web phase is active and is removed as soon as the phase completes,
+times out, or fails (FR-011).
+
+When the configured `--web-time` deadline elapses, the run continues with the
+sources already captured. A single, quantified notice is added to the research
+progress message, for example:
+
+```text
+**Web phase deadline reached** — 7 source(s) captured before timeout; proceeding to synthesis
+```
+
+This notice is rendered at most once per run (FR-012). The underlying
+`PhaseTimedOut` diagnostic is also emitted exactly once per gather phase,
+carrying the effective deadline and the final captured count (FR-004).
+
+Set `--web-time 0` to disable the deadline and allow the web phase to run to
+natural completion (FR-007).
 
 ### Progress events
 
@@ -733,7 +810,9 @@ The session emits structured events that the TUI renders:
   assemble, finalize).
 - **QueriesDecomposed** — the sub-queries generated by the planner.
 - **WebCaptured** — each web source captured (URL, title, search engine,
-  body preview, language, OA recovery info).
+  body preview, language, media type, OA recovery info). The TUI folds
+  these into the per-engine capture summary table; the log panel keeps a
+  one-line-per-URL record.
 - **FromUrlBodyPreview** — preview of a `--from-url` seed page body.
 - **FromFileBodyPreview** — preview of a `--from-file` seed document body.
 - **LocalCaptured** — each local file captured (path, relevance score).
@@ -1145,8 +1224,13 @@ Web search engine keys are top-level in `ragent.json`:
   (white papers, technical reports, academic papers).
 - **Use `--use-low-relevance`** when researching niche topics where even
   low-relevance sources may contain useful information.
-- **Set `--web-phase-timeout-secs`** on slow networks to prevent the web
-  phase from hanging indefinitely.
+- **Use `--web-time`** to raise (or lower) the web phase deadline — by
+  default the web phase is capped at 60 seconds, after which everything
+  gathered so far is ingested and the run continues to analysis/synthesis.
+  Set `--web-time 0` to remove the cap on slow networks. Once the deadline
+  elapses, no new search or fetch is started; the only overshoot is the
+  completion of fetches already in flight, each capped by
+  `--fetch-timeout-secs` (default 30 s), so the phase always returns.
 - **Re-run with the same name** to leverage the source vault — if enough
   sources are already cached, web search is skipped and the run is nearly
   instant.
@@ -1166,7 +1250,7 @@ Web search engine keys are top-level in `ragent.json`:
 | `0 sources` or very few | Search backends blocked / rate-limited | Run `/websearch test`; wait or add an API-backed engine |
 | `LLM synthesis failed — using mechanical fallback` | No API key, model down, or output malformed | Check provider setup; the report still contains deterministic summaries |
 | `CITATION_VERIFICATION_FAILED` | A citation marker `[#N]` points to a missing source | Run again with `--tier full`; the gate blocks shipment |
-| `web phase timed out` | Slow network or many candidate pages | Raise `--web-phase-timeout-secs` or lower `--fetch-concurrently` |
+| `web phase deadline reached` | The 60-second web phase deadline passed (slow network or many candidate pages) | The run continues with the sources gathered so far; raise `--web-time N` or lower `--fetch-concurrently` for fuller coverage. The deadline stops new searches and fetches from being started, so the phase cannot run unbounded — at most the fetches already in flight finish (each capped by `--fetch-timeout-secs`) |
 | `local phase timed out` | Large project with many files | Raise `--local-phase-timeout-secs` or lower `--local-concurrently` |
 | Name rejected | Invalid research name | Use 3–64 lowercase ASCII letters/digits/hyphens starting with a letter |
 | `research/<name>` already exists | Duplicate create | Use `/research open <name>` or pick a new name |

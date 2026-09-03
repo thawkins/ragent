@@ -35,7 +35,7 @@ fn append_top_three_list(out: &mut String, header: &str, items: &[impl AsRef<str
 
 /// Build a mechanical summary string listing how many sources of each kind
 /// were captured, plus the top-3 titles/paths/spec-ids.
-pub(crate) fn default_summary(sources: &[Source], topic: &str) -> String {
+pub fn default_summary(sources: &[Source], topic: &str) -> String {
     let web = sources
         .iter()
         .filter(|s| matches!(s, Source::Web { .. }))
@@ -123,7 +123,7 @@ fn finding_template(
 
 /// Build per-source findings (one per web/local/spec source) when no LLM
 /// analysis engine is available.
-pub(crate) fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
+pub fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
     let mut out = Vec::new();
     let web: Vec<&Source> = sources
         .iter()
@@ -348,7 +348,7 @@ pub(crate) fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
     out
 }
 
-pub(crate) fn default_top_implications(findings: &[String], topic: &str) -> Vec<String> {
+pub fn default_top_implications(findings: &[String], topic: &str) -> Vec<String> {
     // Try to extract the first sentence from each finding's **Implication:** paragraph.
     let re = Regex::new(r"(?i)\*\*Implication:\*\*\s*([^\n]+)").expect("valid implication regex");
     let mut extracted: Vec<String> = findings
@@ -390,7 +390,7 @@ pub(crate) fn default_top_implications(findings: &[String], topic: &str) -> Vec<
 /// Build a per-source bullet title + short excerpt suitable for embedding
 /// in the Findings section when no LLM analysis is available. Returns an
 /// empty string when the body is empty / unavailable.
-pub(crate) fn body_excerpt(body: &str, max_chars: usize) -> String {
+pub fn body_excerpt(body: &str, max_chars: usize) -> String {
     // Strip the "Excerpt — N keyword match(es)" header that the local
     // gatherer prepends so we don't double-print it in the Findings section.
     let stripped = body.strip_prefix("Excerpt —").map_or(body, |rest| {
@@ -426,7 +426,7 @@ pub(crate) fn body_excerpt(body: &str, max_chars: usize) -> String {
 }
 
 /// Build default open-questions bullets when no LLM analysis is available.
-pub(crate) fn default_open_questions(sources: &[Source], topic: &str) -> Vec<String> {
+pub fn default_open_questions(sources: &[Source], topic: &str) -> Vec<String> {
     let mut out = Vec::new();
     let web = sources
         .iter()
@@ -469,7 +469,7 @@ pub(crate) fn default_open_questions(sources: &[Source], topic: &str) -> Vec<Str
 
 /// Extract `CrossReference` entries from local sources.
 #[allow(dead_code)]
-pub(crate) fn cross_references_from(sources: &[Source]) -> Vec<CrossReference> {
+pub fn cross_references_from(sources: &[Source]) -> Vec<CrossReference> {
     sources
         .iter()
         .filter_map(|s| match s {

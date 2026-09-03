@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests validating the FR-019 (`AgentPerf` T-015) rule:
 //! `MutexGuard` MUST NOT cross an `.await` point on the agent hot path.
 //!

@@ -1,7 +1,7 @@
 //! Tests for the Context side panel (spec `contextpanel`).
 //!
 //! - **T-007**: Compute skills, memory and AGENTS.md partition sizes.
-//! Also covers the FR-005 system-prompt estimate used by the partitions.
+//!   Also covers the FR-005 system-prompt estimate used by the partitions.
 
 mod support;
 

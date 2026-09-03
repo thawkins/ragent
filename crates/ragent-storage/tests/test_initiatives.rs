@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the durable `initiatives` table CRUD in `ragent-storage`
 //! (JCODEPLAN M8 T-070).
 

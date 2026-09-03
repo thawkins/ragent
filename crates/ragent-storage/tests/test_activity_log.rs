@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the append-only activity event log store (maka spec T-002).
 //!
 //! Covers FR-001 (append persists before projection), FR-002 (monotonic seq +

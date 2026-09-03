@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests verifying that per-step regexes are pre-compiled
 //! (`AgentPerf` T-011 / FR-016).
 //!

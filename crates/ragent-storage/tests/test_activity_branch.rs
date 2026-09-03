@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for run branching from checkpoint (maka spec T-019, FR-018).
 //!
 //! FR-018: "When a run is branched (a new run created from a checkpoint of an

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `codeindex_explain` tool (spec graphCI, T-012).
 //!
 //! Covers FR-011 (explain a symbol's metadata and connections) and FR-017

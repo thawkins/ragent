@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for rollback to checkpoint / sequence (maka spec T-013, FR-007,
 //! FR-012).
 //!

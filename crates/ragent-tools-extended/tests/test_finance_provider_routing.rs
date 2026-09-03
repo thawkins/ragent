@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for paid-provider routing logic.
 //!
 //! These tests verify that the finance module selects the right provider based
@@ -240,7 +241,7 @@ fn test_yahoo_provider_from_config_falls_back_on_invalid_user_agent() {
         api_key: None,
         base_url: None,
         requests_per_minute: None,
-        user_agent: Some("".to_string()),
+        user_agent: Some(String::new()),
         min_call_interval_seconds: Default::default(),
         yahoo_fallback: None,
     };
@@ -354,7 +355,7 @@ mod helpers {
                     };
                 }
                 Ok(_) => continue,
-                Err(_) => panic!("event channel closed before AgentNotice"),
+                Err(e) => panic!("event channel closed before AgentNotice: {e}"),
             }
         }
     }

@@ -47,7 +47,7 @@ fn test_parse_root_tree_preserves_api_ordering() {
 fn test_parse_root_tree_empty_array() {
     let value = json!([]);
     let names = parse_root_tree(&value);
-    assert!(names.is_empty());
+    assert_eq!(names, Vec::<String>::new());
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn test_parse_root_tree_non_array_yields_empty() {
     // rather than panicking.
     let value = json!({"message": "Not Found"});
     let names = parse_root_tree(&value);
-    assert!(names.is_empty());
+    assert_eq!(names, Vec::<String>::new());
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn test_parse_root_tree_single_object_not_array() {
     // should still be robust to a non-array body.
     let value = json!({"name": "some_file", "type": "file"});
     let names = parse_root_tree(&value);
-    assert!(names.is_empty());
+    assert_eq!(names, Vec::<String>::new());
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn test_parse_root_tree_entries_without_name_skipped() {
 fn test_parse_root_tree_null_value() {
     let value = serde_json::Value::Null;
     let names = parse_root_tree(&value);
-    assert!(names.is_empty());
+    assert_eq!(names, Vec::<String>::new());
 }
 
 #[test]

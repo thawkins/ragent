@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for the Azure Resource Provider JSON parser.
 
 use std::io::Write;

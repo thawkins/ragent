@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `codeindex_godnodes` tool (spec graphCI, T-015).
 //!
 //! Covers FR-014 (top-N most-connected symbols) and FR-017 (non-blocking

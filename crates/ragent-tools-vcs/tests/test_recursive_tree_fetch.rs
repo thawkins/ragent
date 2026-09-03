@@ -144,7 +144,7 @@ async fn test_github_recursive_empty_directory() {
         .fetch_tree_recursive("owner", "repo", 3)
         .await
         .unwrap();
-    assert!(tree.is_empty());
+    assert_eq!(tree, Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -386,7 +386,7 @@ async fn test_gitlab_recursive_empty_directory() {
         .fetch_repository_tree_recursive("group/project", 3)
         .await
         .unwrap();
-    assert!(tree.is_empty());
+    assert_eq!(tree, Vec::<String>::new());
 }
 
 #[tokio::test]

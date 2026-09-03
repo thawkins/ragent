@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the shared [`ResearchRunRequest`] / [`build_session_config`] builder
 //! (RESEARCHPLAN.md Phase 4 — R-001/R-032 convergence).
 //!
@@ -11,6 +12,7 @@ use ragent_config::Config;
 use ragent_research::{
     ResearchRunRequest, build_session_config,
     run_config::{Depth, OutputFormat, Tier},
+    session::DEFAULT_WEB_PHASE_TIMEOUT_SECS,
 };
 
 // ── Defaults ───────────────────────────────────────────────────────────
@@ -37,6 +39,11 @@ fn build_session_config_applies_defaults_with_no_overrides() {
     assert!(!cfg.web.use_low_relevance);
     assert!(!cfg.web.disable_scholarly);
     assert!(!cfg.web.use_pdf_web_sources);
+    assert_eq!(
+        cfg.web.web_phase_timeout_secs,
+        Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS),
+        "omitted web_phase_timeout_secs must default to DEFAULT_WEB_PHASE_TIMEOUT_SECS"
+    );
 
     // Local
     assert!(cfg.local.max_local_sources > 0);
@@ -138,6 +145,20 @@ fn build_session_config_maps_all_explicit_fields() {
 
     // Engine
     assert_eq!(cfg.engine.tier, Tier::Dissertation);
+}
+
+#[test]
+fn build_session_config_zero_web_phase_timeout_disables_deadline() {
+    let req = ResearchRunRequest {
+        web_phase_timeout_secs: Some(0),
+        ..ResearchRunRequest::new("zero", "topic")
+    };
+    let cfg = build_session_config(&req, None);
+    assert_eq!(
+        cfg.web.web_phase_timeout_secs,
+        Some(0),
+        "explicit 0 must be preserved so the deadline is disabled"
+    );
 }
 
 // ── Tier parsing ────────────────────────────────────────────────────────

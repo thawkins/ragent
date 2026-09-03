@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! End-to-end integration tests for `ragent-research` (T-052).
 //!
 //! Exercises the full create → list → show → search → delete flow against a
@@ -100,6 +101,7 @@ async fn write_document_persists_supports_files_and_index() {
             relevance: "anchor file".into(),
         }],
         open_questions: vec!["What about errors?".into()],
+        concepts: None,
         contradiction_graph: None,
         loci: None,
         depth_investigation: None,

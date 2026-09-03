@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the immutable event-id and sequence-number guarantees of the
 //! activity log (maka spec T-003, FR-002).
 //!

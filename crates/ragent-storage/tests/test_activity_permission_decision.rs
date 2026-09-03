@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for recording permission-decision events (maka spec T-006, FR-005).
 //!
 //! FR-005: "When a permission decision is made (grant or deny) for a tool that

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the explain query (spec graphCI, T-009).
 
 use chrono::Utc;

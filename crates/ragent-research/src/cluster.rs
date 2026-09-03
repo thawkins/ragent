@@ -28,7 +28,10 @@ pub const BYTES_PER_TOKEN_GUESS: usize = 4;
 /// dispatched to the active LLM (FR-005, FR-006, FR-014).
 ///
 /// The prompt explicitly asks for a predictable markdown structure so the
-/// resulting `CONCEPTS.md` can be lightly normalized by [`format_concepts_md`].
+/// resulting `CONCEPTS.md` can be lightly normalized by
+/// [`format_concepts_md_with_sources`]. Concept headings are numbered
+/// sequentially and evidence bullets cite sources with `[#N]` markers so each
+/// concept traces back to the References Index in `RESEARCH.md`.
 pub const CONCEPT_EXTRACTION_PROMPT_TEMPLATE: &str = "You are an expert data analyst and researcher. Analyze the provided documents and extract the most important concepts, themes, and ideas across them.\n\
     \n\
     Instructions:\n\
@@ -37,16 +40,16 @@ pub const CONCEPT_EXTRACTION_PROMPT_TEMPLATE: &str = "You are an expert data ana
     2. Identify up to 20 core concepts that appear frequently, carry significant weight, or tie the documents together. Avoid overlapping or repetitive concepts.\n\
     3. For each concept, produce a markdown section with:\n\
     \n\
-       - A level-2 heading (`## Concept Name`) with a concise label (2-4 words).\n\
+       - A level-2 heading (`## N. Concept Name`) with a concise label (2-4 words), where N is the concept's sequential number starting at 1.\n\
        - A **Definition** paragraph (1-2 sentences).\n\
-       - A **Key Evidence** bullet list with 1-2 brief examples from the text.\n\
+       - A **Key Evidence** bullet list with 1-2 brief examples from the text, citing the contributing documents with `[#N]` citation markers (e.g. `[#1]`, `[#7]`), where N is the number in each document header (`--- web-NN.md ---`).\n\
     \n\
     Output format requirements:\n\
     \n\
     - Begin the response with a single `# Concepts` level-1 heading.\n\
-    - Use level-2 headings (`##`) for each concept name.\n\
+    - Use level-2 headings (`##`) for each concept name, numbered sequentially (`## 1. First Concept`, `## 2. Second Concept`, ...).\n\
     - Use bold labels (`**Definition:**` and `**Key Evidence:**`) inside each section.\n\
-    - Keep evidence bullets short and specific.\n\
+    - Keep evidence bullets short and specific, and cite sources with `[#N]` markers (N matches the number in each document's `web-NN.md` header) for each claim.\n\
     - Focus on depth and relevance over quantity.\n\
     \n\
     Here are the documents:\n\
@@ -119,6 +122,264 @@ pub fn format_concepts_md(raw: &str) -> String {
         out.push('\n');
     }
     out
+}
+
+/// Metadata for one captured web source, parsed from the header block of its
+/// `sources/web-NN.md` supporting file.
+///
+/// The header is the `- Key: value` list that
+/// `crate::document::render_supporting_file` writes at the top of every web
+/// source file (`URL`, `Title`, `Author(s)`, `Published (UTC)`, ...). Values
+/// the file does not expose stay empty and are omitted from the rendered
+/// `**WebSources:**` block by [`format_concepts_md_with_sources`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WebSourceMeta {
+    /// 1-based source index parsed from the `web-NN.md` filename. This is the
+    /// same number used by `[#N]` citations in `RESEARCH.md`.
+    pub index: usize,
+    /// Supporting-file basename (e.g. `web-01.md`).
+    pub file: String,
+    /// Source URL from the `- URL:` header line.
+    pub url: String,
+    /// Source title from the `- Title:` header line.
+    pub title: String,
+    /// Author name from the `- Author(s):` header line (empty when unknown).
+    pub author: String,
+    /// Publication date as `YYYY-MM-DD` parsed from the `- Published (UTC):`
+    /// header line (empty when the page exposed no date).
+    pub published: String,
+}
+
+/// Read every `web-NN.md` file under the item's `sources/` directory and
+/// parse its header block into [`WebSourceMeta`] entries, sorted by index.
+///
+/// Files without a parseable `web-NN` index are skipped. Missing metadata
+/// fields remain empty strings.
+///
+/// # Errors
+///
+/// Returns [`ResearchIoError::Io`] when the `sources/` directory or one of
+/// its files cannot be read.
+pub fn load_web_source_metadata(
+    research_root: &Path,
+    name: &ResearchName,
+) -> Result<Vec<WebSourceMeta>, ResearchIoError> {
+    static FILE_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let file_re =
+        FILE_RE.get_or_init(|| regex::Regex::new(r"^web-(\d+)\.md$").expect("valid regex"));
+
+    let sources_dir = ResearchIo::sources_dir(research_root, name);
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&sources_dir)? {
+        let path = entry?.path();
+        let Some(filename) = path.file_name().and_then(|f| f.to_str()) else {
+            continue;
+        };
+        let Some(caps) = file_re.captures(filename) else {
+            continue;
+        };
+        let index: usize = caps[1].parse().unwrap_or(0);
+        if index == 0 {
+            continue;
+        }
+        let body = std::fs::read_to_string(&path)?;
+        out.push(parse_web_source_header(&body, index, filename));
+    }
+    out.sort_by_key(|m| m.index);
+    Ok(out)
+}
+
+/// Parse the `- Key: value` header lines of a web source supporting file.
+///
+/// Only the lines before the first ``` fence are considered; the fenced body
+/// below the header is the captured page text, not metadata.
+fn parse_web_source_header(body: &str, index: usize, filename: &str) -> WebSourceMeta {
+    let mut meta = WebSourceMeta {
+        index,
+        file: filename.to_string(),
+        ..WebSourceMeta::default()
+    };
+    for line in body.lines() {
+        if line.trim_start().starts_with("```") {
+            break;
+        }
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("- URL: ") {
+            meta.url = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("- Title: ") {
+            meta.title = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("- Author(s): ") {
+            // The supporting-file header uses an em-dash placeholder for
+            // unknown authors; treat it as empty so the bullet omits it.
+            let v = v.trim();
+            meta.author = if v == "\u{2014}" || v == "--" {
+                String::new()
+            } else {
+                v.to_string()
+            };
+        } else if let Some(v) = line.strip_prefix("- Published (UTC): ") {
+            // Normalize the RFC-3339 timestamp to the YYYY-MM-DD form used in
+            // `RESEARCH.md` source bullets.
+            let v = v.trim();
+            meta.published = if v == "\u{2014}" || v == "--" {
+                String::new()
+            } else {
+                v.chars().take(10).collect()
+            };
+        }
+    }
+    meta
+}
+
+/// Render one `**WebSources:**` bullet in the exact `RESEARCH.md` Findings
+/// style: `- [N] Title [Author] — URL (published YYYY-MM-DD)`, with the
+/// author and published segments omitted when unknown. Mirrors
+/// `crate::document::render_finding_sources`.
+fn render_web_source_bullet(meta: &WebSourceMeta) -> String {
+    let title = if meta.title.is_empty() {
+        meta.url.as_str()
+    } else {
+        meta.title.as_str()
+    };
+    let mut out = format!("- [{}] {}", meta.index, title);
+    if !meta.author.is_empty() {
+        out.push_str(&format!(" [{}]", meta.author));
+    }
+    out.push_str(" \u{2014} ");
+    out.push_str(&meta.url);
+    if !meta.published.is_empty() {
+        out.push_str(&format!(" (published {})", meta.published));
+    }
+    out
+}
+
+/// Normalize an LLM concept-extraction response and append a
+/// `**WebSources:**` block to every concept that cites captured sources.
+///
+/// Extends [`format_concepts_md`] with two `RESEARCH.md`-aligned passes:
+///
+/// * **Numbering** — every `## ` heading is renumbered sequentially
+///   (`## 1. ...`, `## 2. ...`, ...). Any existing leading number
+///   (`## 3. ...`, `## 3 - ...`, `## 3: ...`) is stripped first so a model
+///   that miscounts still yields a clean sequential run.
+/// * **Source mapping** — each concept section is scanned for `web-NN`
+///   filename citations (still accepted from models trained on the older
+///   prompt); matching entries from `sources` are rendered as a trailing
+///   `**WebSources:**` bullet list in the same format as the `**Sources:**`
+///   block under `## Findings` in `RESEARCH.md`. Sections with no recognized
+///   citations are left untouched.
+/// * **Citation style** — every inline `web-NN` mention in the section body is
+///   rewritten to the `[#N]` citation form used by `RESEARCH.md` so both
+///   documents share one reference style.
+///
+/// URLs are linkified to `[url](url)` Markdown form so the companion matches
+/// the clickable references in `RESEARCH.md`.
+#[must_use]
+pub fn format_concepts_md_with_sources(raw: &str, sources: &[WebSourceMeta]) -> String {
+    let formatted = format_concepts_md(raw);
+    if formatted.lines().count() <= 1 {
+        // The placeholder/empty render has no concept sections.
+        return formatted;
+    }
+
+    static NUM_PREFIX_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static WEB_REF_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static HASH_REF_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let num_prefix_re = NUM_PREFIX_RE.get_or_init(|| {
+        regex::Regex::new(r"^\d+\s*[.):\-\u{2013}\u{2014}]\s*").expect("valid regex")
+    });
+    let web_ref_re =
+        WEB_REF_RE.get_or_init(|| regex::Regex::new(r"\bweb-(\d+)\b").expect("valid regex"));
+    let hash_ref_re =
+        HASH_REF_RE.get_or_init(|| regex::Regex::new(r"\[#(\d+)\]").expect("valid regex"));
+
+    let by_index: std::collections::HashMap<usize, &WebSourceMeta> =
+        sources.iter().map(|m| (m.index, m)).collect();
+
+    // Pass 1: renumber every `## ` heading sequentially.
+    let mut numbered = String::with_capacity(formatted.len() + 64);
+    let mut concept_no = 0usize;
+    for line in formatted.lines() {
+        if line.starts_with("## ") {
+            concept_no += 1;
+            let label = num_prefix_re.replace(&line[3..], "").trim().to_string();
+            numbered.push_str(&format!("## {concept_no}. {label}\n"));
+        } else {
+            numbered.push_str(line);
+            numbered.push('\n');
+        }
+    }
+
+    // Pass 2: append a `**WebSources:**` block to sections that cite sources.
+    let mut sections: Vec<Vec<&str>> = Vec::new();
+    let mut current: Vec<&str> = Vec::new();
+    for line in numbered.lines() {
+        if line.starts_with("## ") && !current.is_empty() {
+            sections.push(std::mem::take(&mut current));
+        }
+        current.push(line);
+    }
+    if !current.is_empty() {
+        sections.push(current);
+    }
+
+    let mut out = String::with_capacity(numbered.len() + 256);
+    for (i, section) in sections.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        for line in section {
+            // Rewrite inline `web-NN` citations to the unpadded `[#N]` style
+            // used by `RESEARCH.md` so both documents share one format.
+            let rewritten = web_ref_re.replace_all(line, |caps: &regex::Captures| {
+                let n = caps[1].trim_start_matches('0');
+                format!("[#{}]", if n.is_empty() { "0" } else { n })
+            });
+            out.push_str(&rewritten);
+            out.push('\n');
+        }
+        while out.ends_with("\n\n") {
+            out.pop();
+        }
+        let body = section
+            .iter()
+            .filter(|l| !l.starts_with("## "))
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut indices: Vec<usize> = web_ref_re
+            .find_iter(&body)
+            .filter_map(|m| m.as_str()[4..].parse().ok())
+            .chain(
+                hash_ref_re
+                    .find_iter(&body)
+                    .filter_map(|m| m.as_str()[2..m.as_str().len() - 1].parse().ok()),
+            )
+            .collect();
+        indices.sort_unstable();
+        indices.dedup();
+        let cited: Vec<&WebSourceMeta> = indices
+            .iter()
+            .filter_map(|n| by_index.get(n).copied())
+            .collect();
+        if !cited.is_empty() {
+            out.push_str("\n**WebSources:**\n");
+            for meta in &cited {
+                out.push_str(&render_web_source_bullet(meta));
+                out.push('\n');
+            }
+        }
+    }
+    if !out.ends_with("\n\n") {
+        // Guarantee exactly one blank line between sections.
+        while out.ends_with('\n') {
+            out.pop();
+        }
+        out.push_str("\n\n");
+    }
+    let mut linked = crate::document::linkify_urls(out.trim_end());
+    linked.push('\n');
+    linked
 }
 
 /// Assembled source payload returned by [`build_cluster_payload_sync`].
@@ -284,8 +545,128 @@ pub fn build_concept_extraction_prompt(payload: &ClusterPayload) -> String {
     CONCEPT_EXTRACTION_PROMPT_TEMPLATE.replace("[INSERT_DOCUMENTS_HERE]", &payload.text)
 }
 
+/// Assemble an in-memory concept-extraction payload from the gathered source
+/// bodies of a `/research create` run.
+///
+/// Unlike [`build_cluster_payload_sync`] (which reads the on-disk
+/// `sources/web-NN.md` supporting files), this variant takes the source bodies
+/// the synthesis step already loaded, so it works mid-session before any
+/// supporting files are written. Each document block is headed
+/// `--- [#N] Title ---` where `N` is the 1-based position in the gathered
+/// source list — the same number the References Index in `RESEARCH.md` uses —
+/// so the model's `[#N]` citations resolve against that index directly.
+///
+/// Documents are appended in order until `max_bytes` is reached; a document
+/// that does not fit is truncated to the remaining budget (matching
+/// [`truncate_to_char_boundary`]).
+#[must_use]
+pub fn build_concepts_payload_from_bodies(
+    bodies: &[crate::analysis::SourceBody],
+    max_bytes: usize,
+) -> String {
+    let mut text = String::new();
+    let mut remaining = max_bytes;
+    for body in bodies {
+        let title = if body.title.trim().is_empty() {
+            body.path_or_url.as_str()
+        } else {
+            body.title.as_str()
+        };
+        let header = format!("\n\n--- [#{}] {} ---\n\n", body.index, title);
+        let header_len = header.len();
+        let body_budget = remaining.saturating_sub(header_len);
+        if body_budget == 0 {
+            break;
+        }
+        let doc = truncate_to_char_boundary(&body.body, body_budget);
+        text.push_str(&header);
+        text.push_str(&doc);
+        remaining = remaining.saturating_sub(header_len + doc.len());
+    }
+    text
+}
+
+/// Normalize a concept-extraction LLM response for embedding as the
+/// `## Concepts` section inside `RESEARCH.md`.
+///
+/// Transformations applied:
+///
+/// * The `# Concepts` level-1 heading is dropped (the section provides its own
+///   `## Concepts` heading in the parent document).
+/// * Every `## N. Name` concept heading is demoted to `### N. Name` so it
+///   nests correctly under the parent section.
+/// * Inline `web-NN` filename citations are rewritten to `[#M]` where `M` is
+///   the combined References Index position supplied by `web_index_map`
+///   (supporting-file number to 1-based combined index). `[#N]` citations are
+///   kept verbatim.
+///
+/// Returns `None` when the response contains no concept sections, so callers
+/// can omit the parent section entirely.
+#[must_use]
+pub fn concepts_section_for_research<S: std::hash::BuildHasher>(
+    raw: &str,
+    web_index_map: &std::collections::HashMap<usize, usize, S>,
+) -> Option<String> {
+    static WEB_REF_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let web_ref_re =
+        WEB_REF_RE.get_or_init(|| regex::Regex::new(r"\bweb-(\d+)\b").expect("valid regex"));
+
+    let mut out = String::with_capacity(raw.len() + 64);
+    let mut sections = 0usize;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !out.ends_with("\n\n") && !out.is_empty() {
+                out.push('\n');
+            }
+            continue;
+        }
+        // Drop the level-1 heading the prompt asks for.
+        if trimmed.starts_with("# ") && !trimmed.starts_with("## ") {
+            continue;
+        }
+        let line = if let Some(rest) = trimmed.strip_prefix("## ") {
+            // Demote the concept heading one level.
+            format!("### {rest}")
+        } else {
+            trimmed.to_string()
+        };
+        let line = web_ref_re
+            .replace_all(&line, |caps: &regex::Captures| {
+                let file_no: usize = caps[1].parse().unwrap_or(0);
+                match web_index_map.get(&file_no) {
+                    Some(combined) => format!("[#{combined}]"),
+                    // Unknown web-NN (no combined index): keep the citation
+                    // number as-is so it at least matches the cluster-style
+                    // numbering rather than dangling as a filename.
+                    None => format!("[#{}]", caps[1].trim_start_matches('0')),
+                }
+            })
+            .into_owned();
+        if line.starts_with("### ") {
+            if sections > 0 {
+                out.push('\n');
+            }
+            sections += 1;
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    let out = out.trim().to_string();
+    if sections == 0 || out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 /// Write the LLM-generated concept extraction response as `CONCEPTS.md` in the
 /// research item folder (FR-007).
+///
+/// The captured `sources/web-NN.md` headers are parsed so the output gains the
+/// sequential concept numbering and `**WebSources:**` reference blocks applied
+/// by [`format_concepts_md_with_sources`]. If the source headers cannot be
+/// read, formatting degrades to plain [`format_concepts_md`] normalization.
 ///
 /// The caller is responsible for the overwrite guard (FR-008); this function
 /// will overwrite an existing `CONCEPTS.md` if one is present. Writes are
@@ -302,13 +683,15 @@ pub async fn write_concepts_md(
     content: &str,
 ) -> Result<PathBuf, ResearchIoError> {
     let path = ResearchIo::concepts_md_path(research_root, name);
-    let formatted = format_concepts_md(content);
+    let sources = load_web_source_metadata(research_root, name).unwrap_or_default();
+    let formatted = format_concepts_md_with_sources(content, &sources);
     ResearchIo::atomic_write(&path, &formatted).await?;
     Ok(path)
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty)]
     use super::*;
 
     fn tmp_root() -> (tempfile::TempDir, ResearchName) {
@@ -415,8 +798,8 @@ mod tests {
             "prompt should contain the fixed persona/instructions"
         );
         assert!(
-            prompt.contains("## Concept Name"),
-            "prompt should request level-2 concept headings"
+            prompt.contains("## N. Concept Name"),
+            "prompt should request numbered level-2 concept headings"
         );
         assert!(
             prompt.contains("**Definition**"),
@@ -425,6 +808,14 @@ mod tests {
         assert!(
             prompt.contains("**Key Evidence**"),
             "prompt should request bold evidence label"
+        );
+        assert!(
+            prompt.contains("web-01"),
+            "prompt should reference the document-header filename form"
+        );
+        assert!(
+            prompt.contains("[#1]"),
+            "prompt should ask the model to cite sources with [#N] markers"
         );
         assert!(
             prompt.contains("# Concepts"),
@@ -545,7 +936,8 @@ mod tests {
         .expect("write");
         let content = std::fs::read_to_string(&path).expect("read");
         assert!(content.starts_with("# Concepts\n"));
-        assert!(content.contains("## Gamma"));
+        // Headings are renumbered sequentially by format_concepts_md_with_sources.
+        assert!(content.contains("## 1. Gamma"));
         assert!(!content.contains("\n\n\n"));
         assert!(content.ends_with('\n'));
     }

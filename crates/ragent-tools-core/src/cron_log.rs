@@ -328,7 +328,7 @@ mod tests {
         assert_eq!(e.outcome, "success");
         assert!(e.error.is_none());
         assert_eq!(e.run_id.as_deref(), Some("session-123"));
-        assert!(!e.timestamp.is_empty());
+        assert_ne!(e.timestamp, "", "timestamp should not be empty");
 
         clear_cron_logs(wd);
     }

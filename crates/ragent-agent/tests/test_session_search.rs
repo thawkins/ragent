@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `session_search` tool.
 
 use ragent_agent::event::EventBus;

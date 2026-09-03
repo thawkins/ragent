@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for Ollama (OpenAI-compatible) streaming tool-call handling.
 
 use std::collections::HashMap;
@@ -180,9 +181,9 @@ async fn test_ollama_parses_reasoning_and_tool_calls_from_stream() {
         "tool args should contain London; got {args}"
     );
 
-    let finishes: Vec<_> = events
+    let finish_count = events
         .iter()
         .filter(|e| matches!(e, StreamEvent::Finish { .. }))
-        .collect();
-    assert_eq!(finishes.len(), 1, "expected a finish event");
+        .count();
+    assert_eq!(finish_count, 1, "expected a finish event");
 }

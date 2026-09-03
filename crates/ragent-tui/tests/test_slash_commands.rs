@@ -87,17 +87,18 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
 
 struct CwdGuard {
     prev: std::path::PathBuf,
-    _lock: MutexGuard<'static, ()>,
+    #[allow(dead_code)]
+    lock: MutexGuard<'static, ()>,
     /// Optional tempdir, declared last so it is deleted only after cwd has
     /// been restored (drop order = field declaration order).
-    _temp: Option<tempfile::TempDir>,
+    temp: Option<tempfile::TempDir>,
 }
 
 impl CwdGuard {
     /// Path of the guard's working directory (the tempdir when present).
     #[allow(dead_code)]
     fn path(&self) -> std::path::PathBuf {
-        self._temp
+        self.temp
             .as_ref()
             .map(|t| t.path().to_path_buf())
             .unwrap_or_else(|| std::env::current_dir().expect("current dir"))
@@ -119,13 +120,13 @@ impl Drop for CwdGuard {
 /// `std::sync::Mutex` is not re-entrant).
 #[allow(dead_code)] // used by tests that require cwd manipulation
 fn with_cwd(dir: &std::path::Path) -> CwdGuard {
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let prev = std::env::current_dir().expect("current dir");
     std::env::set_current_dir(dir).expect("set_current_dir");
     CwdGuard {
         prev,
-        _lock,
-        _temp: None,
+        lock,
+        temp: None,
     }
 }
 
@@ -174,17 +175,17 @@ fn enter_temp_config_dir() -> tempfile::TempDir {
 /// Create a tempdir, chdir into it, and return a guard that restores the
 /// previous cwd on drop. The shared cwd mutex is held for the guard's whole
 /// lifetime, and the tempdir is deleted only after cwd has been restored
-/// (field drop order). Declared `_temp` and `_lock` locals are not needed at
+/// (field drop order). Declared `temp` and `lock` locals are not needed at
 /// the call site, which removes a common cause of cwd-mutex deadlock.
 fn enter_with_cwd() -> CwdGuard {
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let prev = std::env::current_dir().expect("current dir");
     let temp = tempfile::TempDir::new().expect("tempdir");
     std::env::set_current_dir(temp.path()).expect("set_current_dir");
     CwdGuard {
         prev,
-        _lock,
-        _temp: Some(temp),
+        lock,
+        temp: Some(temp),
     }
 }
 
@@ -205,13 +206,13 @@ fn cwd_lock() -> MutexGuard<'static, ()> {
 #[test]
 fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
     let _guard = CwdGuard {
         prev: original_cwd,
-        _lock,
-        _temp: None,
+        lock,
+        temp: None,
     };
     ragent_config::edit_log::set_enabled(false);
 
@@ -261,13 +262,13 @@ fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
 #[test]
 fn test_slash_editlog_toggles_and_persists() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
     let _guard = CwdGuard {
         prev: original_cwd,
-        _lock,
-        _temp: None,
+        lock,
+        temp: None,
     };
     ragent_config::edit_log::set_enabled(false);
 
@@ -2712,13 +2713,13 @@ fn test_slash_tools_show_alias_lists_visibility_switches() {
 
 #[test]
 fn test_slash_tools_office_on_shows_office_tools() {
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
     let _guard = CwdGuard {
         prev: original_cwd,
-        _lock,
-        _temp: None,
+        lock,
+        temp: None,
     };
 
     let mut app = make_app();
@@ -2756,13 +2757,13 @@ fn test_slash_tools_office_on_shows_office_tools() {
 
 #[test]
 fn test_slash_tools_teams_on_shows_team_tools() {
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
     let _guard = CwdGuard {
         prev: original_cwd,
-        _lock,
-        _temp: None,
+        lock,
+        temp: None,
     };
 
     let mut app = make_app();
@@ -2801,13 +2802,13 @@ fn test_slash_tools_teams_on_shows_team_tools() {
 
 #[test]
 fn test_slash_tools_agents_on_shows_agent_tools() {
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
     let _guard = CwdGuard {
         prev: original_cwd,
-        _lock,
-        _temp: None,
+        lock,
+        temp: None,
     };
 
     let mut app = make_app();
@@ -2846,13 +2847,13 @@ fn test_slash_tools_agents_on_shows_agent_tools() {
 
 #[test]
 fn test_slash_tools_plan_on_shows_plan_tools() {
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
     let _guard = CwdGuard {
         prev: original_cwd,
-        _lock,
-        _temp: None,
+        lock,
+        temp: None,
     };
 
     let mut app = make_app();
@@ -3595,13 +3596,13 @@ fn test_config_save_picker_state_struct_construction() {
 #[test]
 fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
     let _guard = CwdGuard {
         prev: original_cwd,
-        _lock,
-        _temp: None,
+        lock,
+        temp: None,
     };
     ragent_config::yolo::set_enabled(false);
 
@@ -3652,13 +3653,13 @@ fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
 #[test]
 fn test_slash_yolo_toggles_and_persists() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let _lock = cwd_lock();
+    let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
     let _guard = CwdGuard {
         prev: original_cwd,
-        _lock,
-        _temp: None,
+        lock,
+        temp: None,
     };
     ragent_config::yolo::set_enabled(false);
 
@@ -4134,7 +4135,7 @@ fn test_triggers_status_empty() {
         "status should show header: {text}"
     );
     assert!(
-        text.contains("Total rules") && text.contains("0"),
+        text.contains("Total rules") && text.contains('0'),
         "status should show zero rules: {text}"
     );
     assert_eq!(app.status, "triggers: status");
@@ -4151,11 +4152,11 @@ fn test_triggers_status_with_rules() {
     app.execute_slash_command("/triggers status");
     let text = app.messages.last().unwrap().text_content();
     assert!(
-        text.contains("Total rules") && text.contains("2"),
+        text.contains("Total rules") && text.contains('2'),
         "status should show 2 rules: {text}"
     );
     assert!(
-        text.contains("Active") && text.contains("2"),
+        text.contains("Active") && text.contains('2'),
         "status should show 2 active: {text}"
     );
     assert_eq!(app.status, "triggers: status");
@@ -4223,14 +4224,14 @@ fn test_inbox_no_subcommand_defaults_to_list() {
 
 #[test]
 fn test_inbox_list_with_entries() {
-    let _guard = enter_with_cwd();
+    let guard = enter_with_cwd();
 
     // Write some inbox entries directly to the JSONL file
     let entries = vec![
         ragent_agent::loop_state::InboxEntry::new("event-abc", "first finding"),
         ragent_agent::loop_state::InboxEntry::new("event-xyz", "second finding"),
     ];
-    ragent_agent::loop_state::write_inbox_entries(&_guard.path(), &entries).expect("write entries");
+    ragent_agent::loop_state::write_inbox_entries(&guard.path(), &entries).expect("write entries");
 
     let mut app = make_app();
     app.execute_slash_command("/inbox list");
@@ -4256,11 +4257,11 @@ fn test_inbox_list_with_entries() {
 
 #[test]
 fn test_inbox_claim_existing() {
-    let _guard = enter_with_cwd();
+    let guard = enter_with_cwd();
 
     let entry = ragent_agent::loop_state::InboxEntry::new("event-1", "test finding");
     let entry_id = entry.id.clone();
-    ragent_agent::loop_state::write_inbox_entries(&_guard.path(), &[entry]).expect("write entry");
+    ragent_agent::loop_state::write_inbox_entries(&guard.path(), &[entry]).expect("write entry");
 
     let mut app = make_app();
     app.execute_slash_command(&format!("/inbox claim {entry_id}"));
@@ -4269,7 +4270,7 @@ fn test_inbox_claim_existing() {
     assert_eq!(app.status, "inbox: claimed");
 
     // Verify the status was persisted
-    let read = ragent_agent::loop_state::read_inbox(&_guard.path()).unwrap();
+    let read = ragent_agent::loop_state::read_inbox(&guard.path()).unwrap();
     assert_eq!(read[0].status, "claimed");
 }
 
@@ -4303,11 +4304,11 @@ fn test_inbox_claim_no_id() {
 
 #[test]
 fn test_inbox_dismiss_existing() {
-    let _guard = enter_with_cwd();
+    let guard = enter_with_cwd();
 
     let entry = ragent_agent::loop_state::InboxEntry::new("event-1", "to dismiss");
     let entry_id = entry.id.clone();
-    ragent_agent::loop_state::write_inbox_entries(&_guard.path(), &[entry]).expect("write entry");
+    ragent_agent::loop_state::write_inbox_entries(&guard.path(), &[entry]).expect("write entry");
 
     let mut app = make_app();
     app.execute_slash_command(&format!("/inbox dismiss {entry_id}"));
@@ -4316,7 +4317,7 @@ fn test_inbox_dismiss_existing() {
     assert_eq!(app.status, "inbox: dismissed");
 
     // Verify the status was persisted
-    let read = ragent_agent::loop_state::read_inbox(&_guard.path()).unwrap();
+    let read = ragent_agent::loop_state::read_inbox(&guard.path()).unwrap();
     assert_eq!(read[0].status, "dismissed");
 }
 
@@ -4350,13 +4351,13 @@ fn test_inbox_dismiss_no_id() {
 
 #[test]
 fn test_inbox_clear_with_entries() {
-    let _guard = enter_with_cwd();
+    let guard = enter_with_cwd();
 
     let entries = vec![
         ragent_agent::loop_state::InboxEntry::new("event-1", "first"),
         ragent_agent::loop_state::InboxEntry::new("event-2", "second"),
     ];
-    ragent_agent::loop_state::write_inbox_entries(&_guard.path(), &entries).expect("write entries");
+    ragent_agent::loop_state::write_inbox_entries(&guard.path(), &entries).expect("write entries");
 
     let mut app = make_app();
     app.execute_slash_command("/inbox clear");
@@ -4369,7 +4370,7 @@ fn test_inbox_clear_with_entries() {
 
     // Verify the file is gone
     assert!(
-        !_guard
+        !guard
             .path()
             .join("log")
             .join("inbox")
@@ -4427,14 +4428,14 @@ fn test_inbox_unknown_subcommand() {
 
 #[test]
 fn test_inbox_list_shows_status() {
-    let _guard = enter_with_cwd();
+    let guard = enter_with_cwd();
 
     let entry = ragent_agent::loop_state::InboxEntry::new("event-1", "test finding");
     let entry_id = entry.id.clone();
-    ragent_agent::loop_state::write_inbox_entries(&_guard.path(), &[entry]).expect("write entry");
+    ragent_agent::loop_state::write_inbox_entries(&guard.path(), &[entry]).expect("write entry");
 
     // Claim it first
-    ragent_agent::loop_state::update_inbox_entry_status(&_guard.path(), &entry_id, "claimed")
+    ragent_agent::loop_state::update_inbox_entry_status(&guard.path(), &entry_id, "claimed")
         .expect("update status");
 
     let mut app = make_app();

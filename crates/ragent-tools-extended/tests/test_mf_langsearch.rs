@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for `masterfetch::search::langsearch` — LangSearch API backend
 //! (T-003, FR-001, FR-003, FR-005).
 //!

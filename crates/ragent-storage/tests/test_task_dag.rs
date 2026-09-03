@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! todo2tasks T-004: tests for the dependency DAG computation
 //! (`compute_task_dag`, `get_task_view`, `list_task_views`).
 //!

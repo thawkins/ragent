@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Diagnostic tests for FTS search issues
 use std::path::Path;
 

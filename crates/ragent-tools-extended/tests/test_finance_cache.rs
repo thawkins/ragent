@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Unit tests for `finance::cache` TTL and eviction behavior.
 //!
 //! These tests exercise the public `QuoteCache` API through the crate boundary

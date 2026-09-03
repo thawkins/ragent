@@ -1,3 +1,4 @@
+#![allow(clippy::field_reassign_with_default)]
 //! Integration tests for the `piegap` config block (FR-016, FR-018 / T-021, T-022).
 //!
 //! These tests verify:
@@ -33,8 +34,8 @@ fn default_piegap_config_has_all_flags_disabled() {
 #[test]
 fn top_level_config_defaults_piegap_when_absent() {
     let cfg: Config = serde_json::from_str("{}").expect("parse");
+    assert!(cfg.piegap.is_empty(), "default piegap should be empty");
     assert_eq!(cfg.piegap, PieGapConfig::default());
-    assert!(cfg.piegap.is_empty());
 }
 
 #[test]
@@ -54,14 +55,17 @@ fn top_level_config_parses_piegap_block() {
     assert!(!cfg.piegap.hooks);
     assert!(!cfg.piegap.archive);
     assert!(!cfg.piegap.web_ui);
-    assert!(!cfg.piegap.is_empty());
+    assert!(!cfg.piegap.is_empty(), "expected non-empty cfg.piegap");
 }
 
 #[test]
 fn piegap_config_deserializes_empty_block() {
     let json = r#"{"piegap": {}}"#;
     let cfg: Config = serde_json::from_str(json).expect("parse");
-    assert!(cfg.piegap.is_empty());
+    assert!(
+        cfg.piegap.is_empty(),
+        "empty piegap block should parse to defaults"
+    );
     assert_eq!(cfg.piegap, PieGapConfig::default());
 }
 
@@ -303,8 +307,8 @@ fn piegap_merge_both_empty_stays_empty() {
 
     base.merge(&overlay);
 
-    assert!(base.is_empty());
-    assert!(overlay.is_empty());
+    assert!(base.is_empty(), "base should be empty");
+    assert!(overlay.is_empty(), "overlay should be empty");
 }
 
 #[test]
@@ -336,7 +340,7 @@ fn piegap_merge_all_flags_from_overlay() {
     assert!(base.web_ui);
     assert!(base.undo);
     assert!(base.session_naming);
-    assert!(!base.is_empty());
+    assert!(!base.is_empty(), "expected non-empty base");
 }
 
 #[test]

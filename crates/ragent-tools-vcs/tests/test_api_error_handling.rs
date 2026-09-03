@@ -53,7 +53,7 @@ fn test_classify_long_body_truncated() {
     // The snippet should be at most ~200 chars + "Response: " prefix.
     let response_part = msg.split("Response: ").nth(1).unwrap_or("");
     assert!(
-        response_part.starts_with("x"),
+        response_part.starts_with('x'),
         "truncated body should start with content"
     );
 }
@@ -110,7 +110,7 @@ fn test_classify_404_does_not_include_body() {
 
 #[test]
 fn test_classify_403_with_reset_time() {
-    let msg = classify_api_error(403, "o/r", "", Some(1787366400));
+    let msg = classify_api_error(403, "o/r", "", Some(1_787_366_400));
     assert!(msg.contains("403"));
     assert!(msg.contains("rate limit"));
     assert!(
@@ -125,7 +125,7 @@ fn test_classify_403_with_reset_time() {
 
 #[test]
 fn test_classify_429_with_reset_time() {
-    let msg = classify_api_error(429, "o/r", "", Some(1787366400));
+    let msg = classify_api_error(429, "o/r", "", Some(1_787_366_400));
     assert!(msg.contains("429"));
     assert!(msg.contains("rate limit"));
     assert!(msg.contains("Rate limit resets at:"));

@@ -260,6 +260,11 @@ pub struct ContextPartitionSnapshot {
     /// Model context-window capacity when the provider advertises one
     /// (FR-010); `None` equals "unknown" (FR-011).
     pub context_window_tokens: Option<usize>,
+    /// Provider-reported input tokens of the last LLM request, i.e. the
+    /// actual context size sent to the model on the most recent turn
+    /// (mirrors the status bar's `ctx:` indicator). Zero until the first
+    /// `TokenUsage` event of the session arrives.
+    pub last_input_tokens: u64,
 }
 
 impl ContextPartitionSnapshot {
@@ -1351,7 +1356,14 @@ pub struct App {
     /// Randomly selected tip shown on the home screen.
     pub tip: &'static str,
     /// Current working directory displayed on the home screen.
+    ///
+    /// This value may be `~`-collapsed for display (e.g. `~/Projects/ragent`).
+    /// Code that needs the real filesystem path for lookups should use
+    /// `cwd_path` instead.
     pub cwd: String,
+    /// Real, non-collapsed current working directory used for project-scoped
+    /// lookups such as the Memory panel.
+    pub cwd_path: std::path::PathBuf,
     /// Shell working directory as reported after each bash command.
     ///
     /// Updated by `ShellCwdChanged` events. `None` until the first bash
@@ -1568,6 +1580,18 @@ pub struct App {
     /// `true` when `memory_cache_*` is stale and needs a SQLite refresh on
     /// the next `render_memory_panel` call.
     pub memory_cache_dirty: bool,
+    /// Index of the currently selected memory row in the Alt+M panel (cursor).
+    pub memory_cursor: usize,
+    /// Line index (into `memory_content_lines`) of each selectable memory row's
+    /// preview line, computed by `render_memory_panel` so cursor navigation can
+    /// scroll the selection into view.
+    pub memory_row_line_indices: Vec<usize>,
+    /// Number of selectable memory rows last rendered in the panel.
+    pub memory_row_count: usize,
+    /// Open overlay showing the full content of a selected memory.
+    pub memory_view: Option<MemoryViewState>,
+    /// Pending confirmation for deleting a memory from the panel.
+    pub pending_memory_delete: Option<PendingMemoryDelete>,
     /// Plain-text lines from the last Telemetry pane render (for copy).
     pub telemetry_content_lines: Vec<String>,
     /// Plain-text lines from the last Context pane render (for copy).
@@ -1580,6 +1604,8 @@ pub struct App {
     pub output_view_area: Rect,
     /// Cached area of the research markdown viewer overlay.
     pub research_view_area: Rect,
+    /// Cached area of the full-memory overlay.
+    pub memory_view_area: Rect,
     /// Cached area of the Agents button beside chat input.
     pub agents_button_area: Rect,
     /// Cached area of the Teams button beside chat input.
@@ -1969,6 +1995,50 @@ impl ResearchViewState {
     pub fn jump_end(&mut self) {
         self.scroll_offset = 0;
     }
+}
+
+/// State for the full-memory overlay opened from the Alt+M panel.
+#[derive(Clone)]
+pub struct MemoryViewState {
+    /// Selected memory row.
+    pub row: ragent_storage::storage::MemoryRow,
+    /// Vertical scroll offset from bottom (0 = newest content at bottom).
+    pub scroll_offset: u16,
+    /// Maximum scroll value computed during render.
+    pub max_scroll: u16,
+    /// Cached pre-wrapped lines for the memory content + metadata.
+    pub line_cache: crate::app::OutputViewLineCache,
+}
+
+impl MemoryViewState {
+    /// Scroll the view by `delta` lines. Positive deltas move toward older
+    /// content (increase offset), negative deltas move toward newer content.
+    pub fn scroll_by(&mut self, delta: i16) {
+        if delta >= 0 {
+            self.scroll_offset = (self.scroll_offset + delta as u16).min(self.max_scroll);
+        } else {
+            self.scroll_offset = self.scroll_offset.saturating_sub((-delta) as u16);
+        }
+    }
+
+    /// Jump to the oldest (top) content.
+    pub fn jump_start(&mut self) {
+        self.scroll_offset = self.max_scroll;
+    }
+
+    /// Jump to the newest (bottom) content.
+    pub fn jump_end(&mut self) {
+        self.scroll_offset = 0;
+    }
+}
+
+/// Pending confirmation state for deleting a memory from the Alt+M panel.
+#[derive(Debug, Clone)]
+pub struct PendingMemoryDelete {
+    /// Memory id being deleted.
+    pub id: i64,
+    /// Short preview of the memory content for the confirmation dialog.
+    pub preview: String,
 }
 
 /// State held while waiting for the user to approve or reject a plan.

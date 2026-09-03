@@ -56,7 +56,7 @@ fn test_skip_email_addresses() {
 #[test]
 fn test_skip_email_with_dot_prefix() {
     let refs = parse_refs("Email dev.team@corp.com");
-    assert!(refs.is_empty());
+    assert!(refs.is_empty(), "refs should be empty");
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn test_ref_at_end() {
 #[test]
 fn test_no_refs() {
     let refs = parse_refs("Just plain text");
-    assert!(refs.is_empty());
+    assert!(refs.is_empty(), "refs should be empty");
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn test_bare_at_sign() {
 #[test]
 fn test_at_end_of_string() {
     let refs = parse_refs("trailing @");
-    assert!(refs.is_empty());
+    assert!(refs.is_empty(), "refs should be empty");
 }
 
 #[test]

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! todo2tasks T-005: tests for cycle detection in the task dependency
 //! DAG (`detect_cycle`).
 //!
@@ -174,7 +175,7 @@ fn test_cycle_diamond() {
     assert_eq!(err.cycle_path.last().unwrap(), "d");
     // Path should be d → a → (b or c) → d
     assert_eq!(err.cycle_path.len(), 4);
-    assert!(err.cycle_path[1] == "a");
+    assert_eq!(err.cycle_path[1], "a");
     assert!(err.cycle_path[2] == "b" || err.cycle_path[2] == "c");
     assert_eq!(err.cycle_path[3], "d");
 }
@@ -203,8 +204,8 @@ fn test_cycle_error_message_format() {
     let err = detect_cycle(&tasks, "b", "a").unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("cycle"), "msg: {msg}");
-    assert!(msg.contains("b"), "msg: {msg}");
-    assert!(msg.contains("a"), "msg: {msg}");
+    assert!(msg.contains('b'), "msg: {msg}");
+    assert!(msg.contains('a'), "msg: {msg}");
     assert!(msg.contains("→"), "msg: {msg}");
 }
 
@@ -214,7 +215,7 @@ fn test_cycle_error_self_loop_message() {
     let tasks = vec![make_task("x", &[])];
     let err = detect_cycle(&tasks, "x", "x").unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("x"), "msg: {msg}");
+    assert!(msg.contains('x'), "msg: {msg}");
     assert!(msg.contains("cycle"), "msg: {msg}");
 }
 
@@ -229,7 +230,7 @@ fn test_cycle_error_clone_debug() {
     assert_eq!(err.cycle_path, cloned.cycle_path);
     let debug_str = format!("{err:?}");
     assert!(debug_str.contains("CycleError"));
-    assert!(debug_str.contains("a"));
+    assert!(debug_str.contains('a'));
 }
 
 // ── Dangling reference (non-existent target) ───────────────────────

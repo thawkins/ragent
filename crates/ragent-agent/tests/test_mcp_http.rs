@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the HTTP MCP transport client.
 
 use std::collections::HashMap;

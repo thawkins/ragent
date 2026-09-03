@@ -61,7 +61,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A handle that owns the temp helper script path and the request directory,
 /// and drives the background watcher task for a single bash invocation.
-pub(crate) struct AskPassBroker {
+pub struct AskPassBroker {
     /// Absolute path to the generated askpass helper script.
     helper_path: PathBuf,
     /// Per-invocation directory the helper writes request files into and the
@@ -77,7 +77,7 @@ impl AskPassBroker {
     ///
     /// Returns `None` (logging a warning) on any I/O failure or on Windows,
     /// letting the bash tool fall back to plain execution without askpass.
-    pub(crate) fn start(session_id: &str) -> Option<Self> {
+    pub fn start(session_id: &str) -> Option<Self> {
         if is_windows() {
             return None;
         }

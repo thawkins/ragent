@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! External integration tests for the Rust language parser.
 
 use ragent_codeindex::parser::rust::RustParser;

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! PERF-004 regression tests for the `format_version` column-existence cache.
 //!
 //! `Storage` now carries an `AtomicBool` (`has_format_version`) that records

@@ -8,8 +8,8 @@ fn test_capabilities_default_to_no_thinking_levels() {
     let config = Config::default();
     let capabilities = ragent_config::Capabilities::default();
 
-    assert!(capabilities.thinking_levels.is_empty());
-    assert!(config.provider.is_empty());
+    assert_eq!(capabilities.thinking_levels.len(), 0);
+    assert_eq!(config.provider.len(), 0);
 }
 
 #[test]

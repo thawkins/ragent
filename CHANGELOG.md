@@ -1,5 +1,100 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+## Version: 1.0.76
+
+### Changed
+
+- Version bump to 1.0.76.
+- Cleaned up Clippy warnings across the workspace to keep `cargo clippy --workspace --tests -- -D warnings` green, including case-sensitive file-extension comparisons and redundant visibility qualifiers in `ragent-tools-core`.
+
+### Added
+
+- **`--web-time` web-phase deadline (60 s default)** — `/research create` now
+  caps the web-gathering phase at 60 seconds by default; when the deadline
+  passes, everything gathered so far is ingested and the run proceeds to
+  analysis/synthesis with the partial source set instead of discarding the
+  phase:
+  - `crates/ragent-research/src/web_gatherer.rs`: new `phase_deadline`
+    option (`WebGatherer::with_phase_deadline`) — search completion, query
+    decomposition, and fetch completion are each bounded by the remaining
+    budget; a stalled search/fetch is abandoned (cancelled on drop) and the
+    gatherer returns a partial `GatherResult`. New `GatherEvent::PhaseTimedOut`
+    diagnostic carries the deadline and the captured count.
+  - `crates/ragent-research/src/session.rs`: `DEFAULT_WEB_PHASE_TIMEOUT_SECS`
+    lowered from 180 to 60; the session passes the deadline to the gatherer
+    instead of wrapping it in a whole-phase `tokio::time::timeout` that
+    previously threw away everything gathered. The deadline is surfaced as a
+    `web_deadline` `RunStep` diagnostic (TUI step log shows it in the Web
+    phase). `--web-time 0` disables the deadline.
+  - `crates/ragent-research/src/cli.rs`: `--web-time N` alias for
+    `--web-phase-timeout-secs N` (both front-ends: CLI + TUI parser), added to
+    the help text.
+  - New test suite `crates/ragent-research/tests/test_web_time_deadline.rs`
+    (partial capture on deadline, default-60 assertion, `--web-time 0`
+    disable path, flag parsing).
+- **No-new-work-after-deadline guarantee (researchfix T-005, FR-008)** — the
+  web-phase deadline now provably stops all new gather work once it elapses:
+  the decomposer call, each sub-query search-result wait, and each in-flight
+  fetch-completion wait are bounded by the remaining budget, and the search
+  and fetch loops break on truncation before polling further work, so no new
+  search or fetch is started after the deadline. The worst-case overshoot is
+  the completion of the fetches already in flight at truncation — in-flight
+  requests are cancelled on drop, and each is capped by
+  `--fetch-timeout-secs` — so the phase can never run unbounded past the
+  deadline. Documented in `WebGatherer::gather_with_observer` and
+  `with_phase_deadline` rustdoc and in `docs/howtos/research.md` /
+  `SPEC.md`. New tests: `test_no_search_issued_after_deadline` (8 sub-queries,
+  500 ms deadline — only the initial in-flight batch is issued, zero fetches)
+  and `test_overshoot_bounded_by_in_flight_fetch_timeout` (slow pages cannot
+  extend the phase past the deadline; no fetch starts after it).
+- **Concepts section in `/research create`** — the research pipeline now
+  extracts a cross-source concept list and embeds it in `RESEARCH.md` as a
+  `## Concepts` section directly above `## Findings` (report layout) or
+  `### Concepts` directly above `### Findings` inside Results (IMRaD layout):
+  - `crates/ragent-research/src/analysis.rs`: new public
+    `LlmAnalysisEngine::complete_raw(prompt, system, max_tokens)` — the shared
+    low-level completion path (registry client resolution, streaming, text
+    accumulation); `stream_synthesis` now delegates to it.
+  - `crates/ragent-research/src/cluster.rs`: `build_concepts_payload_from_bodies`
+    (in-memory payload whose blocks are headed `--- [#N] Title ---` with N =
+    References Index position) and `concepts_section_for_research` (strips the
+    `# Concepts` H1, demotes concept headings one level, rewrites `web-NN`
+    filename citations to combined-index `[#N]` markers).
+  - `crates/ragent-research/src/document.rs`: `ResearchDocument.concepts`
+    field rendered in both layouts; omitted entirely when `None`.
+  - `crates/ragent-research/src/session.rs`: `concepts_engine` field +
+    `with_concepts_engine` builder; new `extract_concepts_section` step runs
+    after ReadabilityAudit and before Assemble, emits `concepts` `RunStep`
+    events (started/completed/skipped/failed), and never aborts the run on
+    failure; shared `read_source_body` helper now backs both synthesis and
+    concept-extraction body loading.
+  - `crates/ragent-agent/src/research_adapter.rs`: wires the concepts engine
+    from the same `LlmAnalysisEngine` Arc used for the `--from-url`/`--from-file`
+    summarizer, so no extra engine is constructed.
+- **Web-phase deadline observability and deduplication (researchfix T-012)** —
+  documented the new deadline behavior in `docs/howtos/research.md`, `SPEC.md`
+  section 11.9, and this changelog. End-state: a 60-second default web-phase
+  deadline (`DEFAULT_WEB_PHASE_TIMEOUT_SECS`), partial-corpus semantics, a
+  single `PhaseTimedOut` / `web_deadline` diagnostic per gather phase (FR-004),
+  `--web-time 0` disables the deadline (FR-007), the iterative engine applies
+  the same deadline each iteration (FR-006), a `web_phase_start` event carries
+  the remaining budget for UI countdowns (FR-009), and the TUI renders a live
+  `web:M:SS` countdown in the status-bar wait segment at least once per second
+  (FR-010, FR-013) plus a one-shot "Web phase deadline reached" notice in the
+  research progress message (FR-012).
+
+### Changed
+
+- Concept-extraction prompt citations generalized: the fixed
+  `CONCEPT_EXTRACTION_PROMPT_TEMPLATE` now asks the model to cite
+  `[#N]` markers keyed to the number shown in each document header, which
+  works for both the `/research cluster` payload (`--- web-NN.md ---`) and
+  the new `/research create` payload (`--- [#N] Title ---`).
+
 ## Version: 1.0.75
 
 ### Changed

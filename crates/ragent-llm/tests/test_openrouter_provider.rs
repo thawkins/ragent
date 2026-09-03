@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! OpenRouter provider offline tests.
 //!
 //! Covers spec `openrouterprov` FR-002 (base URL trim/override), FR-004 (key

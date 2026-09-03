@@ -11,8 +11,8 @@ fn test_code_index_defaults_are_enabled() {
         "code_index.enabled should default to true"
     );
     assert_eq!(config.code_index.max_file_size, 1_048_576);
-    assert!(config.code_index.extra_exclude_dirs.is_empty());
-    assert!(config.code_index.extra_exclude_patterns.is_empty());
+    assert_eq!(config.code_index.extra_exclude_dirs.len(), 0);
+    assert_eq!(config.code_index.extra_exclude_patterns.len(), 0);
 }
 
 #[test]

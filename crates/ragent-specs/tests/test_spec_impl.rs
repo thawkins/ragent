@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `SpecImplRunner` and `PlanParser`.
 //!
 //! Tests the full flow of parsing a PLAN.md, resolving execution order,

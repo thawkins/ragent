@@ -69,7 +69,7 @@ pub fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
 ///
 /// Call this after a successful write so a follow-up edit in the same session
 /// does not trip the stale-file check on a file we just modified.
-pub(crate) fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
+pub fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
     if let Ok(meta) = std::fs::metadata(path)
         && let Ok(mtime) = meta.modified()
     {

@@ -1,3 +1,4 @@
+#![allow(clippy::assert_is_empty)]
 //! Tests for the `graph_edges` and `communities` SQLite tables (spec graphCI, T-001).
 
 use chrono::Utc;
