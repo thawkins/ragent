@@ -1,12 +1,10 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
-
-<p style="margin-top: 4em; font-size: 1.1em;">
-        <strong>Version:</strong> 1.0.74</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">
+        <strong>Version:</strong> 1.0.77</p>
       <p style="font-size: 1.1em;">
-        <strong>Date:</strong> 2026-09-01
+        <strong>Date:</strong> 2026-09-03
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -101,17 +99,23 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.74). The core architecture, tool system,
+Ragent is in **beta** (v1.0.77). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.44 → v1.0.74):**
-- **Clippy `for_kv_map` fix** — Ollama provider iteration now uses `values()`
-  instead of destructuring a key-value pair; the LangSearch merge test
-  expectation was also corrected (v1.0.74)
+**Current Release Highlights (v1.0.44 → v1.0.77):**  - **Documentation refresh for v1.0.77** — updated `CHANGELOG.md`, `README.md`,
+    `SPEC.md`, `STATS.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, and how-to docs
+    to reflect the latest release (v1.0.77)
+  - **Research evaluation scorecard configuration** — new `research.evaluate`
+    section in `ragent.json` for self-evaluation scorecard settings (FR-015 of
+    specs/opendeepresearch). Includes `ResearchEvaluateConfig` and `enabled`
+    default.
+  - **Clippy `for_kv_map` fix** — Ollama provider iteration now uses `values()`
+    instead of destructuring a key-value pair; the LangSearch merge test
+    expectation was also corrected (v1.0.74)
 - **Sub-agent / teammate step visibility** — TUI step log now shows tool calls
   from tracked sub-agents and teammates with an `[agent-tag]` prefix; rebuilt
   step tags for lagged event-bus bursts prevent undercounting (v1.0.73)
@@ -1587,6 +1591,26 @@ Supporting files under `research/<name>/sources/` (e.g. `web-01.md`,
 plain text, local files become keyword-anchored excerpts — so a reader can
 audit the evidence without re-running the search.
 
+### 11.2.1 Execution Modes and Per-Page Summarisation
+
+The `--mode` flag selects the high-level research strategy while reusing
+the same gathering and synthesis pipeline. Supported modes are:
+
+| Mode | Description |
+|------|-------------|
+| `tiered` | Default single adversarial pipeline. |
+| `supervisor` | Supervisor/researcher graph: a lead supervisor spawns parallel sub-topic researchers (FR-009). |
+| `competitive` | Supervisor graph specialised for comparing a set of entities; works best with `--format comparison-table` (FR-014). |
+
+`--max-concurrent-research-units N` caps the number of parallel
+researcher agents in `supervisor` and `competitive` modes. The default is
+5 and can be changed in `ragent.json` under `research.supervisor.max_concurrent_research_units`.
+
+`--summarization-model <provider:model>` selects a lightweight model for
+per-page webpage summaries. When omitted, the active default model is
+used with a short-output limit. This is independent of the per-phase
+overrides `--research-model`, `--compression-model`, and `--final-report-model` (FR-013).
+
 ### 11.3 AI-Driven Synthesis
 
 When the TUI builds a `ResearchSession` with an active provider/model, an
@@ -1656,6 +1680,15 @@ Every `RESEARCH.md` contains:
 
 | Command | Purpose |
 |---------|---------|
+  | `/research create ... --mode tiered|supervisor|competitive` | Select research execution strategy |
+  | `/research create ... --summarization-model <provider:model>` | Use a lightweight model for per-page webpage summaries |
+  | `/research create ... --research-model <provider:model>` | Model used by sub-topic research agents |
+  | `/research create ... --compression-model <provider:model>` | Model used to compress intermediate findings |
+  | `/research create ... --final-report-model <provider:model>` | Model used to write the final report |
+  | `/research create ... --max-concurrent-research-units N` | Limit parallel researchers in supervisor/competitive modes |
+  | `/research create ... --evaluate` | Append a deterministic quality scorecard to `RESEARCH.md` |
+  | `/research create ... --brief <TEXT>` | Provide an explicit research brief |
+  | `/research create ... --no-clarify` | Skip the single clarifying question |
   | `/research create <name> <topic>` | Gather sources and write `RESEARCH.md` |
   | `/research create <name> <topic> --iterations N --depth shallow|standard|deep --format ...` | Iterative research with controls |
   | `/research create <name> --from-url <URL>` | Fetch the URL, use it as the research subject and capture it as the primary source |
@@ -1717,7 +1750,7 @@ The research system is exposed via REST endpoints (all auth-protected):
   The research run executes in a background `tokio::spawn` task.
 - `GET /research/{name}` — show a single research item. Pass `?full=true` to
   include extended metadata fields (`topic`, `queries`, `output_format`,
-  `model`).
+  `model`, `mode`, `summarization_model`, `evaluate`, `brief`).
 - `DELETE /research/{name}?confirm=delete-{name}` — delete a research item
   (requires confirmation token).
 - `GET /research/{name}/events` — SSE stream of live research events. When no
@@ -1727,9 +1760,12 @@ The research system is exposed via REST endpoints (all auth-protected):
 
 The `POST /research` request body mirrors `ResearchRunRequest`:
 `name`, `topic`, `title`, `from_urls`, `from_files`, `sources_dir`,
-`template`, `depth`, `tier`, `iterations`, `format`, `use_local`, `use_specs`,
-`use_low_relevance`, `no_scholarly`, `use_pdf`, `fetch_concurrency`,
-`local_concurrency`, `fetch_timeout_secs`, `web_phase_timeout_secs`,
+`template`, `depth`, `tier`, `iterations`, `format`, `mode`,
+`summarization_model`, `research_model`, `compression_model`,
+`final_report_model`, `max_concurrent_research_units`, `use_local`,
+`use_specs`, `use_low_relevance`, `no_scholarly`, `use_pdf`, `evaluate`,
+`brief`, `clarify`, `fetch_concurrency`, `local_concurrency`,
+`fetch_timeout_secs`, `web_phase_timeout_secs`,
 `local_phase_timeout_secs`, `search_max_retries`, `search_retry_base_delay_ms`,
 `search_circuit_breaker_threshold`, `max_web_results`, `max_local_sources`,
 `max_synthesis_sources`. `web_phase_timeout_secs` (CLI `--web-time`) defaults
@@ -2769,9 +2805,9 @@ All documentation markdown files are located in `docs/` except for these root fi
 ## Research Configuration
 
 The `/research create` synthesis prompt (in `crates/ragent-research/src/analysis.rs`)
-honours two optional `ragent.json` keys under a top-level `research` object. Both
-are opt-in and default to the legacy behaviour, so existing configurations continue
-to work unchanged.
+honours several optional `ragent.json` keys under a top-level `research` object.
+All are opt-in and default to the legacy behaviour, so existing
+configurations continue to work unchanged.
 
 ### `research.few_shot` (boolean, default `false`)
 
@@ -2791,13 +2827,46 @@ voice, audience, and domain framing, e.g.
 `"You are a senior security research analyst for a venture-capital audience."`.
 When absent, the default analyst persona is used.
 
+### `research.models.*` (string, optional)
+
+Per-phase default model overrides. All fields are optional; when omitted the
+phase falls back to the configured default model.
+
+- `research_model` — model used by research agents / sub-topic workers.
+- `compression_model` — model used to compress or summarise intermediate findings.
+- `final_report_model` — model used to write the final report.
+- `summarization_model` — lightweight model used for per-page webpage summaries (FR-002).
+
+### `research.supervisor.max_concurrent_research_units` (integer, default 5)
+
+Maximum number of researcher agents that may run concurrently in `supervisor`
+and `competitive` modes (FR-012).
+
+### `research.evaluate.enabled` (boolean, default `false`)
+
+When `true`, every research run appends a deterministic quality scorecard to
+the assembled `RESEARCH.md` (FR-015). This is equivalent to passing
+`--evaluate` on every `/research create` or `ragent research create` call.
+
 ### Example stanza
 
 ```jsonc
 {
   "research": {
     "few_shot": true,
-    "analysis_persona": "You are a senior research analyst for a venture-capital audience. Read the provided sources and produce a structured markdown analysis. Use only the evidence in the sources; do not invent facts."
+    "analysis_persona": "You are a senior research analyst for a venture-capital audience. Read the provided sources and produce a structured markdown analysis. Use only the evidence in the sources; do not invent facts.",
+    "models": {
+      "summarization_model": "ollama:phi4",
+      "compression_model": "ollama:phi4",
+      "research_model": "openrouter/anthropic/claude-sonnet-4-20250514",
+      "final_report_model": "openrouter/anthropic/claude-sonnet-4-20250514"
+    },
+    "supervisor": {
+      "max_concurrent_research_units": 3
+    },
+    "evaluate": {
+      "enabled": true
+    }
   }
 }
 ```
@@ -2806,9 +2875,11 @@ When absent, the default analyst persona is used.
 
 The prompt-builder knobs (`SynthesisPromptConfig.few_shot_examples`,
 `SynthesisPromptConfig.persona`) and the `LlmAnalysisEngine::with_persona`
-builder are implemented in `crates/ragent-research/src/analysis.rs`. Wiring
-the `ragent.json` keys through to the engine (reading the config at session
-construction and calling `with_persona` / populating `few_shot_examples`) is
+builder are implemented in `crates/ragent-research/src/analysis.rs`. Model
+overrides, supervisor concurrency, and evaluation are propagated from
+`ResearchRunRequest` through `build_session_config` in
+`crates/ragent-research/src/run_request.rs` to the engine phases. Wiring the
+`ragent.json` `research.*` keys through to `build_session_config` defaults is
 tracked as a follow-up; until that wiring lands, the keys are documented so
 callers and integrators know the intended surface.
 

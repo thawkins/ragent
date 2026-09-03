@@ -106,8 +106,11 @@ fn sample_doc_with_concepts(concepts: Option<&str>) -> ResearchDocument {
         polish: None,
         readability_audit: None,
         template_body: None,
+        brief: None,
         decomposed_queries: Vec::new(),
         output_format: ragent_research::run_config::OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     }
 }
 

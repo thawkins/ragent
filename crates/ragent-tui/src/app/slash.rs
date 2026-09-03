@@ -174,13 +174,32 @@ impl App {
                     "help".to_string(),
                 ]
             }
-            "inbox" => {
+            "research" => {
                 vec![
+                    "create".to_string(),
                     "list".to_string(),
-                    "claim".to_string(),
-                    "dismiss".to_string(),
-                    "clear".to_string(),
-                    "help".to_string(),
+                    "open".to_string(),
+                    "search".to_string(),
+                    "show".to_string(),
+                    "delete".to_string(),
+                    "archive".to_string(),
+                    "cluster".to_string(),
+                    "--mode".to_string(),
+                    "--summarization-model".to_string(),
+                    "--evaluate".to_string(),
+                    "--clarify".to_string(),
+                    "--no-clarify".to_string(),
+                    "--format".to_string(),
+                    "--tier".to_string(),
+                    "--depth".to_string(),
+                    "--iterations".to_string(),
+                    "--fetch-concurrently".to_string(),
+                    "--use-local".to_string(),
+                    "--use-specs".to_string(),
+                    "--use-low-relevance".to_string(),
+                    "--use-pdf".to_string(),
+                    "--no-papers".to_string(),
+                    "--web-time".to_string(),
                 ]
             }
             "init" => {
@@ -3901,38 +3920,40 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                 return;
                                             }
                                         };
-                                        rt.block_on(async move {
-                                                let registry = ragent_agent::tool::create_default_registry();
-                                                if let Some(tool) = registry.get("team_create") {
-                                                    let input = serde_json::json!({
-                                                        "name": name_clone,
-                                                        "project_local": true,
-                                                        "blueprint": bp,
-                                                    });
-                                                                                                                                                                                                                      let ctx = ragent_agent::tool::ToolContext {
-                                                                                                                                                                                                                          session_id: sid_clone.clone(),
-                                                                                                                                                                                                                          working_dir: working_dir_clone.clone(),
-                                                                                                                                                                                                                          event_bus: event_bus.clone(),                            storage: Some(storage.clone()),
-                            agent_manager: None,
-                            active_model: active_model_clone,
-                            provider_registry: Some(Arc::clone(
-                                &session_processor.provider_registry,
-                            )),
-                                                                                                                                                                                                                          team_context: None,
-                                                                                                                                                                                                                          team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_agent::tool::TeamManagerInterface>),
-                                                                                                                                                                                                                          code_index: None,
-                                                                                                                                                                                                                          bg_service: None,
-                                                                                                                                                                                                                          spec_manager: session_processor.spec_manager.get().cloned(),                                                                                                                                                                                                                            active_spec_id: session_processor.active_spec.read().await.clone(),
-                                                                                                                                                                                                                            config: Some(Arc::new(ragent_agent::Config::load().unwrap_or_default())),
-                                                                                                                                                                                                                            cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
-                                                                                                                                                                                                                            read_timestamps: session_processor.read_timestamps.clone(),
-                                                                                                                                                                                                                            canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
-                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                        if let Err(e) = tool.execute(input, &ctx).await {
-                                                                                                                                                                                                                            tracing::error!("team create tool failed: {e}");
-                                                                                                                                                                                                                        }
-                                                                                                                                                                                                                  }
-                                            });
+                                        rt.block_on(async move {                                                    let registry = ragent_agent::tool::create_default_registry();
+                                                    if let Some(tool) = registry.get("team_create") {
+                                                        let input = serde_json::json!({
+                                                            "name": name_clone,
+                                                            "project_local": true,
+                                                            "blueprint": bp,
+                                                        });
+                                                        let ctx = ragent_agent::tool::ToolContext {
+                                                            session_id: sid_clone.clone(),
+                                                            working_dir: working_dir_clone.clone(),
+                                                            event_bus: event_bus.clone(),
+                                                            storage: Some(storage.clone()),
+                                                            agent_manager: None,
+                                                            active_model: active_model_clone,
+                                                            provider_registry: Some(Arc::clone(
+                                                                &session_processor.provider_registry,
+                                                            )),
+                                                            team_context: None,
+                                                            team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_agent::tool::TeamManagerInterface>),
+                                                            code_index: None,
+                                                            bg_service: None,
+                                                            spec_manager: session_processor.spec_manager.get().cloned(),
+                                                            active_spec_id: session_processor.active_spec.read().await.clone(),
+                                                            config: Some(Arc::new(ragent_agent::Config::load().unwrap_or_default())),
+                                                            allowed_roots: vec![working_dir_clone.clone()],
+                                                            cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                                                            read_timestamps: session_processor.read_timestamps.clone(),
+                                                            canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+                                                        };
+                                                        if let Err(e) = tool.execute(input, &ctx).await {
+                                                            tracing::error!("team create tool failed: {e}");
+                                                        }
+                                                    }
+                                                });
                                     });
                                 }
                             }
@@ -4905,27 +4926,28 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
             
             ## /dirs — Directory/file permission management
             
-            Manage glob patterns for file operations that are automatically **allowed** or **denied**
-            by the permission system without prompting.
-            
+            Manage glob patterns for file operations that are automatically **allowed** or **denied**            by the permission system without prompting.
+
             ### Subcommands
-            
+
             | Command | Description |
             |---------|-------------|
             | `/dirs add allow <pattern>` | Add a glob pattern to auto-allow (e.g. `src/**/*.rs`) |
             | `/dirs add deny <pattern>` | Add a glob pattern to auto-deny (e.g. `secrets/**`) |
+            | `/dirs add roots <path>` | Add a directory path to allowed_roots |
             | `/dirs remove allow <pattern>` | Remove a pattern from the allowlist |
             | `/dirs remove deny <pattern>` | Remove a pattern from the denylist |
-            | `/dirs show` | Show current allowlist and denylist |
+            | `/dirs remove roots <path>` | Remove a path from allowed_roots |
+            | `/dirs show` | Show current allowlist, denylist, and allowed_roots |
             | `/dirs help` | Show this help text |
-            
+
             ### Flags
-            
+
             - `--global` — Persist to global config (`~/.config/ragent/ragent.json`)
             - (default) — Persist to project config (`./.ragent/ragent.json`)
-            
+
             ### Examples
-            
+
             ```bash
             # Allow editing all Rust source files without prompting
             /dirs add allow src/**/*.rs
@@ -4933,10 +4955,13 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
             # Deny all operations in the secrets directory
             /dirs add deny secrets/**
             
+            # Allow access to a sibling project directory
+            /dirs add roots ../other-project
+            
             # Show current lists
             /dirs show
             ```
-            
+
             ### Pattern Matching
             
             Patterns use **glob syntax**:
@@ -4958,6 +4983,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                             ragent_agent::dir_lists::get_builtin_lists();
                         let user_allow = ragent_agent::dir_lists::get_allowlist();
                         let user_deny = ragent_agent::dir_lists::get_denylist();
+                        let allowed_roots = ragent_agent::dir_lists::get_allowed_roots();
 
                         let mut out = String::from("From: /dirs show\n\n");
                         out.push_str("## Directory/File Permission Lists\n\n");
@@ -5007,6 +5033,21 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                             for pattern in &user_deny {
                                 out.push_str(&format!("  - `{pattern}`\n"));
                             }
+                            out.push('\n');
+                        }
+
+                        // Allowed roots
+                        out.push_str("### Allowed Roots (path escape checking)\n");
+                        if allowed_roots.is_empty() {
+                            out.push_str(
+                                "*(empty)* — only the session's working directory is allowed\n\n",
+                            );
+                        } else {
+                            out.push_str("*Additional directory paths treated as valid roots for path escape checking*\n\n");
+                            for path in &allowed_roots {
+                                out.push_str(&format!("  - `{path}`\n"));
+                            }
+                            out.push('\n');
                         }
 
                         self.append_assistant_text(&out);
@@ -5122,11 +5163,52 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                     }
                                 }
                             }
+                            ("add", "roots") => {
+                                match ragent_agent::dir_lists::add_allowed_roots(pattern, scope) {
+                                    Ok(()) => {
+                                        self.append_assistant_text(&format!(
+                                                      "From: /dirs add roots\n\n\
+                                                      [ok] Added `{pattern}` to **allowed_roots** \
+                                                      ({scope_label}: `{config_file}`).\n\n\
+                                                      Path escape checking will treat `{pattern}` as a valid root directory."
+                                                  ));
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /dirs add roots\n\n[err] Error: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                            ("remove", "roots") => {
+                                match ragent_agent::dir_lists::remove_allowed_roots(pattern, scope)
+                                {
+                                    Ok(true) => {
+                                        self.append_assistant_text(&format!(
+                                                      "From: /dirs remove roots\n\n\
+                                                      [ok] Removed `{pattern}` from **allowed_roots** \
+                                                      ({scope_label}: `{config_file}`).\n\n\
+                                                      Path escape checking will no longer treat `{pattern}` as a valid root."
+                                                  ));
+                                    }
+                                    Ok(false) => {
+                                        self.append_assistant_text(&format!(
+                                                      "From: /dirs remove roots\n\n\
+                                                      [warn] `{pattern}` was not in the {scope_label} allowed_roots."
+                                                  ));
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /dirs remove roots\n\n[err] Error: {e}"
+                                        ));
+                                    }
+                                }
+                            }
                             _ => {
                                 self.append_assistant_text(&format!(
                                                   "From: /dirs {sub}\n\n\
-                                                  Unknown list type `{list_type}`. Use `allow` or `deny`.\n\n\
-                                                  Usage: `/dirs {sub} allow|deny <pattern> [--global]`"
+                                                  Unknown list type `{list_type}`. Use `allow`, `deny`, or `roots`.\n\n\
+                                                  Usage: `/dirs {sub} allow|deny|roots <pattern> [--global]`"
                                               ));
                             }
                         }

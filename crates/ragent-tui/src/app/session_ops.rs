@@ -32,6 +32,8 @@ use crate::theme::{StatusCategory, StatusMessage};
 
 /// Recover from a poisoned mutex, logging the incident and returning the
 /// guarded value so the caller can keep running.
+// reason: only consumed inside this crate (session_ops) - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 pub fn recover_poisoned<'a, T>(
     result: LockResult<MutexGuard<'a, T>>,
     name: &str,
@@ -519,6 +521,14 @@ impl App {
     /// T-013/FR-015: called from the TUI main loop every frame. Drains
     /// [`App::context_snapshot_result`], stores the snapshot in the render
     /// cache, clears the in-flight latch and flags a redraw.
+    ///
+    /// Stale-snapshot guard: when the conversation history size has changed
+    /// since the snapshot was scheduled (e.g. `/compact` replaced `messages`
+    /// while the blocking task was running, or `load_session` resumed a
+    /// different session), the snapshot reflects the pre-mutation state and
+    /// would corrupt the Context panel. We drop it and immediately schedule a
+    /// fresh refresh so the panel tracks the current history without waiting
+    /// for the next event.
     pub fn poll_context_snapshot_refresh(&mut self) {
         let deposited = {
             let mut guard = recover_poisoned(
@@ -527,11 +537,22 @@ impl App {
             );
             guard.take()
         };
-        if let Some(snapshot) = deposited {
-            self.context_snapshot_cache = Some(snapshot);
+        let Some(snapshot) = deposited else {
+            return;
+        };
+        if snapshot.history_message_count != self.conversation_message_count() {
+            tracing::debug!(
+                scheduled = snapshot.history_message_count,
+                current = self.conversation_message_count(),
+                "dropping stale context snapshot — history changed mid-refresh"
+            );
             self.context_refresh_inflight = false;
-            self.needs_redraw = true;
+            self.schedule_context_snapshot_refresh();
+            return;
         }
+        self.context_snapshot_cache = Some(snapshot);
+        self.context_refresh_inflight = false;
+        self.needs_redraw = true;
     }
 
     /// Snapshot for the Context panel render: the cached background result
@@ -638,10 +659,11 @@ impl App {
         let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let tool_ctx = ToolContext {
             session_id: sid.clone(),
-            working_dir,
+            working_dir: working_dir.clone(),
             event_bus: event_bus.clone(),
             read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+            allowed_roots: vec![working_dir], // Default to working_dir for bang commands
         };
 
         tokio::spawn(async move {
@@ -980,6 +1002,9 @@ impl App {
             "alog" => Some("[help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes]".to_string()),
             "log" => Some("[clear subagents|panics|research|editlog|help]".to_string()),
             "blueprints" => Some("[help|list|<name>]".to_string()),
+            "research" => Some(
+                "[create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [--clarify|--no-clarify] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--tier light|full|dissertation] [--depth shallow|standard|deep] [--iterations N] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--use-pdf] [--no-papers] [--web-time N] <name> <topic...>] | [list|open|search|show|delete|archive|cluster]".to_string(),
+            ),
             "help" => Some("[<command>]".to_string()),
             "quit" | "exit" => None,
             "clear" => None,
@@ -1599,6 +1624,11 @@ impl App {
         if !session.directory.is_empty() {
             self.cwd = session.directory.clone();
         }
+
+        // T-010/FR-013: the conversation history was just replaced; refresh
+        // the Context panel snapshot so the History partition and message
+        // count reflect the resumed session rather than the previous one.
+        self.schedule_context_snapshot_refresh();
 
         self.push_log_no_agent(
             LogLevel::Info,

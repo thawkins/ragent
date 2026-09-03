@@ -738,8 +738,8 @@ mod tests {
         let opts = SearchOptions::default();
         assert_eq!(opts.max_results, DEFAULT_MAX_RESULTS);
         assert_eq!(opts.per_engine_results, DEFAULT_PER_ENGINE_RESULTS);
-        assert!(opts.site.is_empty());
-        assert!(opts.exclude_sites.is_empty());
+        assert_eq!(opts.site, String::new());
+        assert_eq!(opts.exclude_sites, Vec::<String>::new());
         assert_eq!(opts.freshness, Freshness::Any);
         assert_eq!(opts.page, DEFAULT_PAGE);
     }
@@ -805,10 +805,10 @@ mod tests {
     #[test]
     fn test_raw_result_default() {
         let r = RawResult::default();
-        assert!(r.title.is_empty());
-        assert!(r.url.is_empty());
-        assert!(r.snippet.is_empty());
-        assert!(r.source.is_empty());
+        assert_eq!(r.title, String::new());
+        assert_eq!(r.url, String::new());
+        assert_eq!(r.snippet, String::new());
+        assert_eq!(r.source, String::new());
         assert!(r.score.is_none());
     }
 
@@ -840,7 +840,7 @@ mod tests {
         assert_eq!(report.engine, "ddg");
         assert_eq!(report.result_count, 1);
         assert!(!report.engine_blocked);
-        assert!(report.error.is_empty());
+        assert_eq!(report.error, String::new());
         assert!(report.has_results());
         assert!(report.is_success());
     }
@@ -876,8 +876,8 @@ mod tests {
     #[test]
     fn test_engine_report_default() {
         let report = EngineReport::default();
-        assert!(report.engine.is_empty());
-        assert!(report.results.is_empty());
+        assert_eq!(report.engine, String::new());
+        assert!(report.results.is_empty(), "results should be empty");
         assert!(!report.engine_blocked);
         assert_eq!(report.result_count, 0);
     }
@@ -950,7 +950,7 @@ mod tests {
     #[test]
     fn test_dedup_empty_input() {
         let deduped = dedup_results_by_url(&[]);
-        assert!(deduped.is_empty());
+        assert!(deduped.is_empty(), "deduped should be empty");
     }
 
     #[test]
@@ -1040,7 +1040,7 @@ mod tests {
     #[test]
     fn test_collect_all_results_empty_reports() {
         let all = collect_all_results(&[]);
-        assert!(all.is_empty());
+        assert!(all.is_empty(), "all should be empty");
     }
 
     #[test]
@@ -1133,7 +1133,7 @@ mod tests {
             vec![RawResult::new("A", "https://a.com", "", "ddg")],
         )];
         let blocked = blocked_engine_names(&reports);
-        assert!(blocked.is_empty());
+        assert!(blocked.is_empty(), "blocked should be empty");
     }
 
     // --- SearchEngineError ---

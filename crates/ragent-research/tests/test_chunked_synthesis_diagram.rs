@@ -126,8 +126,11 @@ fn merged_chunk_results_produce_valid_diagram_and_cross_references() {
         polish: None,
         readability_audit: None,
         template_body: None,
+        brief: None,
         decomposed_queries: Vec::new(),
         output_format: OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     };
     let assembled = assemble_document(&doc);
 

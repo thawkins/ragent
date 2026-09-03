@@ -259,6 +259,9 @@ pub struct ToolContext {
     /// Per-step canonical-path cache (FR-017). Avoids redundant
     /// `canonicalize()` syscalls within a single tool dispatch step.
     pub canonical_cache: Arc<ragent_tools_core::CanonicalPathCache>,
+    /// Allowed root directories for path escape checking. Populated from
+    /// `config.dirs.allowed_roots` at session initialization.
+    pub allowed_roots: Vec<std::path::PathBuf>,
     /// PERF-019: cache for the most recently resolved team directory.
     ///
     /// Team tools call [`find_team_dir`] on every `execute()`, and that
@@ -487,6 +490,7 @@ impl Tool for ExtractedCoreToolAdapter {
             event_bus: tool_bus,
             read_timestamps: ctx.read_timestamps.clone(),
             canonical_cache: ctx.canonical_cache.clone(),
+            allowed_roots: ctx.allowed_roots.clone(),
         };
 
         let result = self

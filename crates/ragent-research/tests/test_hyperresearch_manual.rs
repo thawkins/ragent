@@ -71,6 +71,9 @@ fn base_document() -> ResearchDocument {
         template_body: None,
         decomposed_queries: Vec::new(),
         output_format: OutputFormat::Report,
+        brief: None,
+        comparison_table: None,
+        evaluation_scorecard: None,
     }
 }
 
@@ -265,6 +268,7 @@ async fn manual_case_5_sufficient_vault_sources_skip_new_fetches() {
                 media_type: "page".into(),
                 content_type: None,
                 body_text: format!("content about GLP-1 and cardiovascular outcomes {i}"),
+                summary_text: None,
             })
             .unwrap();
     }

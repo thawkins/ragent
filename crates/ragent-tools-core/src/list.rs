@@ -66,8 +66,15 @@ impl Tool for ListTool {
             |p| resolve_path(&ctx.working_dir, p),
         );
 
-        // C-002: directory listings must stay inside the working root.
-        super::check_path_within_root_cached(&dir, &ctx.working_dir, &ctx.canonical_cache)?;
+        // C-002: directory listings must stay inside the allowed roots.
+        // Use configured allowed_roots if available, otherwise fall back to working_dir.
+        if ctx.allowed_roots.is_empty() {
+            super::check_path_within_root_cached(&dir, &ctx.working_dir, &ctx.canonical_cache)?;
+        } else {
+            let root_refs: Vec<&std::path::Path> =
+                ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
+            super::check_path_within_any_root_cached(&dir, &root_refs, &ctx.canonical_cache)?;
+        }
 
         let max_depth = input["depth"].as_u64().unwrap_or(2) as usize;
 

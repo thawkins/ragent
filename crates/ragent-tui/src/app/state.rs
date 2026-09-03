@@ -860,7 +860,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "research",
-        description: "Research system: /research create|list|open|search|show|delete|archive|cluster",
+        description: "Research system: /research create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> | list | open | search | show | delete | archive | cluster",
     },
     SlashCommandDef {
         trigger: "reverse",

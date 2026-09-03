@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -68,6 +68,10 @@ pub struct VaultSource {
     pub content_hash: String,
     /// Full text body stored for FTS search.
     pub body_text: String,
+    /// Optional LLM-generated summary of the body (T-013, FR-003, FR-018).
+    /// Stored alongside the original `body_text` so downstream agents can
+    /// reuse a concise form while still citing the original URL.
+    pub summary_text: Option<String>,
 }
 
 /// Input used to store a new source in the vault.
@@ -89,6 +93,11 @@ pub struct NewVaultSource {
     pub content_type: Option<String>,
     /// Full text body to store and index.
     pub body_text: String,
+    /// Optional LLM-generated summary of the body (T-013, FR-003, FR-018).
+    /// When present, the vault records both the original full body and the
+    /// summarized form, so future agents can choose which to use while
+    /// keeping the original URL and timestamp for attribution.
+    pub summary_text: Option<String>,
 }
 
 impl NewVaultSource {
@@ -100,10 +109,11 @@ impl NewVaultSource {
 }
 
 /// Persistent, searchable source vault for a single research run.
+#[derive(Clone)]
 pub struct SourceVault {
     vault_root: PathBuf,
     run_tag: String,
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl fmt::Debug for SourceVault {
@@ -140,7 +150,7 @@ impl SourceVault {
         let vault = Self {
             vault_root: vault_root.to_path_buf(),
             run_tag: run_tag.to_string(),
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
         };
         vault.migrate()?;
         Ok(vault)
@@ -195,6 +205,27 @@ impl SourceVault {
         Ok(fs::read_to_string(PathBuf::from(path))?)
     }
 
+    /// Read the optional summary text for a stored source id back into a string.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceVaultError::SourceNotFound`] when the source id does not
+    /// exist in the index.
+    pub fn read_summary(&self, source_id: &str) -> Result<Option<String>> {
+        let summary: Option<String> = self
+            .conn
+            .lock()
+            .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?
+            .query_row(
+                "SELECT summary_text FROM vault_sources
+                   WHERE run_tag = ?1 AND source_id = ?2",
+                params![self.run_tag, source_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(summary)
+    }
+
     /// Store a new source in the vault, or return the existing record if the
     /// same URL has already been captured for this run.
     ///
@@ -219,12 +250,11 @@ impl SourceVault {
             .conn
             .lock()
             .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?;
-
         conn.execute(
             "INSERT INTO vault_sources
-             (source_id, run_tag, url, title, fetch_timestamp, search_tool, search_engine,
-              media_type, content_path, content_hash, body_text)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+               (source_id, run_tag, url, title, fetch_timestamp, search_tool, search_engine,
+                media_type, content_path, content_hash, body_text, summary_text)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 source_id,
                 self.run_tag,
@@ -237,6 +267,7 @@ impl SourceVault {
                 content_path.to_string_lossy().as_ref(),
                 content_hash,
                 source.body_text,
+                source.summary_text,
             ],
         )?;
 
@@ -256,6 +287,7 @@ impl SourceVault {
             content_path,
             content_hash,
             body_text: source.body_text.clone(),
+            summary_text: source.summary_text.clone(),
         })
     }
 
@@ -267,9 +299,9 @@ impl SourceVault {
             .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?;
         let mut stmt = conn.prepare(
             "SELECT id, source_id, run_tag, url, title, fetch_timestamp, search_tool,
-                    search_engine, media_type, content_path, content_hash, body_text
-             FROM vault_sources
-             WHERE run_tag = ?1 AND url = ?2",
+                      search_engine, media_type, content_path, content_hash, body_text, summary_text
+               FROM vault_sources
+               WHERE run_tag = ?1 AND url = ?2",
         )?;
         let mut rows = stmt.query(params![self.run_tag, url])?;
         if let Some(row) = rows.next()? {
@@ -296,7 +328,7 @@ impl SourceVault {
 
         let mut sql = String::from(
             "SELECT id, source_id, run_tag, url, title, fetch_timestamp, search_tool,
-                    search_engine, media_type, content_path, content_hash, body_text
+                    search_engine, media_type, content_path, content_hash, body_text, summary_text
              FROM vault_sources
              WHERE run_tag = ?1",
         );
@@ -339,11 +371,11 @@ impl SourceVault {
             .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?;
         let mut stmt = conn.prepare(
             "SELECT id, source_id, run_tag, url, title, fetch_timestamp, search_tool,
-                    search_engine, media_type, content_path, content_hash, body_text
-             FROM vault_sources
-             WHERE run_tag = ?1
-             ORDER BY fetch_timestamp DESC
-             LIMIT ?2",
+                      search_engine, media_type, content_path, content_hash, body_text, summary_text
+               FROM vault_sources
+               WHERE run_tag = ?1
+               ORDER BY fetch_timestamp DESC
+               LIMIT ?2",
         )?;
         let mut rows = stmt.query(params![self.run_tag, limit as i64])?;
         let mut out = Vec::new();
@@ -385,7 +417,8 @@ impl SourceVault {
                 media_type TEXT NOT NULL DEFAULT 'page',
                 content_path TEXT NOT NULL,
                 content_hash TEXT NOT NULL,
-                body_text TEXT NOT NULL DEFAULT ''
+                body_text TEXT NOT NULL DEFAULT '',
+                summary_text TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_vault_sources_run_tag_url
                 ON vault_sources(run_tag, url);
@@ -393,6 +426,10 @@ impl SourceVault {
                 ON vault_sources(run_tag, fetch_timestamp DESC);
             ",
         )?;
+        // T-013 migration: older vaults created before `summary_text` existed
+        // need the column added. SQLite does not support `ADD COLUMN IF NOT
+        // EXISTS`, so we ignore the error when the column already exists.
+        let _ = conn.execute("ALTER TABLE vault_sources ADD COLUMN summary_text TEXT", []);
         Ok(())
     }
 }
@@ -400,6 +437,7 @@ impl SourceVault {
 fn row_to_source(row: &rusqlite::Row<'_>) -> Result<VaultSource> {
     let fetch_timestamp: String = row.get(5)?;
     let content_path: String = row.get(9)?;
+    let summary_text: Option<String> = row.get(12).ok();
     Ok(VaultSource {
         id: row.get(0)?,
         source_id: row.get(1)?,
@@ -415,6 +453,7 @@ fn row_to_source(row: &rusqlite::Row<'_>) -> Result<VaultSource> {
         content_path: PathBuf::from(content_path),
         content_hash: row.get(10)?,
         body_text: row.get(11)?,
+        summary_text,
     })
 }
 

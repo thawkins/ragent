@@ -155,11 +155,23 @@ pub struct ResearchDocument {
     /// `{{title}}`, `{{topic}}`, `{{date}}` placeholders are substituted
     /// from the item's metadata before the standard sections are appended.
     pub template_body: Option<String>,
+    /// Explicit research brief used as the mission statement for synthesis and
+    /// rendered as `## Research Brief` in the report (FR-004 / T-004).
+    pub brief: Option<String>,
     /// Sub-queries the web-gathering phase issued to the search tool. Empty
     /// when web gathering was disabled or no decomposer was configured.
     pub decomposed_queries: Vec<String>,
     /// Output artifact this document was requested as.
     pub output_format: crate::run_config::OutputFormat,
+    /// Pre-rendered comparison-table body for `OutputFormat::ComparisonTable`
+    /// competitive-analysis runs (FR-014 / FR-016 / T-011). Contains the
+    /// comparison criteria, cross-entity Markdown table, and per-entity
+    /// profiles built from researcher summaries.
+    pub comparison_table: Option<String>,
+    /// Pre-rendered self-evaluation scorecard markdown (FR-008 / T-015).
+    /// When `Some`, the `## Self-Evaluation Scorecard` section is inserted
+    /// before the References Index.
+    pub evaluation_scorecard: Option<String>,
 }
 
 /// One in-project cross-reference row (FR-009).
@@ -306,13 +318,31 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     // the IMRaD layout based on the configured output format.
     if doc.output_format == crate::run_config::OutputFormat::Imrad {
         body.push_str(&assemble_imrad_body(doc, &topic));
+    } else if doc.output_format == crate::run_config::OutputFormat::ComparisonTable {
+        body.push_str(&assemble_comparison_table_body(doc, &topic));
     } else {
         body.push_str(&assemble_report_body(doc, &topic));
     }
 
     // Make every bare URL in the rendered body clickable, while leaving URLs
     // inside code spans, fenced blocks, and existing Markdown links untouched.
-    let body = linkify_urls(&body);
+    let mut body = linkify_urls(&body);
+
+    // ── Self-Evaluation Scorecard (FR-008 / T-015) ────────────────────────
+    // Insert the rendered scorecard before the References Index when available,
+    // so it appears as a regular body section rather than inside frontmatter.
+    if let Some(scorecard) = doc
+        .evaluation_scorecard
+        .as_deref()
+        .filter(|s| !s.is_empty())
+    {
+        let scorecard = format!("\n{scorecard}");
+        if let Some(pos) = body.rfind("\n## References Index") {
+            body.insert_str(pos, &scorecard);
+        } else {
+            body.push_str(&scorecard);
+        }
+    }
 
     // ── CORPA.md companion document ──────────────────────────────────────
     // The QA render sections are split into this separate per-research
@@ -1341,6 +1371,13 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     body.push_str(topic.trim());
     body.push_str("\n\n");
 
+    // ── Research Brief (FR-004 / T-004) ───────────────────────────────
+    if let Some(brief) = doc.brief.as_deref().filter(|b| !b.is_empty()) {
+        body.push_str("## Research Brief\n\n");
+        body.push_str(&strip_control_chars(brief).trim());
+        body.push_str("\n\n");
+    }
+
     // ── Search Queries ──────────────────────────────────────────────────
     body.push_str("## Search Queries\n\n");
     if doc.decomposed_queries.is_empty() {
@@ -1553,6 +1590,12 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     } else {
         body.push_str(strip_control_chars(topic).trim());
         body.push_str("\n\n");
+        // ── Research Brief (FR-004 / T-004) ──────────────────────────────
+        if let Some(brief) = doc.brief.as_deref().filter(|b| !b.is_empty()) {
+            body.push_str("### Research Brief\n\n");
+            body.push_str(&strip_control_chars(brief).trim());
+            body.push_str("\n\n");
+        }
         body.push_str(
             "This research item investigates the topic above by gathering and synthesizing \
              web sources, local project files, and related specifications. The objective is \
@@ -1723,6 +1766,67 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     body
 }
 
+/// Build the body of a dedicated comparison-table `RESEARCH.md` artifact.
+fn assemble_comparison_table_body(doc: &ResearchDocument, topic: &str) -> String {
+    let mut body = String::new();
+
+    body.push_str(&render_scoreboard(doc));
+
+    body.push_str("## Topic\n\n");
+    body.push_str(topic.trim());
+    body.push_str("\n\n");
+
+    if let Some(brief) = doc.brief.as_deref().filter(|b| !b.is_empty()) {
+        body.push_str("## Research Brief\n\n");
+        body.push_str(&strip_control_chars(brief).trim());
+        body.push_str("\n\n");
+    }
+
+    if let Some(table) = doc.comparison_table.as_deref().filter(|t| !t.is_empty()) {
+        body.push_str(&strip_control_chars(table));
+        body.push_str("\n\n");
+    } else {
+        body.push_str(
+            "## Comparison Table\n\n_(no comparison table was produced for this run)_\n\n",
+        );
+    }
+
+    body.push_str("## Executive Summary\n\n");
+    if doc.summary.trim().is_empty() {
+        body.push_str("_(no executive summary recorded yet — run a gathering pass to populate)_\n");
+    } else {
+        body.push_str(&strip_control_chars(doc.summary.trim()));
+        body.push('\n');
+    }
+    body.push('\n');
+
+    body.push_str("## Findings\n\n");
+    if doc.findings.is_empty() {
+        body.push_str("_(no findings yet — the gathering pass will populate this section)_\n\n");
+    } else {
+        for (idx, finding) in doc.findings.iter().enumerate() {
+            let n = idx + 1;
+            let normalized = normalize_finding_labels(strip_control_chars(finding).trim());
+            let (headline, mut remainder) = extract_headline(&normalized, n);
+            if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
+                remainder.push_str("\n\n");
+                remainder.push_str(&sources_list);
+            }
+            body.push_str(&format!(
+                "\n### **Finding {n}** — {headline}\n\n{remainder}\n\n"
+            ));
+        }
+    }
+
+    body.push_str("## References Index\n\n");
+    body.push_str(&ResearchIo::render_references_index(
+        &doc.item.sources,
+        Utc::now(),
+    ));
+
+    body
+}
+
 /// Render the empty `RESEARCH.md` skeleton that [`crate::manager::ResearchManager::create`]
 /// writes before any gathering has run (FR-005 / FR-011). All sections are
 /// present in the placeholder form so the file is well-formed from the moment
@@ -1794,8 +1898,11 @@ fn placeholder_document(
         polish: None,
         readability_audit: None,
         template_body: None,
+        brief: None,
         decomposed_queries: Vec::new(),
         output_format,
+        comparison_table: None,
+        evaluation_scorecard: None,
     }
 }
 
@@ -2605,7 +2712,6 @@ mod tests {
     use super::*;
     use crate::source::Source;
     use std::path::PathBuf;
-
     fn sample_name() -> ResearchName {
         ResearchName::new("rust-async").expect("name must validate")
     }
@@ -2638,8 +2744,11 @@ mod tests {
             polish: None,
             readability_audit: None,
             template_body: None,
+            brief: None,
             decomposed_queries: Vec::new(),
             output_format: crate::run_config::OutputFormat::Report,
+            comparison_table: None,
+            evaluation_scorecard: None,
         }
     }
 

@@ -69,6 +69,8 @@ pub fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
 ///
 /// Call this after a successful write so a follow-up edit in the same session
 /// does not trip the stale-file check on a file we just modified.
+// reason: only consumed inside this crate (edit.rs / multiedit.rs) - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 pub fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
     if let Ok(meta) = std::fs::metadata(path)
         && let Ok(mtime) = meta.modified()

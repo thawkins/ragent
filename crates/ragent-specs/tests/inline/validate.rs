@@ -402,7 +402,10 @@ fn test_parse_requirements_no_ears() {
     let md = "### FR-001 — No EARS\n\nJust text.\n";
     let reqs = parse_requirements(md);
     assert_eq!(reqs.len(), 1);
-    assert!(reqs[0].ears_text.is_empty());
+    assert!(
+        reqs[0].ears_text.is_empty(),
+        "first requirement should have no EARS text"
+    );
 }
 
 #[test]
@@ -507,7 +510,7 @@ fn test_detect_clarification_markers_case_insensitive() {
 fn test_detect_clarification_markers_none() {
     let content = "Just regular text without any markers.\nAnother line.";
     let markers = detect_clarification_markers(content);
-    assert!(markers.is_empty());
+    assert!(markers.is_empty(), "markers should be empty");
 }
 
 #[test]
@@ -602,26 +605,27 @@ API (Application Programming Interface): a set of endpoints.
 `The system shall expose an API for data access.`
 ";
     let issues = detect_ambiguity(content);
-    let undefined: Vec<&str> = issues
-        .iter()
-        .filter(|i| i.kind == AmbiguityKind::UndefinedAcronym)
-        .map(|i| i.term.as_str())
-        .collect();
-    assert!(!undefined.contains(&"API"));
+    assert!(
+        !issues
+            .iter()
+            .filter(|i| i.kind == AmbiguityKind::UndefinedAcronym)
+            .map(|i| i.term.as_str())
+            .any(|t| t == "API")
+    );
 }
 
 #[test]
 fn test_detect_ambiguity_no_requirements() {
     let content = "# Specification\n\nSome intro text with no requirements.\n";
     let issues = detect_ambiguity(content);
-    assert!(issues.is_empty());
+    assert!(issues.is_empty(), "issues should be empty");
 }
 
 #[test]
 fn test_detect_ambiguity_no_ears_text() {
     let content = "## Functional Requirements\n\n### FR-001 - Something\n\nNo backticks here.\n";
     let issues = detect_ambiguity(content);
-    assert!(issues.is_empty());
+    assert!(issues.is_empty(), "issues should be empty");
 }
 
 #[test]
@@ -981,14 +985,14 @@ fn test_detect_contradictions_no_contradictions() {
 `The system shall render output data.`
 ";
     let issues = detect_contradictions(content);
-    assert!(issues.is_empty());
+    assert!(issues.is_empty(), "issues should be empty");
 }
 
 #[test]
 fn test_detect_contradictions_no_requirements() {
     let content = "## Functional Requirements\n\nNo requirements here.\n";
     let issues = detect_contradictions(content);
-    assert!(issues.is_empty());
+    assert!(issues.is_empty(), "issues should be empty");
 }
 
 #[test]
@@ -1001,7 +1005,7 @@ fn test_detect_contradictions_no_ears_text() {
 No backtick text here.
 ";
     let issues = detect_contradictions(content);
-    assert!(issues.is_empty());
+    assert!(issues.is_empty(), "issues should be empty");
 }
 
 #[test]
@@ -1260,7 +1264,7 @@ fn test_detect_gaps_vague_outcome_with_digit_not_flagged_for_no_measurable() {
 fn test_detect_gaps_no_requirements() {
     let content = "## Functional Requirements\n\nNo requirements here.\n";
     let issues = detect_gaps(content);
-    assert!(issues.is_empty());
+    assert!(issues.is_empty(), "issues should be empty");
 }
 
 #[test]
@@ -1273,7 +1277,7 @@ fn test_detect_gaps_no_ears_text() {
 No backtick text here.
 ";
     let issues = detect_gaps(content);
-    assert!(issues.is_empty());
+    assert!(issues.is_empty(), "issues should be empty");
 }
 
 #[test]
@@ -1342,7 +1346,10 @@ fn test_detect_gaps_suggestion_populated() {
 ";
     let issues = detect_gaps(content);
     assert_eq!(issues.len(), 1);
-    assert!(!issues[0].suggestion.is_empty());
+    assert!(
+        !issues[0].suggestion.is_empty(),
+        "first issue should have a suggestion"
+    );
 }
 
 #[test]
@@ -1661,13 +1668,11 @@ fn test_validate_with_flags_all_disabled_skips_consistency() {
     let spec = spec_with_vague_term();
     let flags = SddFlags::all_disabled();
     let report = validate_with_flags(&spec, &flags);
-    let ambiguity_issues: Vec<_> = report
-        .issues
-        .iter()
-        .filter(|i| i.category == Category::Ambiguity)
-        .collect();
     assert!(
-        ambiguity_issues.is_empty(),
+        !report
+            .issues
+            .iter()
+            .any(|i| i.category == Category::Ambiguity),
         "all_disabled should skip consistency (ambiguity) checks"
     );
 }
@@ -1702,13 +1707,11 @@ fn test_validate_with_flags_consistency_enabled_includes_ambiguity() {
 fn test_validate_backward_compat_includes_consistency() {
     let spec = spec_with_vague_term();
     let report = validate(&spec);
-    let ambiguity_issues: Vec<_> = report
-        .issues
-        .iter()
-        .filter(|i| i.category == Category::Ambiguity)
-        .collect();
     assert!(
-        !ambiguity_issues.is_empty(),
+        report
+            .issues
+            .iter()
+            .any(|i| i.category == Category::Ambiguity),
         "validate() backward compat should include consistency checks"
     );
 }

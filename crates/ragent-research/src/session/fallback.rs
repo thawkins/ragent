@@ -35,6 +35,8 @@ fn append_top_three_list(out: &mut String, header: &str, items: &[impl AsRef<str
 
 /// Build a mechanical summary string listing how many sources of each kind
 /// were captured, plus the top-3 titles/paths/spec-ids.
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 pub fn default_summary(sources: &[Source], topic: &str) -> String {
     let web = sources
         .iter()
@@ -123,6 +125,8 @@ fn finding_template(
 
 /// Build per-source findings (one per web/local/spec source) when no LLM
 /// analysis engine is available.
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 pub fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
     let mut out = Vec::new();
     let web: Vec<&Source> = sources
@@ -348,6 +352,8 @@ pub fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
     out
 }
 
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 pub fn default_top_implications(findings: &[String], topic: &str) -> Vec<String> {
     // Try to extract the first sentence from each finding's **Implication:** paragraph.
     let re = Regex::new(r"(?i)\*\*Implication:\*\*\s*([^\n]+)").expect("valid implication regex");
@@ -390,6 +396,8 @@ pub fn default_top_implications(findings: &[String], topic: &str) -> Vec<String>
 /// Build a per-source bullet title + short excerpt suitable for embedding
 /// in the Findings section when no LLM analysis is available. Returns an
 /// empty string when the body is empty / unavailable.
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 pub fn body_excerpt(body: &str, max_chars: usize) -> String {
     // Strip the "Excerpt — N keyword match(es)" header that the local
     // gatherer prepends so we don't double-print it in the Findings section.
@@ -426,6 +434,8 @@ pub fn body_excerpt(body: &str, max_chars: usize) -> String {
 }
 
 /// Build default open-questions bullets when no LLM analysis is available.
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 pub fn default_open_questions(sources: &[Source], topic: &str) -> Vec<String> {
     let mut out = Vec::new();
     let web = sources
@@ -469,6 +479,8 @@ pub fn default_open_questions(sources: &[Source], topic: &str) -> Vec<String> {
 
 /// Extract `CrossReference` entries from local sources.
 #[allow(dead_code)]
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 pub fn cross_references_from(sources: &[Source]) -> Vec<CrossReference> {
     sources
         .iter()

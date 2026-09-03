@@ -61,6 +61,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A handle that owns the temp helper script path and the request directory,
 /// and drives the background watcher task for a single bash invocation.
+// reason: only consumed inside this crate (bash.rs) - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 pub struct AskPassBroker {
     /// Absolute path to the generated askpass helper script.
     helper_path: PathBuf,
@@ -77,6 +79,8 @@ impl AskPassBroker {
     ///
     /// Returns `None` (logging a warning) on any I/O failure or on Windows,
     /// letting the bash tool fall back to plain execution without askpass.
+    // reason: only consumed inside this crate (bash.rs) - `pub` here never escapes the crate.
+    #[allow(unreachable_pub)]
     pub fn start(session_id: &str) -> Option<Self> {
         if is_windows() {
             return None;

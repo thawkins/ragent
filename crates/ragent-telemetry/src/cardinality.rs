@@ -206,7 +206,7 @@ mod tests {
     fn test_empty_attrs_returns_empty() {
         let cache = CardinalityCache::new(1000);
         let result = cache.resolve("ragent.llm.requests", &[]);
-        assert!(result.is_empty());
+        assert_eq!(result, Vec::<opentelemetry::KeyValue>::new());
     }
 
     #[test]

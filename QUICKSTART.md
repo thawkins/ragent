@@ -1086,6 +1086,9 @@ Run any of these from the TUI prompt:
 /research create rust-async async/await idioms --depth deep --iterations 5
 /research create rust-async --from-url https://example.com/article
 /research continue rust-async focus on io_uring integration
+/research create fireworks "Compare Fireworks AI, Together.ai and Groq" --mode competitive --format comparison-table
+/research create rust-async "async/await idioms" --mode supervisor --summarization-model ollama:phi4 --max-concurrent-research-units 3
+/research create rust-async "async/await idioms" --evaluate
 /spec create async-await Add async/await ergonomics --from-research rust-async
 /spec specify async-await Add async/await ergonomics --from-research rust-async
 /spec plan async-await "Rust 2024 edition, tokio runtime"
@@ -1137,6 +1140,9 @@ ragent research create rust-async "async/await idioms in stable Rust"
 ragent research create rust-async "async/await idioms" --depth deep --format executive-summary
 ragent research create rust-async --from-url https://example.com/article
 ragent research continue rust-async "focus on io_uring integration"
+ragent research create fireworks "Compare Fireworks AI, Together.ai and Groq" --mode competitive --format comparison-table
+ragent research create rust-async "async/await idioms" --mode supervisor --summarization-model ollama:phi4 --max-concurrent-research-units 3
+ragent research create rust-async "async/await idioms" --evaluate
 ragent research list
 ragent research open rust-async
 ragent research search "async"
@@ -1154,7 +1160,15 @@ The HTTP API exposes the same surface at `GET /research`, `POST /research`,
 
 The `--tier` flag selects the analysis depth: `light` (minimal), `full`
 (default), or `dissertation` (extended with depth investigations and
-source tensions).
+source tensions). The `--mode` flag selects the execution strategy:
+`tiered` (default single pipeline), `supervisor` (parallel sub-topic
+researchers coordinated by a lead supervisor), or `competitive`
+(supervisor graph specialised for comparing entities). In `supervisor`
+and `competitive` modes, `--max-concurrent-research-units N` caps the
+number of parallel researchers (default 5). `--summarization-model`
+selects a lightweight model for per-page webpage summaries, and
+`--evaluate` appends a deterministic quality scorecard to the final
+`RESEARCH.md`.
 
 See [`docs/research.md`](docs/research.md) for the full workflow guide.
 
@@ -1244,6 +1258,22 @@ Type `/` in the input to open an autocomplete menu:
 | `/spec feedback <name> <note>` | Append a production feedback note to FEEDBACK.md |
 | `/spec jtbd <name> [--force] [--agent <name>]` | Perform JTBD analysis on an existing spec |
 | `/spec list \|search \|show \|validate \|status \|task` | Spec lifecycle commands |
+
+### New in v1.0.77
+
+- **`research.evaluate` config option** — enable a deterministic quality scorecard
+  (quality, relevance, groundedness, completeness, structure) appended to
+  `/research create` reports by setting `"research": { "evaluate": { "enabled": true } }`
+  in `ragent.json`.
+
+### New in v1.0.76
+
+- **`--web-time N`** for `/research create` sets the web-phase deadline
+  (default 60 s; `0` disables the deadline).
+- **Concepts section** in `/research create` reports — a `## Concepts` block
+  appears directly above `## Findings` when an LLM is configured.
+- Research slash commands now show a live `web:M:SS` countdown in the TUI
+  status bar during the web-gathering phase.
 
 ### Benchmark Workflow
 
@@ -1508,7 +1538,7 @@ For full details, see [README.md](README.md) and [SPEC.md](SPEC.md).
 
 ## Research prompt configuration
 
-The `/research create` synthesis prompt accepts two optional `ragent.json`
+The `/research create` synthesis prompt accepts optional `ragent.json`
 keys under a top-level `research` object (see SPEC.md → "Research
 Configuration" for the full schema):
 
@@ -1518,17 +1548,37 @@ Configuration" for the full schema):
 - `research.analysis_persona` (string, optional) — override the default
   `"You are a careful research analyst..."` system persona to tailor voice,
   audience, and domain framing.
+- `research.models.research_model` / `compression_model` /
+  `final_report_model` / `summarization_model` (string, optional) —
+  default model overrides for each research phase.
+- `research.supervisor.max_concurrent_research_units` (integer, default 5)
+  — cap parallel sub-topic researchers when using `supervisor` or
+  `competitive` modes.
+- `research.evaluate.enabled` (bool, default `false`) — always append the
+  deterministic quality scorecard to the report.
 
 ```jsonc
 {
   "research": {
     "few_shot": true,
-    "analysis_persona": "You are a senior research analyst for a venture-capital audience."
+    "analysis_persona": "You are a senior research analyst for a venture-capital audience.",
+    "models": {
+      "summarization_model": "ollama:phi4",
+      "compression_model": "ollama:phi4",
+      "research_model": "openrouter/anthropic/claude-sonnet-4-20250514",
+      "final_report_model": "openrouter/anthropic/claude-sonnet-4-20250514"
+    },
+    "supervisor": {
+      "max_concurrent_research_units": 3
+    },
+    "evaluate": {
+      "enabled": true
+    }
   }
 }
 ```
 
-Both keys are opt-in; existing configs are unchanged. The prompt builder also
+All keys are opt-in; existing configs are unchanged. The prompt builder also
 enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be

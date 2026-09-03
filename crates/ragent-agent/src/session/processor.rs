@@ -1279,16 +1279,13 @@ impl SessionProcessor {
                 // once per tool call. The cloned value is also reused by the
                 // auto-spec-task-update block below (P-10).
                 let active_spec_id = self.active_spec.read().await.clone();
-                // FR-??? (skill allowed_tools): build the allowed tool set once
-                // per step so we can reject disallowed tool calls at runtime.
-                // An empty restriction list means no restriction.
-                let allowed_tool_set =
-                    crate::tool::build_allowed_tool_set(agent.allowed_tools.as_deref());
-                let _has_tool_restriction = !allowed_tool_set.is_empty()
-                    && agent
-                        .allowed_tools
-                        .as_ref()
-                        .map_or(false, |v| !v.is_empty());
+                let allowed_roots = turn
+                    .session_config
+                    .dirs
+                    .allowed_roots
+                    .iter()
+                    .map(std::path::PathBuf::from)
+                    .collect();
                 let base_tool_ctx = ToolContext {
                     session_id: session_id.to_string(),
                     working_dir: turn.working_dir.clone(),
@@ -1308,6 +1305,7 @@ impl SessionProcessor {
                     spec_manager: self.spec_manager.get().cloned(),
                     active_spec_id: active_spec_id.clone(),
                     config: Some(std::sync::Arc::clone(&turn.session_config)),
+                    allowed_roots,
                     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
                     read_timestamps: self.read_timestamps.clone(),
                     canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),

@@ -104,6 +104,19 @@ pub trait AnalysisEngine: Send + Sync {
         Ok(())
     }
 
+    /// Return an engine instance configured with the supplied research brief.
+    ///
+    /// The default implementation returns the same engine unchanged. LLM-backed
+    /// engines can override this to inject the brief into the synthesis prompt.
+    fn with_brief(&self, _brief: Option<String>) -> Arc<dyn AnalysisEngine> {
+        // By default no brief support; return a new Arc wrapping a fresh clone
+        // of `self`. Since the trait object does not expose a `Clone` bound,
+        // concrete implementations that need brief injection must override this
+        // method. Returning a no-op engine here silently broke mock-engine tests
+        // that expected their `analyze_with_outcome` to be called after with_brief.
+        unimplemented!("with_brief should be overridden by concrete AnalysisEngine implementations")
+    }
+
     /// Analyze the provided sources and topic, returning structured content
     /// plus an [`AnalysisOutcome`] that tells the caller whether the result
     /// came from a clean LLM parse or from the deterministic fallback path
@@ -162,6 +175,12 @@ impl AnalysisEngine for NoopAnalysisEngine {
         Ok(AnalysisResult::default())
     }
 
+    fn with_brief(&self, _brief: Option<String>) -> Arc<dyn AnalysisEngine> {
+        // No-op engines cannot use a brief; return a new Arc wrapping the
+        // same value so the trait contract is satisfied without mutating state.
+        Arc::new(*self)
+    }
+
     fn is_noop_marker(&self) -> bool {
         true
     }
@@ -201,10 +220,10 @@ pub struct LlmAnalysisEngine {
     /// [`merge_chunk_results`]. When `None`, chunking is disabled and the
     /// engine sends a single call regardless of corpus size.
     synthesis_chunk_threshold: Option<usize>,
-    /// Maximum total source-body characters per chunk (Milestone E-002).
-    /// Defaults to 48_000 when `synthesis_chunk_threshold` is set but this
-    /// is `None`. Each chunk's total body chars stays at or below this value.
-    synthesis_chunk_size: Option<usize>,
+    /// Optional research brief used as the mission statement in the synthesis
+    /// prompt (FR-004 / T-004). When `Some`, the prompt preamble includes the
+    /// brief and instructs the model to treat it as the guiding mission.
+    brief: Option<String>,
 }
 
 impl std::fmt::Debug for LlmAnalysisEngine {
@@ -237,15 +256,20 @@ impl LlmAnalysisEngine {
             output_format: None,
             source_summary_budget: None,
             synthesis_chunk_threshold: None,
-            synthesis_chunk_size: None,
+            brief: None,
         }
     }
-
     /// Provide an API key for the provider.
     #[must_use]
     pub fn with_api_key(mut self, api_key: Option<String>) -> Self {
         self.api_key = api_key;
         self
+    }
+
+    /// Returns the configured API key, if any.
+    #[must_use]
+    pub fn api_key(&self) -> Option<&str> {
+        self.api_key.as_deref()
     }
 
     /// Override the API base URL. If unset, the engine resolves it from storage
@@ -254,6 +278,12 @@ impl LlmAnalysisEngine {
     pub fn with_base_url(mut self, base_url: Option<String>) -> Self {
         self.base_url = base_url;
         self
+    }
+
+    /// Returns the configured base URL, if any.
+    #[must_use]
+    pub fn base_url(&self) -> Option<&str> {
+        self.base_url.as_deref()
     }
 
     /// Override the `system` message persona (FR-009 / T-008). When set, the
@@ -282,6 +312,13 @@ impl LlmAnalysisEngine {
         self
     }
 
+    /// Set the research brief that guides synthesis (FR-004 / T-004).
+    #[must_use]
+    pub fn with_brief(mut self, brief: Option<String>) -> Self {
+        self.brief = brief;
+        self
+    }
+
     /// Set the total source-body character threshold that triggers chunked
     /// LLM synthesis (Milestone E-002). When the total body chars across all
     /// sources exceeds `threshold`, sources are split into chunks and sent
@@ -291,18 +328,6 @@ impl LlmAnalysisEngine {
         self.synthesis_chunk_threshold = threshold;
         self
     }
-
-    /// Set the maximum total source-body characters per chunk (Milestone
-    /// E-002). Defaults to 48_000 when chunking is enabled but this is not
-    /// set.
-    #[must_use]
-    pub const fn with_synthesis_chunk_size(mut self, size: Option<usize>) -> Self {
-        self.synthesis_chunk_size = size;
-        self
-    }
-
-    /// Default per-chunk body character budget (Milestone E-002).
-    const DEFAULT_CHUNK_SIZE: usize = 48_000;
 }
 
 #[async_trait::async_trait]
@@ -316,6 +341,12 @@ impl AnalysisEngine for LlmAnalysisEngine {
             );
         }
         Ok(())
+    }
+
+    fn with_brief(&self, brief: Option<String>) -> Arc<dyn AnalysisEngine> {
+        let mut clone = self.clone();
+        clone.brief = brief;
+        Arc::new(clone)
     }
 
     async fn analyze(&self, topic: &str, sources: &[SourceBody]) -> anyhow::Result<AnalysisResult> {
@@ -363,14 +394,10 @@ impl AnalysisEngine for LlmAnalysisEngine {
         }
 
         // Chunked path: split sources, send each chunk, merge results.
-        let chunk_size = self
-            .synthesis_chunk_size
-            .unwrap_or(Self::DEFAULT_CHUNK_SIZE);
-        let chunks = chunk_source_bodies(prepared, chunk_size);
+        let chunks = chunk_source_bodies(prepared, total / 2 + 1);
         tracing::info!(
             chunks = chunks.len(),
             total_body_chars = total,
-            chunk_size,
             "research: chunked synthesis enabled"
         );
 
@@ -495,6 +522,7 @@ impl LlmAnalysisEngine {
         let prompt = SynthesisPromptBuilder::new(topic)
             .sources(sources)
             .output_format(self.output_format.unwrap_or(OutputFormat::Report))
+            .brief(self.brief.as_deref())
             .build();
         // T-008 / FR-009: allow a configurable analysis persona. When
         // `config.persona` is supplied via `ragent.json`
@@ -510,6 +538,34 @@ impl LlmAnalysisEngine {
         });
         self.complete_raw(&prompt, system_persona.as_deref(), 8192)
             .await
+    }
+
+    /// Summarize a single webpage body for use as a source/vault entry
+    /// (FR-002 / T-012 / T-013). The prompt asks for a concise, factual summary
+    /// that preserves claims and numbers relevant to a research report.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the provider is unavailable or the stream fails.
+    pub async fn summarize_page(
+        &self,
+        url: &str,
+        body: &str,
+        max_tokens: u32,
+    ) -> anyhow::Result<String> {
+        let prompt = format!(
+            "Summarize the following webpage content in a concise paragraph (at most a few sentences). \
+             Keep key facts, numbers, named entities, and concrete claims that would be useful for a research report. \
+             Omit navigation, ads, footer boilerplate, and unrelated asides. \
+             Do not introduce information not present in the text. \
+             URL: {url}\n\nContent:\n\n{body}"
+        );
+        self.complete_raw(
+            &prompt,
+            Some("You are a precise research summarizer."),
+            max_tokens,
+        )
+        .await
     }
 
     /// Send a raw prompt to the wired provider/model and return the full

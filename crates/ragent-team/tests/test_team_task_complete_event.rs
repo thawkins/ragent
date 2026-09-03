@@ -95,6 +95,7 @@ async fn team_task_complete_publishes_exactly_one_event() {
             std::collections::HashMap::new(),
         )),
         canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+        allowed_roots: Vec::new(),
     };
 
     let tool = TeamTaskCompleteTool;

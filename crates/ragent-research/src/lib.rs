@@ -42,15 +42,20 @@
 
 pub mod adaptive;
 pub mod analysis;
+pub mod brief;
 pub mod cite_checker;
+pub mod clarify;
 pub mod cli;
 pub mod cluster;
+pub mod comparison;
 pub mod contradiction;
 pub mod corpus_critic;
 pub mod diagram;
 pub mod digest;
 pub mod document;
 pub mod engine;
+pub mod entities;
+pub mod evaluation;
 pub mod gather_log;
 pub mod io;
 pub mod item;
@@ -58,6 +63,7 @@ pub mod local_gatherer;
 pub mod locus;
 pub mod manager;
 pub mod open_access;
+pub mod page_summarizer;
 pub mod patcher;
 pub mod plan_dep;
 pub mod planner;
@@ -75,6 +81,7 @@ pub mod source_registry;
 pub mod source_vault;
 pub mod state;
 pub mod status;
+pub mod supervisor;
 pub mod synthesis;
 pub mod tier_router;
 pub mod verify;
@@ -87,10 +94,12 @@ pub use analysis::{
     NoopAnalysisEngine, SourceBody, SourceSummarizer, build_source_bodies, chunk_source_bodies,
     merge_chunk_results, summarize_source_bodies, total_body_chars,
 };
+pub use brief::generate_research_brief;
 pub use cite_checker::{CitationCheckResult, check_citations};
+pub use clarify::needs_clarification;
 pub use cli::{
-    FsLocalTool, ResearchCliCommand, render_list_output, render_search_output,
-    render_session_event_json, render_show_output, session_event_json,
+    ResearchCliCommand, render_list_output, render_search_output, render_session_event_json,
+    render_show_output, render_show_output_json, session_event_json,
 };
 pub use cluster::{
     CONCEPT_EXTRACTION_PROMPT_TEMPLATE, ClusterPayload, DEFAULT_CONTEXT_WINDOW_TOKENS,
@@ -116,6 +125,11 @@ pub use document::{
 pub use engine::{
     Critic, CriticResult, EngineConfig, IterationResult, IterativeEngine, SimpleCritic,
 };
+pub use entities::{
+    CompetitiveEntity, EntityExtractionResult, extract_comparison_criteria,
+    extract_entities_for_competitive_analysis, infer_competitive_set,
+};
+pub use evaluation::{EvaluationScorecard, evaluate_report, render_scorecard};
 pub use io::{IndexEntry, ResearchIo, ResearchIoError};
 pub use item::{
     DERIVED_TITLE_MAX_CHARS, ResearchItem, ResearchItemError, derive_title, derive_title_files,
@@ -136,6 +150,7 @@ pub use open_access::{
     DEFAULT_OA_MIN_FULL_TEXT_CHARS, OpenAccessClient, OpenAccessError, RecoveredOpenAccess,
     RecoverySource, ReqwestOpenAccessClient, query_europepmc, query_unpaywall, recover_open_access,
 };
+pub use page_summarizer::{LlmPageSummarizer, PageSummarizer, PageSummary};
 pub use patcher::{PatchResult, SurgicalPatch, build_surgical_patches};
 pub use plan_dep::{
     ResearchDependency, ResearchDependencyError, parse_research_dependencies,
@@ -150,7 +165,7 @@ pub use reconcile::{
     build_cross_locus_reconcile, build_source_tensions,
 };
 pub use research_name::{MAX_LEN, MIN_LEN, ResearchName, ResearchNameError, is_path_traversal};
-pub use run_config::{Depth, OutputFormat, Tier};
+pub use run_config::{Depth, OutputFormat, ResearchMode, Tier};
 pub use run_manifest::{
     ResumeOutcome, RunManifest, RunManifestError, RunStep, StepEntry, StepStatus,
 };
@@ -159,8 +174,8 @@ pub use scoreboard::{GradeBand, METER_CELLS, render_meter_bar};
 pub use session::{
     AnalysisConfig, AnalysisEvent, DEFAULT_WEB_PHASE_TIMEOUT_SECS, InputConfig, LocalConfig,
     NoopObserver, OutputConfig, ResearchSession, ResilienceConfig, RunEngineConfig, RunOutcome,
-    SessionConfig, SessionEvent, SessionObserver, SessionPhase, SynthesisEvent, SynthesizeOutcome,
-    WebConfig,
+    SessionConfig, SessionEvent, SessionObserver, SessionPhase, SupervisorConfig, SynthesisEvent,
+    SynthesizeOutcome, WebConfig,
 };
 pub use source::{LocalSourceKind, Source};
 pub use source_registry::{BuiltinSourceRegistry, ResearchSourceKind, SourceRegistry};
@@ -169,6 +184,10 @@ pub use state::{
     EvidenceGap, ResearchPlan, ResearchState, StateCounts, SubQuestion, SubQuestionStatus,
 };
 pub use status::ResearchStatus;
+pub use supervisor::{
+    DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS, IterativeResearcherNode, ResearcherAssignment,
+    ResearcherNode, ResearcherStatus, SupervisorNode, SupervisorState,
+};
 pub use synthesis::{CriticReport, SynthesisAudit, build_synthesis_audit};
 pub use tier_router::{TierRouter, TierRouterObserver, TierRouterToSessionObserver};
 pub use verify::{KeywordVerifier, VerificationResult, Verifier};

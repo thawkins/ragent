@@ -35,6 +35,7 @@ fn sample_doc(item: ResearchItem) -> ResearchDocument {
         source_tensions: None,
         synthesis_audit: None,
         template_body: None,
+        brief: None,
         corpus_critic: None,
         gap_fetch: None,
         surgical_patch: None,
@@ -43,9 +44,10 @@ fn sample_doc(item: ResearchItem) -> ResearchDocument {
         readability_audit: None,
         decomposed_queries: Vec::new(),
         output_format: OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     }
 }
-
 #[test]
 fn assemble_document_strips_control_chars_from_title_and_topic() {
     let item = ResearchItem::new(
@@ -93,6 +95,7 @@ fn assemble_document_strips_control_chars_from_summary() {
         source_tensions: None,
         synthesis_audit: None,
         template_body: None,
+        brief: None,
         corpus_critic: None,
         gap_fetch: None,
         surgical_patch: None,
@@ -101,6 +104,8 @@ fn assemble_document_strips_control_chars_from_summary() {
         readability_audit: None,
         decomposed_queries: Vec::new(),
         output_format: OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     };
     let assembled = assemble_document(&doc);
     assert!(
@@ -129,6 +134,7 @@ fn assemble_document_strips_control_chars_from_findings() {
         source_tensions: None,
         synthesis_audit: None,
         template_body: None,
+        brief: None,
         corpus_critic: None,
         gap_fetch: None,
         surgical_patch: None,
@@ -137,6 +143,8 @@ fn assemble_document_strips_control_chars_from_findings() {
         readability_audit: None,
         decomposed_queries: Vec::new(),
         output_format: OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     };
     let assembled = assemble_document(&doc);
     assert!(
@@ -168,6 +176,7 @@ fn assemble_document_strips_control_chars_from_cross_references() {
         source_tensions: None,
         synthesis_audit: None,
         template_body: None,
+        brief: None,
         corpus_critic: None,
         gap_fetch: None,
         surgical_patch: None,
@@ -176,6 +185,8 @@ fn assemble_document_strips_control_chars_from_cross_references() {
         readability_audit: None,
         decomposed_queries: Vec::new(),
         output_format: OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     };
     let assembled = assemble_document(&doc);
     assert!(
@@ -204,6 +215,7 @@ fn assemble_document_strips_control_chars_from_open_questions() {
         source_tensions: None,
         synthesis_audit: None,
         template_body: None,
+        brief: None,
         corpus_critic: None,
         gap_fetch: None,
         surgical_patch: None,
@@ -212,6 +224,8 @@ fn assemble_document_strips_control_chars_from_open_questions() {
         readability_audit: None,
         decomposed_queries: Vec::new(),
         output_format: OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     };
     let assembled = assemble_document(&doc);
     assert!(
@@ -240,6 +254,7 @@ fn assemble_document_strips_control_chars_from_decomposed_queries() {
         source_tensions: None,
         synthesis_audit: None,
         template_body: None,
+        brief: None,
         corpus_critic: None,
         gap_fetch: None,
         surgical_patch: None,
@@ -248,6 +263,8 @@ fn assemble_document_strips_control_chars_from_decomposed_queries() {
         readability_audit: None,
         decomposed_queries: vec!["query\x01 one".to_string(), "query\x02 two".to_string()],
         output_format: OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     };
     let assembled = assemble_document(&doc);
     assert!(
@@ -280,6 +297,7 @@ fn assemble_document_strips_control_chars_in_imrad_layout() {
         source_tensions: None,
         synthesis_audit: None,
         template_body: None,
+        brief: None,
         corpus_critic: None,
         gap_fetch: None,
         surgical_patch: None,
@@ -288,6 +306,8 @@ fn assemble_document_strips_control_chars_in_imrad_layout() {
         readability_audit: None,
         decomposed_queries: vec!["decomp\x02 query".to_string()],
         output_format: OutputFormat::Imrad,
+        comparison_table: None,
+        evaluation_scorecard: None,
     };
     let assembled = assemble_document(&doc);
     for byte in [0x01u8 as char, 0x02u8 as char, 0x03u8 as char] {

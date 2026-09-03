@@ -185,6 +185,15 @@ struct CreateResearchRequest {
     /// `--format report|executive-summary|comparison-table|source-bibliography|imrad`.
     #[serde(default)]
     format: Option<String>,
+    /// `--mode tiered|supervisor|competitive` research execution strategy
+    /// (FR-001).
+    #[serde(default)]
+    mode: Option<String>,
+    /// `--summarization-model <provider:model>` selects a lightweight model
+    /// for summarizing fetched webpages independently from the synthesis
+    /// model (FR-002).
+    #[serde(default)]
+    summarization_model: Option<String>,
     /// `--tier light|full|dissertation`. When omitted the engine default
     /// (`Tier::Full`) is used.
     #[serde(default)]
@@ -218,6 +227,27 @@ struct CreateResearchRequest {
     /// Maximum sources to send to the LLM synthesis engine.
     #[serde(default)]
     max_synthesis_sources: Option<usize>,
+    /// Optional research brief generated from the user's prompt. When
+    /// supplied, downstream agents use this as their mission statement.
+    #[serde(default)]
+    brief: Option<String>,
+    /// Model used by research agents / sub-topic workers (FR-013).
+    #[serde(default)]
+    research_model: Option<String>,
+    /// Model used to compress or summarize intermediate findings (FR-013).
+    #[serde(default)]
+    compression_model: Option<String>,
+    /// Model used to write the final report (FR-013).
+    #[serde(default)]
+    final_report_model: Option<String>,
+    /// Maximum parallel researcher agents in supervisor/competitive modes
+    /// (FR-012).
+    #[serde(default)]
+    max_concurrent_research_units: Option<usize>,
+    /// `--evaluate` — run the deterministic self-evaluation scorecard and
+    /// append it to the assembled report (FR-008 / T-015).
+    #[serde(default)]
+    evaluate: bool,
 }
 
 impl CreateResearchRequest {
@@ -233,6 +263,8 @@ impl CreateResearchRequest {
             template: self.template.clone(),
             depth: self.depth.clone(),
             tier: self.tier.clone(),
+            mode: self.mode.clone(),
+            clarify: None,
             iterations: self.iterations,
             output_format: self.format.clone(),
             use_local: self.use_local,
@@ -251,6 +283,13 @@ impl CreateResearchRequest {
             max_web_results: self.max_web_results,
             max_local_sources: self.max_local_sources,
             max_synthesis_sources: self.max_synthesis_sources,
+            summarization_model: self.summarization_model.clone(),
+            brief: self.brief.clone(),
+            research_model: self.research_model.clone(),
+            compression_model: self.compression_model.clone(),
+            final_report_model: self.final_report_model.clone(),
+            max_concurrent_research_units: self.max_concurrent_research_units,
+            evaluate: Some(self.evaluate),
         }
     }
 }
@@ -553,4 +592,105 @@ async fn research_events_stream(
     Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CreateResearchRequest;
+
+    #[test]
+    fn to_run_request_maps_new_mode_and_summarization_and_evaluate() {
+        let req = CreateResearchRequest {
+            name: "compete".into(),
+            topic: "Compare A and B".into(),
+            title: None,
+            sources_dir: None,
+            template: None,
+            from_urls: Vec::new(),
+            from_files: Vec::new(),
+            use_local: false,
+            use_specs: false,
+            use_low_relevance: false,
+            no_scholarly: false,
+            use_pdf: false,
+            fetch_concurrency: None,
+            fetch_timeout_secs: None,
+            local_concurrency: None,
+            depth: None,
+            iterations: None,
+            format: Some("comparison-table".into()),
+            mode: Some("competitive".into()),
+            summarization_model: Some("ollama:phi4".into()),
+            tier: Some("light".into()),
+            web_phase_timeout_secs: None,
+            local_phase_timeout_secs: None,
+            search_max_retries: None,
+            search_retry_base_delay_ms: None,
+            search_circuit_breaker_threshold: None,
+            max_web_results: None,
+            max_local_sources: None,
+            max_synthesis_sources: None,
+            brief: None,
+            research_model: Some("anthropic:claude-sonnet-4".into()),
+            compression_model: None,
+            final_report_model: None,
+            max_concurrent_research_units: Some(3),
+            evaluate: true,
+        };
+
+        let run = req.to_run_request();
+        assert_eq!(run.mode, Some("competitive".into()));
+        assert_eq!(run.output_format, Some("comparison-table".into()));
+        assert_eq!(run.summarization_model, Some("ollama:phi4".into()));
+        assert_eq!(run.evaluate, Some(true));
+        assert_eq!(run.tier, Some("light".into()));
+        assert_eq!(run.research_model, Some("anthropic:claude-sonnet-4".into()));
+        assert_eq!(run.max_concurrent_research_units, Some(3));
+    }
+
+    #[test]
+    fn to_run_request_preserves_defaults_when_optional_fields_omitted() {
+        let req = CreateResearchRequest {
+            name: "plain".into(),
+            topic: "Rust".into(),
+            title: None,
+            sources_dir: None,
+            template: None,
+            from_urls: Vec::new(),
+            from_files: Vec::new(),
+            use_local: false,
+            use_specs: false,
+            use_low_relevance: false,
+            no_scholarly: false,
+            use_pdf: false,
+            fetch_concurrency: None,
+            fetch_timeout_secs: None,
+            local_concurrency: None,
+            depth: None,
+            iterations: None,
+            format: None,
+            mode: None,
+            summarization_model: None,
+            tier: None,
+            web_phase_timeout_secs: None,
+            local_phase_timeout_secs: None,
+            search_max_retries: None,
+            search_retry_base_delay_ms: None,
+            search_circuit_breaker_threshold: None,
+            max_web_results: None,
+            max_local_sources: None,
+            max_synthesis_sources: None,
+            brief: None,
+            research_model: None,
+            compression_model: None,
+            final_report_model: None,
+            max_concurrent_research_units: None,
+            evaluate: false,
+        };
+
+        let run = req.to_run_request();
+        assert!(run.mode.is_none());
+        assert!(run.summarization_model.is_none());
+        assert_eq!(run.evaluate, Some(false));
+    }
 }

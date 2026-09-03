@@ -47,6 +47,8 @@ mod shim {
             std::sync::Arc<std::sync::RwLock<std::collections::HashMap<std::path::PathBuf, u64>>>,
         /// Canonical path cache.
         pub canonical_cache: std::sync::Arc<crate::shim::CanonicalPathCache>,
+        /// Allowed root directories for path escape checking.
+        pub allowed_roots: Vec<std::path::PathBuf>,
     }
 
     // Stub the tool trait. Only the type signature matters here; the actual

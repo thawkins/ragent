@@ -225,6 +225,7 @@ async fn test_agent_complete_rejects_task_id_and_result_inputs() {
         spec_manager: None,
         active_spec_id: None,
         config: None,
+        allowed_roots: Vec::new(),
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
@@ -274,6 +275,7 @@ async fn test_agent_complete_accepts_summary_input() {
         spec_manager: None,
         active_spec_id: None,
         config: None,
+        allowed_roots: Vec::new(),
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),

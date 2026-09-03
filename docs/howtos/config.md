@@ -1417,31 +1417,40 @@ enabled.
 
 ### 7.34 `research`
 
-Research subsystem configuration.
-
-```json
-{
-  "research": {
-    "open_access_recovery": true,
-    "contact_email": "user@example.com",
-    "oa_min_full_text_chars": 1000
+Research subsystem configuration.  ```json
+  {
+    "research": {
+      "open_access_recovery": true,
+      "contact_email": "user@example.com",
+      "oa_min_full_text_chars": 1000,
+      "evaluate": {
+        "enabled": true
+      }
+    }
   }
-}
-```
-
-#### `ResearchConfig` schema
-
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `open_access_recovery` | `bool` | `false` | Enable open-access recovery via Unpaywall and Europe PMC for short scholarly sources (FR-011). |
-| `contact_email` | `Option<String>` | `None` | Contact email required by Unpaywall's terms of service (FR-012). |
-| `oa_min_full_text_chars` | `usize` | `1000` | Minimum full-text length (chars) that triggers OA recovery. |
-
-`open_access_recovery` uses OR semantics on merge. `contact_email` and
-`oa_min_full_text_chars` override base when present. `is_empty()` returns
-`true` when at default values.
-
-For the research system, see [`docs/howtos/research.md`](research.md).
+  ```
+  
+  #### `ResearchConfig` schema
+  
+  | Field | Type | Default | Description |
+  | ----- | ---- | ------- | ----------- |
+  | `open_access_recovery` | `bool` | `false` | Enable open-access recovery via Unpaywall and Europe PMC for short scholarly sources (FR-011). |
+  | `contact_email` | `Option<String>` | `None` | Contact email required by Unpaywall's terms of service (FR-012). |
+  | `oa_min_full_text_chars` | `usize` | `1000` | Minimum full-text length (chars) that triggers OA recovery. |
+  | `evaluate` | `ResearchEvaluateConfig` | `{"enabled": false}` | Self-evaluation scorecard settings (FR-015 of specs/opendeepresearch). When `enabled`, the research pipeline appends a deterministic quality scorecard (quality, relevance, groundedness, completeness, structure) to the report. |
+  
+  As of v1.0.77, `evaluate` can be configured in `ragent.json` and is omitted from
+  serialized output when at its default value (`enabled: false`).
+  
+  As of v1.0.76, the default web-phase timeout is 60 seconds and can be overridden
+  per run with `--web-time N` (or `--web-phase-timeout-secs N`); `0` disables the
+  deadline. When the deadline elapses, the run continues with the sources gathered    so far. See [`docs/howtos/research.md`](research.md) for the full research workflow.
+  
+  `open_access_recovery` uses OR semantics on merge. `contact_email` and
+  `oa_min_full_text_chars` override base when present. `is_empty()` returns
+  `true` when at default values.
+  
+  For the research system, see [`docs/howtos/research.md`](research.md).
 
 ---
 
@@ -1691,19 +1700,20 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "triggers": false,
     "hooks": false,
     "undo": false
-  },
-
-  "research": {
-    "open_access_recovery": false,
-    "contact_email": null,
-    "oa_min_full_text_chars": 1000
+  },    "research": {
+      "open_access_recovery": false,
+      "contact_email": null,
+      "oa_min_full_text_chars": 1000,
+      "evaluate": {
+        "enabled": false
+      }
+    }
   }
-}
-```
-
----
-
-## 9. Common Recipes
+  ```
+  
+  ---
+  
+  ## 9. Common Recipes
 
 ### Minimal config (just an API key reference)
 

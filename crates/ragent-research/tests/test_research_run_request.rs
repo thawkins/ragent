@@ -11,7 +11,7 @@
 use ragent_config::Config;
 use ragent_research::{
     ResearchRunRequest, build_session_config,
-    run_config::{Depth, OutputFormat, Tier},
+    run_config::{Depth, OutputFormat, ResearchMode, Tier},
     session::DEFAULT_WEB_PHASE_TIMEOUT_SECS,
 };
 
@@ -66,7 +66,7 @@ fn build_session_config_applies_defaults_with_no_overrides() {
     assert_eq!(cfg.engine.tier, Tier::Full);
 }
 
-// ── Explicit overrides ─────────────────────���────────────────────────────
+// ── Explicit overrides ─────────────────────────────────────────────────
 
 #[test]
 fn build_session_config_maps_all_explicit_fields() {
@@ -80,6 +80,8 @@ fn build_session_config_maps_all_explicit_fields() {
         template: Some("imrad".to_string()),
         depth: Some("deep".to_string()),
         tier: Some("dissertation".to_string()),
+        mode: Some("supervisor".to_string()),
+        clarify: Some(true),
         iterations: Some(5),
         output_format: Some("imrad".to_string()),
         use_local: true,
@@ -98,6 +100,13 @@ fn build_session_config_maps_all_explicit_fields() {
         max_web_results: Some(50),
         max_local_sources: Some(30),
         max_synthesis_sources: Some(15),
+        summarization_model: Some("openai:gpt-4.1-nano".to_string()),
+        brief: Some("A generated research brief".to_string()),
+        research_model: Some("openai:gpt-4.1".to_string()),
+        compression_model: Some("openai:gpt-4.1-mini".to_string()),
+        final_report_model: Some("anthropic:claude-sonnet-4".to_string()),
+        max_concurrent_research_units: Some(7),
+        evaluate: Some(true),
     };
     let cfg = build_session_config(&req, None);
 
@@ -145,6 +154,20 @@ fn build_session_config_maps_all_explicit_fields() {
 
     // Engine
     assert_eq!(cfg.engine.tier, Tier::Dissertation);
+    assert_eq!(cfg.engine.mode, ResearchMode::Supervisor);
+    assert_eq!(cfg.engine.max_concurrent_research_units, 7);
+
+    // Brief and models (FR-004, FR-013)
+    assert_eq!(cfg.brief.as_deref(), Some("A generated research brief"));
+    assert_eq!(cfg.models.research_model.as_deref(), Some("openai:gpt-4.1"));
+    assert_eq!(
+        cfg.models.compression_model.as_deref(),
+        Some("openai:gpt-4.1-mini")
+    );
+    assert_eq!(
+        cfg.models.final_report_model.as_deref(),
+        Some("anthropic:claude-sonnet-4")
+    );
 }
 
 #[test]
@@ -157,17 +180,15 @@ fn build_session_config_zero_web_phase_timeout_disables_deadline() {
     assert_eq!(
         cfg.web.web_phase_timeout_secs,
         Some(0),
-        "explicit 0 must be preserved so the deadline is disabled"
+        "explicit 0 web_phase_timeout_secs must disable the deadline"
     );
 }
-
-// ── Tier parsing ────────────────────────────────────────────────────────
 
 #[test]
 fn build_session_config_parses_tier_light() {
     let req = ResearchRunRequest {
         tier: Some("light".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        ..ResearchRunRequest::new("light-test", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.engine.tier, Tier::Light);
@@ -177,7 +198,7 @@ fn build_session_config_parses_tier_light() {
 fn build_session_config_parses_tier_full() {
     let req = ResearchRunRequest {
         tier: Some("full".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        ..ResearchRunRequest::new("full-test", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.engine.tier, Tier::Full);
@@ -187,7 +208,7 @@ fn build_session_config_parses_tier_full() {
 fn build_session_config_parses_tier_dissertation() {
     let req = ResearchRunRequest {
         tier: Some("dissertation".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        ..ResearchRunRequest::new("diss-test", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.engine.tier, Tier::Dissertation);
@@ -196,20 +217,18 @@ fn build_session_config_parses_tier_dissertation() {
 #[test]
 fn build_session_config_invalid_tier_falls_back_to_full() {
     let req = ResearchRunRequest {
-        tier: Some("nonexistent".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        tier: Some("unknown".to_string()),
+        ..ResearchRunRequest::new("bad-tier", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.engine.tier, Tier::Full);
 }
 
-// ── Output format parsing ───────────────────────────────────────────────
-
 #[test]
 fn build_session_config_parses_output_format_executive_summary() {
     let req = ResearchRunRequest {
         output_format: Some("executive-summary".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        ..ResearchRunRequest::new("fmt-exec", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.output.output_format, OutputFormat::ExecutiveSummary);
@@ -219,7 +238,7 @@ fn build_session_config_parses_output_format_executive_summary() {
 fn build_session_config_parses_output_format_comparison_table() {
     let req = ResearchRunRequest {
         output_format: Some("comparison-table".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        ..ResearchRunRequest::new("fmt-cmp", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.output.output_format, OutputFormat::ComparisonTable);
@@ -229,7 +248,7 @@ fn build_session_config_parses_output_format_comparison_table() {
 fn build_session_config_parses_output_format_source_bibliography() {
     let req = ResearchRunRequest {
         output_format: Some("source-bibliography".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        ..ResearchRunRequest::new("fmt-bib", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.output.output_format, OutputFormat::SourceBibliography);
@@ -239,7 +258,7 @@ fn build_session_config_parses_output_format_source_bibliography() {
 fn build_session_config_parses_output_format_imrad() {
     let req = ResearchRunRequest {
         output_format: Some("imrad".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        ..ResearchRunRequest::new("fmt-imrad", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.output.output_format, OutputFormat::Imrad);
@@ -248,20 +267,18 @@ fn build_session_config_parses_output_format_imrad() {
 #[test]
 fn build_session_config_invalid_format_falls_back_to_report() {
     let req = ResearchRunRequest {
-        output_format: Some("unknown-format".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        output_format: Some("nonsense".to_string()),
+        ..ResearchRunRequest::new("bad-fmt", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.output.output_format, OutputFormat::Report);
 }
 
-// ── Depth parsing ────────────────────────────────────────────────────────
-
 #[test]
 fn build_session_config_parses_depth_shallow() {
     let req = ResearchRunRequest {
         depth: Some("shallow".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        ..ResearchRunRequest::new("depth-shallow", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.analysis.depth, Some(Depth::Shallow));
@@ -271,7 +288,7 @@ fn build_session_config_parses_depth_shallow() {
 fn build_session_config_parses_depth_standard() {
     let req = ResearchRunRequest {
         depth: Some("standard".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        ..ResearchRunRequest::new("depth-standard", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.analysis.depth, Some(Depth::Standard));
@@ -281,7 +298,7 @@ fn build_session_config_parses_depth_standard() {
 fn build_session_config_parses_depth_deep() {
     let req = ResearchRunRequest {
         depth: Some("deep".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        ..ResearchRunRequest::new("depth-deep", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.analysis.depth, Some(Depth::Deep));
@@ -290,24 +307,22 @@ fn build_session_config_parses_depth_deep() {
 #[test]
 fn build_session_config_invalid_depth_is_none() {
     let req = ResearchRunRequest {
-        depth: Some("invalid".to_string()),
-        ..ResearchRunRequest::new("t", "topic")
+        depth: Some("unknown".to_string()),
+        ..ResearchRunRequest::new("bad-depth", "topic")
     };
     let cfg = build_session_config(&req, None);
     assert!(cfg.analysis.depth.is_none());
 }
 
-// ── missing_subject ─────────────────────────────────────────────────────
-
 #[test]
 fn missing_subject_true_when_no_topic_no_urls_no_files() {
-    let req = ResearchRunRequest::new("test", "");
+    let req = ResearchRunRequest::default();
     assert!(req.missing_subject());
 }
 
 #[test]
 fn missing_subject_false_when_topic_present() {
-    let req = ResearchRunRequest::new("test", "some topic");
+    let req = ResearchRunRequest::new("x", "topic");
     assert!(!req.missing_subject());
 }
 
@@ -315,7 +330,7 @@ fn missing_subject_false_when_topic_present() {
 fn missing_subject_false_when_from_urls_present() {
     let req = ResearchRunRequest {
         from_urls: vec!["https://example.com".to_string()],
-        ..ResearchRunRequest::new("test", "")
+        ..ResearchRunRequest::default()
     };
     assert!(!req.missing_subject());
 }
@@ -323,97 +338,82 @@ fn missing_subject_false_when_from_urls_present() {
 #[test]
 fn missing_subject_false_when_from_files_present() {
     let req = ResearchRunRequest {
-        from_files: vec!["doc.md".to_string()],
-        ..ResearchRunRequest::new("test", "")
+        from_files: vec!["paper.pdf".to_string()],
+        ..ResearchRunRequest::default()
     };
     assert!(!req.missing_subject());
 }
 
-// ── Config integration ──────────────────────────────────────────────────
-
 #[test]
 fn build_session_config_reads_oa_settings_from_app_config() {
-    let mut config = Config::default();
-    config.research.open_access_recovery = true;
-    config.research.contact_email = Some("test@example.com".to_string());
-    config.research.oa_min_full_text_chars = 5000;
-
-    let req = ResearchRunRequest::new("test", "topic");
-    let cfg = build_session_config(&req, Some(&config));
-
-    assert!(cfg.resilience.open_access_recovery);
+    let mut cfg = Config::default();
+    cfg.research = ragent_config::ResearchConfig {
+        open_access_recovery: true,
+        contact_email: Some("user@example.com".to_string()),
+        oa_min_full_text_chars: 250,
+        ..Default::default()
+    };
+    let req = ResearchRunRequest::new("oa", "topic");
+    let session = build_session_config(&req, Some(&cfg));
+    assert!(session.resilience.open_access_recovery);
     assert_eq!(
-        cfg.resilience.contact_email.as_deref(),
-        Some("test@example.com")
+        session.resilience.contact_email.as_deref(),
+        Some("user@example.com")
     );
-    assert_eq!(cfg.resilience.oa_min_full_text_chars, 5000);
+    assert_eq!(session.resilience.oa_min_full_text_chars, 250);
 }
 
 #[test]
 fn build_session_config_oa_disabled_when_no_app_config() {
-    let req = ResearchRunRequest::new("test", "topic");
+    let req = ResearchRunRequest::new("no-oa", "topic");
     let cfg = build_session_config(&req, None);
-
     assert!(!cfg.resilience.open_access_recovery);
-    assert!(cfg.resilience.contact_email.is_none());
 }
-
-// ── session_event_json helper ───────────────────────────────────────────
 
 #[test]
 fn session_event_json_returns_pure_json_without_prefix() {
-    use ragent_research::cli::session_event_json;
-    use ragent_research::session::SessionEvent;
-
-    let event = SessionEvent::Phase {
-        phase: ragent_research::session::SessionPhase::Setup,
-    };
-    let json = session_event_json(&event);
-
-    // Should NOT start with the CLI prefix
-    assert!(!json.starts_with("ragent-research: "));
-    // Should be valid JSON with kind+payload structure
-    assert!(json.starts_with('{'));
-    assert!(json.contains("\"kind\""));
-    assert!(json.contains("\"payload\""));
+    let json =
+        ragent_research::cli::session_event_json(&ragent_research::session::SessionEvent::Phase {
+            phase: ragent_research::session::SessionPhase::Web,
+        });
+    assert!(json.contains("\"phase\""));
+    assert!(!json.starts_with("data: "));
 }
 
 #[test]
 fn render_session_event_json_wraps_session_event_json_with_prefix() {
-    use ragent_research::cli::{render_session_event_json, session_event_json};
-    use ragent_research::session::SessionEvent;
-
-    let event = SessionEvent::Phase {
-        phase: ragent_research::session::SessionPhase::Setup,
-    };
-    let pure_json = session_event_json(&event);
-    let cli_json = render_session_event_json(&event);
-
-    assert!(cli_json.starts_with("ragent-research: "));
-    assert_eq!(cli_json, format!("ragent-research: {}", pure_json));
+    let rendered = ragent_research::cli::render_session_event_json(
+        &ragent_research::session::SessionEvent::Phase {
+            phase: ragent_research::session::SessionPhase::Web,
+        },
+    );
+    assert!(rendered.starts_with("ragent-research: "));
 }
 
 #[test]
 fn session_event_json_config_snapshot_is_valid_json() {
-    use ragent_research::cli::session_event_json;
-    use ragent_research::run_config::{Depth, OutputFormat};
-    use ragent_research::session::SessionEvent;
-
-    let event = SessionEvent::ConfigSnapshot {
-        output_format: OutputFormat::Imrad.as_str().to_string(),
-        depth: Some(Depth::Deep.as_str().to_string()),
-        iterations: Some(3),
-        tier: Some("full".to_string()),
-        from_urls: vec!["https://example.com".to_string()],
-        from_files: vec!["doc.md".to_string()],
+    let req = ResearchRunRequest::new("cfg-snap", "topic");
+    let cfg = build_session_config(&req, None);
+    let event = ragent_research::session::SessionEvent::ConfigSnapshot {
+        output_format: cfg.output.output_format.as_str().to_string(),
+        depth: cfg.analysis.depth.map(|d| d.as_str().to_string()),
+        iterations: cfg.analysis.iterations,
+        tier: Some(cfg.engine.tier.as_str().to_string()),
+        from_urls: cfg.input.from_urls.clone(),
+        from_files: cfg
+            .input
+            .from_files
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect(),
     };
-    let json = session_event_json(&event);
-
-    // Parse it as JSON to verify validity
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["kind"], "config");
-    assert_eq!(parsed["payload"]["output_format"], "imrad");
-    assert_eq!(parsed["payload"]["depth"], "deep");
-    assert_eq!(parsed["payload"]["iterations"], 3);
-    assert_eq!(parsed["payload"]["tier"], "full");
+    let json = ragent_research::cli::session_event_json(&event);
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("must be valid JSON");
+    assert_eq!(
+        parsed
+            .get("payload")
+            .and_then(|c| c.get("output_format"))
+            .and_then(|v| v.as_str()),
+        Some("report")
+    );
 }

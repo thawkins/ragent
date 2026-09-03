@@ -24,6 +24,7 @@ fn ctx(working_dir: &std::path::Path) -> ToolContext {
         event_bus: Arc::new(ragent_types::event::EventBus::new(64)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+        allowed_roots: vec![working_dir.to_path_buf()],
     }
 }
 

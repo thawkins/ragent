@@ -63,7 +63,15 @@ impl Tool for WriteTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
-        super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+        // C-002: writes must stay inside the allowed roots.
+        // Use configured allowed_roots if available, otherwise fall back to working_dir.
+        if ctx.allowed_roots.is_empty() {
+            super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+        } else {
+            let root_refs: Vec<&std::path::Path> =
+                ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
+            super::check_path_within_any_root_cached(&path, &root_refs, &ctx.canonical_cache)?;
+        }
 
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)

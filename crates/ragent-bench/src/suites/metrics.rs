@@ -58,7 +58,8 @@ pub fn best_exact_or_similarity_sample(
 }
 
 /// Normalize code-like content for text-based comparisons.
-#[must_use]
+// reason: only consumed inside this crate (benchmark metrics) - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 pub fn normalized_code(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }

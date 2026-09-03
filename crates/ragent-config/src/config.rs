@@ -1112,7 +1112,13 @@ pub struct BashConfig {
 /// automatically grant permission for read/edit operations without prompting.
 /// Entries in `denylist` are glob patterns that unconditionally reject access
 /// (e.g. `"secrets/**"`, `"/etc/**"`). Both global and project configs are merged —
-/// the union of all entries is used. Denylist takes precedence over allowlist.
+/// Configuration for directory/file path allowlists and denylists.
+///
+/// The `allowlist` and `denylist` fields contain glob patterns that control
+/// automatic approval/rejection of file operations without prompting.
+/// The `allowed_roots` field specifies additional directory paths that are
+/// treated as valid roots for path escape checking, allowing sub-agents and
+/// tools to access files in multiple project directories.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DirsConfig {
     /// Glob patterns for paths that are automatically allowed (no prompt).
@@ -1121,6 +1127,12 @@ pub struct DirsConfig {
     /// Glob patterns for paths that are unconditionally rejected.
     #[serde(default)]
     pub denylist: Vec<String>,
+    /// Additional directory paths that are treated as valid roots for path
+    /// escape checking. By default, only the session's working directory is
+    /// allowed. Add paths here to permit access to multiple project roots
+    /// (e.g., sibling directories). Paths are canonicalized at load time.
+    #[serde(default, rename = "allowed_roots")]
+    pub allowed_roots: Vec<String>,
 }
 
 /// A user-defined slash-command shortcut.
@@ -2037,12 +2049,28 @@ impl Config {
         if overlay.research.oa_min_full_text_chars != default_oa_min_full_text_chars() {
             base.research.oa_min_full_text_chars = overlay.research.oa_min_full_text_chars;
         }
-
-        // Finance provider config: overlay takes precedence when it contains
+        base.research.evaluate.merge(&overlay.research.evaluate); // Finance provider config: overlay takes precedence when it contains
         // any explicit setting, so project-level Alpha Vantage credentials are
         // not silently discarded by the default Yahoo config.
         if overlay.finance.is_explicitly_configured() {
             base.finance = overlay.finance;
+        }
+
+        // dirs: union of allowlist, denylist, and allowed_roots from both configs
+        for pattern in overlay.dirs.allowlist {
+            if !base.dirs.allowlist.contains(&pattern) {
+                base.dirs.allowlist.push(pattern);
+            }
+        }
+        for pattern in overlay.dirs.denylist {
+            if !base.dirs.denylist.contains(&pattern) {
+                base.dirs.denylist.push(pattern);
+            }
+        }
+        for path in overlay.dirs.allowed_roots {
+            if !base.dirs.allowed_roots.contains(&path) {
+                base.dirs.allowed_roots.push(path);
+            }
         }
 
         base
@@ -2939,6 +2967,99 @@ pub struct ResearchConfig {
     /// gatherer queries OA services for a legal full-text copy.
     #[serde(default = "default_oa_min_full_text_chars")]
     pub oa_min_full_text_chars: usize,
+    /// Model selection for multi-stage research pipelines (FR-013 of
+    /// specs/opendeepresearch). Each field overrides the default model for a
+    /// specific phase when set.
+    #[serde(default, skip_serializing_if = "ResearchModelsConfig::is_empty")]
+    pub models: ResearchModelsConfig,
+    /// Supervisor multi-agent graph limits (FR-012 of specs/opendeepresearch).
+    #[serde(default, skip_serializing_if = "ResearchSupervisorConfig::is_empty")]
+    pub supervisor: ResearchSupervisorConfig,
+    /// Self-evaluation scorecard settings (FR-015 of specs/opendeepresearch).
+    #[serde(default, skip_serializing_if = "ResearchEvaluateConfig::is_empty")]
+    pub evaluate: ResearchEvaluateConfig,
+}
+
+/// Supervisor multi-agent graph limits (FR-012).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResearchSupervisorConfig {
+    /// Maximum number of researcher agents that may run concurrently in
+    /// `supervisor` and `competitive` modes.
+    #[serde(default = "default_max_concurrent_research_units")]
+    pub max_concurrent_research_units: usize,
+}
+
+impl Default for ResearchSupervisorConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_research_units: default_max_concurrent_research_units(),
+        }
+    }
+}
+
+impl ResearchSupervisorConfig {
+    /// Returns `true` when the supervisor config contains only default values.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.max_concurrent_research_units == default_max_concurrent_research_units()
+    }
+}
+
+const fn default_max_concurrent_research_units() -> usize {
+    5
+}
+
+/// Self-evaluation scorecard settings (FR-015).
+///
+/// When enabled, the research pipeline appends a deterministic quality
+/// scorecard (quality, relevance, groundedness, completeness, structure) to
+/// the assembled report.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResearchEvaluateConfig {
+    /// Enable the self-evaluation step by default.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub enabled: bool,
+}
+
+impl ResearchEvaluateConfig {
+    /// Returns `true` when evaluation is disabled (the default).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        !self.enabled
+    }
+
+    /// Merge another evaluate config into `self` using OR semantics — once
+    /// enabled at any config layer, evaluation stays on.
+    pub fn merge(&mut self, other: &Self) {
+        self.enabled |= other.enabled;
+    }
+}
+
+/// Per-phase model overrides for the research subsystem.
+///
+/// When a field is `None`, the phase falls back to the configured default
+/// model. All fields are optional.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResearchModelsConfig {
+    /// Model used by research agents / sub-topic workers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research_model: Option<String>,
+    /// Model used to compress or summarize intermediate findings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compression_model: Option<String>,
+    /// Model used to write the final report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_report_model: Option<String>,
+}
+
+impl ResearchModelsConfig {
+    /// Returns `true` when every model override is unset.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.research_model.is_none()
+            && self.compression_model.is_none()
+            && self.final_report_model.is_none()
+    }
 }
 
 const fn default_oa_min_full_text_chars() -> usize {
@@ -2953,6 +3074,9 @@ impl ResearchConfig {
         !self.open_access_recovery
             && self.contact_email.is_none()
             && self.oa_min_full_text_chars == default_oa_min_full_text_chars()
+            && self.models.is_empty()
+            && self.supervisor.is_empty()
+            && self.evaluate.is_empty()
     }
 }
 
@@ -2962,6 +3086,9 @@ impl Default for ResearchConfig {
             open_access_recovery: false,
             contact_email: None,
             oa_min_full_text_chars: default_oa_min_full_text_chars(),
+            models: ResearchModelsConfig::default(),
+            supervisor: ResearchSupervisorConfig::default(),
+            evaluate: ResearchEvaluateConfig::default(),
         }
     }
 }

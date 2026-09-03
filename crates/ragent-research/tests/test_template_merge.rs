@@ -49,8 +49,11 @@ fn doc_with_template(template_body: Option<&str>) -> ResearchDocument {
         polish: None,
         readability_audit: None,
         template_body: template_body.map(str::to_string),
+        brief: None,
         decomposed_queries: Vec::new(),
         output_format: ragent_research::OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     }
 }
 

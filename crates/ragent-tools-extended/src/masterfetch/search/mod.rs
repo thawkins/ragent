@@ -584,7 +584,10 @@ mod tests {
         let output = orchestrator.search("", &SearchOptions::default()).await;
 
         assert_eq!(output.query, "");
-        assert!(output.merge.results.is_empty());
+        assert!(
+            output.merge.results.is_empty(),
+            "merged results should be empty"
+        );
         assert!(!output.cached);
     }
 
@@ -866,6 +869,9 @@ mod tests {
             elapsed < ENGINE_TIMEOUT + Duration::from_secs(1),
             "search took {elapsed:?}, expected ~{ENGINE_TIMEOUT:?}"
         );
-        assert!(output.merge.results.is_empty());
+        assert!(
+            output.merge.results.is_empty(),
+            "merged results should be empty"
+        );
     }
 }

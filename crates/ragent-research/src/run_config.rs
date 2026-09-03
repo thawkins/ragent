@@ -70,6 +70,53 @@ impl FromStr for OutputFormat {
     }
 }
 
+/// Research execution mode requested via `--mode` (FR-001, FR-009 of
+/// specs/opendeepresearch).
+///
+/// Modes select the high-level research strategy while reusing the same
+/// `ResearchRunRequest` inputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResearchMode {
+    /// Existing tiered adversarial pipeline (default).
+    #[default]
+    Tiered,
+    /// Supervisor/researcher multi-agent graph with parallel sub-topic workers.
+    Supervisor,
+    /// Dedicated competitive-analysis mode that compares a set of entities.
+    Competitive,
+}
+
+impl ResearchMode {
+    /// Parse a mode from its CLI name. Returns `None` for unknown values.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "tiered" | "tier" => Some(Self::Tiered),
+            "supervisor" | "super" => Some(Self::Supervisor),
+            "competitive" | "comp" => Some(Self::Competitive),
+            _ => None,
+        }
+    }
+
+    /// CLI-compatible name for this mode.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tiered => "tiered",
+            Self::Supervisor => "supervisor",
+            Self::Competitive => "competitive",
+        }
+    }
+}
+
+impl FromStr for ResearchMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown research mode: {s}"))
+    }
+}
+
 /// Research tier requested via `--tier` (FR-001 of specs/hyperresearch).
 ///
 /// Tiers select the depth of the adversarial research pipeline.
@@ -210,6 +257,30 @@ impl FromStr for Depth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_research_modes() {
+        assert_eq!(ResearchMode::parse("tiered"), Some(ResearchMode::Tiered));
+        assert_eq!(ResearchMode::parse("tier"), Some(ResearchMode::Tiered));
+        assert_eq!(
+            ResearchMode::parse("supervisor"),
+            Some(ResearchMode::Supervisor)
+        );
+        assert_eq!(
+            ResearchMode::parse("competitive"),
+            Some(ResearchMode::Competitive)
+        );
+        assert_eq!(ResearchMode::parse("comp"), Some(ResearchMode::Competitive));
+        assert_eq!(ResearchMode::parse("invalid"), None);
+        assert_eq!(ResearchMode::default(), ResearchMode::Tiered);
+        for mode in [
+            ResearchMode::Tiered,
+            ResearchMode::Supervisor,
+            ResearchMode::Competitive,
+        ] {
+            assert_eq!(ResearchMode::parse(mode.as_str()), Some(mode));
+        }
+    }
 
     #[test]
     fn parse_tiers() {

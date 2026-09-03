@@ -12,10 +12,10 @@
 
 use std::path::PathBuf;
 
-use crate::run_config::{Depth, OutputFormat, Tier};
+use crate::run_config::{Depth, OutputFormat, ResearchMode, Tier};
 use crate::session::{
-    AnalysisConfig, InputConfig, LocalConfig, OutputConfig, ResilienceConfig, RunEngineConfig,
-    SessionConfig, WebConfig,
+    AnalysisConfig, InputConfig, LocalConfig, ModelConfig, OutputConfig, ResilienceConfig,
+    RunEngineConfig, SessionConfig, WebConfig,
 };
 use crate::web_gatherer::{
     DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_MAX_WEB_RESULTS,
@@ -94,6 +94,24 @@ pub struct ResearchRunRequest {
     pub max_local_sources: Option<usize>,
     /// Override the maximum number of sources sent to the LLM synthesis engine.
     pub max_synthesis_sources: Option<usize>,
+    /// `--summarization-model <provider:model>` override.
+    pub summarization_model: Option<String>,
+    /// `--mode tiered|supervisor|competitive` research execution strategy.
+    pub mode: Option<String>,
+    /// `--max-concurrent-research-units N` for supervisor/competitive modes.
+    pub max_concurrent_research_units: Option<usize>,
+    /// `--no-clarify` disables the single clarifying question.
+    pub clarify: Option<bool>,
+    /// `--brief <TEXT>` explicit research brief.
+    pub brief: Option<String>,
+    /// `--research-model <provider:model>` per-phase model override.
+    pub research_model: Option<String>,
+    /// `--compression-model <provider:model>` per-phase model override.
+    pub compression_model: Option<String>,
+    /// `--final-report-model <provider:model>` per-phase model override.
+    pub final_report_model: Option<String>,
+    /// `--evaluate` enables deterministic self-evaluation scorecard.
+    pub evaluate: Option<bool>,
 }
 
 impl ResearchRunRequest {
@@ -178,6 +196,7 @@ pub fn build_session_config(
             depth: req.depth.as_deref().and_then(Depth::parse),
             iterations: req.iterations,
             max_synthesis_sources: req.max_synthesis_sources,
+            summarization_model: req.summarization_model.clone(),
             contradiction: None,
         },
         resilience: ResilienceConfig {
@@ -196,7 +215,25 @@ pub fn build_session_config(
                 .map(|r| r.oa_min_full_text_chars)
                 .unwrap_or(DEFAULT_OA_MIN_FULL_TEXT_CHARS),
         },
-        engine: RunEngineConfig { tier },
+        engine: RunEngineConfig {
+            tier,
+            mode: req
+                .mode
+                .as_deref()
+                .and_then(ResearchMode::parse)
+                .unwrap_or(ResearchMode::Tiered),
+            max_concurrent_research_units: req
+                .max_concurrent_research_units
+                .unwrap_or(crate::supervisor::DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS),
+        },
+        clarify: req.clarify.unwrap_or(true),
+        brief: req.brief.clone(),
+        models: ModelConfig {
+            research_model: req.research_model.clone(),
+            compression_model: req.compression_model.clone(),
+            final_report_model: req.final_report_model.clone(),
+        },
+        evaluate: req.evaluate.unwrap_or(false),
     }
 }
 

@@ -394,12 +394,18 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.74** — The core architecture, tool system (~169 tools across 18 categories), TUI,
+**v1.0.77** — The core architecture, tool system (~169 tools across 18 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- **Documentation refresh for v1.0.77** — updated `CHANGELOG.md`, `README.md`,
+  `SPEC.md`, `STATS.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, and how-to docs to
+  reflect the latest release (v1.0.77)
+- **Research evaluation scorecard configuration** — new `research.evaluate` section
+  in `ragent.json` controls the self-evaluation scorecard appended to research
+  reports (FR-015 of specs/opendeepresearch)
 - **Clippy `for_kv_map` fix** — Ollama provider iteration now uses `values()`
   instead of destructuring a key-value pair; the LangSearch merge test
   expectation was also corrected (v1.0.74)

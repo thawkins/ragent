@@ -421,16 +421,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         };
     }
 
-    // If a memory delete confirmation modal is active, intercept Enter/Esc
-    // before any other dialog so the confirmation always takes precedence.
-    if app.pending_memory_delete.is_some() {
-        match key.code {
-            KeyCode::Enter => return Some(InputAction::ConfirmMemoryDelete),
-            KeyCode::Esc => return Some(InputAction::CancelMemoryDelete),
-            _ => return None,
-        }
-    }
-
     // If a router save confirmation modal is active, intercept Enter/Esc
     if app.pending_router_save.is_some() {
         match key.code {

@@ -137,7 +137,6 @@ pub fn build_research_session(
         }
         _ => None,
     };
-
     let session = ResearchSession::new(manager, web, local, analysis)
         .with_planner(planner)
         .with_critic(critic);
@@ -145,6 +144,10 @@ pub fn build_research_session(
         Some(sum) => session
             .with_summarizer(sum.clone())
             .with_concepts_engine(sum),
+        None => session,
+    };
+    let session = match provider_registry {
+        Some(reg) => session.with_provider_registry(reg),
         None => session,
     };
     let session = match research_name.map(|n| {
@@ -215,6 +218,12 @@ fn build_tool_context(
     config: Option<Arc<Config>>,
     active_model: Option<ModelRef>,
 ) -> AgentToolContext {
+    // Extract allowed_roots from config if available
+    let allowed_roots = config
+        .as_ref()
+        .map(|c| c.dirs.allowed_roots.iter().map(PathBuf::from).collect())
+        .unwrap_or_default();
+
     AgentToolContext {
         session_id,
         working_dir,
@@ -230,6 +239,7 @@ fn build_tool_context(
         spec_manager: None,
         active_spec_id: None,
         config,
+        allowed_roots,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
@@ -1372,6 +1382,7 @@ mod tests {
                     spec_manager: None,
                     active_spec_id: None,
                     config: None,
+                    allowed_roots: Vec::new(),
                     read_timestamps: Arc::new(std::sync::RwLock::new(
                         std::collections::HashMap::new(),
                     )),
@@ -1596,6 +1607,7 @@ mod tests {
             spec_manager: None,
             active_spec_id: None,
             config: None,
+            allowed_roots: Vec::new(),
             read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
             canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),

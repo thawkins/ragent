@@ -779,6 +779,98 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                     None,
                 )
             }
+            SessionEvent::SupervisorPlanUpdated { sub_topics } => (
+                SessionPhase::SupervisorPlan,
+                "started",
+                format!(
+                    "supervisor plan with {} sub-topic(s): {}",
+                    sub_topics.len(),
+                    sub_topics.join(", ")
+                ),
+                None,
+                0,
+                0,
+                0,
+                None,
+            ),
+            SessionEvent::CompetitiveEntities {
+                entities,
+                criteria,
+                inferred,
+            } => (
+                SessionPhase::SupervisorPlan,
+                "entities",
+                format!(
+                    "competitive set (inferred={}): {} | criteria: {}",
+                    inferred,
+                    entities.join(", "),
+                    if criteria.is_empty() {
+                        "none".to_string()
+                    } else {
+                        criteria.join(", ")
+                    }
+                ),
+                None,
+                0,
+                0,
+                0,
+                None,
+            ),
+            SessionEvent::ResearcherSpawned { id, sub_topic } => (
+                SessionPhase::SupervisorDelegate,
+                "started",
+                format!("spawned researcher {id}: {sub_topic}"),
+                None,
+                0,
+                0,
+                0,
+                None,
+            ),
+            SessionEvent::ResearcherProgress {
+                id,
+                status,
+                detail,
+                sources_found,
+            } => (
+                SessionPhase::SupervisorDelegate,
+                status.as_str(),
+                format!("researcher {id}: {detail} ({sources_found} source(s))"),
+                None,
+                0,
+                0,
+                0,
+                None,
+            ),
+            SessionEvent::ResearcherNote { id, note } => (
+                SessionPhase::SupervisorDelegate,
+                "note",
+                format!("researcher {id} note: {note}"),
+                None,
+                0,
+                0,
+                0,
+                None,
+            ),
+            SessionEvent::ResearcherCompleted { id, summary } => (
+                SessionPhase::SupervisorDelegate,
+                "done",
+                format!("researcher {id} completed: {summary}"),
+                None,
+                0,
+                0,
+                0,
+                None,
+            ),
+            SessionEvent::SupervisorMerged { findings_count } => (
+                SessionPhase::SupervisorSynthesize,
+                "done",
+                format!("merged {findings_count} researcher finding(s)"),
+                None,
+                0,
+                0,
+                0,
+                None,
+            ),
             SessionEvent::Done {
                 total_sources,
                 pdf_count,
@@ -984,6 +1076,28 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 None,
             ),
+            SessionEvent::Synthesis(SynthesisEvent::Evaluation { scorecard }) => (
+                SessionPhase::Synthesize,
+                "done",
+                if scorecard.error.is_some() {
+                    "self-evaluation: failed".to_string()
+                } else {
+                    format!(
+                        "self-evaluation: {}/100 (Q {} R {} G {} C {} S {})",
+                        scorecard.overall,
+                        scorecard.quality,
+                        scorecard.relevance,
+                        scorecard.groundedness,
+                        scorecard.completeness,
+                        scorecard.structure
+                    )
+                },
+                None,
+                0,
+                0,
+                0,
+                None,
+            ),
             SessionEvent::PlanUpdated { sub_questions } => (
                 SessionPhase::Setup,
                 "done",
@@ -1167,6 +1281,16 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 None,
             ),
+            SessionEvent::NeedsClarification { question } => (
+                SessionPhase::Setup,
+                "needs_clarification",
+                format!("clarification needed: {}", sanitize_for_display(question)),
+                None,
+                0,
+                0,
+                0,
+                None,
+            ),
         };
     let payload = ProgressPayload {
         name: name.to_string(),
@@ -1193,6 +1317,10 @@ fn run_step_phase(step: &str) -> SessionPhase {
     match step {
         "decompose" | "width_sweep" | "web_deadline" | "web_phase_start" => SessionPhase::Web,
         "vault_sufficient" => SessionPhase::Setup,
+        "supervisor_plan" => SessionPhase::SupervisorPlan,
+        "supervisor_delegate" => SessionPhase::SupervisorDelegate,
+        "supervisor_synthesize" => SessionPhase::SupervisorSynthesize,
+        "supervisor_finalize" => SessionPhase::SupervisorFinalize,
         _ => SessionPhase::Synthesize,
     }
 }
@@ -1222,6 +1350,10 @@ fn phase_description(phase: SessionPhase) -> String {
         SessionPhase::Synthesize => "synthesizing analysis with LLM".to_string(),
         SessionPhase::Assemble => "assembling RESEARCH.md".to_string(),
         SessionPhase::Finalize => "finalizing".to_string(),
+        SessionPhase::SupervisorPlan => "supervisor planning".to_string(),
+        SessionPhase::SupervisorDelegate => "supervisor delegating".to_string(),
+        SessionPhase::SupervisorSynthesize => "supervisor synthesizing".to_string(),
+        SessionPhase::SupervisorFinalize => "supervisor finalizing".to_string(),
     }
 }
 

@@ -4521,23 +4521,18 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    let (title, target_session, team_filter): (
-        String,
-        Option<String>,
-        Option<(String, String, String)>,
-    ) = match &view.target {
+    let (title, target_session): (String, Option<String>) = match &view.target {
         OutputViewTarget::Session { session_id, label } => {
-            (format!(" Output: {label} "), Some(session_id.clone()), None)
+            (format!(" Output: {label} "), Some(session_id.clone()))
         }
         OutputViewTarget::TeamMember {
-            team_name,
-            agent_id,
             teammate_name,
+            agent_id,
             session_id,
+            ..
         } => (
             format!(" Output: {} [{}] ", teammate_name, agent_id),
             session_id.clone(),
-            Some((team_name.clone(), agent_id.clone(), teammate_name.clone())),
         ),
     };
 
@@ -4564,12 +4559,10 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
     let need_rewrap = view.line_cache.cache_width != inner_width;
 
     // Compute a cheap source-generation key that captures changes to the
-    // displayed messages and log entries.  For the primary session we use
-    // the in-memory messages (last message edit_seq); for storage-backed
-    // sessions we fetch once and derive generation from the same result.
-    // `app.log_seq` covers new log entries appended while the view is open.
+    // displayed messages.  For the primary session we use the in-memory
+    // messages (last message edit_seq); for storage-backed sessions we fetch
+    // once and derive generation from the same result.
     let (current_generation, session_messages) = {
-        let mut generation = app.log_seq;
         // Mix in target identity so switching targets invalidates the cache.
         let target_seed = match &target_session {
             Some(sid) => {
@@ -4579,7 +4572,7 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
             }
             None => 0,
         };
-        generation = generation.wrapping_add(target_seed);
+        let mut generation = target_seed;
 
         let session_messages: Option<std::borrow::Cow<'_, [Message]>> =
             target_session.as_ref().map(|sid| {
@@ -4623,7 +4616,6 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
 
     if cache_stale || need_rewrap {
         let mut lines: Vec<Line<'static>> = Vec::new();
-
         if let Some(ref msgs) = session_messages {
             // Build a step map from the message transcript itself so that
             // storage-backed sessions (sub-agents / teammates) get the same
@@ -4635,25 +4627,6 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
                 &app.sid_to_display_name,
                 &app.cwd,
             );
-        }
-
-        for entry in app.log_entries.iter().filter(|entry| {
-            if let Some((ref team_name, ref agent_id, ref teammate_name)) = team_filter {
-                entry.message.contains(&format!("[{team_name}]"))
-                    && (entry.message.contains(agent_id) || entry.message.contains(teammate_name))
-            } else if let Some(ref sid) = target_session {
-                entry.session_id.as_deref() == Some(sid.as_str())
-                    || (entry.session_id.is_none()
-                        && app.session_id.as_deref() == Some(sid.as_str()))
-            } else {
-                false
-            }
-        }) {
-            let ts = entry.timestamp.format("%H:%M:%S");
-            lines.push(Line::from(vec![
-                Span::styled(format!("{ts} LOG "), Style::default().fg(Color::DarkGray)),
-                Span::raw(entry.message.clone()),
-            ]));
         }
 
         if lines.is_empty() {

@@ -174,6 +174,7 @@ async fn research_baseline_three_topics() {
             max_local_sources: 10,
             ..LocalConfig::default()
         },
+        clarify: false,
         ..SessionConfig::default()
     };
 

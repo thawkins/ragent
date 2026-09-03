@@ -5,6 +5,7 @@
 use ragent_agent::event::Event;
 use ragent_agent::storage::Storage;
 use ragent_agent::{agent::ModelRef, event::EventBus, provider::ProviderRegistry};
+use ragent_research::ResearchStatus;
 use std::sync::Arc;
 
 use crate::research_adapter::TuiResearchObserver;
@@ -126,7 +127,7 @@ impl App {
 
         let cmd = ResearchCliCommand::parse(args);
         if matches!(cmd, ResearchCliCommand::Help) {
-            self.append_assistant_text(ResearchCliCommand::build_help_message());
+            self.append_assistant_text(&ResearchCliCommand::build_help_message());
             self.status = "research: help".to_string();
             return;
         }
@@ -175,6 +176,7 @@ impl App {
                 search_max_retries,
                 search_retry_base_delay_ms,
                 search_circuit_breaker_threshold,
+                ..
             } => {
                 // Use the `[wait]` prefix so the status is treated as
                 // async-in-progress and NOT auto-expired to "ready" by
@@ -313,7 +315,7 @@ impl App {
                 );
                 self.append_assistant_text(&rendered);
             }
-            ResearchCliCommand::List { all } => {
+            ResearchCliCommand::List { all, .. } => {
                 self.status = format!(
                     "research: listing items{}…",
                     if all { " (including archived)" } else { "" }
@@ -324,17 +326,9 @@ impl App {
                 tokio::spawn(async move {
                     match mgr.list(all).await {
                         Ok(items) => {
-                            let rows: Vec<(String, String, String, String, String)> = items
+                            let rows: Vec<(String, String, String, ResearchStatus)> = items
                                 .into_iter()
-                                .map(|i| {
-                                    (
-                                        i.name.to_string(),
-                                        i.title,
-                                        i.status.as_str().to_string(),
-                                        i.created_at.to_rfc3339(),
-                                        i.modified_at.to_rfc3339(),
-                                    )
-                                })
+                                .map(|i| (i.name.to_string(), i.title, i.topic, i.status))
                                 .collect();
                             event_bus.publish(Event::TextDelta {
                                 session_id,
@@ -396,7 +390,7 @@ impl App {
                     }
                 });
             }
-            ResearchCliCommand::Search { query } => {
+            ResearchCliCommand::Search { query, .. } => {
                 self.status = format!("research: searching for '{query}'…");
                 let mgr = manager.clone();
                 let event_bus = self.event_bus.clone();
@@ -404,9 +398,9 @@ impl App {
                 tokio::spawn(async move {
                     match mgr.search(&query, 25).await {
                         Ok(hits) => {
-                            let rows: Vec<(String, String, String)> = hits
+                            let rows: Vec<(String, String, String, String)> = hits
                                 .into_iter()
-                                .map(|h| (h.name, h.title, h.snippet))
+                                .map(|h| (h.name, h.title, h.snippet, h.path.display().to_string()))
                                 .collect();
                             event_bus.publish(Event::TextDelta {
                                 session_id,
@@ -425,7 +419,7 @@ impl App {
                     }
                 });
             }
-            ResearchCliCommand::Show { name } => {
+            ResearchCliCommand::Show { name, .. } => {
                 self.status = format!("research: showing '{name}'…");
                 let mgr = manager.clone();
                 let event_bus = self.event_bus.clone();
@@ -441,7 +435,7 @@ impl App {
                                             s.type_str().to_string(),
                                             s.path_or_url().to_string(),
                                             s.title().to_string(),
-                                            s.captured_at().to_rfc3339(),
+                                            "web".to_string(),
                                             s.oa_recovery_note(),
                                         )
                                     })
@@ -471,7 +465,7 @@ impl App {
                     }
                 });
             }
-            ResearchCliCommand::Delete { name, yes } => {
+            ResearchCliCommand::Delete { name, yes, .. } => {
                 if !yes {
                     self.append_assistant_text(&format!(
                         "From: /research delete\n\nRefusing to delete research/{name} without confirmation. Re-run with `--yes` to skip this prompt."
@@ -506,7 +500,7 @@ impl App {
                     }
                 });
             }
-            ResearchCliCommand::Archive { name } => {
+            ResearchCliCommand::Archive { name, .. } => {
                 self.status = format!("research: archiving '{name}'…");
                 let mgr = manager.clone();
                 let event_bus = self.event_bus.clone();
@@ -530,7 +524,7 @@ impl App {
                     }
                 });
             }
-            ResearchCliCommand::Continue { name, message } => {
+            ResearchCliCommand::Continue { name, message, .. } => {
                 self.append_assistant_text(&format!(
                     "From: /research continue\n\nResuming `{name}`{}",
                     message
@@ -539,7 +533,7 @@ impl App {
                         .unwrap_or_default()
                 ));
             }
-            ResearchCliCommand::Cluster { name, force } => match ResearchName::try_new(&name) {
+            ResearchCliCommand::Cluster { name, force, .. } => match ResearchName::try_new(&name) {
                 Ok(valid_name) => {
                     let root = manager.root().to_path_buf();
                     let item_dir = ResearchIo::item_dir(&root, &valid_name);
@@ -657,6 +651,20 @@ impl App {
                     ));
                 }
             },
+            ResearchCliCommand::Config => {
+                self.append_assistant_text("From: /research config\n\nEffective research defaults come from `ragent.json` and crate-level constants.");
+            }
+            ResearchCliCommand::Resume { name, .. } => {
+                self.append_assistant_text(&format!(
+                    "From: /research resume\n\nResuming `{name}` is not yet implemented in the TUI."
+                ));
+            }
+            ResearchCliCommand::Export { name, .. } => {
+                self.append_assistant_text(&format!("From: /research export\n\nExporting `{name}` is not yet implemented in the TUI."));
+            }
+            ResearchCliCommand::Import { path, .. } => {
+                self.append_assistant_text(&format!("From: /research import\n\nImporting `{path}` is not yet implemented in the TUI."));
+            }
             ResearchCliCommand::Unknown(sub) => {
                 self.append_assistant_text(&format!(
                     "From: /research\n\n**Error:** unknown subcommand `{sub}`. Try `/research help`."

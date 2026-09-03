@@ -30,9 +30,10 @@ use crate::planner::{HeuristicPlanner, Planner};
 use crate::readability::{PolishResult, ReadabilityAudit, audit_readability, polish_analysis};
 use crate::reconcile::{build_cross_locus_reconcile, build_source_tensions};
 use crate::research_name::ResearchName;
-use crate::run_config::{Depth, OutputFormat, Tier};
+use crate::run_config::{Depth, OutputFormat, ResearchMode, Tier};
 use crate::run_manifest::RunStep;
 use crate::source::Source;
+use crate::source_vault::SourceVault;
 use crate::tier_router::{TierRouter, TierRouterObserver, TierRouterToSessionObserver};
 use crate::web_gatherer::{
     DEFAULT_FETCH_CONCURRENCY, DEFAULT_MAX_WEB_RESULTS, GatherEvent, GatherObserver, WebGatherer,
@@ -191,7 +192,7 @@ impl GatherObserver for GatherEventForwarder {
     }
 }
 /// Inputs the caller supplies to [`ResearchSession::run`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SessionConfig {
     /// Topic and seed inputs.
     pub input: InputConfig,
@@ -207,6 +208,36 @@ pub struct SessionConfig {
     pub resilience: ResilienceConfig,
     /// Engine selection (tier/depth/iterations).
     pub engine: RunEngineConfig,
+    /// When `true`, ask a single clarifying question before web searches if
+    /// the topic is ambiguous (FR-005, FR-017). Defaults to `true`.
+    pub clarify: bool,
+    /// Explicit research brief generated from the user's prompt. When `Some`,
+    /// downstream agents use this as their mission statement instead of
+    /// deriving one from the topic (FR-004 brief context).
+    pub brief: Option<String>,
+    /// Per-phase model overrides (FR-013).
+    pub models: ModelConfig,
+    /// When `true`, run the deterministic self-evaluation scorecard and append
+    /// it to the assembled report (FR-008 / T-015).
+    pub evaluate: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            input: InputConfig::default(),
+            output: OutputConfig::default(),
+            web: WebConfig::default(),
+            local: LocalConfig::default(),
+            analysis: AnalysisConfig::default(),
+            resilience: ResilienceConfig::default(),
+            engine: RunEngineConfig::default(),
+            clarify: true,
+            brief: None,
+            models: ModelConfig::default(),
+            evaluate: false,
+        }
+    }
 }
 
 /// Topic and seed inputs for a research session.
@@ -351,6 +382,11 @@ pub struct AnalysisConfig {
     /// remain in the pool and may be selected by the cap if their relevance
     /// rank is high enough relative to the corpus.
     pub max_synthesis_sources: Option<usize>,
+    /// Optional `--summarization-model <provider:model>` override. When
+    /// `Some`, the web gatherer summarizes each fetched page with this model
+    /// before synthesis and before storing the source in the vault (FR-002,
+    /// FR-010). When `None`, the configured default model is used.
+    pub summarization_model: Option<String>,
     /// Polarity dimensions for the contradiction-graph builder
     /// (Milestone FUNC-ANL-02). When `None`, the default medical/tech
     /// dimensions are used. When `Some`, the supplied dimensions override the
@@ -392,6 +428,42 @@ pub struct ResilienceConfig {
 pub struct RunEngineConfig {
     /// `--tier` research tier (FR-001). Defaults to [`Tier::Full`].
     pub tier: Tier,
+    /// `--mode` research execution strategy (FR-001, FR-009 of
+    /// specs/opendeepresearch). Defaults to [`ResearchMode::Tiered`].
+    pub mode: ResearchMode,
+    /// `research.supervisor.max_concurrent_research_units` — maximum parallel
+    /// researcher agents in supervisor/competitive modes (FR-012).
+    pub max_concurrent_research_units: usize,
+}
+
+/// Configuration for supervisor/competitive multi-agent modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SupervisorConfig {
+    /// Maximum number of researcher agents that may run concurrently.
+    pub max_concurrent_research_units: usize,
+}
+
+impl Default for SupervisorConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_research_units: crate::supervisor::DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS,
+        }
+    }
+}
+
+/// Per-phase model selection for a research session.
+///
+/// Each field overrides the default model for a specific phase of the
+/// research pipeline (FR-013 of specs/opendeepresearch). When a field is
+/// `None`, the pipeline falls back to the configured default model.
+#[derive(Debug, Clone, Default)]
+pub struct ModelConfig {
+    /// Model used by research agents / sub-topic workers.
+    pub research_model: Option<String>,
+    /// Model used to compress or summarize intermediate findings.
+    pub compression_model: Option<String>,
+    /// Model used to write the final report.
+    pub final_report_model: Option<String>,
 }
 
 impl SessionConfig {
@@ -400,6 +472,14 @@ impl SessionConfig {
     pub fn engine_config(&self) -> EngineConfig {
         let depth = self.analysis.depth.unwrap_or(Depth::Standard);
         depth.engine_config(self.analysis.iterations, depth == Depth::Deep)
+    }
+
+    /// Resolve the effective supervisor configuration.
+    #[must_use]
+    pub fn supervisor_config(&self) -> SupervisorConfig {
+        SupervisorConfig {
+            max_concurrent_research_units: self.engine.max_concurrent_research_units.max(1),
+        }
     }
 
     /// Maximum web sources to capture for the selected depth/iteration combo.
@@ -471,7 +551,11 @@ impl Default for ResilienceConfig {
 
 impl Default for RunEngineConfig {
     fn default() -> Self {
-        Self { tier: Tier::Full }
+        Self {
+            tier: Tier::Full,
+            mode: ResearchMode::Tiered,
+            max_concurrent_research_units: crate::supervisor::DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS,
+        }
     }
 }
 
@@ -494,6 +578,14 @@ pub enum SessionPhase {
     Assemble,
     /// Marking the item `Complete` and refreshing the index.
     Finalize,
+    /// Supervisor graph: planning sub-topics.
+    SupervisorPlan,
+    /// Supervisor graph: delegating sub-topics to researcher agents.
+    SupervisorDelegate,
+    /// Supervisor graph: merging researcher findings.
+    SupervisorSynthesize,
+    /// Supervisor graph: writing the final document.
+    SupervisorFinalize,
 }
 
 impl SessionPhase {
@@ -508,6 +600,10 @@ impl SessionPhase {
             Self::Synthesize => "synthesize",
             Self::Assemble => "assemble",
             Self::Finalize => "finalize",
+            Self::SupervisorPlan => "supervisor_plan",
+            Self::SupervisorDelegate => "supervisor_delegate",
+            Self::SupervisorSynthesize => "supervisor_synthesize",
+            Self::SupervisorFinalize => "supervisor_finalize",
         }
     }
 }
@@ -623,6 +719,12 @@ pub enum SynthesisEvent {
         /// Readability audit result.
         result: ReadabilityAudit,
     },
+    /// Self-evaluation scorecard produced for the assembled report
+    /// (FR-008 / T-015).
+    Evaluation {
+        /// Self-evaluation scorecard.
+        scorecard: crate::evaluation::EvaluationScorecard,
+    },
 }
 
 /// Progress event emitted as a research session runs. The TUI/CLI/HTTP
@@ -714,6 +816,12 @@ pub enum SessionEvent {
         /// Error describing the failure.
         error: String,
     },
+    /// The session needs a single clarifying answer from the user before it can
+    /// proceed with web searches (FR-005, FR-017).
+    NeedsClarification {
+        /// The clarifying question to present.
+        question: String,
+    },
     /// The research plan was updated with new sub-questions.
     PlanUpdated {
         /// Updated sub-questions.
@@ -784,6 +892,62 @@ pub enum SessionEvent {
         skipped: usize,
         /// Number of steps failed.
         failed: usize,
+    },
+    /// Supervisor graph produced a set of sub-topics (T-005).
+    SupervisorPlanUpdated {
+        /// Planned sub-topics.
+        sub_topics: Vec<String>,
+    },
+    /// Competitive-analysis mode extracted a set of comparable entities and
+    /// detected comparison criteria (FR-006 / T-010).
+    CompetitiveEntities {
+        /// Comparable entities identified for the topic.
+        entities: Vec<String>,
+        /// Comparison criteria/dimensions detected in the topic.
+        criteria: Vec<String>,
+        /// `true` when no explicit entities were named and the set was inferred.
+        inferred: bool,
+    },
+    /// Supervisor graph spawned a researcher agent (T-005).
+    ResearcherSpawned {
+        /// Researcher identifier.
+        id: String,
+        /// Sub-topic assigned to the researcher.
+        sub_topic: String,
+    },
+    /// Supervisor graph researcher reported progress during its tool loop
+    /// (T-006). Emitted when the researcher captures a source, advances an
+    /// iteration, or records a structured note.
+    ResearcherProgress {
+        /// Researcher identifier.
+        id: String,
+        /// Short status label: `capturing`, `iterating`, `note`, `done`.
+        status: String,
+        /// Human-readable progress message.
+        detail: String,
+        /// Number of sources captured so far by this researcher.
+        sources_found: usize,
+    },
+    /// Supervisor graph researcher recorded a structured intermediate note
+    /// (T-006). Notes are surfaced for UI streaming and may be persisted by
+    /// the session layer.
+    ResearcherNote {
+        /// Researcher identifier.
+        id: String,
+        /// Structured note text (a bullet or short paragraph).
+        note: String,
+    },
+    /// Supervisor graph received compressed findings from a researcher (T-005).
+    ResearcherCompleted {
+        /// Researcher identifier.
+        id: String,
+        /// Compressed summary from the researcher.
+        summary: String,
+    },
+    /// Supervisor graph merged all researcher findings before final synthesis.
+    SupervisorMerged {
+        /// Number of completed researcher findings merged.
+        findings_count: usize,
     },
     /// Resolved run options, emitted once at the start of a session.
     ConfigSnapshot {
@@ -879,6 +1043,10 @@ pub struct ResearchSession {
     /// directly above `## Findings` in `RESEARCH.md`. When absent (or when the
     /// extraction call fails), the section is omitted from the document.
     concepts_engine: Option<Arc<LlmAnalysisEngine>>,
+    /// Optional provider registry used to construct phase-specific models
+    /// (e.g. the page summarizer) without coupling the session to one
+    /// global model (FR-013, T-013).
+    provider_registry: Option<Arc<ragent_llm::provider::ProviderRegistry>>,
 }
 
 impl std::fmt::Debug for ResearchSession {
@@ -889,6 +1057,16 @@ impl std::fmt::Debug for ResearchSession {
             .field("has_local", &self.local.is_some())
             .field("has_analysis", &!self.analysis_is_noop())
             .finish()
+    }
+}
+
+/// Map the engine-side [`AnalysisOutcome`] into the user-facing
+/// [`SynthesizeOutcome`] emitted in the `SynthesizeResult` session event.
+fn map_analysis_outcome(outcome: AnalysisOutcome) -> SynthesizeOutcome {
+    match outcome {
+        AnalysisOutcome::Llm => SynthesizeOutcome::Llm,
+        AnalysisOutcome::FallbackEmpty => SynthesizeOutcome::FallbackEmpty,
+        AnalysisOutcome::FallbackError => SynthesizeOutcome::FallbackError,
     }
 }
 
@@ -930,6 +1108,7 @@ impl ResearchSession {
             model: None,
             summarizer: None,
             concepts_engine: None,
+            provider_registry: None,
         }
     }
 
@@ -951,7 +1130,6 @@ impl ResearchSession {
         self.summarizer = Some(summarizer);
         self
     }
-
     /// Attach an LLM engine used by the `/research create` pipeline to extract
     /// the cross-source concept list rendered as the `## Concepts` section in
     /// `RESEARCH.md` (spec researchcluster). Callers typically pass the same
@@ -964,6 +1142,468 @@ impl ResearchSession {
         self
     }
 
+    /// Attach the provider registry so the session can build phase-specific
+    /// engines (e.g. the page summarizer) from per-phase model overrides
+    /// (FR-013, T-013).
+    #[must_use]
+    pub fn with_provider_registry(
+        mut self,
+        registry: Arc<ragent_llm::provider::ProviderRegistry>,
+    ) -> Self {
+        self.provider_registry = Some(registry);
+        self
+    }
+}
+
+impl ResearchSession {
+    /// Access the optional web gatherer.
+    #[must_use]
+    pub fn web(&self) -> Option<WebGatherer> {
+        self.web.clone()
+    }
+
+    /// Access the optional local gatherer.
+    #[must_use]
+    pub fn local(&self) -> Option<LocalGatherer> {
+        self.local.clone()
+    }
+
+    /// Access the analysis engine.
+    #[must_use]
+    pub fn analysis(&self) -> Arc<dyn AnalysisEngine> {
+        self.analysis.clone()
+    }
+
+    /// Access the optional planner.
+    #[must_use]
+    pub fn planner(&self) -> Option<Arc<dyn Planner>> {
+        self.planner.clone()
+    }
+
+    /// Access the optional critic.
+    #[must_use]
+    pub fn critic(&self) -> Option<Arc<dyn Critic>> {
+        self.critic.clone()
+    }
+
+    /// Access the research manager.
+    #[must_use]
+    pub fn manager(&self) -> &ResearchManager {
+        &self.manager
+    }
+
+    /// Access the configured model name.
+    #[must_use]
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    /// Access the optional provider registry.
+    #[must_use]
+    pub fn provider_registry(&self) -> Option<Arc<ragent_llm::provider::ProviderRegistry>> {
+        self.provider_registry.clone()
+    }
+
+    /// Access the optional concepts engine.
+    #[must_use]
+    pub fn concepts_engine(&self) -> Option<Arc<LlmAnalysisEngine>> {
+        self.concepts_engine.clone()
+    }
+
+    /// Run the supervisor/researcher graph for `--mode supervisor|competitive`.
+    ///
+    /// `item` has already been created and marked `InProgress` by the caller.
+    /// `seed_sources` and `seed_queries` come from `--from-url` / `--from-file`
+    /// pre-steps. The graph runs: Plan → Delegate → Collect → Synthesize →
+    /// Finalize, with researcher nodes executed in parallel up to
+    /// `config.supervisor_config().max_concurrent_research_units`.
+    pub async fn run_supervisor(
+        &self,
+        name_str: &str,
+        title: &str,
+        topic: &str,
+        item: &ResearchItem,
+        config: &SessionConfig,
+        brief: Option<&str>,
+        seed_sources: Vec<Source>,
+        seed_queries: Vec<String>,
+        observer: Arc<dyn SessionObserver>,
+        router: &mut TierRouter,
+        router_observer: &dyn TierRouterObserver,
+    ) -> Result<RunOutcome> {
+        use crate::supervisor::{IterativeResearcherNode, SupervisorNode};
+
+        let name = ResearchName::try_new(name_str).map_err(ResearchError::InvalidName)?;
+        let supervisor_cfg = config.supervisor_config();
+
+        // ── Plan ──────────────────────────────────────────────────────────
+        router.run_step_if(RunStep::SupervisorPlan, router_observer, || {});
+        observer.on_event(SessionEvent::Phase {
+            phase: SessionPhase::SupervisorPlan,
+        });
+
+        let (sub_topics, competitive_extraction) =
+            if config.engine.mode == crate::run_config::ResearchMode::Competitive {
+                let extraction = crate::entities::extract_entities_for_competitive_analysis(topic);
+                let entity_names: Vec<String> =
+                    extraction.entities.iter().map(|e| e.name.clone()).collect();
+                observer.on_event(SessionEvent::CompetitiveEntities {
+                    entities: entity_names.clone(),
+                    criteria: extraction.criteria.clone(),
+                    inferred: extraction.inferred,
+                });
+                let competitive_topics = crate::supervisor::build_competitive_sub_topics(
+                    topic,
+                    &extraction.entities,
+                    &extraction.criteria,
+                );
+                let topics = if competitive_topics.is_empty() {
+                    // Fall back to generic supervisor planning if no entities were
+                    // identified so the run still produces something useful.
+                    let planner = self
+                        .planner
+                        .clone()
+                        .unwrap_or_else(|| Arc::new(crate::planner::HeuristicPlanner::new()));
+                    let supervisor = SupervisorNode::new(planner)
+                        .with_max_sub_topics(supervisor_cfg.max_concurrent_research_units);
+                    supervisor.plan(topic).await.map_err(|e| {
+                        ResearchError::EngineRunFailed(format!("supervisor planning failed: {e}"))
+                    })?
+                } else {
+                    competitive_topics
+                };
+                (topics, Some(extraction))
+            } else {
+                let planner = self
+                    .planner
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(crate::planner::HeuristicPlanner::new()));
+                let supervisor = SupervisorNode::new(planner)
+                    .with_max_sub_topics(supervisor_cfg.max_concurrent_research_units);
+                let topics = supervisor.plan(topic).await.map_err(|e| {
+                    ResearchError::EngineRunFailed(format!("supervisor planning failed: {e}"))
+                })?;
+                (topics, None)
+            };
+        observer.on_event(SessionEvent::SupervisorPlanUpdated {
+            sub_topics: sub_topics.clone(),
+        });
+
+        let mut state = crate::supervisor::SupervisorState::new(topic);
+        for sub_topic in sub_topics {
+            state.add_sub_topic(sub_topic);
+        }
+
+        // ── Delegate / Collect ─────────────────────────────────────────
+        router.run_step_if(RunStep::SupervisorDelegate, router_observer, || {});
+        observer.on_event(SessionEvent::Phase {
+            phase: SessionPhase::SupervisorDelegate,
+        });
+
+        // Open a source vault for this supervisor run so every captured web
+        // source is persisted with its original URL and timestamp (FR-003).
+        let project_root = project_root_for(self.manager.root());
+        let run_tag = name.to_string();
+        let vault = match SourceVault::open(project_root, &run_tag) {
+            Ok(v) => Some(Arc::new(v)),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    run_tag,
+                    "supervisor: failed to open source vault; continuing without it"
+                );
+                None
+            }
+        };
+
+        let node = IterativeResearcherNode::new(self.web.clone(), self.analysis.clone())
+            .with_planner(
+                self.planner
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(crate::planner::HeuristicPlanner::new())),
+            )
+            .with_critic(
+                self.critic
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(crate::engine::SimpleCritic)),
+            )
+            .with_engine_config(config.engine_config())
+            .with_brief(brief.map(|b| b.to_string()))
+            .with_research_model(config.models.research_model.clone())
+            .with_vault(vault);
+        let node: Arc<dyn crate::supervisor::ResearcherNode> = Arc::new(node);
+
+        let concurrency = supervisor_cfg.max_concurrent_research_units.max(1);
+        let tasks: Vec<_> = state
+            .pending()
+            .into_iter()
+            .cloned()
+            .map(|assignment| {
+                let node = node.clone();
+                let observer = observer.clone();
+                async move {
+                    observer.on_event(SessionEvent::ResearcherSpawned {
+                        id: assignment.id.clone(),
+                        sub_topic: assignment.sub_topic.clone(),
+                    });
+                    match node
+                        .research(&assignment.id, &assignment.sub_topic, observer.clone())
+                        .await
+                    {
+                        Ok((sources, summary)) => {
+                            observer.on_event(SessionEvent::ResearcherCompleted {
+                                id: assignment.id.clone(),
+                                summary: summary.clone(),
+                            });
+                            (assignment.id, Ok((sources, summary)))
+                        }
+                        Err(e) => (assignment.id, Err(e)),
+                    }
+                }
+            })
+            .collect();
+
+        use futures::StreamExt;
+        let mut stream = futures::stream::iter(tasks).buffer_unordered(concurrency);
+        while let Some((id, result)) = stream.next().await {
+            match result {
+                Ok((sources, summary)) => {
+                    state.set_completed(&id, sources, summary);
+                }
+                Err(e) => {
+                    state.set_failed(&id, e.to_string());
+                }
+            }
+        }
+
+        observer.on_event(SessionEvent::SupervisorMerged {
+            findings_count: state.completed().len(),
+        });
+
+        // Build the deterministic comparison table from the per-entity
+        // researcher summaries so the artifact always ships with explicit
+        // criteria and a cross-entity table (FR-016 / T-011).
+        let comparison_table = competitive_extraction.map(|extraction| {
+            let profiles: Vec<crate::comparison::CompetitiveProfile> = extraction
+                .entities
+                .iter()
+                .map(|entity| {
+                    let summary = state
+                        .assignments
+                        .iter()
+                        .find(|a| a.sub_topic.contains(&entity.name))
+                        .map(|a| a.summary.clone())
+                        .unwrap_or_default();
+                    crate::comparison::CompetitiveProfile::new(entity, summary)
+                })
+                .collect();
+            crate::comparison::build_comparison_table_body(
+                &extraction.entities,
+                &extraction.criteria,
+                &profiles,
+            )
+        });
+
+        // ── Synthesize ───────────────────────────────────────────────────
+        router.run_step_if(RunStep::SupervisorSynthesize, router_observer, || {});
+        observer.on_event(SessionEvent::Phase {
+            phase: SessionPhase::SupervisorSynthesize,
+        });
+        let mut merged_sources = state.merged_sources();
+        for seed in seed_sources {
+            if !merged_sources
+                .iter()
+                .any(|s| crate::supervisor::same_source(s, &seed))
+            {
+                merged_sources.push(seed);
+            }
+        }
+        let (analysis, engine_outcome) = self
+            .synthesize(&name, topic, &merged_sources, brief)
+            .await
+            .map_err(|e| {
+                ResearchError::EngineRunFailed(format!("supervisor synthesis failed: {e}"))
+            })?;
+        let synth_outcome = map_analysis_outcome(engine_outcome);
+
+        observer.on_event(SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult {
+            outcome: synth_outcome,
+            detail: None,
+        }));
+
+        // ── Finalize ─────────────────────────────────────────────────────
+        router.run_step_if(RunStep::SupervisorFinalize, router_observer, || {});
+        observer.on_event(SessionEvent::Phase {
+            phase: SessionPhase::SupervisorFinalize,
+        });
+        let outcome = self
+            .assemble_and_write(
+                name_str,
+                &name,
+                title,
+                topic,
+                item,
+                merged_sources,
+                analysis,
+                synth_outcome,
+                brief,
+                seed_queries,
+                config.output.output_format,
+                comparison_table,
+                config.evaluate,
+                observer.clone(),
+            )
+            .await?;
+
+        router.complete_run(router_observer);
+
+        Ok(outcome)
+    }
+
+    pub(crate) async fn assemble_and_write(
+        &self,
+        name_str: &str,
+        name: &ResearchName,
+        title: &str,
+        topic: &str,
+        item: &ResearchItem,
+        sources: Vec<Source>,
+        mut analysis: AnalysisResult,
+        synth_outcome: SynthesizeOutcome,
+        brief: Option<&str>,
+        queries: Vec<String>,
+        output_format: OutputFormat,
+        comparison_table: Option<String>,
+        evaluate: bool,
+        observer: Arc<dyn SessionObserver>,
+    ) -> Result<RunOutcome> {
+        let llm_produced = synth_outcome == SynthesizeOutcome::Llm;
+        if analysis.summary.is_empty() {
+            analysis.summary = crate::session::fallback::default_summary(&sources, topic);
+        }
+        if analysis.findings.is_empty() {
+            analysis.findings = crate::session::fallback::default_findings(&sources, topic);
+        }
+        if analysis.cross_references.is_empty() {
+            analysis.cross_references = crate::session::fallback::cross_references_from(&sources);
+        }
+        if analysis.open_questions.is_empty() && !llm_produced {
+            analysis.open_questions =
+                crate::session::fallback::default_open_questions(&sources, topic);
+        }
+        if analysis.top_implications.is_empty() && !llm_produced {
+            analysis.top_implications =
+                crate::session::fallback::default_top_implications(&analysis.findings, topic);
+        }
+
+        let concepts_section = if let Some(engine) = &self.concepts_engine {
+            self.extract_concepts_inner(name, &sources, engine)
+                .await
+                .ok()
+                .flatten()
+        } else {
+            None
+        };
+
+        let mut item_with_sources = item.clone();
+        item_with_sources.set_queries(queries.clone());
+        if let Some(model) = &self.model {
+            item_with_sources.model = Some(model.clone());
+        }
+        if output_format != OutputFormat::Report {
+            item_with_sources.output_format = Some(output_format.as_str().to_string());
+        }
+
+        // ── Self-Evaluation Scorecard (FR-008 / T-015) ───────────────────────
+        // Heuristically score the assembled report and either emit the scorecard
+        // as a synthesis event and embed it in the document, or leave it `None`
+        // when evaluation is disabled.
+        let evaluation_scorecard = if evaluate {
+            let scorecard = crate::evaluation::evaluate_report(
+                topic,
+                brief,
+                &analysis.summary,
+                &analysis.findings,
+                &sources,
+                &output_format,
+            );
+            observer.on_event(SessionEvent::Synthesis(SynthesisEvent::Evaluation {
+                scorecard: scorecard.clone(),
+            }));
+            Some(crate::evaluation::render_scorecard(&scorecard))
+        } else {
+            None
+        };
+
+        let mut doc = ResearchDocument {
+            item: item_with_sources,
+            summary: analysis.summary,
+            findings: analysis.findings,
+            top_implications: analysis.top_implications,
+            cross_references: analysis.cross_references,
+            open_questions: analysis.open_questions,
+            contradiction_graph: None,
+            loci: None,
+            depth_investigation: None,
+            evidence_digest: None,
+            triple_draft: None,
+            cross_locus_reconcile: None,
+            source_tensions: None,
+            synthesis_audit: None,
+            corpus_critic: None,
+            gap_fetch: None,
+            surgical_patch: None,
+            cite_check: None,
+            polish: None,
+            readability_audit: None,
+            concepts: concepts_section,
+            template_body: None,
+            brief: brief.map(String::from),
+            decomposed_queries: queries,
+            output_format,
+            comparison_table,
+            evaluation_scorecard,
+        };
+
+        let final_title = if llm_produced && !doc.summary.trim().is_empty() {
+            crate::item::truncate_title(&doc.summary)
+        } else {
+            title.to_string()
+        };
+        doc.item.set_title(&final_title);
+
+        let assembled = self.manager.write_document(&doc).await?;
+        self.manager.complete_gathering(name_str).await?;
+
+        let pdf_count = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "pdf"))
+            .count();
+        let youtube_count = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "youtube"))
+            .count();
+
+        observer.on_event(SessionEvent::Done {
+            total_sources: sources.len(),
+            pdf_count,
+            youtube_count,
+            excluded_count: 0,
+        });
+
+        Ok(RunOutcome {
+            research_name: name.to_string(),
+            sources,
+            document: assembled,
+            web_queries: doc.decomposed_queries.clone(),
+            pdf_count,
+            youtube_count,
+            excluded_count: 0,
+        })
+    }
+}
+
+impl ResearchSession {
     /// Attach a planner for the iterative research branch.
     #[must_use]
     pub fn with_planner(mut self, planner: Arc<dyn Planner>) -> Self {
@@ -1078,6 +1718,21 @@ impl ResearchSession {
         let mut web_queries = Vec::new();
         let mut item_title = title.to_string();
 
+        // ── Resolve effective research brief (FR-004 / T-004) ─────────────
+        // Use an explicit brief when supplied; otherwise auto-generate one for
+        // supervisor/competitive modes so downstream agents have a concrete
+        // mission statement.
+        let effective_brief = config.brief.clone().or_else(|| {
+            if config.engine.mode == ResearchMode::Tiered {
+                return None;
+            }
+            Some(crate::generate_research_brief(
+                &topic,
+                Some(config.engine.mode),
+                Some(config.output.output_format),
+            ))
+        });
+
         // Fail fast when an LLM engine is wired but its provider is not
         // registered. Without this check the run gathers sources for ~40s
         // before the synthesis step silently falls back to the mechanical
@@ -1124,7 +1779,16 @@ impl ResearchSession {
 
         // ── Initialize tier router (T-005) ───────────────────────────────
         let run_tag = crate::tier_router::default_run_tag(name_str);
-        let mut router = TierRouter::new(&run_tag, name_str, &topic, config.engine.tier);
+        // For supervisor/competitive modes, create a mode-aware router so the
+        // run manifest records the graph steps instead of the tiered pipeline.
+        // The router is passed into  and driven there.
+        let mut router = TierRouter::new_with_mode(
+            &run_tag,
+            name_str,
+            &topic,
+            config.engine.tier,
+            config.engine.mode,
+        );
         let router_observer = TierRouterToSessionObserver::new(observer.clone());
         let template_body =
             load_template(self.manager.root(), config.output.template.as_deref()).await;
@@ -1132,13 +1796,53 @@ impl ResearchSession {
         // If we didn't have an explicit topic and no from-url/from-file was
         // supplied, fall back to whatever topic is stored on the pre-existing
         // item.
+
         if topic.trim().is_empty()
             && config.input.from_urls.is_empty()
             && config.input.from_files.is_empty()
         {
             topic = item.topic.clone();
         }
-        // ── Decide single-pass vs. iterative engine ─────────────────────
+
+        // ── Scope clarification (FR-005, FR-017) ─────────────────────────
+        // Ask a single clarifying question before performing any web searches
+        // when the topic is ambiguous and clarification is enabled. This check
+        // deliberately runs after seed pre-steps so derived topics are also
+        // considered, but before any web-search phase begins.
+        if config.clarify {
+            if let Some(question) = crate::needs_clarification(&topic) {
+                observer.on_event(SessionEvent::NeedsClarification {
+                    question: question.clone(),
+                });
+                return Err(ResearchError::NeedsClarification { question });
+            }
+        }
+
+        // ── Supervisor / competitive multi-agent graph (FR-001, FR-009) ───
+        // For supervisor/competitive modes, delegate to the multi-agent graph
+        // instead of the tiered pipeline. The graph reuses the same synthesis
+        // and document-assembly helpers.
+        if config.engine.mode == ResearchMode::Supervisor
+            || config.engine.mode == ResearchMode::Competitive
+        {
+            return self
+                .run_supervisor(
+                    name_str,
+                    &item_title,
+                    &topic,
+                    &item,
+                    config,
+                    effective_brief.as_deref(),
+                    sources,
+                    web_queries,
+                    observer.clone(),
+                    &mut router,
+                    &router_observer,
+                )
+                .await;
+        }
+
+        // ── Decide single-pass vs. iterative engine ────────────────��────
         let engine_cfg = config.engine_config();
         let use_iterative =
             config.analysis.iterations.is_some() || config.analysis.depth == Some(Depth::Deep);
@@ -1480,40 +2184,47 @@ impl ResearchSession {
                 "has_llm_engine": has_llm_engine,
             }),
         );
-        let (mut analysis, synth_outcome, synth_detail) =
-            match self.synthesize(&name, &topic, &synthesis_sources).await {
-                Ok((result, engine_outcome)) => {
-                    // Map the engine's AnalysisOutcome to the user-facing
-                    // SynthesizeOutcome. When no LLM engine is wired in
-                    // (NoopAnalysisEngine), the default analyze_with_outcome
-                    // returns AnalysisOutcome::Llm, but we override to NoLlm
-                    // so the UI is transparent about the provenance.
-                    let synth = if has_llm_engine {
-                        match engine_outcome {
-                            AnalysisOutcome::Llm => SynthesizeOutcome::Llm,
-                            AnalysisOutcome::FallbackEmpty => SynthesizeOutcome::FallbackEmpty,
-                            AnalysisOutcome::FallbackError => SynthesizeOutcome::FallbackError,
-                        }
-                    } else {
-                        SynthesizeOutcome::NoLlm
-                    };
-                    (result, synth, None)
-                }
-                Err(e) => {
-                    // Log at error level (not warn) so it's visible by default
-                    // — synthesis failures are the reason RESEARCH.md ends up
-                    // looking skeletal, and the user needs to know.
-                    tracing::error!(
-                        error = %e,
-                        "research: synthesis failed; falling back to mechanical summary"
-                    );
-                    (
-                        AnalysisResult::default(),
-                        SynthesizeOutcome::FallbackError,
-                        Some(e.to_string()),
-                    )
-                }
-            };
+        let (mut analysis, synth_outcome, synth_detail) = match self
+            .synthesize(
+                &name,
+                &topic,
+                &synthesis_sources,
+                effective_brief.as_deref(),
+            )
+            .await
+        {
+            // Map the engine's AnalysisOutcome to the user-facing
+            // SynthesizeOutcome. When no LLM engine is wired in
+            // (NoopAnalysisEngine), the default analyze_with_outcome
+            // returns AnalysisOutcome::Llm, but we override to NoLlm
+            // so the UI is transparent about the provenance.
+            Ok((result, engine_outcome)) => {
+                let synth = if has_llm_engine {
+                    match engine_outcome {
+                        AnalysisOutcome::Llm => SynthesizeOutcome::Llm,
+                        AnalysisOutcome::FallbackEmpty => SynthesizeOutcome::FallbackEmpty,
+                        AnalysisOutcome::FallbackError => SynthesizeOutcome::FallbackError,
+                    }
+                } else {
+                    SynthesizeOutcome::NoLlm
+                };
+                (result, synth, None)
+            }
+            Err(e) => {
+                // Log at error level (not warn) so it's visible by default
+                // — synthesis failures are the reason RESEARCH.md ends up
+                // looking skeletal, and the user needs to know.
+                tracing::error!(
+                    error = %e,
+                    "research: synthesis failed; falling back to mechanical summary"
+                );
+                (
+                    AnalysisResult::default(),
+                    SynthesizeOutcome::FallbackError,
+                    Some(e.to_string()),
+                )
+            }
+        };
         observer.on_event(SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult {
             outcome: synth_outcome,
             detail: synth_detail.clone(),
@@ -1823,8 +2534,11 @@ impl ResearchSession {
                 Some(readability_audit)
             },
             template_body,
+            brief: None,
             decomposed_queries: web_queries.clone(),
             output_format: config.output.output_format,
+            comparison_table: None,
+            evaluation_scorecard: None,
         };
         // The frontmatter `title` should be a reduced-length version of the
         // final summary (max 80 chars) so the displayed headline reflects the
@@ -2179,7 +2893,6 @@ impl ResearchSession {
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::Local,
         });
-
         let web_fut = async {
             if let Some(web) = &self.web {
                 let web_budget = config.web.max_web_results.max(config.budget_web_results());
@@ -2190,7 +2903,57 @@ impl ResearchSession {
                 // of discarding the phase, so analysis/synthesis still runs
                 // over the partial source set. `--web-time 0` disables the
                 // deadline entirely.
-                let web = web
+                let run_tag = crate::tier_router::default_run_tag("web-gather");
+                let vault = match SourceVault::open(project_root, &run_tag) {
+                    Ok(v) => Some(Arc::new(v)),
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            run_tag,
+                            "research: failed to open source vault; continuing without it"
+                        );
+                        None
+                    }
+                };
+                let summarizer: Option<Arc<dyn crate::page_summarizer::PageSummarizer>> =
+                    self.provider_registry.as_ref().and_then(|registry| {
+                        let model_ref = config
+                            .analysis
+                            .summarization_model
+                            .as_deref()
+                            .and_then(|s| {
+                                s.split_once('/')
+                                    .map(|(p, m)| (p.to_string(), m.to_string()))
+                            })
+                            .or_else(|| {
+                                self.model.as_deref().and_then(|s| {
+                                    s.split_once('/')
+                                        .map(|(p, m)| (p.to_string(), m.to_string()))
+                                })
+                            });
+                        let (provider_id, model_id) = model_ref?;
+                        let api_key = self
+                            .summarizer
+                            .as_ref()
+                            .and_then(|s| s.api_key().map(|k| k.to_string()));
+                        let base_url = self
+                            .summarizer
+                            .as_ref()
+                            .and_then(|s| s.base_url().map(|k| k.to_string()));
+                        Some(
+                            Arc::new(crate::page_summarizer::LlmPageSummarizer::new(Arc::new(
+                                crate::analysis::LlmAnalysisEngine::new(
+                                    registry.clone(),
+                                    provider_id,
+                                    model_id,
+                                )
+                                .with_api_key(api_key)
+                                .with_base_url(base_url),
+                            )))
+                                as Arc<dyn crate::page_summarizer::PageSummarizer>,
+                        )
+                    });
+                let mut web = web
                     .clone()
                     .with_fetch_concurrency(config.web.fetch_concurrency)
                     .with_fetch_timeout(std::time::Duration::from_secs(
@@ -2219,6 +2982,12 @@ impl ResearchSession {
                                 std::time::Instant::now() + std::time::Duration::from_secs(secs)
                             }),
                     );
+                if let Some(vault) = vault {
+                    web = web.with_vault(vault);
+                }
+                if let Some(sum) = summarizer {
+                    web = web.with_summarizer(sum);
+                }
                 let forwarder = GatherEventForwarder {
                     observer: observer.clone(),
                 };
@@ -2339,11 +3108,12 @@ impl ResearchSession {
     /// returning the [`AnalysisResult`] paired with an [`AnalysisOutcome`]
     /// so the caller can surface `SynthesizeOutcome::FallbackEmpty` when
     /// the LLM produced malformed output (FR-005 / T-005).
-    async fn synthesize(
+    pub(crate) async fn synthesize(
         &self,
         name: &ResearchName,
         topic: &str,
         sources: &[Source],
+        brief: Option<&str>,
     ) -> anyhow::Result<(AnalysisResult, AnalysisOutcome)> {
         let research_root = self.manager.root().to_path_buf();
         let name = name.clone();
@@ -2355,7 +3125,8 @@ impl ResearchSession {
         })
         .await
         .map_err(|e| anyhow::anyhow!("synthesis body loading failed: {e}"))?;
-        self.analysis.analyze_with_outcome(topic, &bodies).await
+        let analysis = self.analysis.with_brief(brief.map(String::from));
+        analysis.analyze_with_outcome(topic, &bodies).await
     }
 
     /// Extract the cross-source concept list for the `## Concepts` section
@@ -2370,7 +3141,7 @@ impl ResearchSession {
     /// [`crate::cluster::concepts_section_for_research`]. Any failure is
     /// logged and reported via a `RunStep` event, but never aborts the run —
     /// the document simply renders without the section.
-    async fn extract_concepts_section(
+    pub async fn extract_concepts_section(
         &self,
         name: &ResearchName,
         sources: &[Source],
@@ -2422,8 +3193,9 @@ impl ResearchSession {
     }
 
     /// Build the concept-extraction payload from `sources`, call the LLM, and
-    /// normalize the response. Shared by [`Self::extract_concepts_section`].
-    async fn extract_concepts_inner(
+    /// normalize the response. Shared by [`Self::extract_concepts_section`] and
+    /// the supervisor finalization path.
+    pub(crate) async fn extract_concepts_inner(
         &self,
         name: &ResearchName,
         sources: &[Source],
@@ -2514,7 +3286,7 @@ fn build_web_index_map(sources: &[Source]) -> std::collections::HashMap<usize, u
 /// for fresh sessions), fall back to the on-disk supporting file for items
 /// loaded from disk that predate the body field, and use the spec relevance
 /// note for `Source::Spec` entries.
-fn read_source_body(
+pub(crate) fn read_source_body(
     research_root: &std::path::Path,
     name: &ResearchName,
     src: &Source,
@@ -2753,7 +3525,6 @@ mod tests {
             files: HashMap::from([(f.clone(), "Rust async programming is great.".into())]),
         });
         let local = LocalGatherer::new(local_tool);
-
         let session = ResearchSession::new(
             manager,
             Some(web),
@@ -2762,9 +3533,10 @@ mod tests {
         );
         let cfg = SessionConfig {
             input: InputConfig {
-                topic: "Rust async".into(),
+                topic: "Rust async runtimes in 2024".into(),
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let observer = Arc::new(CollectObserver::default());
@@ -2773,7 +3545,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.research_name, "rust-async");
-        assert_eq!(outcome.web_queries, vec!["Rust async".to_string()]);
+        assert_eq!(
+            outcome.web_queries,
+            vec!["Rust async runtimes in 2024".to_string()]
+        );
         assert!(!outcome.sources.is_empty());
         // Document should exist on disk.
         let p = research_root.join("rust-async/RESEARCH.md");
@@ -2847,9 +3622,10 @@ mod tests {
         );
         let cfg = SessionConfig {
             input: InputConfig {
-                topic: "topic".into(),
+                topic: "well scoped research topic".into(),
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let observer = Arc::new(CollectObserver::default());
@@ -2883,9 +3659,10 @@ mod tests {
         );
         let cfg = SessionConfig {
             input: InputConfig {
-                topic: "topic".into(),
+                topic: "well scoped research topic".into(),
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let outcome = session
@@ -3315,6 +4092,7 @@ mod tests {
                 from_urls: vec!["https://example.com/page".into()],
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let outcome = session
@@ -3462,13 +4240,14 @@ mod tests {
         let observer = Arc::new(CollectObserver::default());
         let cfg = SessionConfig {
             input: InputConfig {
-                topic: "anything".into(),
+                topic: "well scoped research topic".into(),
                 ..InputConfig::default()
             },
             local: LocalConfig {
                 disable_local: true,
                 ..LocalConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let outcome = session
@@ -3553,13 +4332,14 @@ mod tests {
         let observer = Arc::new(CollectObserver::default());
         let cfg = SessionConfig {
             input: InputConfig {
-                topic: "topic".into(),
+                topic: "well scoped research topic".into(),
                 ..InputConfig::default()
             },
             local: LocalConfig {
                 disable_specs: true,
                 ..LocalConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let outcome = session
@@ -3596,9 +4376,10 @@ mod tests {
         let observer = Arc::new(CollectObserver::default());
         let cfg = SessionConfig {
             input: InputConfig {
-                topic: "topic".into(),
+                topic: "well scoped research topic".into(),
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         session
@@ -3630,9 +4411,10 @@ mod tests {
         let observer = Arc::new(CollectObserver::default());
         let cfg = SessionConfig {
             input: InputConfig {
-                topic: "topic".into(),
+                topic: "well scoped research topic".into(),
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         session
@@ -3658,9 +4440,10 @@ mod tests {
         let observer = Arc::new(CollectObserver::default());
         let cfg = SessionConfig {
             input: InputConfig {
-                topic: "topic".into(),
+                topic: "well scoped research topic".into(),
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         session
@@ -3895,6 +4678,7 @@ mod tests {
                 topic: "Rust async".into(),
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let observer = Arc::new(CollectObserver::default());
@@ -4061,6 +4845,7 @@ mod tests {
                 topic: "Rust async".into(),
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let outcome = session
@@ -4181,6 +4966,7 @@ mod tests {
                 topic: "Rust async".into(),
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let observer = Arc::new(CollectObserver::default());
@@ -4304,6 +5090,7 @@ mod tests {
                 from_urls: vec!["https://example.com/seed".into()],
                 ..InputConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let outcome = session
@@ -4874,6 +5661,7 @@ mod tests {
                 disable_specs: true,
                 ..LocalConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         #[derive(Default)]
@@ -4957,6 +5745,7 @@ mod tests {
                 disable_specs: true,
                 ..LocalConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let outcome = session
@@ -5038,11 +5827,175 @@ mod tests {
                 search_circuit_breaker_threshold: 10,
                 ..ResilienceConfig::default()
             },
+            clarify: false,
             ..SessionConfig::default()
         };
         let outcome = session
             .run("h002retrycfg", "Test", &cfg, Arc::new(NoopObserver))
             .await;
         assert!(outcome.is_ok(), "session with retry config should complete");
+    }
+
+    #[tokio::test]
+    async fn competitive_mode_delegates_one_researcher_per_entity() {
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+        struct RecordingSearch;
+        #[async_trait]
+        impl WebSearchTool for RecordingSearch {
+            async fn search(
+                &self,
+                query: &str,
+                _max_results: usize,
+            ) -> anyhow::Result<Vec<WebSearchHit>> {
+                Ok(vec![WebSearchHit {
+                    url: format!("https://example.com/{query}"),
+                    title: format!("Article for {query}"),
+                    snippet: query.to_string(),
+                    matched_query: query.to_string(),
+                    search_tool: "fake".to_string(),
+                    search_engine: "fake".to_string(),
+                    author: None,
+                }])
+            }
+        }
+        struct OkFetch;
+        #[async_trait]
+        impl WebFetchTool for OkFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: url.to_string(),
+                    title: format!("Title for {url}"),
+                    body: body256("competitive analysis body"),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                    author: None,
+                })
+            }
+        }
+
+        let manager = ResearchManager::new(&research_root);
+        let web = WebGatherer::new(Arc::new(RecordingSearch), Arc::new(OkFetch));
+        let session = ResearchSession::new(
+            manager,
+            Some(web),
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig {
+            input: InputConfig {
+                topic: "Compare Fireworks AI and Groq for LLM inference".into(),
+                ..InputConfig::default()
+            },
+            engine: RunEngineConfig {
+                mode: ResearchMode::Competitive,
+                ..RunEngineConfig::default()
+            },
+            clarify: false,
+            ..SessionConfig::default()
+        };
+        let observer = Arc::new(CollectObserver::default());
+        let outcome = session
+            .run("comp-delegation", "Comp Delegation", &cfg, observer.clone())
+            .await
+            .unwrap();
+
+        let events = observer.events.lock().unwrap();
+
+        // FR-006: competitive extraction event is emitted.
+        let entity_event = events
+            .iter()
+            .find_map(|e| match e {
+                SessionEvent::CompetitiveEntities { entities, .. } => Some(entities.clone()),
+                _ => None,
+            })
+            .expect("should emit CompetitiveEntities event");
+        assert!(
+            entity_event.iter().any(|n| n.contains("Fireworks AI")),
+            "expected Fireworks AI in extracted entities: {entity_event:?}"
+        );
+        assert!(
+            entity_event.iter().any(|n| n.contains("Groq")),
+            "expected Groq in extracted entities: {entity_event:?}"
+        );
+
+        // FR-006 / FR-007: one sub-topic per entity is planned.
+        let plan = events
+            .iter()
+            .find_map(|e| match e {
+                SessionEvent::SupervisorPlanUpdated { sub_topics } => Some(sub_topics.clone()),
+                _ => None,
+            })
+            .expect("should emit SupervisorPlanUpdated event");
+        assert_eq!(plan.len(), 2, "expected one sub-topic per entity: {plan:?}");
+        assert!(
+            plan.iter().any(|t| t.contains("Fireworks AI")),
+            "plan should include Fireworks AI: {plan:?}"
+        );
+        assert!(
+            plan.iter().any(|t| t.contains("Groq")),
+            "plan should include Groq: {plan:?}"
+        );
+
+        // FR-007: researchers are spawned with per-entity sub-topics.
+        let spawned: Vec<(&String, &String)> = events
+            .iter()
+            .filter_map(|e| match e {
+                SessionEvent::ResearcherSpawned { id, sub_topic } => Some((id, sub_topic)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            spawned.len(),
+            2,
+            "expected one spawned researcher per entity, got {spawned:?}"
+        );
+        assert!(
+            spawned.iter().any(|(_, t)| t.contains("Fireworks AI")),
+            "researcher sub-topic should include Fireworks AI: {spawned:?}"
+        );
+        assert!(
+            spawned.iter().any(|(_, t)| t.contains("Groq")),
+            "researcher sub-topic should include Groq: {spawned:?}"
+        );
+
+        // FR-009: supervisor mode should drive supervisor-specific RunStep
+        // events through the mode-aware tier router.
+        let run_steps: Vec<(String, String)> = events
+            .iter()
+            .filter_map(|e| match e {
+                SessionEvent::RunStep { step, status, .. } if step.starts_with("supervisor_") => {
+                    Some((step.clone(), status.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            run_steps.iter().any(|(s, _)| s == "supervisor_plan"),
+            "expected supervisor_plan RunStep, got {run_steps:?}"
+        );
+        assert!(
+            run_steps.iter().any(|(s, _)| s == "supervisor_delegate"),
+            "expected supervisor_delegate RunStep, got {run_steps:?}"
+        );
+        assert!(
+            run_steps.iter().any(|(s, _)| s == "supervisor_synthesize"),
+            "expected supervisor_synthesize RunStep, got {run_steps:?}"
+        );
+        assert!(
+            run_steps.iter().any(|(s, _)| s == "supervisor_finalize"),
+            "expected supervisor_finalize RunStep, got {run_steps:?}"
+        );
+
+        // The run should still write a RESEARCH.md document.
+        assert!(
+            research_root.join("comp-delegation/RESEARCH.md").is_file(),
+            "RESEARCH.md should be written for competitive mode"
+        );
+        assert!(!outcome.sources.is_empty(), "should capture web sources");
     }
 }

@@ -16,6 +16,7 @@ fn make_ctx(dir: &std::path::Path) -> ToolContext {
         event_bus: Arc::new(EventBus::new(1024)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+        allowed_roots: vec![dir.to_path_buf()],
     }
 }
 

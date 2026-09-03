@@ -317,24 +317,13 @@ impl App {
                 // Log the step for the primary session AND for every tracked
                 // sub-agent/teammate session so the Agents/Teams panels' step
                 // count (one per ToolCallStart) is visible in the log.
-                let agent_tag = if is_primary {
-                    None
-                } else {
-                    self.agent_log_tag(session_id)
-                };
-                let agent_prefix = agent_tag
-                    .as_ref()
-                    .map(|tag| format!("[{tag}] "))
-                    .unwrap_or_default();
+                let (agent_tag, agent_prefix, log_session_id) =
+                    self.tracked_log_context(session_id, is_primary);
                 self.push_log_for(
                     LogLevel::Tool,
                     format!("{agent_prefix}[{step}.{current_substep}] tool call: {tool}"),
                     agent_tag,
-                    if is_primary {
-                        None
-                    } else {
-                        Some(session_id.clone())
-                    },
+                    log_session_id,
                 );
                 self.needs_redraw = true;
             }
@@ -363,15 +352,8 @@ impl App {
                     .get(call_id)
                     .map(|(_sid, step, substep)| format!("[{step}.{substep}] "))
                     .unwrap_or_default();
-                let agent_tag = if is_primary {
-                    None
-                } else {
-                    self.agent_log_tag(session_id)
-                };
-                let agent_prefix = agent_tag
-                    .as_ref()
-                    .map(|tag| format!("[{tag}] "))
-                    .unwrap_or_default();
+                let (agent_tag, agent_prefix, log_session_id) =
+                    self.tracked_log_context(session_id, is_primary);
                 if let Some(err) = error {
                     self.push_log_for(
                         LogLevel::Error,
@@ -379,25 +361,12 @@ impl App {
                             "{agent_prefix}{step_tag}tool {tool} failed: {err} ({duration_ms}ms)"
                         ),
                         agent_tag,
-                        if is_primary {
-                            None
-                        } else {
-                            Some(session_id.clone())
-                        },
+                        log_session_id,
                     );
                 } else {
                     let message =
                         format!("{agent_prefix}{step_tag}tool {tool} completed ({duration_ms}ms)");
-                    self.push_log_for(
-                        LogLevel::Tool,
-                        message,
-                        agent_tag,
-                        if is_primary {
-                            None
-                        } else {
-                            Some(session_id.clone())
-                        },
-                    );
+                    self.push_log_for(LogLevel::Tool, message, agent_tag, log_session_id);
                 }
                 if is_primary {
                     // T-010/FR-013: the tool-call state changed, so refresh the
@@ -447,29 +416,13 @@ impl App {
                             entry.call_id.clone(),
                             (short_sid.clone(), step, current_substep),
                         );
-                        let agent_tag = if is_primary {
-                            None
-                        } else {
-                            self.agent_log_tag(session_id)
-                        };
-                        let agent_prefix = agent_tag
-                            .as_ref()
-                            .map(|tag| format!("[{tag}] "))
-                            .unwrap_or_default();
+                        let (agent_tag, agent_prefix, log_session_id) =
+                            self.tracked_log_context(session_id, is_primary);
                         let message = format!(
                             "{agent_prefix}[{step}.{current_substep}] tool call: {}",
                             entry.tool
                         );
-                        self.push_log_for(
-                            LogLevel::Tool,
-                            message,
-                            agent_tag,
-                            if is_primary {
-                                None
-                            } else {
-                                Some(session_id.clone())
-                            },
-                        );
+                        self.push_log_for(LogLevel::Tool, message, agent_tag, log_session_id);
                     }
                     if is_primary {
                         if !self.find_tool_call_part(&entry.call_id) {
@@ -2323,6 +2276,33 @@ impl App {
             .iter()
             .find(|t| t.child_session_id == session_id)
             .map(|t| t.id.clone())
+    }
+
+    /// Build the `(agent_tag, agent_prefix, log_session_id)` triple used by
+    /// every per-session log line that needs to attribute activity to a
+    /// tracked sub-agent/teammate. Primary-session events get `agent_tag =
+    /// None` and an empty prefix; tracked events get a `[name] ` prefix
+    /// and the child session id so the per-agent output view picks them up.
+    fn tracked_log_context(
+        &self,
+        session_id: &str,
+        is_primary: bool,
+    ) -> (Option<String>, String, Option<String>) {
+        let agent_tag = if is_primary {
+            None
+        } else {
+            self.agent_log_tag(session_id)
+        };
+        let agent_prefix = agent_tag
+            .as_ref()
+            .map(|tag| format!("[{tag}] "))
+            .unwrap_or_default();
+        let log_session_id = if is_primary {
+            None
+        } else {
+            Some(session_id.to_string())
+        };
+        (agent_tag, agent_prefix, log_session_id)
     }
 
     /// Returns `true` for the primary session or any session that is a

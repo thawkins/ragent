@@ -107,6 +107,13 @@ pub enum ResearchError {
     /// The configured analysis provider is not available.
     #[error("research provider not available: {0}")]
     ProviderNotAvailable(String),
+    /// The topic is ambiguous and the caller must answer a clarifying question
+    /// before web searches are performed (FR-005, FR-017).
+    #[error("clarification needed: {question}")]
+    NeedsClarification {
+        /// The single clarifying question to present to the user.
+        question: String,
+    },
 }
 
 /// Result alias for [`ResearchManager`].
@@ -999,8 +1006,11 @@ pub fn render_document_for(
         polish: None,
         readability_audit: None,
         template_body: None,
+        brief: None,
         decomposed_queries: queries.to_vec(),
         output_format: crate::run_config::OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     };
     assemble_document(&doc)
 }
@@ -1331,8 +1341,11 @@ mod tests {
             cite_check: None,
             polish: None,
             readability_audit: None,
+            brief: None,
             decomposed_queries: Vec::new(),
             output_format: crate::run_config::OutputFormat::Report,
+            comparison_table: None,
+            evaluation_scorecard: None,
         };
         mgr.write_document(&doc).await.unwrap();
 
@@ -1616,8 +1629,11 @@ mod tests {
             cite_check: None,
             polish: None,
             readability_audit: None,
+            brief: None,
             decomposed_queries: Vec::new(),
             output_format: crate::run_config::OutputFormat::Report,
+            comparison_table: None,
+            evaluation_scorecard: None,
         };
         mgr.write_document(&doc).await.unwrap();
         let path = ResearchIo::research_md_path(tmp.path(), &name);
@@ -1685,7 +1701,10 @@ mod frontmatter_tests {
             polish: None,
             readability_audit: None,
             decomposed_queries: vec!["Rust async".into(), "Tokio runtime".into()],
+            brief: None,
             output_format: crate::run_config::OutputFormat::Report,
+            comparison_table: None,
+            evaluation_scorecard: None,
         };
         mgr.write_document(&doc).await.unwrap();
         mgr.complete_gathering("rust-async").await.unwrap();

@@ -4,11 +4,30 @@
 
 ### Added
 
+## Version: 1.0.78
+
+### Changed
+
+- Version bump to 1.0.78.
+- add compartatice research
+
 ## Version: 1.0.77
 
 ### Changed
 
 - Version bump to 1.0.77.
+- Updated project documentation for v1.0.77 (`README.md`, `SPEC.md`, `STATS.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, `CHANGELOG.md`, `docs/howtos/config.md`, `docs/howtos/research.md`).
+- Merged the latest feature work from `1.0.76` and `1.0.75` into the v1.0.77 release snapshot.
+
+### Added
+
+- **Documentation refresh for v1.0.77** — `README.md` project status now references v1.0.77 highlights. `SPEC.md` and `TUI-QUICKSTART.md` version/date blocks updated to 2026-09-03. `STATS.md` updated with current project composition and crate breakdown.
+- **Research evaluation scorecard configuration** — new `research.evaluate` section in `ragent.json` for self-evaluation scorecard settings (FR-015 of specs/opendeepresearch). Includes `ResearchEvaluateConfig` and `enabled` default.
+- **Research configuration re-export** — `ResearchEvaluateConfig` is now re-exported from `ragent-config` for downstream consumers.
+
+### Fixed
+
+- **Research config round-trip test** — `crates/ragent-config/tests/test_research_config.rs` now initializes the required `evaluate` field so the test compiles and passes.
 
 ## Version: 1.0.76
 

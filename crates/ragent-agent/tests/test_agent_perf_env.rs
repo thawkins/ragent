@@ -15,6 +15,8 @@ fn env_var_name_is_stable() {
 
 #[test]
 fn default_state_is_profiling_disabled() {
+    // Reset ALL state to ensure a clean baseline - previous tests may have left config values
+    perf::set_profiling_override(None);
     // Make sure no leftover state from a previous test pollutes the lookup.
     perf::init_from_env();
     // The test harness typically does not set `RAGENT_AGENT_PERF`, so

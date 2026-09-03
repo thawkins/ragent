@@ -117,8 +117,11 @@ async fn write_document_persists_supports_files_and_index() {
         polish: None,
         readability_audit: None,
         template_body: None,
+        brief: None,
         decomposed_queries: Vec::new(),
         output_format: ragent_research::OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     };
     mgr.write_document(&doc).await.unwrap();
 
@@ -194,9 +197,12 @@ async fn session_uses_analysis_engine_to_synthesize_findings() {
     use std::sync::Arc;
 
     struct MockEngine;
-
     #[async_trait]
     impl AnalysisEngine for MockEngine {
+        fn with_brief(&self, _brief: Option<String>) -> Arc<dyn AnalysisEngine> {
+            Arc::new(Self)
+        }
+
         async fn analyze(
             &self,
             topic: &str,
@@ -305,6 +311,10 @@ async fn session_uses_analysis_engine_to_synthesize_findings() {
             ..ragent_research::AnalysisConfig::default()
         },
         ..SessionConfig::default()
+    };
+    let config = SessionConfig {
+        clarify: false,
+        ..config
     };
     session
         .run("rust-async", "Rust Async", &config, Arc::new(NoopObserver))
@@ -438,6 +448,10 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
     struct EmptyAnalysis;
     #[async_trait]
     impl AnalysisEngine for EmptyAnalysis {
+        fn with_brief(&self, _brief: Option<String>) -> Arc<dyn AnalysisEngine> {
+            Arc::new(Self)
+        }
+
         async fn analyze(
             &self,
             _topic: &str,
@@ -465,6 +479,10 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
             ..LocalConfig::default()
         },
         ..SessionConfig::default()
+    };
+    let cfg = SessionConfig {
+        clarify: false,
+        ..cfg
     };
     session
         .run("lifetime-check", "Lifetime Check", &cfg, observer.clone())
@@ -523,9 +541,12 @@ async fn session_renders_synthesis_error_note_and_fallback_findings() {
     use std::path::{Path, PathBuf};
 
     struct FailingEngine;
-
     #[async_trait]
     impl AnalysisEngine for FailingEngine {
+        fn with_brief(&self, _brief: Option<String>) -> Arc<dyn AnalysisEngine> {
+            Arc::new(Self)
+        }
+
         async fn analyze(
             &self,
             _topic: &str,
@@ -617,6 +638,10 @@ async fn session_renders_synthesis_error_note_and_fallback_findings() {
         },
         ..SessionConfig::default()
     };
+    let config = SessionConfig {
+        clarify: false,
+        ..config
+    };
     session
         .run(
             "rust-async",
@@ -669,9 +694,12 @@ async fn session_persists_synthesize_result_to_run_log() {
     use std::sync::Arc;
 
     struct EmptyEngine;
-
     #[async_trait]
     impl AnalysisEngine for EmptyEngine {
+        fn with_brief(&self, _brief: Option<String>) -> Arc<dyn AnalysisEngine> {
+            Arc::new(Self)
+        }
+
         async fn analyze(
             &self,
             _topic: &str,
@@ -736,6 +764,10 @@ async fn session_persists_synthesize_result_to_run_log() {
         },
         ..SessionConfig::default()
     };
+    let config = SessionConfig {
+        clarify: false,
+        ..config
+    };
     session
         .run(
             "log-run",
@@ -756,5 +788,269 @@ async fn session_persists_synthesize_result_to_run_log() {
     assert!(
         entries.iter().any(|e| e.contains("synthesize_result")),
         "run log must contain a synthesize_result event"
+    );
+}
+
+#[tokio::test]
+async fn competitive_mode_produces_comparison_table_and_entity_profiles() {
+    use async_trait::async_trait;
+    use ragent_research::{
+        AnalysisEngine, AnalysisResult, InputConfig, LocalConfig, LocalGatherer, LocalTool,
+        OutputConfig, ResearchManager, ResearchMode, ResearchSession, SessionConfig, SessionEvent,
+        SessionObserver, SynthesisEvent, WebConfig, WebFetchTool, WebFetchedPage, WebGatherer,
+        WebSearchHit, WebSearchTool,
+    };
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    /// Deterministic search tool that returns one hit for each competitive
+    /// entity in the topic, so the supervisor can delegate one researcher per
+    /// entity (FR-006, FR-007).
+    struct CompetitiveSearch;
+
+    #[async_trait]
+    impl WebSearchTool for CompetitiveSearch {
+        async fn search(
+            &self,
+            query: &str,
+            _max_results: usize,
+        ) -> anyhow::Result<Vec<WebSearchHit>> {
+            // Return a hit whose URL embeds the query so the fetch tool can
+            // produce entity-specific bodies.
+            let title = format!("Overview of {query}");
+            Ok(vec![WebSearchHit {
+                url: format!("https://example.com/{query}"),
+                title,
+                snippet: format!("{query} offers pricing and speed information."),
+                matched_query: query.to_string(),
+                search_tool: "fake".to_string(),
+                search_engine: "fake".to_string(),
+                author: None,
+            }])
+        }
+    }
+
+    /// Deterministic fetch tool that returns bodies long enough to survive
+    /// post-fetch filtering and that mention the entity plus comparison
+    /// dimensions so the comparison-table heuristic can extract cells.
+    struct CompetitiveFetch;
+
+    #[async_trait]
+    impl WebFetchTool for CompetitiveFetch {
+        async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+            let entity = url
+                .strip_prefix("https://example.com/")
+                .unwrap_or(url)
+                .to_string();
+            let body = format!(
+                "Comprehensive article about {entity}. {entity} provides aggressive per-token \
+                 pricing and very low latency for large language model inference. The platform \
+                 emphasises throughput and batch pricing, with competitive speed benchmarks \
+                 against other inference providers. This text contains more than two hundred and \
+                 fifty six characters so that the minimum content length threshold used by the \
+                 web gatherer is comfortably satisfied and the source is not excluded during \
+                 post-fetch filtering.",
+            );
+            Ok(WebFetchedPage {
+                url: url.to_string(),
+                title: format!("{entity} inference platform"),
+                body,
+                published_at: None,
+                content_type: None,
+                page_type: None,
+                language: Some("english".to_string()),
+                author: None,
+            })
+        }
+    }
+
+    struct NoLocal;
+
+    #[async_trait]
+    impl LocalTool for NoLocal {
+        async fn glob(&self, _root: &Path, _pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
+            Ok(Vec::new())
+        }
+        async fn grep(
+            &self,
+            _path: &Path,
+            _terms: &[String],
+        ) -> anyhow::Result<Vec<ragent_research::GrepMatch>> {
+            Ok(Vec::new())
+        }
+        async fn read(&self, _path: &Path) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+        async fn list_specs(&self, _root: &Path) -> anyhow::Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        async fn spec_title(&self, _root: &Path, _spec_id: &str) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+    }
+
+    /// Observer that records all events for post-run assertions.
+    #[derive(Default)]
+    struct CaptureObserver {
+        events: Mutex<Vec<SessionEvent>>,
+    }
+
+    impl SessionObserver for CaptureObserver {
+        fn on_event(&self, event: SessionEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    let tmp = TempDir::new().unwrap();
+    let research_root = tmp.path().join("research");
+    tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+    let manager = ResearchManager::new(&research_root);
+    let web = WebGatherer::new(Arc::new(CompetitiveSearch), Arc::new(CompetitiveFetch))
+        .with_keep_low_relevance(true);
+    let local = LocalGatherer::new(Arc::new(NoLocal));
+    let session = ResearchSession::new(manager, Some(web), Some(local), Arc::new(EmptyAnalysis));
+
+    struct EmptyAnalysis;
+
+    #[async_trait]
+    impl AnalysisEngine for EmptyAnalysis {
+        fn with_brief(&self, _brief: Option<String>) -> Arc<dyn AnalysisEngine> {
+            Arc::new(Self)
+        }
+
+        async fn analyze(
+            &self,
+            _topic: &str,
+            _sources: &[ragent_research::SourceBody],
+        ) -> anyhow::Result<AnalysisResult> {
+            // Simulate an empty LLM response so the deterministic mechanical
+            // fallback paths are exercised end-to-end.
+            Ok(AnalysisResult::default())
+        }
+    }
+
+    let observer = Arc::new(CaptureObserver::default());
+    let cfg = SessionConfig {
+        input: InputConfig {
+            topic: "Compare Fireworks AI, Together.ai, and Groq for LLM inference".into(),
+            ..InputConfig::default()
+        },
+        output: OutputConfig {
+            output_format: ragent_research::OutputFormat::ComparisonTable,
+            ..OutputConfig::default()
+        },
+        web: WebConfig {
+            max_web_results: 5,
+            ..WebConfig::default()
+        },
+        local: LocalConfig {
+            max_local_sources: 5,
+            ..LocalConfig::default()
+        },
+        engine: ragent_research::RunEngineConfig {
+            mode: ResearchMode::Competitive,
+            max_concurrent_research_units: 3,
+            ..ragent_research::RunEngineConfig::default()
+        },
+        ..SessionConfig::default()
+    };
+    let cfg = SessionConfig {
+        clarify: false,
+        ..cfg
+    };
+
+    session
+        .run(
+            "competitive-test",
+            "Competitive Test",
+            &cfg,
+            observer.clone(),
+        )
+        .await
+        .unwrap();
+
+    let research_md = tokio::fs::read_to_string(research_root.join("competitive-test/RESEARCH.md"))
+        .await
+        .unwrap();
+
+    // FR-006 / FR-016: the report must contain a comparison table and profiles.
+    assert!(
+        research_md.contains("## Comparison Table"),
+        "competitive report must contain a comparison table:\n{research_md}"
+    );
+    assert!(
+        research_md.contains("## Entity Profiles"),
+        "competitive report must contain per-entity profiles:\n{research_md}"
+    );
+    assert!(
+        research_md.contains("## Comparison Criteria"),
+        "competitive report must list explicit comparison criteria:\n{research_md}"
+    );
+
+    // Verify the expected entities appear in the report.
+    for entity in ["Fireworks AI", "Together.ai", "Groq"] {
+        assert!(
+            research_md.contains(entity),
+            "competitive report missing entity {entity}:\n{research_md}"
+        );
+    }
+
+    // Verify at least one comparison dimension was detected and rendered.
+    assert!(
+        research_md.contains("pricing") || research_md.contains("speed/latency"),
+        "competitive report missing detected comparison dimensions:\n{research_md}"
+    );
+
+    // The artifact must still cite sources in the comparison-table body or
+    // references index.
+    assert!(
+        research_md.contains("## References Index"),
+        "competitive report must include a references index:\n{research_md}"
+    );
+    assert!(
+        research_md.contains("example.com"),
+        "competitive report must reference the captured web URLs:\n{research_md}"
+    );
+
+    // Verify the competitive-analysis pipeline emitted the expected streaming
+    // events so callers (TUI/CLI/HTTP) can show per-entity progress.
+    let events = observer.events.lock().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::CompetitiveEntities { .. })),
+        "competitive run must emit CompetitiveEntities event"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::ResearcherSpawned { .. })),
+        "competitive run must emit ResearcherSpawned events"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::ResearcherCompleted { .. })),
+        "competitive run must emit ResearcherCompleted events"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::SupervisorMerged { .. })),
+        "competitive run must emit SupervisorMerged event"
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult { .. })
+        )),
+        "competitive run must emit a SynthesizeResult event"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Done { .. })),
+        "competitive run must emit Done event"
     );
 }

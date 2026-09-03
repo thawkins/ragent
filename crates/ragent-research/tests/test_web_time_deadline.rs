@@ -110,6 +110,7 @@ fn web_only_cfg(deadline_secs: Option<u64>, topic: &str) -> SessionConfig {
             disable_specs: true,
             ..LocalConfig::default()
         },
+        clarify: false,
         ..SessionConfig::default()
     }
 }

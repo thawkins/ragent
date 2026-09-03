@@ -408,6 +408,7 @@ async fn test_bash_tool_timeout_returns_error_with_partial_output() {
         event_bus: Arc::new(EventBus::new(128)),
         read_timestamps: Arc::new(RwLock::new(std::collections::HashMap::new())),
         canonical_cache: Arc::new(CanonicalPathCache::new()),
+        allowed_roots: vec![tmp.path().to_path_buf()],
     };
 
     // `sleep` runs past the 1s timeout. It first prints a marker to stdout so

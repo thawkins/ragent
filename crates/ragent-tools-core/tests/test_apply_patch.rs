@@ -19,9 +19,10 @@ fn test_ctx(working_dir: PathBuf) -> ToolContext {
     ToolContext {
         event_bus: Arc::new(EventBus::new(128)),
         session_id: "test-session".to_string(),
-        working_dir,
+        working_dir: working_dir.clone(),
         read_timestamps: Arc::new(RwLock::new(std::collections::HashMap::new())),
         canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+        allowed_roots: vec![working_dir],
     }
 }
 

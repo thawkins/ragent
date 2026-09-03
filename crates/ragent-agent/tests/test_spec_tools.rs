@@ -27,6 +27,7 @@ fn base_ctx() -> ToolContext {
         spec_manager: None,
         active_spec_id: None,
         config: None,
+        allowed_roots: Vec::new(),
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),

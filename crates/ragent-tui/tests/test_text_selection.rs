@@ -495,6 +495,102 @@ fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
     );
 }
 
+#[test]
+fn test_output_view_overlay_does_not_render_log_lines() {
+    // The overlay must show the sub-agent transcript in the same chat format
+    // as the Messages window; raw log-panel entries (timestamps, TUL badges)
+    // must not leak in.
+    let mut app = make_app();
+    app.current_screen = ScreenMode::Chat;
+    app.session_id = Some("lead-s1".to_string());
+    app.storage
+        .create_session("child-s1", "/tmp")
+        .expect("create child session");
+    app.storage
+        .create_message(&ragent_agent::message::Message::assistant_text(
+            "child-s1",
+            "child transcript text",
+        ))
+        .expect("create child message");
+
+    // Log entries that previously leaked into the overlay: the task-start
+    // marker and tool-call mirror lines, both stamped to the child session.
+    app.log_entries.push(ragent_tui::app::LogEntry {
+        timestamp: chrono::Utc::now(),
+        level: ragent_tui::app::LogLevel::Info,
+        message: "[bg] Background task started: explore-a1b2c3d4 (explore)".to_string(),
+        session_id: Some("child-s1".to_string()),
+        agent_id: None,
+        seq: 1,
+    });
+    app.log_entries.push(ragent_tui::app::LogEntry {
+        timestamp: chrono::Utc::now(),
+        level: ragent_tui::app::LogLevel::Tool,
+        message: "[explore-a1b2c3d4] [1.1] tool call: grep".to_string(),
+        session_id: Some("child-s1".to_string()),
+        agent_id: Some("explore-a1b2c3d4".to_string()),
+        seq: 2,
+    });
+
+    app.output_view = Some(OutputViewState {
+        target: OutputViewTarget::Session {
+            session_id: "child-s1".to_string(),
+            label: "explore [a1b2c3d4]".to_string(),
+        },
+        scroll_offset: 0,
+        max_scroll: 0,
+        line_cache: ragent_tui::app::OutputViewLineCache {
+            lines: Vec::new(),
+            wrapped_lines: Vec::new(),
+            content_lines: Vec::new(),
+            wrapped_count: 0,
+            cache_width: 0,
+            source_generation: 0,
+        },
+    });
+
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).expect("create test terminal");
+    terminal
+        .draw(|frame| ragent_tui::layout::render(frame, &mut app))
+        .expect("render frame");
+
+    // Extract just the overlay region text.
+    let area = app.output_view_area;
+    let buffer = terminal.backend().buffer().clone();
+    let mut overlay_text = String::new();
+    for y in area.y..area.y.saturating_add(area.height) {
+        for x in area.x..area.x.saturating_add(area.width) {
+            if let Some(cell) = buffer.cell((x, y)) {
+                overlay_text.push_str(cell.symbol());
+            }
+        }
+        overlay_text.push('\n');
+    }
+
+    let lines: Vec<&str> = overlay_text.lines().collect();
+    // The chat-format transcript line must be present ("● " prefix).
+    assert!(
+        lines.iter().any(|l| l.contains("child transcript text")),
+        "overlay should render the child transcript, got:\n{overlay_text}"
+    );
+    // No log-panel-style lines: timestamped level badges must not appear.
+    for style in ["INF ", "TUL ", "WRN ", "ERR "] {
+        assert!(
+            !lines.iter().any(|l| l.contains(style)),
+            "overlay must not contain log-panel badge {style:?}, got:\n{overlay_text}"
+        );
+    }
+    assert!(
+        !overlay_text.contains("tool call: grep"),
+        "overlay must not mirror log-window tool lines, got:\n{overlay_text}"
+    );
+    assert!(
+        !overlay_text.contains("Background task started"),
+        "overlay must not mirror log-window task-start lines, got:\n{overlay_text}"
+    );
+}
+
 // ---------- Selection normalization ----------
 
 #[test]

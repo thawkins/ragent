@@ -33,6 +33,7 @@ fn ctx(dir: &Path) -> ToolContext {
         event_bus: Arc::new(EventBus::new(64)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+        allowed_roots: vec![dir.to_path_buf()],
     }
 }
 
@@ -178,6 +179,22 @@ async fn list_rejects_traversal() {
     let dir = tmp_dir();
     let out = ListTool.execute(json!({"path": ".."}), &ctx(&dir)).await;
     assert!(out.is_err(), "list should reject ../ escape: {out:?}");
+}
+
+#[tokio::test]
+async fn list_allows_additional_allowed_root() {
+    let dir_a = tmp_dir();
+    let dir_b = tmp_dir();
+    let mut ctx = ctx(&dir_a);
+    ctx.allowed_roots.push(dir_b.clone());
+
+    let out = ListTool
+        .execute(json!({"path": dir_b.to_str().unwrap(), "depth": 0}), &ctx)
+        .await;
+    assert!(
+        out.is_ok(),
+        "list should allow path inside configured allowed_root: {out:?}"
+    );
 }
 
 #[tokio::test]

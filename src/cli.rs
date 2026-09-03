@@ -269,6 +269,13 @@ pub async fn handle_research_command(
                 iterations,
                 depth,
                 tier,
+                mode: None,
+                summarization_model: None,
+                research_model: None,
+                compression_model: None,
+                final_report_model: None,
+                max_concurrent_research_units: None,
+                clarify: None,
                 format,
                 sources_dir,
                 template,
@@ -285,14 +292,20 @@ pub async fn handle_research_command(
                 search_max_retries,
                 search_circuit_breaker_threshold,
                 search_retry_base_delay_ms,
+                max_web_results: None,
+                max_local_sources: None,
+                max_synthesis_sources: None,
+                brief: None,
+                evaluate: false,
             }
         }
-        ResearchCommands::List { all } => ResearchCliCommand::List { all },
+        ResearchCommands::List { all } => ResearchCliCommand::List { all, json: false },
         ResearchCommands::Open { name } => ResearchCliCommand::Open { name },
         ResearchCommands::Search { query } => ResearchCliCommand::Search {
             query: query.join(" "),
+            json: false,
         },
-        ResearchCommands::Show { name } => ResearchCliCommand::Show { name },
+        ResearchCommands::Show { name } => ResearchCliCommand::Show { name, json: false },
         ResearchCommands::Delete { name, yes } => ResearchCliCommand::Delete { name, yes },
         ResearchCommands::Archive { name } => ResearchCliCommand::Archive { name },
         ResearchCommands::Continue { name, message } => ResearchCliCommand::Continue {
@@ -309,19 +322,11 @@ pub async fn handle_research_command(
         ResearchCliCommand::Help => {
             println!("{}", ResearchCliCommand::build_help_message());
         }
-        ResearchCliCommand::List { all } => {
+        ResearchCliCommand::List { all, .. } => {
             let items = manager.list(all).await?;
-            let rows: Vec<(String, String, String, String, String)> = items
+            let rows: Vec<(String, String, String, ragent_research::ResearchStatus)> = items
                 .into_iter()
-                .map(|i| {
-                    (
-                        i.name.to_string(),
-                        i.title,
-                        i.status.as_str().to_string(),
-                        i.created_at.to_rfc3339(),
-                        i.modified_at.to_rfc3339(),
-                    )
-                })
+                .map(|i| (i.name.to_string(), i.title, i.topic, i.status))
                 .collect();
             print!("{}", ragent_research::render_list_output(&rows));
         }
@@ -330,15 +335,15 @@ pub async fn handle_research_command(
             let path = ragent_research::ResearchIo::research_md_path(manager.root(), &item.name);
             println!("{}", path.display());
         }
-        ResearchCliCommand::Search { query } => {
+        ResearchCliCommand::Search { query, .. } => {
             let hits = manager.search(&query, 25).await?;
-            let rows: Vec<(String, String, String)> = hits
+            let rows: Vec<(String, String, String, String)> = hits
                 .into_iter()
-                .map(|h| (h.name, h.title, h.snippet))
+                .map(|h| (h.name, h.title, h.snippet, h.path.display().to_string()))
                 .collect();
             print!("{}", ragent_research::render_search_output(&rows));
         }
-        ResearchCliCommand::Show { name } => {
+        ResearchCliCommand::Show { name, .. } => {
             let item = manager.show(&name).await?;
             let sources: Vec<(String, String, String, String, Option<String>)> = item
                 .sources
@@ -348,7 +353,7 @@ pub async fn handle_research_command(
                         s.type_str().to_string(),
                         s.path_or_url().to_string(),
                         s.title().to_string(),
-                        s.captured_at().to_rfc3339(),
+                        "web".to_string(),
                         s.oa_recovery_note(),
                     )
                 })
@@ -391,6 +396,12 @@ pub async fn handle_research_command(
             iterations,
             depth,
             tier,
+            mode,
+            research_model,
+            compression_model,
+            final_report_model,
+            max_concurrent_research_units,
+            clarify,
             format,
             sources_dir,
             template,
@@ -407,6 +418,12 @@ pub async fn handle_research_command(
             search_max_retries,
             search_retry_base_delay_ms,
             search_circuit_breaker_threshold,
+            max_web_results,
+            max_local_sources,
+            max_synthesis_sources,
+            brief,
+            evaluate,
+            ..
         } => {
             // Derive a human-readable item title that summarises the topic
             // (rather than truncating to its first word). Falls back to the
@@ -428,6 +445,8 @@ pub async fn handle_research_command(
                 template,
                 depth,
                 tier,
+                mode,
+                clarify,
                 iterations,
                 output_format: format,
                 use_local,
@@ -443,6 +462,15 @@ pub async fn handle_research_command(
                 search_max_retries,
                 search_retry_base_delay_ms,
                 search_circuit_breaker_threshold,
+                max_web_results,
+                max_local_sources,
+                max_synthesis_sources,
+                brief,
+                research_model,
+                compression_model,
+                final_report_model,
+                max_concurrent_research_units,
+                evaluate: Some(evaluate),
                 ..Default::default()
             };
             let config = ragent_research::build_session_config(&req, config_arc.as_deref());
@@ -459,7 +487,7 @@ pub async fn handle_research_command(
                 working_dir.clone(),
                 event_bus,
                 Some(storage),
-                config_arc,
+                config_arc.clone(),
                 Some(Arc::new(ragent_agent::provider::create_default_registry())),
                 active_model,
                 Some(name.as_str()),
@@ -490,6 +518,52 @@ pub async fn handle_research_command(
                     }
                     summary.push(')');
                     println!("{summary}");
+                }
+                Err(ragent_research::ResearchError::NeedsClarification { question }) => {
+                    eprintln!("ragent-research: {}", question);
+                    eprint!("Answer: ");
+                    let mut answer = String::new();
+                    std::io::stdin().read_line(&mut answer)?;
+                    let answer = answer.trim();
+                    if answer.is_empty() {
+                        eprintln!("ragent-research: clarification cancelled");
+                        std::process::exit(1);
+                    }
+                    let mut req = req;
+                    req.topic = format!("{} (clarification: {})", req.topic, answer);
+                    let config = ragent_research::build_session_config(&req, config_arc.as_deref());
+                    match session
+                        .run(&name, &title, &config, Arc::new(CliObserver))
+                        .await
+                    {
+                        Ok(outcome) => {
+                            let mut summary = format!(
+                                "ragent-research: created research/{} ({} sources",
+                                outcome.research_name,
+                                outcome.sources.len()
+                            );
+                            if outcome.pdf_count > 0 {
+                                summary.push_str(&format!(
+                                    ", {} PDF{}",
+                                    outcome.pdf_count,
+                                    if outcome.pdf_count == 1 { "" } else { "s" }
+                                ));
+                            }
+                            if outcome.youtube_count > 0 {
+                                summary.push_str(&format!(
+                                    ", {} YouTube video{}",
+                                    outcome.youtube_count,
+                                    if outcome.youtube_count == 1 { "" } else { "s" }
+                                ));
+                            }
+                            summary.push(')');
+                            println!("{summary}");
+                        }
+                        Err(e) => {
+                            eprintln!("ragent-research: {e}");
+                            std::process::exit(1);
+                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!("ragent-research: {e}");
@@ -670,6 +744,18 @@ pub async fn handle_research_command(
                 path = concepts_path.display(),
                 size = response.len()
             );
+        }
+        ResearchCliCommand::Config => {
+            println!("ragent-research: effective defaults are loaded from ragent.json.");
+        }
+        ResearchCliCommand::Resume { name } => {
+            println!("ragent-research: resume '{name}' is not implemented in the CLI.");
+        }
+        ResearchCliCommand::Export { name, .. } => {
+            println!("ragent-research: export '{name}' is not implemented in the CLI.");
+        }
+        ResearchCliCommand::Import { path, .. } => {
+            println!("ragent-research: import '{path}' is not implemented in the CLI.");
         }
         ResearchCliCommand::Unknown(sub) => {
             eprintln!("ragent-research: unknown subcommand '{sub}'. Try `ragent research help`.");

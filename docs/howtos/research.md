@@ -420,6 +420,28 @@ to the plan. The optional message is added to the plan as a new sub-question.
 
 ---
 
+## 4A. Web-phase deadline
+
+As of v1.0.76, `/research create` caps the web-gathering phase at 60 seconds
+by default. Use `--web-time N` (or `--web-phase-timeout-secs N`) to change the
+deadline; set `--web-time 0` to disable it.
+
+When the deadline elapses, the run ingests everything gathered so far and
+continues to analysis/synthesis with the partial source set. No new search or
+fetch is started after the deadline, so the phase cannot run unbounded — the
+worst-case overshoot is the completion of fetches already in flight, each capped
+by `--fetch-timeout-secs` (default 30 s).
+
+The TUI status bar shows a live `web:M:SS` countdown while the web phase is
+active, and a single quantified notice is added to the research progress message
+when the deadline is reached, for example:
+
+```text
+**Web phase deadline reached** — 7 source(s) captured before timeout; proceeding to synthesis
+```
+
+---
+
 ## 5. Tiers: light, full, dissertation
 
 The `--tier` flag selects how much adversarial quality assurance runs after

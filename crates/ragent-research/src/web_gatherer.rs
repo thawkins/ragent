@@ -628,6 +628,12 @@ pub struct WebGatherer {
     /// everything captured so far as a partial [`GatherResult`] instead of
     /// blocking indefinitely. `None` (the default) means no deadline.
     phase_deadline: Option<Instant>,
+    /// Optional LLM page summarizer (T-012 / T-013). When configured, each
+    /// captured web page body is summarized before it is stored in the vault
+    /// and before it is handed off to the synthesis pipeline. The original
+    /// full body is still written to the vault so citations can trace back to
+    /// the captured source (FR-003, FR-018).
+    summarizer: Option<Arc<dyn crate::page_summarizer::PageSummarizer>>,
 }
 
 impl std::fmt::Debug for WebGatherer {
@@ -646,6 +652,7 @@ impl std::fmt::Debug for WebGatherer {
             )
             .field("has_gather_log", &self.gather_log.is_some())
             .field("has_vault", &self.vault.is_some())
+            .field("has_summarizer", &self.summarizer.is_some())
             .field("open_access_recovery", &self.open_access_recovery)
             .field("oa_min_full_text_chars", &self.oa_min_full_text_chars)
             .field("has_contact_email", &self.contact_email.is_some())
@@ -680,6 +687,7 @@ impl WebGatherer {
             oa_min_full_text_chars: DEFAULT_OA_MIN_FULL_TEXT_CHARS,
             oa_client: Some(Arc::new(ReqwestOpenAccessClient::new(None))),
             phase_deadline: None,
+            summarizer: None,
         }
     }
 
@@ -712,6 +720,19 @@ impl WebGatherer {
     #[must_use]
     pub fn with_vault(mut self, vault: Arc<SourceVault>) -> Self {
         self.vault = Some(vault);
+        self
+    }
+
+    /// Attach an optional LLM page summarizer (T-012 / T-013). When set, each
+    /// captured web page body is summarized before it enters the vault and the
+    /// synthesis pipeline. The original full body is still persisted in the vault
+    /// so citations can resolve to the captured source (FR-018).
+    #[must_use]
+    pub fn with_summarizer(
+        mut self,
+        summarizer: Arc<dyn crate::page_summarizer::PageSummarizer>,
+    ) -> Self {
+        self.summarizer = Some(summarizer);
         self
     }
 
@@ -957,21 +978,60 @@ impl WebGatherer {
         let title = clean_web_source_title(&page.title, url);
         let media_type = classify_web_source(url, page.content_type.as_deref())
             .as_str()
-            .to_string();
-        // Fall back to an aggressive best-guess detector when the fetcher did
+            .to_string(); // Fall back to an aggressive best-guess detector when the fetcher did
         // not report a language, so `--from-url` seed sources still get a
         // language label in the References Index.
         let language = page
             .language
             .clone()
             .or_else(|| detectable_body(&body).and_then(detect_language_best_effort));
+        let captured_at = chrono::Utc::now();
+        let mut summary_text: Option<String> = None;
+        let body_for_source: String = if let Some(sum) = self.summarizer.as_ref() {
+            match sum.summarize_page(&page.url, &page.body).await {
+                Ok(page_summary) => {
+                    summary_text = Some(page_summary.summary.clone());
+                    page_summary.summary
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        url = %page.url,
+                        "research: seed URL summarization failed; using full body"
+                    );
+                    body.clone()
+                }
+            }
+        } else {
+            body.clone()
+        };
+        if let Some(vault) = self.vault.as_ref() {
+            let new_source = crate::source_vault::NewVaultSource {
+                url: page.url.clone(),
+                title: title.clone(),
+                fetch_timestamp: Some(captured_at),
+                search_tool: String::new(),
+                search_engine: String::new(),
+                media_type: media_type.clone(),
+                content_type: page.content_type.clone(),
+                body_text: body.clone(),
+                summary_text: summary_text.clone(),
+            };
+            if let Err(e) = vault.store(&new_source) {
+                tracing::warn!(
+                    error = %e,
+                    url = %page.url,
+                    "research: failed to store seed URL source in vault"
+                );
+            }
+        }
         let source = Source::Web {
             url: page.url.clone(),
             title,
-            captured_at: chrono::Utc::now(),
+            captured_at,
             published_at: page.published_at,
             body_path: web_body_path(0),
-            body,
+            body: body_for_source,
             relevance: "User-supplied seed URL".into(),
             search_tool: String::new(),
             search_engine: String::new(),
@@ -2092,15 +2152,65 @@ impl WebGatherer {
                             "content_chars": content_chars,
                         })),
                     );
+                    let captured_at = Utc::now();
+                    let mut summary_text: Option<String> = None;
+                    let body_for_source: String = if let Some(sum) = self.summarizer.as_ref() {
+                        match sum.summarize_page(&page.url, &page.body).await {
+                            Ok(page_summary) => {
+                                summary_text = Some(page_summary.summary.clone());
+                                tracing::info!(
+                                    url = %page.url,
+                                    summary_chars = page_summary.summary.chars().count(),
+                                    "research: summarized web source"
+                                );
+                                page_summary.summary
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    url = %page.url,
+                                    "research: page summarization failed; using full body"
+                                );
+                                body.clone()
+                            }
+                        }
+                    } else {
+                        body.clone()
+                    };
+                    if let Some(vault) = self.vault.as_ref() {
+                        let new_source = crate::source_vault::NewVaultSource {
+                            url: page.url.clone(),
+                            title: title.clone(),
+                            fetch_timestamp: Some(captured_at),
+                            search_tool: hit.search_tool.clone(),
+                            search_engine: hit.search_engine.clone(),
+                            media_type: classify_web_source(
+                                &page.url,
+                                page.content_type.as_deref(),
+                            )
+                            .as_str()
+                            .to_string(),
+                            content_type: page.content_type.clone(),
+                            body_text: body.clone(),
+                            summary_text: summary_text.clone(),
+                        };
+                        if let Err(e) = vault.store(&new_source) {
+                            tracing::warn!(
+                                error = %e,
+                                url = %page.url,
+                                "research: failed to store source in vault"
+                            );
+                        }
+                    }
                     collected.push((
                         index,
                         Some(Source::Web {
                             url: page.url.clone(),
                             title,
-                            captured_at: Utc::now(),
+                            captured_at,
                             published_at: page.published_at,
                             body_path,
-                            body,
+                            body: body_for_source,
                             relevance,
                             search_tool: hit.search_tool,
                             search_engine: hit.search_engine,
@@ -4459,7 +4569,6 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
         let vault = SourceVault::open_with_root(&vault_root, "run-2026-001").unwrap();
-
         vault
             .store(&NewVaultSource {
                 url: "https://vaulted.example/page".into(),
@@ -4470,6 +4579,7 @@ mod tests {
                 media_type: "page".into(),
                 content_type: None,
                 body_text: body256("vaulted rust async runtime content"),
+                summary_text: None,
             })
             .unwrap();
 
@@ -4592,6 +4702,7 @@ mod tests {
                     media_type: "page".into(),
                     content_type: None,
                     body_text: body256(&format!("vaulted rust async runtime content {i}")),
+                    summary_text: None,
                 })
                 .unwrap();
         }
@@ -4634,7 +4745,6 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
         let vault = SourceVault::open_with_root(&vault_root, "run-2026-below").unwrap();
-
         vault
             .store(&NewVaultSource {
                 url: "https://vaulted.example/page".into(),
@@ -4645,6 +4755,7 @@ mod tests {
                 media_type: "page".into(),
                 content_type: None,
                 body_text: body256("vaulted rust async runtime content"),
+                summary_text: None,
             })
             .unwrap();
 
@@ -4720,6 +4831,7 @@ mod tests {
                     media_type: "page".into(),
                     content_type: None,
                     body_text: body256(&format!("vaulted rust async runtime content {i}")),
+                    summary_text: None,
                 })
                 .unwrap();
         }
@@ -4765,6 +4877,97 @@ mod tests {
         assert!(
             sufficient.is_some(),
             "expected VaultSufficient event, got {events:?}"
+        );
+    }
+
+    /// A fake summarizer that returns deterministic text so we can assert the
+    /// vault stores the summary alongside the original URL and timestamp (T-013).
+    struct FakeSummarizer;
+
+    #[async_trait]
+    impl crate::page_summarizer::PageSummarizer for FakeSummarizer {
+        async fn summarize_page(
+            &self,
+            url: &str,
+            _body: &str,
+        ) -> anyhow::Result<crate::page_summarizer::PageSummary> {
+            Ok(crate::page_summarizer::PageSummary {
+                url: url.to_string(),
+                summary: "Summarized.".to_string(),
+                summarized_at: chrono::Utc::now(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn gather_stores_summarized_source_in_vault_with_url_and_timestamp() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        let vault = SourceVault::open_with_root(&vault_root, "run-2026-summary").unwrap();
+
+        let hits = vec![WebSearchHit {
+            url: "https://web.example".into(),
+            title: "Web page".into(),
+            snippet: "rust async runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+            author: None,
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://web.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://web.example".into(),
+                title: "Web page".into(),
+                body: body256("fresh web content with many details"),
+                content_type: None,
+                page_type: None,
+                language: None,
+                author: None,
+            },
+        );
+        let (search, fetch) = (
+            Arc::new(FakeSearch {
+                hits,
+                calls: Mutex::new(Vec::new()),
+            }),
+            Arc::new(FakeFetch {
+                pages,
+                fail_urls: Vec::new(),
+                calls: Mutex::new(Vec::new()),
+            }),
+        );
+        let summarizer: Arc<dyn crate::page_summarizer::PageSummarizer> = Arc::new(FakeSummarizer);
+        let g = WebGatherer::new(search, fetch)
+            .with_vault(Arc::new(vault.clone()))
+            .with_summarizer(summarizer);
+        let result = g.gather("rust async runtime", 5).await.unwrap();
+        assert_eq!(result.len(), 1, "one source should be captured");
+        assert_eq!(
+            result[0].path_or_url(),
+            "https://web.example",
+            "source should carry the original URL"
+        );
+
+        let stored = vault.list(5).unwrap();
+        assert_eq!(stored.len(), 1, "vault should contain one stored source");
+        assert_eq!(stored[0].url, "https://web.example");
+        assert!(
+            stored[0]
+                .body_text
+                .contains("fresh web content with many details"),
+            "vault should keep the original body text"
+        );
+        assert_eq!(
+            stored[0].summary_text.as_deref(),
+            Some("Summarized."),
+            "vault should store the generated summary"
+        );
+        assert!(
+            stored[0].fetch_timestamp > chrono::DateTime::UNIX_EPOCH,
+            "vault should store a post-epoch fetch timestamp"
         );
     }
 

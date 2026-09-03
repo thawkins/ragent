@@ -593,7 +593,7 @@ mod tests {
         let md = gitlab_project_to_metadata(&value, "");
         assert_eq!(md.description, "");
         assert_eq!(md.language, "");
-        assert!(md.topics.is_empty());
+        assert_eq!(md.topics, Vec::<String>::new());
         assert_eq!(md.stargazers_count, 0);
     }
 
@@ -603,7 +603,7 @@ mod tests {
         let md = gitlab_project_to_metadata(&value, "");
         assert_eq!(md.description, "");
         assert_eq!(md.language, "");
-        assert!(md.topics.is_empty());
+        assert_eq!(md.topics, Vec::<String>::new());
         assert_eq!(md.stargazers_count, 0);
         assert_eq!(md.default_branch, "");
     }
@@ -617,7 +617,7 @@ mod tests {
             "default_branch": "develop",
         });
         let md = gitlab_project_to_metadata(&value, "Go");
-        assert!(md.topics.is_empty());
+        assert_eq!(md.topics, Vec::<String>::new());
         assert_eq!(md.language, "Go");
         assert_eq!(md.default_branch, "develop");
     }
@@ -758,19 +758,19 @@ mod tests {
     #[test]
     fn test_parse_gitlab_tree_empty_array() {
         let value = json!([]);
-        assert!(parse_gitlab_tree(&value).is_empty());
+        assert_eq!(parse_gitlab_tree(&value), Vec::<String>::new());
     }
 
     #[test]
     fn test_parse_gitlab_tree_non_array_yields_empty() {
         let value = json!({"message": "404 Not Found"});
-        assert!(parse_gitlab_tree(&value).is_empty());
+        assert_eq!(parse_gitlab_tree(&value), Vec::<String>::new());
     }
 
     #[test]
     fn test_parse_gitlab_tree_null_value() {
         let value = serde_json::Value::Null;
-        assert!(parse_gitlab_tree(&value).is_empty());
+        assert_eq!(parse_gitlab_tree(&value), Vec::<String>::new());
     }
 
     #[test]

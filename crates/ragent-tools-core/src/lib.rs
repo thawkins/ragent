@@ -146,6 +146,10 @@ pub struct ToolContext {
     /// Per-step canonical-path cache (FR-017). Avoids redundant
     /// `canonicalize()` syscalls within a single tool dispatch step.
     pub canonical_cache: Arc<CanonicalPathCache>,
+    /// Allowed root directories for path escape checking. When empty, only
+    /// `working_dir` is used as the allowed root. When populated, paths may
+    /// resolve to any of these roots.
+    pub allowed_roots: Vec<PathBuf>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -178,21 +182,28 @@ pub trait Tool: Send + Sync {
 /// existing prefix and then appends the remaining, normalised components.  This
 /// catches traversal attempts in non-existent paths such as `../etc/passwd`.
 ///
+/// # Arguments
+///
+/// * `path` - The path to validate.
+/// * `roots` - A slice of allowed root directories. The path must be within at least one.
+///
 /// # Errors
 ///
-/// Returns an error if the path escapes the given root.
-pub fn check_path_within_root(path: &Path, root: &Path) -> anyhow::Result<()> {
-    let canonical_root = root
-        .canonicalize()
-        .unwrap_or_else(|_| root.to_path_buf().clean_path());
+/// Returns an error if the path escapes all given roots.
+pub fn check_path_within_any_root(path: &Path, roots: &[&Path]) -> anyhow::Result<()> {
+    if roots.is_empty() {
+        anyhow::bail!("Path validation failed: no allowed roots configured");
+    }
 
-    // Canonicalise the existing portion of `path`.  We cannot call
-    // `canonicalize` directly on a non-existent path, so we walk up until we
-    // find something that exists, record the missing tail components, then
-    // reconstruct the path from the canonical base.
     let canonical = if let Ok(c) = path.canonicalize() {
         c
     } else {
+        // Path does not exist — walk up to the longest existing prefix
+        // and reconstruct, using the first root as fallback.
+        let fallback_root = roots[0]
+            .canonicalize()
+            .unwrap_or_else(|_| roots[0].to_path_buf().clean_path());
+
         let mut existing: &Path = path;
         let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
         loop {
@@ -208,20 +219,134 @@ pub fn check_path_within_root(path: &Path, root: &Path) -> anyhow::Result<()> {
             }
             match existing.parent() {
                 Some(parent) => existing = parent,
-                None => break canonical_root.clone(),
+                None => break fallback_root.clone(),
             }
         }
     };
 
-    if !is_path_within(&canonical, &canonical_root) && !is_alias_within(&canonical, &canonical_root)
-    {
-        anyhow::bail!(
-            "Path escape rejected: '{}' resolves outside project root '{}'",
-            path.display(),
-            canonical_root.display()
-        );
+    // Check if path is within any of the allowed roots
+    // Both the path and roots are canonicalized before matching to handle
+    // symlinks, bind mounts, and other path aliases correctly
+    for root in roots {
+        let canonical_root = match root.canonicalize() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::debug!(
+                    "Failed to canonicalize allowed root '{}': {}. Using cleaned path instead.",
+                    root.display(),
+                    e
+                );
+                root.to_path_buf().clean_path()
+            }
+        };
+
+        if is_path_within(&canonical, &canonical_root)
+            || is_alias_within(&canonical, &canonical_root)
+        {
+            return Ok(());
+        }
     }
-    Ok(())
+
+    // Path escapes all allowed roots - show canonical path for clarity
+    anyhow::bail!(
+        "Path escape rejected: '{}' (canonical: '{}') resolves outside all allowed roots",
+        path.display(),
+        canonical.display()
+    );
+}
+
+/// Cached variant of [`check_path_within_any_root`] (FR-017).
+///
+/// Uses the provided [`CanonicalPathCache`] to avoid redundant
+/// `canonicalize()` syscalls for the roots and path within a single
+/// agent-loop step.
+///
+/// # Arguments
+///
+/// * `path` - The path to validate.
+/// * `roots` - A slice of allowed root directories.
+/// * `cache` - Cache for canonical path lookups.
+///
+/// # Errors
+///
+/// Returns an error if the path escapes all given roots.
+pub fn check_path_within_any_root_cached(
+    path: &Path,
+    roots: &[&Path],
+    cache: &CanonicalPathCache,
+) -> anyhow::Result<()> {
+    if roots.is_empty() {
+        anyhow::bail!("Path validation failed: no allowed roots configured");
+    }
+
+    let canonical = if let Some(c) = cache.get_or_canonicalize(path) {
+        c
+    } else {
+        // Path does not exist — walk up to the longest existing prefix
+        // and reconstruct, using the first root as fallback.
+        let fallback_root = cache
+            .get_or_canonicalize(roots[0])
+            .unwrap_or_else(|| roots[0].to_path_buf().clean_path());
+
+        let mut existing: &Path = path;
+        let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+        loop {
+            if let Some(c) = cache.get_or_canonicalize(existing) {
+                let mut base = c;
+                for part in tail.iter().rev() {
+                    base = base.join(part);
+                }
+                break base;
+            }
+            if let Some(name) = existing.file_name() {
+                tail.push(name);
+            }
+            match existing.parent() {
+                Some(parent) => existing = parent,
+                None => break fallback_root.clone(),
+            }
+        }
+    };
+
+    // Check if path is within any of the allowed roots
+    // Both the path and roots are canonicalized before matching to handle
+    // symlinks, bind mounts, and other path aliases correctly
+    for root in roots {
+        let canonical_root = cache
+            .get_or_canonicalize(root)
+            .unwrap_or_else(|| root.to_path_buf().clean_path());
+
+        if is_path_within(&canonical, &canonical_root)
+            || is_alias_within(&canonical, &canonical_root)
+        {
+            return Ok(());
+        }
+    }
+
+    // Path escapes all allowed roots - show canonical path for clarity
+    anyhow::bail!(
+        "Path escape rejected: '{}' (canonical: '{}') resolves outside all allowed roots",
+        path.display(),
+        canonical.display()
+    );
+}
+
+/// Verify that `path` resolves within `root` after canonicalization.
+///
+/// Canonicalises both `path` and `root` and checks that the path
+/// is within the root. This is the single-root version; for multiple
+/// roots use [`check_path_within_any_root`].
+///
+/// # Arguments
+///
+/// * `path` - The path to validate.
+/// * `root` - The allowed root directory.
+///
+/// # Errors
+///
+/// Returns an error if the path escapes the given root.
+pub fn check_path_within_root(path: &Path, root: &Path) -> anyhow::Result<()> {
+    check_path_within_any_root(path, &[root])
 }
 
 /// Cached variant of [`check_path_within_root`] (FR-017).
@@ -238,44 +363,7 @@ pub fn check_path_within_root_cached(
     root: &Path,
     cache: &CanonicalPathCache,
 ) -> anyhow::Result<()> {
-    let canonical_root = cache
-        .get_or_canonicalize(root)
-        .unwrap_or_else(|| root.to_path_buf().clean_path());
-
-    let canonical = if let Some(c) = cache.get_or_canonicalize(path) {
-        c
-    } else {
-        // Path does not exist — walk up to the longest existing prefix
-        // and reconstruct, caching the canonical base.
-        let mut existing: &Path = path;
-        let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
-        loop {
-            if let Some(c) = cache.get_or_canonicalize(existing) {
-                let mut base = c;
-                for part in tail.iter().rev() {
-                    base = base.join(part);
-                }
-                break base;
-            }
-            if let Some(name) = existing.file_name() {
-                tail.push(name);
-            }
-            match existing.parent() {
-                Some(parent) => existing = parent,
-                None => break canonical_root.clone(),
-            }
-        }
-    };
-
-    if !is_path_within(&canonical, &canonical_root) && !is_alias_within(&canonical, &canonical_root)
-    {
-        anyhow::bail!(
-            "Path escape rejected: '{}' resolves outside project root '{}'",
-            path.display(),
-            canonical_root.display()
-        );
-    }
-    Ok(())
+    check_path_within_any_root_cached(path, &[root], cache)
 }
 
 /// Returns true when `child` is `root` or a descendant of `root`, using path

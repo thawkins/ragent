@@ -75,7 +75,9 @@ use super::replace::{
     CascadeFail, CascadeMatch, FindError, MatchLane, disambiguation_hint,
     find_flexible_replacement_range, find_replacement_cascade, format_match_failure, length_note,
 };
-use super::{Tool, ToolContext, ToolOutput};
+use super::{
+    Tool, ToolContext, ToolOutput, check_path_within_any_root, check_path_within_root_cached,
+};
 
 /// Minimum lines of context to show before and after the edited region in the
 /// result snippet (FR-008).
@@ -213,7 +215,15 @@ impl Tool for EditTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
-        super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+        // C-002: edits must stay inside the allowed roots.
+        // Use configured allowed_roots if available, otherwise fall back to working_dir.
+        if ctx.allowed_roots.is_empty() {
+            check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+        } else {
+            let root_refs: Vec<&std::path::Path> =
+                ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
+            check_path_within_any_root(&path, &root_refs)?;
+        }
 
         // Acquire file lock to serialize concurrent edits to the same file.
         let _lock = super::file_lock::lock_file(&path).await;

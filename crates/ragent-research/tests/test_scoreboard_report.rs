@@ -48,6 +48,9 @@ fn empty_doc(item: ResearchItem) -> ResearchDocument {
         readability_audit: None,
         decomposed_queries: Vec::new(),
         output_format: OutputFormat::Report,
+        brief: None,
+        comparison_table: None,
+        evaluation_scorecard: None,
     }
 }
 

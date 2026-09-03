@@ -84,6 +84,8 @@ pub struct DirLists {
     pub allowlist: Vec<String>,
     /// Glob patterns for file operations automatically denied.
     pub denylist: Vec<String>,
+    /// Additional directory paths treated as valid roots for path escape checking.
+    pub allowed_roots: Vec<String>,
 }
 
 /// Compiled glob patterns for efficient matching.
@@ -172,14 +174,17 @@ pub fn load_from_config() {
         Ok(cfg) => {
             let mut allowlist = Vec::new();
             let mut denylist = Vec::new();
+            let mut allowed_roots = Vec::new();
 
             // Use the new dedicated dirs field from config
             allowlist.extend(cfg.dirs.allowlist);
             denylist.extend(cfg.dirs.denylist);
+            allowed_roots.extend(cfg.dirs.allowed_roots);
 
             DirLists {
                 allowlist,
                 denylist,
+                allowed_roots,
             }
         }
         Err(e) => {
@@ -224,6 +229,15 @@ pub fn get_denylist() -> Vec<String> {
     global()
         .read()
         .map(|g| g.denylist.clone())
+        .unwrap_or_default()
+}
+
+/// Returns a snapshot of the current allowed_roots.
+#[must_use]
+pub fn get_allowed_roots() -> Vec<String> {
+    global()
+        .read()
+        .map(|g| g.allowed_roots.clone())
         .unwrap_or_default()
 }
 
@@ -352,6 +366,53 @@ pub fn add_denylist(pattern: &str, scope: Scope) -> Result<()> {
     })
 }
 
+/// Add `path` to the allowed_roots. Persists to the chosen config file.
+pub fn add_allowed_roots(path: &str, scope: Scope) -> Result<()> {
+    {
+        let mut g = global()
+            .write()
+            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
+        if !g.allowed_roots.contains(&path.to_string()) {
+            g.allowed_roots.push(path.to_string());
+        }
+    }
+    patch_config(scope, |root| {
+        // Ensure dirs object exists
+        if !root["dirs"].is_object() {
+            root["dirs"] =
+                serde_json::json!({ "allowlist": [], "denylist": [], "allowed_roots": [] });
+        }
+        if !root["dirs"]["allowed_roots"].is_array() {
+            root["dirs"]["allowed_roots"] = serde_json::json!([]);
+        }
+
+        if let Some(arr) = root["dirs"]["allowed_roots"].as_array_mut() {
+            let val = serde_json::Value::String(path.to_string());
+            if !arr.contains(&val) {
+                arr.push(val);
+            }
+        }
+    })
+}
+
+/// Remove `path` from the allowed_roots. Persists to the chosen config file.
+pub fn remove_allowed_roots(path: &str, scope: Scope) -> Result<bool> {
+    let removed = {
+        let mut g = global()
+            .write()
+            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
+        let before = g.allowed_roots.len();
+        g.allowed_roots.retain(|e| e != path);
+        g.allowed_roots.len() < before
+    };
+    patch_config(scope, |root| {
+        if let Some(arr) = root["dirs"]["allowed_roots"].as_array_mut() {
+            arr.retain(|v| v.as_str() != Some(path));
+        }
+    })?;
+    Ok(removed)
+}
+
 /// Remove `pattern` from the denylist. Persists to the chosen config file.
 pub fn remove_denylist(pattern: &str, scope: Scope) -> Result<bool> {
     let removed = {
@@ -392,13 +453,16 @@ where
 
     // Ensure the `dirs` key exists with allowlist/denylist arrays
     if !root["dirs"].is_object() {
-        root["dirs"] = serde_json::json!({ "allowlist": [], "denylist": [] });
+        root["dirs"] = serde_json::json!({ "allowlist": [], "denylist": [], "allowed_roots": [] });
     }
     if !root["dirs"]["allowlist"].is_array() {
         root["dirs"]["allowlist"] = serde_json::json!([]);
     }
     if !root["dirs"]["denylist"].is_array() {
         root["dirs"]["denylist"] = serde_json::json!([]);
+    }
+    if !root["dirs"]["allowed_roots"].is_array() {
+        root["dirs"]["allowed_roots"] = serde_json::json!([]);
     }
 
     mutate(&mut root);

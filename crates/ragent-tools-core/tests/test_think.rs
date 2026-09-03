@@ -23,6 +23,7 @@ async fn test_think_tool_returns_full_thought_in_metadata() {
         event_bus: Arc::new(EventBus::new(16)),
         read_timestamps: Arc::new(RwLock::new(HashMap::new())),
         canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+        allowed_roots: vec![PathBuf::from("/tmp")],
     };
     let thought = "This is the full reasoning content that should remain visible.";
 

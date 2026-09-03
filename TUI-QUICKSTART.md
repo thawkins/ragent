@@ -4,6 +4,35 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (1.0.77)
+
+- **Documentation refresh** — `CHANGELOG.md`, `README.md`, `SPEC.md`,
+  `STATS.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, and how-to docs updated to
+  reflect the latest release.
+- **Research evaluation scorecard** — configure `"research": { "evaluate": { "enabled": true } }`
+  in `ragent.json` to append a deterministic quality scorecard (quality,
+  relevance, groundedness, completeness, structure) to `/research create`
+  reports.
+
+## Highlights (1.0.76)
+
+- **`--web-time` web-phase deadline (60 s default)** — `/research create` now
+  caps the web-gathering phase at 60 seconds by default; when the deadline passes,
+  everything gathered so far is ingested and the run proceeds to
+  analysis/synthesis with the partial source set instead of discarding the phase.
+- **No-new-work-after-deadline guarantee** — once the deadline elapses, no new
+  search or fetch is started; the only overshoot is the completion of fetches
+  already in flight (each capped by `--fetch-timeout-secs`), so the phase always
+  returns (researchfix T-005, FR-008).
+- **Concepts section in `/research create`** — the pipeline now extracts a
+  cross-source concept list and embeds it in `RESEARCH.md` as a `## Concepts`
+  section directly above `## Findings` (report layout) or `### Concepts` above
+  `### Findings` (IMRaD layout).
+- **Web-phase deadline observability and deduplication** — TUI status bar shows a
+  live `web:M:SS` countdown during the web phase, and a single quantified notice is
+  added to the research progress message when the deadline is reached
+  (researchfix T-012).
+
 ## Highlights (1.0.74)
 
 - **Clippy `for_kv_map` fix** — Ollama provider iteration now uses `values()`

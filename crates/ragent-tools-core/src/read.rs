@@ -188,8 +188,15 @@ impl Tool for ReadTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
-        // C-002: reads must stay inside the working root.
-        super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+        // C-002: reads must stay inside the allowed roots.
+        // Use configured allowed_roots if available, otherwise fall back to working_dir.
+        if ctx.allowed_roots.is_empty() {
+            super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+        } else {
+            let root_refs: Vec<&std::path::Path> =
+                ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
+            super::check_path_within_any_root_cached(&path, &root_refs, &ctx.canonical_cache)?;
+        }
 
         if path.is_dir() {
             anyhow::bail!(

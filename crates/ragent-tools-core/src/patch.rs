@@ -89,7 +89,22 @@ impl Tool for PatchTool {
                 resolve_path(&ctx.working_dir, &fp.path)
             };
 
-            super::check_path_within_root_cached(&target, &ctx.working_dir, &ctx.canonical_cache)?;
+            // C-002: patches must stay inside the allowed roots.
+            if ctx.allowed_roots.is_empty() {
+                super::check_path_within_root_cached(
+                    &target,
+                    &ctx.working_dir,
+                    &ctx.canonical_cache,
+                )?;
+            } else {
+                let root_refs: Vec<&std::path::Path> =
+                    ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
+                super::check_path_within_any_root_cached(
+                    &target,
+                    &root_refs,
+                    &ctx.canonical_cache,
+                )?;
+            }
 
             let content = tokio::fs::read_to_string(&target)
                 .await

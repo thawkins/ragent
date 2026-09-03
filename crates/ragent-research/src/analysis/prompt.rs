@@ -9,7 +9,9 @@ use super::parser::truncate_body;
 use crate::run_config::OutputFormat;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SynthesisPromptConfig {
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
+pub struct SynthesisPromptConfig {
     /// Optional audience/domain framing appended to the task preamble
     /// (FR-009 / Finding 12). `None` preserves the legacy preamble.
     #[allow(dead_code)] // reserved for T-008 persona/audience wiring; not yet read
@@ -28,8 +30,12 @@ pub(crate) struct SynthesisPromptConfig {
     /// Optional template body merged with the structured synthesis
     /// requirements (FR-007 / T-006).
     pub template_body: Option<String>,
-    /// Output artifact requested via `--format`. Governs the volume and
-    /// emphasis instructions in `render_output_template`.
+    /// Optional research brief used as the mission statement in the preamble
+    /// (FR-004 / T-004). When `Some`, the prompt includes the brief and
+    /// instructs the model to follow it instead of the raw topic.
+    pub brief: Option<String>,
+    /// Optional output format used to specialize the synthesis template
+    /// (FR-012 / specs/imradreport).
     pub output_format: Option<OutputFormat>,
 }
 
@@ -50,7 +56,9 @@ pub(crate) struct SynthesisPromptConfig {
 /// in to additional prompt sections via the config; they never alter the
 /// default output.
 #[derive(Debug, Clone)]
-pub(crate) struct SynthesisPromptBuilder<'a> {
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
+pub struct SynthesisPromptBuilder<'a> {
     topic: &'a str,
     sources: &'a [SourceBody],
     config: SynthesisPromptConfig,
@@ -58,7 +66,9 @@ pub(crate) struct SynthesisPromptBuilder<'a> {
 
 impl<'a> SynthesisPromptBuilder<'a> {
     /// Begin building a synthesis prompt for `topic`.
-    pub(crate) fn new(topic: &'a str) -> Self {
+    // reason: only consumed inside this crate - `pub` here never escapes the crate.
+    #[allow(unreachable_pub)]
+    pub fn new(topic: &'a str) -> Self {
         Self {
             topic,
             sources: &[],
@@ -67,32 +77,52 @@ impl<'a> SynthesisPromptBuilder<'a> {
     }
 
     /// Attach the captured source corpus. Required before [`build`].
-    pub(crate) const fn sources(mut self, sources: &'a [SourceBody]) -> Self {
+    // reason: only consumed inside this crate - `pub` here never escapes the crate.
+    #[allow(unreachable_pub)]
+    pub const fn sources(mut self, sources: &'a [SourceBody]) -> Self {
         self.sources = sources;
         self
     }
 
     /// Attach the full prompt configuration (T-003..T-008 knobs).
-    #[allow(dead_code)] // reserved for T-003..T-008 prompt configuration wiring
-    pub(crate) fn config(mut self, config: SynthesisPromptConfig) -> Self {
+    #[allow(dead_code)]
+    // reserved for T-003..T-008 prompt configuration wiring
+    // reason: only consumed inside this crate - `pub` here never escapes the crate.
+    #[allow(unreachable_pub)]
+    pub fn config(mut self, config: SynthesisPromptConfig) -> Self {
         self.config = config;
         self
     }
 
     /// Set the output artifact for this prompt (FR-012).
-    pub(crate) const fn output_format(mut self, fmt: OutputFormat) -> Self {
+    // reason: only consumed inside this crate - `pub` here never escapes the crate.
+    #[allow(unreachable_pub)]
+    pub const fn output_format(mut self, fmt: OutputFormat) -> Self {
         self.config.output_format = Some(fmt);
         self
     }
 
+    /// Set the research brief that guides the synthesis (FR-004 / T-004).
+    // reason: only consumed inside this crate - `pub` here never escapes the crate.
+    #[allow(unreachable_pub)]
+    pub fn brief(mut self, brief: Option<&'a str>) -> Self {
+        self.config.brief = brief.map(String::from);
+        self
+    }
+
     /// Borrow the active config immutably.
-    #[allow(dead_code)] // reserved for T-003..T-008 prompt configuration wiring
-    pub(crate) const fn cfg(&self) -> &SynthesisPromptConfig {
+    #[allow(dead_code)]
+    // reserved for T-003..T-008 prompt configuration wiring
+    // reason: only consumed inside this crate - `pub` here never escapes the crate.
+    #[allow(unreachable_pub)]
+    pub const fn cfg(&self) -> &SynthesisPromptConfig {
         &self.config
     }
 
     /// Produce the final prompt string.
-    pub(crate) fn build(&self) -> String {
+    // reason: only consumed inside this crate - `pub` here never escapes the crate.
+    #[allow(unreachable_pub)]
+    pub fn build(&self) -> String {
         let mut prompt = String::new();
         prompt.push_str(&render_preamble(self.topic, &self.config));
         if self.sources.is_empty() {
@@ -116,11 +146,22 @@ impl<'a> SynthesisPromptBuilder<'a> {
 }
 
 /// Render the task preamble. With the default config this is byte-identical to
-/// the legacy opening of `build_synthesis_prompt`.
-pub(crate) fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> String {
-    format!(
+/// the legacy opening of `build_synthesis_prompt`. When a research brief is
+/// supplied, the preamble includes it as the guiding mission statement
+/// (FR-004 / T-004).
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
+pub fn render_preamble(topic: &str, config: &SynthesisPromptConfig) -> String {
+    let mut out = String::new();
+    if let Some(brief) = config.brief.as_deref().filter(|b| !b.is_empty()) {
+        out.push_str("Research Brief (use this as your mission statement):\n\n");
+        out.push_str(brief);
+        out.push_str("\n\n");
+    }
+    out.push_str(&format!(
         "You are writing the analysis section of a research report for the topic:\n\n{topic}\n\n"
-    )
+    ));
+    out
 }
 
 /// Render the mandatory top-level section instructions plus the
@@ -136,7 +177,9 @@ pub(crate) fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> S
 /// the model is still asked for the same raw sections so the parser remains
 /// unchanged, and an extra paragraph encourages results-oriented phrasing so
 /// the final `IMRaD` layout reads naturally in the `## Results` section.
-pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
+pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     match config.output_format {
         Some(OutputFormat::ExecutiveSummary) => {
@@ -326,7 +369,9 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
 /// enables the **Sources Cited / Date Spread** paragraph, the caller passes
 /// `include_published = true` so each web source header gains a `Published`
 /// line the model can quote in its date-spread analysis.
-pub(crate) fn render_sources_block(sources: &[SourceBody], include_published: bool) -> String {
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
+pub fn render_sources_block(sources: &[SourceBody], include_published: bool) -> String {
     let mut out = String::new();
     out.push_str("---\n\n### Sources\n\n");
     for src in sources {
@@ -363,7 +408,9 @@ pub(crate) fn render_sources_block(sources: &[SourceBody], include_published: bo
 
 /// Render the closing instruction line. With the default config this is
 /// byte-identical to the legacy final lines of `build_synthesis_prompt`.
-pub(crate) fn render_closing(_config: &SynthesisPromptConfig) -> String {
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
+pub fn render_closing(_config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     out.push_str(
         "\nNow produce only the six sections above: Executive Summary, Top 10 Implications, Findings, In-Project Cross-References, and Open Questions. Do not include a title or any other preamble. ",
@@ -386,8 +433,11 @@ pub(crate) fn render_closing(_config: &SynthesisPromptConfig) -> String {
 /// point. It delegates to [`SynthesisPromptBuilder`] with the default config,
 /// so its output is byte-identical to the pre-refactor implementation. Callers
 /// that need the extended knobs (T-003..T-008) should use the builder directly.
-#[allow(dead_code)] // preserved for backward-compat byte-identical tests
-pub(crate) fn build_synthesis_prompt(topic: &str, sources: &[SourceBody]) -> String {
+#[allow(dead_code)]
+// preserved for backward-compat byte-identical tests
+// reason: only consumed inside this crate - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
+pub fn build_synthesis_prompt(topic: &str, sources: &[SourceBody]) -> String {
     SynthesisPromptBuilder::new(topic)
         .sources(sources)
         .output_format(OutputFormat::Report)

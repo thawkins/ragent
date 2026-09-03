@@ -663,7 +663,7 @@ mod tests {
             parsed
                 .get(k)
                 .and_then(|v| v.as_str())
-                .and_then(|s| s.replace(",", "").parse::<u64>().ok())
+                .and_then(|s| s.replace(';', "").parse::<u64>().ok())
                 .unwrap_or(0)
         };
 

@@ -174,6 +174,7 @@ fn make_ctx(
         spec_manager: None,
         active_spec_id: None,
         config: None,
+        allowed_roots: Vec::new(),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
         canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),

@@ -126,6 +126,9 @@ fn research_config_round_trips_through_json() {
         open_access_recovery: true,
         contact_email: Some("oa@example.com".to_string()),
         oa_min_full_text_chars: 750,
+        models: ragent_config::ResearchModelsConfig::default(),
+        supervisor: ragent_config::ResearchSupervisorConfig::default(),
+        evaluate: ragent_config::ResearchEvaluateConfig::default(),
     };
 
     let json = serde_json::to_string(&original).expect("serialize");

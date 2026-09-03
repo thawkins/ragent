@@ -15,7 +15,7 @@ use ragent_tools_extended::storage::{EmbeddingMatch, MemoryRow, StorageBackend, 
 /// All fields are wrapped in `Arc<Mutex<…>>` so the struct can be cheaply
 /// cloned (via `Arc`) while keeping interior mutability across async calls.
 #[derive(Clone)]
-pub(crate) struct MockStorage {
+pub struct MockStorage {
     todos: Arc<Mutex<HashMap<String, TaskRow>>>,
 }
 

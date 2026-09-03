@@ -19,6 +19,7 @@ fn sample_source(url: &str, title: &str, body: &str) -> NewVaultSource {
         media_type: "page".to_string(),
         content_type: None,
         body_text: body.to_string(),
+        summary_text: None,
     }
 }
 

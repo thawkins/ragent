@@ -66,8 +66,11 @@ fn doc_with_findings() -> ResearchDocument {
         polish: None,
         readability_audit: None,
         template_body: None,
+        brief: None,
         decomposed_queries: Vec::new(),
         output_format: OutputFormat::Report,
+        comparison_table: None,
+        evaluation_scorecard: None,
     }
 }
 

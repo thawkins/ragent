@@ -109,8 +109,22 @@ impl Tool for GrepTool {
             |p| resolve_path(&ctx.working_dir, p),
         );
 
-        // C-002: grep must stay inside the working root even when `path` is provided.
-        super::check_path_within_root_cached(&search_path, &ctx.working_dir, &ctx.canonical_cache)?;
+        // C-002: grep must stay inside the allowed roots.
+        if ctx.allowed_roots.is_empty() {
+            super::check_path_within_root_cached(
+                &search_path,
+                &ctx.working_dir,
+                &ctx.canonical_cache,
+            )?;
+        } else {
+            let root_refs: Vec<&std::path::Path> =
+                ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
+            super::check_path_within_any_root_cached(
+                &search_path,
+                &root_refs,
+                &ctx.canonical_cache,
+            )?;
+        }
 
         let include_glob = input["include"].as_str().map(str::to_owned);
         let exclude_glob = input["exclude"].as_str().map(str::to_owned);

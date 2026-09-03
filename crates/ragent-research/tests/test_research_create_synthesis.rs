@@ -36,6 +36,12 @@ use tempfile::TempDir;
 /// response cannot be parsed into the required structure (FR-005).
 struct MalformedMockEngine;
 
+impl Clone for MalformedMockEngine {
+    fn clone(&self) -> Self {
+        Self
+    }
+}
+
 #[async_trait]
 impl AnalysisEngine for MalformedMockEngine {
     async fn analyze(
@@ -44,6 +50,10 @@ impl AnalysisEngine for MalformedMockEngine {
         _sources: &[SourceBody],
     ) -> anyhow::Result<AnalysisResult> {
         Ok(AnalysisResult::default())
+    }
+
+    fn with_brief(&self, _brief: Option<String>) -> Arc<dyn AnalysisEngine> {
+        Arc::new(self.clone())
     }
 
     async fn analyze_with_outcome(
@@ -81,6 +91,12 @@ impl AnalysisEngine for MalformedMockEngine {
 /// passes the malformed check and the citation/date validation.
 struct WellFormedMockEngine;
 
+impl Clone for WellFormedMockEngine {
+    fn clone(&self) -> Self {
+        Self
+    }
+}
+
 #[async_trait]
 impl AnalysisEngine for WellFormedMockEngine {
     async fn analyze(
@@ -89,6 +105,10 @@ impl AnalysisEngine for WellFormedMockEngine {
         _sources: &[SourceBody],
     ) -> anyhow::Result<AnalysisResult> {
         Ok(AnalysisResult::default())
+    }
+
+    fn with_brief(&self, _brief: Option<String>) -> Arc<dyn AnalysisEngine> {
+        Arc::new(self.clone())
     }
 
     async fn analyze_with_outcome(
@@ -173,6 +193,7 @@ fn cfg_with_topic(topic: &str) -> SessionConfig {
             disable_specs: true,
             ..LocalConfig::default()
         },
+        clarify: false,
         ..SessionConfig::default()
     }
 }
@@ -372,6 +393,7 @@ async fn executive_summary_format_writes_shorter_summary_instruction() {
             disable_specs: true,
             ..LocalConfig::default()
         },
+        clarify: false,
         ..SessionConfig::default()
     };
     let _outcome = session
@@ -470,6 +492,7 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
             disable_specs: true,
             ..LocalConfig::default()
         },
+        clarify: false,
         ..SessionConfig::default()
     };
 

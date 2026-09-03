@@ -61,6 +61,7 @@ fn make_ctx(
             std::collections::HashMap::new(),
         )),
         canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -234,6 +235,7 @@ async fn test_team_idle_publishes_teammate_idle_event() {
             std::collections::HashMap::new(),
         )),
         canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+        allowed_roots: Vec::new(),
     };
 
     let tool = ragent_team::tools::team_idle::TeamIdleTool;
