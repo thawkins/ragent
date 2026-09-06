@@ -97,8 +97,9 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
     language filtering via `/codeindex lang <language>`; **semantic code graph** with
     `codeindex_godnodes` (top-N most-connected symbols), `codeindex_path` (shortest
     path between symbols), `codeindex_explain` (node metadata and edges), and
-    `codeindex_communities` (community detection); graph built via
-    `/codeindex graph build`
+    `codeindex_communities` (community detection); graph built in the background
+    via `/codeindex graph build` (phased lock discipline keeps search available
+    during derivation; status-bar `idx`/`graph` busy indicators show progress)
 - **Memory system** — three-tier system with file blocks, structured SQLite store,
   and optional embedding-based semantic search; automatic extraction, decay,
   compression, and knowledge graph support
@@ -397,17 +398,31 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.79** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.80** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- **Code index status improvements** — the `codeindex_status` tool never
+  blocks on the store lock: when a background reindex or graph build holds
+  the mutex it returns an immediate busy report built from lock-free progress
+  atomics; `IndexStats` now carries `graph_total_edges`/`graph_nodes`/
+  `graph_communities`; and `codeindex_path`/`codeindex_explain` resolve
+  symbols with exact-match + definition-kind ranking so impl/trait names no
+  longer shadow the real definitions
+- **Config save/load cache coherence (M-025)** — every `Config::save()`
+  invalidates the on-disk load cache (`Config::invalidate_load_cache()`), and
+  the cache key is snapshotted after the auto-creating first load, so TUI
+  config writes (`/codeindex off`, `/tools`, ...) are immediately visible to
+  subsequent loads in the same process — this fixes the v1.0.80 CI failure
+  (run 34023696563)
+
 - **`plot_*` tool family** — six scientific/terminal plotting tools
   (`plot_line`, `plot_scatter`, `plot_bar`, `plot_histogram`, `plot_pie`,
   `plot_heatmap`) render ASCII-art graphs — with real ANSI colours — inline in
   the TUI message window via `ratatui-plt`; GPL-3.0 dependency explicitly
-  accepted and allow-listed in `deny.toml` (uncommitted, post v1.0.79)
+  accepted and allow-listed in `deny.toml` (v1.0.80)
 
 - **Research web-search quota controls** — `--max-search-calls N` places a hard,
   run-scoped cap on total web-search calls per research run, shared via `Arc` across
@@ -477,6 +492,11 @@ Recent highlights:
   (`codeindex_godnodes`, `codeindex_path`, `codeindex_explain`,
   `codeindex_communities`) with community detection, shortest-path traversal,
   and god-node identification; `/codeindex graph build` sub-command
+- **Threaded codeindex graph build + status indicators** — graph builds run on
+  a dedicated OS thread via `spawn_graph_build` with a phased lock discipline
+  (brief snapshot, lock-free derivation, brief persist), so FTS search stays
+  available during derivation; the TUI status bar shows `idx`/`graph` busy
+  tags while a reindex or graph build runs (uncommitted, v1.0.80 cycle)
 - **Bang commands** — Prefix any prompt with `!` to run a shell command and
   have the model review its output (v1.0.42)
 - **Compaction fix** — Fixed compaction getting stuck when all messages fit

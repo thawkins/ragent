@@ -142,11 +142,15 @@ suggesting `grep` or `glob` as alternatives.
 ### 4.1 codeindex_status
 
 **Description:** Show the current status and statistics of the codebase
-index — files indexed, symbols extracted, languages, index size, and
-timestamps.
+index — files indexed, symbols extracted, languages, index size,
+graph state (built / building / not built), and timestamps. The tool
+**never blocks**: when a background reindex or graph build holds the store
+lock it returns an immediate busy report built from the lock-free progress
+atomics instead of stalling or retrying.
 
-**Use cases:** Check whether the index is ready before running other
-codeindex tools; diagnose stale-index issues.
+**Use cases:** Check whether the index and graph are ready before running
+other codeindex tools; diagnose stale-index issues; observe live
+`done/total` progress while a reindex or graph build runs.
 
 **Schema:**
 ```json
@@ -160,7 +164,7 @@ No parameters required.
 codeindex_status
 ```
 
-Output:
+Output (idle):
 ```text
 ## Code Index Status
 
@@ -168,10 +172,26 @@ Files indexed:  342
 Total symbols:  5218
 Total size:     128.5 KB
 Languages:      rust (4210), python (1008)
+FTS state:      built
+Graph state:    built (3121 edges, 2870 nodes, 12 communities)
 Last full:      2026-01-15T09:30:00Z
 Last incremental: 2026-01-15T10:12:33Z
 Index size:     45.2 KB
 ```
+
+Output (busy — store lock held by a background operation):
+```text
+## Code Index Status
+
+Index:          busy (lock held by a background operation)
+Reindexing:     180/342 files
+Graph building: 90/342 files
+```
+The busy report is also returned in `metadata` as
+`{"busy": true, "error": "codeindex_busy", "reindexing": true,
+"reindex_done": 180, "reindex_total": 342, "graph_building": true,
+"graph_done": 90, "graph_total": 342}` so agents can poll build state
+programmatically.
 
 ---
 
@@ -378,6 +398,12 @@ confidence tags.
 **Use cases:** Trace how two unrelated symbols are connected; understand
 the dependency chain between modules; find the coupling distance.
 
+Name resolution prefers exact matches over the underlying substring query
+and ranks definition kinds (struct/function/trait/class/enum/interface)
+above impl/module containers, so a trait like `CachedSessionProcessor` no
+longer shadows the struct `SessionProcessor` when you ask for a path from
+`SessionProcessor`.
+
 **Schema:**
 ```json
 {
@@ -496,9 +522,21 @@ Build the graph from the TUI:
 ```
 
 This derives edges from the indexed symbols and stores them in the SQLite
-database. The graph tools (`codeindex_explain`, `codeindex_path`,
+database. The build runs on a dedicated OS thread (`codeindex-graph-build`),
+so the TUI stays responsive: the command returns immediately with a `[wait]`
+status, the status bar animates a `graph` busy tag, and the completion
+message arrives when the build finishes. The build uses a phased lock
+discipline — a brief read-only snapshot of the derivation inputs, a
+lock-free in-memory derivation, and a brief single-transaction persist — so
+search and the other store readers remain available while the graph builds.
+A double-build guard refuses overlapping builds. `/codeindex reindex` also
+runs in the background the same way (with an `idx` status-bar tag).
+
+The graph tools (`codeindex_explain`, `codeindex_path`,
 `codeindex_communities`, `codeindex_godnodes`) all require the graph to
-be built first.
+be built first. While a build is in flight, `/codeindex show` reports
+`**Graph:** building...` with per-file `done/total` progress, and
+`codeindex_status` reports `graph_state: "building"`.
 
 Export the graph for external analysis:
 
@@ -653,9 +691,12 @@ The semantic graph has not been built. Build it:
 
 ### "codeindex_busy" response
 
-The index is temporarily locked by a background operation. The tool
-returns immediately with a busy message instead of stalling. Retry after
-a moment or check status:
+The index is temporarily locked by a background operation (a reindex or a
+graph build). The tool returns immediately with a busy message instead of
+stalling; the busy report includes live `done/total` progress for the
+reindex and graph phases. The TUI status bar also animates `idx` / `graph`
+busy tags for the same conditions. Wait for the build to finish or check
+progress:
 
 ```text
 /codeindex show

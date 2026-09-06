@@ -13,15 +13,40 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 - **`/clip`** — copies the rendered message-window transcript to the system clipboard in one step.
 - **`/research list` renders a human-readable table again** — the fixed-width `NAME/TITLE/STATUS/CREATED/MODIFIED` table is the default output, with JSON behind the `--json` flag.
 
-## Highlights (uncommitted, post 1.0.79)
+## Highlights (uncommitted, post 1.0.80)
+
+- **Config saves are now immediately visible** — `/codeindex off`, `/tools`,
+  and every other config-writing slash command invalidate the on-disk config
+  load cache, so a save followed by a load in the same session always sees
+  the saved state (fixes the v1.0.80 CI failure in
+  `test_tools_visibility_command`).
+- **Code index busy indicators never lie** — the `idx` and `graph` status-bar
+  tags track their own phases: a graph build holding the store lock no longer
+  lights the `idx` tag, and the tags no longer vanish simultaneously at build
+  completion.
+- **`codeindex_status` never blocks** — when a background reindex or graph
+  build holds the store lock, the tool answers instantly with a busy report
+  (metadata `busy: true`, `error: "codeindex_busy"`) including live
+  `done/total` progress for both reindex and graph phases.
+
+## Highlights (1.0.80)
 
 - **`plot_*` tools render inline graphs** — `plot_line`, `plot_scatter`,
   `plot_bar`, `plot_histogram`, `plot_pie`, and `plot_heatmap` draw ASCII-art
   charts directly in the message window, with real ANSI colours for palette
   series, pie slices, and heatmaps (rendered off-screen via `ratatui-plt`).
-  The step log also shows friendly one-liners for the code-index graph tools
-  (`codeindex_godnodes`, `codeindex_path`, `codeindex_explain`,
-  `codeindex_communities`) and `model_info`.
+- **Threaded codeindex graph build** — `/codeindex graph build`,
+  `/codeindex graph lang <l>`, and `/codeindex reindex` run in the background;
+  the status bar animates `idx`/`graph` busy tags while the work runs and the
+  completion message arrives when done. The step log also shows friendly
+  one-liners for the code-index graph tools (`codeindex_godnodes`,
+  `codeindex_path`, `codeindex_explain`, `codeindex_communities`) and
+  `model_info`.
+- **Graph-build visibility** — `/codeindex show` reports
+  `**Graph:** building...` with per-file progress; the `codeindex_status` tool
+  reports `graph_state`, `graph_building`/`graph_done`/`graph_total`, and the
+  `IndexStats` graph counters (`graph_total_edges`/`graph_nodes`/
+  `graph_communities`).
 
 ## Highlights (1.0.77)
 

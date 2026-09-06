@@ -9,6 +9,7 @@ use crate::store::IndexStore;
 use crate::types::{Confidence, EdgeKind, GraphEdge, Symbol, SymbolKind};
 use anyhow::Result;
 use std::collections::HashMap;
+use std::sync::atomic::Ordering as AtomicOrdering;
 use tracing::debug;
 
 /// Extract a trait name from an `impl` signature such as
@@ -308,145 +309,124 @@ pub fn derive_edges_for_file(store: &IndexStore, file_id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Rebuild the entire semantic edge graph for all indexed files.
-///
-/// Clears any existing edges, then derives edges for every indexed file
-/// and returns a [`BuildResult`] summary.  This is the full-graph path
-/// used by `full_reindex` (FR-007) and `SymbolGraph::build`.
-///
-/// Performance: loads all symbols and all refs **once**, builds the
-/// name-resolution maps **once**, derives all edges in a single in-memory
-/// pass, and persists them in a single transaction.  This is O(N) in the
-/// number of files/symbols/refs — the previous implementation was O(N²)
-/// because it reloaded all symbols and all refs for every file.
-pub fn derive_and_store(store: &IndexStore) -> Result<BuildResult> {
-    let start = std::time::Instant::now();
+/// Progress counter shared by `full_reindex` with [`derive_and_store`] so the
+/// per-file loop can report incremental progress to lock-free atomics polled
+/// by the UI.
+type ProgressCounter = std::sync::atomic::AtomicU32;
 
-    // Load all symbols ONCE and build name-resolution maps ONCE.
+/// A consistent read-snapshot of everything full-graph edge derivation needs.
+///
+/// Loading the snapshot takes four SQL scans under one brief store lock; the
+/// CPU-heavy derivation ([`derive_edges_from_inputs`]) then runs with **no**
+/// store lock held, so FTS search and other store readers stay available for
+/// the whole derivation.  Only the final [`persist_edges`] call re-acquires
+/// the store lock, and it holds it for a single write transaction touching
+/// the `graph_edges` table only.
+pub struct GraphInputs {
+    /// Every indexed symbol (drives name resolution and per-file grouping).
+    pub all_symbols: Vec<Symbol>,
+    /// Every symbol reference (drives calls/references edges).
+    pub all_refs: Vec<crate::types::SymbolRef>,
+    /// Imports grouped by `file_id` (drives imports edges).
+    pub imports_by_file: HashMap<i64, Vec<crate::types::ImportEntry>>,
+    /// All indexed files in path order (drives iteration order + language).
+    pub files: Vec<crate::types::FileEntry>,
+    /// `path -> file_id` for resolving each file's symbol/import groups.
+    pub file_ids: HashMap<String, i64>,
+}
+
+/// Snapshot the store inputs needed for full-graph edge derivation.
+///
+/// Runs four read-only SQL scans (symbols, refs, imports, files) under the
+/// caller's store guard; keep that guard scope short.  Pair with
+/// [`derive_edges_from_inputs`] + [`persist_edges`] so the derivation runs
+/// without the lock (FR-026 phased graph build).
+pub fn load_graph_inputs(store: &IndexStore) -> Result<GraphInputs> {
     let all_symbols = store.query_symbols(&crate::types::SymbolFilter::default())?;
-    if all_symbols.is_empty() {
-        store.clear_edges()?;
-        return Ok(BuildResult {
-            edges_total: 0,
-            edges_extracted: 0,
-            edges_inferred: 0,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-        });
-    }
-    let nr = NameResolution::from_symbols(&all_symbols);
-
-    // Load all refs ONCE.
     let all_refs = store.query_all_refs()?;
-
-    // Collect all edges in memory, then persist in a single transaction.
-    let mut all_edges: Vec<GraphEdge> = Vec::new();
-
-    // 1. Ref-derived edges (calls, references) for all files at once.
-    all_edges.extend(derive_ref_edges(&all_refs, &nr, None));
-
-    // 2. Import + impl edges per file (need per-file symbol/import lists).
     let files = store.list_files()?;
-    for file in &files {
-        if file.language.is_none() {
-            continue;
-        }
-        let file_id = match store.get_file_id(&file.path)? {
-            Some(id) => id,
-            None => continue,
-        };
+    let file_ids: HashMap<String, i64> = store
+        .list_files_with_ids()?
+        .into_iter()
+        .map(|(id, path)| (path, id))
+        .collect();
 
-        let file_symbols = store.get_file_symbols(file_id)?;
-        if file_symbols.is_empty() {
-            continue;
-        }
-
-        let imports = store.get_file_imports(file_id)?;
-        all_edges.extend(derive_import_edges(&file_symbols, &imports, &nr));
-        all_edges.extend(derive_impl_edges(&file_symbols, &nr));
+    let mut imports_by_file: HashMap<i64, Vec<crate::types::ImportEntry>> = HashMap::new();
+    for (file_id, imp) in store.list_all_imports()? {
+        imports_by_file.entry(file_id).or_default().push(imp);
     }
 
-    // Persist: clear + bulk-insert in one transaction. The clear stays
-    // inside the transaction so a crash between clear and commit cannot leave
-    // the edge table permanently empty (which would trip the TUI empty-graph
-    // guard until the next rebuild).
-    store.begin_transaction()?;
-    let result = (|| -> anyhow::Result<()> {
-        store.clear_edges()?;
-        store.upsert_edges_batch(&all_edges)
-    })();
-    if result.is_ok() {
-        store.commit_transaction()?;
-    } else {
-        let _ = store.conn.execute_batch("ROLLBACK");
-    }
-    result?;
-
-    let edges_extracted = store.edge_count_by_confidence_typed(Confidence::Extracted)? as usize;
-    let edges_inferred = store.edge_count_by_confidence_typed(Confidence::Inferred)? as usize;
-
-    debug!(
-        "derive_and_store: {} edges ({} EXTRACTED, {} INFERRED) in {}ms",
-        edges_extracted + edges_inferred,
-        edges_extracted,
-        edges_inferred,
-        start.elapsed().as_millis()
-    );
-
-    Ok(BuildResult {
-        edges_total: edges_extracted + edges_inferred,
-        edges_extracted,
-        edges_inferred,
-        elapsed_ms: start.elapsed().as_millis() as u64,
+    Ok(GraphInputs {
+        all_symbols,
+        all_refs,
+        imports_by_file,
+        files,
+        file_ids,
     })
 }
 
-/// Rebuild the semantic edge graph restricted to files of a single language.
+/// Derive the full edge set from a [`GraphInputs`] snapshot — pure in-memory.
 ///
-/// Clears existing edges, then derives edges only for files whose detected
-/// language matches `language`.  Used by `SymbolGraph::build_for_language`.
-///
-/// Like [`derive_and_store`], this loads all symbols and all refs once and
-/// persists in a single transaction.
-pub fn derive_and_store_for_language(store: &IndexStore, language: &str) -> Result<BuildResult> {
-    let start = std::time::Instant::now();
+/// Performs no store access at all, so callers may run it without any lock
+/// held.  Mirrors the derivation loop of the former long-held-lock
+/// `derive_and_store`: ref edges for all files, then import + impl edges per
+/// file (files without a detected language are skipped, matching the
+/// original behaviour).
+pub fn derive_edges_from_inputs(
+    inputs: &GraphInputs,
+    graph_done: Option<&ProgressCounter>,
+) -> Vec<GraphEdge> {
+    let nr = NameResolution::from_symbols(&inputs.all_symbols);
+    let mut all_edges = derive_ref_edges(&inputs.all_refs, &nr, None);
 
-    // Load all symbols ONCE for name resolution.
-    let all_symbols = store.query_symbols(&crate::types::SymbolFilter::default())?;
-    if all_symbols.is_empty() {
-        store.clear_edges()?;
-        return Ok(BuildResult {
-            edges_total: 0,
-            edges_extracted: 0,
-            edges_inferred: 0,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-        });
-    }
-    let nr = NameResolution::from_symbols(&all_symbols);
-
-    // Load all refs ONCE.
-    let all_refs = store.query_all_refs()?;
-
-    // Collect file IDs matching the language filter.
-    let files = store.list_files()?;
-    let target_file_ids: Vec<i64> = {
-        let mut ids = Vec::new();
-        for file in &files {
-            if file.language.as_deref() != Some(language) {
-                continue;
-            }
-            if let Some(id) = store.get_file_id(&file.path)? {
-                ids.push(id);
-            }
+    for file in &inputs.files {
+        if file.language.is_none() {
+            continue;
         }
-        ids
-    };
+        let Some(&file_id) = inputs.file_ids.get(&file.path) else {
+            continue;
+        };
+        let Some(file_symbols) = nr.symbols_by_file.get(&file_id) else {
+            continue;
+        };
+        if file_symbols.is_empty() {
+            continue;
+        }
+        if let Some(imports) = inputs.imports_by_file.get(&file_id) {
+            all_edges.extend(derive_import_edges(file_symbols, imports, &nr));
+        }
+        all_edges.extend(derive_impl_edges(file_symbols, &nr));
+        if let Some(done) = graph_done {
+            done.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+    }
 
-    let target_set: std::collections::HashSet<i64> = target_file_ids.iter().copied().collect();
+    all_edges
+}
+
+/// Derive the full edge set restricted to a single language — pure in-memory.
+///
+/// Like [`derive_edges_from_inputs`] but only emits edges whose source and
+/// target symbols live in files of `language` (mirrors the former
+/// `derive_and_store_for_language` filter).
+pub fn derive_edges_from_inputs_for_language(
+    inputs: &GraphInputs,
+    language: &str,
+    graph_done: Option<&ProgressCounter>,
+) -> Vec<GraphEdge> {
+    let target_set: std::collections::HashSet<i64> = inputs
+        .files
+        .iter()
+        .filter(|f| f.language.as_deref() == Some(language))
+        .filter_map(|f| inputs.file_ids.get(&f.path).copied())
+        .collect();
+
+    let nr = NameResolution::from_symbols(&inputs.all_symbols);
 
     let mut all_edges: Vec<GraphEdge> = Vec::new();
 
     // 1. Ref-derived edges, filtered to target-language files.
-    for r in &all_refs {
+    for r in &inputs.all_refs {
         if !target_set.contains(&r.file_id) {
             continue;
         }
@@ -487,22 +467,49 @@ pub fn derive_and_store_for_language(store: &IndexStore, language: &str) -> Resu
     }
 
     // 2. Import + impl edges for target-language files.
-    for &file_id in &target_file_ids {
-        let file_symbols = store.get_file_symbols(file_id)?;
+    for file in &inputs.files {
+        if file.language.as_deref() != Some(language) {
+            continue;
+        }
+        let Some(&file_id) = inputs.file_ids.get(&file.path) else {
+            continue;
+        };
+        let Some(file_symbols) = nr.symbols_by_file.get(&file_id) else {
+            continue;
+        };
         if file_symbols.is_empty() {
             continue;
         }
-        let imports = store.get_file_imports(file_id)?;
-        all_edges.extend(derive_import_edges(&file_symbols, &imports, &nr));
-        all_edges.extend(derive_impl_edges(&file_symbols, &nr));
+        if let Some(imports) = inputs.imports_by_file.get(&file_id) {
+            all_edges.extend(derive_import_edges(file_symbols, imports, &nr));
+        }
+        all_edges.extend(derive_impl_edges(file_symbols, &nr));
     }
 
-    // Persist: clear + bulk-insert in one transaction (same crash-safety
-    // reasoning as `derive_and_store_for_language` above).
+    if let Some(done) = graph_done {
+        done.store(target_set.len() as u32, AtomicOrdering::Relaxed);
+    }
+
+    all_edges
+}
+
+/// Persist a derived edge set: clear + bulk-insert in one transaction, then
+/// return the confidence-split [`BuildResult`] summary.
+///
+/// Touches only the `graph_edges` table; keep the caller's store-guard scope
+/// limited to this call so FTS/store readers are blocked for a single write
+/// transaction, not the derivation.
+pub fn persist_edges(store: &IndexStore, edges: &[GraphEdge]) -> Result<BuildResult> {
+    let start = std::time::Instant::now();
+
+    // Persist: clear + bulk-insert in one transaction. The clear stays
+    // inside the transaction so a crash between clear and commit cannot leave
+    // the edge table permanently empty (which would trip the TUI empty-graph
+    // guard until the next rebuild).
     store.begin_transaction()?;
     let result = (|| -> anyhow::Result<()> {
         store.clear_edges()?;
-        store.upsert_edges_batch(&all_edges)
+        store.upsert_edges_batch(edges)
     })();
     if result.is_ok() {
         store.commit_transaction()?;
@@ -514,10 +521,76 @@ pub fn derive_and_store_for_language(store: &IndexStore, language: &str) -> Resu
     let edges_extracted = store.edge_count_by_confidence_typed(Confidence::Extracted)? as usize;
     let edges_inferred = store.edge_count_by_confidence_typed(Confidence::Inferred)? as usize;
 
+    debug!(
+        "persist_edges: {} edges ({} EXTRACTED, {} INFERRED) in {}ms",
+        edges_extracted + edges_inferred,
+        edges_extracted,
+        edges_inferred,
+        start.elapsed().as_millis()
+    );
+
     Ok(BuildResult {
         edges_total: edges_extracted + edges_inferred,
         edges_extracted,
         edges_inferred,
         elapsed_ms: start.elapsed().as_millis() as u64,
     })
+}
+
+/// Rebuild the entire semantic edge graph for all indexed files.
+///
+/// Loads a [`GraphInputs`] snapshot, derives all edges in memory, and
+/// persists them in a single transaction.  This is the full-graph path
+/// used by `SymbolGraph::build` (FR-007); `CodeIndex` uses the split
+/// load/derive/persist phases directly so the store lock is released during
+/// the CPU-heavy derivation (FR-026).
+///
+/// `graph_done` (when supplied) is incremented once per file processed in the
+/// import/impl loop so callers can display live progress.
+pub fn derive_and_store(
+    store: &IndexStore,
+    graph_done: Option<&ProgressCounter>,
+) -> Result<BuildResult> {
+    let start = std::time::Instant::now();
+
+    let inputs = load_graph_inputs(store)?;
+    if inputs.all_symbols.is_empty() {
+        store.clear_edges()?;
+        return Ok(BuildResult {
+            edges_total: 0,
+            edges_extracted: 0,
+            edges_inferred: 0,
+            elapsed_ms: start.elapsed().as_millis() as u64,
+        });
+    }
+
+    let all_edges = derive_edges_from_inputs(&inputs, graph_done);
+    let mut result = persist_edges(store, &all_edges)?;
+    result.elapsed_ms = start.elapsed().as_millis() as u64;
+
+    debug!(
+        "derive_and_store: {} edges in {}ms",
+        result.edges_total, result.elapsed_ms
+    );
+
+    Ok(result)
+}
+
+/// Rebuild the semantic edge graph restricted to files of a single language.
+///
+/// Loads a [`GraphInputs`] snapshot, derives edges in memory for files whose
+/// detected language matches, then persists in a single transaction.  Like
+/// [`derive_and_store`], the CPU-heavy derivation needs no store access;
+/// callers that want maximum concurrency should use the split phases
+/// directly (FR-026).
+pub fn derive_and_store_for_language(store: &IndexStore, language: &str) -> Result<BuildResult> {
+    let start = std::time::Instant::now();
+
+    let inputs = load_graph_inputs(store)?;
+
+    let all_edges = derive_edges_from_inputs_for_language(&inputs, language, None);
+    let mut result = persist_edges(store, &all_edges)?;
+    result.elapsed_ms = start.elapsed().as_millis() as u64;
+
+    Ok(result)
 }

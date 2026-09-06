@@ -291,10 +291,37 @@ fn build_line2(
 
     let left_width: u16 = spans.iter().map(|s| s.width() as u16).sum();
 
+    // Codeindex busy indicators (top-right, after the service icons). These
+    // render in every responsive mode because they are appended in
+    // `build_line2` itself rather than `build_line2_right` (which defers to
+    // `/status` in non-verbose modes). Style mirrors the compression busy tag
+    // in `build_line2_left`: bold, warning/cyan glyph + short label. Their
+    // width is reserved before the gap is computed so the tags stay inside
+    // the terminal width instead of being clipped.
+    let mut busy: Vec<Span<'static>> = Vec::new();
+    if app.code_index_busy {
+        busy.push(Span::styled(
+            format!("{}idx ", indicators::BUSY),
+            Style::default()
+                .fg(colors::WARNING)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    if app.code_index_graph_busy {
+        busy.push(Span::styled(
+            format!("{}graph ", indicators::BUSY),
+            Style::default()
+                .fg(colors::IN_PROGRESS)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    let busy_width: u16 = busy.iter().map(|s| s.width() as u16).sum();
+
     // Calculate gap
     let total_used = left_width
         .saturating_add(center_width)
-        .saturating_add(right_width);
+        .saturating_add(right_width)
+        .saturating_add(busy_width);
     let gap_size = width.saturating_sub(total_used);
 
     // Add center section
@@ -307,6 +334,9 @@ fn build_line2(
 
     // Add right section
     spans.extend(right);
+
+    // Add codeindex busy indicators
+    spans.extend(busy);
 
     Line::from(spans)
 }

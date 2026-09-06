@@ -146,7 +146,7 @@ impl<'a> SymbolGraph<'a> {
     ///
     /// *Full implementation in T-004 / T-005.*
     pub fn build(&self) -> Result<BuildResult> {
-        edges::derive_and_store(self.store)
+        edges::derive_and_store(self.store, None)
     }
 
     /// Build the graph restricted to symbols from a single language.

@@ -1,7 +1,7 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.79</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.80</p>
         <p style="font-size: 1.1em;">
           <strong>Date:</strong> 2026-09-06
       </p>
@@ -1343,7 +1343,17 @@ over indexed symbols that captures relationships such as `calls`, `imports`,
 
 The graph is built on demand via `/codeindex graph build` (or
 `/codeindex graph lang <language>` for a per-language subgraph) and persisted
-in the `graph_edges` SQLite table.
+in the `graph_edges` SQLite table. Graph builds run on a dedicated OS thread
+(`codeindex-graph-build`) via `CodeIndex::spawn_graph_build`, so the TUI event
+loop stays responsive while the derivation runs; a double-build guard refuses
+overlapping builds.
+
+Graph builds use a phased lock discipline: the store mutex is taken only for
+two brief windows - a read-only snapshot of the derivation inputs (symbols,
+refs, imports, files) and the final single-transaction persist into
+`graph_edges`. The CPU-heavy derivation runs with no locks held, so FTS search
+and the other store readers remain available while the graph builds; only the
+short write transaction touches the `graph_edges` table.
 
 #### Graph Tools
 
@@ -1354,16 +1364,49 @@ in the `graph_edges` SQLite table.
 | `codeindex_explain` | Node metadata and incoming/outgoing edges for a symbol |
 | `codeindex_communities` | Community detection via label propagation |
 
-All graph tools use non-blocking `try_*` variants with retry and return a
+All graph tools use non-blocking `try_*` variants and return a
 `codeindex_busy` response when the index is locked (e.g. during a reindex).
+Graph name resolution (`codeindex_path`, `codeindex_explain`) prefers exact
+name matches over the underlying substring query and ranks definition kinds
+(struct/function/trait/class/enum/interface) above impl/module containers, so
+a trait named `CachedSessionProcessor` no longer shadows the struct
+`SessionProcessor`.
 
 #### Graph Status
 
 `/codeindex show` reports graph-level statistics alongside index stats:
 edge count (total, extracted, inferred), node count, per-kind edge counts,
-and community count.
+and community count. While a graph build is in flight, `/codeindex show`
+reports `**Graph:** building...` with per-file progress (`done/total`), and
+the `codeindex_status` tool reports `graph_state: "building"` plus
+`graph_building`/`graph_done`/`graph_total` metadata. `codeindex_status`
+never blocks on the store lock: when the lock is held it returns an immediate
+busy report built from the lock-free progress atomics (metadata `busy: true`,
+`error: "codeindex_busy"`). The `IndexStats` type carries `graph_total_edges`/
+`graph_nodes`/`graph_communities` so status surfaces can report "graph built"
+vs "not built" without a separate graph query.
 
-### 8.6 Incremental Updates
+### 8.6 Code Index Status Indicators
+
+The TUI status bar (second line, top-right) shows two bold busy indicators
+while the code index works:
+
+- `IDX` glyph (`idx`) -- the FTS/store indexes are being updated (a reindex
+  holds the store/FTS locks or the reindex progress counters are active).
+- `GRAPH` glyph (`graph`) -- the semantic edge graph is being (re)built.
+
+Both busy tags render in every responsive mode and are polled lock-free from
+`CodeIndex` atomics (`reindex_progress()` / `graph_busy()` /
+`graph_build_progress()`) by `App::refresh_code_index_stats`, so they stay
+live even while the index mutexes are held by the background work.
+
+Attribution rule: when the store lock is unavailable (`try_status()` returns
+`None`) and `graph_busy` is set, the lock is attributed to the graph build --
+the `idx` indicator is not latched and is cleared if stale, so the two
+indicators track their own phases and never vanish simultaneously at build
+completion.
+
+### 8.7 Incremental Updates
 
 A file watcher detects changes and incrementally updates the index. Language
 filtering is available via `/codeindex lang <language>`.
@@ -2636,6 +2679,7 @@ examples.
 | Version | Date | Highlights |
 |---------|------|------------|
 | v1.0.79 | 2026-09-06 | Research web-search quota controls (`--max-search-calls`, run-scoped `SearchBudget` + `SharedQueryCache`); `--depth` bounds web volume by default (shallow 6 / standard 9 / deep 15); competitive researcher count capped at `max_concurrent_research_units`; `/research update <name>` invocation replay (CLI/TUI/HTTP `PUT /research/{name}`); `--mode competitive` defaults `--format` to `comparison-table`; GitHub `blob/` URLs rewritten to `raw.githubusercontent.com` and non-HTML content bypasses the readability gate; `/clip` slash command; `/research list` human-readable table restored (JSON behind `--json`); `/research create` TUI progress display simplified; provider-search-request counting (`search_providers` RunStep) |
+| uncommitted | 2026-09-06 | Config load-cache coherence fix (M-025 CI failure run 34023696563): `Config::load` re-snapshots candidate mtimes after `load_uncached`, `save`/`save_to_source` call the new public `Config::invalidate_load_cache`, cache moved into a shared `load_cache_slot()` so saves are immediately visible to loads. `codeindex_path`/`codeindex_explain` name-resolution fix (exact-match + definition-kind ranking over the substring query). `codeindex_status` tool non-blocking busy report from lock-free atomics (no `with_retry`). `IndexStats` gains `graph_total_edges`/`graph_nodes`/`graph_communities`. Pinned nightly toolchain (`rust-toolchain.toml`) + `TOOLCHAIN.md` review. |
 | uncommitted | 2026-09-06 | `plot_*` tool family (`plot_line`/`plot_scatter`/`plot_bar`/`plot_histogram`/`plot_pie`/`plot_heatmap`) via `ratatui-plt` 0.0.2 (GPL-3.0 accepted, allow-listed in `deny.toml`); inline ANSI plot rendering in the TUI message window (`plot_output_lines` + `ansi_line_to_styled`); tool input summaries for code-index graph, `model_info`, and plot tools; 31 new tests (25 plot tools + 6 TUI rendering); how-to PDF set completed (15 A4 xelatex PDFs) |
 | v1.0.28 | 2026-08-14 | SDD back-fill: `/spec specify` (SPEC.md only with clarification markers), `/spec plan` (PLAN.md from tech context), `/spec tasks` (TASKS.md + quickstart.md), `/spec feedback` (FEEDBACK.md notes); consistency validation (ambiguity, contradiction, gap detection); `CONSTITUTION.md` with amendment process; `data-model.md` and `contracts/` artifacts; SDD config flags (`sdd.branch_per_spec`, `sdd.data_model`, `sdd.contracts`, `sdd.feedback_loop`); production feedback loop in `/spec plan`; research frontmatter linking with `## Related Research` section |
 | v1.0.23 | 2026-08-11 | `/spec update` regenerates `PLAN.md` + `TESTPLAN.md` from edited `SPEC.md`; `/spec create` emits `TESTPLAN.md` manual test plan; `/spec add` regenerates plans after incremental add; `/spec jtbd` Jobs-To-Be-Done analysis; research readability extraction mandatory; YouTube transcript capture fixed |
@@ -3296,7 +3340,17 @@ over indexed symbols that captures relationships such as `calls`, `imports`,
 
 The graph is built on demand via `/codeindex graph build` (or
 `/codeindex graph lang <language>` for a per-language subgraph) and persisted
-in the `graph_edges` SQLite table.
+in the `graph_edges` SQLite table. Graph builds run on a dedicated OS thread
+(`codeindex-graph-build`) via `CodeIndex::spawn_graph_build`, so the TUI event
+loop stays responsive while the derivation runs; a double-build guard refuses
+overlapping builds.
+
+Graph builds use a phased lock discipline: the store mutex is taken only for
+two brief windows - a read-only snapshot of the derivation inputs (symbols,
+refs, imports, files) and the final single-transaction persist into
+`graph_edges`. The CPU-heavy derivation runs with no locks held, so FTS search
+and the other store readers remain available while the graph builds; only the
+short write transaction touches the `graph_edges` table.
 
 #### Graph Tools
 
@@ -3307,16 +3361,49 @@ in the `graph_edges` SQLite table.
 | `codeindex_explain` | Node metadata and incoming/outgoing edges for a symbol |
 | `codeindex_communities` | Community detection via label propagation |
 
-All graph tools use non-blocking `try_*` variants with retry and return a
+All graph tools use non-blocking `try_*` variants and return a
 `codeindex_busy` response when the index is locked (e.g. during a reindex).
+Graph name resolution (`codeindex_path`, `codeindex_explain`) prefers exact
+name matches over the underlying substring query and ranks definition kinds
+(struct/function/trait/class/enum/interface) above impl/module containers, so
+a trait named `CachedSessionProcessor` no longer shadows the struct
+`SessionProcessor`.
 
 #### Graph Status
 
 `/codeindex show` reports graph-level statistics alongside index stats:
 edge count (total, extracted, inferred), node count, per-kind edge counts,
-and community count.
+and community count. While a graph build is in flight, `/codeindex show`
+reports `**Graph:** building...` with per-file progress (`done/total`), and
+the `codeindex_status` tool reports `graph_state: "building"` plus
+`graph_building`/`graph_done`/`graph_total` metadata. `codeindex_status`
+never blocks on the store lock: when the lock is held it returns an immediate
+busy report built from the lock-free progress atomics (metadata `busy: true`,
+`error: "codeindex_busy"`). The `IndexStats` type carries `graph_total_edges`/
+`graph_nodes`/`graph_communities` so status surfaces can report "graph built"
+vs "not built" without a separate graph query.
 
-### 8.6 Incremental Updates
+### 8.6 Code Index Status Indicators
+
+The TUI status bar (second line, top-right) shows two bold busy indicators
+while the code index works:
+
+- `IDX` glyph (`idx`) -- the FTS/store indexes are being updated (a reindex
+  holds the store/FTS locks or the reindex progress counters are active).
+- `GRAPH` glyph (`graph`) -- the semantic edge graph is being (re)built.
+
+Both busy tags render in every responsive mode and are polled lock-free from
+`CodeIndex` atomics (`reindex_progress()` / `graph_busy()` /
+`graph_build_progress()`) by `App::refresh_code_index_stats`, so they stay
+live even while the index mutexes are held by the background work.
+
+Attribution rule: when the store lock is unavailable (`try_status()` returns
+`None`) and `graph_busy` is set, the lock is attributed to the graph build --
+the `idx` indicator is not latched and is cleared if stale, so the two
+indicators track their own phases and never vanish simultaneously at build
+completion.
+
+### 8.7 Incremental Updates
 
 A file watcher detects changes and incrementally updates the index. Language
 filtering is available via `/codeindex lang <language>`.

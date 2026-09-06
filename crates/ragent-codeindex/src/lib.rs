@@ -97,6 +97,16 @@ pub struct CodeIndex {
     reindex_total: AtomicU32,
     /// Files processed so far in the current reindex.
     reindex_done: AtomicU32,
+    /// True while the semantic edge graph is being derived/persisted (either
+    /// by an explicit `build_graph` call or by the graph phase of
+    /// `full_reindex`). Lock-free, pollable while every mutex is held so the
+    /// UI can show a "graph building" indicator without blocking.
+    graph_busy: AtomicBool,
+    /// Files (or language-filtered files) remaining in the current graph
+    /// build (0 when idle).
+    graph_total: AtomicU32,
+    /// Files processed so far in the current graph build.
+    graph_done: AtomicU32,
     /// M-029: cached total on-disk size of `index_dir`. Recomputing this on
     /// every `status()` poll rescanned the whole tree; the cache is refreshed
     /// only on a full reindex (where the size meaningfully changes).
@@ -125,6 +135,9 @@ impl CodeIndex {
             reindex_stopping: Arc::new(AtomicBool::new(false)),
             reindex_total: AtomicU32::new(0),
             reindex_done: AtomicU32::new(0),
+            graph_busy: AtomicBool::new(false),
+            graph_total: AtomicU32::new(0),
+            graph_done: AtomicU32::new(0),
             cached_index_size: std::sync::Mutex::new(None),
         })
     }
@@ -145,6 +158,9 @@ impl CodeIndex {
             reindex_stopping: Arc::new(AtomicBool::new(false)),
             reindex_total: AtomicU32::new(0),
             reindex_done: AtomicU32::new(0),
+            graph_busy: AtomicBool::new(false),
+            graph_total: AtomicU32::new(0),
+            graph_done: AtomicU32::new(0),
             cached_index_size: std::sync::Mutex::new(None),
         })
     }
@@ -165,6 +181,19 @@ impl CodeIndex {
     #[doc(hidden)]
     pub fn try_lock_fts_for_test(&self) -> Option<std::sync::MutexGuard<'_, FtsIndex>> {
         self.fts.try_lock().ok()
+    }
+
+    /// Set the graph-busy flag directly (for testing busy-state reporting).
+    #[doc(hidden)]
+    pub fn set_graph_busy_for_test(&self, busy: bool) {
+        self.graph_busy.store(busy, Ordering::Relaxed);
+    }
+
+    /// Set the graph-build progress counters directly (for testing).
+    #[doc(hidden)]
+    pub fn set_graph_progress_for_test(&self, done: u32, total: u32) {
+        self.graph_done.store(done, Ordering::Relaxed);
+        self.graph_total.store(total, Ordering::Relaxed);
     }
 
     /// Lock the store, recovering a poisoned guard so a panicking thread
@@ -377,6 +406,17 @@ impl CodeIndex {
         stats.fts_doc_count = fts.doc_count().unwrap_or(0);
         drop(fts);
 
+        // Graph dataset counts (edge/node/community totals for the semantic
+        // edge graph; zero when the graph has not been built yet).  The FTS
+        // guard is already dropped above, so taking the store guard here does
+        // not violate the documented lock order.
+        {
+            let store = self.store_guard();
+            stats.graph_total_edges = store.edge_count()?;
+            stats.graph_nodes = store.graph_node_count()?;
+            stats.graph_communities = store.community_count()?;
+        }
+
         // Calculate on-disk index size if using a real directory. M-029:
         // served from a cache (refreshed only on full reindex) so a status
         // poll does not rescan the whole tree every time.
@@ -402,6 +442,20 @@ impl CodeIndex {
 
         if let Ok(fts) = self.fts.try_lock() {
             stats.fts_doc_count = fts.doc_count().unwrap_or(0);
+        }
+
+        // Graph dataset counts.  A brief lock is acceptable here: this runs
+        // three COUNT queries, which are fast on the indexed edge tables.
+        if let Ok(store) = self.store.try_lock() {
+            if let (Ok(e), Ok(n), Ok(c)) = (
+                store.edge_count(),
+                store.graph_node_count(),
+                store.community_count(),
+            ) {
+                stats.graph_total_edges = e;
+                stats.graph_nodes = n;
+                stats.graph_communities = c;
+            }
         }
 
         if self.config.index_dir.exists() {
@@ -555,9 +609,24 @@ impl CodeIndex {
     /// then persists them in the `graph_edges` table.  Returns a
     /// [`graph::BuildResult`] with edge counts distinguishing `EXTRACTED` from
     /// `INFERRED`.  Blocks until the store lock is acquired.
+    ///
+    /// The store lock is held only for two brief windows — a read snapshot of
+    /// the derivation inputs and the final single-transaction persist.  The
+    /// CPU-heavy derivation runs with **no** locks held, so FTS search and
+    /// the other store readers stay available while the graph builds (FR-026).
+    ///
+    /// While the build runs the [`CodeIndex::graph_busy`] flag is set so UIs
+    /// can show a live indicator; the flag is cleared on success and failure
+    /// alike.
     pub fn build_graph(&self) -> Result<graph::BuildResult> {
-        let store = self.store_guard();
-        graph::SymbolGraph::new(&store).build()
+        self.graph_busy.store(true, Ordering::Relaxed);
+        self.graph_done.store(0, Ordering::Relaxed);
+        self.graph_total.store(0, Ordering::Relaxed);
+        let result = self.graph_build_phased(None);
+        self.graph_done.store(0, Ordering::Relaxed);
+        self.graph_total.store(0, Ordering::Relaxed);
+        self.graph_busy.store(false, Ordering::Relaxed);
+        result
     }
 
     /// Build (or rebuild) the semantic edge graph restricted to symbols from a
@@ -565,9 +634,86 @@ impl CodeIndex {
     ///
     /// Like [`build_graph()`] but only derives edges for files whose detected
     /// language matches `language`.  Useful for per-language subgraph analysis.
+    /// Lock behaviour matches [`build_graph()`]: brief load + brief persist,
+    /// derivation runs lock-free (FR-026).
     pub fn build_graph_for_language(&self, language: &str) -> Result<graph::BuildResult> {
+        self.graph_busy.store(true, Ordering::Relaxed);
+        self.graph_done.store(0, Ordering::Relaxed);
+        self.graph_total.store(0, Ordering::Relaxed);
+        let result = self.graph_build_phased(Some(language));
+        self.graph_done.store(0, Ordering::Relaxed);
+        self.graph_total.store(0, Ordering::Relaxed);
+        self.graph_busy.store(false, Ordering::Relaxed);
+        result
+    }
+
+    /// Shared phased graph-build body used by [`Self::build_graph`],
+    /// [`Self::build_graph_for_language`], and the graph phase of
+    /// [`Self::full_reindex`].
+    ///
+    /// Lock discipline (FR-026): the store mutex is taken twice, briefly —
+    /// once to snapshot the derivation inputs (read-only) and once to persist
+    /// the derived edges in a single transaction.  The CPU-heavy derivation
+    /// runs with no locks held, so FTS search and the other store readers
+    /// stay available for the whole build.  Does not touch `graph_busy`; the
+    /// caller owns that flag.
+    fn graph_build_phased(&self, language: Option<&str>) -> Result<graph::BuildResult> {
+        // Phase 1: brief store lock — snapshot the derivation inputs.
+        let inputs = {
+            let store = self.store_guard();
+            graph::edges::load_graph_inputs(&store)?
+        };
+        self.graph_total
+            .store(inputs.files.len() as u32, Ordering::Relaxed);
+        // Phase 2: derive with NO lock held (store + FTS stay available).
+        let edges = match language {
+            Some(lang) => graph::edges::derive_edges_from_inputs_for_language(
+                &inputs,
+                lang,
+                Some(&self.graph_done),
+            ),
+            None => graph::edges::derive_edges_from_inputs(&inputs, Some(&self.graph_done)),
+        };
+        // Phase 3: brief store lock — persist in one transaction.
         let store = self.store_guard();
-        graph::SymbolGraph::new(&store).build_for_language(language)
+        graph::edges::persist_edges(&store, &edges)
+    }
+
+    /// Spawn the graph build on a dedicated OS thread.
+    ///
+    /// Returns immediately; the heavy derivation runs on a thread named
+    /// `codeindex-graph-build` so interactive callers (e.g. the TUI event
+    /// loop) stay responsive.  Fails if a graph build is already running.
+    pub fn spawn_graph_build(
+        index: std::sync::Arc<Self>,
+    ) -> std::io::Result<std::thread::JoinHandle<()>> {
+        if index.graph_busy() {
+            return Err(std::io::Error::other("graph build already running"));
+        }
+        std::thread::Builder::new()
+            .name("codeindex-graph-build".into())
+            .spawn(move || {
+                if let Err(e) = index.build_graph() {
+                    warn!("spawn_graph_build: graph build failed: {e}");
+                }
+            })
+    }
+
+    /// Returns `true` while the semantic edge graph is being (re)built.
+    ///
+    /// Lock-free (atomic read), safe to poll while every index mutex is held.
+    pub fn graph_busy(&self) -> bool {
+        self.graph_busy.load(Ordering::Relaxed)
+    }
+
+    /// Returns `(done, total)` for the current graph build.
+    ///
+    /// Both are 0 when no graph build is running.  Lock-free (atomic reads).
+    pub fn graph_build_progress(&self) -> (u32, u32) {
+        (
+            self.graph_done.load(Ordering::Relaxed),
+            self.graph_total.load(Ordering::Relaxed),
+        )
     }
 
     /// Return the total number of edges in the `graph_edges` table.
@@ -598,6 +744,32 @@ impl CodeIndex {
             edges_mixes_in: store.edge_count_by_kind("mixes_in")?,
             edges_implements: store.edge_count_by_kind("implements")?,
             communities: store.community_count()?,
+        })
+    }
+
+    /// Non-blocking variant of [`graph_status()`] (FR-017).
+    ///
+    /// Returns `None` if the `SQLite` store lock is currently held (e.g. by a
+    /// background reindex or graph build) so callers can report a busy state
+    /// immediately instead of stalling.
+    pub fn try_graph_status(&self) -> Option<GraphStatus> {
+        let store = self.store.try_lock().ok()?;
+        Some(GraphStatus {
+            total_edges: store.edge_count().ok()?,
+            edges_extracted: store
+                .edge_count_by_confidence_typed(types::Confidence::Extracted)
+                .ok()?,
+            edges_inferred: store
+                .edge_count_by_confidence_typed(types::Confidence::Inferred)
+                .ok()?,
+            nodes: store.graph_node_count().ok()?,
+            edges_calls: store.edge_count_by_kind("calls").ok()?,
+            edges_imports: store.edge_count_by_kind("imports").ok()?,
+            edges_inherits: store.edge_count_by_kind("inherits").ok()?,
+            edges_references: store.edge_count_by_kind("references").ok()?,
+            edges_mixes_in: store.edge_count_by_kind("mixes_in").ok()?,
+            edges_implements: store.edge_count_by_kind("implements").ok()?,
+            communities: store.community_count().ok()?,
         })
     }
 
@@ -1035,26 +1207,34 @@ impl CodeIndex {
         let fts_sync_ms = fts_sync_start.elapsed().as_millis();
 
         // ── Build semantic edge graph (FR-007) ──────────────────────────
+        // The graph phase is reported separately from FTS indexing via the
+        // graph_busy flag + graph progress counters so the UI can label it
+        // ("graph building") distinctly from "indexing".  Like build_graph,
+        // the store lock is held only for the input snapshot and the final
+        // persist; derivation runs lock-free (FR-026).
         let graph_start = Instant::now();
-        let (edges_extracted, edges_inferred) = {
-            let store = self.store_guard();
-            match graph::edges::derive_and_store(&store) {
-                Ok(build_result) => {
-                    debug!(
-                        "full_reindex: graph built: {} edges ({} EXTRACTED, {} INFERRED) in {}ms",
-                        build_result.edges_total,
-                        build_result.edges_extracted,
-                        build_result.edges_inferred,
-                        build_result.elapsed_ms
-                    );
-                    (build_result.edges_extracted, build_result.edges_inferred)
-                }
-                Err(e) => {
-                    warn!("full_reindex: graph build failed: {e}");
-                    (0, 0)
-                }
+        self.graph_busy.store(true, Ordering::Relaxed);
+        self.graph_done.store(0, Ordering::Relaxed);
+        self.graph_total.store(0, Ordering::Relaxed);
+        let (edges_extracted, edges_inferred) = match self.graph_build_phased(None) {
+            Ok(build_result) => {
+                debug!(
+                    "full_reindex: graph built: {} edges ({} EXTRACTED, {} INFERRED) in {}ms",
+                    build_result.edges_total,
+                    build_result.edges_extracted,
+                    build_result.edges_inferred,
+                    build_result.elapsed_ms
+                );
+                (build_result.edges_extracted, build_result.edges_inferred)
+            }
+            Err(e) => {
+                warn!("full_reindex: graph build failed: {e}");
+                (0, 0)
             }
         };
+        self.graph_busy.store(false, Ordering::Relaxed);
+        self.graph_total.store(0, Ordering::Relaxed);
+        self.graph_done.store(0, Ordering::Relaxed);
         result.edges_extracted = edges_extracted;
         result.edges_inferred = edges_inferred;
         let graph_ms = graph_start.elapsed().as_millis();

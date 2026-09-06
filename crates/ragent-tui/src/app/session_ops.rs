@@ -1361,9 +1361,28 @@ impl App {
             let (done, total) = idx.reindex_progress();
             let reindex_active = total > 0 && done < total;
 
+            // Graph-build latch: the lock-free graph_busy atomic is set by
+            // build_graph / build_graph_for_language / the graph phase of
+            // full_reindex, so it stays observable even while the store lock
+            // is held for the whole build. Read it BEFORE the try_status
+            // probe: the graph build holds the store mutex for its entire
+            // duration, so try_status() returning None while graph_busy is
+            // set means the graph build holds the lock — not indexing.
+            let graph_busy = idx.graph_busy();
+
             if let Some(stats) = idx.try_status() {
                 self.code_index_stats_cache = Some(stats);
                 self.code_index_stats_last_refresh = std::time::Instant::now();
+                if self.code_index_busy && !reindex_active {
+                    self.code_index_busy = false;
+                    self.needs_redraw = true;
+                }
+            } else if graph_busy {
+                // Store lock held by the graph build. Do not latch the idx
+                // indicator from the lock-held heuristic; clear it if a
+                // previous poll set it, so each indicator tracks its own
+                // phase and clears at its own time instead of both
+                // vanishing the moment the graph build finishes.
                 if self.code_index_busy && !reindex_active {
                     self.code_index_busy = false;
                     self.needs_redraw = true;
@@ -1380,11 +1399,181 @@ impl App {
                 self.code_index_busy = true;
                 self.needs_redraw = true;
             }
+            if graph_busy != self.code_index_graph_busy {
+                self.code_index_graph_busy = graph_busy;
+                self.needs_redraw = true;
+            }
         } else {
             self.code_index_stats_cache = None;
             self.code_index_stats_last_refresh = std::time::Instant::now();
             self.code_index_busy = false;
+            if self.code_index_graph_busy {
+                self.code_index_graph_busy = false;
+                self.needs_redraw = true;
+            }
         }
+    }
+
+    /// Spawn `/codeindex graph build` (or `graph lang <l>`) on the dedicated
+    /// codeindex graph-build thread. The command handler sets a `[wait]`
+    /// status; the spawned thread delivers the rendered result through
+    /// `code_index_bg_result`, drained by `poll_codeindex_bg_result`.
+    ///
+    /// Returns `Ok(())` when the build was spawned, `Err(reason)` when it was
+    /// refused (no index attached, or a build is already running).
+    pub(crate) fn spawn_codeindex_graph_build(
+        &mut self,
+        language: Option<String>,
+    ) -> Result<(), String> {
+        let Some(idx) = self.code_index.clone() else {
+            return Err("Code index is not active. Enable it first with `/codeindex on`.".into());
+        };
+        if self.code_index_graph_spawned {
+            return Err("a graph build is already running".into());
+        }
+        self.code_index_graph_spawned = true;
+        self.needs_redraw = true;
+        let results = self.code_index_bg_result.clone();
+        let spawn_result = std::thread::Builder::new()
+            .name("codeindex-graph-build-request".into())
+            .spawn(move || {
+                let outcome = if let Some(lang) = language {
+                    idx.build_graph_for_language(&lang).map(|result| {
+                        if result.edges_total == 0 {
+                            (
+                                format!(
+                                    "[warn] No edges found for language `{lang}`. Ensure \
+                                     files of that language are indexed (run \
+                                     `/codeindex reindex`)."
+                                ),
+                                format!("codeindex: graph lang {lang} (no edges)"),
+                            )
+                        } else {
+                            (
+                                format!(
+                                    "\u{2705} Graph built for `{lang}`: {} edges \
+                                     ({} EXTRACTED, {} INFERRED) in {}ms.",
+                                    result.edges_total,
+                                    result.edges_extracted,
+                                    result.edges_inferred,
+                                    result.elapsed_ms
+                                ),
+                                format!(
+                                    "codeindex: graph lang {lang} ({} edges)",
+                                    result.edges_total
+                                ),
+                            )
+                        }
+                    })
+                } else {
+                    idx.build_graph().map(|result| {
+                        (
+                            format!(
+                                "\u{2705} Graph built: {} edges ({} EXTRACTED, {} INFERRED) \
+                                 in {}ms.",
+                                result.edges_total,
+                                result.edges_extracted,
+                                result.edges_inferred,
+                                result.elapsed_ms
+                            ),
+                            format!("codeindex: graph built ({} edges)", result.edges_total),
+                        )
+                    })
+                };
+                let payload = match outcome {
+                    Ok((message, status)) => Ok(format!("{message}\n\nSTATUS:{status}")),
+                    Err(e) => Err(format!("graph build failed: {e}")),
+                };
+                if let Ok(mut guard) = results.lock() {
+                    *guard = Some(payload);
+                }
+            });
+        if let Err(e) = spawn_result {
+            // Roll the latch back so a later command can retry.
+            self.code_index_graph_spawned = false;
+            return Err(format!("failed to spawn graph build thread: {e}"));
+        }
+        Ok(())
+    }
+
+    /// Spawn a full reindex on a dedicated thread so the TUI event loop stays
+    /// responsive. Progress is observable via the existing reindex atomics
+    /// (and the graph phase via the graph-busy indicator).
+    pub(crate) fn spawn_codeindex_reindex(&mut self) -> Result<(), String> {
+        let Some(idx) = self.code_index.clone() else {
+            return Err("Code index is not active. Enable it first with `/codeindex on`.".into());
+        };
+        if self.code_index_reindex_spawned {
+            return Err("a reindex is already running".into());
+        }
+        self.code_index_reindex_spawned = true;
+        self.needs_redraw = true;
+        let results = self.code_index_bg_result.clone();
+        let spawn_result = std::thread::Builder::new()
+            .name("codeindex-manual-reindex".into())
+            .spawn(move || {
+                let payload = match idx.full_reindex() {
+                    Ok(result) => Ok(format!(
+                        "[ok] Re-index complete: +{} ~{} -{} files, {} symbols in {}ms.\n\n\
+                         STATUS:codeindex: reindexed {} files",
+                        result.files_added,
+                        result.files_updated,
+                        result.files_removed,
+                        result.symbols_extracted,
+                        result.elapsed_ms,
+                        result.files_added + result.files_updated
+                    )),
+                    Err(e) => Err(format!("Re-index failed: {e}")),
+                };
+                if let Ok(mut guard) = results.lock() {
+                    *guard = Some(payload);
+                }
+            });
+        if let Err(e) = spawn_result {
+            self.code_index_reindex_spawned = false;
+            return Err(format!("failed to spawn reindex thread: {e}"));
+        }
+        Ok(())
+    }
+
+    /// Drain the completion result from an off-thread codeindex graph build
+    /// or full reindex and surface it in the message window. Mirrors
+    /// `poll_pending_opt`; the `\n\nSTATUS:` suffix carries the status-bar
+    /// text back from the worker thread.
+    pub fn poll_codeindex_bg_result(&mut self) {
+        let outcome = {
+            let mut guard = match self.code_index_bg_result.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            guard.take()
+        };
+        let Some(outcome) = outcome else {
+            return;
+        };
+        self.code_index_graph_spawned = false;
+        self.code_index_reindex_spawned = false;
+        match outcome {
+            Ok(rendered) => {
+                let (message, status) = match rendered.split_once("\n\nSTATUS:") {
+                    Some((m, s)) => (m.to_string(), s.to_string()),
+                    None => (rendered.clone(), "codeindex: done".to_string()),
+                };
+                self.append_assistant_text(&message);
+                self.status = status;
+                self.arm_status_expiry();
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    "Finished /codeindex background task".to_string(),
+                );
+            }
+            Err(msg) => {
+                self.append_assistant_text(&format!("[err] {msg}"));
+                self.status = "[warn] codeindex: background task failed".to_string();
+                self.push_log_no_agent(LogLevel::Error, msg);
+            }
+        }
+        self.needs_redraw = true;
     }
 
     /// Test hook: exposes the crate-internal stats refresh to integration

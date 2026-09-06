@@ -1,5 +1,86 @@
 # Changelog
 
+## Version: 1.0.81
+
+### Changed
+
+- Version bump to 1.0.81 (updated codeindex indexing tooling).
+- `cargo check` passes (only the pre-existing future-incompat notice for the external `attribute-derive-macro` crate).
+- `cargo audit` reports only the 10 allowed warnings (unmaintained `ttf-parser`, unsound `lru`, yanked `chacha20` transitive dependencies); no actionable security failures.
+
+## Uncommitted (post 1.0.80)
+
+Working-tree changes (staged + unstaged) on top of commit `a042f4ed`
+("Version: 1.0.80 - add plot tools"). Detailed entries for the codeindex graph
+work below also live in the 1.0.80 section; this block is the uncommitted
+marker for this documentation pass.
+
+### Fixed
+
+- **Config save/load cache coherence (M-025 CI failure, run 34023696563)** —
+  `Config::load()` (crates/ragent-config/src/config.rs) cached the resolved
+  config keyed on `(cwd, mtimes+sizes)` of candidate config files, but the
+  mtimes were snapshotted BEFORE `load_uncached()` — which auto-creates the
+  default `.ragent/ragent.json` on a first load — so a first load in a fresh
+  cwd cached an EMPTY mtime list and the fast path short-circuited true
+  forever; additionally `save()`/`save_to_source()` never invalidated the
+  cache, so any TUI config save (`/codeindex off`, `/tools`, ...) was
+  invisible to subsequent `Config::load()` calls for the rest of the process.
+  Fixed by re-snapshotting candidate mtimes AFTER `load_uncached()` (new
+  `snapshot_candidate_mtimes`), calling the new public
+  `Config::invalidate_load_cache()` after every successful write, and moving
+  the `OnceLock` cache into a shared `load_cache_slot()` so load and
+  invalidate clear the same static. This is what made
+  `test_slash_codeindex_off_updates_visibility_and_config` and
+  `test_slash_tools_toggle_persists_and_updates_hidden_registry` fail on CI
+  (no pre-existing global config) while passing locally.
+- **`codeindex_path` / `codeindex_explain` name resolution** — the graph
+  traverser picked the FIRST row of a case-insensitive substring query
+  ordered by name, so `SessionProcessor` resolved to the
+  `CachedSessionProcessor` trait, `EventBus` to the `Default for EventBus`
+  impl, and `WebGatherer` to `WebGatherError` — all near-zero-edge nodes that
+  made `codeindex_path` report "No path found" for well-connected symbols.
+  `crates/ragent-codeindex/src/graph/traverse.rs` now ranks candidates:
+  exact name matches first, then definition kinds (struct/function/trait/
+  class/enum/interface) over impl/module containers, with a lowest-symbol-id
+  tie-break for determinism.
+- **`codeindex_status` tool no longer blocks (or retries) on a held store
+  lock** — the tool replaced its 5 s `with_retry` loop with a single
+  `try_status()` probe; when the store/FTS mutex is held by a background
+  reindex or graph build it returns immediately with a busy report built from
+  the lock-free progress atomics (`reindex_progress()`, `graph_busy()`,
+  `graph_build_progress()`), carrying `metadata.busy = true` and
+  `error: "codeindex_busy"`. The TUI `/codeindex status` slash command uses
+  the same non-blocking probe path.
+
+### Changed
+
+- **`IndexStats` now carries graph counters** — `graph_total_edges`,
+  `graph_nodes`, and `graph_communities` are populated by `CodeIndex::status()`
+  (and best-effort by `try_status()` under `try_lock`), so status surfaces can
+  report "graph built" vs "not built" without a separate graph query.
+- **Pinned nightly toolchain** — new `rust-toolchain.toml` pins
+  `nightly-2026-09-04` (replacing the `RUSTUP_TOOLCHAIN=nightly` env
+  approach) so daily nightly updates stop invalidating the sccache cache and
+  forcing full rebuilds; `TOOLCHAIN.md` documents the review and the
+  deliberate bump procedure.
+
+### Tests
+
+- `crates/ragent-codeindex/tests/test_graph_resolve_regression.rs` (3 tests)
+  pins the resolver regressions above (substring-trait shadowing, impl
+  `Default for X` shadowing, exact-vs-substring preference).
+- `crates/ragent-codeindex/tests/test_status_graph_fields.rs` (3 tests) covers
+  the `IndexStats` graph fields and the `try_status`/`try_graph_status`
+  locked-store degradations.
+- `crates/ragent-tools-extended/tests/test_codeindex_status_busy.rs` (4
+  tests) covers the busy-report output/metadata, including a source-level
+  guard that `codeindex_status.rs` must not reintroduce `with_retry`.
+- `crates/ragent-tui/tests/test_codeindex_indicators.rs` gained 3 tests for
+  the simultaneous-vanish fix: a graph build holding the store lock must not
+  latch the `idx` indicator, and each indicator clears only for its own
+  phase.
+
 ## Version: 1.0.80
 
 ### Changed
@@ -7,9 +88,49 @@
 - Version bump to 1.0.80.
 - `cargo check` passes (only the pre-existing future-incompat notice for the external `attribute-derive-macro` crate).
 - `cargo audit` reports only allowed warnings (yanked `chacha20` transitive dependency); no actionable security failures.
+- **Phased graph build keeps the store lock free during derivation (FR-026)** —
+  `CodeIndex::build_graph`, `build_graph_for_language`, and the graph phase of
+  `full_reindex` no longer hold the `IndexStore` mutex for the whole build.
+  Edge derivation is split into `graph::edges::load_graph_inputs` (brief
+  read-only snapshot of symbols, refs, imports, files — imports now loaded in
+  one SQL scan via the new `IndexStore::list_all_imports`),
+  `derive_edges_from_inputs` / `derive_edges_from_inputs_for_language` (pure
+  in-memory derivation, no locks), and `persist_edges` (brief single-transaction
+  write touching only `graph_edges`). FTS search and the other store readers
+  stay available while the graph builds; live `graph_done`/`graph_total`
+  progress now also advances during direct `build_graph` calls (not just
+  `full_reindex`) and the counters are reset to `(0, 0)` when the build
+  completes.
 
 ### Added
 
+- **Codeindex busy indicators on the status bar (second line, top-right)** —
+  the TUI now shows two bold busy tags while the code index works: `idx`
+  (warning/yellow) while a reindex holds the store/FTS locks or the reindex
+  progress counters are active, and `graph` (cyan) while the semantic edge
+  graph is being (re)built. Both latches are polled lock-free from new
+  `CodeIndex` atomics (`graph_busy()`, `graph_build_progress()`) by
+  `App::refresh_code_index_stats`, so they stay live even while the index
+  mutexes are held, render in every responsive mode, and animate at the 250 ms
+  event-loop cadence. Their width is reserved before the right-gap computation
+  so the tags never clip off the terminal edge.
+- **Threaded codeindex graph build** — `CodeIndex::spawn_graph_build(Arc)`
+  runs the heavy semantic-graph derivation on a dedicated OS thread named
+  `codeindex-graph-build` (with a double-build guard that refuses overlapping
+  builds). The TUI `/codeindex graph build`, `/codeindex graph lang <l>`, and
+  `/codeindex reindex` commands now run in the background instead of blocking
+  the event loop for minutes on large repos: the command sets a `[wait]`
+  status immediately, the status bar indicator animates while the build runs,
+  and the completion message + status text are delivered through a mutex
+  slot drained by `App::poll_codeindex_bg_result` each loop wake (mirroring
+  the `/opt` async pattern). `full_reindex` now also labels its graph phase
+  via the same graph-busy flag and reports per-file progress
+  (`graph_done`/`graph_total`) during derivation.
+- **Graph-build visibility in status surfaces** — `/codeindex show` reports
+  `**Graph:** building...` with `done/total` file progress while a build runs,
+  and the `codeindex_status` tool reports `graph_state: "building"` plus
+  `graph_building`/`graph_done`/`graph_total` in its metadata so agents can
+  poll build state without blocking on the store lock.
 - **`plot_*` tool family (6 new tools)** — scientific/terminal plotting on the
   message window, rendered off-screen to text via `ratatui-plt` 0.0.2
   (GPL-3.0, explicitly accepted by the project owner 2026-09-06 and added to
@@ -40,6 +161,16 @@
 
 ### Tests
 
+- `crates/ragent-codeindex/tests/test_graph_build_async.rs` (7 tests) covers
+  graph-busy flag lifecycle (clears after success and on the empty-index
+  path), spawned-thread build completion with real edges, observation of
+  `graph_busy` while the store lock is held by another thread (the property
+  the status-bar indicator relies on), the double-spawn guard, and the FR-026
+  phased-build properties above.
+- `crates/ragent-tui/tests/test_codeindex_indicators.rs` (8 tests) covers
+  `idx`/`graph` indicator rendering (single, combined, hidden when idle),
+  `poll_codeindex_bg_result` success/error/no-op draining with spawned-latch
+  reset, and the graph-busy latch clearing when no index is attached.
 - `crates/ragent-tools-extended/tests/test_plot_tools.rs` (25 tests) covers
   rendering, stacked/horizontal bars, histogram norms, heatmap defaults,
   registry registration, canvas bounds, string-encoded argument coercion, and

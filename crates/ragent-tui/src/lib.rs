@@ -748,6 +748,9 @@ pub async fn run_tui(
         // Check for completed /opt LLM results.
         app.poll_pending_opt();
 
+        // Check for completed off-thread codeindex graph builds / reindexes.
+        app.poll_codeindex_bg_result();
+
         // Check for completed compaction runs.
         app.poll_compaction_result();
 
@@ -976,6 +979,7 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
             s.started_at.elapsed() < Duration::from_secs(MODEL_DOWNLOAD_STALE_SECS)
         }) || (app.active_bench_task_id.is_some() && !app.bench_stale())
             || app.code_index_busy
+            || app.code_index_graph_busy
             || (app.autopilot_enabled && app.autopilot_pending_continue.is_some());
     if animate {
         deadline = deadline.min(now + Duration::from_millis(250));

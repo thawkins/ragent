@@ -8513,10 +8513,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                     "show" | "status" | "" => {
                         let config_enabled = self.code_index_enabled;
-                        // Check if we have an active code index with real stats
+                        // Check if we have an active code index with real stats.
+                        // Non-blocking probe: report busy immediately instead of
+                        // stalling while a background reindex/graph build holds
+                        // the store lock.
                         if let Some(ref idx) = self.code_index {
-                            match idx.status() {
-                                Ok(stats) => {
+                            match idx.try_status() {
+                                Some(stats) => {
                                     let mut output = String::from("## Code Index Status\n\n");
                                     output.push_str(&format!(
                                         "**Enabled:** {}\n",
@@ -8588,8 +8591,18 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     // build`, so it may be empty even when the
                                     // index is populated.
                                     output.push_str("\n## Graph Dataset\n\n");
-                                    match idx.graph_status() {
-                                        Ok(gs) => {
+                                    if idx.graph_busy() {
+                                        let (gdone, gtotal) = idx.graph_build_progress();
+                                        output
+                                            .push_str("\u{26a0}\u{fe0f} **Graph:** building...\n");
+                                        if gtotal > 0 {
+                                            output.push_str(&format!(
+                                                "**Progress:** {gdone}/{gtotal} files\n"
+                                            ));
+                                        }
+                                    }
+                                    match idx.try_graph_status() {
+                                        Some(gs) => {
                                             if gs.total_edges == 0 {
                                                 output.push_str(
                                                     "**Graph:** not built (0 edges).\n\n\
@@ -8626,10 +8639,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                 ));
                                             }
                                         }
-                                        Err(e) => {
-                                            output.push_str(&format!(
-                                                "\u{26a0}\u{fe0f} Error reading graph stats: {e}\n"
-                                            ));
+                                        None => {
+                                            // Graph stats unavailable because the
+                                            // store lock is held; try_status()
+                                            // succeeded so this is transient.
+                                            output.push_str(
+                                                "\u{26a0}\u{fe0f} Graph stats unavailable \
+                                                 (index busy — retry shortly).\n",
+                                            );
                                         }
                                     }
 
@@ -8641,11 +8658,47 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                         stats.fts_doc_count
                                     );
                                 }
-                                Err(e) => {
-                                    self.append_assistant_text(&format!(
-                                        "## Code Index Status\n\n\u{26a0}\u{fe0f} Error reading index stats: {e}"
+                                None => {
+                                    // Store/FTS lock held by a background
+                                    // reindex or graph build. Report busy
+                                    // immediately from the lock-free atomics.
+                                    let (done, total) = idx.reindex_progress();
+                                    let reindexing = total > 0 && done < total;
+                                    let graph_busy = idx.graph_busy();
+                                    let (gdone, gtotal) = idx.graph_build_progress();
+
+                                    let mut output = String::from("## Code Index Status\n\n");
+                                    output.push_str(&format!(
+                                        "**Enabled:** {}\n",
+                                        if config_enabled {
+                                            "\u{2713} yes"
+                                        } else {
+                                            "\u{2717} no"
+                                        }
                                     ));
-                                    self.status = "codeindex: error".to_string();
+                                    output.push_str(
+                                        "**Index:** busy — the store lock is held by a \
+                                         background operation\n",
+                                    );
+                                    if reindexing {
+                                        output.push_str(&format!(
+                                            "**Reindexing:** {done}/{total} files\n"
+                                        ));
+                                    }
+                                    if graph_busy {
+                                        output.push_str(&format!(
+                                            "**Graph:** building ({gdone}/{gtotal} files)\n"
+                                        ));
+                                    }
+                                    if !reindexing && !graph_busy {
+                                        output.push_str(
+                                            "Wait a moment and retry — the background \
+                                             operation will release the lock when done.\n",
+                                        );
+                                    }
+
+                                    self.append_assistant_text(&output);
+                                    self.status = "codeindex: busy".to_string();
                                 }
                             }
                         } else {
@@ -8667,29 +8720,15 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     "reindex" => {
-                        if let Some(idx) = self.code_index.clone() {
+                        if self.code_index.is_some() {
                             self.append_assistant_text(
-                                "[sync] **Re-indexing codebase...** scanning files and extracting symbols.",
+                                "[sync] **Re-indexing codebase...** scanning files and extracting symbols. This runs in the background; watch the status bar for the indexing indicator.",
                             );
-                            match idx.full_reindex() {
-                                Ok(result) => {
-                                    self.append_assistant_text(&format!(
-                                        "[ok] Re-index complete: +{} ~{} -{} files, {} symbols in {}ms.",
-                                        result.files_added,
-                                        result.files_updated,
-                                        result.files_removed,
-                                        result.symbols_extracted,
-                                        result.elapsed_ms,
-                                    ));
-                                    self.status = format!(
-                                        "codeindex: reindexed {} files",
-                                        result.files_added + result.files_updated
-                                    );
-                                }
-                                Err(e) => {
-                                    self.append_assistant_text(&format!(
-                                        "[err] Re-index failed: {e}"
-                                    ));
+                            self.status = "[wait] codeindex: reindexing…".to_string();
+                            match self.spawn_codeindex_reindex() {
+                                Ok(()) => {}
+                                Err(reason) => {
+                                    self.append_assistant_text(&format!("[err] {reason}"));
                                     self.status = "codeindex: reindex failed".to_string();
                                 }
                             }
@@ -8719,27 +8758,16 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let graph_sub = args.split_whitespace().nth(1).unwrap_or("");
                         match graph_sub {
                             "build" => {
-                                if let Some(idx) = self.code_index.clone() {
+                                if self.code_index.is_some() {
                                     self.append_assistant_text(
-                                        "\u{1f517} **Building semantic edge graph...** deriving typed edges from indexed symbols.",
+                                        "\u{1f517} **Building semantic edge graph...** deriving typed edges from indexed symbols. This runs in the background; the status bar shows a graph indicator while it works.",
                                     );
-                                    match idx.build_graph() {
-                                        Ok(result) => {
+                                    self.status = "[wait] codeindex: building graph…".to_string();
+                                    match self.spawn_codeindex_graph_build(None) {
+                                        Ok(()) => {}
+                                        Err(reason) => {
                                             self.append_assistant_text(&format!(
-                                                "\u{2705} Graph built: {} edges ({} EXTRACTED, {} INFERRED) in {}ms.",
-                                                result.edges_total,
-                                                result.edges_extracted,
-                                                result.edges_inferred,
-                                                result.elapsed_ms,
-                                            ));
-                                            self.status = format!(
-                                                "codeindex: graph built ({} edges)",
-                                                result.edges_total
-                                            );
-                                        }
-                                        Err(e) => {
-                                            self.append_assistant_text(&format!(
-                                                "\u{274c} Graph build failed: {e}"
+                                                "\u{274c} Graph build failed: {reason}"
                                             ));
                                             self.status =
                                                 "codeindex: graph build failed".to_string();
@@ -8760,45 +8788,21 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                         "Usage: `/codeindex graph lang <language>`\n\n\
                                          Example: `/codeindex graph lang rust`\n\n\
                                          Rebuilds the semantic edge graph using only \
-                                         files detected as the given language, allowing \
-                                         per-language subgraph analysis.",
+                                           files detected as the given language, allowing \
+                                           per-language subgraph analysis.",
                                     );
                                     self.status = "codeindex: graph lang (usage)".to_string();
-                                } else if let Some(idx) = self.code_index.clone() {
+                                } else if self.code_index.is_some() {
                                     self.append_assistant_text(&format!(
-                                        "\u{1f517} **Building graph for language `{lang}`...**"
-                                    ));
-                                    match idx.build_graph_for_language(lang) {
-                                        Ok(result) => {
-                                            if result.edges_total == 0 {
-                                                self.append_assistant_text(&format!(
-                                                    "\u{26a0}\u{fe0f} No edges found for \
-                                                     language `{lang}`. Ensure files of that \
-                                                     language are indexed (run \
-                                                     `/codeindex reindex`)."
-                                                ));
-                                                self.status = format!(
-                                                    "codeindex: graph lang {lang} (no edges)"
-                                                );
-                                            } else {
-                                                self.append_assistant_text(&format!(
-                                                    "\u{2705} Graph built for `{lang}`: {} \
-                                                     edges ({} EXTRACTED, {} INFERRED) in \
-                                                     {}ms.",
-                                                    result.edges_total,
-                                                    result.edges_extracted,
-                                                    result.edges_inferred,
-                                                    result.elapsed_ms,
-                                                ));
-                                                self.status = format!(
-                                                    "codeindex: graph lang {lang} ({} edges)",
-                                                    result.edges_total
-                                                );
-                                            }
-                                        }
-                                        Err(e) => {
+                                          "\u{1f517} **Building graph for language `{lang}`...** This runs in the background; the status bar shows a graph indicator while it works."
+                                      ));
+                                    self.status =
+                                        format!("[wait] codeindex: building graph ({lang})…");
+                                    match self.spawn_codeindex_graph_build(Some(lang.to_string())) {
+                                        Ok(()) => {}
+                                        Err(reason) => {
                                             self.append_assistant_text(&format!(
-                                                "\u{274c} Graph lang build failed: {e}"
+                                                "\u{274c} Graph lang build failed: {reason}"
                                             ));
                                             self.status =
                                                 "codeindex: graph lang failed".to_string();
@@ -8806,8 +8810,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     }
                                 } else {
                                     self.append_assistant_text(
-                                        "\u{26a0}\u{fe0f} Code index is not active. Enable it first with `/codeindex on`.",
-                                    );
+                                          "\u{26a0}\u{fe0f} Code index is not active. Enable it first with `/codeindex on`.",
+                                      );
                                     self.status = "codeindex: not active".to_string();
                                 }
                             }

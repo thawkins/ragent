@@ -1291,9 +1291,7 @@ impl Config {
             return Self::load_uncached();
         }
 
-        use std::sync::OnceLock;
-        static CACHE: OnceLock<std::sync::Mutex<Option<CachedConfigFile>>> = OnceLock::new();
-        let cache = CACHE.get_or_init(|| std::sync::Mutex::new(None));
+        let cache = Self::load_cache_slot();
         // The project config path (`.ragent/ragent.json`) is relative to the
         // current working directory, which can change (e.g. in tests); include
         // it in the cache key so a stale entry is never returned.
@@ -1338,6 +1336,14 @@ impl Config {
         }
         let cfg = Self::load_uncached();
         if let Ok(cfg) = &cfg {
+            // Re-snapshot AFTER load_uncached: a first-time load in a fresh
+            // directory creates the default project config (load_uncached
+            // writes `.ragent/ragent.json`), and that file must participate
+            // in the cache key. Snapshotting before the write left `mtimes`
+            // empty, so a subsequent `save` (which writes a file absent from
+            // the snapshot) never invalidated the fast path and every later
+            // `load` in the same cwd was served the pre-save config.
+            let mtimes = Self::snapshot_candidate_mtimes(&candidates);
             let mut guard = cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1348,6 +1354,30 @@ impl Config {
             });
         }
         cfg
+    }
+
+    /// Record `(path, mtime, size)` for each candidate config file that
+    /// currently exists. Used to key the M-025 load cache.
+    fn snapshot_candidate_mtimes(
+        candidates: &[PathBuf],
+    ) -> Vec<(PathBuf, std::time::SystemTime, u64)> {
+        candidates
+            .iter()
+            .filter_map(|path| {
+                let meta = std::fs::metadata(path).ok()?;
+                let mt = meta.modified().ok()?;
+                Some((path.clone(), mt, meta.len()))
+            })
+            .collect()
+    }
+
+    /// The shared M-025 cache slot used by both [`Config::load`] and
+    /// [`Config::invalidate_load_cache`]. A single static guarantees that an
+    /// invalidation clears exactly the cache `load` consults.
+    fn load_cache_slot() -> &'static std::sync::Mutex<Option<CachedConfigFile>> {
+        use std::sync::OnceLock;
+        static CACHE: OnceLock<std::sync::Mutex<Option<CachedConfigFile>>> = OnceLock::new();
+        CACHE.get_or_init(|| std::sync::Mutex::new(None))
     }
 
     /// The uncached config loader (the real work behind [`Config::load`]).
@@ -1532,7 +1562,15 @@ impl Config {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| anyhow::anyhow!("Failed to serialise config: {}", e))?;
 
-        Self::write_config_if_changed(&path, &json)
+        let result = Self::write_config_if_changed(&path, &json);
+        // Any on-disk write can change the files the M-025 load cache is keyed
+        // on (in particular, a first-ever save creates a file that was absent
+        // from the cached mtime snapshot). Invalidate so the next `load`
+        // re-reads from disk instead of serving the pre-save config.
+        if result.is_ok() {
+            Self::invalidate_load_cache();
+        }
+        result
     }
 
     /// Save the config back to its original source file.
@@ -1569,7 +1607,29 @@ impl Config {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| anyhow::anyhow!("Failed to serialise config: {}", e))?;
 
-        Self::write_config_if_changed(&path, &json)
+        let result = Self::write_config_if_changed(&path, &json);
+        // Same M-025 cache discipline as [`Config::save`]: the write may have
+        // created or changed a file in the cache key, so drop the cached
+        // config and let the next `load` re-read from disk.
+        if result.is_ok() {
+            Self::invalidate_load_cache();
+        }
+        result
+    }
+
+    /// Drop the M-025 on-disk load cache, forcing the next [`Config::load`]
+    /// to re-read and re-parse every contributing config file.
+    ///
+    /// Called after every successful config write so a save is immediately
+    /// visible to subsequent loads in the same process (a first-ever save
+    /// creates a file that was absent from the cached mtime snapshot, which
+    /// the mtime fast path alone cannot detect).
+    pub fn invalidate_load_cache() {
+        let cache = Self::load_cache_slot();
+        let mut guard = cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = None;
     }
 
     /// Resolve the global config directory (`<config_dir>/ragent`) using the

@@ -1634,6 +1634,20 @@ pub struct App {
     pub code_index_stats_last_refresh: std::time::Instant,
     /// True when the background indexer holds the store/FTS locks.
     pub code_index_busy: bool,
+    /// True while the codeindex semantic graph is being (re)built. Latched
+    /// from the lock-free `CodeIndex::graph_busy` atomic by
+    /// `refresh_code_index_stats` and rendered as a status-bar indicator.
+    pub code_index_graph_busy: bool,
+    /// True while a TUI-spawned codeindex graph build is running; guards
+    /// against a second `/codeindex graph build` overlapping the first.
+    pub code_index_graph_spawned: bool,
+    /// True while a TUI-spawned codeindex full reindex is running; guards
+    /// against overlapping `/codeindex reindex` commands.
+    pub code_index_reindex_spawned: bool,
+    /// Completion result from an off-thread codeindex graph build or full
+    /// reindex: the rendered assistant message on success, or the error
+    /// text. Drained by `poll_codeindex_bg_result` on the UI thread.
+    pub code_index_bg_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
     /// Active file watcher + background worker session for the code index.
     pub code_index_watch_session: Option<ragent_codeindex::WatchSession>,
     /// Active MCP discovery dialog, if any.

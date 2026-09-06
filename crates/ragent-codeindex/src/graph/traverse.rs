@@ -9,7 +9,7 @@
 
 use crate::graph::{Connection, ExplainResult, PathResult};
 use crate::store::IndexStore;
-use crate::types::{GraphEdge, SymbolFilter};
+use crate::types::GraphEdge;
 use anyhow::Result;
 use std::collections::{HashMap, VecDeque};
 
@@ -143,7 +143,7 @@ pub fn explain(store: &IndexStore, name: &str) -> Result<Option<ExplainResult>> 
     let mut outgoing: Vec<Connection> = Vec::new();
 
     // Build a lookup of all symbols for name/file resolution.
-    let all_symbols = store.query_symbols(&SymbolFilter::default())?;
+    let all_symbols = store.query_symbols(&crate::types::SymbolFilter::default())?;
     let sym_lookup: HashMap<i64, &crate::types::Symbol> =
         all_symbols.iter().map(|s| (s.id, s)).collect();
 
@@ -227,29 +227,72 @@ fn edge_to_connection(
     })
 }
 
-/// Find the first symbol ID matching the given name (exact match, case-
-/// sensitive, first result).
-fn find_symbol_id(store: &IndexStore, name: &str) -> Result<Option<i64>> {
-    let filter = SymbolFilter {
-        name: Some(name.to_string()),
-        limit: Some(1),
-        ..Default::default()
+/// Rank a candidate symbol for name resolution when several symbols share a
+/// name. Lower is better. Definition kinds (struct/function/trait/...) are
+/// preferred over container kinds (impl/module) because graph edges attach to
+/// definitions; identical ranks fall back to the lowest symbol ID so the
+/// result is deterministic.
+///
+/// Why this exists: `query_symbols` does a case-insensitive substring match
+/// ordered by name, so for `SessionProcessor` it returned the
+/// `CachedSessionProcessor` trait and for `EventBus` the `Default for EventBus`
+/// impl — both near-zero-edge nodes that made `codeindex_path` report
+/// "No path found" for well-connected symbols.
+fn resolution_rank(sym: &crate::types::Symbol) -> (u8, i64) {
+    let kind_rank: u8 = match sym.kind {
+        crate::types::SymbolKind::Function
+        | crate::types::SymbolKind::Method
+        | crate::types::SymbolKind::Struct
+        | crate::types::SymbolKind::Class
+        | crate::types::SymbolKind::Enum
+        | crate::types::SymbolKind::Trait
+        | crate::types::SymbolKind::Interface => 0,
+        crate::types::SymbolKind::EnumVariant
+        | crate::types::SymbolKind::Constant
+        | crate::types::SymbolKind::Static
+        | crate::types::SymbolKind::TypeAlias
+        | crate::types::SymbolKind::Field
+        | crate::types::SymbolKind::Macro
+        | crate::types::SymbolKind::Test => 1,
+        crate::types::SymbolKind::Impl | crate::types::SymbolKind::Module => 2,
+        crate::types::SymbolKind::Import | crate::types::SymbolKind::Unknown => 3,
     };
-    let symbols = store.query_symbols(&filter)?;
-    Ok(symbols.first().map(|s| s.id))
+    (kind_rank, sym.id)
 }
 
-/// Find the first symbol matching the given name (exact match, case-
-/// sensitive, first result).  Returns the full [`Symbol`] so the caller
-/// has access to file_id, start_line, etc.
+/// Pick the best candidate from a ranked list of symbols.
+fn best_candidate(symbols: &[crate::types::Symbol]) -> Option<&crate::types::Symbol> {
+    symbols.iter().min_by_key(|s| resolution_rank(s))
+}
+
+/// Find the symbol ID best matching the given name.
+///
+/// Prefers exact name matches over substring matches, then definition kinds
+/// over impl/module nodes (see [`resolution_rank`]).
+fn find_symbol_id(store: &IndexStore, name: &str) -> Result<Option<i64>> {
+    Ok(find_symbol(store, name)?.map(|s| s.id))
+}
+
+/// Find the symbol best matching the given name, preferring exact matches and
+/// definition kinds. Returns the full [`Symbol`] so the caller has access to
+/// file_id, start_line, etc.
 fn find_symbol(store: &IndexStore, name: &str) -> Result<Option<crate::types::Symbol>> {
-    let filter = SymbolFilter {
+    // Exact match first (no LIKE wildcards in the query value).
+    let exact = store.query_symbols(&crate::types::SymbolFilter {
         name: Some(name.to_string()),
-        limit: Some(1),
         ..Default::default()
-    };
-    let symbols = store.query_symbols(&filter)?;
-    Ok(symbols.into_iter().next())
+    })?;
+    let exact: Vec<_> = exact.into_iter().filter(|s| s.name == name).collect();
+    if let Some(sym) = best_candidate(&exact) {
+        return Ok(Some(sym.clone()));
+    }
+
+    // Fall back to substring matches (query_symbols is case-insensitive).
+    let candidates = store.query_symbols(&crate::types::SymbolFilter {
+        name: Some(name.to_string()),
+        ..Default::default()
+    })?;
+    Ok(best_candidate(&candidates).cloned())
 }
 
 /// Look up a symbol's name by its ID.

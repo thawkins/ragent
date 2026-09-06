@@ -788,6 +788,38 @@ impl IndexStore {
         Ok(imports)
     }
 
+    /// Load every import row in the database, grouped by file.
+    ///
+    /// Used by the graph edge-derivation snapshot ([`crate::graph::edges`])
+    /// so the whole import set is read in a single SQL scan under one brief
+    /// store lock instead of one query per file.
+    pub fn list_all_imports(&self) -> Result<Vec<(i64, ImportEntry)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT file_id, imported_name, source_module, alias, line, kind
+             FROM imports ORDER BY file_id, line",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                ImportEntry {
+                    file_id: row.get(0)?,
+                    imported_name: row.get(1)?,
+                    source_module: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    alias: row.get(3)?,
+                    line: row.get::<_, i64>(4)? as u32,
+                    kind: row.get(5)?,
+                },
+            ))
+        })?;
+
+        let mut imports = Vec::new();
+        for r in rows {
+            imports.push(r?);
+        }
+        Ok(imports)
+    }
+
     /// Search imports by imported name.
     pub fn query_imports(&self, name_substring: &str) -> Result<Vec<ImportEntry>> {
         let mut stmt = self.conn.prepare_cached(
@@ -1351,6 +1383,9 @@ impl IndexStore {
             last_incremental_update: None,
             index_size_bytes: 0,
             fts_doc_count: 0, // set by CodeIndex::status()
+            graph_total_edges: 0,
+            graph_nodes: 0,
+            graph_communities: 0,
             total_references,
         })
     }

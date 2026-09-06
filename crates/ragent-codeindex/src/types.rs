@@ -268,6 +268,13 @@ pub struct IndexStats {
     pub fts_doc_count: u64,
     /// Total number of symbol references stored.
     pub total_references: u64,
+    /// Total number of edges in the semantic edge graph (`graph_edges`
+    /// table).  Zero when the graph has not been built yet.
+    pub graph_total_edges: u64,
+    /// Number of distinct symbols appearing as a graph edge endpoint.
+    pub graph_nodes: u64,
+    /// Number of distinct communities detected by the last community run.
+    pub graph_communities: u64,
 }
 
 impl fmt::Display for IndexStats {

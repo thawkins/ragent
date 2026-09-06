@@ -334,8 +334,8 @@ async fn test_plot_canvas_bounds_are_enforced() {
         .execute(
             json!({
                 "series": { "data": [[0.0, 0.0], [1.0, 1.0]] },
-                "width": 999999,
-                "height": 999999
+                "width": 999_999,
+                "height": 999_999
             }),
             &ctx(),
         )

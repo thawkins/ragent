@@ -14,6 +14,8 @@ the project root `README.md` and the **Tutorial** in
 
 1. [Overview](#1-overview)
 2. [File Discovery and Loading Order](#2-file-discovery-and-loading-order)
+   - [Auto-creation](#auto-creation)
+   - [Load cache and save invalidation](#load-cache-and-save-invalidation)
 3. [Merge Semantics](#3-merge-semantics)
 4. [CLI and Environment Overrides](#4-cli-and-environment-overrides)
 5. [Config Error Reporting](#5-config-error-reporting)
@@ -138,6 +140,26 @@ illustration only.
 If no config file is found at either the global or project path, `Config::load`
 creates a `.ragent/` directory and writes a default `ragent.json` there so the
 user has a starting point.
+
+### Load cache and save invalidation
+
+`Config::load()` keeps a process-level cache of the resolved configuration,
+keyed on the current working directory plus the `(path, mtime, size)` tuple
+of every candidate config file that existed at load time. Two rules keep the
+cache coherent (the M-025 discipline):
+
+- The mtime snapshot is taken **after** `load_uncached()` runs, so a
+  first-time load that auto-creates `.ragent/ragent.json` includes the new
+  file in the cache key.
+- Every successful write through `Config::save()` or
+  `Config::save_to_source()` calls `Config::invalidate_load_cache()`, so the
+  next `load()` re-reads from disk instead of serving the pre-save config.
+
+Together these guarantee that TUI saves (`/codeindex off`, `/tools`, ...) are
+immediately visible to subsequent loads in the same process — including the
+case where the save created a config file that was absent from the cached
+mtime snapshot (for example, a fresh environment with no global config, as on
+CI).
 
 ---
 
