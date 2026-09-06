@@ -45,6 +45,7 @@ const fn sample_doc(item: ResearchItem) -> ResearchDocument {
         output_format: OutputFormat::Imrad,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     }
 }
 

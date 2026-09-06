@@ -27,6 +27,39 @@ use crate::app::state::{App, LogLevel, ScreenMode};
 use crate::theme::StatusHistory;
 
 impl App {
+    /// Collapse `$HOME` at the front of `path` to `~` for display.
+    ///
+    /// The inverse of [`expand_home_path`]; used wherever a real path is
+    /// rendered to the user. Paths are never collapsed for filesystem use.
+    pub(crate) fn collapse_home_path(path: &std::path::Path) -> String {
+        let s = path.display().to_string();
+        if let Some(home) = std::env::var_os("HOME") {
+            let home = home.to_string_lossy();
+            if let Some(rest) = s.strip_prefix(home.as_ref()) {
+                return format!("~{rest}");
+            }
+        }
+        s
+    }
+
+    /// Expand a leading `~` to `$HOME` and return the real filesystem path.
+    ///
+    /// Defensive guard for display-derived strings (restored sessions,
+    /// persisted settings): a literal `~/...` value joined onto the process
+    /// cwd would create a bogus `~/` directory tree on disk.
+    pub(crate) fn expand_home_path(path: &std::path::Path) -> std::path::PathBuf {
+        let s = path.display().to_string();
+        if let Some(rest) = s.strip_prefix("~") {
+            if rest.starts_with('/') || rest.is_empty() {
+                if let Some(home) = std::env::var_os("HOME") {
+                    if !home.is_empty() {
+                        return std::path::PathBuf::from(home).join(rest.trim_start_matches('/'));
+                    }
+                }
+            }
+        }
+        path.to_path_buf()
+    }
     /// Construct a new `App` instance wired to the supplied event bus,
     /// storage, provider registry, and session processor.
     ///
@@ -43,18 +76,8 @@ impl App {
     ) -> Self {
         let mut sub = StartupTimings::new();
 
-        let cwd = std::env::current_dir()
-            .map(|p| {
-                let path = p.display().to_string();
-                if let Some(home) = std::env::var_os("HOME") {
-                    let home = home.to_string_lossy();
-                    if let Some(rest) = path.strip_prefix(home.as_ref()) {
-                        return format!("~{rest}");
-                    }
-                }
-                path
-            })
-            .unwrap_or_default();
+        let cwd_path = std::env::current_dir().unwrap_or_default();
+        let cwd = Self::collapse_home_path(&cwd_path);
 
         let t0 = Instant::now();
         let git_branch = Self::detect_git_branch();

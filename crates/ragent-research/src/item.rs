@@ -89,6 +89,11 @@ pub struct ResearchItem {
     /// read directly from the original paywalled URL (FR-015).
     #[serde(default)]
     pub open_access_recovery: bool,
+    /// Verbatim front-end invocation (e.g. `ragent research create --name x
+    /// "topic" --tier full`) recorded in frontmatter so a future
+    /// `/research update` command can replay the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation: Option<String>,
 }
 
 impl ResearchItem {
@@ -112,6 +117,7 @@ impl ResearchItem {
             output_format: None,
             model: None,
             open_access_recovery: false,
+            invocation: None,
         }
     }
 
@@ -237,6 +243,14 @@ impl ResearchItem {
         }
         if self.open_access_recovery {
             out.push_str("open_access_recovery: true\n");
+        }
+        if let Some(inv) = &self.invocation {
+            out.push_str(&format!(
+                "invocation: \"{}\"\n",
+                strip_control_chars(inv)
+                    .replace(['\n', '\r'], " ")
+                    .replace('"', "\\\"")
+            ));
         }
         out.push_str("---\n\n");
         out
@@ -374,6 +388,7 @@ impl ResearchItem {
             .remove("open_access_recovery")
             .map(|v| v.trim().eq_ignore_ascii_case("true"))
             .unwrap_or(false);
+        let invocation = fields.remove("invocation").map(|v| unquote_yaml_scalar(&v));
 
         Ok(Self {
             name,
@@ -387,6 +402,7 @@ impl ResearchItem {
             output_format,
             model,
             open_access_recovery,
+            invocation,
         })
     }
 }
@@ -997,6 +1013,66 @@ mod tests {
         let json = serde_json::to_string(&item).unwrap();
         let back: ResearchItem = serde_json::from_str(&json).unwrap();
         assert!(back.open_access_recovery);
+    }
+
+    #[test]
+    fn render_frontmatter_includes_invocation_when_set() {
+        let mut item = ResearchItem::new(sample_name(), "Rust Async", "topic");
+        item.invocation =
+            Some("ragent research create --name rust-async \"topic\" --tier full".to_string());
+        let fm = item.render_frontmatter();
+        assert!(
+            fm.contains(
+                "invocation: \"ragent research create --name rust-async \\\"topic\\\" --tier full\""
+            ),
+            "frontmatter should record the verbatim invocation; got:\n{fm}"
+        );
+    }
+
+    #[test]
+    fn render_frontmatter_omits_invocation_when_none() {
+        let item = ResearchItem::new(sample_name(), "Rust Async", "topic");
+        let fm = item.render_frontmatter();
+        assert!(
+            !fm.contains("invocation:"),
+            "frontmatter should omit invocation line when unset; got:\n{fm}"
+        );
+    }
+
+    #[test]
+    fn from_frontmatter_parses_invocation() {
+        let block = "---\nname: rust-async\ntitle: Rust Async\ntopic: topic\ninvocation: \"ragent research create --name rust-async \\\"topic\\\"\"\n---\n";
+        let item = ResearchItem::from_frontmatter(block).expect("must parse");
+        assert_eq!(
+            item.invocation.as_deref(),
+            Some("ragent research create --name rust-async \"topic\"")
+        );
+    }
+
+    #[test]
+    fn from_frontmatter_defaults_invocation_to_none() {
+        let block = "---\nname: rust-async\ntitle: Rust Async\ntopic: topic\n---\n";
+        let item = ResearchItem::from_frontmatter(block).expect("must parse");
+        assert!(item.invocation.is_none());
+    }
+
+    #[test]
+    fn frontmatter_invocation_round_trips() {
+        let mut item = ResearchItem::new(sample_name(), "Rust Async", "topic");
+        item.invocation =
+            Some("ragent research create --name rust-async \"a: b\" --tier full".to_string());
+        let fm = item.render_frontmatter();
+        let back = ResearchItem::from_frontmatter(&fm).expect("must parse");
+        assert_eq!(back.invocation, item.invocation);
+    }
+
+    #[test]
+    fn serde_round_trip_preserves_invocation() {
+        let mut item = ResearchItem::new(sample_name(), "Rust Async", "topic");
+        item.invocation = Some("ragent research create --name rust-async \"topic\"".to_string());
+        let json = serde_json::to_string(&item).unwrap();
+        let back: ResearchItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.invocation, item.invocation);
     }
 
     #[test]

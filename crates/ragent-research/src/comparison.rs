@@ -95,6 +95,7 @@ pub fn build_comparison_table_body(
             body.push_str(&format!(" {} |", escape_pipe(&cell)));
         }
         let profile_summary = profile
+            .filter(|p| !p.summary.trim().is_empty())
             .map(|p| compact_profile_summary(&p.summary))
             .unwrap_or_else(|| "—".to_string());
         body.push_str(&format!(" {} |\n", escape_pipe(&profile_summary)));
@@ -115,24 +116,55 @@ pub fn build_comparison_table_body(
             escape_markdown(&entity.name),
             escape_markdown(&category_note)
         ));
-        if let Some(profile) = profile {
-            body.push_str(&escape_markdown(&profile.summary).trim());
-            body.push_str("\n\n");
-        } else {
-            body.push_str("_(no researcher summary available for this entity)_\n\n");
-        }
+        let summary_text = profile
+            .filter(|p| !p.summary.trim().is_empty())
+            .map(|p| render_profile_summary(&p.summary))
+            .unwrap_or_else(|| "_(no researcher summary available for this entity)_".to_string());
+        body.push_str(&summary_text);
+        body.push_str("\n\n");
     }
 
     body
+}
+
+/// Labels that begin known researcher-summary boilerplate lines (the woven
+/// mission brief, progress counters). Criterion cells and profile snippets
+/// must skip these so the cells hold entity attributes, not brief prose.
+const RESEARCHER_BOILERPLATE_LABELS: [&str; 9] = [
+    "Mission:",
+    "Approach:",
+    "Output expectation:",
+    "Scope note:",
+    "Audience:",
+    "Success criteria:",
+    "Progress:",
+    "Scope:",
+    "Model:",
+];
+
+/// Whether a summary line is mission-brief boilerplate rather than content.
+fn is_researcher_boilerplate(line: &str) -> bool {
+    let t = line.trim().trim_start_matches('*');
+    RESEARCHER_BOILERPLATE_LABELS
+        .iter()
+        .any(|label| t.starts_with(label))
 }
 
 /// Extract a short cell value for `criterion` from `summary`.
 ///
 /// The heuristic searches for the criterion keyword and returns the sentence
 /// or phrase that contains it, truncated to keep table cells readable. When
-/// the criterion is not mentioned, returns `"—"`.
+/// the criterion is not mentioned, returns `"—"`. Heading-style lines (the
+/// researcher header) and mission-brief boilerplate lines are skipped so the
+/// cell reflects profile content.
 fn extract_criterion_cell(summary: &str, criterion: &str) -> String {
-    let lower_summary = summary.to_lowercase();
+    let body = summary
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#') && !is_researcher_boilerplate(l))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let search_text = if body.is_empty() { summary } else { &body };
+    let lower_summary = search_text.to_lowercase();
     let lower_criterion = criterion.to_lowercase();
     let keyword = lower_criterion
         .split_whitespace()
@@ -141,17 +173,20 @@ fn extract_criterion_cell(summary: &str, criterion: &str) -> String {
 
     if let Some(idx) = lower_summary.find(keyword) {
         // Find the start of the sentence/line containing the keyword.
-        let start = summary[..idx]
+        let start = search_text[..idx]
             .rfind(['\n', '.', ';'])
             .map(|i| i + 1)
             .unwrap_or(0);
-        let end = summary[idx..]
+        let end = search_text[idx..]
             .find(['\n', '.', ';'])
             .map(|i| idx + i + 1)
-            .unwrap_or(summary.len());
-        let snippet = summary[start..end].trim();
+            .unwrap_or(search_text.len());
+        let snippet = search_text[start..end].trim();
         if snippet.len() > 120 {
-            format!("{}…", snippet[..120].trim_end())
+            format!(
+                "{}…",
+                snippet[..snippet.floor_char_boundary(120)].trim_end()
+            )
         } else {
             snippet.to_string()
         }
@@ -161,13 +196,52 @@ fn extract_criterion_cell(summary: &str, criterion: &str) -> String {
 }
 
 /// Return a compact one-line profile summary for the table's Profile column.
+/// Heading-style lines (e.g. the researcher header `# Researcher …`) and
+/// mission-brief boilerplate lines are skipped so the cell shows actual
+/// profile content.
 fn compact_profile_summary(summary: &str) -> String {
-    let first_line = summary.lines().next().unwrap_or(summary).trim();
+    let first_line = summary
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#') && !is_researcher_boilerplate(l))
+        .unwrap_or(summary.lines().next().unwrap_or(summary).trim());
     if first_line.len() > 140 {
-        format!("{}…", first_line[..140].trim_end())
+        format!(
+            "{}…",
+            first_line[..first_line.floor_char_boundary(140)].trim_end()
+        )
     } else {
         first_line.to_string()
     }
+}
+
+/// Render a researcher summary under an entity's `### {Entity}` subsection.
+///
+/// The researcher boilerplate header (`# Researcher researcher-N: ...`) is
+/// dropped and every remaining heading inside the summary is demoted to
+/// `####` so the summary's internal sections (`Summary`, `Findings`, ...)
+/// nest below the entity heading instead of escaping the document outline.
+/// Newlines are preserved: flattening them (the previous behaviour) fused
+/// the whole profile into a single paragraph that inherited the header's
+/// heading style, which made the section unreadable.
+fn render_profile_summary(summary: &str) -> String {
+    let mut rendered = String::new();
+    for line in summary.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            let heading_text = trimmed.trim_start_matches('#').trim();
+            if heading_text.starts_with("Researcher ") {
+                continue;
+            }
+            rendered.push_str("#### ");
+            rendered.push_str(heading_text);
+            rendered.push('\n');
+        } else {
+            rendered.push_str(line);
+            rendered.push('\n');
+        }
+    }
+    rendered.trim().to_string()
 }
 
 /// Escape pipe characters for Markdown tables.
@@ -231,5 +305,57 @@ mod tests {
         )];
         let body = build_comparison_table_body(&entities, &criteria, &profiles);
         assert!(body.contains("| — |"));
+    }
+
+    #[test]
+    fn compact_profile_summary_skips_researcher_header() {
+        let summary = "# Researcher researcher-2: Research Together.ai for 'topic'\n\n\
+                       Together AI competes on catalog breadth and workflow depth.";
+        let cell = compact_profile_summary(summary);
+        assert!(cell.starts_with("Together AI competes"));
+        assert!(!cell.contains("Researcher"));
+    }
+
+    #[test]
+    fn criterion_cell_skips_researcher_header() {
+        let summary = "# Researcher researcher-3: Research Groq for 'topic'\n\n\
+                       Groq delivers the fastest LLM inference via custom silicon.";
+        let cell = extract_criterion_cell(summary, "LLM inference");
+        assert!(cell.contains("fastest LLM inference"));
+        assert!(!cell.contains("Researcher"));
+    }
+
+    #[test]
+    fn entity_profile_preserves_newlines_and_drops_researcher_header() {
+        let entities = vec![entity("Groq")];
+        let criteria = vec!["speed".to_string()];
+        let summary = "# Researcher researcher-3: Research Groq for 'topic'\n\n\
+                       ## Summary\n\nGroq is the fastest open-model inference provider.\n\n\
+                       ## Findings\n\n- LPU silicon delivers 750 tok/s on Llama 3 8B.";
+        let profiles = vec![CompetitiveProfile::new(&entities[0], summary)];
+        let body = build_comparison_table_body(&entities, &criteria, &profiles);
+        let idx = body.find("## Entity Profiles").expect("profiles section");
+        let section = &body[idx..];
+        assert!(!section.contains("Researcher"), "{section}");
+        assert!(
+            section.contains("#### Summary\n\nGroq is the fastest"),
+            "{section}"
+        );
+        assert!(
+            section.contains("#### Findings\n\n- LPU silicon delivers"),
+            "{section}"
+        );
+    }
+
+    #[test]
+    fn entity_profile_empty_summary_renders_placeholder() {
+        let entities = vec![entity("Groq")];
+        let profiles = vec![CompetitiveProfile::new(&entities[0], "")];
+        let body = build_comparison_table_body(&entities, &["speed".to_string()], &profiles);
+        assert!(body.contains("_(no researcher summary available for this entity)_"));
+        assert!(
+            body.contains("| — |"),
+            "empty profile cell must render an em dash"
+        );
     }
 }

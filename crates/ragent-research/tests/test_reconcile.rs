@@ -20,7 +20,7 @@ fn web_source(index: usize, body: &str) -> Source {
         body: body.to_string(),
         relevance: "High".to_string(),
         search_tool: "mf_search".to_string(),
-        search_engine: "duckduckgo".to_string(),
+        search_engine: "openalex".to_string(),
         content_type: None,
         page_type: None,
         media_type: "page".to_string(),

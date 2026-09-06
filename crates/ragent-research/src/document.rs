@@ -172,6 +172,10 @@ pub struct ResearchDocument {
     /// When `Some`, the `## Self-Evaluation Scorecard` section is inserted
     /// before the References Index.
     pub evaluation_scorecard: Option<String>,
+    /// Pre-rendered per-provider search-request summary markdown. When
+    /// `Some`, the `### Search Provider Requests` section is rendered next to
+    /// the Search Engine Summary. `None` omits the section entirely.
+    pub provider_stats: Option<String>,
 }
 
 /// One in-project cross-reference row (FR-009).
@@ -1403,6 +1407,18 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push('\n');
     }
 
+    // ── Search Provider Requests ────────────────────────────────────────
+    // Per-provider search-request totals for the run (how many requests were
+    // sent to each search tool/engine), rendered only when the session
+    // recorded at least one provider call.
+    if let Some(provider_stats) = &doc.provider_stats
+        && !provider_stats.trim().is_empty()
+    {
+        body.push_str("### Search Provider Requests\n\n");
+        body.push_str(provider_stats.trim_end());
+        body.push_str("\n\n");
+    }
+
     // ── Executive Summary ─────────────────────────────────────────────────
     body.push_str("## Executive Summary\n\n");
     if doc.summary.trim().is_empty() {
@@ -1628,6 +1644,17 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push('\n');
     }
 
+    // ── Search Provider Requests (IMRaD Methods sub-section) ───────────
+    // Per-provider search-request totals for the run, rendered only when
+    // the session recorded at least one provider call.
+    if let Some(provider_stats) = &doc.provider_stats
+        && !provider_stats.trim().is_empty()
+    {
+        body.push_str("### Search Provider Requests\n\n");
+        body.push_str(provider_stats.trim_end());
+        body.push_str("\n\n");
+    }
+
     body.push_str("### Research Configuration\n\n");
     body.push_str(
         "Evidence was gathered through automated web search and local cross-reference \
@@ -1782,23 +1809,29 @@ fn assemble_comparison_table_body(doc: &ResearchDocument, topic: &str) -> String
         body.push_str("\n\n");
     }
 
+    // ── Executive Summary ──────────────────────────────────────────────
+    // Rendered before the comparison table (like the report layout places it
+    // before the findings) so readers see the synthesis at the top of the
+    // artifact instead of after the entity profiles.
+    body.push_str("## Executive Summary\n\n");
+    if doc.summary.trim().is_empty() {
+        body.push_str("_(no executive summary recorded yet — the synthesis pass will populate)_\n");
+    } else {
+        body.push_str(&strip_control_chars(doc.summary.trim()));
+        body.push('\n');
+    }
+    body.push('\n');
+
     if let Some(table) = doc.comparison_table.as_deref().filter(|t| !t.is_empty()) {
-        body.push_str(&strip_control_chars(table));
+        // Trim the block's trailing blank lines (the builder already ends with
+        // `\n\n`) so a doubled blank-line gap does not precede Findings.
+        body.push_str(strip_control_chars(table).trim_end());
         body.push_str("\n\n");
     } else {
         body.push_str(
             "## Comparison Table\n\n_(no comparison table was produced for this run)_\n\n",
         );
     }
-
-    body.push_str("## Executive Summary\n\n");
-    if doc.summary.trim().is_empty() {
-        body.push_str("_(no executive summary recorded yet — run a gathering pass to populate)_\n");
-    } else {
-        body.push_str(&strip_control_chars(doc.summary.trim()));
-        body.push('\n');
-    }
-    body.push('\n');
 
     body.push_str("## Findings\n\n");
     if doc.findings.is_empty() {
@@ -1818,7 +1851,6 @@ fn assemble_comparison_table_body(doc: &ResearchDocument, topic: &str) -> String
         }
     }
 
-    body.push_str("## References Index\n\n");
     body.push_str(&ResearchIo::render_references_index(
         &doc.item.sources,
         Utc::now(),
@@ -1903,6 +1935,7 @@ fn placeholder_document(
         output_format,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     }
 }
 
@@ -2582,14 +2615,14 @@ fn normalize_finding_labels(finding: &str) -> String {
 /// videos).
 ///
 /// Each [`Source::Web`] carries a comma-separated `search_engine` field (e.g.
-/// `"duckduckgo, brave"`). This function splits that field, counts the
+/// `"openalex, wikipedia"`). This function splits that field, counts the
 /// `media_type` (`"page"`, `"pdf"`, `"youtube"`) per engine, and emits a
 /// Markdown table:
 ///
 /// ```text
 /// | Engine | Pages | PDFs | Videos | Total |
 /// |--------|-------|------|--------|-------|
-/// | duckduckgo | 5 | 1 | 0 | 6 |
+/// | openalex | 5 | 1 | 0 | 6 |
 /// ```
 ///
 /// Returns an empty string when no web sources have a non-empty
@@ -2651,6 +2684,33 @@ pub fn render_search_engine_summary(sources: &[Source]) -> String {
             counts.videos,
             counts.total(),
         ));
+    }
+    out
+}
+
+/// Render the per-provider search-request summary section.
+///
+/// `tool_calls` holds `(search tool, call count)` pairs as snapshotted from
+/// the run's [`crate::provider_stats::ProviderCallStats`] counter. The output
+/// is a Markdown table with one row per provider; returns an empty string
+/// when the list is empty so callers can unconditionally attach the result.
+///
+/// # Example
+///
+/// ```text
+/// | Search Provider | Requests |
+/// |-----------------|----------|
+/// | mf_search       | 12       |
+/// ```
+#[must_use]
+pub fn render_provider_stats_summary(tool_calls: &[(String, usize)]) -> String {
+    if tool_calls.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("| Search Provider | Requests |\n");
+    out.push_str("|-----------------|----------|\n");
+    for (tool, count) in tool_calls {
+        out.push_str(&format!("| {} | {} |\n", escape_pipe(tool), count));
     }
     out
 }
@@ -2749,6 +2809,7 @@ mod tests {
             output_format: crate::run_config::OutputFormat::Report,
             comparison_table: None,
             evaluation_scorecard: None,
+            provider_stats: None,
         }
     }
 
@@ -3145,18 +3206,18 @@ mod tests {
     #[test]
     fn render_search_engine_summary_counts_pages_pdfs_videos() {
         let sources = [
-            web_source("duckduckgo, brave", "page"),
-            web_source("duckduckgo", "page"),
-            web_source("brave", "pdf"),
+            web_source("openalex, wikipedia", "page"),
+            web_source("openalex", "page"),
+            web_source("wikipedia", "pdf"),
             web_source("exa", "youtube"),
             web_source("exa", "page"),
         ];
         let table = render_search_engine_summary(&sources);
         assert!(table.contains("| Engine | Pages | PDFs | Videos | Total |"));
-        // brave: 1 page (from multi-engine source) + 1 pdf = 1 page, 1 pdf, 0 videos, 2 total
-        assert!(table.contains("| brave | 1 | 1 | 0 | 2 |"));
-        // duckduckgo: 2 pages (one from multi-engine, one single) = 2 pages
-        assert!(table.contains("| duckduckgo | 2 | 0 | 0 | 2 |"));
+        // wikipedia: 1 page (from multi-engine source) + 1 pdf = 1 page, 1 pdf, 0 videos, 2 total
+        assert!(table.contains("| wikipedia | 1 | 1 | 0 | 2 |"));
+        // openalex: 2 pages (one from multi-engine, one single) = 2 pages
+        assert!(table.contains("| openalex | 2 | 0 | 0 | 2 |"));
         // exa: 1 youtube + 1 page = 1 page, 0 pdfs, 1 video, 2 total
         assert!(table.contains("| exa | 1 | 0 | 1 | 2 |"));
     }
@@ -3179,7 +3240,10 @@ mod tests {
     #[test]
     fn assemble_document_renders_search_engine_summary_after_queries() {
         let mut item = sample_item();
-        item.sources = vec![web_source("duckduckgo", "page"), web_source("brave", "pdf")];
+        item.sources = vec![
+            web_source("openalex", "page"),
+            web_source("wikipedia", "pdf"),
+        ];
         let mut doc = sample_doc(item);
         doc.decomposed_queries = vec!["test query".into()];
         let assembled = assemble_document(&doc);
@@ -3199,8 +3263,8 @@ mod tests {
             summary_pos < exec_pos,
             "Search Engine Summary should come before Executive Summary"
         );
-        assert!(assembled.body.contains("| duckduckgo | 1 | 0 | 0 | 1 |"));
-        assert!(assembled.body.contains("| brave | 0 | 1 | 0 | 1 |"));
+        assert!(assembled.body.contains("| openalex | 1 | 0 | 0 | 1 |"));
+        assert!(assembled.body.contains("| wikipedia | 0 | 1 | 0 | 1 |"));
     }
 
     #[test]

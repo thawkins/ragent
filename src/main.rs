@@ -955,6 +955,11 @@ async fn async_main() -> Result<()> {
                     .flatten()
                     .filter(|k| !k.is_empty())
                     .or_else(|| {
+                        std::env::var("OLLAMA_CLOUD_API_KEY")
+                            .ok()
+                            .filter(|k| !k.is_empty())
+                    })
+                    .or_else(|| {
                         std::env::var("OLLAMA_API_KEY")
                             .ok()
                             .filter(|k| !k.is_empty())
@@ -1148,7 +1153,12 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
             }
         }
         Some(Commands::Research { command }) => {
-            cli::handle_research_command(*command, resolved_agent.model.clone()).await?;
+            cli::handle_research_command(
+                *command,
+                resolved_agent.model.clone(),
+                Some(storage.clone()),
+            )
+            .await?;
         }
     }
     Ok(())

@@ -25,7 +25,6 @@ ragent-tools-extended = { path = "../ragent-tools-extended" }
 ragent-tools-vcs = { path = "../ragent-tools-vcs" }
 ragent-server = { path = "../ragent-server" }
 ragent-telemetry = { path = "../ragent-telemetry" }
-axum = { workspace = true }
 dirs = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -35,7 +34,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
-tokio-stream = { workspace = true }
 futures = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }

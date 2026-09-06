@@ -10,6 +10,7 @@ use ragent_research::{
 #[test]
 fn config_snapshot_json_includes_output_format() {
     let event = SessionEvent::ConfigSnapshot {
+        mode: "tiered".to_string(),
         output_format: OutputFormat::Imrad.as_str().to_string(),
         depth: Some(Depth::Deep.as_str().to_string()),
         iterations: Some(3),
@@ -31,6 +32,7 @@ fn config_snapshot_json_includes_output_format() {
 #[test]
 fn config_snapshot_json_omits_optional_fields() {
     let event = SessionEvent::ConfigSnapshot {
+        mode: "tiered".to_string(),
         output_format: OutputFormat::Report.as_str().to_string(),
         depth: None,
         iterations: None,
@@ -50,6 +52,7 @@ fn config_snapshot_json_omits_optional_fields() {
 #[test]
 fn config_snapshot_json_includes_from_urls() {
     let event = SessionEvent::ConfigSnapshot {
+        mode: "tiered".to_string(),
         output_format: OutputFormat::ExecutiveSummary.as_str().to_string(),
         depth: None,
         iterations: None,
@@ -65,6 +68,7 @@ fn config_snapshot_json_includes_from_urls() {
 #[test]
 fn config_snapshot_json_includes_multiple_from_urls() {
     let event = SessionEvent::ConfigSnapshot {
+        mode: "tiered".to_string(),
         output_format: OutputFormat::Report.as_str().to_string(),
         depth: None,
         iterations: None,
@@ -86,6 +90,7 @@ fn config_snapshot_json_includes_multiple_from_urls() {
 #[test]
 fn config_snapshot_json_includes_from_files() {
     let event = SessionEvent::ConfigSnapshot {
+        mode: "tiered".to_string(),
         output_format: OutputFormat::Report.as_str().to_string(),
         depth: None,
         iterations: None,
@@ -100,6 +105,7 @@ fn config_snapshot_json_includes_from_files() {
 #[test]
 fn config_snapshot_json_includes_multiple_from_files() {
     let event = SessionEvent::ConfigSnapshot {
+        mode: "tiered".to_string(),
         output_format: OutputFormat::Report.as_str().to_string(),
         depth: None,
         iterations: None,

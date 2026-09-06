@@ -44,6 +44,8 @@ use crate::open_access::{
     DEFAULT_OA_MIN_FULL_TEXT_CHARS, OpenAccessClient, RecoveredOpenAccess, ReqwestOpenAccessClient,
     recover_open_access,
 };
+use crate::provider_stats::ProviderCallStats;
+use crate::search_budget::{SearchBudget, SharedQueryCache};
 use crate::source::Source;
 use crate::source_vault::SourceVault;
 use std::time::{Duration, Instant};
@@ -79,7 +81,7 @@ pub const DEFAULT_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// the capture phase of [`WebGatherer::gather_with_observer`]. 10 is a safe
 /// middle ground: fast enough to keep wall-clock latency low when a search
 /// returns many candidate URLs, while staying well clear of OS file-descriptor
-/// limits and typical search-provider rate ceilings.  Override with the
+/// limits and typical search-provider rate ceilings. Override with the
 /// `--fetch-concurrently N` CLI flag or [`WebGatherer::with_fetch_concurrency`].
 pub const DEFAULT_FETCH_CONCURRENCY: usize = 10;
 
@@ -143,14 +145,14 @@ pub const MIN_ENCYCLOPEDIA_CONTENT_CHARS: usize = 80;
 ///
 /// Scholarly backends (currently OpenAlex) rank results by their own
 /// `relevance_score`; the lexical title/snippet pre-filter is a heuristic for
-/// unranked HTML scrapers (DuckDuckGo, Brave) and would reject most scholarly
+/// unranked HTML scrapers (LangSearch, Tavily) and would reject most scholarly
 /// titles because they do not lexically overlap with the (often rephrased)
 /// research sub-query. Scholarly hits are therefore exempt from the lexical
 /// filter and from the URL fetch — their snippet is the evidence.
 ///
 /// A hit is scholarly only when OpenAlex is the *sole* contributing engine.
-/// When the same URL is also returned by a general web engine (DuckDuckGo,
-/// Brave), the page is a fetchable HTML page and the normal fetch path is
+/// When the same URL is also returned by a general web engine (LangSearch,
+/// Tavily), the page is a fetchable HTML page and the normal fetch path is
 /// preferred so the richer page body is captured instead of the concise
 /// abstract.
 fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
@@ -164,7 +166,7 @@ fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
 ///
 /// Encyclopedia backends (currently Wikipedia) rank results by their own
 /// search relevance; the lexical title/snippet pre-filter is a heuristic for
-/// unranked HTML scrapers (DuckDuckGo, Brave) and would reject most
+/// unranked HTML scrapers (LangSearch, Tavily) and would reject most
 /// encyclopedia titles because they use proper names and technical terms
 /// that do not lexically overlap with the (often rephrased) research
 /// sub-query. Encyclopedia hits are therefore exempt from the lexical filter
@@ -173,7 +175,7 @@ fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
 ///
 /// A hit is encyclopedia only when Wikipedia is the *sole* contributing
 /// engine. When the same URL is also returned by a general web engine
-/// (DuckDuckGo, Brave), the page is a fetchable HTML page and the normal fetch
+/// (LangSearch, Tavily), the page is a fetchable HTML page and the normal fetch
 /// path is preferred so the richer page body is captured instead of the
 /// concise summary.
 fn is_encyclopedia_hit(hit: &WebSearchHit) -> bool {
@@ -286,7 +288,7 @@ pub struct GatherResult {
     /// and were considered for fetching during the width sweep.
     pub considered_count: usize,
     /// Backend search engines that contributed at least one hit, sorted and
-    /// deduplicated (e.g. `["brave", "duckduckgo", "openalex"]`).
+    /// deduplicated (e.g. `["langsearch", "openalex", "tavily", "wikipedia"]`).
     pub engines: Vec<String>,
 }
 
@@ -324,7 +326,7 @@ pub struct WebSearchHit {
     /// produced the source.
     pub search_tool: String,
     /// Name(s) of the backend search engine(s) that returned this hit. For
-    /// `mf_search` this is a comma-separated list like `"duckduckgo, brave"`;
+    /// `mf_search` this is a comma-separated list like `"openalex, wikipedia"`;
     /// for `websearch` it is `"tavily"`.
     pub search_engine: String,
     /// Author name when the search engine exposed one in its result payload
@@ -545,6 +547,22 @@ pub enum GatherEvent {
         /// Number of sources already captured when the deadline fired.
         captured: usize,
     },
+    /// The run-scoped search budget was exhausted mid-gather, so remaining
+    /// sub-queries were skipped without issuing further search calls. Emitted
+    /// once per gather pass. The pass degrades to the hits captured so far.
+    SearchBudgetExhausted {
+        /// Search calls consumed by this run when the budget ran out.
+        used: usize,
+        /// Configured budget limit.
+        limit: usize,
+    },
+    /// End-of-pass summary of the search-provider request counts recorded by
+    /// the attached [`ProviderCallStats`] counter. Emitted once per gather
+    /// pass, only when a counter is attached.
+    ProviderCallsSummary {
+        /// `(search tool, call count)` pairs, sorted by tool name.
+        tool_calls: Vec<(String, usize)>,
+    },
 }
 
 /// Observer receiving [`GatherEvent`]s from [`WebGatherer`].
@@ -634,6 +652,18 @@ pub struct WebGatherer {
     /// full body is still written to the vault so citations can trace back to
     /// the captured source (FR-003, FR-018).
     summarizer: Option<Arc<dyn crate::page_summarizer::PageSummarizer>>,
+    /// Optional run-scoped search budget. When configured, each sub-query
+    /// search reserves one call from the shared counter before issuing any
+    /// provider request; once exhausted, remaining sub-queries are skipped.
+    search_budget: Option<Arc<SearchBudget>>,
+    /// Optional shared query-result cache. Successful search results are
+    /// memoised by normalized query text so identical sub-queries across
+    /// parallel researchers issue only one provider call.
+    query_cache: Option<Arc<SharedQueryCache>>,
+    /// Optional run-scoped per-provider search-request counter. When
+    /// configured, each logical search call is recorded and an end-of-pass
+    /// [`GatherEvent::ProviderCallsSummary`] is emitted.
+    provider_stats: Option<Arc<ProviderCallStats>>,
 }
 
 impl std::fmt::Debug for WebGatherer {
@@ -688,6 +718,9 @@ impl WebGatherer {
             oa_client: Some(Arc::new(ReqwestOpenAccessClient::new(None))),
             phase_deadline: None,
             summarizer: None,
+            search_budget: None,
+            query_cache: None,
+            provider_stats: None,
         }
     }
 
@@ -831,7 +864,7 @@ impl WebGatherer {
         }
     }
 
-    /// Attach a query decomposer.  When present, [`gather_with_observer`]
+    /// Attach a query decomposer. When present, [`gather_with_observer`]
     /// decomposes the topic into parallel sub-queries and deduplicates the
     /// combined results.
     #[must_use]
@@ -843,10 +876,10 @@ impl WebGatherer {
     /// Override the fetch-phase concurrency limit.
     ///
     /// Controls how many candidate page fetches are issued in parallel during
-    /// [`gather_with_observer`].  Values of `0` are clamped up to `1` so the
-    /// stream always makes progress.  Larger values reduce wall-clock latency
+    /// [`gather_with_observer`]. Values of `0` are clamped up to `1` so the
+    /// stream always makes progress. Larger values reduce wall-clock latency
     /// when a search returns many hits, at the cost of more in-flight HTTP
-    /// connections and memory.  The default is [`DEFAULT_FETCH_CONCURRENCY`]
+    /// connections and memory. The default is [`DEFAULT_FETCH_CONCURRENCY`]
     /// (10).
     ///
     /// This also bounds the deadline overshoot (FR-008): at most
@@ -946,6 +979,41 @@ impl WebGatherer {
     pub fn with_search_circuit_breaker_threshold(mut self, n: u32) -> Self {
         self.search_circuit_breaker_threshold = n;
         self
+    }
+
+    /// Attach a run-scoped search budget. Each sub-query search reserves one
+    /// call from the shared counter before issuing any provider request; once
+    /// exhausted, remaining sub-queries are skipped and the pass degrades to
+    /// the hits captured so far.
+    #[must_use]
+    pub fn with_search_budget(mut self, budget: Arc<SearchBudget>) -> Self {
+        self.search_budget = Some(budget);
+        self
+    }
+
+    /// Attach a shared query-result cache. Successful search results are
+    /// memoised by normalized query text so identical sub-queries across
+    /// parallel researchers issue only one provider call.
+    #[must_use]
+    pub fn with_query_cache(mut self, cache: Arc<SharedQueryCache>) -> Self {
+        self.query_cache = Some(cache);
+        self
+    }
+
+    /// Attach a run-scoped per-provider search-request counter. Each logical
+    /// search call is recorded and an end-of-pass
+    /// [`GatherEvent::ProviderCallsSummary`] is emitted.
+    #[must_use]
+    pub fn with_provider_stats(mut self, stats: Arc<ProviderCallStats>) -> Self {
+        self.provider_stats = Some(stats);
+        self
+    }
+
+    /// Access the attached run-scoped per-provider search-request counter, if
+    /// any. Cloning the `Arc` shares the same totals.
+    #[must_use]
+    pub fn provider_stats(&self) -> Option<Arc<ProviderCallStats>> {
+        self.provider_stats.clone()
     }
 
     /// Fetch a single URL and return it as a [`Source::Web`] plus the raw
@@ -1048,7 +1116,6 @@ impl WebGatherer {
     /// Gather up to `max_results` web sources for `topic`.
     ///
     /// Returns an empty `Vec` (not an error) when:
-    ///
     /// - The search tool returns no hits (FR-006 graceful degradation).
     /// - Every fetch call fails for transient reasons (logged at info,
     ///   not surfaced as an error to the caller — the local-gathering
@@ -1415,7 +1482,7 @@ impl WebGatherer {
             }
         }
 
-        // Determine the set of sub-queries.  If no decomposer is configured
+        // Determine the set of sub-queries. If no decomposer is configured
         // we still treat the original topic as a single query so callers see
         // a consistent [`GatherResult`].
         let queries: Vec<String> = if truncated {
@@ -1487,6 +1554,9 @@ impl WebGatherer {
         let max_retries = self.search_max_retries;
         let base_delay_ms = self.search_retry_base_delay_ms;
         let circuit_threshold = self.search_circuit_breaker_threshold;
+        let search_budget = self.search_budget.clone();
+        let query_cache = self.query_cache.clone();
+        let provider_stats = self.provider_stats.clone();
         let consecutive_failures = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let circuit_tripped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let search_futures: Vec<_> = queries
@@ -1496,11 +1566,28 @@ impl WebGatherer {
                 let tool = search_tool.clone();
                 let cf = consecutive_failures.clone();
                 let ct = circuit_tripped.clone();
+                let budget = search_budget.clone();
+                let cache = query_cache.clone();
+                let stats = provider_stats.clone();
                 async move {
                     // Circuit-breaker check: if already tripped, skip this
                     // search entirely and return a marker error.
                     if ct.load(std::sync::atomic::Ordering::Relaxed) {
                         return SearchCallOutcome::CircuitOpen;
+                    }
+                    // Run-scoped search budget: reserve one call before any
+                    // provider request. Exhaustion skips the search entirely.
+                    if let Some(budget) = &budget
+                        && !budget.try_acquire()
+                    {
+                        return SearchCallOutcome::BudgetExhausted;
+                    }
+                    // Shared query cache: an identical query already answered
+                    // this run is served without a provider call.
+                    if let Some(cache) = &cache
+                        && let Some(hits) = cache.get(&q)
+                    {
+                        return SearchCallOutcome::Ok { hits, retries: 0 };
                     }
                     // Retry loop with exponential backoff.
                     let mut attempt: u32 = 0;
@@ -1510,6 +1597,14 @@ impl WebGatherer {
                             Ok(hits) => {
                                 // Success: reset the consecutive-failure counter.
                                 cf.store(0, std::sync::atomic::Ordering::Relaxed);
+                                // Record one logical search call (retries
+                                // included) and memoise the result.
+                                if let Some(stats) = &stats {
+                                    stats.record(&hit_search_tool(&hits));
+                                }
+                                if let Some(cache) = &cache {
+                                    cache.insert(&q, hits.clone());
+                                }
                                 return SearchCallOutcome::Ok {
                                     hits,
                                     retries: attempt,
@@ -1524,6 +1619,12 @@ impl WebGatherer {
                                     ct.store(true, std::sync::atomic::Ordering::Relaxed);
                                 }
                                 if attempt >= max_retries {
+                                    // Record the logical call even on terminal
+                                    // failure so the provider total reflects
+                                    // the paid request.
+                                    if let Some(stats) = &stats {
+                                        stats.record(&hit_search_tool(&[]));
+                                    }
                                     return SearchCallOutcome::Err {
                                         error: last_error.clone(),
                                         retries: attempt,
@@ -1589,6 +1690,7 @@ impl WebGatherer {
             );
         };
         let mut circuit_open_emitted = false;
+        let mut budget_exhausted_emitted = false;
 
         while let Some((idx, outcome)) = next_bounded!(results) {
             // Deadline reached while waiting for the next sub-query search:
@@ -1663,7 +1765,6 @@ impl WebGatherer {
                             continue;
                         }
                         considered_count += 1;
-                        hit.matched_query = query.clone();
                         self.log_url_outcome(
                             &hit.url,
                             &query,
@@ -1777,6 +1878,25 @@ impl WebGatherer {
                         );
                     }
                     any_search_error = Some(format!("{query}: search circuit-breaker open"));
+                }
+                SearchCallOutcome::BudgetExhausted => {
+                    // The run-scoped search budget ran out before this
+                    // sub-query started. Emit the budget-exhausted event once
+                    // and skip the remaining sub-queries.
+                    if !budget_exhausted_emitted {
+                        if let Some(budget) = &self.search_budget {
+                            if let Some(obs) = observer {
+                                obs.on_event(GatherEvent::SearchBudgetExhausted {
+                                    used: budget.used(),
+                                    limit: budget.limit().unwrap_or(0),
+                                });
+                            }
+                        }
+                        budget_exhausted_emitted = true;
+                        tracing::warn!(
+                            "research: run search budget exhausted; skipping remaining sub-queries"
+                        );
+                    }
                 }
             }
         }
@@ -2335,6 +2455,15 @@ impl WebGatherer {
                 excluded: excluded_count,
             });
         }
+        // End-of-pass provider-call summary, emitted once when a counter is
+        // attached so the session can surface per-tool request totals.
+        if let Some(obs) = observer
+            && let Some(stats) = &self.provider_stats
+        {
+            obs.on_event(GatherEvent::ProviderCallsSummary {
+                tool_calls: stats.by_tool(),
+            });
+        }
         Ok(GatherResult {
             queries,
             sources,
@@ -2369,6 +2498,21 @@ enum SearchCallOutcome {
     /// The circuit-breaker was already open when this sub-query started, so no
     /// search call was made.
     CircuitOpen,
+    /// The run-scoped search budget was exhausted before this sub-query
+    /// started, so no search call was made.
+    BudgetExhausted,
+}
+
+/// Determine the search-tool name to attribute a logical search call to.
+///
+/// Prefers the `search_tool` field of the first returned hit; falls back to
+/// `"unknown"` when the hit list is empty (e.g. a terminal failure where no
+/// hits were captured) so the provider total still reflects the paid request.
+fn hit_search_tool(hits: &[WebSearchHit]) -> String {
+    hits.first()
+        .map(|h| h.search_tool.clone())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 /// Compute a deterministic relevance note for a captured web source.
@@ -2700,7 +2844,7 @@ mod tests {
             snippet: "Rust async runtime tokio".into(),
             matched_query: String::new(),
             search_tool: "mf_search".into(),
-            search_engine: "duckduckgo, openalex".into(),
+            search_engine: "langsearch, openalex".into(),
             author: None,
         }];
         let mut pages = std::collections::HashMap::new();
@@ -2835,7 +2979,7 @@ mod tests {
             snippet: "Rust programming language".into(),
             matched_query: String::new(),
             search_tool: "mf_search".into(),
-            search_engine: "duckduckgo, wikipedia".into(),
+            search_engine: "langsearch, wikipedia".into(),
             author: None,
         }];
         let mut pages = std::collections::HashMap::new();
@@ -3375,7 +3519,7 @@ mod tests {
     #[tokio::test]
     async fn gather_rejects_empty_topic() {
         let (g, _, _) = gatherer_with(Vec::new(), std::collections::HashMap::new(), Vec::new());
-        let err = g.gather("   ", 5).await.unwrap_err();
+        let err = g.gather(" ", 5).await.unwrap_err();
         assert!(matches!(err, WebGatherError::EmptyTopic));
     }
 
@@ -4575,7 +4719,7 @@ mod tests {
                 title: "Vaulted Rust Async Page".into(),
                 fetch_timestamp: Some(Utc::now()),
                 search_tool: "mf_search".into(),
-                search_engine: "duckduckgo".into(),
+                search_engine: "langsearch".into(),
                 media_type: "page".into(),
                 content_type: None,
                 body_text: body256("vaulted rust async runtime content"),
@@ -4698,7 +4842,7 @@ mod tests {
                     title: format!("Vaulted Rust Async Page {i}"),
                     fetch_timestamp: Some(Utc::now()),
                     search_tool: "mf_search".into(),
-                    search_engine: "duckduckgo".into(),
+                    search_engine: "langsearch".into(),
                     media_type: "page".into(),
                     content_type: None,
                     body_text: body256(&format!("vaulted rust async runtime content {i}")),
@@ -4751,7 +4895,7 @@ mod tests {
                 title: "Vaulted Rust Async Page".into(),
                 fetch_timestamp: Some(Utc::now()),
                 search_tool: "mf_search".into(),
-                search_engine: "duckduckgo".into(),
+                search_engine: "langsearch".into(),
                 media_type: "page".into(),
                 content_type: None,
                 body_text: body256("vaulted rust async runtime content"),
@@ -4827,7 +4971,7 @@ mod tests {
                     title: format!("Vaulted Rust Async Page {i}"),
                     fetch_timestamp: Some(Utc::now()),
                     search_tool: "mf_search".into(),
-                    search_engine: "duckduckgo".into(),
+                    search_engine: "langsearch".into(),
                     media_type: "page".into(),
                     content_type: None,
                     body_text: body256(&format!("vaulted rust async runtime content {i}")),
@@ -5008,7 +5152,7 @@ mod tests {
             snippet: "short abstract".into(),
             matched_query: String::new(),
             search_tool: "mf_search".into(),
-            search_engine: "duckduckgo".into(),
+            search_engine: "langsearch".into(),
             author: None,
         }];
         let mut pages = std::collections::HashMap::new();
@@ -5081,7 +5225,7 @@ mod tests {
             snippet: "already full text".into(),
             matched_query: String::new(),
             search_tool: "mf_search".into(),
-            search_engine: "duckduckgo".into(),
+            search_engine: "langsearch".into(),
             author: None,
         }];
         let mut pages = std::collections::HashMap::new();
@@ -5181,25 +5325,23 @@ mod tests {
     async fn width_sweep_tracks_parallel_engines_and_considered_count() {
         let hits = vec![
             WebSearchHit {
-                url: "https://ddg.example".into(),
-                title: "DuckDuckGo result".into(),
+                url: "https://langsearch.example".into(),
+                title: "LangSearch result".into(),
                 snippet: "topic Rust async runtime".into(),
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
-                search_engine: "duckduckgo".into(),
+                search_engine: "langsearch".into(),
                 author: None,
-            }
-,
+            },
             WebSearchHit {
-                url: "https://brave.example".into(),
-                title: "Brave result".into(),
+                url: "https://tavily.example".into(),
+                title: "Tavily result".into(),
                 snippet: "topic Rust async runtime".into(),
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
-                search_engine: "brave".into(),
+                search_engine: "tavily".into(),
                 author: None,
-            }
-,
+            },
             WebSearchHit {
                 url: "https://wikipedia.example".into(),
                 title: "Wikipedia summary".into(),
@@ -5208,8 +5350,7 @@ mod tests {
                 search_tool: "mf_search".into(),
                 search_engine: "wikipedia".into(),
                 author: None,
-            }
-,
+            },
             WebSearchHit {
                 url: "https://openalex.example/paper".into(),
                 title: "OpenAlex paper".into(),
@@ -5218,11 +5359,10 @@ mod tests {
                 search_tool: "mf_search".into(),
                 search_engine: "openalex".into(),
                 author: None,
-            }
-,
+            },
         ];
         let mut pages = std::collections::HashMap::new();
-        for url in ["https://ddg.example", "https://brave.example"] {
+        for url in ["https://langsearch.example", "https://tavily.example"] {
             pages.insert(
                 url.into(),
                 WebFetchedPage {
@@ -5242,7 +5382,7 @@ mod tests {
             .gather_with_observer("Rust async runtime", 10, None)
             .await
             .unwrap();
-        // DuckDuckGo and Brave pages are fetched; Wikipedia and OpenAlex are
+        // LangSearch and Tavily pages are fetched; Wikipedia and OpenAlex are
         // captured as snippet-only sources.
         assert_eq!(
             result.sources.len(),
@@ -5251,7 +5391,7 @@ mod tests {
         );
         assert_eq!(
             result.engines,
-            vec!["brave", "duckduckgo", "openalex", "wikipedia"],
+            vec!["langsearch", "openalex", "tavily", "wikipedia"],
             "engines should be sorted and deduplicated"
         );
         assert_eq!(
@@ -5272,7 +5412,7 @@ mod tests {
             snippet: "topic Rust async runtime".into(),
             matched_query: String::new(),
             search_tool: "mf_search".into(),
-            search_engine: "duckduckgo, brave".into(),
+            search_engine: "langsearch, tavily".into(),
             author: None,
         }];
         let mut pages = std::collections::HashMap::new();
@@ -5295,7 +5435,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.sources.len(), 1);
-        assert_eq!(result.engines, vec!["brave", "duckduckgo"]);
+        assert_eq!(result.engines, vec!["langsearch", "tavily"]);
     }
 
     /// T-006: the width-sweep summary event is emitted after parallel
@@ -5304,26 +5444,26 @@ mod tests {
     async fn width_sweep_emits_summary_event() {
         let hits = vec![
             WebSearchHit {
-                url: "https://ddg.example".into(),
-                title: "DuckDuckGo result".into(),
+                url: "https://langsearch.example".into(),
+                title: "LangSearch result".into(),
                 snippet: "topic Rust async runtime".into(),
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
-                search_engine: "duckduckgo".into(),
+                search_engine: "langsearch".into(),
                 author: None,
             },
             WebSearchHit {
-                url: "https://brave.example".into(),
-                title: "Brave result".into(),
+                url: "https://tavily.example".into(),
+                title: "Tavily result".into(),
                 snippet: "topic Rust async runtime".into(),
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
-                search_engine: "brave".into(),
+                search_engine: "tavily".into(),
                 author: None,
             },
         ];
         let mut pages = std::collections::HashMap::new();
-        for url in ["https://ddg.example", "https://brave.example"] {
+        for url in ["https://langsearch.example", "https://tavily.example"] {
             pages.insert(
                 url.into(),
                 WebFetchedPage {
@@ -5356,8 +5496,7 @@ mod tests {
         let events = obs.0.lock().unwrap();
         let summary = events.iter().find(|e| {
             matches!(
-                e,
-                GatherEvent::WidthSweepSummary { engines, .. } if engines.contains(&"duckduckgo".to_string())
+                e, GatherEvent::WidthSweepSummary { engines, .. } if engines.contains(&"langsearch".to_string())
             )
         });
         assert!(
@@ -5373,7 +5512,7 @@ mod tests {
         }) = summary
         {
             assert_eq!(queries, &["Rust async runtime".to_string()]);
-            assert_eq!(engines, &["brave", "duckduckgo"]);
+            assert_eq!(engines, &["langsearch", "tavily"]);
             assert_eq!(*considered, 2);
             assert_eq!(*captured, result.sources.len());
             assert_eq!(*excluded, 0);

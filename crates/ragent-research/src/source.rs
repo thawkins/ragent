@@ -97,7 +97,7 @@ pub enum Source {
         search_tool: String,
         /// Name(s) of the backend search engine(s) that returned this URL.
         /// For `mf_search` this is a comma-separated list like
-        /// `"duckduckgo, brave"`; for `websearch` it is `"tavily"`. Empty when
+        /// `"openalex, wikipedia"`; for `websearch` it is `"tavily"`. Empty when
         /// the source predates this field or was supplied directly via `--from-url`.
         #[serde(default)]
         search_engine: String,
@@ -269,7 +269,7 @@ impl Source {
     /// Name(s) of the backend search engine(s) that returned this URL.
     ///
     /// Only [`Source::Web`] carries a `search_engine` value (e.g.
-    /// `"duckduckgo, brave"`, `"exa"`, `"tavily"`). Local, spec, and other
+    /// `"openalex, wikipedia"`, `"exa"`, `"tavily"`). Local, spec, and other
     /// sources do not have a search engine and return an empty string.
     #[must_use]
     pub fn search_engine(&self) -> &str {

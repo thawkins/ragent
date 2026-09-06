@@ -67,30 +67,6 @@ pub struct ResearchStep {
     pub status: StepStatus,
 }
 
-/// Capture counts aggregated for one backend search engine.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct EngineCaptureRow {
-    /// Engine name as reported by the search tool (e.g. `"brave"`).
-    pub engine: String,
-    /// Number of captured pages (plain HTML/article content).
-    pub page: usize,
-    /// Number of captured PDF documents.
-    pub pdf: usize,
-    /// Number of captured YouTube videos.
-    pub youtube: usize,
-    /// Captured-article counts per detected language (uppercase, e.g.
-    /// `"ENGLISH"` -> 3).
-    pub languages: std::collections::BTreeMap<String, usize>,
-}
-
-impl EngineCaptureRow {
-    /// Total captures attributed to this engine across all media types.
-    #[must_use]
-    pub fn total(&self) -> usize {
-        self.page + self.pdf + self.youtube
-    }
-}
-
 /// Accumulated progress for a single `/research create` run.
 #[derive(Debug, Clone)]
 pub struct ResearchProgress {
@@ -98,6 +74,9 @@ pub struct ResearchProgress {
     pub name: String,
     /// Research topic string.
     pub topic: String,
+    /// Selected run options (mode/format/tier/depth/...), rendered once at
+    /// the top of the log so users can verify the configuration at a glance.
+    pub options: Option<String>,
     /// Ordered log of steps emitted so far.
     pub steps: Vec<ResearchStep>,
     /// Total source count once the run completes.
@@ -120,18 +99,6 @@ pub struct ResearchProgress {
     pub youtube_count: usize,
     /// Number of web sources fetched but excluded for low relevance.
     pub excluded_count: usize,
-    /// Structured per-source capture delta, present only on `WebCaptured`
-    /// events. Used by the tracker to maintain the per-engine capture
-    /// summary table.
-    pub capture: Option<CaptureDelta>,
-    /// Per-engine capture aggregation, ordered by first appearance so the
-    /// summary table rows stay stable across redraws.
-    pub engines: Vec<EngineCaptureRow>,
-    /// Lowercased source URLs seen so far, used to report the unique-source
-    /// count alongside the per-engine attribution total in the summary table
-    /// (a URL found by several engines is one unique source but N engine
-    /// attributions).
-    pub unique_urls: std::collections::HashSet<String>,
     /// Wall-clock deadline for the active web-gathering phase. When set,
     /// the TUI renders a live countdown from this instant (FR-010, FR-013).
     /// Cleared when the web phase ends or the deadline is reached.
@@ -144,6 +111,7 @@ impl ResearchProgress {
         Self {
             name: name.into(),
             topic: topic.into(),
+            options: None,
             steps: Vec::new(),
             total_sources: None,
             done: false,
@@ -153,75 +121,28 @@ impl ResearchProgress {
             pdf_count: 0,
             youtube_count: 0,
             excluded_count: 0,
-            capture: None,
-            engines: Vec::new(),
-            unique_urls: std::collections::HashSet::new(),
             web_phase_deadline: None,
-        }
-    }
-
-    /// Record one captured source in the per-engine aggregation.
-    ///
-    /// A hit found by several `mf_search` backends (`engines` contains more
-    /// than one name) contributes one capture to each named engine row so
-    /// per-engine counts sum to more than the unique-URL total — matching
-    /// how the References Index attributes provenance. The URL itself is
-    /// tracked separately in [`Self::unique_urls`] so the summary can show
-    /// both figures.
-    pub fn record_capture(&mut self, capture: &CaptureDelta) {
-        if !capture.url.is_empty() {
-            self.unique_urls.insert(capture.url.to_lowercase());
-        }
-        // Ensure every engine row exists (first-appearance order).
-        for engine in &capture.engines {
-            if !self.engines.iter().any(|r| &r.engine == engine) {
-                self.engines.push(EngineCaptureRow {
-                    engine: engine.clone(),
-                    ..EngineCaptureRow::default()
-                });
-            }
-        }
-        for row in self
-            .engines
-            .iter_mut()
-            .filter(|r| capture.engines.contains(&r.engine))
-        {
-            match capture.media_type.as_str() {
-                "pdf" => row.pdf += 1,
-                "youtube" => row.youtube += 1,
-                _ => row.page += 1,
-            }
-            *row.languages.entry(capture.language.clone()).or_insert(0) += 1;
         }
     }
 
     /// Apply a parsed step update, appending or completing a step.
     ///
-    /// Web-capture and web-fetch-failure events are accumulated as counts so
-    /// the rendered log stays compact; per-engine capture counts are shown in
-    /// a summary table instead of one line per captured URL.
+    /// Per-URL web capture/failure/exclusion events are accumulated as counts
+    /// so the rendered log stays compact.
     pub fn apply(&mut self, phase: SessionPhase, status: StepStatus, detail: impl Into<String>) {
-        self.apply_with_capture(phase, status, detail, None);
-    }
-
-    /// Apply a parsed step update with an optional structured capture delta.
-    ///
-    /// Captured sources update the per-engine aggregation and the fetch
-    /// counters but do not append per-URL log lines; the message window
-    /// renders them through [`Self::render`] as a compact summary table.
-    pub fn apply_with_capture(
-        &mut self,
-        phase: SessionPhase,
-        status: StepStatus,
-        detail: impl Into<String>,
-        capture: Option<CaptureDelta>,
-    ) {
         let detail = detail.into();
 
-        if let Some(delta) = capture {
-            self.capture = Some(delta.clone());
-            self.record_capture(&delta);
-        } // Accumulate per-URL web results as counts rather than log lines.
+        // The resolved-options snapshot is stored and rendered once at the
+        // top of the log instead of becoming a setup step line.
+        if phase == SessionPhase::Setup
+            && status == StepStatus::Done
+            && let Some(opts) = detail.strip_prefix("options in use: ")
+        {
+            self.options = Some(opts.to_string());
+            return;
+        }
+
+        // Accumulate per-URL web results as counts rather than log lines.
         if phase == SessionPhase::Web && status == StepStatus::Done && detail.contains("captured ")
         {
             self.fetched_count += 1;
@@ -315,134 +236,14 @@ impl ResearchProgress {
         self.web_phase_deadline = None;
     }
 
-    /// Render the per-engine capture summary table.
-    ///
-    /// One row per backend search engine with capture counts by media type
-    /// (page/pdf/youtube) and a cell listing the detected languages with
-    /// their article counts. Rendered with plain ASCII so the message
-    /// window treats it as preformatted text.
-    fn render_capture_table(&self) -> String {
-        if self.engines.is_empty() {
-            return String::new();
-        }
-        let header = ["engine", "page", "pdf", "yt", "total", "languages"];
-        let mut rows: Vec<Vec<String>> = Vec::with_capacity(self.engines.len() + 1);
-        let mut lang_totals: std::collections::BTreeMap<String, usize> =
-            std::collections::BTreeMap::new();
-        let (mut t_page, mut t_pdf, mut t_yt) = (0usize, 0usize, 0usize);
-        for row in &self.engines {
-            let langs = row
-                .languages
-                .iter()
-                .map(|(lang, n)| format!("{lang}:{n}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            rows.push(vec![
-                row.engine.clone(),
-                row.page.to_string(),
-                row.pdf.to_string(),
-                row.youtube.to_string(),
-                row.total().to_string(),
-                if langs.is_empty() {
-                    "-".to_string()
-                } else {
-                    langs
-                },
-            ]);
-            t_page += row.page;
-            t_pdf += row.pdf;
-            t_yt += row.youtube;
-            for (lang, n) in &row.languages {
-                *lang_totals.entry(lang.clone()).or_insert(0) += n;
-            }
-        }
-        let langs_total = lang_totals
-            .iter()
-            .map(|(lang, n)| format!("{lang}:{n}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        rows.push(vec![
-            "total".to_string(),
-            t_page.to_string(),
-            t_pdf.to_string(),
-            t_yt.to_string(),
-            (t_page + t_pdf + t_yt).to_string(),
-            if langs_total.is_empty() {
-                "-".to_string()
-            } else {
-                langs_total
-            },
-        ]);
-
-        let widths: Vec<usize> = header
-            .iter()
-            .enumerate()
-            .map(|(col, h)| {
-                rows.iter()
-                    .map(|r| r.get(col).map_or(0, |c| c.chars().count()))
-                    .max()
-                    .unwrap_or(0)
-                    .max(h.chars().count())
-            })
-            .collect();
-        let border: String = {
-            let mut b = String::from("+");
-            for w in &widths {
-                b.push_str(&"-".repeat(w + 2));
-                b.push('+');
-            }
-            b
-        };
-        let render_row = |cells: &[String]| {
-            let mut line = String::from("|");
-            for (col, w) in widths.iter().enumerate() {
-                let cell = cells.get(col).cloned().unwrap_or_default();
-                let numeric = col > 0 && col < 5;
-                let pad = w.saturating_sub(cell.chars().count());
-                line.push(' ');
-                if numeric {
-                    line.push_str(&" ".repeat(pad));
-                    line.push_str(&cell);
-                } else {
-                    line.push_str(&cell);
-                    line.push_str(&" ".repeat(pad));
-                }
-                line.push_str(" |");
-            }
-            line
-        };
-        let mut out = String::from("[captures] Captured sources by search engine:\n");
-        out.push_str(&border);
-        out.push('\n');
-        out.push_str(&render_row(
-            &header.iter().map(|h| h.to_string()).collect::<Vec<_>>(),
-        ));
-        out.push('\n');
-        out.push_str(&border);
-        out.push('\n');
-        for row in &rows {
-            out.push_str(&render_row(row));
-            out.push('\n');
-        }
-        out.push_str(&border);
-        out.push('\n');
-        // Footer disambiguates the two counting bases: the total row sums
-        // per-engine attributions (a URL found by N engines counts N times)
-        // while the unique count is the deduplicated URL total.
-        let attributions = t_page + t_pdf + t_yt;
-        out.push_str(&format!(
-            "[captures] {} engine attribution(s), {} unique source(s).\n",
-            attributions,
-            self.unique_urls.len()
-        ));
-        out
-    }
-
     /// Render the tracker as a markdown log list for the message window.
     pub fn render(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("[research] Research Progress — `{}`\n", self.name));
         out.push_str(&format!("Topic: {}\n", self.topic));
+        if let Some(options) = &self.options {
+            out.push_str(&format!("Options: {options}\n"));
+        }
         out.push('\n');
         let prefix_len = "  XX running  — ".chars().count();
         let continuation = " ".repeat(prefix_len);
@@ -463,9 +264,6 @@ impl ResearchProgress {
                 out.push('\n');
             }
         }
-        // Per-engine capture summary table replaces the per-URL listing so
-        // the message window stays compact while sources stream in.
-        out.push_str(&self.render_capture_table());
         if self.done
             && let Some(total) = self.total_sources
         {
@@ -514,26 +312,6 @@ impl ResearchProgress {
     }
 }
 
-/// Structured capture delta carried on `WebCaptured` events so the TUI can
-/// aggregate captures per search engine without parsing the detail line.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CaptureDelta {
-    /// Backend search engine(s) that returned this URL. A hit found by
-    /// multiple `mf_search` backends is a comma-separated list, e.g.
-    /// `"duckduckgo, brave"`; it contributes one capture to each named
-    /// engine row.
-    pub engines: Vec<String>,
-    /// Classified content type (`"page"`, `"pdf"`, `"youtube"`).
-    pub media_type: String,
-    /// Detected human language in uppercase (e.g. `"ENGLISH"`), or
-    /// `"UNKNOWN"` when language detection was unavailable.
-    pub language: String,
-    /// Source URL, used to track the unique-source count in the capture
-    /// summary. Empty for legacy payloads that predate the field.
-    #[serde(default)]
-    pub url: String,
-}
-
 /// JSON payload carried inside an [`Event::AgentNotice`] message.
 ///
 /// Fields are owned `String`s so the payload can be deserialised from a borrowed
@@ -549,10 +327,6 @@ struct ProgressPayload {
     pdf_count: usize,
     youtube_count: usize,
     excluded_count: usize,
-    /// Structured per-source capture delta, present only on `WebCaptured`
-    /// events. Optional so older payloads keep decoding.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    capture: Option<CaptureDelta>,
 }
 
 fn encode_payload(payload: ProgressPayload) -> String {
@@ -583,25 +357,17 @@ pub fn encode_cluster_progress_event(
         pdf_count: 0,
         youtube_count: 0,
         excluded_count: 0,
-        capture: None,
     })
 }
 
 /// Encode a [`SessionEvent`] plus run metadata as a sentinel-prefixed
 /// `AgentNotice` message string.
 pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> String {
-    let (phase, status, detail, total_sources, pdf_count, youtube_count, excluded_count, capture) =
+    let (phase, status, detail, total_sources, pdf_count, youtube_count, excluded_count) =
         match event {
-            SessionEvent::Phase { phase } => (
-                *phase,
-                "started",
-                phase_description(*phase),
-                None,
-                0,
-                0,
-                0,
-                None,
-            ),
+            SessionEvent::Phase { phase } => {
+                (*phase, "started", phase_description(*phase), None, 0, 0, 0)
+            }
             SessionEvent::QueriesDecomposed { queries } => {
                 let detail = if queries.is_empty() {
                     "no decomposition".to_string()
@@ -613,7 +379,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                         queries.join("\n  - ")
                     )
                 };
-                (SessionPhase::Web, "queries", detail, None, 0, 0, 0, None)
+                (SessionPhase::Web, "queries", detail, None, 0, 0, 0)
             }
             SessionEvent::WebSearchFailed { error } => (
                 SessionPhase::Web,
@@ -623,7 +389,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::WebFetchFailed { url, error } => (
                 SessionPhase::Web,
@@ -637,7 +402,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::WebSourceExcluded { url, reason } => (
                 SessionPhase::Web,
@@ -651,59 +415,29 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::WebCaptured {
                 url,
                 title,
-                search_tool,
-                search_engine,
+                search_tool: _,
+                search_engine: _,
                 body_preview: _,
-                language,
+                language: _,
                 oa_recovery: _,
-                media_type,
-            } => {
-                // Keep the log-panel detail to one compact line; the full
-                // per-URL listing in the message window is replaced by the
-                // per-engine capture summary table rendered by
-                // [`ResearchProgress::render`].
-                let provenance = match (search_tool.is_empty(), search_engine.is_empty()) {
-                    (true, true) => String::new(),
-                    (false, true) => format!(" via {search_tool}"),
-                    (true, false) => format!(" via {search_engine}"),
-                    (false, false) => format!(" via {search_tool} ({search_engine})"),
-                };
-                let detail = format!(
-                    "[{language}] captured {}{} — {}",
+                media_type: _,
+            } => (
+                SessionPhase::Web,
+                "captured",
+                format!(
+                    "captured {} — {}",
                     sanitize_for_display(url),
-                    provenance,
                     sanitize_for_display(title)
-                );
-                // Split the engine CSV so a hit found by several mf_search
-                // backends counts once per engine row in the summary table.
-                let engines: Vec<String> = search_engine
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|e| !e.is_empty())
-                    .map(str::to_string)
-                    .collect();
-                let capture = CaptureDelta {
-                    engines,
-                    media_type: media_type.clone(),
-                    language: language.clone(),
-                    url: url.clone(),
-                };
-                (
-                    SessionPhase::Web,
-                    "captured",
-                    detail,
-                    None,
-                    0,
-                    0,
-                    0,
-                    Some(capture),
-                )
-            }
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
             SessionEvent::FromUrlBodyPreview { url, body_preview } => (
                 SessionPhase::Setup,
                 "preview",
@@ -716,7 +450,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::FromFileBodyPreview { path, body_preview } => (
                 SessionPhase::Setup,
@@ -730,7 +463,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::LocalCaptured { path, score } => (
                 SessionPhase::Local,
@@ -740,7 +472,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::SpecCaptured { spec_id } => (
                 SessionPhase::Specs,
@@ -750,7 +481,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult { outcome, detail }) => {
                 let detail = match (outcome, detail) {
@@ -768,16 +498,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                         "no LLM engine configured — using mechanical fallback".to_string()
                     }
                 };
-                (
-                    SessionPhase::Synthesize,
-                    "done",
-                    detail,
-                    None,
-                    0,
-                    0,
-                    0,
-                    None,
-                )
+                (SessionPhase::Synthesize, "done", detail, None, 0, 0, 0)
             }
             SessionEvent::SupervisorPlanUpdated { sub_topics } => (
                 SessionPhase::SupervisorPlan,
@@ -791,7 +512,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::CompetitiveEntities {
                 entities,
@@ -814,7 +534,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::ResearcherSpawned { id, sub_topic } => (
                 SessionPhase::SupervisorDelegate,
@@ -824,7 +543,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::ResearcherProgress {
                 id,
@@ -839,7 +557,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::ResearcherNote { id, note } => (
                 SessionPhase::SupervisorDelegate,
@@ -849,7 +566,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::ResearcherCompleted { id, summary } => (
                 SessionPhase::SupervisorDelegate,
@@ -859,7 +575,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::SupervisorMerged { findings_count } => (
                 SessionPhase::SupervisorSynthesize,
@@ -869,7 +584,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Done {
                 total_sources,
@@ -884,7 +598,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 *pdf_count,
                 *youtube_count,
                 *excluded_count,
-                None,
             ),
             SessionEvent::RunStep {
                 step,
@@ -904,7 +617,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::TierDone {
                 completed,
@@ -920,9 +632,9 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::ConfigSnapshot {
+                mode,
                 output_format,
                 depth,
                 iterations,
@@ -930,7 +642,8 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 from_urls,
                 from_files,
             } => {
-                let mut parts = vec![format!("output format: {output_format}")];
+                let mut parts = vec![format!("mode: {mode}")];
+                parts.push(format!("output format: {output_format}"));
                 if let Some(t) = tier {
                     parts.push(format!("tier: {t}"));
                 }
@@ -964,7 +677,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                     0,
                     0,
                     0,
-                    None,
                 )
             }
             SessionEvent::Synthesis(SynthesisEvent::SynthesisAudit { audit }) => (
@@ -978,7 +690,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Analysis(AnalysisEvent::CorpusCritic { report }) => (
                 SessionPhase::Synthesize,
@@ -994,7 +705,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Analysis(AnalysisEvent::GapFetch { result }) => (
                 SessionPhase::Synthesize,
@@ -1009,7 +719,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Synthesis(SynthesisEvent::SurgicalPatch { result }) => (
                 SessionPhase::Synthesize,
@@ -1025,7 +734,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Synthesis(SynthesisEvent::CiteCheck { result }) => (
                 SessionPhase::Synthesize,
@@ -1044,7 +752,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Synthesis(SynthesisEvent::Polish { result }) => (
                 SessionPhase::Synthesize,
@@ -1059,7 +766,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Synthesis(SynthesisEvent::ReadabilityAudit { result }) => (
                 SessionPhase::Synthesize,
@@ -1074,7 +780,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Synthesis(SynthesisEvent::Evaluation { scorecard }) => (
                 SessionPhase::Synthesize,
@@ -1096,7 +801,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::PlanUpdated { sub_questions } => (
                 SessionPhase::Setup,
@@ -1106,7 +810,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::SubQuestionStatusChanged { id, status } => (
                 SessionPhase::Web,
@@ -1120,7 +823,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::SourceFailed { source, error } => (
                 SessionPhase::Web,
@@ -1137,7 +839,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Synthesis(SynthesisEvent::CriticResult { score, gaps }) => (
                 SessionPhase::Synthesize,
@@ -1150,7 +851,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::VerificationResult { passed, issues } => (
                 SessionPhase::Synthesize,
@@ -1164,7 +864,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::IterationCompleted { iteration, score } => (
                 SessionPhase::Synthesize,
@@ -1177,7 +876,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::FollowUpQueries { queries } => (
                 SessionPhase::Web,
@@ -1187,7 +885,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Analysis(AnalysisEvent::ContradictionGraph {
                 edges,
@@ -1203,7 +900,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Analysis(AnalysisEvent::LociAnalysis {
                 loci,
@@ -1219,7 +915,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Analysis(AnalysisEvent::DepthInvestigation { investigations }) => (
                 SessionPhase::Synthesize,
@@ -1232,7 +927,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Analysis(AnalysisEvent::CrossLocusReconcile { reconcile }) => (
                 SessionPhase::Synthesize,
@@ -1242,7 +936,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Analysis(AnalysisEvent::SourceTensions { tensions }) => (
                 SessionPhase::Synthesize,
@@ -1252,7 +945,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Analysis(AnalysisEvent::EvidenceDigest { digest }) => (
                 SessionPhase::Synthesize,
@@ -1266,7 +958,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::Analysis(AnalysisEvent::TripleDraft { draft }) => (
                 SessionPhase::Synthesize,
@@ -1279,7 +970,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
             SessionEvent::NeedsClarification { question } => (
                 SessionPhase::Setup,
@@ -1289,7 +979,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
                 0,
-                None,
             ),
         };
     let payload = ProgressPayload {
@@ -1302,7 +991,6 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
         pdf_count,
         youtube_count,
         excluded_count,
-        capture,
     };
     encode_payload(payload)
 }
@@ -1335,7 +1023,6 @@ fn run_step_status(status: &str) -> &str {
         "completed" => "done",
         "failed" => "error",
         "skipped" => "skipped",
-        "event" | "tier done" => "event",
         _ => "event",
     }
 }
@@ -1378,9 +1065,6 @@ pub struct DecodedProgress {
     pub youtube_count: usize,
     /// Number of web sources fetched but excluded for low relevance.
     pub excluded_count: usize,
-    /// Structured per-source capture delta, present only on `WebCaptured`
-    /// events.
-    pub capture: Option<CaptureDelta>,
 }
 
 /// Try to decode an [`Event::AgentNotice`] message as a research progress
@@ -1409,7 +1093,6 @@ pub fn decode_progress_event(message: &str) -> Option<DecodedProgress> {
         pdf_count: payload.pdf_count,
         youtube_count: payload.youtube_count,
         excluded_count: payload.excluded_count,
-        capture: payload.capture,
     })
 }
 
@@ -1423,6 +1106,10 @@ fn parse_phase(s: &str) -> Option<SessionPhase> {
         "synthesize" => SessionPhase::Synthesize,
         "assemble" => SessionPhase::Assemble,
         "finalize" => SessionPhase::Finalize,
+        "supervisor_plan" => SessionPhase::SupervisorPlan,
+        "supervisor_delegate" => SessionPhase::SupervisorDelegate,
+        "supervisor_synthesize" => SessionPhase::SupervisorSynthesize,
+        "supervisor_finalize" => SessionPhase::SupervisorFinalize,
         _ => return None,
     })
 }

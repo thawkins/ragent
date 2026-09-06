@@ -6,8 +6,6 @@
 //! - [`engine`] — the [`SearchEngine`] trait, [`RawResult`] / [`EngineReport`]
 //!   structs, search options, and URL-normalisation helpers for dedup
 //!   (T-012, FR-008, NFR-003).
-//! - [`duckduckgo`] — `DuckDuckGo` keyless backend (T-013).
-//! - [`brave`] — Brave keyless backend (T-014).
 //! - [`langsearch`] — LangSearch API-backed backend (T-003).
 //! - [`tavily`] — Tavily API-backed backend (T-001, T-002).
 //! - [`perplexity`] — Perplexity Sonar API-backed backend.
@@ -44,9 +42,7 @@
 //! For testing, the orchestrator accepts a `Vec<Box<dyn SearchEngine>>`,
 //! enabling mock engines without network I/O (NFR-003).
 
-pub mod brave;
 pub mod consensus;
-pub mod duckduckgo;
 pub mod engine;
 pub mod exa;
 pub mod langsearch;
@@ -76,11 +72,10 @@ pub const SEARCH_CACHE_TTL: Duration = Duration::from_mins(5);
 
 /// Per-engine timeout. If a single backend does not respond within this
 /// duration it is dropped from the merge and reported as an error. This keeps
-/// the overall search well within the 15-second NFR-001 budget even if one
-/// engine hangs. The shared HTTP client already has a 30-second timeout; this
-/// per-engine timeout is a shorter safety net so one slow engine cannot block
-/// the entire search.
-pub const ENGINE_TIMEOUT: Duration = Duration::from_secs(10);
+/// the overall search bounded even if one engine hangs. The shared HTTP client
+/// already has a 30-second timeout; this per-engine timeout matches it so a
+/// slow engine is given a full window to respond before being dropped.
+pub const ENGINE_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ---------------------------------------------------------------------------
 // SearchOutput
@@ -125,7 +120,7 @@ pub struct SearchOutput {
 ///
 /// # Examples
 ///
-/// Create an orchestrator with default backends (`DuckDuckGo` + Brave):
+/// Create an orchestrator with custom backends:
 ///
 /// ```no_run
 /// use ragent_tools_extended::masterfetch::search::{
@@ -154,15 +149,13 @@ struct CacheEntry {
 }
 
 impl SearchOrchestrator {
-    /// Create a new orchestrator with the default backends (`DuckDuckGo` +
-    /// Brave).
+    /// Create a new orchestrator with no backends. Callers should use
+    /// [`MfSearchTool::build_orchestrator`] to obtain a fully wired
+    /// orchestrator, or [`with_engines`](Self::with_engines) to supply custom
+    /// backends.
     #[must_use]
     pub fn new() -> Self {
-        let engines: Vec<Arc<dyn SearchEngine>> = vec![
-            Arc::new(duckduckgo::DuckDuckGoEngine::new()),
-            Arc::new(brave::BraveEngine::new()),
-        ];
-        Self::with_engines(engines)
+        Self::with_engines(Vec::new())
     }
 
     /// Create a new orchestrator with custom backends (for testing or for
@@ -790,8 +783,8 @@ mod tests {
     }
 
     #[test]
-    fn test_engine_timeout_is_10_seconds() {
-        assert_eq!(ENGINE_TIMEOUT, Duration::from_secs(10));
+    fn test_engine_timeout_is_30_seconds() {
+        assert_eq!(ENGINE_TIMEOUT, Duration::from_secs(30));
     }
 
     /// An engine that sleeps longer than `ENGINE_TIMEOUT`.

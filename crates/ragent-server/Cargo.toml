@@ -9,8 +9,6 @@ workspace = true
 
 [dependencies]
 ragent-agent = { path = "../ragent-agent" }
-ragent-config = { path = "../ragent-config" }
-ragent-types = { path = "../ragent-types" }
 ragent-prompt_opt = { path = "../ragent-prompt_opt" }
 ragent-research = { path = "../ragent-research" }
 tokio = { workspace = true }
@@ -22,9 +20,7 @@ axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true, features = ["fs", "cors"] }
 tokio-stream = { workspace = true }
-async-stream = { workspace = true }
 futures = { workspace = true }
-chrono = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }
 

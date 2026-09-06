@@ -2,8 +2,8 @@
 //!
 //! Implements FR-008 through FR-010, FR-022, FR-023, FR-025, FR-026.
 //!
-//! Queries multiple public search-engine backends in parallel (`DuckDuckGo`,
-//! Brave, OpenAlex, and optionally more), merges and deduplicates results by
+//! Queries multiple public search-engine backends in parallel (`OpenAlex`,
+//! Wikipedia, and optionally more), merges and deduplicates results by
 //! normalised URL, ranks by relevance with cross-engine consensus boosting,
 //! and returns a formatted result list with structured signals.
 //!
@@ -21,14 +21,13 @@
 //!
 //! # API keys
 //!
-//! The tool is **keyless by default** (FR-023): it scrapes public search-engine
-//! HTML result pages via DuckDuckGo and Brave, and queries the OpenAlex
-//! scholarly-works API (no API key required). An optional `openalex_email`
-//! config field or `OPENALEX_EMAIL` environment variable participates in the
-//! OpenAlex polite pool. If a `langsearch_api_key`, `tavily_api_key`,
-//! `perplexity_api_key`, or `exa_api_key` is configured in `ragent.json` (or
-//! the corresponding environment variable is set), an optional API-backed
-//! engine is added for higher-quality results; the keys are masked in
+//! The tool is **keyless by default** (FR-023): it queries the OpenAlex
+//! scholarly-works API (no API key required) and the Wikipedia REST API. An
+//! optional `openalex_email` config field or `OPENALEX_EMAIL` environment
+//! variable participates in the OpenAlex polite pool. If a `langsearch_api_key`,
+//! `tavily_api_key`, `perplexity_api_key`, or `exa_api_key` is configured in
+//! `ragent.json` (or the corresponding environment variable is set), an optional
+//! API-backed engine is added for higher-quality results; the keys are masked in
 //! diagnostics and never logged.
 
 use anyhow::Result;
@@ -100,20 +99,19 @@ impl MfSearchTool {
     /// Build the [`SearchOrchestrator`] for this tool based on the supplied
     /// [`ToolContext`].
     ///
-    /// The orchestrator always includes the keyless `DuckDuckGo`, Brave,
-    /// `OpenAlex`, and `Wikipedia` backends. The OpenAlex backend is keyless
-    /// (no API key) and queries the OpenAlex scholarly-works catalog; an
-    /// optional polite-pool `mailto` email (from the `OPENALEX_EMAIL`
-    /// environment variable or the `openalex_email` config field) is appended
-    /// to its requests. The Wikipedia backend is keyless and queries the
-    /// Wikipedia REST API page/summary endpoint. If `ctx.config` contains a
-    /// non-empty `langsearch_api_key`, a [`LangSearchEngine`] is added as an
-    /// additional backend. If `ctx.config` contains a non-empty
-    /// `tavily_api_key` (or `TAVILY_API_KEY` environment variable), a
-    /// [`TavilyEngine`] is added as an additional backend. If `ctx.config`
-    /// contains a non-empty `perplexity_api_key` (or `PERPLEXITY_API_KEY`
-    /// environment variable), a [`PerplexityEngine`] is added as an
-    /// additional backend.
+    /// The orchestrator always includes the keyless `OpenAlex` and `Wikipedia`
+    /// backends. The OpenAlex backend is keyless (no API key) and queries the
+    /// OpenAlex scholarly-works catalog; an optional polite-pool `mailto` email
+    /// (from the `OPENALEX_EMAIL` environment variable or the `openalex_email`
+    /// config field) is appended to its requests. The Wikipedia backend is
+    /// keyless and queries the Wikipedia REST API page/summary endpoint. If
+    /// `ctx.config` contains a non-empty `langsearch_api_key`, a
+    /// [`LangSearchEngine`] is added as an additional backend. If `ctx.config`
+    /// contains a non-empty `tavily_api_key` (or `TAVILY_API_KEY` environment
+    /// variable), a [`TavilyEngine`] is added as an additional backend. If
+    /// `ctx.config` contains a non-empty `perplexity_api_key` (or
+    /// `PERPLEXITY_API_KEY` environment variable), a [`PerplexityEngine`] is
+    /// added as an additional backend.
     ///
     /// This helper is public so integration tests can verify backend wiring
     /// without making network requests.
@@ -122,8 +120,6 @@ impl MfSearchTool {
         let (langsearch_key, tavily_key, perplexity_key, exa_key) = Self::resolve_search_keys(ctx);
         let mailto = Self::resolve_openalex_mailto(ctx);
         let mut engines: Vec<Arc<dyn SearchEngine>> = vec![
-            Arc::new(super::super::search::duckduckgo::DuckDuckGoEngine::new()),
-            Arc::new(super::super::search::brave::BraveEngine::new()),
             Arc::new(OpenAlexEngine::with_mailto(mailto)),
             Arc::new(WikipediaEngine::new()),
         ];
@@ -202,29 +198,17 @@ impl MfSearchTool {
 
     /// Return availability status for all possible search backends.
     ///
-    /// DuckDuckGo, Brave, OpenAlex, and Wikipedia are always considered
-    /// available (keyless). LangSearch, Tavily, Perplexity, and Exa require an
-    /// API key and are marked as `failed` when the key is missing. `in_use`
-    /// reflects the engines that are actually wired into the orchestrator
-    /// built from the supplied [`ToolContext`].
+    /// OpenAlex and Wikipedia are always considered available (keyless).
+    /// LangSearch, Tavily, Perplexity, and Exa require an API key and are marked
+    /// as `failed` when the key is missing. `in_use` reflects the engines that
+    /// are actually wired into the orchestrator built from the supplied
+    /// [`ToolContext`].
     #[must_use]
     pub fn engine_status(ctx: &ToolContext) -> Vec<EngineStatus> {
         let (langsearch_key, tavily_key, perplexity_key, exa_key) = Self::resolve_search_keys(ctx);
         let orchestrator = Self::build_orchestrator(ctx);
         let in_use: HashSet<&str> = orchestrator.engine_names().into_iter().collect();
         vec![
-            EngineStatus {
-                name: "DuckDuckGo",
-                enabled: true,
-                in_use: in_use.contains("duckduckgo"),
-                failed: false,
-            },
-            EngineStatus {
-                name: "Brave",
-                enabled: true,
-                in_use: in_use.contains("brave"),
-                failed: false,
-            },
             EngineStatus {
                 name: "OpenAlex",
                 enabled: true,
@@ -308,21 +292,21 @@ impl Tool for MfSearchTool {
 
     fn description(&self) -> &'static str {
         "Local keyless web search. Required parameter: 'query'. Multiple backends \
-             run in parallel (DuckDuckGo, Brave, OpenAlex, Wikipedia, optional LangSearch / \
-             Tavily / Perplexity / Exa when configured via 'langsearch_api_key', \
-             'tavily_api_key', 'perplexity_api_key', or 'exa_api_key'). Keyless backends do \
-             not require API keys. OpenAlex queries the scholarly-works catalog; set \
-             'openalex_email' in ragent.json or the OPENALEX_EMAIL env var to join the polite \
-             pool. Wikipedia queries the English Wikipedia REST API for encyclopedia \
-             summaries. Optional 'site', 'exclude_sites', 'freshness' (day/week/month/year), \
-             'max_results' (1-500, default 6) for the overall merge cap, and 'page' (0-10). \
-             Optional 'per_engine_results' (1-200, default 75) caps how many results each \
-             individual engine returns before merge/dedup. Optional 'engine' restricts the \
-             search to a single backend (duckduckgo, brave, openalex, wikipedia, langsearch, \
-             tavily, perplexity, exa); when omitted all configured engines run in parallel. \
-             Each result carries relevance_score, fetch_relevance, and engines_consensus. \
-             Engines that provide their own relevance score (e.g. OpenAlex) use it directly \
-             in ranking."
+                 run in parallel (OpenAlex, Wikipedia, optional LangSearch / \
+                 Tavily / Perplexity / Exa when configured via 'langsearch_api_key', \
+                 'tavily_api_key', 'perplexity_api_key', or 'exa_api_key'). Keyless backends do \
+                 not require API keys. OpenAlex queries the scholarly-works catalog; set \
+                 'openalex_email' in ragent.json or the OPENALEX_EMAIL env var to join the polite \
+                 pool. Wikipedia queries the English Wikipedia REST API for encyclopedia \
+                 summaries. Optional 'site', 'exclude_sites', 'freshness' (day/week/month/year), \
+                 'max_results' (1-500, default 6) for the overall merge cap, and 'page' (0-10). \
+                 Optional 'per_engine_results' (1-200, default 75) caps how many results each \
+                 individual engine returns before merge/dedup. Optional 'engine' restricts the \
+                 search to a single backend (openalex, wikipedia, langsearch, \
+                 tavily, perplexity, exa); when omitted all configured engines run in parallel. \
+                 Each result carries relevance_score, fetch_relevance, and engines_consensus. \
+                 Engines that provide their own relevance score (e.g. OpenAlex) use it directly \
+                 in ranking."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -359,8 +343,7 @@ impl Tool for MfSearchTool {
                     "description": "Result page (0-10, default: 0)"
                 },
                 "engine": {
-                    "type": "string",
-                    "enum": ["duckduckgo", "brave", "openalex", "wikipedia", "langsearch", "tavily", "perplexity", "exa"],
+                    "type": "string",                      "enum": ["openalex", "wikipedia", "langsearch", "tavily", "perplexity", "exa"],
                     "description": "Restrict the search to a single backend. When omitted, all configured engines run in parallel"
                 }
             },

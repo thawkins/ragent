@@ -933,6 +933,57 @@ fn test_slash_cost_no_samples_shows_message() {
     assert!(text.contains("No completed LLM responses yet"));
 }
 
+// ── /clip ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_clip_copies_rendered_message_lines() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.message_content_lines = vec![
+        "You: hello world".to_string(),
+        "Assistant: hi there".to_string(),
+        "".to_string(),
+        "Assistant: second block".to_string(),
+    ];
+
+    app.execute_slash_command("/clip");
+
+    assert_eq!(app.status, "clip: copied 61 chars");
+    assert!(!app.messages.is_empty(), "clip should create a message");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("From: /clip"));
+    assert!(text.contains("61 characters"));
+    assert!(text.contains("4 rendered lines"));
+    // The clipboard write itself is fire-and-forget on a background thread
+    // (see clipboard::set_clipboard_text); verify it was issued without
+    // stalling the test on the Linux wait() workaround.
+}
+
+#[test]
+fn test_slash_clip_registered_in_help() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/help");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("/clip"), "help should document /clip: {text}");
+}
+
+#[test]
+fn test_slash_clip_empty_window_shows_hint() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    assert!(app.message_content_lines.is_empty());
+
+    app.execute_slash_command("/clip");
+
+    assert_eq!(app.status, "clip: nothing to copy");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("From: /clip"));
+    assert!(text.contains("No rendered message content"));
+}
+
 // ── /compact ────────────────────────────────────────────────────────
 
 #[test]

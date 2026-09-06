@@ -237,8 +237,26 @@ impl SearchEngine for OpenAlexEngine {
         let status = response.status();
 
         if status.as_u16() == 429 {
+            // OpenAlex's budget-based rate limiter returns a JSON body
+            // explaining the reason (e.g. "Insufficient budget ... Resets at
+            // midnight UTC"). Surface that message so the per-engine error
+            // report is actionable instead of a bare "rate-limited".
+            let detail = response
+                .text()
+                .await
+                .ok()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .and_then(|value| {
+                    value
+                        .get("message")
+                        .and_then(|m| m.as_str())
+                        .map(str::to_string)
+                });
             tracing::warn!(status = %status, "openalex: rate-limited");
-            return EngineReport::blocked(ENGINE_NAME, "rate-limited");
+            return match detail {
+                Some(msg) => EngineReport::blocked(ENGINE_NAME, format!("rate-limited: {msg}")),
+                None => EngineReport::blocked(ENGINE_NAME, "rate-limited"),
+            };
         }
 
         if !status.is_success() {

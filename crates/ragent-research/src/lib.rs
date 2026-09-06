@@ -68,6 +68,7 @@ pub mod patcher;
 pub mod plan_dep;
 pub mod planner;
 mod polarity;
+pub mod provider_stats;
 pub mod readability;
 pub mod reconcile;
 pub mod research_name;
@@ -75,6 +76,7 @@ pub mod run_config;
 pub mod run_manifest;
 pub mod run_request;
 pub mod scoreboard;
+pub mod search_budget;
 pub mod session;
 pub mod source;
 pub mod source_registry;
@@ -98,8 +100,9 @@ pub use brief::generate_research_brief;
 pub use cite_checker::{CitationCheckResult, check_citations};
 pub use clarify::needs_clarification;
 pub use cli::{
-    ResearchCliCommand, render_list_output, render_search_output, render_session_event_json,
-    render_show_output, render_show_output_json, session_event_json,
+    ResearchCliCommand, render_list_output, render_list_output_json, render_search_output,
+    render_search_output_json, render_session_event_json, render_show_output,
+    render_show_output_json, session_event_json,
 };
 pub use cluster::{
     CONCEPT_EXTRACTION_PROMPT_TEMPLATE, ClusterPayload, DEFAULT_CONTEXT_WINDOW_TOKENS,
@@ -157,6 +160,7 @@ pub use plan_dep::{
     parse_spec_frontmatter_research, research_dependency_names,
 };
 pub use planner::{HeuristicPlanner, LlmPlanner, Planner};
+pub use provider_stats::ProviderCallStats;
 pub use readability::{
     PolishChange, PolishResult, ReadabilityAudit, audit_readability, polish_analysis,
 };
@@ -169,8 +173,9 @@ pub use run_config::{Depth, OutputFormat, ResearchMode, Tier};
 pub use run_manifest::{
     ResumeOutcome, RunManifest, RunManifestError, RunStep, StepEntry, StepStatus,
 };
-pub use run_request::{ResearchRunRequest, build_session_config};
+pub use run_request::{InvocationParseError, ResearchRunRequest, build_session_config};
 pub use scoreboard::{GradeBand, METER_CELLS, render_meter_bar};
+pub use search_budget::{SearchBudget, SharedQueryCache};
 pub use session::{
     AnalysisConfig, AnalysisEvent, DEFAULT_WEB_PHASE_TIMEOUT_SECS, InputConfig, LocalConfig,
     NoopObserver, OutputConfig, ResearchSession, ResilienceConfig, RunEngineConfig, RunOutcome,

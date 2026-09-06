@@ -360,6 +360,9 @@ Add unit tests for the bash permission command-name extraction logic
   pane it offers **Copy**, **Cut**, and **Paste**. In provider-setup dialogs
   (EnterKey, GitLabSetup, TelemetrySetup) it pastes the clipboard into the
   active field.
+- **`/clip`** — copies the entire rendered contents of the message window (the
+  plain-text transcript rows you see on screen) to the system clipboard in one
+  step.
 
 ### Permission prompts
 
@@ -404,6 +407,10 @@ ragent will:
 /research open rust-patterns
 /research search "async runtime"
 ```
+
+`/research list` prints an aligned table (NAME, TITLE, STATUS, CREATED,
+MODIFIED) in a preformatted block so the columns are not distorted by
+markdown rendering; `/research search` prints a bullet list of matches.
 
 The `create` form supports a number of optional flags:
 

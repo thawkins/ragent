@@ -14,11 +14,8 @@ chrono.workspace = true
 uuid.workspace = true
 sha2.workspace = true
 tokio.workspace = true
-tracing.workspace = true
-rust_xlsxwriter.workspace = true
 futures.workspace = true
 reqwest.workspace = true
-flate2 = "1"
 async-trait = { workspace = true }
 rustc-hash = { workspace = true }
 calamine = { workspace = true }

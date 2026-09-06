@@ -33,12 +33,15 @@ fn build_session_config_applies_defaults_with_no_overrides() {
     assert!(cfg.output.template.is_none());
 
     // Web
-    assert!(cfg.web.max_web_results > 0);
+    // Default config uses the 0 sentinel = derive the effective budget from
+    // the selected depth (SessionConfig::effective_web_budget).
+    assert_eq!(cfg.web.max_web_results, 0);
     assert!(cfg.web.fetch_concurrency > 0);
     assert!(cfg.web.fetch_timeout_secs > 0);
     assert!(!cfg.web.use_low_relevance);
     assert!(!cfg.web.disable_scholarly);
     assert!(!cfg.web.use_pdf_web_sources);
+    assert!(cfg.web.max_search_calls.is_none());
     assert_eq!(
         cfg.web.web_phase_timeout_secs,
         Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS),
@@ -98,6 +101,7 @@ fn build_session_config_maps_all_explicit_fields() {
         search_retry_base_delay_ms: Some(500),
         search_circuit_breaker_threshold: Some(5),
         max_web_results: Some(50),
+        max_search_calls: Some(40),
         max_local_sources: Some(30),
         max_synthesis_sources: Some(15),
         summarization_model: Some("openai:gpt-4.1-nano".to_string()),
@@ -107,6 +111,7 @@ fn build_session_config_maps_all_explicit_fields() {
         final_report_model: Some("anthropic:claude-sonnet-4".to_string()),
         max_concurrent_research_units: Some(7),
         evaluate: Some(true),
+        invocation: Some("ragent research create --name full-test \"deep topic\"".to_string()),
     };
     let cfg = build_session_config(&req, None);
 
@@ -134,6 +139,7 @@ fn build_session_config_maps_all_explicit_fields() {
     assert!(cfg.web.disable_scholarly);
     assert!(cfg.web.use_pdf_web_sources);
     assert_eq!(cfg.web.web_phase_timeout_secs, Some(120));
+    assert_eq!(cfg.web.max_search_calls, Some(40));
 
     // Local
     assert_eq!(cfg.local.max_local_sources, 30);
@@ -167,6 +173,12 @@ fn build_session_config_maps_all_explicit_fields() {
     assert_eq!(
         cfg.models.final_report_model.as_deref(),
         Some("anthropic:claude-sonnet-4")
+    );
+
+    // Invocation frontmatter replay value
+    assert_eq!(
+        cfg.invocation.as_deref(),
+        Some("ragent research create --name full-test \"deep topic\"")
     );
 }
 
@@ -395,6 +407,7 @@ fn session_event_json_config_snapshot_is_valid_json() {
     let req = ResearchRunRequest::new("cfg-snap", "topic");
     let cfg = build_session_config(&req, None);
     let event = ragent_research::session::SessionEvent::ConfigSnapshot {
+        mode: cfg.engine.mode.as_str().to_string(),
         output_format: cfg.output.output_format.as_str().to_string(),
         depth: cfg.analysis.depth.map(|d| d.as_str().to_string()),
         iterations: cfg.analysis.iterations,
@@ -416,4 +429,56 @@ fn session_event_json_config_snapshot_is_valid_json() {
             .and_then(|v| v.as_str()),
         Some("report")
     );
+}
+// ── Competitive mode implies comparison-table format ─────────────────────
+
+#[test]
+fn build_session_config_competitive_defaults_to_comparison_table() {
+    // `--mode competitive` without `--format` implies `--format comparison-table`.
+    let req = ResearchRunRequest {
+        mode: Some("competitive".to_string()),
+        ..ResearchRunRequest::new("comp-default", "Compare A and B")
+    };
+    let cfg = build_session_config(&req, None);
+    assert_eq!(cfg.output.output_format, OutputFormat::ComparisonTable);
+    assert_eq!(cfg.engine.mode, ResearchMode::Competitive);
+}
+
+#[test]
+fn build_session_config_competitive_explicit_format_wins() {
+    // An explicit `--format` always overrides the competitive default.
+    let req = ResearchRunRequest {
+        mode: Some("competitive".to_string()),
+        output_format: Some("imrad".to_string()),
+        ..ResearchRunRequest::new("comp-override", "Compare A and B")
+    };
+    let cfg = build_session_config(&req, None);
+    assert_eq!(cfg.output.output_format, OutputFormat::Imrad);
+    assert_eq!(cfg.engine.mode, ResearchMode::Competitive);
+}
+
+#[test]
+fn build_session_config_non_competitive_modes_still_default_to_report() {
+    // The competitive default must not leak into tiered/supervisor runs.
+    for (raw, expected) in [
+        ("tiered", ResearchMode::Tiered),
+        ("supervisor", ResearchMode::Supervisor),
+    ] {
+        let req = ResearchRunRequest {
+            mode: Some(raw.to_string()),
+            ..ResearchRunRequest::new("no-cmp-default", "topic")
+        };
+        let cfg = build_session_config(&req, None);
+        assert_eq!(cfg.output.output_format, OutputFormat::Report);
+        assert_eq!(cfg.engine.mode, expected);
+    }
+}
+
+#[test]
+fn build_session_config_no_mode_still_defaults_to_report() {
+    // Plain create runs without `--mode` keep the report default.
+    let req = ResearchRunRequest::new("plain-default", "topic");
+    let cfg = build_session_config(&req, None);
+    assert_eq!(cfg.output.output_format, OutputFormat::Report);
+    assert_eq!(cfg.engine.mode, ResearchMode::Tiered);
 }

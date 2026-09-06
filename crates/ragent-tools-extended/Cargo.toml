@@ -39,11 +39,9 @@ base64 = { workspace = true }
 reqwest = { workspace = true, features = ["cookies", "gzip", "deflate"] }
 tokio-tungstenite = { workspace = true }
 regex = { workspace = true }
-percent-encoding = "2"
 docx-rust = { workspace = true }
 yfinance-rs = "0.9.1"
 calamine = { workspace = true }
-rust_xlsxwriter = { workspace = true }
 ooxmlsdk = { workspace = true }
 zip = { workspace = true }
 quick-xml = { workspace = true }
@@ -74,6 +72,11 @@ optional = true
 [features]
 default = []
 embeddings = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
+
+[package.metadata.cargo-machete]
+# readability-rs is used via its lib name `readability` (extractor.rs, webfetch.rs);
+# cargo-machete matches on the package name and flags it as unused.
+ignored = ["readability-rs"]
 
 [lints]
 workspace = true

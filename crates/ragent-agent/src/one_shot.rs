@@ -37,7 +37,7 @@ fn resolve_api_key(provider_id: &str, storage: Option<&Arc<Storage>>) -> Result<
         "gemini" => &["GEMINI_API_KEY"],
         "huggingface" => &["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
         "generic_openai" => &["GENERIC_OPENAI_API_KEY", "OPENAI_API_KEY"],
-        "ollama_cloud" => &["OLLAMA_API_KEY"],
+        "ollama_cloud" => &["OLLAMA_CLOUD_API_KEY", "OLLAMA_API_KEY"],
         "azure_foundry" => &["AZURE_AI_FOUNDRY_API_KEY"],
         "openrouter" => &["OPENROUTER_API_KEY"],
         "copilot" => &["GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN"],

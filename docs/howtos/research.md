@@ -527,7 +527,7 @@ The depth also controls how many local files are captured:
 |--------|--------|
 | `report` (default) | Topic, Search Queries, Executive Summary, Top 10 Implications, Open Questions, Findings, Findings Relationship Diagram, Cross-References, References Index |
 | `executive-summary` | One-page summary of the same content |
-| `comparison-table` | Comparison table across key entities |
+| `comparison-table` | Topic, Research Brief, Executive Summary, Comparison Criteria, Comparison Table, Entity Profiles, Findings, References Index |
 | `source-bibliography` | Bibliography of all captured sources |
 | `imrad` | Scientific/technical report: Abstract, Introduction, Methods, Results, Discussion, References Index |
 

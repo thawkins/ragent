@@ -52,6 +52,7 @@ fn base_document() -> ResearchDocument {
         output_format: OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     }
 }
 

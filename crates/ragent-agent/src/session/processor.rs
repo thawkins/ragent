@@ -2568,7 +2568,7 @@ impl SessionProcessor {
             "gemini" => vec!["GEMINI_API_KEY"],
             "huggingface" => vec!["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
             "generic_openai" => vec!["OPENAI_API_KEY", "GENERIC_OPENAI_API_KEY"],
-            "ollama_cloud" => vec!["OLLAMA_API_KEY"],
+            "ollama_cloud" => vec!["OLLAMA_CLOUD_API_KEY", "OLLAMA_API_KEY"],
             "azure_foundry" => vec!["AZURE_AI_FOUNDRY_API_KEY"],
             _ => vec![],
         };

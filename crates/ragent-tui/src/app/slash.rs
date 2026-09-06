@@ -183,6 +183,7 @@ impl App {
                     "show".to_string(),
                     "delete".to_string(),
                     "archive".to_string(),
+                    "update".to_string(),
                     "cluster".to_string(),
                     "--mode".to_string(),
                     "--summarization-model".to_string(),
@@ -361,16 +362,16 @@ impl App {
             .ok_or_else(|| "no telemetry config destination found".to_string())?;
         crate::app::state::atomic_config_update(&path, |json| {
             // Ensure the top-level "telemetry" object exists.
-            if !json.get("telemetry").map_or(false, |v| v.is_object()) {
-                json.as_object_mut()
-                    .expect("json is an object")
-                    .insert("telemetry".to_string(), serde_json::json!({}));
-            }
-            let telemetry = json
+            let obj = json
                 .as_object_mut()
-                .and_then(|obj| obj.get_mut("telemetry"))
+                .ok_or_else(|| "config root is not an object".to_string())?;
+            if !obj.get("telemetry").map_or(false, |v| v.is_object()) {
+                obj.insert("telemetry".to_string(), serde_json::json!({}));
+            }
+            let telemetry = obj
+                .get_mut("telemetry")
                 .and_then(|v| v.as_object_mut())
-                .expect("telemetry object");
+                .ok_or_else(|| "telemetry is not an object".to_string())?;
             let value =
                 serde_json::to_value(otel).map_err(|e| format!("serialise otel config: {e}"))?;
             telemetry.insert("otel".to_string(), value);
@@ -2600,6 +2601,28 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                           );
                         self.status = "actionloop: no samples".to_string();
                     }
+                }
+            }
+            "clip" => {
+                // /clip — copy the rendered contents of the message window to
+                // the system clipboard. Uses the plain-text rows the Messages
+                // pane last rendered (the same buffer text-selection copy
+                // reads), so what lands on the clipboard is exactly what the
+                // user sees.
+                if self.message_content_lines.is_empty() {
+                    self.append_assistant_text(
+                        "From: /clip\nNo rendered message content to copy yet.",
+                    );
+                    self.status = "clip: nothing to copy".to_string();
+                } else {
+                    let text = self.message_content_lines.join("\n");
+                    Self::set_clipboard(&text);
+                    let chars = text.len();
+                    self.append_assistant_text(&format!(
+                        "From: /clip\n📋 Copied {chars} characters ({n} rendered lines) to the clipboard.",
+                        n = self.message_content_lines.len()
+                    ));
+                    self.status = format!("clip: copied {chars} chars");
                 }
             }
             "editlog" => self.handle_editlog_command(args),
@@ -8248,6 +8271,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             total += r.result_count;
                         }
                         output.push_str(&format!("\nTotal raw results: {total}"));
+                        let failed: Vec<_> =
+                            results.iter().filter(|r| !r.error.is_empty()).collect();
+                        if !failed.is_empty() {
+                            output.push_str("\n\nErrors:");
+                            for r in failed {
+                                output.push_str(&format!("\n• {} — {}", r.name, r.error));
+                            }
+                        }
                         self.append_assistant_text(&output);
                         self.status = "websearch: engine test complete".to_string();
                     }
@@ -8281,7 +8312,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             ));
                         }
                         output.push_str(
-                                          "\nKeyless engines (DuckDuckGo, Brave) are always enabled. \
+                                          "\nKeyless engines (DuckDuckGo, Brave, Google) are always enabled. \
+                                           Google scrapes results via a headless Chrome browser. \
                                            LangSearch requires `langsearch_api_key` in `ragent.json`. \
                                            Tavily requires `tavily_api_key` in `ragent.json` or the \
                                            `TAVILY_API_KEY` environment variable. \

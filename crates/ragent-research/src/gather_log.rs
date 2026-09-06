@@ -166,7 +166,7 @@ mod tests {
             "considered",
             "A",
             "mf_search",
-            "duckduckgo",
+            "openalex",
             None,
             None,
         )
@@ -177,7 +177,7 @@ mod tests {
             "rejected",
             "B",
             "mf_search",
-            "duckduckgo",
+            "openalex",
             Some("relevance too low (Low)"),
             Some(&json!({"relevance": "Low"})),
         )

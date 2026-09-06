@@ -142,6 +142,33 @@ async fn delete_test_item(name: &str) {
     let _ = mgr.delete(name).await;
 }
 
+/// Helper to build an authenticated PUT request.
+fn auth_put(token: &str, uri: &str) -> Request<Body> {
+    Request::builder()
+        .method("PUT")
+        .uri(uri)
+        .header("Authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap()
+}
+
+/// Create a research item on disk and stamp a recorded invocation line into
+/// its RESEARCH.md frontmatter, as a real invocation-aware front-end would.
+async fn create_test_item_with_invocation(name: &str, invocation: &str) {
+    create_test_item(name, "replay topic").await;
+    let cwd = std::env::current_dir().unwrap();
+    let path = cwd.join("research").join(name).join("RESEARCH.md");
+    let content = std::fs::read_to_string(&path).unwrap();
+    let stamped = content.replacen(
+        "\n---\n",
+        &format!("\ninvocation: \"{invocation}\"\n---\n"),
+        1,
+    );
+    ragent_research::ResearchIo::atomic_write(&path, &stamped)
+        .await
+        .unwrap();
+}
+
 // ── Auth tests ───────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -361,6 +388,132 @@ async fn test_research_post_duplicate_returns_conflict() {
 }
 
 // ── SSE events endpoint ─────────────────────────────────────────────────
+
+// ── Update (PUT /research/{name}) tests ─────────────────────────────────
+
+#[tokio::test]
+async fn test_research_update_not_found() {
+    let _guard = FS_LOCK.lock().await;
+    let app = router(test_state("tok"));
+    let resp = app
+        .oneshot(auth_put("tok", "/research/nonexistent-item-xyz"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body = body_string(resp).await;
+    assert!(body.contains("not found"));
+}
+
+#[tokio::test]
+async fn test_research_update_without_invocation_returns_bad_request() {
+    let _guard = FS_LOCK.lock().await;
+    let name = test_name();
+    create_test_item(&name, "topic").await;
+
+    let app = router(test_state("tok"));
+    let resp = app
+        .oneshot(auth_put("tok", &format!("/research/{name}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = body_string(resp).await;
+    assert!(body.contains("no invocation recorded"));
+
+    delete_test_item(&name).await;
+}
+
+#[tokio::test]
+async fn test_research_update_with_unparseable_invocation_returns_bad_request() {
+    let _guard = FS_LOCK.lock().await;
+    let name = test_name();
+    create_test_item_with_invocation(&name, "ragent research list --all").await;
+
+    let app = router(test_state("tok"));
+    let resp = app
+        .oneshot(auth_put("tok", &format!("/research/{name}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = body_string(resp).await;
+    assert!(body.contains("cannot replay"));
+
+    delete_test_item(&name).await;
+}
+
+#[tokio::test]
+async fn test_research_update_accepts_recorded_invocation() {
+    let _guard = FS_LOCK.lock().await;
+    let name = test_name();
+    // The recorded invocation names the same item; the frontmatter name is
+    // authoritative for the replay either way.
+    create_test_item_with_invocation(
+        &name,
+        &format!("ragent research create {name} \"replay topic\" --tier full"),
+    )
+    .await;
+
+    let app = router(test_state("tok"));
+    let resp = app
+        .oneshot(auth_put("tok", &format!("/research/{name}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+    // Location header should point to the SSE stream.
+    let location = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(location, format!("/research/{name}/events"));
+
+    let body = body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(parsed["name"], name);
+    assert_eq!(parsed["status"], "accepted");
+    assert!(
+        parsed["replayed_invocation"]
+            .as_str()
+            .unwrap()
+            .starts_with("ragent research create")
+    );
+
+    // Clean up — the background replay may fail (no LLM), but the item
+    // exists on disk and the run registry must drain.
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    delete_test_item(&name).await;
+}
+
+#[tokio::test]
+async fn test_research_update_conflicts_with_in_flight_run() {
+    let _guard = FS_LOCK.lock().await;
+    let name = test_name();
+    create_test_item_with_invocation(
+        &name,
+        &format!("ragent research create {name} \"replay topic\""),
+    )
+    .await;
+
+    let state = test_state("tok");
+    // Simulate an in-flight run by pre-registering the name.
+    {
+        let mut runs = state.research_runs.lock().await;
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
+        runs.insert(name.clone(), tx);
+    }
+    let app = router(state);
+    let resp = app
+        .oneshot(auth_put("tok", &format!("/research/{name}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let body = body_string(resp).await;
+    assert!(body.contains("already in progress"));
+
+    delete_test_item(&name).await;
+}
+
+// ── SSE events endpoint (continued) ─────────────────────────────────────
 
 #[tokio::test]
 async fn test_research_events_no_active_run_returns_status() {

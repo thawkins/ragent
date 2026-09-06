@@ -92,7 +92,7 @@ async fn test_execute_rejects_missing_query() {
 #[tokio::test]
 async fn test_execute_returns_results_with_keyless_backends() {
     // Even without a Tavily key, the websearch wrapper delegates to
-    // mf_search which always has DuckDuckGo + Brave. This test verifies
+    // mf_search which always has OpenAlex + Wikipedia. This test verifies
     // the wrapper produces output and metadata in the expected shape.
     let tool = WebSearchTool;
     let result = tool
@@ -143,17 +143,17 @@ fn test_metadata_results_shape() {
                 "url": "https://rust-lang.github.io/async-book/",
                 "snippet": "A guide to async programming in Rust.",
                 "search_tool": "websearch",
-                "search_engine": "duckduckgo, brave"
+                "search_engine": "openalex, wikipedia"
             },
             {
                 "title": "Tokio Tutorial",
                 "url": "https://tokio.rs/tokio/tutorial",
                 "snippet": "Learn how to use Tokio for async Rust.",
                 "search_tool": "websearch",
-                "search_engine": "duckduckgo"
+                "search_engine": "openalex"
             }
         ],
-        "engines_used": ["duckduckgo", "brave"],
+        "engines_used": ["openalex", "wikipedia"],
         "engine_blocked": [],
         "cached": false,
         "duration_ms": 1234
@@ -165,9 +165,9 @@ fn test_metadata_results_shape() {
     assert_eq!(hits[0].url, "https://rust-lang.github.io/async-book/");
     assert_eq!(hits[0].snippet, "A guide to async programming in Rust.");
     assert_eq!(hits[0].search_tool, "websearch");
-    assert_eq!(hits[0].search_engine, "duckduckgo, brave");
+    assert_eq!(hits[0].search_engine, "openalex, wikipedia");
     assert_eq!(hits[1].title, "Tokio Tutorial");
-    assert_eq!(hits[1].search_engine, "duckduckgo");
+    assert_eq!(hits[1].search_engine, "openalex");
 }
 
 #[test]
@@ -193,8 +193,8 @@ fn test_orchestrator_includes_tavily_when_key_present() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_tavily_key("tvly-test-key"));
     let names = orchestrator.engine_names();
     assert!(names.contains(&"tavily"));
-    assert!(names.contains(&"duckduckgo"));
-    assert!(names.contains(&"brave"));
+    assert!(names.contains(&"openalex"));
+    assert!(names.contains(&"wikipedia"));
 }
 
 #[test]
@@ -204,6 +204,6 @@ fn test_orchestrator_omits_tavily_when_no_key() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx());
     let names = orchestrator.engine_names();
     assert!(!names.contains(&"tavily"));
-    assert!(names.contains(&"duckduckgo"));
-    assert!(names.contains(&"brave"));
+    assert!(names.contains(&"openalex"));
+    assert!(names.contains(&"wikipedia"));
 }

@@ -1011,6 +1011,7 @@ pub fn render_document_for(
         output_format: crate::run_config::OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     };
     assemble_document(&doc)
 }
@@ -1346,6 +1347,7 @@ mod tests {
             output_format: crate::run_config::OutputFormat::Report,
             comparison_table: None,
             evaluation_scorecard: None,
+            provider_stats: None,
         };
         mgr.write_document(&doc).await.unwrap();
 
@@ -1634,6 +1636,7 @@ mod tests {
             output_format: crate::run_config::OutputFormat::Report,
             comparison_table: None,
             evaluation_scorecard: None,
+            provider_stats: None,
         };
         mgr.write_document(&doc).await.unwrap();
         let path = ResearchIo::research_md_path(tmp.path(), &name);
@@ -1705,6 +1708,7 @@ mod frontmatter_tests {
             output_format: crate::run_config::OutputFormat::Report,
             comparison_table: None,
             evaluation_scorecard: None,
+            provider_stats: None,
         };
         mgr.write_document(&doc).await.unwrap();
         mgr.complete_gathering("rust-async").await.unwrap();

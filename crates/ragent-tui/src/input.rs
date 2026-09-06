@@ -2482,15 +2482,11 @@ fn handle_router_setup_key(app: &mut App, key: KeyEvent) {
             active_bucket_index = 0;
         }
         KeyCode::Left if !left_pane_focused => {
-            let idx = Tier::all()
-                .iter()
-                .position(|t| *t == active_bucket)
-                .unwrap_or(0);
-            active_bucket = *Tier::all()
-                .iter()
-                .cycle()
-                .nth(idx + Tier::all().len() - 1)
-                .expect("tier list non-empty");
+            let tiers = Tier::all();
+            let idx = tiers.iter().position(|t| *t == active_bucket).unwrap_or(0);
+            active_bucket = *tiers
+                .get((idx + tiers.len() - 1) % tiers.len())
+                .unwrap_or(&Tier::Simple);
             active_bucket_index = 0;
         }
         KeyCode::Right if !left_pane_focused => {

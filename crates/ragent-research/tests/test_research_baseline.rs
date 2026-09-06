@@ -42,7 +42,7 @@ impl WebSearchTool for TopicFakeSearch {
                 snippet: format!("A detailed article about {keyword}."),
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
-                search_engine: "duckduckgo, brave".into(),
+                search_engine: "openalex, wikipedia".into(),
                 author: None,
             })
             .collect();

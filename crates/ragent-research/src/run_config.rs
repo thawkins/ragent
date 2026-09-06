@@ -94,7 +94,7 @@ impl ResearchMode {
         match s.to_lowercase().as_str() {
             "tiered" | "tier" => Some(Self::Tiered),
             "supervisor" | "super" => Some(Self::Supervisor),
-            "competitive" | "comp" => Some(Self::Competitive),
+            "competitive" | "comp" | "competative" => Some(Self::Competitive),
             _ => None,
         }
     }
@@ -269,6 +269,11 @@ mod tests {
         assert_eq!(
             ResearchMode::parse("competitive"),
             Some(ResearchMode::Competitive)
+        );
+        assert_eq!(
+            ResearchMode::parse("competative"),
+            Some(ResearchMode::Competitive),
+            "common misspelling must map to Competitive"
         );
         assert_eq!(ResearchMode::parse("comp"), Some(ResearchMode::Competitive));
         assert_eq!(ResearchMode::parse("invalid"), None);

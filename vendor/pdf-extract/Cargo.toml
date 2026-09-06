@@ -59,9 +59,6 @@ version = "0.4.22"
 version = "0.38"
 default-features = false
 
-[dependencies.postscript]
-version = "0.14"
-
 [dependencies.type1-encoding-parser]
 version = "0.1.0"
 

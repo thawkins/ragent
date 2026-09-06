@@ -54,6 +54,7 @@ fn empty_doc(item: ResearchItem) -> ResearchDocument {
         brief: None,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     }
 }
 
@@ -73,7 +74,7 @@ fn web_source(
         body: body.to_string(),
         relevance: relevance.to_string(),
         search_tool: "mf_search".into(),
-        search_engine: "duckduckgo".into(),
+        search_engine: "openalex".into(),
         content_type: None,
         page_type: None,
         media_type: "page".into(),

@@ -3,7 +3,7 @@
 //! [`WebSearchTool`] is retained for direct agent use and backwards
 //! compatibility. It delegates to the multi-engine `mf_search` pipeline
 //! (via [`MfSearchTool::build_orchestrator`]) so that all configured
-//! backends — DuckDuckGo, Brave, LangSearch, and Tavily — contribute
+//! backends — OpenAlex, Wikipedia, LangSearch, and Tavily — contribute
 //! results. The tool preserves its original name (`websearch`), parameter
 //! schema (`query`, `num_results`), and human-readable output format.
 //!
@@ -20,7 +20,7 @@ use crate::masterfetch::tools::search_tool::MfSearchTool;
 /// Performs a web search and returns structured results.
 ///
 /// Delegates to the `mf_search` multi-engine pipeline so results include
-/// DuckDuckGo, Brave, and optionally LangSearch / Tavily when their API
+/// OpenAlex, Wikipedia, and optionally LangSearch / Tavily when their API
 /// keys are configured.
 pub struct WebSearchTool;
 
@@ -36,7 +36,7 @@ impl Tool for WebSearchTool {
     fn description(&self) -> &'static str {
         "Search the web and return results with titles, URLs, and snippets. \
          Required parameter: 'query'. Optional 'num_results' (default 5, max 20). \
-         By default uses the keyless mf_search pipeline (DuckDuckGo, Brave); \
+         By default uses the keyless mf_search pipeline (OpenAlex, Wikipedia); \
          optional Tavily/LangSearch API keys improve quality but are not required."
     }
     fn parameters_schema(&self) -> Value {

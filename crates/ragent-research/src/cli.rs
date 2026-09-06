@@ -14,7 +14,6 @@
 use std::collections::HashMap;
 
 use crate::run_config::{Depth, OutputFormat, ResearchMode, Tier};
-use crate::status::ResearchStatus;
 
 /// Parsed `ragent research` sub-command.
 ///
@@ -137,6 +136,10 @@ pub enum ResearchCliCommand {
         /// `--max-web-results N` — override the maximum number of web sources
         /// to capture.
         max_web_results: Option<usize>,
+        /// `--max-search-calls N` — hard cap on the total number of web-search
+        /// calls the run may issue, shared across all supervisor/competitive
+        /// researchers and gather passes. When `None`, no cap is applied.
+        max_search_calls: Option<usize>,
         /// `--max-local-sources N` — override the maximum number of in-project
         /// local sources to capture.
         max_local_sources: Option<usize>,
@@ -199,6 +202,12 @@ pub enum ResearchCliCommand {
         /// Optional follow-up message for the resumed session.
         message: Option<String>,
     },
+    /// `ragent research update <name>` — replay the invocation recorded in
+    /// the item's frontmatter and overwrite `RESEARCH.md`.
+    Update {
+        /// URL-safe research item name.
+        name: String,
+    },
     /// `ragent research cluster <name> [--force]`
     Cluster {
         /// URL-safe research item name.
@@ -250,6 +259,7 @@ impl ResearchCliCommand {
             "archive" => Self::parse_archive(&args[1..]),
             "resume" => Self::parse_resume(&args[1..]),
             "continue" => Self::parse_continue(&args[1..]),
+            "update" => Self::parse_update(&args[1..]),
             "cluster" => Self::parse_cluster(&args[1..]),
             "export" => Self::parse_export(&args[1..]),
             "import" => Self::parse_import(&args[1..]),
@@ -292,6 +302,7 @@ impl ResearchCliCommand {
         let mut no_papers = false;
         let mut use_pdf = false;
         let mut max_web_results: Option<usize> = None;
+        let mut max_search_calls: Option<usize> = None;
         let mut max_local_sources: Option<usize> = None;
         let mut max_synthesis_sources: Option<usize> = None;
         let mut brief: Option<String> = None;
@@ -301,7 +312,9 @@ impl ResearchCliCommand {
             let arg = rest[i];
             match arg {
                 "--from-url"
+                | "--from-urls"
                 | "--from-file"
+                | "--from-files"
                 | "--iterations"
                 | "--depth"
                 | "--tier"
@@ -324,14 +337,17 @@ impl ResearchCliCommand {
                 | "--search-retry-base-delay-ms"
                 | "--search-circuit-breaker-threshold"
                 | "--max-web-results"
+                | "--max-search-calls"
                 | "--max-local-sources"
                 | "--max-synthesis-sources"
                 | "--brief" => {
                     i += 1;
                     if let Some(v) = rest.get(i) {
                         match arg {
-                            "--from-url" => from_urls.push((*v).to_string()),
-                            "--from-file" => from_files.push((*v).to_string()),
+                            "--from-url" | "--from-urls" => from_urls.push((*v).to_string()),
+                            "--from-file" | "--from-files" => {
+                                from_files.push((*v).to_string());
+                            }
                             "--iterations" => iterations = v.parse().ok(),
                             "--depth" => depth = Some((*v).to_string()),
                             "--tier" => tier = Some((*v).to_string()),
@@ -367,6 +383,7 @@ impl ResearchCliCommand {
                                 search_circuit_breaker_threshold = v.parse().ok();
                             }
                             "--max-web-results" => max_web_results = v.parse().ok(),
+                            "--max-search-calls" => max_search_calls = v.parse().ok(),
                             "--max-local-sources" => max_local_sources = v.parse().ok(),
                             "--max-synthesis-sources" => max_synthesis_sources = v.parse().ok(),
                             "--brief" => brief = Some((*v).to_string()),
@@ -428,6 +445,7 @@ impl ResearchCliCommand {
             search_retry_base_delay_ms,
             search_circuit_breaker_threshold,
             max_web_results,
+            max_search_calls,
             max_local_sources,
             max_synthesis_sources,
             brief,
@@ -515,6 +533,14 @@ impl ResearchCliCommand {
         }
     }
 
+    /// Parse `update <name>`. Extra arguments are tolerated and ignored so
+    /// the recorded CLI/TUI/HTTP invocation forms replay unchanged.
+    fn parse_update(rest: &[&str]) -> Self {
+        Self::Update {
+            name: Self::first_positional(rest).unwrap_or_default(),
+        }
+    }
+
     fn parse_cluster(rest: &[&str]) -> Self {
         Self::Cluster {
             name: Self::first_positional(rest).unwrap_or_default(),
@@ -572,6 +598,7 @@ impl ResearchCliCommand {
   archive <name>                  Archive a research item
   resume <name>                  Resume an in-progress run
   continue <name> [--message ...] Continue a completed run with a follow-up
+  update <name>                   Replay the recorded invocation for a run
   cluster <name> [--force]        Extract concept clusters for a run
   export <name> [--output path]   Export a research item
   import <path> [--name name]    Import a research item
@@ -579,7 +606,7 @@ impl ResearchCliCommand {
   help                           Show this help message
 
 Common create flags:
-  --mode tiered|supervisor|competitive
+  --mode tiered|supervisor|competitive (competitive implies --format comparison-table)
   --tier light|full|dissertation
   --depth shallow|standard|deep
   --format report|executive-summary|comparison-table|source-bibliography|imrad
@@ -614,26 +641,80 @@ fn split_args(input: &str) -> Vec<String> {
     tokens
 }
 
-/// Render a list of research items as a JSON array (one object per item).
+/// Render a list of research items as a fixed-width human-readable table.
+///
+/// Each tuple is `(name, title, topic, status, created, modified)`. Long
+/// fields are truncated to their column width so rows stay aligned. Use
+/// [`render_list_output_json`] for machine-readable output.
 #[must_use]
-pub fn render_list_output(items: &[(String, String, String, ResearchStatus)]) -> String {
+pub fn render_list_output(items: &[(String, String, String, String, String, String)]) -> String {
+    if items.is_empty() {
+        return "(no research items)\n".to_string();
+    }
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{:<22} {:<32} {:<11} {:<24} {:<24}\n",
+        "NAME", "TITLE", "STATUS", "CREATED", "MODIFIED"
+    ));
+    out.push_str(&"-".repeat(120));
+    out.push('\n');
+    for (name, title, _topic, status, created, modified) in items {
+        out.push_str(&format!(
+            "{:<22} {:<32} {:<11} {:<24} {:<24}\n",
+            truncate(name, 22),
+            truncate(title, 32),
+            truncate(status, 11),
+            truncate(created, 24),
+            truncate(modified, 24),
+        ));
+    }
+    out
+}
+
+/// Render a list of research items as a JSON array (one object per item).
+///
+/// Each tuple is `(name, title, topic, status, created, modified)`.
+#[must_use]
+pub fn render_list_output_json(
+    items: &[(String, String, String, String, String, String)],
+) -> String {
     let rows: Vec<serde_json::Value> = items
         .iter()
-        .map(|(name, title, topic, status)| {
+        .map(|(name, title, topic, status, created, modified)| {
             serde_json::json!({
                 "name": name,
                 "title": title,
                 "topic": topic,
-                "status": status.as_str(),
+                "status": status,
+                "created": created,
+                "modified": modified,
             })
         })
         .collect();
     serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string())
 }
 
-/// Render search results as a JSON array.
+/// Render search results as a human-readable bullet list.
+///
+/// Each tuple is `(name, title, snippet)`. Use [`render_search_output_json`]
+/// for machine-readable output.
 #[must_use]
-pub fn render_search_output(results: &[(String, String, String, String)]) -> String {
+pub fn render_search_output(results: &[(String, String, String)]) -> String {
+    let mut out = String::new();
+    for (name, title, snippet) in results {
+        out.push_str(&format!("* {name} - {title}\n    {snippet}\n"));
+    }
+    if out.is_empty() {
+        out.push_str("(no matches)\n");
+    }
+    out
+}
+
+/// Render search results as a JSON array.
+///
+/// Each tuple is `(name, title, snippet, path)`.
+#[must_use]
+pub fn render_search_output_json(results: &[(String, String, String, String)]) -> String {
     let rows: Vec<serde_json::Value> = results
         .iter()
         .map(|(name, title, snippet, path)| {
@@ -646,6 +727,16 @@ pub fn render_search_output(results: &[(String, String, String, String)]) -> Str
         })
         .collect();
     serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// Truncate a string to at most `max` characters, appending `...` when cut.
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut t: String = s.chars().take(max.saturating_sub(3)).collect();
+    t.push_str("...");
+    t
 }
 
 /// Render a single research item as a JSON object.
@@ -962,6 +1053,7 @@ pub fn session_event_json(event: &crate::session::SessionEvent) -> String {
             serde_json::json!({ "findings_count": findings_count }),
         ),
         SessionEvent::ConfigSnapshot {
+            mode,
             output_format,
             depth,
             iterations,
@@ -971,6 +1063,7 @@ pub fn session_event_json(event: &crate::session::SessionEvent) -> String {
         } => (
             "config",
             serde_json::json!({
+                "mode": mode,
                 "output_format": output_format,
                 "depth": depth,
                 "iterations": iterations,
@@ -993,12 +1086,6 @@ pub fn session_event_json(event: &crate::session::SessionEvent) -> String {
 #[must_use]
 pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String {
     format!("ragent-research: {}", session_event_json(event))
-}
-
-/// Convert a research status enum to its display string.
-#[must_use]
-pub fn status_label(status: ResearchStatus) -> &'static str {
-    status.as_str()
 }
 
 /// Parse a `<name>` / `<status>` filter pair from a `search` query string.
@@ -1209,6 +1296,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_create_with_mode() {
+        let cmd = ResearchCliCommand::parse("create comp topic --mode competitive");
+        match cmd {
+            ResearchCliCommand::Create {
+                name, topic, mode, ..
+            } => {
+                assert_eq!(name, "comp");
+                assert_eq!(topic, "topic");
+                assert_eq!(mode.as_deref(), Some("competitive"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_list_json() {
         assert_eq!(
             ResearchCliCommand::parse("list --json"),
@@ -1295,15 +1397,41 @@ mod tests {
     }
 
     #[test]
-    fn render_list_output_is_valid_json() {
-        let json = render_list_output(&[(
+    fn render_list_output_table_has_aligned_header() {
+        let out = render_list_output(&[(
             "foo".to_string(),
             "Foo".to_string(),
             "topic".to_string(),
-            ResearchStatus::Complete,
+            "complete".to_string(),
+            "2026-01-01T00:00:00+00:00".to_string(),
+            "2026-01-02T00:00:00+00:00".to_string(),
+        )]);
+        assert!(out.contains("NAME"));
+        assert!(out.contains("STATUS"));
+        assert!(out.contains("CREATED"));
+        assert!(out.contains("foo"));
+        assert!(out.contains("complete"));
+        assert!(!out.contains('{'));
+    }
+
+    #[test]
+    fn render_list_output_empty_shows_message() {
+        assert_eq!(render_list_output(&[]), "(no research items)\n");
+    }
+
+    #[test]
+    fn render_list_output_json_is_valid_json() {
+        let json = render_list_output_json(&[(
+            "foo".to_string(),
+            "Foo".to_string(),
+            "topic".to_string(),
+            "complete".to_string(),
+            "2026-01-01T00:00:00+00:00".to_string(),
+            "2026-01-02T00:00:00+00:00".to_string(),
         )]);
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
         assert_eq!(parsed[0]["name"].as_str(), Some("foo"));
+        assert_eq!(parsed[0]["topic"].as_str(), Some("topic"));
     }
 
     #[test]
@@ -1328,8 +1456,21 @@ mod tests {
     }
 
     #[test]
-    fn render_search_output_is_valid_json() {
-        let json = render_search_output(&[(
+    fn render_search_output_bullet_list() {
+        let out =
+            render_search_output(&[("foo".to_string(), "Foo".to_string(), "snippet".to_string())]);
+        assert!(out.contains("* foo - Foo"));
+        assert!(out.contains("snippet"));
+    }
+
+    #[test]
+    fn render_search_output_empty_shows_message() {
+        assert_eq!(render_search_output(&[]), "(no matches)\n");
+    }
+
+    #[test]
+    fn render_search_output_json_is_valid_json() {
+        let json = render_search_output_json(&[(
             "foo".to_string(),
             "Foo".to_string(),
             "snippet".to_string(),
@@ -1337,6 +1478,19 @@ mod tests {
         )]);
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
         assert_eq!(parsed[0]["path"].as_str(), Some("research/foo/RESEARCH.md"));
+    }
+
+    #[test]
+    fn truncate_short_string_passes_through() {
+        assert_eq!(truncate("abc", 5), "abc");
+    }
+
+    #[test]
+    fn truncate_long_string_ellipsises() {
+        let s = "a".repeat(20);
+        let t = truncate(&s, 5);
+        assert_eq!(t.chars().count(), 5);
+        assert!(t.ends_with("..."));
     }
 
     #[test]

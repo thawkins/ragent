@@ -26,7 +26,7 @@ fn comparison_doc(table: Option<&str>) -> ResearchDocument {
         body: "A is fast.".into(),
         relevance: String::new(),
         search_tool: "mf_search".into(),
-        search_engine: "duckduckgo".into(),
+        search_engine: "openalex".into(),
         content_type: None,
         page_type: None,
         media_type: "page".into(),
@@ -62,6 +62,7 @@ fn comparison_doc(table: Option<&str>) -> ResearchDocument {
         output_format: OutputFormat::ComparisonTable,
         comparison_table: table.map(str::to_string),
         evaluation_scorecard: None,
+        provider_stats: None,
     }
 }
 

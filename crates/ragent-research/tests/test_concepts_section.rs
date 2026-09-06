@@ -111,6 +111,7 @@ fn sample_doc_with_concepts(concepts: Option<&str>) -> ResearchDocument {
         output_format: ragent_research::run_config::OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     }
 }
 

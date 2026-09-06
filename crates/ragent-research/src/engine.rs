@@ -193,6 +193,8 @@ impl GatherObserver for StateGatherForwarder {
             GatherEvent::SearchReturnedNoHits
             | GatherEvent::SearchRetrying { .. }
             | GatherEvent::SearchCircuitOpen { .. }
+            | GatherEvent::SearchBudgetExhausted { .. }
+            | GatherEvent::ProviderCallsSummary { .. }
             | GatherEvent::WidthSweepSummary { .. } => {
                 // Retry/circuit diagnostics and the summary are surfaced by
                 // the session-level forwarder; the engine only needs the

@@ -28,7 +28,6 @@ tracing = { workspace = true }
 
 # File operations
 globset = { workspace = true }
-walkdir = "2.5"
 similar = { workspace = true }
 lru = { workspace = true }
 
@@ -47,7 +46,6 @@ libc = { workspace = true }
 
 # Utilities
 chrono = { workspace = true }
-uuid = { workspace = true }
 dirs = "6"
 
 [dev-dependencies]

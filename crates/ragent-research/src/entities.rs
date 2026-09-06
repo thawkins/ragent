@@ -306,7 +306,7 @@ pub fn infer_competitive_set(topic: &str, max_entities: usize) -> Vec<String> {
             "Neovim",
         ]
     } else if lower.contains("rust") && lower.contains("runtime") {
-        vec!["Tokio", "async-std", "smol", "Actix", " embassy"]
+        vec!["Tokio", "async-std", "smol", "Actix", "embassy"]
     } else {
         vec!["Option A", "Option B", "Option C"]
     };
@@ -352,7 +352,11 @@ fn detect_category(topic: &str) -> Option<&'static str> {
 /// Extract comparison criteria/dimensions from the topic.
 ///
 /// The heuristic looks for trailing prepositional phrases ("for X", "in Y",
-/// "regarding Z") and for common comparison keywords.
+/// "regarding Z") and for common comparison keywords. When neither yields a
+/// dimension, a generic attribute grid (licensing/pricing, model support,
+/// deployment, UX, quality) is returned so competitive runs always render
+/// per-attribute comparison columns (FR-016) instead of a bare Entity/Profile
+/// listing.
 #[must_use]
 pub fn extract_comparison_criteria(topic: &str) -> Vec<String> {
     let lower = topic.to_lowercase();
@@ -385,6 +389,18 @@ pub fn extract_comparison_criteria(topic: &str) -> Vec<String> {
         if lower.contains(keyword) && !criteria.iter().any(|c| c.contains(axis)) {
             criteria.push(axis.to_string());
         }
+    }
+
+    // Generic attribute-grid fallback: a plain "compare A, B, C" topic names
+    // no dimensions, but the comparison table still needs per-attribute
+    // columns and per-entity researchers still need dimension guidance
+    // (FR-016).
+    if criteria.is_empty() {
+        criteria.push("licensing and pricing".to_string());
+        criteria.push("model and provider support".to_string());
+        criteria.push("deployment and integration".to_string());
+        criteria.push("UX and workflow".to_string());
+        criteria.push("quality and performance".to_string());
     }
 
     criteria

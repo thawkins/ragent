@@ -707,6 +707,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Clear message history for the current session",
     },
     SlashCommandDef {
+        trigger: "clip",
+        description: "Copy the rendered message-window contents to the system clipboard",
+    },
+    SlashCommandDef {
         trigger: "cancel",
         description: "Cancel a background task (/cancel <task_id_prefix>)",
     },

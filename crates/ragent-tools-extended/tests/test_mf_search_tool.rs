@@ -110,10 +110,13 @@ fn test_description_mentions_key_features() {
     let tool = MfSearchTool;
     let desc = tool.description();
     assert!(
-        desc.contains("DuckDuckGo"),
-        "description should mention DuckDuckGo"
+        desc.contains("OpenAlex"),
+        "description should mention OpenAlex"
     );
-    assert!(desc.contains("Brave"), "description should mention Brave");
+    assert!(
+        desc.contains("Wikipedia"),
+        "description should mention Wikipedia"
+    );
     assert!(
         desc.contains("LangSearch"),
         "description should mention LangSearch"
@@ -153,10 +156,8 @@ fn test_description_mentions_key_features() {
 #[test]
 fn test_orchestrator_without_key_uses_three_engines() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx());
-    assert_eq!(orchestrator.engine_count(), 4);
+    assert_eq!(orchestrator.engine_count(), 2);
     let names = orchestrator.engine_names();
-    assert!(names.contains(&"duckduckgo"));
-    assert!(names.contains(&"brave"));
     assert!(names.contains(&"openalex"));
     assert!(names.contains(&"wikipedia"));
 }
@@ -164,7 +165,7 @@ fn test_orchestrator_without_key_uses_three_engines() {
 #[test]
 fn test_orchestrator_with_key_adds_langsearch_engine() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_langsearch_key("ls-test-key"));
-    assert_eq!(orchestrator.engine_count(), 5);
+    assert_eq!(orchestrator.engine_count(), 3);
     let names = orchestrator.engine_names();
     assert!(names.contains(&"langsearch"));
 }
@@ -172,7 +173,7 @@ fn test_orchestrator_with_key_adds_langsearch_engine() {
 #[test]
 fn test_orchestrator_with_empty_key_omits_langsearch_engine() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_langsearch_key(""));
-    assert_eq!(orchestrator.engine_count(), 4);
+    assert_eq!(orchestrator.engine_count(), 2);
     let names = orchestrator.engine_names();
     assert!(!names.contains(&"langsearch"));
 }
@@ -180,7 +181,7 @@ fn test_orchestrator_with_empty_key_omits_langsearch_engine() {
 #[test]
 fn test_orchestrator_with_tavily_key_adds_tavily_engine() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_tavily_key("tvly-test-key"));
-    assert_eq!(orchestrator.engine_count(), 5);
+    assert_eq!(orchestrator.engine_count(), 3);
     let names = orchestrator.engine_names();
     assert!(names.contains(&"tavily"));
 }
@@ -188,7 +189,7 @@ fn test_orchestrator_with_tavily_key_adds_tavily_engine() {
 #[test]
 fn test_orchestrator_with_empty_tavily_key_omits_tavily_engine() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_tavily_key(""));
-    assert_eq!(orchestrator.engine_count(), 4);
+    assert_eq!(orchestrator.engine_count(), 2);
     let names = orchestrator.engine_names();
     assert!(!names.contains(&"tavily"));
 }
@@ -196,7 +197,7 @@ fn test_orchestrator_with_empty_tavily_key_omits_tavily_engine() {
 #[test]
 fn test_orchestrator_with_perplexity_key_adds_perplexity_engine() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_perplexity_key("pplx-test-key"));
-    assert_eq!(orchestrator.engine_count(), 5);
+    assert_eq!(orchestrator.engine_count(), 3);
     let names = orchestrator.engine_names();
     assert!(names.contains(&"perplexity"));
 }
@@ -204,7 +205,7 @@ fn test_orchestrator_with_perplexity_key_adds_perplexity_engine() {
 #[test]
 fn test_orchestrator_with_empty_perplexity_key_omits_perplexity_engine() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_perplexity_key(""));
-    assert_eq!(orchestrator.engine_count(), 4);
+    assert_eq!(orchestrator.engine_count(), 2);
     let names = orchestrator.engine_names();
     assert!(!names.contains(&"perplexity"));
 }
@@ -226,7 +227,7 @@ fn test_orchestrator_with_both_keys_adds_all_optional_engines() {
         )),
     };
     let orchestrator = MfSearchTool::build_orchestrator(&ctx);
-    assert_eq!(orchestrator.engine_count(), 6);
+    assert_eq!(orchestrator.engine_count(), 4);
     let names = orchestrator.engine_names();
     assert!(names.contains(&"langsearch"));
     assert!(names.contains(&"tavily"));
@@ -252,7 +253,7 @@ fn test_orchestrator_with_all_three_keys_adds_all_optional_engines() {
         )),
     };
     let orchestrator = MfSearchTool::build_orchestrator(&ctx);
-    assert_eq!(orchestrator.engine_count(), 7);
+    assert_eq!(orchestrator.engine_count(), 5);
     let names = orchestrator.engine_names();
     assert!(names.contains(&"langsearch"));
     assert!(names.contains(&"tavily"));
@@ -264,7 +265,7 @@ fn test_orchestrator_with_all_three_keys_adds_all_optional_engines() {
 #[test]
 fn test_orchestrator_with_exa_key_adds_exa_engine() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_exa_key("exa-test-key"));
-    assert_eq!(orchestrator.engine_count(), 5);
+    assert_eq!(orchestrator.engine_count(), 3);
     let names = orchestrator.engine_names();
     assert!(names.contains(&"exa"));
 }
@@ -272,7 +273,7 @@ fn test_orchestrator_with_exa_key_adds_exa_engine() {
 #[test]
 fn test_orchestrator_with_empty_exa_key_omits_exa_engine() {
     let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_exa_key(""));
-    assert_eq!(orchestrator.engine_count(), 4);
+    assert_eq!(orchestrator.engine_count(), 2);
     let names = orchestrator.engine_names();
     assert!(!names.contains(&"exa"));
 }
@@ -296,7 +297,7 @@ fn test_orchestrator_with_all_four_keys_adds_all_optional_engines() {
         )),
     };
     let orchestrator = MfSearchTool::build_orchestrator(&ctx);
-    assert_eq!(orchestrator.engine_count(), 8);
+    assert_eq!(orchestrator.engine_count(), 6);
     let names = orchestrator.engine_names();
     assert!(names.contains(&"langsearch"));
     assert!(names.contains(&"tavily"));
@@ -363,8 +364,6 @@ fn test_parameters_schema_includes_engine_enum() {
         .iter()
         .map(|v| v.as_str().unwrap().to_string())
         .collect();
-    assert!(engine_enum.contains(&"duckduckgo".to_string()));
-    assert!(engine_enum.contains(&"brave".to_string()));
     assert!(engine_enum.contains(&"openalex".to_string()));
     assert!(engine_enum.contains(&"wikipedia".to_string()));
     assert!(engine_enum.contains(&"langsearch".to_string()));
@@ -451,8 +450,8 @@ fn test_build_search_metadata_populates_search_tool_and_engine() {
     let opts = SearchOptions::new(1);
     let names = orchestrator.engine_names();
     assert!(names.contains(&"tavily"));
-    assert!(names.contains(&"duckduckgo"));
-    assert!(names.contains(&"brave"));
+    assert!(names.contains(&"openalex"));
+    assert!(names.contains(&"wikipedia"));
 
     // The real metadata construction runs inside execute(); here we just
     // ensure the orchestrator exposes the expected engine list so research
@@ -464,15 +463,9 @@ fn test_build_search_metadata_populates_search_tool_and_engine() {
 #[test]
 fn test_engine_status_without_keys_shows_keyless_engines_enabled() {
     let status = MfSearchTool::engine_status(&ctx());
-    assert_eq!(status.len(), 8);
+    assert_eq!(status.len(), 6);
     let by_name: std::collections::HashMap<&str, &EngineStatus> =
         status.iter().map(|e| (e.name, e)).collect();
-
-    let duck = by_name["DuckDuckGo"];
-    assert!(duck.enabled && duck.in_use && !duck.failed);
-
-    let brave = by_name["Brave"];
-    assert!(brave.enabled && brave.in_use && !brave.failed);
 
     let oalex = by_name["OpenAlex"];
     assert!(oalex.enabled && oalex.in_use && !oalex.failed);

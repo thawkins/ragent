@@ -131,6 +131,7 @@ fn merged_chunk_results_produce_valid_diagram_and_cross_references() {
         output_format: OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     };
     let assembled = assemble_document(&doc);
 

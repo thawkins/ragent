@@ -12,21 +12,10 @@ doctest = false
 
 [dependencies]
 tokio = { workspace = true }
-futures = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
-tracing = { workspace = true }
-uuid = { workspace = true }
-chrono = { workspace = true }
-async-trait = { workspace = true }
-dirs = { workspace = true }
-fs2 = { workspace = true }
 parking_lot = { workspace = true }
-dashmap = { workspace = true }
 ragent-agent = { path = "../ragent-agent" }
-ragent-config = { path = "../ragent-config" }
-ragent-storage = { path = "../ragent-storage" }
 ragent-types = { path = "../ragent-types" }
 
 [dev-dependencies]

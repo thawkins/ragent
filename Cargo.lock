@@ -5078,7 +5078,6 @@ dependencies = [
  "euclid",
  "log",
  "lopdf 0.38.0",
- "postscript",
  "type1-encoding-parser",
  "unicode-normalization",
 ]
@@ -5336,12 +5335,6 @@ checksum = "c2a106d1259c23fac8e543272398ae0e3c0b8d33c88ed73d0cc71b0f1d902618"
 dependencies = [
  "portable-atomic",
 ]
-
-[[package]]
-name = "postscript"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78451badbdaebaf17f053fd9152b3ffb33b516104eacb45e7864aaa9c712f306"
 
 [[package]]
 name = "potential_utf"
@@ -5718,7 +5711,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "1.0.78"
+version = "1.0.79"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5732,11 +5725,8 @@ dependencies = [
  "ragent-research",
  "ragent-server",
  "ragent-specs",
- "ragent-telemetry",
  "ragent-tui",
  "ragent-types",
- "reqwest 0.12.28",
- "serde",
  "serde_json",
  "tokio",
  "tracing",
@@ -5746,40 +5736,23 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.78"
+version = "1.0.79"
 dependencies = [
  "anyhow",
- "async-stream",
  "async-trait",
  "base64 0.22.1",
- "blake3",
- "bytes",
- "calamine",
  "chrono",
  "criterion",
  "dashmap",
  "dirs 6.0.0",
- "docx-rust",
  "flate2",
  "fs2",
  "futures",
- "glob",
  "globset",
- "grep-regex",
- "grep-searcher",
  "html2text",
  "ignore",
- "lopdf 0.39.0",
- "lru 0.12.5",
- "ndarray",
  "num_cpus",
- "ooxmlsdk",
- "ort",
  "parking_lot",
- "pdf-extract",
- "pin-project-lite",
- "printpdf",
- "quick-xml 0.39.4",
  "ragent-codeindex",
  "ragent-config",
  "ragent-llm",
@@ -5791,64 +5764,55 @@ dependencies = [
  "ragent-tools-extended",
  "ragent-tools-vcs",
  "ragent-types",
- "rand 0.9.5",
- "rayon",
  "readability-rs",
  "regex",
  "reqwest 0.12.28",
  "rmcp",
  "rusqlite",
- "rust_xlsxwriter",
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
  "similar",
- "spreadsheet-ods",
  "tar",
  "tempfile",
  "thiserror 2.0.19",
- "tokenizers",
  "tokio",
  "tokio-stream",
  "tracing",
  "url",
  "uuid",
  "walkdir",
- "zip 7.2.0",
 ]
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.78"
+version = "1.0.79"
 dependencies = [
  "anyhow",
  "async-trait",
  "calamine",
  "chrono",
  "criterion",
- "flate2",
  "futures",
  "ragent-agent",
  "ragent-llm",
  "ragent-tools-core",
  "ragent-types",
  "reqwest 0.12.28",
- "rust_xlsxwriter",
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
  "tokio",
- "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.78"
+version = "1.0.79"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5895,7 +5859,6 @@ dependencies = [
  "serde_json",
  "serial_test",
  "tempfile",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -5907,7 +5870,6 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "base64 0.22.1",
  "bytes",
  "chrono",
  "dirs 5.0.1",
@@ -5922,9 +5884,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
- "thiserror 1.0.69",
  "tokio",
- "tokio-util",
  "tracing",
 ]
 
@@ -5939,7 +5899,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.78"
+version = "1.0.79"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5951,7 +5911,6 @@ dependencies = [
  "ragent-config",
  "ragent-llm",
  "ragent-specs",
- "ragent-storage",
  "ragent-tools-extended",
  "ragent-types",
  "regex",
@@ -5959,7 +5918,6 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "similar",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
@@ -5970,22 +5928,18 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.78"
+version = "1.0.79"
 dependencies = [
  "anyhow",
- "async-stream",
  "async-trait",
  "axum 0.8.9",
- "chrono",
  "criterion",
  "futures",
  "http-body-util",
  "parking_lot",
  "ragent-agent",
- "ragent-config",
  "ragent-prompt_opt",
  "ragent-research",
- "ragent-types",
  "serde",
  "serde_json",
  "tempfile",
@@ -6033,41 +5987,27 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "1.0.78"
+version = "1.0.79"
 dependencies = [
  "anyhow",
- "async-trait",
- "chrono",
- "dashmap",
- "dirs 6.0.0",
- "fs2",
- "futures",
  "parking_lot",
  "ragent-agent",
- "ragent-config",
- "ragent-storage",
  "ragent-tools-core",
  "ragent-types",
- "serde",
  "serde_json",
  "tempfile",
  "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]
 name = "ragent-telemetry"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "parking_lot",
  "ragent-config",
- "ragent-types",
- "serde",
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
@@ -6100,8 +6040,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "uuid",
- "walkdir",
  "which",
 ]
 
@@ -6127,7 +6065,6 @@ dependencies = [
  "paft-decimal",
  "paft-money",
  "pdf-extract",
- "percent-encoding",
  "printpdf",
  "quick-xml 0.39.4",
  "ragent-codeindex",
@@ -6140,7 +6077,6 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
- "rust_xlsxwriter",
  "serde",
  "serde_json",
  "spreadsheet-ods",
@@ -6177,12 +6113,11 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.78"
+version = "1.0.79"
 dependencies = [
  "anyhow",
  "arboard",
  "async-trait",
- "axum 0.8.9",
  "chrono",
  "criterion",
  "crossterm",
@@ -6218,7 +6153,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-stream",
  "tracing",
  "tracing-subscriber",
  "unicode-segmentation",
@@ -6232,7 +6166,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "once_cell",
  "regex",
  "rusqlite",
  "serde",

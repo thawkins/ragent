@@ -1620,9 +1620,13 @@ impl App {
             );
         }
 
-        // Update cwd to match the session's working directory
+        // Update cwd to match the session's working directory. Keep the
+        // display string (`~`-collapsed) and the real path in sync so path
+        // consumers (`cwd_path`, e.g. the research manager root) follow the
+        // resumed session's directory.
         if !session.directory.is_empty() {
-            self.cwd = session.directory.clone();
+            self.cwd_path = Self::expand_home_path(std::path::Path::new(&session.directory));
+            self.cwd = Self::collapse_home_path(&self.cwd_path);
         }
 
         // T-010/FR-013: the conversation history was just replaced; refresh

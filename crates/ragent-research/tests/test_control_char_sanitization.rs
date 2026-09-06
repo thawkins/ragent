@@ -46,6 +46,7 @@ fn sample_doc(item: ResearchItem) -> ResearchDocument {
         output_format: OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     }
 }
 #[test]
@@ -106,6 +107,7 @@ fn assemble_document_strips_control_chars_from_summary() {
         output_format: OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     };
     let assembled = assemble_document(&doc);
     assert!(
@@ -145,6 +147,7 @@ fn assemble_document_strips_control_chars_from_findings() {
         output_format: OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     };
     let assembled = assemble_document(&doc);
     assert!(
@@ -187,6 +190,7 @@ fn assemble_document_strips_control_chars_from_cross_references() {
         output_format: OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     };
     let assembled = assemble_document(&doc);
     assert!(
@@ -226,6 +230,7 @@ fn assemble_document_strips_control_chars_from_open_questions() {
         output_format: OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     };
     let assembled = assemble_document(&doc);
     assert!(
@@ -265,6 +270,7 @@ fn assemble_document_strips_control_chars_from_decomposed_queries() {
         output_format: OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     };
     let assembled = assemble_document(&doc);
     assert!(
@@ -308,6 +314,7 @@ fn assemble_document_strips_control_chars_in_imrad_layout() {
         output_format: OutputFormat::Imrad,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     };
     let assembled = assemble_document(&doc);
     for byte in [0x01u8 as char, 0x02u8 as char, 0x03u8 as char] {

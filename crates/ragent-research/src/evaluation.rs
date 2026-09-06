@@ -270,7 +270,7 @@ mod tests {
             body: "body".into(),
             relevance: String::new(),
             search_tool: "mf_search".into(),
-            search_engine: "duckduckgo".into(),
+            search_engine: "openalex".into(),
             content_type: None,
             page_type: None,
             media_type: "page".into(),

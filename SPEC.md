@@ -2,7 +2,7 @@
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
 <h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">
-        <strong>Version:</strong> 1.0.77</p>
+        <strong>Version:</strong> 1.0.78</p>
       <p style="font-size: 1.1em;">
         <strong>Date:</strong> 2026-09-03
       </p>
@@ -99,37 +99,28 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.77). The core architecture, tool system,
+Ragent is in **beta** (v1.0.78). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.44 → v1.0.77):**  - **Documentation refresh for v1.0.77** — updated `CHANGELOG.md`, `README.md`,
-    `SPEC.md`, `STATS.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, and how-to docs
-    to reflect the latest release (v1.0.77)
-  - **Research evaluation scorecard configuration** — new `research.evaluate`
-    section in `ragent.json` for self-evaluation scorecard settings (FR-015 of
-    specs/opendeepresearch). Includes `ResearchEvaluateConfig` and `enabled`
-    default.
-  - **Clippy `for_kv_map` fix** — Ollama provider iteration now uses `values()`
-    instead of destructuring a key-value pair; the LangSearch merge test
-    expectation was also corrected (v1.0.74)
-- **Sub-agent / teammate step visibility** — TUI step log now shows tool calls
-  from tracked sub-agents and teammates with an `[agent-tag]` prefix; rebuilt
-  step tags for lagged event-bus bursts prevent undercounting (v1.0.73)
-- **Tool-permit handling fix** — `SessionProcessor` now surfaces an explicit
-  error when the per-tool resource permit cannot be acquired (v1.0.73)
-- **Token counting fixes** — TUI context panel percentages now use a consistent
-  bytes-to-tokens conversion so they align with the status-bar usage figure
-  (v1.0.72)
-- **Context side panel** — toggleable `Alt+X` panel showing live, quantified
-  context-window occupancy, with non-blocking refresh (v1.0.71)
-- **Research clustering** — `/research cluster` concept extraction and a new
-  `cluster.rs` payload builder (v1.0.71)
-- **One-shot agent runner** — lightweight, provider-agnostic single-prompt
-  execution path without spinning up a full agent loop (v1.0.71)
+**Current Release Highlights (v1.0.44 → v1.0.78):**
+
+- **Supervisor/competitive research modes** — `/research create` now supports `--mode tiered|supervisor|competitive`. `supervisor` runs a lead supervisor that spawns parallel sub-topic researchers; `competitive` compares a set of entities and defaults to `--format comparison-table` unless an explicit `--format` is supplied (FR-009/FR-014 of specs/opendeepresearch).
+- **Research brief and clarification** — deterministic research-brief generation and a single clarifying question for ambiguous topics, surfaced via `--brief`/`--clarify` and `SessionEvent::NeedsClarification` (FR-004/FR-005).
+- **Allowed roots for path escape checking** — `dirs.allowed_roots` in `ragent.json` permits reading/writing files in multiple project directories (FR-017).
+- **Per-page web summarisation and self-evaluation scorecard** — optional page summariser (`--summarization-model`) and deterministic quality scorecard (`--evaluate`/`research.evaluate.enabled`) extend research reports (FR-002/FR-015).
+- **Documentation refresh for v1.0.77** — updated `CHANGELOG.md`, `README.md`, `SPEC.md`, `STATS.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, and how-to docs to reflect the latest release (v1.0.77).
+- **Research evaluation scorecard configuration** — new `research.evaluate` section in `ragent.json` for self-evaluation scorecard settings (FR-015 of specs/opendeepresearch). Includes `ResearchEvaluateConfig` and `enabled` default.
+- **Clippy `for_kv_map` fix** — Ollama provider iteration now uses `values()` instead of destructuring a key-value pair; the LangSearch merge test expectation was also corrected (v1.0.74).
+- **Sub-agent / teammate step visibility** — TUI step log now shows tool calls from tracked sub-agents and teammates with an `[agent-tag]` prefix; rebuilt step tags for lagged event-bus bursts prevent undercounting (v1.0.73).
+- **Tool-permit handling fix** — `SessionProcessor` now surfaces an explicit error when the per-tool resource permit cannot be acquired (v1.0.73).
+- **Token counting fixes** — TUI context panel percentages now use a consistent bytes-to-tokens conversion so they align with the status-bar usage figure (v1.0.72).
+- **Context side panel** — toggleable `Alt+X` panel showing live, quantified context-window occupancy, with non-blocking refresh (v1.0.71).
+- **Research clustering** — `/research cluster` concept extraction and a new `cluster.rs` payload builder (v1.0.71).
+- **One-shot agent runner** — lightweight, provider-agnostic single-prompt execution path without spinning up a full agent loop (v1.0.71).
 - **Code index semantic graph** — New `codeindex_godnodes`, `codeindex_path`,
   `codeindex_explain`, and `codeindex_communities` tools; typed edge graph with
   `calls`, `imports`, `inherits`, `references`, `mixes_in`, `implements` edges;
@@ -914,7 +905,8 @@ Built-in default rules include:
 - File-write tools must target paths inside the working directory unless the user
   explicitly allows escaping.
 - Path normalization resolves `..` and symlinks before permission checks.
-- The `dirs` config block can whitelist additional writable roots.
+- The `dirs` config block can whitelist additional writable roots via `allowlist`/`denylist` glob patterns.
+- `dirs.allowed_roots` declares additional directory roots that are valid for path escape checking; files under any listed root are reachable by read/write/list/grep tools (FR-017).
 
 ### 4.6 Secret Redaction
 
@@ -1021,7 +1013,9 @@ The format is compatible with OpenCode's `opencode.json`.
     "initial_response_timeout_secs": 300
   },
   "dirs": {
-    "allow_write": ["target/temp/**"]
+    "allowlist": ["src/**", "tests/**"],
+    "denylist": ["secrets/**", ".env"],
+    "allowed_roots": ["/home/alice/shared"]
   }
 }
 ```
@@ -1562,7 +1556,13 @@ A research session runs in phases:
    readability extraction failed — and would only be available via the
    html2text / raw tag-strip fallbacks — are rejected with a
    `readability extraction failed …` fetch error instead of being accepted.
-   PDF and YouTube sources bypass readability entirely by design. YouTube
+   `github.com/{owner}/{repo}/blob/…` file-view URLs are rewritten to their
+   `raw.githubusercontent.com` counterparts before fetching, since the blob
+   page is GitHub application chrome that readability cannot extract as an
+   article. PDF and YouTube sources bypass readability entirely by design,
+   as do non-HTML content types (e.g. `text/plain` served by
+   `raw.githubusercontent.com`) — their bodies are the verbatim document
+   content, so no fallback extraction is involved. YouTube
    sources are captured as the video's caption transcript: `mf_fetch`
    parses the watch page's `ytInitialPlayerResponse` (brace-balanced,
    string-aware JSON extraction), reads the caption tracks from
@@ -1600,7 +1600,7 @@ the same gathering and synthesis pipeline. Supported modes are:
 |------|-------------|
 | `tiered` | Default single adversarial pipeline. |
 | `supervisor` | Supervisor/researcher graph: a lead supervisor spawns parallel sub-topic researchers (FR-009). |
-| `competitive` | Supervisor graph specialised for comparing a set of entities; works best with `--format comparison-table` (FR-014). |
+| `competitive` | Supervisor graph specialised for comparing a set of entities. Defaults to `--format comparison-table` unless an explicit `--format` is supplied (FR-014). |
 
 `--max-concurrent-research-units N` caps the number of parallel
 researcher agents in `supervisor` and `competitive` modes. The default is
@@ -1610,6 +1610,16 @@ researcher agents in `supervisor` and `competitive` modes. The default is
 per-page webpage summaries. When omitted, the active default model is
 used with a short-output limit. This is independent of the per-phase
 overrides `--research-model`, `--compression-model`, and `--final-report-model` (FR-013).
+
+`--clarify` (default) and `--no-clarify` control whether the pipeline
+asks a single clarifying question when the topic looks ambiguous (FR-005,
+FR-017). `--brief <TEXT>` supplies an explicit research brief used as
+the mission statement for synthesis (FR-004).
+
+`--evaluate` appends a deterministic self-evaluation scorecard
+(quality, relevance, groundedness, completeness, structure) to the
+assembled `RESEARCH.md` (FR-008, FR-015). It can also be enabled by
+default via `research.evaluate.enabled: true`.
 
 ### 11.3 AI-Driven Synthesis
 
@@ -1641,7 +1651,10 @@ Every `RESEARCH.md` contains:
 - YAML frontmatter with `name`, `title`, `status`, `created`, `modified`, `sources`
   (the `title` is a reduced-length version of the `## Summary` content, capped at
   80 characters, so the headline reflects the synthesis rather than the original
-  prompt)
+  prompt) plus an optional `invocation` line recording the verbatim front-end
+  command (`ragent research create ...` from the CLI, `/research ...` from the
+  TUI, or a `POST /research` summary from the HTTP API) so the
+  `/research update` command can replay the run
   - `# Title:` heading
   - `## Topic`
   - `## Summary`
@@ -1680,27 +1693,28 @@ Every `RESEARCH.md` contains:
 
 | Command | Purpose |
 |---------|---------|
-  | `/research create ... --mode tiered|supervisor|competitive` | Select research execution strategy |
-  | `/research create ... --summarization-model <provider:model>` | Use a lightweight model for per-page webpage summaries |
-  | `/research create ... --research-model <provider:model>` | Model used by sub-topic research agents |
-  | `/research create ... --compression-model <provider:model>` | Model used to compress intermediate findings |
-  | `/research create ... --final-report-model <provider:model>` | Model used to write the final report |
-  | `/research create ... --max-concurrent-research-units N` | Limit parallel researchers in supervisor/competitive modes |
-  | `/research create ... --evaluate` | Append a deterministic quality scorecard to `RESEARCH.md` |
-  | `/research create ... --brief <TEXT>` | Provide an explicit research brief |
-  | `/research create ... --no-clarify` | Skip the single clarifying question |
-  | `/research create <name> <topic>` | Gather sources and write `RESEARCH.md` |
-  | `/research create <name> <topic> --iterations N --depth shallow|standard|deep --format ...` | Iterative research with controls |
-  | `/research create <name> --from-url <URL>` | Fetch the URL, use it as the research subject and capture it as the primary source |
-  | `/research create <name> --from-file <PATH>` | Extract a local document and use it as the research subject |
-  | `/research create ... --use-low-relevance` | Retain low-relevance web sources |
-  | `/research continue <name> [message]` | Resume an in-progress research item |
-  | `/research list` | List research items |
-  | `/research open <name>` | Show the path to `RESEARCH.md` |
-  | `/research show <name>` | Show metadata |
-  | `/research search <query>` | Search across all `RESEARCH.md` files |
-  | `/research delete <name>` | Delete a research item |
-  | `/research archive <name>` | Archive a research item |
+| `/research create ... --mode tiered|supervisor|competitive` | Select research execution strategy |
+| `/research create ... --summarization-model <provider:model>` | Use a lightweight model for per-page webpage summaries |
+| `/research create ... --research-model <provider:model>` | Model used by sub-topic research agents |
+| `/research create ... --compression-model <provider:model>` | Model used to compress intermediate findings |
+| `/research create ... --final-report-model <provider:model>` | Model used to write the final report |
+| `/research create ... --max-concurrent-research-units N` | Limit parallel researchers in supervisor/competitive modes |
+| `/research create ... --evaluate` | Append a deterministic quality scorecard to `RESEARCH.md` |
+| `/research create ... --brief <TEXT>` | Provide an explicit research brief |
+| `/research create ... --no-clarify` | Skip the single clarifying question |
+| `/research create <name> <topic>` | Gather sources and write `RESEARCH.md` |
+| `/research create <name> <topic> --iterations N --depth shallow|standard|deep --format ...` | Iterative research with controls |
+| `/research create <name> --from-url <URL>` | Fetch the URL, use it as the research subject and capture it as the primary source |
+| `/research create <name> --from-file <PATH>` | Extract a local document and use it as the research subject |
+| `/research create ... --use-low-relevance` | Retain low-relevance web sources |
+| `/research continue <name> [message]` | Resume an in-progress research item |
+| `/research update <name>` | Replay the recorded invocation for a run and overwrite `RESEARCH.md` |
+| `/research list` | List research items |
+| `/research open <name>` | Show the path to `RESEARCH.md` |
+| `/research show <name>` | Show metadata |
+| `/research search <query>` | Search across all `RESEARCH.md` files |
+| `/research delete <name>` | Delete a research item |
+| `/research archive <name>` | Archive a research item |
 
 ### 11.6 Iterative Research Loop (`researchext`)
 
@@ -1767,7 +1781,8 @@ The `POST /research` request body mirrors `ResearchRunRequest`:
 `brief`, `clarify`, `fetch_concurrency`, `local_concurrency`,
 `fetch_timeout_secs`, `web_phase_timeout_secs`,
 `local_phase_timeout_secs`, `search_max_retries`, `search_retry_base_delay_ms`,
-`search_circuit_breaker_threshold`, `max_web_results`, `max_local_sources`,
+`search_circuit_breaker_threshold`, `max_web_results`, `max_search_calls`,
+`max_local_sources`,
 `max_synthesis_sources`. `web_phase_timeout_secs` (CLI `--web-time`) defaults
 to 60 seconds (`DEFAULT_WEB_PHASE_TIMEOUT_SECS`); a value of `0` disables the
 deadline and allows the web phase to run to natural completion (FR-007). When
@@ -1785,6 +1800,23 @@ live `web:M:SS` countdown in the status-bar wait segment, computed from a stored
 wall-clock `Instant` at render time and updated at least once per second while
 the phase is active (FR-009, FR-010, FR-013). The same deadline is applied to
 every iteration of the iterative research engine (FR-006).
+
+Web-search quota controls: `max_search_calls` (CLI `--max-search-calls N`)
+places a hard cap on the total web-search calls a single run may issue. The
+cap is shared via `Arc` across every supervisor/competitive researcher and
+every gather pass (main gather, engine iterations, gap-fill), so N parallel
+researchers draw from one per-run pool; when the cap is reached remaining
+sub-queries are skipped, the run proceeds with the sources gathered so far,
+and a `search_budget` `RunStep` diagnostic reports the used/limit counts.
+Within a supervisor/competitive run, a query-result cache keyed on the
+normalized query text serves identical sub-queries (common when per-entity
+researchers decompose the same comparison dimensions) from the cache instead
+of re-issuing paid search calls. In competitive mode the researcher count is
+capped at `max_concurrent_research_units` (one sub-topic per extracted
+entity, truncated to the cap). Without an explicit `--max-web-results`, the
+web-source budget is derived from `--depth` (shallow 6 / standard 9 / deep 15
+sources per the depth preset) instead of defaulting to the 500-source
+ceiling; `--depth` therefore bounds web volume by default.
 
 ---
 # Part IV: Agent Customization & Extension
@@ -2878,10 +2910,11 @@ The prompt-builder knobs (`SynthesisPromptConfig.few_shot_examples`,
 builder are implemented in `crates/ragent-research/src/analysis.rs`. Model
 overrides, supervisor concurrency, and evaluation are propagated from
 `ResearchRunRequest` through `build_session_config` in
-`crates/ragent-research/src/run_request.rs` to the engine phases. Wiring the
-`ragent.json` `research.*` keys through to `build_session_config` defaults is
-tracked as a follow-up; until that wiring lands, the keys are documented so
-callers and integrators know the intended surface.
+`crates/ragent-research/src/run_request.rs` to the engine phases. The
+`ragent.json` `research.*` keys are read via `Config::merge` in
+`crates/ragent-config/src/config.rs` and propagated through
+`build_session_config` so CLI/TUI defaults match the config file. Callers can
+still override per run with the corresponding flags.
 
 ## Appendix F: Changelog (v0.1.0-beta.1 → v0.1.0-beta.28)
 
@@ -2913,4 +2946,628 @@ callers and integrators know the intended surface.
 - Doctest build breakages in `session::permissions` and `tool::ToolRegistry`
 - TUI read-tool header now uses pending args when `ToolCallStart` is dropped, and shows `📄 missing path` for malformed calls
 - `RUSTSEC-2025-0052` (`async-std` discontinued) advisory ignored in `cargo-deny` configuration (beta.26)
+    "tool_visibility": {
+      "office": true,
+      "github": true,
+      "gitlab": true,
+      "teams": true,
+      "agents": true,
+      "plan": true,
+      "codeindex": true,
+      "masterfetch": true,
+      "browser": true
+    },
+    "yolo": false,
+    "stream": {
+      "timeout_secs": 120,
+      "initial_response_timeout_secs": 300
+    },
+    "dirs": {
+      "allowlist": ["src/**", "tests/**"],
+      "denylist": ["secrets/**", ".env"],
+      "allowed_roots": ["/home/alice/shared"]
+    }
+  }
+}
+```
 
+### 5.3 Environment Variables
+
+| Variable | Provider / Purpose |
+|----------|--------------------|
+| `ANTHROPIC_API_KEY` | Anthropic |
+| `OPENAI_API_KEY` | OpenAI |
+| `GITHUB_TOKEN` | GitHub / Copilot |
+| `GEMINI_API_KEY` | Google Gemini |
+| `HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN` | Hugging Face |
+| `AZURE_AI_FOUNDRY_API_KEY`, `AZURE_AI_FOUNDRY_BASE` | Azure AI Foundry |
+| `AZURE_RESOURCE_API_KEY` | Azure Resource |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_REGION` | Amazon Bedrock |
+| `XAI_API_KEY` | xAI Grok |
+| `RAGENT_FOUNDRY_LOCAL_FORCE_WEB` | Force Foundry Local web-service path |
+| `LANGSEARCH_API_KEY` | Web search (LangSearch) |
+| `TAVILY_API_KEY` | Web search (Tavily) |
+
+### 5.4 Compaction Configuration
+
+The `compaction` block controls OpenCode-derived summarisation-based context-window
+compaction, which replaces the older Headroom `compression` scheme. It satisfies
+FR-008 (auto toggle) and FR-011 (user-overridable threshold, buffer, keep-tokens,
+and summary output-token values).
+
+```jsonc
+{
+  "compaction": {
+    // Enable automatic pre-send summarisation. When false, only emergency
+    // overflow compaction runs on provider context-overflow errors (FR-008).
+    "auto": true,
+    // Fraction of the model's context window at which automatic pre-send
+    // compaction triggers (0.0–1.0). Default: 0.7 (70 %). This is the
+    // recommended, model-independent trigger: 70 % of a 32k window is 22.4k
+    // tokens, while 70 % of a 200k window is 140k tokens. The threshold is
+    // never below 70 %, even when a fraction-based fallback is used.
+    "threshold": 0.7,
+    // Response/safety buffer as a fraction of the model's context window.
+    // Only used when `threshold` is null. Compaction then triggers when
+    // estimated request tokens exceed context_window - max(output_tokens,
+    // buffer). Default: 0.10 (10 %, FR-011).
+    "buffer": 0.10,
+    // Recent conversation turns kept verbatim after compaction.
+    "keep": {
+      // Fraction of the context window reserved for recent user/assistant/tool turns to preserve.
+      // Default: 0.20 (20 %, FR-011).
+      "tokens": 0.20
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `auto` | bool | `true` | Enable automatic pre-send compaction (FR-008) |
+| `threshold` | f64 | `0.7` | Fraction of context window that triggers compaction; model-independent |
+| `buffer` | f64 | `0.10` | Fallback response/safety buffer as a fraction of the context window when `threshold` is null (FR-011) |
+| `keep.tokens` | f64 | `0.20` | Fraction of context window reserved for recent turns preserved verbatim (FR-011) |
+
+The compaction trigger threshold is always raised to at least 70 % of the
+model's context window, so automatic pre-send compaction never fires on routine
+prompts that fill less than 70 % of the available context. Emergency overflow
+compaction is not subject to this floor.
+
+The compaction summary output length is fixed at `4096` tokens and tool outputs
+are truncated to `2000` characters before being serialised into the summarisation
+prompt, matching OpenCode's defaults.
+
+The legacy `compression` block (`compression.enabled`, `compression.mode`,
+`compression.auto_threshold`) is still parsed for one-release migration:
+`compression.enabled` is treated as `compaction.auto` when `compaction.auto` is
+not set explicitly. New configurations should use `compaction`.
+
+Trigger the one-shot compaction manually with the `/compact` slash command
+(`/compress` is a deprecated alias — FR-009).
+
+### 5.5 Thinking Configuration
+
+Thinking/reasoning is configured per model:
+
+```jsonc
+{
+  "provider": {
+    "anthropic": {
+      "models": {
+        "claude-sonnet-4-20250514": {
+          "thinking": { "enabled": true, "level": "medium" }
+        }
+      }
+    }
+  }
+}
+```
+
+Levels: `auto`, `off`, `low`, `medium`, `high`. `budget_tokens` is optional.
+
+---
+
+## 6. Terminal User Interface (TUI)
+
+### 6.1 TUI Layout
+
+The TUI is a ratatui full-screen interface with these panels:
+
+| Panel | Purpose |
+|-------|---------|
+| Chat | Conversation stream with markdown and syntax highlighting |
+| Log | Step-numbered tool calls with pretty-printed JSON |
+| Status bar | Provider/model, context usage, compression indicator, YOLO state |
+| Input | Command-line with slash-command autocomplete |
+| Permission dialog | Modal approval dialog with live countdown (120 s) |
+| Question dialog | Modal user question (free-text or multiple-choice) |
+
+### 6.2 Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/quit` / `/q` | Exit ragent |
+| `/provider` | Open provider setup dialog (always allows editing the stored key) |
+| `/model` | Select model (jumps to model list when a provider is already configured) |
+| `/agent` | Select agent |
+| `/agents` | List loaded agents and diagnostics |
+| `/websearch show` | Show web-search engine diagnostics (enabled / in-use / failed) |
+| `/websearch help` | Show `/websearch` subcommand help |
+| `/websearch test` | Test configured web-search backends |
+| `/webapi enable\|disable\|help` | Manage the HTTP REST API |
+| `/tools` | Toggle tool visibility |
+| `/codeindex on\|off` | Enable/disable code index |
+| `/codeindex lang <language>` | Filter code index by language |
+| `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
+| `/memory` | Memory management commands |
+| `/yolo` | Toggle YOLO mode |
+| `/todo` `/task` `/tasks` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
+| `/team create <name>` | Create a team |
+| `/team open <name>` | Re-open existing team |
+| `/team close` | Close current team |
+| `/team clear` | Reset current team state |
+| `/team delete <name>` | Delete team on disk |
+| `/team cleanup` | Tear down current team |
+| `/team message ...` | Send team message |
+| `/swarm <prompt>` | Decompose prompt into parallel subtasks |
+| `/swarm status` | Show active swarm tasks |
+| `/swarm kill` | Cancel active swarm |
+| `/autopilot on\|off` | Toggle autonomous mode |
+| `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
+| `/research create\|list\|show\|search\|delete` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance` |
+| `/config show` | Show resolved configuration |
+| `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
+| `/config list` | Interactive picker to restore a saved backup |
+| `/init config` | Create a default `ragent.json` in the global config directory |
+| `/startup` | Show per-stage startup timing instrumentation |
+| `/telemetry help\|on\|off\|setup\|counters` | Manage OpenTelemetry metrics export |
+| `/dirs` | Show configured writable directories |
+| `/profile` / `/theme` / `/status` / `/mouse` | UI preferences |
+| `/skill` / `/skills` | Load or inspect skill packs |
+| `/mcp discover\|list\|call` | MCP server commands |
+| `/opt <method> <prompt>` | Optimize a prompt |
+| `/update` / `/update install` | Auto-update (reserved; not implemented) |
+
+### 6.3 TUI Component Architecture
+
+```mermaid
+graph LR
+    App[App State] --> EventLoop[Event Loop]
+    EventLoop --> Terminal[Terminal]
+    App --> Chat[Chat Widget]
+    App --> Log[Log Widget]
+    App --> Input[Input Widget]
+    App --> Status[Status Bar]
+    App --> Dialogs[Permission / Question Dialogs]
+    EventBus --> App
+```
+
+**Figure 7:** TUI Component Architecture — UI layout and event wiring
+
+### 6.4 Permission Dialog Countdown
+
+The permission dialog displays a live countdown:
+
+- Format: `M:SS` (e.g., `1:45`)
+- Shows `EXPIRED` when the 120-second timeout is reached
+- The event loop redraws continuously so the timer decrements without requiring keyboard input
+
+---
+
+## 7. HTTP Server & API
+
+### 7.1 Starting the Server
+
+```bash
+ragent serve --port 9100 --host 127.0.0.1
+```
+
+### 7.2 REST Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check |
+| POST | `/sessions` | Create a session |
+| GET | `/sessions` | List sessions |
+| GET | `/sessions/{id}` | Get session details |
+| POST | `/sessions/{id}/messages` | Send a message (returns SSE stream) |
+| GET | `/sessions/{id}/events` | SSE event stream |
+| GET | `/models` | List available models |
+| GET | `/providers` | List providers |
+| GET | `/agents` | List agents |
+| POST | `/opt` | Prompt optimization |
+| GET | `/research` | List research items |
+| POST | `/research` | Create + run a research gathering session (returns `202 Accepted` with `Location` header) |
+| GET | `/research/{name}` | Show one research item (supports `?full=true` for extended metadata) |
+| DELETE | `/research/{name}` | Delete a research item (requires `?confirm=delete-{name}`) |
+| GET | `/research/{name}/events` | SSE stream of live research events for a background run |
+
+### 7.3 SSE Events
+
+The server streams the following event types:
+
+| Event | Description |
+|-------|-------------|
+| `assistant_chunk` | Token or reasoning block |
+| `tool_requested` / `tool_executed` | Tool lifecycle |
+| `permission_requested` / `permission_replied` | Permission flow |
+| `question_requested` / `question_answered` | Question tool |
+| `compression_started` / `compression_finished` | Context compaction lifecycle |
+| `subagent_*` / `teammate_*` | Multi-agent lifecycle |
+| `agent_notice` | Status messages |
+| `research` | Research session events (phase, web capture, synthesis, analysis, done) — streamed via `GET /research/{name}/events` |
+
+### 7.4 Authentication
+
+The HTTP API uses Bearer token authentication:
+
+```bash
+curl -H "Authorization: Bearer $RAGENT_TOKEN" ...
+```
+
+`RAGENT_TOKEN` is read from the environment. If unset, the server may allow
+local requests without authentication depending on build configuration.
+
+### 7.5 HTTP API Request Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Axum
+    participant SP as Session Processor
+    participant LLM
+    Client->>Axum: POST /sessions/{id}/messages
+    Axum->>SP: dispatch message
+    SP->>LLM: streaming request
+    LLM-->>SP: chunks / tool calls
+    SP-->>Axum: events
+    Axum-->>Client: SSE stream
+```
+
+**Figure 8:** HTTP API Request Flow — REST + SSE lifecycle
+
+---
+
+# Part III: Data & Knowledge Systems
+
+---
+
+## 8. Code Index
+
+### 8.1 Overview
+
+The code index provides fast, local, read-only code intelligence. It is built
+on tree-sitter parsing and Tantivy full-text search, with a SQLite metadata
+store.
+
+### 8.2 Supported Languages
+
+Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform,
+CMake, Gradle, Maven, and more (15+ grammars compiled-in).
+
+### 8.3 Architecture
+
+```mermaid
+graph LR
+    Scan[File Scanner] --> Parse[Tree-sitter Parser]
+    Parse --> Store[(SQLite Metadata)]
+    Parse --> Index[Tantivy FTS Index]
+    Query[Tool Query] --> Index
+    Query --> Store
+```
+
+**Figure 9:** Code Index Pipeline — File scan → parse → index → search
+
+### 8.4 Code Index Tools
+
+| Tool | Purpose |
+|------|---------|
+| `codeindex_search` | Full-text search across indexed code |
+| `codeindex_symbols` | Search for symbols by name |
+| `codeindex_references` | Find references to a symbol |
+| `codeindex_dependencies` | Query file-level imports/dependents |
+| `codeindex_status` | Show index status |
+| `codeindex_reindex` | Trigger a full re-index |
+
+All code index tools are **hardwired always-allowed** because they are read-only
+and local-only.
+
+### 8.5 Semantic Code Graph
+
+The code index also maintains a **semantic code graph** — a typed edge graph
+over indexed symbols that captures relationships such as `calls`, `imports`,
+`inherits`, `references`, `mixes_in`, and `implements`. Edges are either
+`EXTRACTED` (from tree-sitter parse data) or `INFERRED` (heuristic).
+
+The graph is built on demand via `/codeindex graph build` (or
+`/codeindex graph lang <language>` for a per-language subgraph) and persisted
+in the `graph_edges` SQLite table.
+
+#### Graph Tools
+
+| Tool | Purpose |
+|------|---------|
+| `codeindex_godnodes` | Top-N most-connected symbols (highest degree) |
+| `codeindex_path` | Shortest path (by hop count) between two symbols |
+| `codeindex_explain` | Node metadata and incoming/outgoing edges for a symbol |
+| `codeindex_communities` | Community detection via label propagation |
+
+All graph tools use non-blocking `try_*` variants with retry and return a
+`codeindex_busy` response when the index is locked (e.g. during a reindex).
+
+#### Graph Status
+
+`/codeindex show` reports graph-level statistics alongside index stats:
+edge count (total, extracted, inferred), node count, per-kind edge counts,
+and community count.
+
+### 8.6 Incremental Updates
+
+A file watcher detects changes and incrementally updates the index. Language
+filtering is available via `/codeindex lang <language>`.
+
+---
+
+## 9. Memory System
+
+### 9.1 Three Tiers
+
+| Tier | Storage | Use Case |
+|------|---------|----------|
+| **File blocks** | Markdown files in `.ragent/memory/` or `~/.ragent/memory/` | Long-form notes, patterns, preferences |
+| **Structured store** | SQLite via `memory_store` / `memory_recall` | Facts, errors, workflows with tags/confidence |
+| **Semantic search** | Optional embeddings (`all-MiniLM-L6-v2`) | Similarity-based recall |
+
+### 9.2 Memory Operations
+
+| Tool | Purpose |
+|------|---------|
+| `memory_read` | Read a memory block file |
+| `memory_write` | Write/append to a memory block file |
+| `memory_replace` | Replace a string in a named block |
+| `memory_store` | Store a structured memory entry |
+| `memory_recall` | Full-text search structured memories |
+| `memory_search` | Semantic/keyword search across memories |
+| `memory_forget` | Delete memories by filter |
+| `memory_migrate` | Split a flat MEMORY.md into blocks |
+| `conversation_search` | Keyword/turn-range/stats search over the current session |
+| `session_search` | Cross-session full-text search with filters and context |
+
+### 9.3 Automatic Extraction
+
+After each assistant turn the system can extract:
+
+- Project facts and patterns
+- Errors and their resolutions
+- User preferences
+- Workflows and standard operating procedures
+
+Extracted memories are tagged with category, confidence, and source.
+
+### 9.4 Decay, Compaction, and Knowledge Graph
+
+- Memories decay in relevance over time unless accessed or reinforced.
+- Compaction summarises old memories.
+- A lightweight knowledge graph links related memories by tag and reference.
+
+---
+
+## 10. Spec Management
+
+### 10.1 Overview
+
+Ragent includes a built-in specification lifecycle for tracking features,
+requirements, and implementation tasks.
+
+### 10.2 Directory Layout
+
+Specs live in `specs/<SpecId>/`:
+
+```
+specs/
+└── testspec/
+    ├── SPEC.md          # EARS requirements and status
+    ├── PLAN.md          # Implementation tasks and Phase -1 gates
+    ├── TASKS.md         # Ordered task list extracted from PLAN.md
+    ├── TESTPLAN.md      # Manual test-plan with TC-NNN test cases
+    ├── CONSTITUTION.md  # Optional: project constitution with nine articles
+    ├── data-model.md    # Optional: data-model artifact (gated by sdd.data_model)
+    ├── contracts/       # Optional: API contracts directory (gated by sdd.contracts)
+    ├── quickstart.md    # Key validation scenarios derived from SPEC.md
+    ├── FEEDBACK.md      # Optional: production feedback notes
+    ├── JTBD.md          # Optional: Jobs-To-Be-Done analysis
+    └── REPORT.md        # Optional audit/completion report
+```
+
+### 10.3 Spec Status Lifecycle
+
+```mermaid
+graph LR
+    draft[draft] --> in_progress[in_progress]
+    in_progress --> implemented[implemented]
+    implemented --> in_review[in_review]
+    in_review --> verified[verified]
+    in_review --> draft
+    verified --> archived[archived]
+```
+
+### 10.4 Spec Tools
+
+| Tool | Purpose |
+|------|---------|
+| `spec_list` | List specifications |
+| `spec_read` | Read a spec by ID |
+| `spec_search` | Search specs by keyword |
+| `spec_coverage` | Generate requirement coverage report |
+| `spec_task_update` | Update a plan task status |
+
+### 10.5 Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/spec create <name> <title> [--from-research <name>]` | Create a new spec (SPEC.md + PLAN.md + TESTPLAN.md) |
+| `/spec specify <name> <feature> [--from-research <name>]` | Generate SPEC.md only (EARS spec with `[NEEDS CLARIFICATION]` markers); optionally creates a git branch when `sdd.branch_per_spec` is enabled |
+| `/spec plan <name> <tech-context>` | Generate or regenerate PLAN.md from existing SPEC.md using technology context as guidance |
+| `/spec tasks <name>` | Generate TASKS.md (ordered task list from PLAN.md) and quickstart.md (validation scenarios from SPEC.md) |
+| `/spec update <specname>` | Re-read `SPEC.md` and regenerate `PLAN.md` + `TESTPLAN.md` (preserves unchanged task IDs) |
+| `/spec add <id> <requirement>` | Add an incremental requirement to an existing spec |
+| `/spec feedback <spec-id> <note>` | Append a production feedback note to `FEEDBACK.md` |
+| `/spec impl <id>` / `/spec implement <id>` | Transition spec to `in_progress` and generate plan |
+| `/spec jtbd <specname> [--force] [--agent <name>]` | Perform JTBD analysis and write `JTBD.md` in the spec folder |
+| `/spec list [--status <status>] [--prefix <prefix>]` | List specs with optional filtering |
+| `/spec search <query>` | Search specs by keyword |
+| `/spec show <id>` | Read a spec |
+| `/spec validate [specname]` | Validate EARS compliance, clarification markers, and consistency (ambiguity, contradiction, gap detection) |
+| `/spec status <id> [<new-status>]` | Show or transition spec status |
+| `/spec task <id> [<task-id>] [<new-status>]` | List, show, or update task status |
+| `/spec coverage <id>` | Generate requirement coverage report |
+| `/spec activate <id>` | Activate a spec for context injection into agent prompts |
+| `/spec deactivate` | Deactivate the currently active spec |
+| `/spec delete <id> [--yes]` | Delete a spec directory |
+
+### 10.6 Research Linkage
+
+Specs can reference research outputs via the `--from-research` flag on
+`/spec create` and `/spec specify`. When provided, the spec's `SPEC.md`
+receives a `research:` key in its YAML frontmatter linking to the research
+artifact, and a `## Related Research` section is injected into the body
+summarising the linked research output.
+
+### 10.7 SDD Configuration Flags
+
+The following configuration flags in `ragent.json` under the `sdd` key control
+opt-in Spec-Driven Development capabilities:
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `branch_per_spec` | `false` | Create a `spec/<name>` git branch during `/spec specify` |
+| `data_model` | `false` | Generate `data-model.md` during `/spec plan` |
+| `contracts` | `false` | Generate `contracts/` directory during `/spec plan` |
+| `feedback_loop` | `false` | Surface `FEEDBACK.md` notes during `/spec plan` regeneration |
+
+### 10.8 Consistency Validation
+
+`/spec validate` performs three categories of consistency checks in addition
+to EARS compliance:
+
+- **Ambiguity detection** — flags vague terms (e.g. "fast", "efficient") and
+  undefined references in requirement text.
+- **Contradiction detection** — identifies conflicting requirements that
+  specify opposing constraints.
+- **Gap detection** — identifies requirements lacking acceptance criteria.
+
+Consistency warnings are included in the validation report alongside EARS
+errors and `[NEEDS CLARIFICATION]` marker warnings.
+
+### 10.9 Clarification Markers
+
+During `/spec specify`, the LLM is instructed to insert
+`[NEEDS CLARIFICATION]` markers for ambiguous or underspecified requirements.
+These markers are detected during validation and block the `approved` status
+transition until resolved.
+
+### 10.10 Production Feedback Loop
+
+`/spec feedback <spec-id> <note>` appends advisory notes to
+`specs/<spec-id>/FEEDBACK.md`. When the `sdd.feedback_loop` config flag is
+enabled, these notes are automatically surfaced in the `/spec plan` prompt
+so that production feedback (metrics, incidents, user reports) informs plan
+regeneration.
+
+### 10.11 Constitutional Amendment Process
+
+When a spec directory contains a `CONSTITUTION.md`, amendments require
+explicit rationale documentation, a backwards-compatibility assessment, and
+a dated changelog entry within the file. The constitution parser validates
+the nine-article structure and the amendment process.
+
+---
+
+# Part III: Data & Knowledge Systems (continued)
+
+## 11. Research System
+
+### 11.1 Overview
+
+The `/research` slash command and `ragent research` CLI create structured
+research items under `research/<name>/`. Each item contains captured sources
+(web pages, local files, prior specs) and a single `RESEARCH.md` document.
+
+### 11.2 Source Gathering
+
+A research session runs in phases:
+
+1. **Setup** — validate name and create the skeleton `RESEARCH.md`.
+2. **Web** — issue `websearch` queries and fetch pages via `webfetch`. Every
+   HTML page captured as a web source must have been extracted by the
+   `readability-rs` crate (the research web-gather phase verifies the
+   `extraction_method` signal reported by `mf_fetch`, or re-runs readability
+   on the raw HTML when the legacy `webfetch` tool is used). Pages where
+   readability extraction failed — and would only be available via the
+   html2text / raw tag-strip fallbacks — are rejected with a
+   `readability extraction failed …` fetch error instead of being accepted.
+   `github.com/{owner}/{repo}/blob/…` file-view URLs are rewritten to their
+   `raw.githubusercontent.com` counterparts before fetching, since the blob
+   page is GitHub application chrome that readability cannot extract as an
+   article. PDF and YouTube sources bypass readability entirely by design,
+   as do non-HTML content types (e.g. `text/plain` served by
+   `raw.githubusercontent.com`) — their bodies are the verbatim document
+   content, so no fallback extraction is involved. YouTube
+   sources are captured as the video's caption transcript: `mf_fetch`
+   parses the watch page's `ytInitialPlayerResponse` (brace-balanced,
+   string-aware JSON extraction), reads the caption tracks from
+   `captions.playerCaptionsTracklistRenderer.captionTracks`, and fetches
+   the default (or first English) track. A fetch that fails at the tool
+   level (e.g. `mf_fetch` reporting `content_ok = false` or an `error`,
+   such as "no caption tracks available for this YouTube video") is
+   rejected as an explicit `FetchFailed` event carrying the real reason —
+   placeholder error text never enters the research corpus as a source
+   body.
+3. **Local** — scan project files with `glob`/`grep`/`read`. Each captured
+   file produces an excerpt showing the matching lines plus one line of
+   context on either side, and a `relevance` note that names the matched
+   keyword(s) and the first matching line.
+4. **Specs** — cross-reference prior specs under `specs/`.
+5. **Synthesize** — (TUI only, when an active model is configured) send the
+   captured source bodies to the LLM and ask for Summary, Findings,
+   In-Project Cross-References, and Open Questions. The session emits a
+   `SynthesizeResult` event so the UI can distinguish LLM-synthesized output
+   from the mechanical fallback.
+6. **Assemble** — combine frontmatter, analysis, and References Index.
+7. **Finalize** — mark the item `Complete` and refresh `research/INDEX.md`.
+
+Supporting files under `research/<name>/sources/` (e.g. `web-01.md`,
+`local-02.md`) contain the **actual** captured body — web pages render into
+plain text, local files become keyword-anchored excerpts — so a reader can
+audit the evidence without re-running the search.
+
+### 11.2.1 Execution Modes and Per-Page Summarisation
+
+The `--mode` flag selects the high-level research strategy while reusing
+the same gathering and synthesis pipeline. Supported modes are:
+
+| Mode | Description |
+|------|-------------|
+| `tiered` | Default single adversarial pipeline. |
+| `supervisor` | Supervisor/researcher graph: a lead supervisor spawns parallel sub-topic researchers (FR-009). |
+| `competitive` | Supervisor graph specialised for comparing a set of entities. Defaults to `--format comparison-table` unless an explicit `--format` is supplied (FR-014). |
+
+`--max-concurrent-research-units N` caps the number of parallel
+researcher agents in `supervisor` and `competitive` modes. The default is
+5 and can be changed in `ragent.json` under `research.supervisor.max_concurrent_research_units`.
+
+`--summarization-model <provider:model>` selects a lightweight model for
+per-page webpage summaries. When omitted, the active default model is
+used with a short-output limit. This is independent of the per-phase
+overrides `--research-model`, `--compression-model`, and `--final-report-model` (FR-013).
+
+`--clarify` (default) and `--no-clarify` control whether the pipeline
+asks a single clarifying question when the topic looks ambiguous (FR-005,
+FR-017). `--brief <TEXT>` supplies an explicit research brief used as
+the mission statement for synthesis (FR-004).
+
+`--evaluate` appends a deterministic self-evaluation scorecard
+(quality, relevance, groundedness, completeness, structure) to the
+assembled `RESEARCH.md` (FR-008, FR-015). It can also be enabled by
+default via `research.evaluate.enabled: true`.

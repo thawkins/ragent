@@ -1086,7 +1086,7 @@ Run any of these from the TUI prompt:
 /research create rust-async async/await idioms --depth deep --iterations 5
 /research create rust-async --from-url https://example.com/article
 /research continue rust-async focus on io_uring integration
-/research create fireworks "Compare Fireworks AI, Together.ai and Groq" --mode competitive --format comparison-table
+/research create fireworks "Compare Fireworks AI, Together.ai and Groq" --mode competitive   # --format comparison-table is implied
 /research create rust-async "async/await idioms" --mode supervisor --summarization-model ollama:phi4 --max-concurrent-research-units 3
 /research create rust-async "async/await idioms" --evaluate
 /spec create async-await Add async/await ergonomics --from-research rust-async
@@ -1140,10 +1140,10 @@ ragent research create rust-async "async/await idioms in stable Rust"
 ragent research create rust-async "async/await idioms" --depth deep --format executive-summary
 ragent research create rust-async --from-url https://example.com/article
 ragent research continue rust-async "focus on io_uring integration"
-ragent research create fireworks "Compare Fireworks AI, Together.ai and Groq" --mode competitive --format comparison-table
+ragent research create fireworks "Compare Fireworks AI, Together.ai and Groq" --mode competitive   # --format comparison-table is implied
 ragent research create rust-async "async/await idioms" --mode supervisor --summarization-model ollama:phi4 --max-concurrent-research-units 3
 ragent research create rust-async "async/await idioms" --evaluate
-ragent research list
+ragent research list          # aligned table; add --json for machine-readable output
 ragent research open rust-async
 ragent research search "async"
 ragent research show rust-async
@@ -1156,7 +1156,7 @@ The HTTP API exposes the same surface at `GET /research`, `POST /research`,
 `POST /research` returns `202 Accepted` with a `Location` header pointing to
 `GET /research/<name>/events` (SSE stream of live research events).
 `GET /research/<name>` supports `?full=true` to include `topic`, `queries`,
-`output_format`, and `model` metadata.
+`output_format`, `model`, `mode`, `summarization_model`, `evaluate`, and `brief` metadata.
 
 The `--tier` flag selects the analysis depth: `light` (minimal), `full`
 (default), or `dissertation` (extended with depth investigations and
@@ -1169,6 +1169,15 @@ number of parallel researchers (default 5). `--summarization-model`
 selects a lightweight model for per-page webpage summaries, and
 `--evaluate` appends a deterministic quality scorecard to the final
 `RESEARCH.md`.
+
+Every `RESEARCH.md` frontmatter also records an `invocation` line — the
+verbatim `ragent research create ...` command, `/research ...` TUI slash
+command, or `POST /research` request summary that started the run. The
+`/research update <name>` command (or `ragent research update <name>` /
+`PUT /research/<name>`) reads that line and replays the exact run,
+overwriting `RESEARCH.md` and the associated source/companion files with
+freshly gathered results. The original invocation is preserved on
+`research continue` re-runs.
 
 See [`docs/research.md`](docs/research.md) for the full workflow guide.
 
@@ -1258,6 +1267,13 @@ Type `/` in the input to open an autocomplete menu:
 | `/spec feedback <name> <note>` | Append a production feedback note to FEEDBACK.md |
 | `/spec jtbd <name> [--force] [--agent <name>]` | Perform JTBD analysis on an existing spec |
 | `/spec list \|search \|show \|validate \|status \|task` | Spec lifecycle commands |
+
+### New in v1.0.78
+
+- **`/research create` execution modes** — `--mode tiered|supervisor|competitive` selects the high-level research strategy. `supervisor` spawns parallel sub-topic researchers; `competitive` compares entities and defaults to `--format comparison-table` (an explicit `--format` still wins).
+- **`/research create` per-phase models** — `--research-model`, `--compression-model`, `--final-report-model`, and `--summarization-model` override the model used for each research phase.
+- **`/research create --brief` and `--clarify`** — supply an explicit mission statement or let the pipeline ask a single clarifying question for ambiguous topics.
+- **`dirs.allowed_roots`** — configure multiple project directories the agent can read/write via `ragent.json`.
 
 ### New in v1.0.77
 

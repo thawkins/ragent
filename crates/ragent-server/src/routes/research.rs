@@ -52,7 +52,12 @@ use ragent_research::{ResearchManager, SearchHit, SessionEvent, SessionObserver}
 pub fn research_routes() -> Router<AppState> {
     Router::new()
         .route("/", get(list_research).post(create_research))
-        .route("/{name}", get(show_research).delete(delete_research))
+        .route(
+            "/{name}",
+            get(show_research)
+                .delete(delete_research)
+                .put(update_research),
+        )
         .route("/{name}/events", get(research_events_stream))
 }
 
@@ -221,6 +226,10 @@ struct CreateResearchRequest {
     /// Maximum web sources to capture.
     #[serde(default)]
     max_web_results: Option<usize>,
+    /// Hard cap on the total web-search calls the run may issue, shared
+    /// across all supervisor/competitive researchers. When `None`, no cap.
+    #[serde(default)]
+    max_search_calls: Option<usize>,
     /// Maximum in-project local sources to capture.
     #[serde(default)]
     max_local_sources: Option<usize>,
@@ -251,6 +260,114 @@ struct CreateResearchRequest {
 }
 
 impl CreateResearchRequest {
+    /// Reconstruct an equivalent `POST /research` invocation summary from the
+    /// parsed JSON body. Used to populate the `invocation` frontmatter field
+    /// so a future `/research update` command can replay the run.
+    fn invocation_summary(&self) -> String {
+        let mut parts = vec![format!("POST /research {}", self.name)];
+        parts.push(format!("\"{}\"", self.topic));
+        for url in &self.from_urls {
+            parts.push(format!("--from-url {url}"));
+        }
+        for file in &self.from_files {
+            parts.push(format!("--from-file {file}"));
+        }
+        if let Some(v) = &self.sources_dir {
+            parts.push(format!("--sources-dir {v}"));
+        }
+        if let Some(v) = &self.template {
+            parts.push(format!("--template {v}"));
+        }
+        if let Some(v) = &self.depth {
+            parts.push(format!("--depth {v}"));
+        }
+        if let Some(v) = &self.tier {
+            parts.push(format!("--tier {v}"));
+        }
+        if let Some(v) = &self.mode {
+            parts.push(format!("--mode {v}"));
+        }
+        if let Some(v) = &self.iterations {
+            parts.push(format!("--iterations {v}"));
+        }
+        if let Some(v) = &self.format {
+            parts.push(format!("--format {v}"));
+        }
+        if self.use_local {
+            parts.push("--use-local".to_string());
+        }
+        if self.use_specs {
+            parts.push("--use-specs".to_string());
+        }
+        if self.use_low_relevance {
+            parts.push("--use-low-relevance".to_string());
+        }
+        if self.no_scholarly {
+            parts.push("--no-scholarly".to_string());
+        }
+        if self.use_pdf {
+            parts.push("--use-pdf".to_string());
+        }
+        if let Some(v) = self.fetch_concurrency {
+            parts.push(format!("--fetch-concurrently {v}"));
+        }
+        if let Some(v) = self.local_concurrency {
+            parts.push(format!("--local-concurrently {v}"));
+        }
+        if let Some(v) = self.fetch_timeout_secs {
+            parts.push(format!("--fetch-timeout-secs {v}"));
+        }
+        if let Some(v) = self.web_phase_timeout_secs {
+            parts.push(format!("--web-phase-timeout-secs {v}"));
+        }
+        if let Some(v) = self.local_phase_timeout_secs {
+            parts.push(format!("--local-phase-timeout-secs {v}"));
+        }
+        if let Some(v) = self.search_max_retries {
+            parts.push(format!("--search-max-retries {v}"));
+        }
+        if let Some(v) = self.search_retry_base_delay_ms {
+            parts.push(format!("--search-retry-base-delay-ms {v}"));
+        }
+        if let Some(v) = self.search_circuit_breaker_threshold {
+            parts.push(format!("--search-circuit-breaker-threshold {v}"));
+        }
+        if let Some(v) = self.max_web_results {
+            parts.push(format!("--max-web-results {v}"));
+        }
+        if let Some(v) = self.max_search_calls {
+            parts.push(format!("--max-search-calls {v}"));
+        }
+        if let Some(v) = self.max_local_sources {
+            parts.push(format!("--max-local-sources {v}"));
+        }
+        if let Some(v) = self.max_synthesis_sources {
+            parts.push(format!("--max-synthesis-sources {v}"));
+        }
+        if let Some(v) = &self.summarization_model {
+            parts.push(format!("--summarization-model {v}"));
+        }
+        if let Some(v) = &self.brief {
+            parts.push(format!("--brief \"{v}\""));
+        }
+        if let Some(v) = &self.research_model {
+            parts.push(format!("--research-model {v}"));
+        }
+        if let Some(v) = &self.compression_model {
+            parts.push(format!("--compression-model {v}"));
+        }
+        if let Some(v) = &self.final_report_model {
+            parts.push(format!("--final-report-model {v}"));
+        }
+        if let Some(v) = self.max_concurrent_research_units {
+            parts.push(format!("--max-concurrent-research-units {v}"));
+        }
+        if self.evaluate {
+            parts.push("--evaluate".to_string());
+        }
+        parts.join(" ")
+    }
+
     /// Convert this HTTP request into the shared [`ResearchRunRequest`].
     fn to_run_request(&self) -> ragent_research::ResearchRunRequest {
         ragent_research::ResearchRunRequest {
@@ -281,6 +398,7 @@ impl CreateResearchRequest {
             search_retry_base_delay_ms: self.search_retry_base_delay_ms,
             search_circuit_breaker_threshold: self.search_circuit_breaker_threshold,
             max_web_results: self.max_web_results,
+            max_search_calls: self.max_search_calls,
             max_local_sources: self.max_local_sources,
             max_synthesis_sources: self.max_synthesis_sources,
             summarization_model: self.summarization_model.clone(),
@@ -290,6 +408,7 @@ impl CreateResearchRequest {
             final_report_model: self.final_report_model.clone(),
             max_concurrent_research_units: self.max_concurrent_research_units,
             evaluate: Some(self.evaluate),
+            invocation: Some(self.invocation_summary()),
         }
     }
 }
@@ -329,17 +448,8 @@ async fn create_research(
     // this channel. The registry entry doubles as an in-flight guard: a
     // concurrent POST with the same name is rejected here (the disk-based
     // duplicate check above only sees completed items).
-    struct BroadcastObserver(tokio::sync::broadcast::Sender<SessionEvent>);
-    impl SessionObserver for BroadcastObserver {
-        fn on_event(&self, event: SessionEvent) {
-            // Best-effort send; if there are no subscribers the event is
-            // simply dropped (this is expected — the channel has no
-            // receivers when nobody is listening to the SSE stream).
-            let _ = self.0.send(event);
-        }
-    }
     let observer = {
-        let mut runs = state.research_runs.lock().await;
+        let runs = state.research_runs.lock().await;
         if runs.contains_key(&req.name) {
             drop(runs);
             return error_response(
@@ -348,9 +458,8 @@ async fn create_research(
             )
             .into_response();
         }
-        let (tx, _rx) = tokio::sync::broadcast::channel::<SessionEvent>(256);
-        runs.insert(req.name.clone(), tx.clone());
-        BroadcastObserver(tx)
+        drop(runs);
+        BroadcastObserver::register(&state.research_runs, req.name.clone()).await
     };
 
     // Wire the tool registry from the shared session processor.
@@ -431,6 +540,195 @@ async fn create_research(
     )
         .into_response()
 }
+// ── SSE broadcast observer (shared by POST + PUT) ────────────────────────
+
+/// [`SessionObserver`] that fans research session events out over a
+/// tokio broadcast channel so SSE subscribers of
+/// `GET /research/{name}/events` receive live progress. Shared by the
+/// `POST /research` (create) and `PUT /research/{name}` (update) routes.
+struct BroadcastObserver(tokio::sync::broadcast::Sender<SessionEvent>);
+
+impl BroadcastObserver {
+    /// Register a fresh broadcast channel in the run registry.
+    ///
+    /// The registry entry doubles as an in-flight guard — callers must check
+    /// `research_runs` for the name before invoking this.
+    async fn register(
+        runs: &tokio::sync::Mutex<
+            std::collections::HashMap<String, tokio::sync::broadcast::Sender<SessionEvent>>,
+        >,
+        name: String,
+    ) -> Self {
+        let mut runs = runs.lock().await;
+        let (tx, _rx) = tokio::sync::broadcast::channel::<SessionEvent>(256);
+        runs.insert(name, tx.clone());
+        Self(tx)
+    }
+}
+
+impl SessionObserver for BroadcastObserver {
+    fn on_event(&self, event: SessionEvent) {
+        // Best-effort send; if there are no subscribers the event is
+        // simply dropped (this is expected — the channel has no
+        // receivers when nobody is listening to the SSE stream).
+        let _ = self.0.send(event);
+    }
+}
+
+// ── PUT /research/{name} ─────────────────────────────────────────────────
+
+/// Replay the invocation recorded in a research item's frontmatter and
+/// overwrite `RESEARCH.md` (and the associated supporting files) with a
+/// fresh run.
+///
+/// - `404` when the item does not exist.
+/// - `400` when the item has no `invocation:` frontmatter line or the
+///   recorded command cannot be parsed back into a run request.
+/// - `409` when a run with the same name is already in flight.
+/// - `202 Accepted` with a `Location` header pointing at the SSE stream
+///   once the replay has been spawned.
+async fn update_research(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> axum::response::Response {
+    let manager = ResearchManager::new(research_root());
+
+    // The item must exist and carry a recorded invocation.
+    let item = match manager.show(&name).await {
+        Ok(item) => item,
+        Err(ragent_research::ResearchError::NotFound(missing, suggestions)) => {
+            return error_response(
+                StatusCode::NOT_FOUND,
+                format!("research item '{missing}' not found. Closest matches: {suggestions}"),
+            )
+            .into_response();
+        }
+        Err(ragent_research::ResearchError::InvalidName(_)) => {
+            return error_response(StatusCode::BAD_REQUEST, "invalid research name")
+                .into_response();
+        }
+        Err(e) => {
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                .into_response();
+        }
+    };
+    let Some(recorded) = item.invocation.clone() else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "research item '{name}' has no invocation recorded in its frontmatter; \
+                 only runs created with an invocation-aware front-end can be replayed"
+            ),
+        )
+        .into_response();
+    };
+    let mut run_req = match ragent_research::ResearchRunRequest::from_invocation(&recorded) {
+        Ok(req) => req,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("cannot replay research item '{name}': {e}"),
+            )
+            .into_response();
+        }
+    };
+    // The item name and title from the frontmatter are authoritative.
+    run_req.name = name.clone();
+    run_req.title = Some(item.title.clone());
+
+    // In-flight guard + SSE broadcast channel (shared with POST /research).
+    let observer = {
+        let runs = state.research_runs.lock().await;
+        if runs.contains_key(&name) {
+            drop(runs);
+            return error_response(
+                StatusCode::CONFLICT,
+                format!("research run '{name}' is already in progress"),
+            )
+            .into_response();
+        }
+        drop(runs);
+        BroadcastObserver::register(&state.research_runs, name.clone()).await
+    };
+
+    let cfg = state.config.read().await.clone();
+    let config = ragent_research::build_session_config(&run_req, Some(&cfg));
+
+    // Wire the tool registry from the shared session processor.
+    let project_root = research_root()
+        .parent()
+        .unwrap_or_else(|| StdPath::new("."))
+        .to_path_buf();
+    let provider_registry = state.session_processor.provider_registry.clone();
+    let active_model =
+        ragent_agent::agent::resolve_agent_with_model(&cfg.default_agent, &cfg, &provider_registry)
+            .ok()
+            .and_then(|agent| agent.model.clone());
+    let session = build_research_session(
+        &state.session_processor.tool_registry,
+        manager.clone(),
+        name.clone(),
+        project_root,
+        state.event_bus.clone(),
+        Some(state.storage.clone()),
+        Some(Arc::new(cfg)),
+        Some(provider_registry),
+        active_model,
+        Some(name.as_str()),
+    );
+
+    // Spawn the replay as a background task so the HTTP response returns
+    // immediately with 202 Accepted. Failed runs still deliver a terminal
+    // RunStep event to SSE subscribers (same pattern as POST /research).
+    let name_clone = name.clone();
+    let title_clone = item.title.clone();
+    let runs_registry = state.research_runs.clone();
+    let err_tx = observer.0.clone();
+    tokio::spawn(async move {
+        match session
+            .run(&name_clone, &title_clone, &config, Arc::new(observer))
+            .await
+        {
+            Ok(_outcome) => {
+                tracing::info!(
+                    name = %name_clone,
+                    "research: background replay completed successfully"
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    name = %name_clone,
+                    error = %e,
+                    "research: background replay failed"
+                );
+                let _ = err_tx.send(SessionEvent::RunStep {
+                    step: "update".to_string(),
+                    status: "failed".to_string(),
+                    detail: Some(e.to_string()),
+                });
+            }
+        }
+        let mut runs = runs_registry.lock().await;
+        runs.remove(&name_clone);
+    });
+
+    // Return 202 Accepted with a Location header pointing to the SSE stream.
+    let location = format!("/research/{name}/events");
+    let body = Json(serde_json::json!({
+        "name": name,
+        "title": item.title,
+        "status": "accepted",
+        "message": "Research replay started. Connect to the location header for live events.",
+        "replayed_invocation": recorded,
+    }));
+    (
+        StatusCode::ACCEPTED,
+        [("location", location.as_str())],
+        body,
+    )
+        .into_response()
+}
+
 // ── GET /research/{name} ────────────────────────────────────────────────
 
 /// Query parameters for `GET /research/{name}`.
@@ -628,6 +926,7 @@ mod tests {
             search_retry_base_delay_ms: None,
             search_circuit_breaker_threshold: None,
             max_web_results: None,
+            max_search_calls: None,
             max_local_sources: None,
             max_synthesis_sources: None,
             brief: None,
@@ -678,6 +977,7 @@ mod tests {
             search_retry_base_delay_ms: None,
             search_circuit_breaker_threshold: None,
             max_web_results: None,
+            max_search_calls: None,
             max_local_sources: None,
             max_synthesis_sources: None,
             brief: None,

@@ -1,8 +1,72 @@
 # Changelog
 
-## Unreleased
+## Version: 1.0.79
+
+### Changed
+
+- Version bump to 1.0.79.
+- `cargo check` passes with only a pre-existing `unused workspace dependency` warning for `axum-extra`.
+- `cargo audit` reports only allowed warnings (no actionable security failures); legacy `lru 0.12.5` unsoundness warnings remain tracked.
 
 ### Added
+
+- **`/clip` slash command** — copies the rendered contents of the message window
+  (the exact plain-text transcript rows the Messages pane displays) to the
+  system clipboard in one step, joining each rendered row with newlines. Uses
+  the same pre-wrapped line buffer as text-selection copy, so what lands on the
+  clipboard is exactly what is on screen. An empty window reports
+  "nothing to copy" instead of writing an empty clipboard. Registered in the
+  slash-command autocomplete list and `/help`; documented in TUI-QUICKSTART.md.
+
+### Changed
+
+- **`/research create` TUI progress display simplified** — the live progress log now opens with an `Options:` line (mode, output format, tier, depth, iterations, from-urls/from-files) rendered once beneath the topic instead of a per-run config step line, per-captured-source lines are gone from both the message window and the log panel (web capture/failure/exclusion events accumulate into the existing fetch-totals counters only), and the per-engine capture summary table has been removed along with its `CaptureDelta`/`EngineCaptureRow` payload machinery. Web-search request counts still surface at run end via the completion notice and the `search_providers` pipeline step. `SessionEvent::ConfigSnapshot` gained a `mode` field so the TUI can display the resolved mode.
+
+### Added
+
+- **Research web-search quota controls** — `--max-search-calls N` (CLI flag, TUI parser flag, HTTP `max_search_calls` field) places a hard, run-scoped cap on the total number of web-search calls a research run may issue. The cap lives on a new `SearchBudget` primitive (crates/ragent-research/src/search_budget.rs) shared via `Arc` across every supervisor/competitive researcher and every gather pass (main gather, engine iterations, gap-fill), so N parallel researchers draw from one per-run pool. When the cap is reached, remaining sub-queries are skipped without error, the run proceeds with the sources gathered so far, and a `search_budget` `RunStep` diagnostic reports the used/limit counts (new `GatherEvent::SearchBudgetExhausted`). A run-scoped `SharedQueryCache` also memoises successful search results keyed on the normalized query text, so supervisor/competitive researchers whose decomposed sub-queries collide (common when every entity researcher decomposes the same comparison dimensions) reuse the cached hits instead of re-issuing paid search calls. The cache is always on for supervisor/competitive runs; the budget is opt-in via `--max-search-calls`.
+
+### Changed
+
+- **`--depth` now bounds web volume by default** — the effective web-source budget for gather passes is derived from the selected depth (`shallow` 6 / `standard` 9 / `deep` 15 sources) unless `--max-web-results` is passed explicitly. Previously every depth preset collapsed into the 500-source default (`max(depth_budget, 500)`), making `--depth shallow` ineffective at limiting search/fetch volume. `WebConfig::max_web_results` uses `0` as the derive-from-depth sentinel; `SessionConfig::effective_web_budget()` is the single resolution point (gap-fill included). Sub-query search requests are also right-sized to the per-query share of the budget (floor 10) instead of every parallel sub-query requesting the full `max_results`.
+- **Competitive-mode researcher count is capped** — `build_competitive_sub_topics` emits one sub-topic per extracted entity and the session previously ran all of them regardless of `--max-concurrent-research-units`, scaling search quota linearly with the entity list. The competitive plan is now truncated to the configured cap (the generic supervisor fallback path was already capped).
+
+### Fixed
+
+- **`/research list` renders a human-readable table again** — v1.0.78 changed `render_list_output`/`render_search_output` to emit raw JSON, which every consumer (TUI `/research list`, `/research search`, and `ragent research list|search`) printed verbatim inside a fenced code block, producing a dense JSON slab. The fixed-width `NAME/TITLE/STATUS/CREATED/MODIFIED` table and the bullet-list search renderer are restored as the default output; the JSON form now lives behind the existing `--json` flag via new `render_list_output_json`/`render_search_output_json` helpers. The shell CLI `ragent research list` gained a `--json` flag, and list rows once again include `created`/`modified` timestamps (RFC 3339) in both table and JSON output.
+
+### Added
+
+- **`--mode competitive` defaults `--format` to `comparison-table`** — `/research create` (and the TUI slash command, HTTP `POST /research`, and `PUT /research/{name}` replay path) no longer requires an explicit `--format comparison-table` when `--mode competitive` is set: the shared `build_session_config` builder (crates/ragent-research/src/run_request.rs) now defaults the output format to `comparison-table` for competitive runs. An explicit `--format` argument still wins, and non-competitive modes keep the `report` default. The CLI help table, SPEC.md, and QUICKSTART.md were updated accordingly; four new builder tests pin the default, the override, and the non-leak into `tiered`/`supervisor`.
+- **`/research update <name>` invocation replay** — the `invocation` frontmatter line recorded by every research front-end (CLI argv, TUI `/research ...` slash command, HTTP `POST /research` summary) can now be replayed to re-run a research item and overwrite `RESEARCH.md` and its associated files (`CORPA.md`, `sources/`, index) with freshly gathered results:
+  - `crates/ragent-research/src/run_request.rs` adds `ResearchRunRequest::from_invocation` plus `InvocationParseError`. It normalizes all three recorded grammars, reuses the shared `ResearchCliCommand` parser, and keeps the original invocation stamped on the replayed run. The shared parser now also accepts the `--from-urls`/`--from-files` spellings that clap derives (previously only the documented singular `--from-url`/`--from-file` worked in the TUI parser).
+  - `crates/ragent-research/src/cli.rs` adds the `update <name>` verb to `ResearchCliCommand` (variant, parse helper, help-table row).
+  - CLI: `ragent research update <name>` (src/cli.rs) — loads the item, requires an invocation line, replays it, and re-runs the full pipeline including the clarification-answer flow.
+  - TUI: `/research update <name>` (crates/ragent-tui/src/app/research.rs) — runs the replay in the background with live phase progress; `update` also added to the slash autocomplete list.
+  - HTTP: `PUT /research/{name}` (crates/ragent-server/src/routes/research.rs) — `404` missing item, `400` missing/unparseable invocation, `409` in-flight, `202 Accepted` + `Location` SSE header on spawn. The broadcast observer is hoisted to a shared module-level type reused by POST and PUT.
+  - Tests: `crates/ragent-research/tests/test_research_invocation_replay.rs` (14 tests) and five new `PUT` route tests in `crates/ragent-server/tests/test_research_routes.rs`.
+
+### Fixed
+
+- **GitHub `blob/` URLs no longer fail research gathering** — competitive/supervisor research runs surfaced many
+  `web — source failed: … readability extraction failed` errors for GitHub file-view URLs
+  (`github.com/{owner}/{repo}/blob/{ref}/{path}`). The blob page is GitHub application chrome (nav menus, file
+  tree, buttons) that `readability-rs` cannot extract as an article, so those URLs were guaranteed rejections
+  under the research web-gather readability guarantee. `AgentWebFetchTool::fetch` now rewrites such URLs to their
+  `raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}` counterparts (multi-segment refs like `refs/heads/main`
+  are preserved; repo roots, issues, PRs, and directory listings are left unchanged), so the file's actual
+  content is captured instead. Non-HTML content types (`text/plain` from the raw endpoint and similar) now
+  bypass the readability check like PDFs and YouTube transcripts already did — their bodies are the verbatim
+  document content and no fallback extraction is involved. Remaining `source failed` messages for bot-blocked
+  (HTTP 429), gone (HTTP 410/521), or JS-shell pages are genuine rejections and continue to be reported.
+
+### Tests
+
+- `test_normalize_github_blob_url_rewrites_to_raw`, `test_normalize_github_blob_url_multi_segment_ref`,
+  `test_normalize_github_blob_url_leaves_non_blob_urls_unchanged`,
+  `test_github_blob_fetch_uses_rewritten_raw_url`, and
+  `test_mf_fetch_non_html_content_type_bypasses_readability_check` in
+  `crates/ragent-agent/src/research_adapter.rs`.
 
 ## Version: 1.0.78
 

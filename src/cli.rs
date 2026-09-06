@@ -79,6 +79,13 @@ pub enum ResearchCommands {
         /// seed multiple files.
         #[arg(long, value_name = "PATH")]
         from_files: Vec<String>,
+        /// Research mode: tiered|supervisor|competitive (competitive implies
+        /// --format comparison-table unless an explicit --format is supplied)
+        #[arg(long, value_name = "MODE")]
+        mode: Option<String>,
+        /// Maximum parallel researcher agents in supervisor/competitive modes
+        #[arg(long, value_name = "N")]
+        max_concurrent_research_units: Option<usize>,
         /// Number of gathering iterations
         #[arg(long)]
         iterations: Option<u32>,
@@ -89,6 +96,7 @@ pub enum ResearchCommands {
         #[arg(long, value_name = "TIER")]
         tier: Option<String>,
         /// Output format: report|executive-summary|comparison-table|source-bibliography
+        /// (defaulted to comparison-table when --mode competitive is set)
         #[arg(long)]
         format: Option<String>,
         /// Optional extra sources directory (FR-019)
@@ -147,12 +155,29 @@ pub enum ResearchCommands {
         /// Defaults to 3.
         #[arg(long, value_name = "N")]
         search_circuit_breaker_threshold: Option<u32>,
+        /// Hard cap on the total number of web-search calls the run may issue,
+        /// shared across all supervisor/competitive researchers and retries.
+        /// When the cap is reached the run proceeds with the sources gathered
+        /// so far instead of failing. Omit for no cap.
+        #[arg(long, value_name = "N")]
+        max_search_calls: Option<usize>,
+        /// Ask a single clarifying question before web searches when the
+        /// topic is ambiguous. Defaults to enabled; --no-clarify disables it.
+        #[arg(long, overrides_with = "clarify")]
+        no_clarify: bool,
+        /// Ask a single clarifying question before web searches when the
+        /// topic is ambiguous (paired with --no-clarify). Defaults to true.
+        #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
+        clarify: Option<bool>,
     },
     /// List research items
     List {
         /// Include archived items
         #[arg(long)]
         all: bool,
+        /// Output as a JSON array (one object per item)
+        #[arg(long)]
+        json: bool,
     },
     /// Print the absolute path of a research item's RESEARCH.md
     Open {
@@ -191,6 +216,12 @@ pub enum ResearchCommands {
         #[arg(value_name = "MESSAGE", trailing_var_arg = true, num_args = 0..)]
         message: Vec<String>,
     },
+    /// Replay the invocation recorded in a research item's frontmatter and
+    /// overwrite its RESEARCH.md (and associated files) with a fresh run
+    Update {
+        /// Research name
+        name: String,
+    },
     /// Extract top 10 concepts from the web-source documents under a research
     /// item and write them to `CONCEPTS.md`.
     Cluster {
@@ -209,6 +240,7 @@ pub enum ResearchCommands {
 pub async fn handle_research_command(
     command: ResearchCommands,
     active_model: Option<ragent_agent::agent::ModelRef>,
+    storage: Option<std::sync::Arc<Storage>>,
 ) -> Result<()> {
     use ragent_research::cli::ResearchCliCommand;
     use ragent_research::{ResearchManager, SessionEvent, SessionObserver};
@@ -224,9 +256,56 @@ pub async fn handle_research_command(
         }
     }
 
+    /// Render the end-of-run per-provider search-request summary, e.g.
+    /// `, 12 search request(s) (mf_search: 12)`; empty when no calls occurred.
+    fn provider_calls_suffix(outcome: &ragent_research::RunOutcome) -> String {
+        if outcome.provider_tool_calls.is_empty() {
+            return String::new();
+        }
+        let per_tool = outcome
+            .provider_tool_calls
+            .iter()
+            .map(|(tool, count)| format!("{tool}: {count}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let total: usize = outcome
+            .provider_tool_calls
+            .iter()
+            .map(|(_, count)| count)
+            .sum();
+        format!(", {total} search request(s) ({per_tool})")
+    }
+
     let working_dir = std::env::current_dir()?;
     let research_root = working_dir.join("research");
     let manager = ResearchManager::new(&research_root);
+
+    // Use the caller's persistent storage when available so the research
+    // pipeline can reach credentials stored with `ragent auth <provider> <key>`.
+    // When running research as a bare CLI invocation (no main-session storage
+    // was created), open the persistent database directly; fall back to
+    // in-memory storage when the database cannot be opened.
+    let research_storage = match storage {
+        Some(s) => s,
+        None => {
+            let db_path = dirs::data_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("ragent")
+                .join("ragent.db");
+            match Storage::open(&db_path) {
+                Ok(s) => Arc::new(s),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        db_path = %db_path.display(),
+                        "ragent-research: failed to open persistent storage; \
+                         stored provider credentials unavailable"
+                    );
+                    Arc::new(Storage::open_in_memory()?)
+                }
+            }
+        }
+    };
 
     let cli_cmd = match command {
         ResearchCommands::Create {
@@ -234,6 +313,8 @@ pub async fn handle_research_command(
             topic,
             from_urls,
             from_files,
+            mode,
+            max_concurrent_research_units,
             iterations,
             depth,
             tier,
@@ -253,8 +334,12 @@ pub async fn handle_research_command(
             search_max_retries,
             search_retry_base_delay_ms,
             search_circuit_breaker_threshold,
+            max_search_calls,
+            no_clarify,
+            clarify: _,
         } => {
             let topic = topic.join(" ");
+            let clarify = !no_clarify;
             if topic.is_empty() && from_urls.is_empty() && from_files.is_empty() {
                 eprintln!(
                     "ragent-research: usage: ragent research create <name> <topic...> [--from-url <URL>] [--from-file <PATH>]"
@@ -269,13 +354,13 @@ pub async fn handle_research_command(
                 iterations,
                 depth,
                 tier,
-                mode: None,
+                mode,
                 summarization_model: None,
                 research_model: None,
                 compression_model: None,
                 final_report_model: None,
-                max_concurrent_research_units: None,
-                clarify: None,
+                max_concurrent_research_units,
+                clarify: Some(clarify),
                 format,
                 sources_dir,
                 template,
@@ -292,6 +377,7 @@ pub async fn handle_research_command(
                 search_max_retries,
                 search_circuit_breaker_threshold,
                 search_retry_base_delay_ms,
+                max_search_calls,
                 max_web_results: None,
                 max_local_sources: None,
                 max_synthesis_sources: None,
@@ -299,7 +385,7 @@ pub async fn handle_research_command(
                 evaluate: false,
             }
         }
-        ResearchCommands::List { all } => ResearchCliCommand::List { all, json: false },
+        ResearchCommands::List { all, json } => ResearchCliCommand::List { all, json },
         ResearchCommands::Open { name } => ResearchCliCommand::Open { name },
         ResearchCommands::Search { query } => ResearchCliCommand::Search {
             query: query.join(" "),
@@ -316,32 +402,58 @@ pub async fn handle_research_command(
                 Some(message.join(" "))
             },
         },
+        ResearchCommands::Update { name } => ResearchCliCommand::Update { name },
         ResearchCommands::Cluster { name, force } => ResearchCliCommand::Cluster { name, force },
     };
     match cli_cmd {
         ResearchCliCommand::Help => {
             println!("{}", ResearchCliCommand::build_help_message());
         }
-        ResearchCliCommand::List { all, .. } => {
+        ResearchCliCommand::List { all, json } => {
+            // `list` scans the research root directly, so a refresh here also
+            // repairs a stale INDEX.md after items are moved or removed from
+            // disk outside of the manager (e.g. manual directory moves).
+            manager.refresh_index().await?;
             let items = manager.list(all).await?;
-            let rows: Vec<(String, String, String, ragent_research::ResearchStatus)> = items
+            let rows: Vec<(String, String, String, String, String, String)> = items
                 .into_iter()
-                .map(|i| (i.name.to_string(), i.title, i.topic, i.status))
+                .map(|i| {
+                    (
+                        i.name.to_string(),
+                        i.title,
+                        i.topic,
+                        i.status.as_str().to_string(),
+                        i.created_at.to_rfc3339(),
+                        i.modified_at.to_rfc3339(),
+                    )
+                })
                 .collect();
-            print!("{}", ragent_research::render_list_output(&rows));
+            if json {
+                println!("{}", ragent_research::render_list_output_json(&rows));
+            } else {
+                print!("{}", ragent_research::render_list_output(&rows));
+            }
         }
         ResearchCliCommand::Open { name } => {
             let item = manager.show(&name).await?;
             let path = ragent_research::ResearchIo::research_md_path(manager.root(), &item.name);
             println!("{}", path.display());
         }
-        ResearchCliCommand::Search { query, .. } => {
+        ResearchCliCommand::Search { query, json } => {
             let hits = manager.search(&query, 25).await?;
-            let rows: Vec<(String, String, String, String)> = hits
+            let json_rows: Vec<(String, String, String, String)> = hits
                 .into_iter()
                 .map(|h| (h.name, h.title, h.snippet, h.path.display().to_string()))
                 .collect();
-            print!("{}", ragent_research::render_search_output(&rows));
+            if json {
+                println!("{}", ragent_research::render_search_output_json(&json_rows));
+            } else {
+                let rows: Vec<(String, String, String)> = json_rows
+                    .into_iter()
+                    .map(|(name, title, snippet, _path)| (name, title, snippet))
+                    .collect();
+                print!("{}", ragent_research::render_search_output(&rows));
+            }
         }
         ResearchCliCommand::Show { name, .. } => {
             let item = manager.show(&name).await?;
@@ -419,6 +531,7 @@ pub async fn handle_research_command(
             search_retry_base_delay_ms,
             search_circuit_breaker_threshold,
             max_web_results,
+            max_search_calls,
             max_local_sources,
             max_synthesis_sources,
             brief,
@@ -463,6 +576,7 @@ pub async fn handle_research_command(
                 search_retry_base_delay_ms,
                 search_circuit_breaker_threshold,
                 max_web_results,
+                max_search_calls,
                 max_local_sources,
                 max_synthesis_sources,
                 brief,
@@ -471,6 +585,11 @@ pub async fn handle_research_command(
                 final_report_model,
                 max_concurrent_research_units,
                 evaluate: Some(evaluate),
+                // Record the verbatim command line for frontmatter replay.
+                invocation: {
+                    let argv: Vec<String> = std::env::args().collect();
+                    Some(argv.join(" "))
+                },
                 ..Default::default()
             };
             let config = ragent_research::build_session_config(&req, config_arc.as_deref());
@@ -479,7 +598,7 @@ pub async fn handle_research_command(
             // key is available, as well as local in-project sources.
             let tool_registry = Arc::new(ragent_agent::tool::create_default_registry());
             let event_bus = Arc::new(EventBus::new(256));
-            let storage = Arc::new(Storage::open_in_memory()?);
+            let storage = research_storage.clone();
             let session = ragent_agent::research_adapter::build_research_session(
                 &tool_registry,
                 manager.clone(),
@@ -517,6 +636,7 @@ pub async fn handle_research_command(
                         ));
                     }
                     summary.push(')');
+                    summary.push_str(&provider_calls_suffix(&outcome));
                     println!("{summary}");
                 }
                 Err(ragent_research::ResearchError::NeedsClarification { question }) => {
@@ -557,6 +677,7 @@ pub async fn handle_research_command(
                                 ));
                             }
                             summary.push(')');
+                            summary.push_str(&provider_calls_suffix(&outcome));
                             println!("{summary}");
                         }
                         Err(e) => {
@@ -595,7 +716,7 @@ pub async fn handle_research_command(
                     let config = ragent_research::build_session_config(&req, None);
                     let tool_registry = Arc::new(ragent_agent::tool::create_default_registry());
                     let event_bus = Arc::new(EventBus::new(256));
-                    let storage = Arc::new(Storage::open_in_memory()?);
+                    let storage = research_storage.clone();
                     let session = ragent_agent::research_adapter::build_research_session(
                         &tool_registry,
                         manager.clone(),
@@ -614,9 +735,105 @@ pub async fn handle_research_command(
                     {
                         Ok(outcome) => {
                             println!(
-                                "ragent-research: continued research/{} ({} sources)",
+                                "ragent-research: continued research/{} ({} sources{})",
                                 outcome.research_name,
-                                outcome.sources.len()
+                                outcome.sources.len(),
+                                provider_calls_suffix(&outcome)
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("ragent-research: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("ragent-research: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        ResearchCliCommand::Update { name } => {
+            // Replay the invocation recorded in the item's frontmatter and
+            // overwrite RESEARCH.md (and the associated supporting files) with
+            // a fresh run.
+            let item = match manager.show(&name).await {
+                Ok(item) => item,
+                Err(e) => {
+                    eprintln!("ragent-research: {e}");
+                    std::process::exit(1);
+                }
+            };
+            let Some(recorded) = item.invocation.clone() else {
+                eprintln!(
+                    "ragent-research: research/{name} has no invocation recorded in its \
+                     frontmatter; only runs created with an invocation-aware front-end \
+                     can be replayed"
+                );
+                std::process::exit(1);
+            };
+            let mut req = match ragent_research::ResearchRunRequest::from_invocation(&recorded) {
+                Ok(req) => req,
+                Err(e) => {
+                    eprintln!("ragent-research: cannot replay research/{name}: {e}");
+                    std::process::exit(1);
+                }
+            };
+            // The item name comes from the frontmatter, which is authoritative.
+            req.name = name.clone();
+            req.title = Some(item.title.clone());
+            eprintln!("ragent-research: updating research/{name} — replaying: {recorded}");
+            let config_arc = ragent_config::Config::load().ok().map(Arc::new);
+            let config = ragent_research::build_session_config(&req, config_arc.as_deref());
+            let tool_registry = Arc::new(ragent_agent::tool::create_default_registry());
+            let event_bus = Arc::new(EventBus::new(256));
+            let storage = research_storage.clone();
+            let session = ragent_agent::research_adapter::build_research_session(
+                &tool_registry,
+                manager.clone(),
+                name.clone(),
+                working_dir.clone(),
+                event_bus,
+                Some(storage),
+                config_arc.clone(),
+                Some(Arc::new(ragent_agent::provider::create_default_registry())),
+                active_model,
+                Some(name.as_str()),
+            );
+            match session
+                .run(&name, &item.title, &config, Arc::new(CliObserver))
+                .await
+            {
+                Ok(outcome) => {
+                    println!(
+                        "ragent-research: updated research/{} ({} sources{})",
+                        outcome.research_name,
+                        outcome.sources.len(),
+                        provider_calls_suffix(&outcome)
+                    );
+                }
+                Err(ragent_research::ResearchError::NeedsClarification { question }) => {
+                    eprintln!("ragent-research: {}", question);
+                    eprint!("Answer: ");
+                    let mut answer = String::new();
+                    std::io::stdin().read_line(&mut answer)?;
+                    let answer = answer.trim();
+                    if answer.is_empty() {
+                        eprintln!("ragent-research: clarification cancelled");
+                        std::process::exit(1);
+                    }
+                    req.topic = format!("{} (clarification: {})", req.topic, answer);
+                    let config = ragent_research::build_session_config(&req, config_arc.as_deref());
+                    match session
+                        .run(&name, &item.title, &config, Arc::new(CliObserver))
+                        .await
+                    {
+                        Ok(outcome) => {
+                            println!(
+                                "ragent-research: updated research/{} ({} sources{})",
+                                outcome.research_name,
+                                outcome.sources.len(),
+                                provider_calls_suffix(&outcome)
                             );
                         }
                         Err(e) => {

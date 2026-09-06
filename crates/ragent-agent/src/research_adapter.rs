@@ -29,8 +29,9 @@ use crate::{
 use ragent_research::{
     AnalysisEngine, Critic, GrepMatch, HeuristicPlanner, HeuristicQueryDecomposer,
     LlmAnalysisEngine, LlmPlanner, LlmQueryDecomposer, LocalGatherer, LocalTool,
-    NoopAnalysisEngine, Planner, QueryDecomposer, ResearchManager, ResearchSession, SimpleCritic,
-    WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
+    NoopAnalysisEngine, Planner, ProviderCallStats, QueryDecomposer, ResearchManager,
+    ResearchSession, SimpleCritic, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit,
+    WebSearchTool,
 };
 
 /// Build a [`ResearchSession`] backed by the agent tool `registry`.
@@ -84,9 +85,7 @@ pub fn build_research_session(
                 storage.as_deref(),
                 config.as_deref(),
             );
-            let api_key = storage
-                .as_deref()
-                .and_then(|s| s.get_provider_auth(&model_ref.provider_id).ok().flatten());
+            let api_key = resolve_api_key(&model_ref.provider_id, storage.as_deref());
             Arc::new(
                 LlmAnalysisEngine::new(registry, &model_ref.provider_id, &model_ref.model_id)
                     .with_api_key(api_key)
@@ -98,9 +97,7 @@ pub fn build_research_session(
 
     let planner: Arc<dyn Planner> = match (provider_registry.clone(), active_model.clone()) {
         (Some(reg), Some(m)) => {
-            let api_key = storage
-                .as_deref()
-                .and_then(|s| s.get_provider_auth(&m.provider_id).ok().flatten());
+            let api_key = resolve_api_key(&m.provider_id, storage.as_deref());
             let base_url = resolve_base_url(&m.provider_id, storage.as_deref(), config.as_deref());
             Arc::new(
                 LlmPlanner::new(reg, &m.provider_id, &m.model_id)
@@ -125,9 +122,7 @@ pub fn build_research_session(
     // concept-extraction step, so only one engine is constructed.
     let summarizer = match (provider_registry.clone(), active_model.clone()) {
         (Some(reg), Some(m)) => {
-            let api_key = storage
-                .as_deref()
-                .and_then(|s| s.get_provider_auth(&m.provider_id).ok().flatten());
+            let api_key = resolve_api_key(&m.provider_id, storage.as_deref());
             let base_url = resolve_base_url(&m.provider_id, storage.as_deref(), config.as_deref());
             Some(Arc::new(
                 LlmAnalysisEngine::new(reg, &m.provider_id, &m.model_id)
@@ -208,6 +203,38 @@ fn resolve_base_url(
             }),
         _ => None,
     }
+}
+
+/// Resolve a provider API key for research engines: environment variables
+/// first (same table and precedence as [`SessionProcessor::resolve_api_key`]),
+/// then the encrypted credential store when `storage` is available.
+///
+/// Returning `None` leaves the engine keyless, which is valid for local
+/// providers such as `ollama`.
+fn resolve_api_key(provider_id: &str, storage: Option<&Storage>) -> Option<String> {
+    let env_vars: &[&str] = match provider_id {
+        "anthropic" => &["ANTHROPIC_API_KEY"],
+        "openai" => &["OPENAI_API_KEY"],
+        "gemini" => &["GEMINI_API_KEY"],
+        "huggingface" => &["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
+        "generic_openai" => &["OPENAI_API_KEY", "GENERIC_OPENAI_API_KEY"],
+        "ollama_cloud" => &["OLLAMA_CLOUD_API_KEY", "OLLAMA_API_KEY"],
+        "ollama" => &["OLLAMA_API_KEY"],
+        "azure_foundry" => &["AZURE_AI_FOUNDRY_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        "copilot" => &["GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN"],
+        _ => &[],
+    };
+
+    for var in env_vars {
+        if let Ok(key) = std::env::var(var)
+            && !key.is_empty()
+        {
+            return Some(key);
+        }
+    }
+
+    storage.and_then(|s| s.get_provider_auth(provider_id).ok().flatten())
 }
 
 fn build_tool_context(
@@ -307,7 +334,12 @@ fn build_web_gatherer(
                 legacy_verifier: None,
             }),
         )
-        .with_decomposer(decomposer),
+        .with_decomposer(decomposer)
+        // Run-scoped per-provider search-request counter: without this the
+        // session-level `provider_stats()` probe stays `None` and the
+        // end-of-run "Search Provider | Requests" table is never rendered
+        // for CLI/TUI/HTTP runs.
+        .with_provider_stats(Arc::new(ProviderCallStats::new())),
     )
 }
 
@@ -460,6 +492,14 @@ const HEAD_METADATA_USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/
 #[async_trait]
 impl WebFetchTool for AgentWebFetchTool {
     async fn fetch(&self, url: &str) -> Result<WebFetchedPage> {
+        // Rewrite `github.com` file-view URLs to their raw counterparts.
+        // The blob page is heavy GitHub chrome (nav, file tree, buttons)
+        // that readability cannot extract as an article, so fetching it
+        // would always fall back to html2text and be rejected by the
+        // mandatory readability guarantee below. The raw endpoint serves
+        // the file's actual content, so rewriting converts a guaranteed
+        // rejection into a usable source.
+        let url = normalize_github_blob_url(url);
         // Prefer `mf_fetch` for richer metadata (content_type, page_type, title).
         // Fall back to the legacy `webfetch` tool when `mf_fetch` is not
         // registered.
@@ -497,7 +537,7 @@ impl WebFetchTool for AgentWebFetchTool {
         };
 
         let (mut body, mut title, content_type, page_type, language, mut author) = if is_mf_fetch {
-            parse_mf_fetch_output(url, &output.content, output.metadata.as_ref())
+            parse_mf_fetch_output(&url, &output.content, output.metadata.as_ref())
         } else {
             let title = output
                 .metadata
@@ -512,7 +552,7 @@ impl WebFetchTool for AgentWebFetchTool {
                         .content
                         .lines()
                         .find(|l| !l.trim().is_empty())
-                        .unwrap_or(url)
+                        .unwrap_or(&url)
                         .to_string()
                 });
             (
@@ -578,8 +618,19 @@ impl WebFetchTool for AgentWebFetchTool {
         // rejected so fallback-extracted noise never enters the research
         // corpus. PDFs and YouTube transcripts bypass readability entirely by
         // design, so they are exempt from the check.
-        let media_kind = ragent_research::classify_web_source(url, content_type.as_deref());
-        if media_kind == ragent_research::WebSourceKind::Page {
+        let media_kind = ragent_research::classify_web_source(&url, content_type.as_deref());
+        // The readability chain only runs for HTML bodies (`extract()` returns
+        // non-HTML content types unchanged). For those, the body IS the
+        // document content — e.g. `text/plain` served by
+        // `raw.githubusercontent.com` — so accepting it does not weaken the
+        // guarantee: no fallback extraction ever touched it. Same rationale as
+        // the PDF and YouTube exemptions. An absent content type (legacy
+        // `webfetch` path) keeps the strict re-verification behaviour.
+        let content_type_is_html = content_type
+            .as_deref()
+            .map(|ct| ct.contains("text/html") || ct.contains("application/xhtml"))
+            .unwrap_or(true);
+        if media_kind == ragent_research::WebSourceKind::Page && content_type_is_html {
             let readability_used = if is_mf_fetch {
                 // `mf_fetch` reports which extraction stage produced the body
                 // via the `extraction_method` envelope signal.
@@ -598,10 +649,10 @@ impl WebFetchTool for AgentWebFetchTool {
                 if let Some(verifier) = self.legacy_verifier.as_ref() {
                     verifier()
                 } else {
-                    verify_readability_on_raw_html(&self.tool, &self.ctx, url).await
+                    verify_readability_on_raw_html(&self.tool, &self.ctx, &url).await
                 }
                 #[cfg(not(test))]
-                verify_readability_on_raw_html(&self.tool, &self.ctx, url).await
+                verify_readability_on_raw_html(&self.tool, &self.ctx, &url).await
             };
             if !readability_used {
                 anyhow::bail!(
@@ -622,7 +673,7 @@ impl WebFetchTool for AgentWebFetchTool {
         // `author` is still `None`. Best-effort: any failure simply leaves the
         // fields as `None`.
         let need_author = author.is_none();
-        let page_meta = extract_head_metadata_for_url(url, need_author)
+        let page_meta = extract_head_metadata_for_url(&url, need_author)
             .await
             .unwrap_or_default();
         let published_at = page_meta.published_at;
@@ -702,6 +753,50 @@ pub fn readability_extract_ok(html: &str, url: &str) -> bool {
         readable.text.trim().chars().count() >= MIN_READABILITY_EXTRACT_CHARS
     });
     result.unwrap_or(false)
+}
+
+/// Rewrite a `github.com` file-view URL to its `raw.githubusercontent.com`
+/// counterpart.
+///
+/// `https://github.com/{owner}/{repo}/blob/{ref}/{path...}` becomes
+/// `https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path...}`. The
+/// blob page is GitHub application chrome (nav menus, file tree, buttons)
+/// with the file content embedded in a React shell — `readability-rs` cannot
+/// reliably extract an article from it, so such URLs are guaranteed
+/// rejections under the research readability guarantee. The raw endpoint
+/// serves the file's exact content as `text/plain`, which needs no
+/// extraction at all.
+///
+/// Non-blob GitHub URLs (repo roots, issues, PRs, gists) and malformed URLs
+/// are returned unchanged. URLs with fewer than five path segments after the
+/// host (`/{owner}/{repo}/blob/{branch}` with no file path, i.e. a directory
+/// listing) are also left alone — the raw endpoint would 404 them.
+///
+/// Exposed for tests in the inline test module.
+#[must_use]
+pub fn normalize_github_blob_url(url: &str) -> String {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return url.to_string();
+    };
+    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    if host != "github.com" && host != "www.github.com" {
+        return url.to_string();
+    }
+    let segments: Vec<&str> = parsed
+        .path_segments()
+        .map(|s| s.filter(|seg| !seg.is_empty()).collect())
+        .unwrap_or_default();
+    // /{owner}/{repo}/blob/{ref}/{path...} needs at least 5 segments.
+    if segments.len() < 5 || segments.get(2) != Some(&"blob") {
+        return url.to_string();
+    }
+    let rest = &segments[3..]; // {ref}/{path...}
+    format!(
+        "https://raw.githubusercontent.com/{}/{}/{}",
+        segments[0],
+        segments[1],
+        rest.join("/")
+    )
 }
 
 /// Parse the `mf_fetch` tool's output envelope.
@@ -1682,6 +1777,50 @@ mod tests {
         }
     }
 
+    /// A fake `mf_fetch` tool that records the requested URL and serves a
+    /// raw-text body, simulating the `raw.githubusercontent.com` endpoint.
+    #[derive(Default)]
+    struct RecordingMfFetch {
+        requested_urls: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl AgentTool for RecordingMfFetch {
+        fn name(&self) -> &'static str {
+            "mf_fetch"
+        }
+        fn description(&self) -> &'static str {
+            "fake"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        fn permission_category(&self) -> &'static str {
+            "web"
+        }
+        async fn execute(
+            &self,
+            input: serde_json::Value,
+            _ctx: &AgentToolContext,
+        ) -> anyhow::Result<ToolOutput> {
+            let url = input
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            self.requested_urls
+                .lock()
+                .expect("poisoned requested_urls lock")
+                .push(url);
+            Ok(ToolOutput {
+                content: "raw file body".to_string(),
+                metadata: Some(serde_json::json!({
+                    "content_type": "text/plain; charset=utf-8",
+                })),
+            })
+        }
+    }
+
     #[test]
     fn test_mf_fetch_readability_method_accepted() {
         let fake = Arc::new(FakeMfFetch {
@@ -1768,6 +1907,99 @@ mod tests {
         assert!(
             page.is_ok(),
             "PDF sources must bypass the readability check: {page:?}"
+        );
+    }
+
+    #[test]
+    fn test_mf_fetch_non_html_content_type_bypasses_readability_check() {
+        // Non-HTML content types (e.g. `text/plain` from
+        // raw.githubusercontent.com) are served verbatim by `mf_fetch` — no
+        // extraction chain runs, so there is no fallback to reject. The body
+        // IS the document content.
+        let fake = Arc::new(FakeMfFetch {
+            extraction_method: None,
+            content_type: "text/plain; charset=utf-8",
+        });
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
+        let page = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: fake,
+                ctx: test_tool_context(),
+                legacy_verifier: None,
+            };
+            fetcher
+                .fetch("https://raw.githubusercontent.com/o/r/main/README.md")
+                .await
+        });
+        assert!(
+            page.is_ok(),
+            "text/plain sources must bypass the readability check: {page:?}"
+        );
+    }
+
+    #[test]
+    fn test_normalize_github_blob_url_rewrites_to_raw() {
+        let rewritten = normalize_github_blob_url(
+            "https://github.com/MajorCommotion/hermes-agent-setup-guide/blob/main/HERMES-AGENT-SETUP-GUIDE.md",
+        );
+        assert_eq!(
+            rewritten,
+            "https://raw.githubusercontent.com/MajorCommotion/hermes-agent-setup-guide/main/HERMES-AGENT-SETUP-GUIDE.md"
+        );
+    }
+
+    #[test]
+    fn test_normalize_github_blob_url_multi_segment_ref() {
+        let rewritten =
+            normalize_github_blob_url("https://github.com/o/r/blob/refs/heads/main/docs/guide.md");
+        assert_eq!(
+            rewritten,
+            "https://raw.githubusercontent.com/o/r/refs/heads/main/docs/guide.md"
+        );
+    }
+
+    #[test]
+    fn test_normalize_github_blob_url_leaves_non_blob_urls_unchanged() {
+        // Repo root, issue, pull request, and short directory-listing URLs
+        // must pass through untouched.
+        for url in [
+            "https://github.com/o/r",
+            "https://github.com/o/r/issues/42",
+            "https://github.com/o/r/pull/7",
+            "https://github.com/o/r/blob/main",
+            "https://example.com/blob/main/file.md",
+        ] {
+            assert_eq!(
+                normalize_github_blob_url(url),
+                url,
+                "url must be unchanged: {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_github_blob_fetch_uses_rewritten_raw_url() {
+        // End-to-end: fetching a github.com blob URL must hit the rewritten
+        // raw.githubusercontent.com URL, and the recorded page URL must be the
+        // rewritten one.
+        let fake = Arc::new(RecordingMfFetch::default());
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
+        let page = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: fake,
+                ctx: test_tool_context(),
+                legacy_verifier: None,
+            };
+            fetcher
+                .fetch(
+                    "https://github.com/MajorCommotion/hermes-agent-setup-guide/blob/main/HERMES-AGENT-SETUP-GUIDE.md",
+                )
+                .await
+        });
+        let page = page.expect("rewritten raw URL must be accepted");
+        assert_eq!(
+            page.url,
+            "https://raw.githubusercontent.com/MajorCommotion/hermes-agent-setup-guide/main/HERMES-AGENT-SETUP-GUIDE.md"
         );
     }
 
@@ -1876,8 +2108,8 @@ fn test_parse_mf_search_metadata_extracts_hits_and_engine_provenance() {
                 "title": "Rust Lifetimes",
                 "url": "https://doc.rust-lang.org/nomicon/lifetimes.html",
                 "snippet": "A deep dive into lifetimes.",
-                "source": "duckduckgo, brave",
-                "search_engine": "duckduckgo, brave",
+                "source": "openalex, wikipedia",
+                "search_engine": "openalex, wikipedia",
                 "position": 1,
                 "relevance_score": 0.95,
                 "fetch_relevance": "high",
@@ -1894,7 +2126,7 @@ fn test_parse_mf_search_metadata_extracts_hits_and_engine_provenance() {
     );
     assert_eq!(hits[0].snippet, "A deep dive into lifetimes.");
     assert_eq!(hits[0].search_tool, "mf_search");
-    assert_eq!(hits[0].search_engine, "duckduckgo, brave");
+    assert_eq!(hits[0].search_engine, "openalex, wikipedia");
 }
 
 #[test]
@@ -1905,13 +2137,13 @@ fn test_parse_mf_search_metadata_falls_back_to_source_field() {
                 "title": "No engine field",
                 "url": "https://example.com",
                 "snippet": "fallback",
-                "source": "brave"
+                "source": "wikipedia"
             }
         ]
     });
     let hits = parse_mf_search_metadata(&metadata, "mf_search");
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].search_engine, "brave");
+    assert_eq!(hits[0].search_engine, "wikipedia");
 }
 
 #[test]

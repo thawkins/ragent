@@ -15,7 +15,7 @@ fn sample_source(url: &str, title: &str, body: &str) -> NewVaultSource {
         title: title.to_string(),
         fetch_timestamp: None,
         search_tool: "mf_search".to_string(),
-        search_engine: "duckduckgo, brave".to_string(),
+        search_engine: "openalex, wikipedia".to_string(),
         media_type: "page".to_string(),
         content_type: None,
         body_text: body.to_string(),

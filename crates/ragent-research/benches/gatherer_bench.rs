@@ -100,7 +100,7 @@ fn fake_hits(n: usize) -> Vec<WebSearchHit> {
             snippet: "Rust async runtime benchmark snippet".into(),
             matched_query: String::new(),
             search_tool: "mf_search".into(),
-            search_engine: "duckduckgo, brave".into(),
+            search_engine: "openalex, wikipedia".into(),
             author: None,
         })
         .collect()

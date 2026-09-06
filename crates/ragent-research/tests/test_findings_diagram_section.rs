@@ -71,6 +71,7 @@ fn doc_with_findings() -> ResearchDocument {
         output_format: OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     }
 }
 

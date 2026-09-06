@@ -511,10 +511,6 @@ impl App {
                 // so no MessageEnd arrives for it. Compaction completion and
                 // queued-send dispatch are handled by poll_compaction_result.
                 self.compact_in_progress = false;
-                // Session title generation has been removed along with the
-                // internal LLM subsystem; sessions default to an empty
-                // title and rely on the user to rename them.
-                let _ = (session_id, reason);
                 // Handle pending plan delegation: switch agent and auto-send task
                 if let Some((task, context)) = self.pending_plan_task.take() {
                     self.execute_plan_delegation(session_id, task, context);
@@ -796,14 +792,25 @@ impl App {
                     } else {
                         LogLevel::Info
                     };
-                    self.push_log_no_agent(
-                        level,
-                        format!(
-                            "research: {} — {}",
-                            decoded.phase.as_str(),
-                            crate::app::helpers::sanitize_for_display(&decoded.detail)
-                        ),
-                    ); // Keep the status bar in sync with the running phase.
+                    // Per-URL web capture/failure/exclusion events are
+                    // aggregated into counts by `ResearchProgress::apply`;
+                    // keep them out of the log panel so it stays a phase
+                    // overview rather than a per-source listing.
+                    let is_per_url_event = decoded.phase
+                        == crate::research_progress::SessionPhase::Web
+                        && (decoded.detail.starts_with("captured ")
+                            || decoded.detail.starts_with("fetch failed for ")
+                            || decoded.detail.starts_with("excluded "));
+                    if !is_per_url_event {
+                        self.push_log_no_agent(
+                            level,
+                            format!(
+                                "research: {} — {}",
+                                decoded.phase.as_str(),
+                                crate::app::helpers::sanitize_for_display(&decoded.detail)
+                            ),
+                        );
+                    } // Keep the status bar in sync with the running phase.
                     // The `[wait]` prefix marks this as async-in-progress so
                     // [`App::arm_status_expiry`] will not auto-clear it to
                     // "ready" while the background research is still running.
@@ -844,12 +851,7 @@ impl App {
                         };
                         last
                     };
-                    progress.apply_with_capture(
-                        decoded.phase,
-                        decoded.status,
-                        decoded.detail.clone(),
-                        decoded.capture.clone(),
-                    );
+                    progress.apply(decoded.phase, decoded.status, decoded.detail.clone());
                     if let Some(total) = decoded.total_sources {
                         progress.finish(
                             total,

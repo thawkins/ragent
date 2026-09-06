@@ -63,11 +63,6 @@ fn test_encode_progress_event_sanitizes_web_captured() {
     );
     assert!(decoded.detail.contains("https://example.com"));
     assert!(decoded.detail.contains("Title with control"));
-    assert!(
-        decoded.detail.contains("[UNKNOWN]"),
-        "language tag should be present in detail: {}",
-        decoded.detail
-    );
 }
 
 #[test]

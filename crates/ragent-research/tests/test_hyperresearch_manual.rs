@@ -74,6 +74,7 @@ fn base_document() -> ResearchDocument {
         brief: None,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     }
 }
 
@@ -264,7 +265,7 @@ async fn manual_case_5_sufficient_vault_sources_skip_new_fetches() {
                 title: format!("Manual Page {i}"),
                 fetch_timestamp: Some(Utc::now()),
                 search_tool: "mf_search".into(),
-                search_engine: "duckduckgo".into(),
+                search_engine: "openalex".into(),
                 media_type: "page".into(),
                 content_type: None,
                 body_text: format!("content about GLP-1 and cardiovascular outcomes {i}"),

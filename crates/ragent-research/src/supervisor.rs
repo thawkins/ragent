@@ -188,11 +188,13 @@ pub(crate) fn same_source(a: &Source, b: &Source) -> bool {
 /// Build one sub-topic per competitive entity so the supervisor delegates a
 /// dedicated researcher to each comparable option (FR-006 / T-010).
 ///
-/// The returned questions embed the original topic and any detected comparison
-/// criteria so each researcher gathers evidence along the same dimensions.
+/// Each sub-topic names only its own entity plus the detected comparison
+/// criteria. The overall topic is deliberately NOT embedded: the mission brief
+/// (woven into the researcher's compression prompt) already carries it, and
+/// embedding the full multi-entity topic made every researcher search for all
+/// entities, which polluted the per-entity findings with cross-entity content.
 #[must_use]
 pub fn build_competitive_sub_topics(
-    topic: &str,
     entities: &[crate::entities::CompetitiveEntity],
     criteria: &[String],
 ) -> Vec<String> {
@@ -215,13 +217,34 @@ pub fn build_competitive_sub_topics(
                 .map(|c| format!(" ({c})"))
                 .unwrap_or_default();
             format!(
-                "Research {entity}{category} for '{topic}'{dims}",
+                "Research {entity}{category}{dims}",
                 entity = e.name,
                 category = category_clause,
                 dims = dimension_clause,
             )
         })
         .collect()
+}
+
+/// Check whether `sub_topic` was generated for `entity_name`.
+///
+/// Competitive sub-topics have the form `Research {entity}{category}{dims}`
+/// where the criteria clause may name other entities, so a plain substring
+/// search would misattribute. This predicate anchors on the leading
+/// `Research {entity}` prefix and requires the entity name to be followed by
+/// a clause boundary — end of string, the category clause ` (`, or the
+/// dimension clause ` across ` — so a name that is a prefix of another
+/// (e.g. `Groq` vs `Groq Cloud`) cannot capture the other entity's
+/// assignment.
+#[must_use]
+pub fn sub_topic_matches_entity(sub_topic: &str, entity_name: &str) -> bool {
+    let after_prefix = sub_topic.trim_start_matches("Research ").trim_start();
+    let Some(after_entity) = after_prefix.strip_prefix(entity_name) else {
+        return false;
+    };
+    after_entity.is_empty()
+        || after_entity.starts_with(" (")
+        || after_entity.starts_with(" across ")
 }
 
 /// Abstraction over a worker that researches one sub-topic and returns
@@ -469,12 +492,42 @@ fn source_relevance_snippet(src: &Source) -> String {
         .map(|r| {
             let r = r.trim();
             if r.len() > 120 {
-                format!("{}…", &r[..120])
+                format!("{}…", &r[..r.floor_char_boundary(120)])
             } else {
                 r.to_string()
             }
         })
         .unwrap_or_else(|| "captured".to_string())
+}
+
+/// Extract the entity name from a competitive-shaped sub-topic
+/// (`Research {entity}{category}{dims}`), if the sub-topic has that shape.
+fn competitive_entity_name(sub_topic: &str) -> Option<String> {
+    let rest = sub_topic
+        .trim_start()
+        .strip_prefix("Research ")?
+        .trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+    // Entity names may contain spaces ("GitHub Copilot"); the name ends at
+    // the category clause `(` or the dimension clause ` across `.
+    let end = rest
+        .find(" (")
+        .or(rest.find(" across "))
+        .unwrap_or(rest.len());
+    let name = rest[..end].trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// Check whether a captured source body (title plus text) mentions `entity`.
+fn mentions_entity(body: &crate::analysis::SourceBody, entity: &str) -> bool {
+    let lc_entity = entity.to_lowercase();
+    body.title.to_lowercase().contains(&lc_entity) || body.body.to_lowercase().contains(&lc_entity)
 }
 
 /// Build a short compressed summary from a researcher's final state.
@@ -523,7 +576,11 @@ fn build_summary(
     // Include a concise findings block derived from the captured source
     // bodies. We avoid calling back into the analysis engine here to keep
     // the researcher node deterministic and cheap; instead we surface the
-    // first ~200 chars of each source body as a preview.
+    // first ~200 chars of each source body as a preview. For competitive
+    // sub-topics the previews are filtered to sources that mention the
+    // entity so the fallback cannot publish other entities' content under
+    // this entity's profile.
+    let entity = competitive_entity_name(sub_topic);
     let bodies = build_source_bodies(&state.sources, |src| {
         src.body().and_then(|b| {
             if b.is_empty() {
@@ -533,11 +590,18 @@ fn build_summary(
             }
         })
     });
+    let bodies: Vec<_> = match entity.as_deref() {
+        Some(name) => bodies
+            .into_iter()
+            .filter(|b| mentions_entity(b, name))
+            .collect(),
+        None => bodies,
+    };
     if !bodies.is_empty() {
         lines.push("\n## Findings".to_string());
         for body in bodies.iter().take(5) {
             let snippet = if body.body.len() > 200 {
-                format!("{}…", &body.body[..200])
+                format!("{}…", &body.body[..body.body.floor_char_boundary(200)])
             } else {
                 body.body.clone()
             };
@@ -575,10 +639,22 @@ impl IterativeResearcherNode {
         // Weave the shared mission brief into the sub-topic so the
         // per-researcher compression is aligned with the overall goal without
         // relying on `AnalysisEngine::with_brief` (which is optional).
-        let topic_with_brief = match self.brief.as_ref() {
+        let mut topic_with_brief = match self.brief.as_ref() {
             Some(b) => format!("{b}\n\nSub-topic: {sub_topic}"),
             None => sub_topic.to_string(),
         };
+        // Competitive sub-topics have the `Research {entity}...` shape. The
+        // comparison-table compression template asks for findings that compare
+        // the entities, but a per-entity profile needs entity-scoped findings;
+        // countermand that here so each researcher reports on its own entity
+        // and mentions others only as explicit contrast.
+        if sub_topic.trim_start().starts_with("Research ") {
+            topic_with_brief.push_str(
+                "\n\nScope: report findings about the single entity named at the start of the \
+                 sub-topic only. Mention other entities solely as explicit contrast, never as \
+                 the subject of a finding.",
+            );
+        }
 
         let (result, _outcome) = self
             .analysis
@@ -949,18 +1025,95 @@ mod tests {
             },
         ];
         let criteria = vec!["LLM inference".to_string()];
-        let topics =
-            build_competitive_sub_topics("Compare inference providers", &entities, &criteria);
+        let topics = build_competitive_sub_topics(&entities, &criteria);
         assert_eq!(topics.len(), 2);
-        assert!(topics[0].contains("Fireworks AI"));
-        assert!(topics[0].contains("inference provider"));
+        assert!(topics[0].starts_with("Research Fireworks AI (inference provider)"));
         assert!(topics[0].contains("LLM inference"));
-        assert!(topics[1].contains("Groq"));
+        assert!(topics[1].starts_with("Research Groq (inference provider)"));
+        // The overall topic must not be embedded so each researcher's
+        // searches stay scoped to its own entity.
+        assert!(!topics[0].contains("Compare inference providers"));
+        assert!(!topics[1].contains("Compare inference providers"));
+    }
+
+    #[test]
+    fn sub_topic_matches_entity_anchors_on_prefix() {
+        // The criteria clause may name other entities, so a substring match
+        // would misattribute; the prefix anchor must select only the exact
+        // entity, with a token boundary so prefix-colliding names are safe.
+        let topic = "Research Together.ai (inference provider) across \
+             dimensions: LLM inference, pricing";
+        assert!(sub_topic_matches_entity(topic, "Together.ai"));
+        assert!(!sub_topic_matches_entity(topic, "Fireworks AI"));
+        assert!(!sub_topic_matches_entity(topic, "Groq"));
+        // Token boundary: entity `Groq` must not match a sub-topic for
+        // `Groq Cloud` and vice versa.
+        assert!(!sub_topic_matches_entity(
+            "Research Groq Cloud across dimensions: latency",
+            "Groq"
+        ));
+        assert!(!sub_topic_matches_entity(
+            "Research Groq across dimensions: latency",
+            "Groq Cloud"
+        ));
+    }
+
+    #[test]
+    fn competitive_entity_name_extracts_entity_from_sub_topic() {
+        assert_eq!(
+            competitive_entity_name("Research Groq (inference provider) across dimensions: x"),
+            Some("Groq".to_string())
+        );
+        assert_eq!(
+            competitive_entity_name("Research GitHub Copilot across dimensions: x"),
+            Some("GitHub Copilot".to_string())
+        );
+        assert_eq!(competitive_entity_name("What is the state of Rust?"), None);
+        assert_eq!(competitive_entity_name("Research "), None);
+    }
+
+    #[test]
+    fn build_summary_fallback_filters_findings_by_entity() {
+        let mut state = ResearchState::new("compare AlphaAgent and BetaAgent");
+        state.add_source(sample_web_source(
+            "Beta review",
+            "BetaAgent is a cloud platform with many tools.",
+        ));
+        state.add_source(sample_web_source(
+            "Alpha review",
+            "AlphaAgent is a fast local terminal agent.",
+        ));
+        let summary = build_summary("researcher-1", "Research AlphaAgent", &state, None, None);
+        let findings_idx = summary.find("## Findings").expect("findings block");
+        let findings = &summary[findings_idx..];
+        assert!(findings.contains("Alpha review"));
+        assert!(!findings.contains("Beta review"));
+    }
+
+    /// Deterministic web source with a given title and body text.
+    fn sample_web_source(title: &str, body: &str) -> Source {
+        Source::Web {
+            url: format!("https://example.com/{title}"),
+            title: title.to_string(),
+            captured_at: chrono::Utc::now(),
+            published_at: None,
+            body_path: std::path::PathBuf::from("sources/web-01.md"),
+            body: body.to_string(),
+            relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".to_string(),
+            language: None,
+            author: None,
+            oa_recovery: None,
+        }
     }
 
     #[test]
     fn build_competitive_sub_topics_returns_empty_for_no_entities() {
-        let topics = build_competitive_sub_topics("Compare something", &[], &[]);
+        let topics = build_competitive_sub_topics(&[], &[]);
         assert_eq!(topics, Vec::<String>::new());
     }
 }

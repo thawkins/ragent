@@ -21,7 +21,7 @@ impl WebSearchTool for FixedSearch {
             snippet: "snippet".into(),
             matched_query: String::new(),
             search_tool: "mf_search".to_string(),
-            search_engine: "duckduckgo, brave".to_string(),
+            search_engine: "openalex, wikipedia".to_string(),
             author: None,
         }])
     }

@@ -198,6 +198,27 @@ fn entity_extraction_explicit_vs_list() {
     }
 }
 
+/// A plain "compare A, B, C" topic names no dimensions. The extractor must
+/// still fall back to a generic attribute grid so the comparison table has
+/// per-attribute columns instead of degenerating to Entity+Profile only
+/// (FR-016 regression from the OpenCode/ClaudeCode/Copilot harness run).
+#[test]
+fn entity_extraction_plain_comparison_gets_default_criteria() {
+    let result = extract_entities_for_competitive_analysis(
+        "compare OpenCode, ClaudeCode, Github Copilot, RooCode, Hermes, Codex",
+    );
+    assert!(!result.criteria.is_empty(), "got {:?}", result.criteria);
+    let joined = result.criteria.join(", ");
+    assert!(
+        joined.contains("licensing") && joined.contains("pricing"),
+        "default criteria should cover licensing/pricing, got {joined}"
+    );
+    assert!(
+        joined.contains("quality") || joined.contains("performance"),
+        "default criteria should cover quality/performance, got {joined}"
+    );
+}
+
 #[test]
 fn entity_extraction_infers_from_category() {
     let result = extract_entities_for_competitive_analysis("Research the inference market");

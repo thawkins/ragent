@@ -12,15 +12,16 @@
 
 use std::path::PathBuf;
 
+use thiserror::Error;
+
 use crate::run_config::{Depth, OutputFormat, ResearchMode, Tier};
 use crate::session::{
     AnalysisConfig, InputConfig, LocalConfig, ModelConfig, OutputConfig, ResilienceConfig,
     RunEngineConfig, SessionConfig, WebConfig,
 };
 use crate::web_gatherer::{
-    DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_MAX_WEB_RESULTS,
-    DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD, DEFAULT_SEARCH_MAX_RETRIES,
-    DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
+    DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
+    DEFAULT_SEARCH_MAX_RETRIES, DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
 };
 use crate::{
     DEFAULT_LOCAL_CONCURRENCY, DEFAULT_MAX_LOCAL_SOURCES, DEFAULT_OA_MIN_FULL_TEXT_CHARS,
@@ -60,6 +61,8 @@ pub struct ResearchRunRequest {
     /// `--iterations N` override.
     pub iterations: Option<u32>,
     /// `--format report|executive-summary|comparison-table|source-bibliography|imrad`.
+    /// When `None` and `--mode competitive` is set the builder defaults this to
+    /// `comparison-table`; any explicit value wins.
     pub output_format: Option<String>,
     /// `--use-local` — enable the local-file scanning phase.
     pub use_local: bool,
@@ -90,6 +93,10 @@ pub struct ResearchRunRequest {
     pub search_circuit_breaker_threshold: Option<u32>,
     /// Override the maximum number of web sources to capture.
     pub max_web_results: Option<usize>,
+    /// `--max-search-calls N` — hard cap on total web-search calls for the
+    /// run, shared across all supervisor/competitive researchers and gather
+    /// passes. When `None`, no cap is applied.
+    pub max_search_calls: Option<usize>,
     /// Override the maximum number of in-project local sources to capture.
     pub max_local_sources: Option<usize>,
     /// Override the maximum number of sources sent to the LLM synthesis engine.
@@ -112,6 +119,10 @@ pub struct ResearchRunRequest {
     pub final_report_model: Option<String>,
     /// `--evaluate` enables deterministic self-evaluation scorecard.
     pub evaluate: Option<bool>,
+    /// Verbatim front-end invocation (e.g. `ragent research create --name x
+    /// "topic" --tier full`) recorded in `RESEARCH.md` frontmatter so a future
+    /// `/research update` command can replay the run.
+    pub invocation: Option<String>,
 }
 
 impl ResearchRunRequest {
@@ -131,6 +142,182 @@ impl ResearchRunRequest {
     pub fn missing_subject(&self) -> bool {
         self.topic.is_empty() && self.from_urls.is_empty() && self.from_files.is_empty()
     }
+
+    /// Rebuild a [`ResearchRunRequest`] from a recorded front-end invocation
+    /// string so `/research update` can replay the original run.
+    ///
+    /// Three invocation grammars are recognized (see the `invocation` field
+    /// documentation):
+    ///
+    /// - CLI argv (recorded verbatim): `<binary> research create <name> …`
+    /// - TUI slash command: `/research create <name> …`
+    /// - HTTP summary: `POST /research <name> "topic" --flag …` (the `create`
+    ///   verb is implied and inserted).
+    ///
+    /// The returned request keeps `invocation` set to the recorded command so
+    /// a replayed run re-stamps the original invocation rather than the
+    /// `update` command that triggered it. `title` is intentionally left
+    /// `None`; callers derive it from the stored item.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvocationParseError`] when the string is empty, does not
+    /// describe a `create` run, or lacks an item name.
+    pub fn from_invocation(invocation: &str) -> std::result::Result<Self, InvocationParseError> {
+        let trimmed = invocation.trim();
+        if trimmed.is_empty() {
+            return Err(InvocationParseError::Empty);
+        }
+        let command = normalize_invocation(trimmed);
+        match crate::cli::ResearchCliCommand::parse(&command) {
+            crate::cli::ResearchCliCommand::Create {
+                name,
+                topic,
+                from_urls,
+                from_files,
+                iterations,
+                depth,
+                tier,
+                mode,
+                summarization_model,
+                research_model,
+                compression_model,
+                final_report_model,
+                max_concurrent_research_units,
+                clarify,
+                format,
+                sources_dir,
+                template,
+                fetch_concurrency,
+                use_local,
+                use_specs,
+                use_low_relevance,
+                no_papers,
+                use_pdf,
+                fetch_timeout_secs,
+                local_concurrency,
+                web_phase_timeout_secs,
+                local_phase_timeout_secs,
+                search_max_retries,
+                search_retry_base_delay_ms,
+                search_circuit_breaker_threshold,
+                max_web_results,
+                max_search_calls,
+                max_local_sources,
+                max_synthesis_sources,
+                brief,
+                evaluate,
+            } => {
+                if name.is_empty() {
+                    return Err(InvocationParseError::MissingName);
+                }
+                Ok(Self {
+                    name,
+                    topic,
+                    title: None,
+                    from_urls,
+                    from_files,
+                    sources_dir,
+                    template,
+                    depth,
+                    tier,
+                    iterations,
+                    output_format: format,
+                    use_local,
+                    use_specs,
+                    use_low_relevance,
+                    no_scholarly: no_papers,
+                    use_pdf,
+                    fetch_concurrency,
+                    local_concurrency,
+                    fetch_timeout_secs,
+                    web_phase_timeout_secs,
+                    local_phase_timeout_secs,
+                    search_max_retries,
+                    search_retry_base_delay_ms,
+                    search_circuit_breaker_threshold,
+                    max_web_results,
+                    max_search_calls,
+                    max_local_sources,
+                    max_synthesis_sources,
+                    summarization_model,
+                    mode,
+                    max_concurrent_research_units,
+                    clarify,
+                    brief,
+                    research_model,
+                    compression_model,
+                    final_report_model,
+                    evaluate: Some(evaluate),
+                    // Keep the recorded command verbatim so the replayed run
+                    // re-stamps the original invocation in frontmatter.
+                    invocation: Some(trimmed.to_string()),
+                })
+            }
+            crate::cli::ResearchCliCommand::Unknown(verb) if verb == "create" => {
+                Err(InvocationParseError::MissingName)
+            }
+            crate::cli::ResearchCliCommand::Unknown(verb) => {
+                Err(InvocationParseError::NotCreate(verb))
+            }
+            _ => Err(InvocationParseError::NotCreate(
+                "a non-create research command".to_string(),
+            )),
+        }
+    }
+}
+
+/// Errors surfaced when replaying a recorded invocation string
+/// ([`ResearchRunRequest::from_invocation`]).
+#[derive(Debug, Error)]
+pub enum InvocationParseError {
+    /// The recorded invocation was empty.
+    #[error("recorded invocation is empty; nothing to replay")]
+    Empty,
+    /// The recorded invocation is not a `create` run (only create runs can
+    /// be replayed).
+    #[error(
+        "recorded invocation is {0}, not a research create command; \
+         only create runs can be replayed"
+    )]
+    NotCreate(String),
+    /// The recorded create command carried no research item name.
+    #[error("recorded invocation has no research item name")]
+    MissingName,
+}
+
+/// Normalize a recorded invocation to the shared `create …` grammar used by
+/// [`crate::cli::ResearchCliCommand::parse`].
+///
+/// - TUI slash form `/research create …` keeps its verb and drops the prefix.
+/// - HTTP summary form `POST /research <name> …` has the `create` verb
+///   inserted.
+/// - CLI argv form `<binary> research create …` skips every leading token up
+///   to and including the `research` subcommand token, so any binary path
+///   (including paths containing spaces) is handled.
+fn normalize_invocation(invocation: &str) -> String {
+    let trimmed = invocation.trim();
+    if let Some(rest) = trimmed.strip_prefix("/research ") {
+        return rest.to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix("POST /research ") {
+        return format!("create {rest}");
+    }
+    let first_token = trimmed.split(' ').next().unwrap_or_default();
+    if first_token == "create" {
+        // Already in the shared parser grammar.
+        return trimmed.to_string();
+    }
+    // CLI argv form: skip leading tokens until the `research` subcommand.
+    let mut rest = trimmed;
+    while let Some((head, tail)) = rest.split_once(' ') {
+        if head == "research" {
+            return tail.to_string();
+        }
+        rest = tail;
+    }
+    // Unrecognized form; return as-is so the shared parser reports it.
+    rest.to_string()
 }
 
 /// Build a fully populated [`SessionConfig`] from a front-end request.
@@ -139,6 +326,9 @@ impl ResearchRunRequest {
 /// configured `ragent.json` `research.*` values are used for open-access
 /// recovery settings, and the crate-wide constants are used for concurrency,
 /// timeout, and retry defaults.
+///
+/// Mode-aware defaults: a `competitive` run without an explicit
+/// `--format` defaults to `comparison-table`.
 ///
 /// `app_config` is the loaded `ragent.json` configuration, when available.
 /// When `None`, open-access recovery defaults to disabled and the default OA
@@ -156,6 +346,20 @@ pub fn build_session_config(
         .and_then(Tier::parse)
         .unwrap_or(Tier::Full);
 
+    let mode = req
+        .mode
+        .as_deref()
+        .and_then(ResearchMode::parse)
+        .unwrap_or(ResearchMode::Tiered);
+
+    // `--mode competitive` implies `--format comparison-table` unless the
+    // caller supplied an explicit `--format` (which always wins).
+    let output_format = match req.output_format.as_deref() {
+        Some(s) => OutputFormat::parse(s).unwrap_or(OutputFormat::Report),
+        None if mode == ResearchMode::Competitive => OutputFormat::ComparisonTable,
+        None => OutputFormat::Report,
+    };
+
     SessionConfig {
         input: InputConfig {
             topic: req.topic.clone(),
@@ -165,15 +369,13 @@ pub fn build_session_config(
         },
         output: OutputConfig {
             template: req.template.clone(),
-            output_format: req
-                .output_format
-                .as_deref()
-                .map_or(OutputFormat::Report, |s| {
-                    OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
-                }),
+            output_format,
         },
         web: WebConfig {
-            max_web_results: req.max_web_results.unwrap_or(DEFAULT_MAX_WEB_RESULTS),
+            // 0 = derive the effective budget from the selected depth (see
+            // `SessionConfig::effective_web_budget`); an explicit
+            // `--max-web-results` always wins.
+            max_web_results: req.max_web_results.unwrap_or(0),
             fetch_concurrency: req.fetch_concurrency.unwrap_or(DEFAULT_FETCH_CONCURRENCY),
             fetch_timeout_secs: req
                 .fetch_timeout_secs
@@ -184,6 +386,7 @@ pub fn build_session_config(
             web_phase_timeout_secs: req
                 .web_phase_timeout_secs
                 .or(Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS)),
+            max_search_calls: req.max_search_calls,
         },
         local: LocalConfig {
             max_local_sources: req.max_local_sources.unwrap_or(DEFAULT_MAX_LOCAL_SOURCES),
@@ -217,17 +420,14 @@ pub fn build_session_config(
         },
         engine: RunEngineConfig {
             tier,
-            mode: req
-                .mode
-                .as_deref()
-                .and_then(ResearchMode::parse)
-                .unwrap_or(ResearchMode::Tiered),
+            mode,
             max_concurrent_research_units: req
                 .max_concurrent_research_units
                 .unwrap_or(crate::supervisor::DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS),
         },
         clarify: req.clarify.unwrap_or(true),
         brief: req.brief.clone(),
+        invocation: req.invocation.clone(),
         models: ModelConfig {
             research_model: req.research_model.clone(),
             compression_model: req.compression_model.clone(),
@@ -294,6 +494,18 @@ mod tests {
     }
 
     #[test]
+    fn build_session_config_parses_mode() {
+        let req = ResearchRunRequest {
+            name: "test".into(),
+            topic: "topic".into(),
+            mode: Some("competitive".into()),
+            ..ResearchRunRequest::default()
+        };
+        let cfg = build_session_config(&req, None);
+        assert_eq!(cfg.engine.mode, ResearchMode::Competitive);
+    }
+
+    #[test]
     fn nested_defaults_match_legacy_flat_defaults() {
         let cfg = SessionConfig::default();
         assert!(cfg.input.topic.is_empty());
@@ -302,7 +514,9 @@ mod tests {
         assert!(cfg.input.from_files.is_empty());
         assert!(cfg.output.template.is_none());
         assert_eq!(cfg.output.output_format, OutputFormat::Report);
-        assert_eq!(cfg.web.max_web_results, DEFAULT_MAX_WEB_RESULTS);
+        // Default config uses the 0 sentinel = derive the web budget from
+        // the selected depth (`SessionConfig::effective_web_budget`).
+        assert_eq!(cfg.web.max_web_results, 0);
         assert_eq!(cfg.web.fetch_concurrency, DEFAULT_FETCH_CONCURRENCY);
         assert_eq!(cfg.web.fetch_timeout_secs, 30);
         assert!(!cfg.web.use_low_relevance);
@@ -365,6 +579,44 @@ mod tests {
             cfg.web.web_phase_timeout_secs,
             Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS),
             "default web_phase_timeout must be 60 seconds (NFR-003)"
+        );
+    }
+
+    #[test]
+    fn build_session_config_parses_all_modes() {
+        for (raw, expected) in [
+            ("tiered", ResearchMode::Tiered),
+            ("supervisor", ResearchMode::Supervisor),
+            ("competitive", ResearchMode::Competitive),
+        ] {
+            let req = ResearchRunRequest {
+                name: "test".into(),
+                topic: "topic".into(),
+                mode: Some(raw.into()),
+                ..ResearchRunRequest::default()
+            };
+            let cfg = build_session_config(&req, None);
+            assert_eq!(
+                cfg.engine.mode, expected,
+                "`--mode {raw}` must parse to {expected:?}"
+            );
+        }
+    }
+
+    /// Research items are discovered by directory under `<research_root>/`
+    /// regardless of research mode, so the RESEARCH.md write path is the same
+    /// for `tiered` (default `/research create`) and the supervisor/competitive
+    /// `--mode` runs. Pin that invariant so a mode branch can never drift to a
+    /// different output folder.
+    #[test]
+    fn research_md_path_is_mode_independent() {
+        let root = std::path::Path::new("research");
+        let name = crate::research_name::ResearchName::try_new("mode-output").expect("valid name");
+        let path = crate::io::ResearchIo::research_md_path(root, &name);
+        assert_eq!(
+            path,
+            root.join("mode-output").join("RESEARCH.md"),
+            "RESEARCH.md must always be written under <research_root>/<name>/"
         );
     }
 }

@@ -54,6 +54,7 @@ fn doc_with_template(template_body: Option<&str>) -> ResearchDocument {
         output_format: ragent_research::OutputFormat::Report,
         comparison_table: None,
         evaluation_scorecard: None,
+        provider_stats: None,
     }
 }
 

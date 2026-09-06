@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.78"
+version = "1.0.79"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -144,8 +144,6 @@ ragent-llm = { path = "crates/ragent-llm" }
 ragent-server = { path = "crates/ragent-server" }
 ragent-tui = { path = "crates/ragent-tui" }
 
-ragent-telemetry = { path = "crates/ragent-telemetry" }
-
 # ── Hashing / file-locking ───────────────────────────────────────────────
 num_cpus = "1.16"
 sha2 = "0.10"
@@ -159,8 +157,6 @@ async-trait = "0.1"
 futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }   # sync → BroadcastStream
 async-stream = "0.3"
-pin-project-lite = "0.2"
-bytes = "1"
 
 # ── Serialization ────────────────────────────────────────────────────────
 serde = { version = "1", features = ["derive", "rc"] }
@@ -196,7 +192,6 @@ clap = { version = "4", features = ["derive"] }
 
 # ── Web framework (Axum) ────────────────────────────────────────────────
 axum = { version = "0.8", features = ["macros"] }
-axum-extra = { version = "0.10", features = ["typed-header"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
@@ -206,7 +201,6 @@ crossterm = "0.28"
 
 # ── File / path / text ──────────────────────────────────────────────────
 globset = "0.4"
-glob = "0.3"
 dirs = "6"
 html2text = "0.16"
 similar = "2"
@@ -293,7 +287,7 @@ default = []
 # The `telemetry` feature is no longer required; telemetry is hardwired into the
 # binary by default via `ragent-telemetry`'s own default feature. Kept as an
 # alias for compatibility with any scripts still passing --features telemetry.
-telemetry = ["ragent-tui/telemetry", "ragent-telemetry/telemetry"]
+telemetry = ["ragent-tui/telemetry"]
 
 [profile.release]
 lto = true
@@ -309,7 +303,6 @@ ragent-server = { workspace = true }
 ragent-tui = { workspace = true }
 ragent-specs = { workspace = true }
 ragent-research = { workspace = true }
-ragent-telemetry = { workspace = true }
 ragent-types = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
@@ -321,8 +314,6 @@ dirs = { workspace = true }
 uuid = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
-reqwest = { workspace = true }
-serde = { workspace = true }
 chrono = { workspace = true }
 
 [lints]

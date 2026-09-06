@@ -9,7 +9,6 @@ description = "Codebase indexing and structured search for ragent"
 blake3 = { workspace = true }
 ignore = { workspace = true }
 rusqlite = { workspace = true }
-tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -43,6 +42,12 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "bench_indexing"
 harness = false
+
+[package.metadata.cargo-machete]
+# tree-sitter-openscad-ng is used via its lib name `tree_sitter_openscad`
+# (src/parser/openscad.rs); cargo-machete matches on the package name and
+# flags it as unused.
+ignored = ["tree-sitter-openscad-ng"]
 
 [lints]
 workspace = true

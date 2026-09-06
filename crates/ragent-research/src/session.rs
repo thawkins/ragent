@@ -35,9 +35,7 @@ use crate::run_manifest::RunStep;
 use crate::source::Source;
 use crate::source_vault::SourceVault;
 use crate::tier_router::{TierRouter, TierRouterObserver, TierRouterToSessionObserver};
-use crate::web_gatherer::{
-    DEFAULT_FETCH_CONCURRENCY, DEFAULT_MAX_WEB_RESULTS, GatherEvent, GatherObserver, WebGatherer,
-};
+use crate::web_gatherer::{DEFAULT_FETCH_CONCURRENCY, GatherEvent, GatherObserver, WebGatherer};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -188,6 +186,35 @@ impl GatherObserver for GatherEventForwarder {
                     )),
                 });
             }
+            GatherEvent::SearchBudgetExhausted { used, limit } => {
+                self.observer.on_event(SessionEvent::RunStep {
+                    step: "search_budget".to_string(),
+                    status: crate::run_manifest::StepStatus::Skipped.as_str().to_string(),
+                    detail: Some(format!(
+                        "run search budget of {limit} calls exhausted after {used}; proceeding with sources gathered so far"
+                    )),
+                });
+            }
+            GatherEvent::ProviderCallsSummary { tool_calls } => {
+                let detail = if tool_calls.is_empty() {
+                    "no search provider calls were issued this run".to_string()
+                } else {
+                    let per_tool = tool_calls
+                        .iter()
+                        .map(|(tool, count)| format!("{tool}: {count}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let total: usize = tool_calls.iter().map(|(_, c)| c).sum();
+                    format!("{total} search request(s) ({per_tool})")
+                };
+                self.observer.on_event(SessionEvent::RunStep {
+                    step: "search_providers".to_string(),
+                    status: crate::run_manifest::StepStatus::Completed
+                        .as_str()
+                        .to_string(),
+                    detail: Some(detail),
+                });
+            }
         }
     }
 }
@@ -217,6 +244,9 @@ pub struct SessionConfig {
     pub brief: Option<String>,
     /// Per-phase model overrides (FR-013).
     pub models: ModelConfig,
+    /// Verbatim front-end invocation (CLI command, TUI slash command, or HTTP
+    /// request summary) recorded in `RESEARCH.md` frontmatter for replay.
+    pub invocation: Option<String>,
     /// When `true`, run the deterministic self-evaluation scorecard and append
     /// it to the assembled report (FR-008 / T-015).
     pub evaluate: bool,
@@ -234,6 +264,7 @@ impl Default for SessionConfig {
             engine: RunEngineConfig::default(),
             clarify: true,
             brief: None,
+            invocation: None,
             models: ModelConfig::default(),
             evaluate: false,
         }
@@ -292,7 +323,11 @@ pub struct OutputConfig {
 /// Web-gathering knobs for a research session.
 #[derive(Debug, Clone)]
 pub struct WebConfig {
-    /// Maximum web sources to capture (default `250`).
+    /// Maximum web sources to capture. A value of `0` means "derive the
+    /// budget from the selected depth" (see
+    /// [`SessionConfig::effective_web_budget`]); the default config uses the
+    /// sentinel so `--depth` actually bounds gathering volume unless the
+    /// caller passes an explicit `--max-web-results`.
     pub max_web_results: usize,
     /// Maximum number of candidate pages to fetch concurrently during the
     /// web-gathering phase. Defaults to [`DEFAULT_FETCH_CONCURRENCY`] (10).
@@ -326,6 +361,12 @@ pub struct WebConfig {
     /// Defaults to `Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS)` so a stalled
     /// search backend or OA lookup cannot wedge a run indefinitely.
     pub web_phase_timeout_secs: Option<u64>,
+    /// `--max-search-calls N`: hard cap on the number of web-search calls the
+    /// whole run may issue (including supervisor/competitive researchers and
+    /// retries). When `None`, no cap is applied (historic behaviour). The cap
+    /// is shared via `Arc` across every gatherer in the run, and exhausted
+    /// budgets degrade the run to its partial results instead of failing.
+    pub max_search_calls: Option<usize>,
 }
 
 /// Default wall-clock budget for the entire web-gathering phase
@@ -489,6 +530,20 @@ impl SessionConfig {
         (cfg.max_sources_per_question * 3).max(3)
     }
 
+    /// Effective web-source budget for gather passes: an explicit
+    /// `--max-web-results` (`max_web_results > 0`) always wins; otherwise the
+    /// budget is derived from the selected depth via [`Self::budget_web_results`]
+    /// so `--depth shallow` genuinely bounds web volume instead of every
+    /// preset collapsing into the 500-source default.
+    #[must_use]
+    pub fn effective_web_budget(&self) -> usize {
+        if self.web.max_web_results > 0 {
+            self.web.max_web_results
+        } else {
+            self.budget_web_results()
+        }
+    }
+
     /// Maximum local sources to capture for the selected depth.
     #[must_use]
     pub fn budget_local_sources(&self) -> usize {
@@ -512,13 +567,18 @@ impl Default for OutputConfig {
 impl Default for WebConfig {
     fn default() -> Self {
         Self {
-            max_web_results: DEFAULT_MAX_WEB_RESULTS,
+            // 0 = derive the effective budget from the selected depth (see
+            // `SessionConfig::effective_web_budget`) so `--depth` bounds
+            // web volume by default; an explicit `--max-web-results` always
+            // overrides.
+            max_web_results: 0,
             fetch_concurrency: DEFAULT_FETCH_CONCURRENCY,
             fetch_timeout_secs: 30,
             use_low_relevance: false,
             disable_scholarly: false,
             use_pdf_web_sources: false,
             web_phase_timeout_secs: Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS),
+            max_search_calls: None,
         }
     }
 }
@@ -951,6 +1011,8 @@ pub enum SessionEvent {
     },
     /// Resolved run options, emitted once at the start of a session.
     ConfigSnapshot {
+        /// Research mode (`tiered`, `supervisor`, `competitive`).
+        mode: String,
         /// Output format.
         output_format: String,
         /// Depth preset.
@@ -1210,6 +1272,15 @@ impl ResearchSession {
         self.concepts_engine.clone()
     }
 
+    /// Access the optional run-scoped per-provider search-request counter.
+    /// Cloning the `Arc` shares the same totals; attach it back via
+    /// [`WebGatherer::with_provider_stats`] so every gather pass in the run
+    /// contributes to one aggregate view.
+    #[must_use]
+    pub fn provider_stats(&self) -> Option<Arc<crate::provider_stats::ProviderCallStats>> {
+        self.web.as_ref().and_then(WebGatherer::provider_stats)
+    }
+
     /// Run the supervisor/researcher graph for `--mode supervisor|competitive`.
     ///
     /// `item` has already been created and marked `InProgress` by the caller.
@@ -1253,10 +1324,13 @@ impl ResearchSession {
                     inferred: extraction.inferred,
                 });
                 let competitive_topics = crate::supervisor::build_competitive_sub_topics(
-                    topic,
                     &extraction.entities,
                     &extraction.criteria,
                 );
+                // Cap the researcher count at the configured concurrency:
+                // competitive topics are one-per-entity and previously ran
+                // uncapped, so entity-heavy topics scaled search quota
+                // linearly with the entity list.
                 let topics = if competitive_topics.is_empty() {
                     // Fall back to generic supervisor planning if no entities were
                     // identified so the run still produces something useful.
@@ -1271,6 +1345,9 @@ impl ResearchSession {
                     })?
                 } else {
                     competitive_topics
+                        .into_iter()
+                        .take(supervisor_cfg.max_concurrent_research_units)
+                        .collect::<Vec<_>>()
                 };
                 (topics, Some(extraction))
             } else {
@@ -1316,7 +1393,33 @@ impl ResearchSession {
             }
         };
 
-        let node = IterativeResearcherNode::new(self.web.clone(), self.analysis.clone())
+        // Run-scoped search controls shared by every researcher in this run:
+        //
+        // - Budget (`--max-search-calls`): one counter shared via `Arc`, so
+        //   N parallel researchers draw from a single per-run pool.
+        // - Query cache: competitive/supervisor researchers decompose their
+        //   (entity-scoped) sub-topics into near-identical dimension queries;
+        //   the shared cache turns duplicate queries into free lookups
+        //   instead of repeated paid search calls.
+        let search_budget = config
+            .web
+            .max_search_calls
+            .map(|limit| Arc::new(crate::search_budget::SearchBudget::new(Some(limit))));
+        let query_cache = Arc::new(crate::search_budget::SharedQueryCache::new());
+        // Per-provider search-request counter: one shared Arc so every
+        // researcher's searches roll up into a single per-run view,
+        // reported at the end of the run.
+        let provider_stats = Arc::new(crate::provider_stats::ProviderCallStats::new());
+        let researcher_web = self.web.clone().map(|w| {
+            let w = match &search_budget {
+                Some(budget) => w.with_search_budget(budget.clone()),
+                None => w,
+            };
+            w.with_query_cache(query_cache)
+                .with_provider_stats(provider_stats.clone())
+        });
+
+        let node = IterativeResearcherNode::new(researcher_web, self.analysis.clone())
             .with_planner(
                 self.planner
                     .clone()
@@ -1388,10 +1491,18 @@ impl ResearchSession {
                 .entities
                 .iter()
                 .map(|entity| {
+                    // Match the assignment generated FOR this entity (its
+                    // sub-topic starts with "Research {entity}") rather than
+                    // any sub-topic that merely mentions it — competitive
+                    // sub-topics embed the full topic, which names every
+                    // entity, so a `contains` match would attribute the first
+                    // entity's summary to all rows.
                     let summary = state
                         .assignments
                         .iter()
-                        .find(|a| a.sub_topic.contains(&entity.name))
+                        .find(|a| {
+                            crate::supervisor::sub_topic_matches_entity(&a.sub_topic, &entity.name)
+                        })
                         .map(|a| a.summary.clone())
                         .unwrap_or_default();
                     crate::comparison::CompetitiveProfile::new(entity, summary)
@@ -1451,6 +1562,7 @@ impl ResearchSession {
                 config.output.output_format,
                 comparison_table,
                 config.evaluate,
+                config.invocation.clone(),
                 observer.clone(),
             )
             .await?;
@@ -1475,6 +1587,7 @@ impl ResearchSession {
         output_format: OutputFormat,
         comparison_table: Option<String>,
         evaluate: bool,
+        invocation: Option<String>,
         observer: Arc<dyn SessionObserver>,
     ) -> Result<RunOutcome> {
         let llm_produced = synth_outcome == SynthesizeOutcome::Llm;
@@ -1510,9 +1623,16 @@ impl ResearchSession {
         if let Some(model) = &self.model {
             item_with_sources.model = Some(model.clone());
         }
+        // Populate the References Index inputs: without this the supervisor
+        // path ships `sources: 0` frontmatter and a "No sources captured"
+        // table even when researchers captured evidence.
+        for s in &sources {
+            item_with_sources.add_source(s.clone());
+        }
         if output_format != OutputFormat::Report {
             item_with_sources.output_format = Some(output_format.as_str().to_string());
         }
+        item_with_sources.invocation = invocation.or_else(|| item.invocation.clone());
 
         // ── Self-Evaluation Scorecard (FR-008 / T-015) ───────────────────────
         // Heuristically score the assembled report and either emit the scorecard
@@ -1563,6 +1683,7 @@ impl ResearchSession {
             output_format,
             comparison_table,
             evaluation_scorecard,
+            provider_stats: None,
         };
 
         let final_title = if llm_produced && !doc.summary.trim().is_empty() {
@@ -1571,6 +1692,21 @@ impl ResearchSession {
             title.to_string()
         };
         doc.item.set_title(&final_title);
+
+        // ── Per-provider search-request summary ────────────────────────────
+        // Report how many search requests each provider received across the
+        // whole run (default pipeline, tiered iterations, and every
+        // supervisor/competitive researcher combined) and embed the table in
+        // the assembled document.
+        let provider_tool_calls = self.report_provider_stats(&observer);
+        let provider_stats_md =
+            crate::document::render_provider_stats_summary(&provider_tool_calls);
+        let provider_stats = if provider_stats_md.is_empty() {
+            None
+        } else {
+            Some(provider_stats_md)
+        };
+        doc.provider_stats = provider_stats;
 
         let assembled = self.manager.write_document(&doc).await?;
         self.manager.complete_gathering(name_str).await?;
@@ -1599,6 +1735,7 @@ impl ResearchSession {
             pdf_count,
             youtube_count,
             excluded_count: 0,
+            provider_tool_calls,
         })
     }
 }
@@ -1701,6 +1838,7 @@ impl ResearchSession {
         // Confirm resolved options up front so callers can verify the expected
         // output format and other flags before any expensive work runs.
         observer.on_event(SessionEvent::ConfigSnapshot {
+            mode: config.engine.mode.as_str().to_string(),
             output_format: config.output.output_format.as_str().to_string(),
             depth: config.analysis.depth.map(|d| d.as_str().to_string()),
             iterations: config.analysis.iterations,
@@ -1774,6 +1912,10 @@ impl ResearchSession {
                 .create_with_format(name_str, &item_title, &topic, config.output.output_format)
                 .await?
         };
+        // Preserve the invocation recorded in an existing item's frontmatter
+        // so `continue`/re-runs keep the original command when the front-end
+        // does not supply a fresh one.
+        let stored_invocation = item.invocation.clone();
         mark_in_progress(&mut item);
         self.manager.start_gathering(name_str).await?;
 
@@ -1842,7 +1984,7 @@ impl ResearchSession {
                 .await;
         }
 
-        // ── Decide single-pass vs. iterative engine ────────────────��────
+        // ── Decide single-pass vs. iterative engine ─────────────────────
         let engine_cfg = config.engine_config();
         let use_iterative =
             config.analysis.iterations.is_some() || config.analysis.depth == Some(Depth::Deep);
@@ -2077,7 +2219,7 @@ impl ResearchSession {
             let gap_queries = derive_gap_queries(&corpus_critic, &loci, &topic);
             if !gap_queries.is_empty() {
                 if let Some(web) = &self.web {
-                    let budget = config.web.max_web_results.clamp(3, 10);
+                    let budget = config.effective_web_budget().clamp(3, 10);
                     let forwarder = GatherEventForwarder {
                         observer: observer.clone(),
                     };
@@ -2414,6 +2556,7 @@ impl ResearchSession {
                 Some(config.output.output_format.as_str().to_string());
         }
         item_with_sources.open_access_recovery = config.resilience.open_access_recovery;
+        item_with_sources.invocation = config.invocation.clone().or(stored_invocation);
         for s in &synthesis_sources {
             item_with_sources.add_source(s.clone());
         }
@@ -2539,6 +2682,7 @@ impl ResearchSession {
             output_format: config.output.output_format,
             comparison_table: None,
             evaluation_scorecard: None,
+            provider_stats: None,
         };
         // The frontmatter `title` should be a reduced-length version of the
         // final summary (max 80 chars) so the displayed headline reflects the
@@ -2553,6 +2697,19 @@ impl ResearchSession {
                 item_title
             };
         doc.item.set_title(&final_title);
+        // ── Per-provider search-request summary ────────────────────────────
+        // Report how many search requests each provider received across the
+        // whole run (default pipeline, tiered iterations, and every
+        // supervisor/competitive researcher combined) and embed the table in
+        // the assembled document.
+        let provider_tool_calls = self.report_provider_stats(&observer);
+        let provider_stats_md =
+            crate::document::render_provider_stats_summary(&provider_tool_calls);
+        doc.provider_stats = if provider_stats_md.is_empty() {
+            None
+        } else {
+            Some(provider_stats_md)
+        };
         let assembled = self.manager.write_document(&doc).await?;
         // ── Finalize ─────────────────────────────────────────────────────
         observer.on_event(SessionEvent::Phase {
@@ -2601,7 +2758,42 @@ impl ResearchSession {
             pdf_count,
             youtube_count,
             excluded_count,
+            provider_tool_calls,
         })
+    }
+}
+
+impl ResearchSession {
+    /// Emit the end-of-run per-provider search-request summary.
+    ///
+    /// Sends one `search_providers` [`SessionEvent::RunStep`] carrying the
+    /// per-tool totals gathered across the whole run (default pipeline,
+    /// tiered iterations, and every supervisor/competitive researcher
+    /// combined) and returns the `(tool, count)` snapshot for the
+    /// [`RunOutcome`]. Emits nothing when no provider-stats counter is
+    /// attached or no search calls were issued.
+    fn report_provider_stats(&self, observer: &Arc<dyn SessionObserver>) -> Vec<(String, usize)> {
+        let Some(stats) = self.provider_stats() else {
+            return Vec::new();
+        };
+        let tool_calls = stats.by_tool();
+        if tool_calls.is_empty() {
+            return tool_calls;
+        }
+        let per_tool = tool_calls
+            .iter()
+            .map(|(tool, count)| format!("{tool}: {count}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let total: usize = tool_calls.iter().map(|(_, count)| count).sum();
+        observer.on_event(SessionEvent::RunStep {
+            step: "search_providers".to_string(),
+            status: crate::run_manifest::StepStatus::Completed
+                .as_str()
+                .to_string(),
+            detail: Some(format!("{total} search request(s) ({per_tool})")),
+        });
+        tool_calls
     }
 }
 
@@ -2895,7 +3087,7 @@ impl ResearchSession {
         });
         let web_fut = async {
             if let Some(web) = &self.web {
-                let web_budget = config.web.max_web_results.max(config.budget_web_results());
+                let web_budget = config.effective_web_budget();
                 // H-001 / --web-time: convert the optional phase timeout into
                 // a wall-clock deadline. When the deadline passes the
                 // gatherer returns a partial result with everything captured
@@ -2988,6 +3180,18 @@ impl ResearchSession {
                 if let Some(sum) = summarizer {
                     web = web.with_summarizer(sum);
                 }
+                // Run-scoped search budget (`--max-search-calls`): bounds
+                // the paid search calls issued by the main gather pass.
+                if let Some(limit) = config.web.max_search_calls {
+                    web = web.with_search_budget(Arc::new(
+                        crate::search_budget::SearchBudget::new(Some(limit)),
+                    ));
+                }
+                // Run-scoped per-provider search-request counter so the main
+                // gather pass contributes to the end-of-run provider totals.
+                if let Some(stats) = self.provider_stats() {
+                    web = web.with_provider_stats(stats);
+                }
                 let forwarder = GatherEventForwarder {
                     observer: observer.clone(),
                 };
@@ -3074,9 +3278,25 @@ impl ResearchSession {
             .critic
             .clone()
             .unwrap_or_else(|| Arc::new(SimpleCritic));
+        // Run-scoped search budget (`--max-search-calls`): every engine
+        // iteration draws from the same per-run pool.
+        let engine_web = self.web.clone().map(|w| {
+            let w = match config.web.max_search_calls {
+                Some(limit) => w.with_search_budget(Arc::new(
+                    crate::search_budget::SearchBudget::new(Some(limit)),
+                )),
+                None => w,
+            };
+            // Run-scoped per-provider search-request counter so iterative
+            // passes contribute to the end-of-run provider totals.
+            match self.provider_stats() {
+                Some(stats) => w.with_provider_stats(stats),
+                None => w,
+            }
+        });
         let engine = IterativeEngine::new(
             planner,
-            self.web.clone(),
+            engine_web,
             self.analysis.clone(),
             critic,
             config.engine_config(),
@@ -3255,6 +3475,11 @@ pub struct RunOutcome {
     pub youtube_count: usize,
     /// Number of web sources fetched but excluded for low relevance.
     pub excluded_count: usize,
+    /// Per-provider search-request totals for the run as
+    /// `(search tool, call count)` pairs, sorted by tool name. Empty when the
+    /// run gathered no sources via the web pipeline or no provider-stats
+    /// counter was attached.
+    pub provider_tool_calls: Vec<(String, usize)>,
 }
 
 // ── Free helpers ─────────────────────────────────────────────────────────
@@ -4513,6 +4738,37 @@ mod tests {
         };
         assert_eq!(shallow.budget_web_results(), 6);
         assert_eq!(deep.budget_web_results(), 15);
+    }
+
+    #[test]
+    fn effective_web_budget_derives_from_depth_unless_overridden() {
+        // Default config: max_web_results is the 0 sentinel → derive from depth.
+        let shallow = SessionConfig {
+            analysis: AnalysisConfig {
+                depth: Some(Depth::Shallow),
+                ..AnalysisConfig::default()
+            },
+            ..SessionConfig::default()
+        };
+        let deep = SessionConfig {
+            analysis: AnalysisConfig {
+                depth: Some(Depth::Deep),
+                ..AnalysisConfig::default()
+            },
+            ..SessionConfig::default()
+        };
+        assert_eq!(shallow.effective_web_budget(), 6);
+        assert_eq!(deep.effective_web_budget(), 15);
+
+        // An explicit max_web_results always wins over the depth derivation.
+        let explicit = SessionConfig {
+            web: WebConfig {
+                max_web_results: 500,
+                ..WebConfig::default()
+            },
+            ..SessionConfig::default()
+        };
+        assert_eq!(explicit.effective_web_budget(), 500);
     }
 
     #[test]
@@ -5997,5 +6253,115 @@ mod tests {
             "RESEARCH.md should be written for competitive mode"
         );
         assert!(!outcome.sources.is_empty(), "should capture web sources");
+    }
+
+    #[tokio::test]
+    async fn competitive_mode_caps_researchers_at_max_concurrent_units() {
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+        struct CountingSearch {
+            calls: std::sync::Mutex<usize>,
+        }
+        #[async_trait]
+        impl WebSearchTool for CountingSearch {
+            async fn search(
+                &self,
+                query: &str,
+                _max_results: usize,
+            ) -> anyhow::Result<Vec<WebSearchHit>> {
+                *self.calls.lock().unwrap() += 1;
+                Ok(vec![WebSearchHit {
+                    url: format!("https://example.com/{query}"),
+                    title: format!("Article for {query}"),
+                    snippet: query.to_string(),
+                    matched_query: query.to_string(),
+                    search_tool: "fake".to_string(),
+                    search_engine: "fake".to_string(),
+                    author: None,
+                }])
+            }
+        }
+        struct OkFetch;
+        #[async_trait]
+        impl WebFetchTool for OkFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: url.to_string(),
+                    title: format!("Title for {url}"),
+                    body: body256("competitive analysis body"),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                    author: None,
+                })
+            }
+        }
+
+        // A topic naming more entities than the researcher cap: the plan
+        // (and thus the researcher count and search volume) must be
+        // truncated to `max_concurrent_research_units`.
+        let manager = ResearchManager::new(&research_root);
+        let search = Arc::new(CountingSearch {
+            calls: std::sync::Mutex::new(0),
+        });
+        let web = WebGatherer::new(search.clone(), Arc::new(OkFetch));
+        let session = ResearchSession::new(
+            manager,
+            Some(web),
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig {
+            input: InputConfig {
+                topic: "Compare Fireworks AI and Groq for LLM inference".into(),
+                ..InputConfig::default()
+            },
+            engine: RunEngineConfig {
+                mode: ResearchMode::Competitive,
+                max_concurrent_research_units: 1,
+                ..RunEngineConfig::default()
+            },
+            clarify: false,
+            ..SessionConfig::default()
+        };
+        let observer = Arc::new(CollectObserver::default());
+        let outcome = session
+            .run("comp-capped", "Comp Capped", &cfg, observer.clone())
+            .await
+            .unwrap();
+
+        let events = observer.events.lock().unwrap();
+        let plan = events
+            .iter()
+            .find_map(|e| match e {
+                SessionEvent::SupervisorPlanUpdated { sub_topics } => Some(sub_topics.clone()),
+                _ => None,
+            })
+            .expect("should emit SupervisorPlanUpdated event");
+        assert_eq!(
+            plan.len(),
+            1,
+            "competitive plan must be capped at max_concurrent_research_units: {plan:?}"
+        );
+
+        let spawned = events
+            .iter()
+            .filter(|e| matches!(e, SessionEvent::ResearcherSpawned { .. }))
+            .count();
+        assert_eq!(
+            spawned, 1,
+            "exactly one researcher may run under the cap, got {spawned}"
+        );
+
+        // Search volume scales with the researcher count, not the entity list.
+        let calls = *search.calls.lock().unwrap();
+        assert!(
+            calls <= 4,
+            "capped competitive run should issue a handful of searches, got {calls}"
+        );
+        assert!(!outcome.sources.is_empty());
     }
 }
