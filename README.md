@@ -20,7 +20,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — ~169 registered tools across 18 categories:
+- **Comprehensive tool system** — 168 registered tools across 25 categories:
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -54,6 +54,9 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
       - **Stocks & currency** — stock_quote, stock_history, stock_fundamentals,
         stock_search, stock_options, currency_rate, currency_history. Free Yahoo
         Finance is the default; Alpha Vantage can be configured in `ragent.json`.
+      - **Plotting** — plot_line, plot_scatter, plot_bar, plot_histogram,
+        plot_pie, plot_heatmap render ASCII-art graphs (with ANSI colours)
+        inline in the message window via `ratatui-plt`
       - **Code search & navigation** — codeindex_search, codeindex_symbols,
       codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex
     - **MasterFetch** — mf_fetch, mf_search, mf_crawl, mf_cache_clear for web content
@@ -342,7 +345,7 @@ The project is a Cargo workspace built from 17 focused crates:
 | `ragent-team`           | Team coordination runtime and team tools                                                                                                                                                          |
 | `ragent-telemetry`      | OpenTelemetry instrumentation and OTLP export                                                                                                                                                     |
 | `ragent-tools-core`     | Core shell/file/search tools                                                                                                                                                                      |
-| `ragent-tools-extended` | Extended document/web/memory/codeindex tools                                                                                                                                                      |
+| `ragent-tools-extended` | Extended document/web/memory/codeindex/plot tools                                                                                                                                                      |
 | `ragent-tools-vcs`      | GitHub and GitLab tool surface                                                                                                                                                                    |
 | `ragent-tui`            | Ratatui terminal interface                                                                                                                                                                        |
 | `ragent-types`          | Shared IDs, events, messages, and sanitization primitives                                                                                                                                         |
@@ -394,15 +397,42 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.77** — The core architecture, tool system (~169 tools across 18 categories), TUI,
+**v1.0.79** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
-- **Documentation refresh for v1.0.77** — updated `CHANGELOG.md`, `README.md`,
-  `SPEC.md`, `STATS.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, and how-to docs to
-  reflect the latest release (v1.0.77)
+- **`plot_*` tool family** — six scientific/terminal plotting tools
+  (`plot_line`, `plot_scatter`, `plot_bar`, `plot_histogram`, `plot_pie`,
+  `plot_heatmap`) render ASCII-art graphs — with real ANSI colours — inline in
+  the TUI message window via `ratatui-plt`; GPL-3.0 dependency explicitly
+  accepted and allow-listed in `deny.toml` (uncommitted, post v1.0.79)
+
+- **Research web-search quota controls** — `--max-search-calls N` places a hard,
+  run-scoped cap on total web-search calls per research run, shared via `Arc` across
+  every supervisor/competitive researcher and gather pass; a run-scoped query cache
+  memoises identical sub-queries so parallel researchers reuse cached hits instead of
+  re-issuing paid calls (v1.0.79)
+- **`--depth` bounds web volume by default** — the effective web-source budget is
+  derived from the selected depth (shallow 6 / standard 9 / deep 15) unless
+  `--max-web-results` is passed explicitly, so `--depth shallow` now actually limits
+  search/fetch volume (v1.0.79)
+- **`/research update <name>` invocation replay** — re-runs a research item by
+  replaying its recorded invocation line, overwriting `RESEARCH.md` and associated
+  files with freshly gathered results; available via CLI, TUI, and HTTP `PUT /research/{name}`
+  (v1.0.79)
+- **`--mode competitive` defaults `--format` to `comparison-table`** — competitive
+  runs no longer require an explicit `--format comparison-table` (v1.0.79)
+- **GitHub `blob/` URLs no longer fail research gathering** — file-view URLs are
+  rewritten to `raw.githubusercontent.com` and non-HTML content bypasses the
+  readability gate, eliminating guaranteed `readability extraction failed` rejections
+  (v1.0.79)
+- **`/clip` slash command** — copies the rendered message-window transcript to the
+  system clipboard in one step (v1.0.79)
+- **`/research list` renders a human-readable table again** — the fixed-width
+  `NAME/TITLE/STATUS/CREATED/MODIFIED` table is restored as the default output, with
+  JSON behind the `--json` flag (v1.0.79)
 - **Research evaluation scorecard configuration** — new `research.evaluate` section
   in `ragent.json` controls the self-evaluation scorecard appended to research
   reports (FR-015 of specs/opendeepresearch)

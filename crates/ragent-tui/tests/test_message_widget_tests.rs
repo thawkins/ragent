@@ -191,3 +191,124 @@ fn test_skill_manage_input_summary_load() {
     assert!(summary.starts_with("🧩"));
     assert!(summary.contains("simplify"));
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Plot ANSI rendering
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_plot_output_lines_prefers_ansi_canvas() {
+    use ragent_tui::widgets::message_widget::plot_output_lines;
+    use serde_json::json;
+
+    let output = json!({
+        "status": "success",
+        "plot": "plain\ncanvas",
+        "plot_ansi": "\u{1b}[36mcyan\u{1b}[0m\n\u{1b}[31mred\u{1b}[0m"
+    });
+    let lines = plot_output_lines(&Some(output)).expect("expected plot lines");
+    assert_eq!(lines.len(), 2, "one line per canvas row");
+    // The ANSI canvas is preferred over the plain-text one.
+    assert!(
+        lines[0].to_string().contains("cyan"),
+        "first line should carry the ANSI-coloured text, got: {:?}",
+        lines[0]
+    );
+    assert!(
+        lines[1].to_string().contains("red"),
+        "second line should carry the ANSI-coloured text, got: {:?}",
+        lines[1]
+    );
+}
+
+#[test]
+fn test_plot_output_lines_multi_colour_line_gets_distinct_spans() {
+    use ragent_tui::widgets::message_widget::plot_output_lines;
+    use ratatui::style::Color;
+    use serde_json::json;
+
+    // One row carrying three colour runs, exactly as `buffer_to_ansi` emits
+    // them: each colour change starts a new SGR sequence. The parser must
+    // flush the pending text run at every escape so each run keeps its own
+    // colour; a regression re-renders the whole line with the last colour.
+    let output = json!({
+        "status": "success",
+        "plot": "abc123",
+        "plot_ansi": "\u{1b}[31mabc\u{1b}[32mdef\u{1b}[34m123\u{1b}[0m"
+    });
+    let lines = plot_output_lines(&Some(output)).expect("expected plot lines");
+    assert_eq!(lines.len(), 1);
+    let spans = &lines[0].spans;
+    let colored: Vec<(String, Color)> = spans
+        .iter()
+        .filter_map(|s| s.style.fg.map(|c| (s.content.to_string(), c)))
+        .collect();
+    assert!(
+        colored.contains(&("abc".to_string(), Color::Red)),
+        "expected a red 'abc' span, got: {colored:?}"
+    );
+    assert!(
+        colored.contains(&("def".to_string(), Color::Green)),
+        "expected a green 'def' span, got: {colored:?}"
+    );
+    assert!(
+        colored.contains(&("123".to_string(), Color::Blue)),
+        "expected a blue '123' span, got: {colored:?}"
+    );
+}
+
+#[test]
+fn test_plot_output_lines_bg_only_runs_keep_background() {
+    use ragent_tui::widgets::message_widget::plot_output_lines;
+    use ratatui::style::Color;
+    use serde_json::json;
+
+    // Heatmap cells are painted via background colour only (fg == bg is
+    // reset to a contrasting fg). `buffer_to_ansi` emits fg and bg as
+    // separate SGR sequences; each colour change must still split spans.
+    let output = json!({
+        "status": "success",
+        "plot": "xx",
+        "plot_ansi": "\u{1b}[38;2;68;1;84m\u{1b}[48;2;68;1;84mx\u{1b}[38;2;59;82;139m\u{1b}[48;2;59;82;139mx\u{1b}[0m"
+    });
+    let lines = plot_output_lines(&Some(output)).expect("expected plot lines");
+    assert_eq!(lines.len(), 1);
+    let bgs: Vec<Option<Color>> = lines[0]
+        .spans
+        .iter()
+        .filter(|s| !s.content.trim().is_empty())
+        .map(|s| s.style.bg)
+        .collect();
+    assert_eq!(bgs.len(), 2, "two colour runs expected, got: {bgs:?}");
+    assert_ne!(
+        bgs[0], bgs[1],
+        "the two cells should carry different background colours"
+    );
+    assert_eq!(bgs[0], Some(Color::Rgb(68, 1, 84)), "viridis dark purple");
+    assert_eq!(bgs[1], Some(Color::Rgb(59, 82, 139)), "viridis blue");
+}
+
+#[test]
+fn test_plot_output_lines_falls_back_to_plain_canvas() {
+    use ragent_tui::widgets::message_widget::plot_output_lines;
+    use serde_json::json;
+
+    let output = json!({
+        "status": "success",
+        "plot": "plain\ncanvas"
+    });
+    let lines = plot_output_lines(&Some(output)).expect("expected plot lines");
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].to_string().contains("plain"));
+    assert!(lines[1].to_string().contains("canvas"));
+}
+
+#[test]
+fn test_plot_output_lines_none_when_no_canvas() {
+    use ragent_tui::widgets::message_widget::plot_output_lines;
+    use serde_json::json;
+
+    assert!(plot_output_lines(&None).is_none());
+    assert!(plot_output_lines(&Some(json!({ "status": "error" }))).is_none());
+    assert!(plot_output_lines(&Some(json!({ "plot": "   " }))).is_none());
+}

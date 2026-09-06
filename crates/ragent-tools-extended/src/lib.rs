@@ -37,6 +37,7 @@ pub mod office_read;
 pub mod office_write;
 pub mod pdf_read;
 pub mod pdf_write;
+pub mod plot;
 pub mod task;
 pub mod webfetch;
 pub mod websearch;
@@ -472,6 +473,17 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(masterfetch::tools::screenshot::MfScreenshotTool));
     registry.register(Arc::new(masterfetch::tools::cache_clear::MfCacheClearTool));
     registry.register(Arc::new(masterfetch::tools::version::MfVersionTool));
+
+    // plot_* tools: render graphs on the message window via ratatui-plt
+    // (GPL-3.0 — explicitly accepted by the project owner 2026-09-06; see
+    // src/plot/mod.rs). Read-only, local off-screen rendering, "system"
+    // permission category.
+    registry.register(Arc::new(plot::plot_line::PlotLineTool));
+    registry.register(Arc::new(plot::plot_scatter::PlotScatterTool));
+    registry.register(Arc::new(plot::plot_bar::PlotBarTool));
+    registry.register(Arc::new(plot::plot_histogram::PlotHistogramTool));
+    registry.register(Arc::new(plot::plot_pie::PlotPieTool));
+    registry.register(Arc::new(plot::plot_heatmap::PlotHeatmapTool));
 
     // yfinance tools (T-015)
     registry.register(Arc::new(finance::tools::quote::StockQuoteTool::new()));

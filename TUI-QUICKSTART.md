@@ -4,6 +4,25 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (1.0.79)
+
+- **`/research create --max-search-calls N`** — hard, run-scoped cap on total web-search calls per research run, shared across every supervisor/competitive researcher and gather pass.
+- **`/research update <name>`** — re-runs a research item by replaying its recorded invocation line, overwriting `RESEARCH.md` and associated files.
+- **`--mode competitive` defaults `--format` to `comparison-table`** — competitive runs no longer require an explicit `--format comparison-table`.
+- **`--depth` bounds web volume by default** — the effective web-source budget is derived from the selected depth (shallow 6 / standard 9 / deep 15) unless `--max-web-results` is passed explicitly.
+- **`/clip`** — copies the rendered message-window transcript to the system clipboard in one step.
+- **`/research list` renders a human-readable table again** — the fixed-width `NAME/TITLE/STATUS/CREATED/MODIFIED` table is the default output, with JSON behind the `--json` flag.
+
+## Highlights (uncommitted, post 1.0.79)
+
+- **`plot_*` tools render inline graphs** — `plot_line`, `plot_scatter`,
+  `plot_bar`, `plot_histogram`, `plot_pie`, and `plot_heatmap` draw ASCII-art
+  charts directly in the message window, with real ANSI colours for palette
+  series, pie slices, and heatmaps (rendered off-screen via `ratatui-plt`).
+  The step log also shows friendly one-liners for the code-index graph tools
+  (`codeindex_godnodes`, `codeindex_path`, `codeindex_explain`,
+  `codeindex_communities`) and `model_info`.
+
 ## Highlights (1.0.77)
 
 - **Documentation refresh** — `CHANGELOG.md`, `README.md`, `SPEC.md`,

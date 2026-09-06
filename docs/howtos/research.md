@@ -176,12 +176,20 @@ Run a research session and write `RESEARCH.md`. This is the primary command.
   [--web-time N] [--web-phase-timeout-secs N] [--local-phase-timeout-secs N]
   [--search-max-retries N] [--search-retry-base-delay-ms N]
   [--search-circuit-breaker-threshold N]
+  [--max-web-results N] [--max-search-calls N]
   [--use-local] [--use-specs] [--use-low-relevance] [--no-papers] [--use-pdf]
 ```
 
 If the first argument after `/research create` is not a recognised
 subcommand, the parser treats the whole line as `<name> <topic>`; this lets
 you type quickly when the name is valid.
+
+**Re-running a research item:** `/research update <name>` replays the item's
+recorded invocation line and re-runs the full pipeline, overwriting
+`RESEARCH.md` and its associated files (`CORPA.md`, `sources/`, index) with
+freshly gathered results. The original invocation is preserved on the replayed
+run. The same replay is available from the CLI (`ragent research update <name>`)
+and over HTTP (`PUT /research/{name}`).
 
 **Quick syntax note:** The `--from-url` flag can be repeated to seed multiple
 pages. The `--from-file` flag accepts PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP,
@@ -481,6 +489,16 @@ gathering. The default is `full`.
 | `shallow` | 1 | 2 | 2 |
 | `standard` (default) | 3 | 3 | 4 |
 | `deep` | 5 | 5 | 6 |
+
+**Web volume is bounded by depth by default.** Unless `--max-web-results` is
+passed explicitly, the effective web-source budget for gather passes is derived
+from the selected depth (shallow 6 / standard 9 / deep 15 sources), so
+`--depth shallow` actually limits search/fetch volume instead of collapsing
+into the 500-source ceiling. `--max-search-calls N` additionally places a hard,
+run-scoped cap on the total number of web-search calls a run may issue, shared
+across every supervisor/competitive researcher and gather pass; when the cap is
+reached, remaining sub-queries are skipped and the run proceeds with the
+sources gathered so far.
 
 ### Iteration override
 

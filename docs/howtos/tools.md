@@ -39,6 +39,7 @@ schema, the system instruction the model receives, and a worked example.
 | 22 | Interactive | 4 | always on |
 | 23 | Finance | 8 | `finance` |
 | 24 | Communications | 2 | always on |
+| 25 | Plot | 6 | always on |
 
 Switches default `off` for `github`, `gitlab`, `teams`, `agents`, `plan`,
 `office`; the rest default `on`. See `docs/howtos/tool-visibility.md`.
@@ -534,6 +535,40 @@ See `docs/howtos/communications.md` for OAuth2 setup and channel config.
 ```text
 gmail action="search" query="from:ci@example.com is:unread"
 send_channel_message action="send" message="Build passed" channel="telegram"
+```
+
+---
+
+## 25. Plot
+
+Scientific/terminal plotting rendered off-screen to a text canvas via
+`ratatui-plt`. Every tool returns the canvas as plain text and mirrors it into
+output metadata (`plot` plain canvas, `plot_ansi` ANSI-coloured canvas); the
+TUI renders the coloured canvas inline in the message window. Canvas is
+clamped to 220x80 cells. All tools are read-only and always visible.
+
+| Tool | Description |
+|------|-------------|
+| `plot_line` | XY line chart from one or more named series of `[x, y]` points. |
+| `plot_scatter` | XY scatter with dot markers. |
+| `plot_bar` | Bar chart from categories + datasets; `stacked` and `horizontal` modes. |
+| `plot_histogram` | Histogram over a sample array; `count`/`density`/`probability` normalisation. |
+| `plot_pie` | Pie (or `donut`) chart from labelled slices; auto 8-colour palette cycling. |
+| `plot_heatmap` | 2D grid heatmap; `viridis`, `plasma`, `inferno`, `magma`, `coolwarm` colormaps. |
+
+Common optional arguments: `title`, `x_label`, `y_label`, `width` (default
+80, max 220), `height` (default 20, max 80). Colours accept named colors
+(`red`, `cyan`, `lightgreen`, ...) or `#rrggbb` hex strings. String-encoded
+`series`/`categories`/`data`/`slices`/`grid` payloads are coerced
+automatically; malformed input returns an error output rather than crashing.
+
+**Example:**
+```text
+plot_line title="Latency" series=[{"name":"p50","data":[[1,12],[2,11],[3,9]],"color":"cyan"},{"name":"p99","data":[[1,40],[2,38],[3,30]],"color":"red"}]
+plot_bar categories=["openalex","wikipedia"] datasets=[{"name":"hits","data":[14,22]}]
+plot_histogram data=[3,5,5,7,9,9,9,11] bins=4
+plot_pie slices=[{"label":"rust","value":71},{"label":"other","value":29}]
+plot_heatmap grid={"values":[[0,1],[2,3]]} colormap="viridis"
 ```
 
 ---

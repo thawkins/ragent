@@ -861,6 +861,20 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or("imports");
             format!("📇 {}: {}", direction, path)
         }
+        "codeindex_godnodes" => {
+            let n = input.get("n").and_then(|v| v.as_u64()).unwrap_or(10);
+            format!("📇 god nodes (top {})", n)
+        }
+        "codeindex_path" => {
+            let from = get_str(&["from"]).unwrap_or_default();
+            let to = get_str(&["to"]).unwrap_or_default();
+            format!("📇 path {} → {}", trunc120(&from), trunc120(&to))
+        }
+        "codeindex_explain" => {
+            let symbol = get_str(&["symbol"]).unwrap_or_default();
+            format!("📇 explain {}", trunc120(&symbol))
+        }
+        "codeindex_communities" => "📇 communities".to_string(),
 
         // ═══════════════════════════════════════════════════════════════════
         // 📋 SPEC MANAGEMENT
@@ -1351,6 +1365,90 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
 
         // ═══════════════════════════════════════════════════════════════════
+        // 🧠 MODEL INFO
+        // ═══════════════════════════════════════════════════════════════════
+        "model_info" => {
+            let format = get_str(&["format"]).unwrap_or_else(|| "text".to_string());
+            format!("🧠 model info ({})", format)
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📊 PLOT
+        // ═══════════════════════════════════════════════════════════════════
+        "plot_line" | "plot_scatter" => {
+            let series = input
+                .get("series")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(1);
+            let title = get_str(&["title"]).unwrap_or_default();
+            if title.is_empty() {
+                format!("📊 {} ({} series)", tool, series)
+            } else {
+                format!("📊 {}: {} ({} series)", tool, trunc120(&title), series)
+            }
+        }
+        "plot_bar" => {
+            let cats = input
+                .get("categories")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            let title = get_str(&["title"]).unwrap_or_default();
+            if title.is_empty() {
+                format!("📊 bar ({} categories)", cats)
+            } else {
+                format!("📊 bar: {} ({} categories)", trunc120(&title), cats)
+            }
+        }
+        "plot_histogram" => {
+            let samples = input
+                .get("data")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            let bins = input.get("bins").and_then(|v| v.as_u64()).unwrap_or(20);
+            let title = get_str(&["title"]).unwrap_or_default();
+            if title.is_empty() {
+                format!("📊 histogram ({} samples, {} bins)", samples, bins)
+            } else {
+                format!(
+                    "📊 histogram: {} ({} samples, {} bins)",
+                    trunc120(&title),
+                    samples,
+                    bins
+                )
+            }
+        }
+        "plot_pie" => {
+            let slices = input
+                .get("slices")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            let title = get_str(&["title"]).unwrap_or_default();
+            if title.is_empty() {
+                format!("📊 pie ({} slices)", slices)
+            } else {
+                format!("📊 pie: {} ({} slices)", trunc120(&title), slices)
+            }
+        }
+        "plot_heatmap" => {
+            let rows = input
+                .get("grid")
+                .and_then(|v| v.get("values"))
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            let title = get_str(&["title"]).unwrap_or_default();
+            if title.is_empty() {
+                format!("📊 heatmap ({} rows)", rows)
+            } else {
+                format!("📊 heatmap: {} ({} rows)", trunc120(&title), rows)
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
         // 🏁 AGENT COMPLETE
         // ═══════════════════════════════════════════════════════════════════
         "agent_complete" => {
@@ -1441,6 +1539,206 @@ pub(crate) fn tool_inline_diff(
             }
         }
         _ => None,
+    }
+}
+
+/// Return the rendered plot lines for a `plot_*` tool call, if any.
+///
+/// The plot tools mirror the full ASCII-art canvas into their output metadata
+/// under the `plot` key (the event-bus `content` is only a short preview), and
+/// an ANSI-coloured variant under `plot_ansi`. The TUI stores that metadata on
+/// the tool-call state, so the message renderers can display the plot inline in
+/// the message window. The ANSI canvas is preferred so multi-colour plots
+/// (palette series, pie slices, heatmaps) render with their real colours; the
+/// plain-text canvas is the fallback. Each returned line carries a two-space
+/// indent so it aligns with the surrounding tool-call output.
+pub fn plot_output_lines(output: &Option<serde_json::Value>) -> Option<Vec<Line<'static>>> {
+    let out = output.as_ref()?;
+    let indent = Span::raw("  ");
+    if let Some(ansi) = out.get("plot_ansi").and_then(serde_json::Value::as_str) {
+        if !ansi.trim().is_empty() {
+            return Some(
+                ansi.lines()
+                    .map(|l| {
+                        let mut spans = vec![indent.clone()];
+                        spans.extend(ansi_line_to_styled(l).spans);
+                        Line::from(spans)
+                    })
+                    .collect(),
+            );
+        }
+    }
+    let plot = out.get("plot")?.as_str()?;
+    if plot.trim().is_empty() {
+        return None;
+    }
+    Some(
+        plot.lines()
+            .map(|l| Line::from(vec![indent.clone(), Span::raw(l.to_string())]))
+            .collect(),
+    )
+}
+
+/// Parse a single ANSI-coloured line (as produced by `ratatui_plt`'s
+/// `buffer_to_ansi`) into a styled ratatui [`Line`].
+///
+/// SGR foreground/background escapes are mapped to [`Style`] colours; any other
+/// escape sequences are stripped. This lets the TUI render the plot canvas with
+/// the per-cell colours the widgets assigned (palette series, pie slices,
+/// heatmap colormaps) instead of a single flat colour.
+fn ansi_line_to_styled(line: &str) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut fg: Option<Color> = None;
+    let mut bg: Option<Color> = None;
+    let mut text = String::new();
+    let mut chars = line.chars().peekable();
+
+    let flush = |text: &mut String,
+                 spans: &mut Vec<Span<'static>>,
+                 fg: Option<Color>,
+                 bg: Option<Color>| {
+        if !text.is_empty() {
+            let mut style = Style::default();
+            if let Some(c) = fg {
+                style = style.fg(c);
+            }
+            if let Some(c) = bg {
+                style = style.bg(c);
+            }
+            spans.push(Span::styled(std::mem::take(text), style));
+        }
+    };
+
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            // A new escape sequence is starting: flush the pending text run
+            // with the colours currently in effect BEFORE updating fg/bg, so
+            // each colour run becomes its own styled span. Without this the
+            // whole line accumulates in `text` and renders with the final
+            // colour only (single-colour plot bug).
+            flush(&mut text, &mut spans, fg, bg);
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                let mut params = String::new();
+                while let Some(&n) = chars.peek() {
+                    if n.is_ascii_alphabetic() {
+                        chars.next();
+                        break;
+                    }
+                    params.push(n);
+                    chars.next();
+                }
+                apply_sgr(&params, &mut fg, &mut bg);
+            } else {
+                // Unknown escape: skip until a letter terminator.
+                while let Some(&n) = chars.peek() {
+                    chars.next();
+                    if n.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            text.push(c);
+        }
+    }
+    flush(&mut text, &mut spans, fg, bg);
+    Line::from(spans)
+}
+
+/// Apply an SGR parameter string (e.g. `"36"`, `"38;2;r;g;b"`, `"0"`) to the
+/// running foreground/background colours.
+fn apply_sgr(params: &str, fg: &mut Option<Color>, bg: &mut Option<Color>) {
+    let parts: Vec<&str> = params.split(';').collect();
+    if parts.is_empty() {
+        return;
+    }
+    match parts[0] {
+        "0" => {
+            *fg = None;
+            *bg = None;
+        }
+        "39" => *fg = None,
+        "49" => *bg = None,
+        "30" | "31" | "32" | "33" | "34" | "35" | "36" | "37" | "90" | "91" | "92" | "93"
+        | "94" | "95" | "96" | "97" => {
+            let idx: u8 = parts[0].parse().unwrap_or(0);
+            *fg = Some(ansi_fg_color(idx));
+        }
+        "40" | "41" | "42" | "43" | "44" | "45" | "46" | "47" | "100" | "101" | "102" | "103"
+        | "104" | "105" | "106" | "107" => {
+            let idx: u8 = parts[0].parse().unwrap_or(0);
+            *bg = Some(ansi_bg_color(idx));
+        }
+        "38" => {
+            if parts.len() >= 5 && parts[1] == "2" {
+                let r: u8 = parts[2].parse().unwrap_or(0);
+                let g: u8 = parts[3].parse().unwrap_or(0);
+                let b: u8 = parts[4].parse().unwrap_or(0);
+                *fg = Some(Color::Rgb(r, g, b));
+            } else if parts.len() >= 3 && parts[1] == "5" {
+                let idx: u8 = parts[2].parse().unwrap_or(0);
+                *fg = Some(Color::Indexed(idx));
+            }
+        }
+        "48" => {
+            if parts.len() >= 5 && parts[1] == "2" {
+                let r: u8 = parts[2].parse().unwrap_or(0);
+                let g: u8 = parts[3].parse().unwrap_or(0);
+                let b: u8 = parts[4].parse().unwrap_or(0);
+                *bg = Some(Color::Rgb(r, g, b));
+            } else if parts.len() >= 3 && parts[1] == "5" {
+                let idx: u8 = parts[2].parse().unwrap_or(0);
+                *bg = Some(Color::Indexed(idx));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Map an ANSI foreground SGR code to a ratatui [`Color`].
+fn ansi_fg_color(idx: u8) -> Color {
+    match idx {
+        30 => Color::Black,
+        31 => Color::Red,
+        32 => Color::Green,
+        33 => Color::Yellow,
+        34 => Color::Blue,
+        35 => Color::Magenta,
+        36 => Color::Cyan,
+        37 => Color::Gray,
+        90 => Color::DarkGray,
+        91 => Color::LightRed,
+        92 => Color::LightGreen,
+        93 => Color::LightYellow,
+        94 => Color::LightBlue,
+        95 => Color::LightMagenta,
+        96 => Color::LightCyan,
+        97 => Color::White,
+        _ => Color::Reset,
+    }
+}
+
+/// Map an ANSI background SGR code to a ratatui [`Color`].
+fn ansi_bg_color(idx: u8) -> Color {
+    match idx {
+        40 => Color::Black,
+        41 => Color::Red,
+        42 => Color::Green,
+        43 => Color::Yellow,
+        44 => Color::Blue,
+        45 => Color::Magenta,
+        46 => Color::Cyan,
+        47 => Color::Gray,
+        100 => Color::DarkGray,
+        101 => Color::LightRed,
+        102 => Color::LightGreen,
+        103 => Color::LightYellow,
+        104 => Color::LightBlue,
+        105 => Color::LightMagenta,
+        106 => Color::LightCyan,
+        107 => Color::White,
+        _ => Color::Reset,
     }
 }
 
@@ -2687,6 +2985,223 @@ pub fn tool_result_summary(
         }
 
         // ═══════════════════════════════════════════════════════════════════
+        // 🗂️ BACKGROUND PROCESS
+        // ═══════════════════════════════════════════════════════════════════
+        "bg" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
+            let task_id = out.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+            if task_id.is_empty() {
+                Some(format!("🗂️ {}", action))
+            } else {
+                Some(format!("🗂️ {} {}", action, task_id))
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🖥️ BROWSER
+        // ═══════════════════════════════════════════════════════════════════
+        "browser" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
+            match action {
+                "open" => {
+                    let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("?");
+                    let loaded = out.get("loaded").and_then(|v| v.as_bool()).unwrap_or(false);
+                    Some(format!(
+                        "🖥️ opened {} ({})",
+                        trunc120(url),
+                        if loaded { "loaded" } else { "not loaded" }
+                    ))
+                }
+                "snapshot" => {
+                    let title = out.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    Some(format!("🖥️ snapshot: {}", trunc120(title)))
+                }
+                "screenshot" => {
+                    let len = out.get("data_length").and_then(|v| v.as_u64()).unwrap_or(0);
+                    Some(format!("🖥️ screenshot ({} bytes)", len))
+                }
+                "status" => {
+                    let available = out
+                        .get("available")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let pages = out
+                        .get("page_targets")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    Some(format!(
+                        "🖥️ status: {} ({} pages)",
+                        if available {
+                            "available"
+                        } else {
+                            "unavailable"
+                        },
+                        pages
+                    ))
+                }
+                "setup" => {
+                    let status = out.get("status").and_then(|v| v.as_str()).unwrap_or("done");
+                    Some(format!("🖥️ setup: {}", status))
+                }
+                other => Some(format!("🖥️ {}", other)),
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📧 GMAIL
+        // ════════════���══════════════════════════════════════════════════════
+        "gmail" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
+            match action {
+                "search" => {
+                    let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    Some(format!(
+                        "📧 {} found",
+                        pluralize(count, "message", "messages")
+                    ))
+                }
+                "send" => {
+                    let id = out.get("message_id").and_then(|v| v.as_str()).unwrap_or("");
+                    Some(format!("📧 sent ({})", trunc120(id)))
+                }
+                "draft" => {
+                    let id = out.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
+                    Some(format!("📧 drafted ({})", trunc120(id)))
+                }
+                "status" => {
+                    let auth = out
+                        .get("authenticated")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    Some(format!(
+                        "📧 status: {}",
+                        if auth {
+                            "authenticated"
+                        } else {
+                            "not authenticated"
+                        }
+                    ))
+                }
+                other => Some(format!("📧 {}", other)),
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📨 CHANNELS
+        // ═══════════════════════════════════════════════════════════════════
+        "send_channel_message" => {
+            let delivered = out.get("delivered").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!(
+                "📨 {} delivered",
+                pluralize(delivered, "message", "messages")
+            ))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📂 OPEN
+        // ═══════════════════════════════════════════════════════════════════
+        "open" => {
+            let target = out.get("target").and_then(|v| v.as_str()).unwrap_or("?");
+            let success = out
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            Some(format!(
+                "📂 {} ({})",
+                trunc120(target),
+                if success { "opened" } else { "failed" }
+            ))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🧠 MODEL INFO
+        // ═══════════════════════════════════════════════════════════════════
+        "model_info" => {
+            let provider = out
+                .get("provider_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let model = out
+                .get("model_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            Some(format!("🧠 {} / {}", trunc120(provider), trunc120(model)))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📇 CODE INDEX GRAPH
+        // ═══════════════════════════════════════════════════════════════════
+        "codeindex_godnodes" => {
+            let total = out
+                .get("total_results")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            Some(format!(
+                "{} found",
+                pluralize(total, "god node", "god nodes")
+            ))
+        }
+        "codeindex_path" => {
+            let hops = out.get("hops").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(hops, "hop", "hops")))
+        }
+        "codeindex_explain" => {
+            let name = out.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let degree = out.get("degree").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("📇 {} (degree {})", trunc120(name), degree))
+        }
+        "codeindex_communities" => {
+            let total = out
+                .get("total_communities")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            Some(format!(
+                "{} found",
+                pluralize(total, "community", "communities")
+            ))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📊 PLOT
+        // ═══════════════════════════════════════════════════════════════════
+        "plot_line" | "plot_scatter" => {
+            let series = out.get("series").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let w = out.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
+            let h = out.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "📊 {} ({} series, {}x{})",
+                tool,
+                pluralize(series, "series", "series"),
+                w,
+                h
+            ))
+        }
+        "plot_bar" => {
+            let cats = out.get("categories").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let ds = out.get("datasets").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("📊 bar ({} categories, {} datasets)", cats, ds))
+        }
+        "plot_histogram" => {
+            let samples = out.get("samples").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let bins = out.get("bins").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("📊 histogram ({} samples, {} bins)", samples, bins))
+        }
+        "plot_pie" => {
+            let slices = out.get("slices").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let donut = out.get("donut").and_then(|v| v.as_bool()).unwrap_or(false);
+            Some(format!(
+                "📊 pie ({} slices{})",
+                slices,
+                if donut { ", donut" } else { "" }
+            ))
+        }
+        "plot_heatmap" => {
+            let rows = out.get("rows").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let cols = out.get("cols").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("📊 heatmap ({}x{})", rows, cols))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
         // DEFAULT: Unknown tools
         // ═══════════════════════════════════════════════════════════════════
         _ => {
@@ -3040,6 +3555,21 @@ impl<'a> MessageWidget<'a> {
                                             Style::default().fg(Color::Red),
                                         ),
                                     ]));
+                                }
+                            } else if let Some(result) =
+                                tool_result_summary(tool, &state.output, &state.input, self.cwd)
+                            {
+                                lines.push(Line::from(Span::styled(
+                                    format!("  └ {}", result),
+                                    Style::default().fg(Color::Gray),
+                                )));
+                            }
+                        } else if tool.starts_with("plot_") {
+                            // Render the full ASCII-art plot canvas inline in the
+                            // message window (mirrored into metadata under `plot`).
+                            if let Some(plot_lines) = plot_output_lines(&state.output) {
+                                for line in plot_lines {
+                                    lines.push(line);
                                 }
                             } else if let Some(result) =
                                 tool_result_summary(tool, &state.output, &state.input, self.cwd)

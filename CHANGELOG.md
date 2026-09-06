@@ -1,5 +1,62 @@
 # Changelog
 
+## Version: 1.0.80
+
+### Changed
+
+- Version bump to 1.0.80.
+- `cargo check` passes (only the pre-existing future-incompat notice for the external `attribute-derive-macro` crate).
+- `cargo audit` reports only allowed warnings (yanked `chacha20` transitive dependency); no actionable security failures.
+
+### Added
+
+- **`plot_*` tool family (6 new tools)** — scientific/terminal plotting on the
+  message window, rendered off-screen to text via `ratatui-plt` 0.0.2
+  (GPL-3.0, explicitly accepted by the project owner 2026-09-06 and added to
+  the `deny.toml` license allow list): `plot_line` (XY series), `plot_scatter`
+  (dot markers), `plot_bar` (categories + datasets, `stacked`/`horizontal`
+  modes), `plot_histogram` (`count`/`density`/`probability` normalisation),
+  `plot_pie` (slices with auto palette cycling, optional `donut`), and
+  `plot_heatmap` (`viridis`/`plasma`/`inferno`/`magma`/`coolwarm` colormaps).
+  Shared parsing/rendering helpers live in
+  `crates/ragent-tools-extended/src/plot/mod.rs` (string-encoded series coerce
+  gracefully, canvas clamped to 220x80, argument errors degrade to an error
+  output rather than crashing). All six tools register under the `system`
+  permission category in `create_extended_registry`; the crate-local `ratatui
+  0.30` dependency (pinned by `ratatui-plt`) sits alongside the workspace
+  `ratatui 0.29` used by `ragent-tui`.
+- **Inline plot rendering in the TUI message window** — `plot_output_lines`
+  (crates/ragent-tui/src/widgets/message_widget.rs) renders the plot tool's
+  ANSI-coloured canvas (metadata key `plot_ansi`, falling back to the plain
+  `plot` key) inline beneath the tool call, with a new `ansi_line_to_styled`
+  parser that maps SGR colour runs to distinct styled spans so palette series,
+  pie slices, and heatmaps keep their real colours. `layout.rs` routes any
+  `plot_*` tool output through the renderer instead of the one-line summary.
+- **Tool input summaries for the code-index graph and plot tools** — the TUI
+  step log now shows human-readable one-liners for `codeindex_godnodes`,
+  `codeindex_path`, `codeindex_explain`, `codeindex_communities`,
+  `model_info`, and each `plot_*` tool (series/category/sample counts,
+  titles) in `tool_input_summary`.
+
+### Tests
+
+- `crates/ragent-tools-extended/tests/test_plot_tools.rs` (25 tests) covers
+  rendering, stacked/horizontal bars, histogram norms, heatmap defaults,
+  registry registration, canvas bounds, string-encoded argument coercion, and
+  distinct-SGR-colour-run rendering.
+- `crates/ragent-tui/tests/test_message_widget_tests.rs` gained 6 tests for
+  `plot_output_lines` (ANSI preference, multi-colour span splitting,
+  plain-canvas fallback, empty/missing output).
+
+### Documentation
+
+- `docs/howtos/pdf/*.pdf` — all 15 how-to guides now ship A4 xelatex PDFs.
+- `docs/howtos/permissions.md` — `$'\xNN'` hex-escape examples wrapped in
+  inline code so the LaTeX PDF build no longer breaks.
+- `docs/howtos/research.md` — documents `--max-web-results` /
+  `--max-search-calls`, the depth-derived web budget, and
+  `/research update <name>` replay.
+
 ## Version: 1.0.79
 
 ### Changed
@@ -67,6 +124,18 @@
   `test_github_blob_fetch_uses_rewritten_raw_url`, and
   `test_mf_fetch_non_html_content_type_bypasses_readability_check` in
   `crates/ragent-agent/src/research_adapter.rs`.
+
+### Documentation
+
+- **`docs/howtos/permissions.md` PDF added** — the permissions how-to now ships a
+  `pdf/permissions.pdf` alongside the other how-to PDFs. The `$'\xNN'` hex-escape
+  examples were wrapped in inline code so they render correctly under the xelatex
+  PDF engine (previously the raw `\xNN` sequence broke the LaTeX build).
+- **`docs/howtos/research.md` updated** — documents the new `--max-web-results` /
+  `--max-search-calls` flags, the depth-derived web-source budget, and the
+  `/research update <name>` invocation-replay flow.
+- **`STATS.md` refreshed** — updated project-wide metrics (404,293 lines, 991 files,
+  ~7,676 tests, 444 test files) and per-crate file/test counts for v1.0.79.
 
 ## Version: 1.0.78
 

@@ -67,6 +67,10 @@ allow = [
     "MPL-2.0",
     # webpki-roots uses CDLA-Permissive-2.0 (Community Data License Agreement — permissive).
     "CDLA-Permissive-2.0",
+    # GPL-3.0 — ratatui-plt (plot_* tools). Explicitly accepted by the project
+    # owner 2026-09-06 for terminal scientific-plots; documented in
+    # crates/ragent-tools-extended (the only consuming crate).
+    "GPL-3.0",
 ]
 
 # ring uses a custom ISC-style license.

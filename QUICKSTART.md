@@ -709,6 +709,14 @@ The AI agent can use these tools during a session:
 | `glob`     | Find files by name pattern                     | `file:read`     |
 | `list`     | List directory contents (2 levels deep)         | `file:read`     |
 | `question` | Ask the user a clarifying question             | `question`      |
+| `plot_line`| Render an XY line plot on the message window   | `system`        |
+| `plot_bar` | Render a bar chart (stacked/horizontal)        | `system`        |
+| `plot_pie` | Render a pie/donut chart                       | `system`        |
+
+168 tools are registered in total across 25 categories — run `/tools` in the
+TUI to list them all. The `plot_*` family (`plot_line`, `plot_scatter`,
+`plot_bar`, `plot_histogram`, `plot_pie`, `plot_heatmap`) renders ASCII-art
+graphs, coloured via ANSI, inline in the message window.
 
 MCP servers can provide additional tools that are automatically discovered and
 made available to the agent (see [SPEC.md §3.11](SPEC.md#311-mcp-client)). MCP
@@ -1267,6 +1275,15 @@ Type `/` in the input to open an autocomplete menu:
 | `/spec feedback <name> <note>` | Append a production feedback note to FEEDBACK.md |
 | `/spec jtbd <name> [--force] [--agent <name>]` | Perform JTBD analysis on an existing spec |
 | `/spec list \|search \|show \|validate \|status \|task` | Spec lifecycle commands |
+
+### New in v1.0.79
+
+- **`/research create --max-search-calls N`** — places a hard, run-scoped cap on the total web-search calls a research run may issue, shared across every supervisor/competitive researcher and gather pass.
+- **`/research update <name>`** — re-runs a research item by replaying its recorded invocation line, overwriting `RESEARCH.md` and associated files with freshly gathered results.
+- **`--mode competitive` defaults `--format` to `comparison-table`** — competitive runs no longer require an explicit `--format comparison-table`.
+- **`--depth` bounds web volume by default** — the effective web-source budget is derived from the selected depth (shallow 6 / standard 9 / deep 15) unless `--max-web-results` is passed explicitly.
+- **`/clip`** — copies the rendered message-window transcript to the system clipboard in one step.
+- **`/research list` renders a human-readable table again** — the fixed-width `NAME/TITLE/STATUS/CREATED/MODIFIED` table is the default output, with JSON behind the `--json` flag.
 
 ### New in v1.0.78
 

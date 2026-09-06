@@ -41,7 +41,7 @@ use crate::app::{
     ProviderSetupStep, SelectionPane,
 };
 use crate::widgets::message_widget::{
-    canonical_tool_name, capitalize_tool_name, is_agent_notice, read_line_range,
+    canonical_tool_name, capitalize_tool_name, is_agent_notice, plot_output_lines, read_line_range,
     render_agent_notice_lines, tool_inline_diff, tool_input_summary, tool_result_summary,
 };
 
@@ -5170,6 +5170,21 @@ fn messages_to_lines(
                                         Style::default().fg(Color::Green),
                                     )));
                                 }
+                            }
+                        } else if tool.starts_with("plot_") {
+                            // Render the full ASCII-art plot canvas inline in the
+                            // message window (mirrored into metadata under `plot`).
+                            if let Some(plot_lines) = plot_output_lines(&state.output) {
+                                for line in plot_lines {
+                                    lines.push(line);
+                                }
+                            } else if let Some(result) =
+                                tool_result_summary(tool, &state.output, &state.input, cwd)
+                            {
+                                lines.push(Line::from(Span::styled(
+                                    format!("  └ {}", result),
+                                    Style::default().fg(Color::DarkGray),
+                                )));
                             }
                         } else if tool != "edit"
                             && let Some(result) =

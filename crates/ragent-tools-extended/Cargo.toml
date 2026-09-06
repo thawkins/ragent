@@ -34,6 +34,15 @@ uuid = { workspace = true }
 dirs = { workspace = true }
 html2text = { workspace = true }
 readability-rs = { workspace = true }
+# GPL-3.0 dependency (explicitly accepted by the project owner 2026-09-06):
+# scientific/terminal plotting widgets used by the plot_* tools. Added to the
+# cargo-deny allow list with the same rationale. `default-features = false`
+# avoids pulling in crossterm (we render off-screen to text only).
+ratatui-plt = { version = "0.0.2", default-features = false }
+# ratatui must match the version ratatui-plt pins (0.30); it is used here only
+# for the `Widget` bound + `Color` in the plot_* off-screen renderer. This is a
+# second, crate-local ratatui distinct from the workspace 0.29 used by ragent-tui.
+ratatui = "0.30"
 base64 = { workspace = true }
 
 reqwest = { workspace = true, features = ["cookies", "gzip", "deflate"] }

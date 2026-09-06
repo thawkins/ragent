@@ -399,7 +399,7 @@ Layer 4: Directory Escape Check  ── reject cd .., cd ~, cd /absolute
 Layer 5: Syntax Validation       ── bash -n pre-check
     │
     ▼
-Layer 6: Obfuscation Detection   ── reject base64|bash, eval$(...), $'\xNN'
+Layer 6: Obfuscation Detection   ── reject base64|bash, eval$(...), `$'\\xNN'`
     │
     ▼
 Layer 7: User Allow/Deny Lists   ── /bash add|remove allow|deny
@@ -566,7 +566,7 @@ fn validate_no_obfuscation(command: &str) -> Result<()> {
     if (command.contains("python") || command.contains("perl"))
         && (command.contains("exec(") || command.contains("eval(")) { ... }
 
-    // $'\xNN' hex escape sequences used to build commands
+    // `$'\\xNN'` hex escape sequences used to build commands
     if command.contains("$'\\x") { ... }
 
     // eval with command substitution
@@ -753,7 +753,7 @@ the following safety checks are skipped:
 | Bash denied commands (Layer 3)     | Yes       | mkfs, insmod, useradd, etc. allowed      |
 | Bash denied patterns (Layer 3)     | Yes       | rm -rf /, sudo, dd if=, etc. allowed     |
 | User bash denylist (Layer 7)       | Yes       | User-defined deny patterns ignored       |
-| Obfuscation detection (Layer 6)    | Yes       | base64\|bash, eval$(), $'\xNN' allowed    |
+| Obfuscation detection (Layer 6)    | Yes       | base64\|bash, eval$(), `$'\\xNN'` allowed    |
 | Interactive permission prompts     | Yes       | All tools auto-approve                   |
 | Safe command whitelist (Layer 1)  | No        | Still checked (but has no blocking effect) |
 | Directory escape check (Layer 4)   | No        | Still enforced                           |

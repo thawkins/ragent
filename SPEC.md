@@ -1,10 +1,9 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">
-        <strong>Version:</strong> 1.0.78</p>
-      <p style="font-size: 1.1em;">
-        <strong>Date:</strong> 2026-09-03
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.79</p>
+        <p style="font-size: 1.1em;">
+          <strong>Date:</strong> 2026-09-06
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -99,15 +98,22 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.78). The core architecture, tool system,
+Ragent is in **beta** (v1.0.79). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.44 → v1.0.78):**
+**Current Release Highlights (v1.0.44 → v1.0.79):**
 
+- **Research web-search quota controls** — `--max-search-calls N` places a hard, run-scoped cap on total web-search calls per research run, shared via `Arc` across every supervisor/competitive researcher and gather pass; a run-scoped query cache memoises identical sub-queries so parallel researchers reuse cached hits instead of re-issuing paid calls (FR-016 of specs/opendeepresearch).
+- **`--depth` bounds web volume by default** — the effective web-source budget is derived from the selected depth (shallow 6 / standard 9 / deep 15) unless `--max-web-results` is passed explicitly, so `--depth shallow` now actually limits search/fetch volume.
+- **`/research update <name>` invocation replay** — re-runs a research item by replaying its recorded invocation line, overwriting `RESEARCH.md` and associated files with freshly gathered results; available via CLI, TUI, and HTTP `PUT /research/{name}`.
+- **`--mode competitive` defaults `--format` to `comparison-table`** — competitive runs no longer require an explicit `--format comparison-table`.
+- **GitHub `blob/` URLs no longer fail research gathering** — file-view URLs are rewritten to `raw.githubusercontent.com` and non-HTML content bypasses the readability gate, eliminating guaranteed `readability extraction failed` rejections.
+- **`/clip` slash command** — copies the rendered message-window transcript to the system clipboard in one step.
+- **`/research list` renders a human-readable table again** — the fixed-width `NAME/TITLE/STATUS/CREATED/MODIFIED` table is restored as the default output, with JSON behind the `--json` flag.
 - **Supervisor/competitive research modes** — `/research create` now supports `--mode tiered|supervisor|competitive`. `supervisor` runs a lead supervisor that spawns parallel sub-topic researchers; `competitive` compares a set of entities and defaults to `--format comparison-table` unless an explicit `--format` is supplied (FR-009/FR-014 of specs/opendeepresearch).
 - **Research brief and clarification** — deterministic research-brief generation and a single clarifying question for ambiguous topics, surfaced via `--brief`/`--clarify` and `SessionEvent::NeedsClarification` (FR-004/FR-005).
 - **Allowed roots for path escape checking** — `dirs.allowed_roots` in `ragent.json` permits reading/writing files in multiple project directories (FR-017).
@@ -136,6 +142,12 @@ current state of all subsystems.
 - **Stocks & currency tools** — `stock_quote`, `stock_history`,
   `stock_fundamentals`, `stock_search`, `stock_options`, `stock_recommendations`,
   `currency_rate`, `currency_history` (v1.0.36)
+- **Plot tools** — `plot_line`, `plot_scatter`, `plot_bar`, `plot_histogram`,
+  `plot_pie`, `plot_heatmap` render ASCII-art graphs (with ANSI colours)
+  inline in the TUI message window via `ratatui-plt` 0.0.2 (GPL-3.0
+  dependency explicitly accepted and allow-listed in `deny.toml`); the TUI
+  renders the tools' `plot_ansi` canvas with per-colour-run styled spans
+  (uncommitted, post v1.0.79)
 - **Start-of-turn compaction** — Uses persisted provider-reported input token
   count so it aligns with the TUI usage percentage (v1.0.34)
 
@@ -2623,6 +2635,8 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.79 | 2026-09-06 | Research web-search quota controls (`--max-search-calls`, run-scoped `SearchBudget` + `SharedQueryCache`); `--depth` bounds web volume by default (shallow 6 / standard 9 / deep 15); competitive researcher count capped at `max_concurrent_research_units`; `/research update <name>` invocation replay (CLI/TUI/HTTP `PUT /research/{name}`); `--mode competitive` defaults `--format` to `comparison-table`; GitHub `blob/` URLs rewritten to `raw.githubusercontent.com` and non-HTML content bypasses the readability gate; `/clip` slash command; `/research list` human-readable table restored (JSON behind `--json`); `/research create` TUI progress display simplified; provider-search-request counting (`search_providers` RunStep) |
+| uncommitted | 2026-09-06 | `plot_*` tool family (`plot_line`/`plot_scatter`/`plot_bar`/`plot_histogram`/`plot_pie`/`plot_heatmap`) via `ratatui-plt` 0.0.2 (GPL-3.0 accepted, allow-listed in `deny.toml`); inline ANSI plot rendering in the TUI message window (`plot_output_lines` + `ansi_line_to_styled`); tool input summaries for code-index graph, `model_info`, and plot tools; 31 new tests (25 plot tools + 6 TUI rendering); how-to PDF set completed (15 A4 xelatex PDFs) |
 | v1.0.28 | 2026-08-14 | SDD back-fill: `/spec specify` (SPEC.md only with clarification markers), `/spec plan` (PLAN.md from tech context), `/spec tasks` (TASKS.md + quickstart.md), `/spec feedback` (FEEDBACK.md notes); consistency validation (ambiguity, contradiction, gap detection); `CONSTITUTION.md` with amendment process; `data-model.md` and `contracts/` artifacts; SDD config flags (`sdd.branch_per_spec`, `sdd.data_model`, `sdd.contracts`, `sdd.feedback_loop`); production feedback loop in `/spec plan`; research frontmatter linking with `## Related Research` section |
 | v1.0.23 | 2026-08-11 | `/spec update` regenerates `PLAN.md` + `TESTPLAN.md` from edited `SPEC.md`; `/spec create` emits `TESTPLAN.md` manual test plan; `/spec add` regenerates plans after incremental add; `/spec jtbd` Jobs-To-Be-Done analysis; research readability extraction mandatory; YouTube transcript capture fixed |
 | v1.0.22 | 2026-08-09 | Fixed time-sensitive `test_parse_natural_time_5pm_tomorrow` CI failure (date-based assertion) |
