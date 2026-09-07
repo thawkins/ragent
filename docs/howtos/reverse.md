@@ -44,8 +44,8 @@ guessing at the architecture, `/reverse` automates the entire process:
 
 ### What it does
 
-- Fetches public repository data using the unauthenticated GitHub API (or
-  with a `GITHUB_TOKEN` if set, for higher rate limits).
+- Fetches public repository data using the GitHub API (a GitHub token is
+  required — see [Section 8](#8-api-interaction)).
 - Derives a comprehensive creation prompt that captures the repository's
   architecture, module structure, key features, and technology decisions.
 - Streams the generated prompt into the chat window for review.
@@ -98,21 +98,22 @@ passes it to `/spec create` to produce a formal specification under
 Fetch a public GitHub repository and generate a synthetic creation prompt.
 
 ```text
-/reverse <owner/repo> [--tech <stack>] [--create <name>]
+/reverse <repo> [--tech <stack>] [--create <name>] [--depth <N>]
 ```
 
 #### Arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<owner/repo>` | Yes | GitHub repository identifier in `owner/repo` format, or a full GitHub URL |
+| `<repo>` | Yes | Repository identifier. Accepts `owner/repo`, `github:owner/repo`, `github:<github-url>`, `gitlab:namespace/project`, `gitlab:host/namespace/project`, HTTPS URLs (`https://github.com/owner/repo`, `https://gitlab.com/ns/proj`), and SSH URLs (`git@github.com:owner/repo.git`) |
 
 #### Flags
 
 | Flag | Required | Description |
 |------|----------|-------------|
-| `--tech <stack>` | No | Constrain the generated prompt to a specific technology stack (e.g. `rust`, `python`, `typescript`) |
+| `--tech <stack>` | No | Constrain the generated prompt to a specific technology stack (e.g. `rust`, `python`, `typescript`). Values containing spaces must be **quoted** — `--tech "Next.js + Rails"` is captured whole; unquoted values are single tokens, so hyphenated forms like `rust-axum-sqlx` also work |
 | `--create <name>` | No | Chain into `/spec create` using the generated prompt, creating a spec under `specs/<name>/` |
+| `--depth <N>` | No | Directory levels to fetch from the tree (1–10, default 1). See [Section 10](#10-the-depth-flag). |
 
 ### 3.2 Input formats
 
@@ -260,6 +261,8 @@ The project consists of the following top-level modules:
 By default, the generated prompt reflects the repository's original
 technology stack. The `--tech <stack>` flag constrains the prompt to a
 specific target stack, making it useful for planning a port or rewrite.
+Multi-word stacks are supported when quoted: single and double quotes
+group the value into one token and the quote characters are stripped.
 
 ### How it works
 
@@ -356,9 +359,13 @@ implement the spec (see `docs/howtos/spec.md` for details).
 
 ### GitHub authentication
 
-The `/reverse` command uses the GitHub REST API. Without authentication,
-the API allows 60 requests per hour per IP address. To increase this to
-5,000 requests per hour, set the `GITHUB_TOKEN` environment variable:
+A GitHub token is a **prerequisite**: `/reverse` refuses to run without one
+and reports "No GitHub token configured. Run `/github login` to
+authenticate, then re-run `/reverse`." The token is resolved via
+`/github login` (OAuth device flow, stored in `~/.ragent/github_token`) or
+the `GITHUB_TOKEN` environment variable. Unauthenticated GitHub API access
+allows only 60 requests per hour per IP; an authenticated token raises this
+to 5,000 requests per hour.
 
 ```bash
 export GITHUB_TOKEN="ghp_your_token_here"
@@ -376,11 +383,13 @@ priority order:
 2. `ragent.json` configuration
 3. Encrypted credential database (configured via `/gitlab setup`)
 
-For self-hosted GitLab instances, the host is extracted from the repository
-URL or the `gitlab:host/namespace/project` format.
+For self-hosted GitLab instances, the host is resolved in priority order:
+explicit host in the repo identifier (`gitlab:host/namespace/project`),
+then the `GITLAB_URL` environment variable, then `https://gitlab.com`.
 
 ```bash
 export GITLAB_TOKEN="glpat-your_token_here"
+export GITLAB_URL="https://gitlab.example.com"
 ```
 
 ### Rate limiting
@@ -404,11 +413,23 @@ avoid hitting the rate limit.
 | `gitlab token missing` | No GitLab token configured | Set `GITLAB_TOKEN` env var or run `/gitlab setup` |
 | `invalid depth` | `--depth` value out of range | Use a value between 1 and 10 |
 
+> **Silent degradation on GitHub fetch failures:** metadata/tree fetch
+> failures on the GitHub path are swallowed (`unwrap_or_default()`), so an
+> API error produces an empty context fed to the LLM rather than an error
+> message — the `repository not found` / `rate limit exceeded` /
+> `network error` messages only surface on the **GitLab** path. If the
+> generated prompt looks thin, re-run after checking your token and rate
+> limit.
+
 ---
 
 ## 9. CLI equivalents
 
-The same functionality is available from the command line:
+The TUI `/reverse` command is the primary entry point; the equivalent
+`ragent reverse` CLI subcommand is not currently registered in the clap CLI
+(`run`, `serve`, `session`, `memory`, `auth`, `models`, `config`,
+`research` are the available subcommands). The examples below describe the
+intended CLI surface and will become accurate when the subcommand ships:
 
 ```bash
 # Basic reverse-engineering
@@ -530,8 +551,9 @@ You want to rewrite a legacy application using a modern stack:
 /reverse example/legacy-monolith --tech "Rust with axum, SQLx, and Redis"
 ```
 
-The generated prompt maps the legacy monolith's functionality to a modern
-Rust microservice architecture with specific crate recommendations.
+The quotes are required here: an unquoted value would stop at the first
+space. The generated prompt maps the legacy monolith's functionality to a
+modern Rust microservice architecture with specific crate recommendations.
 
 ### Example 6: Reverse-engineer and immediately implement
 
@@ -565,6 +587,16 @@ between the two projects.
 
 ### Example 8: Generate a prompt for a specific use case
 
+You want a creation prompt focused on the testing infrastructure of a
+project:
+
+```text
+/reverse example/well-tested-app --tech rust-proptest
+```
+
+The generated prompt emphasises how to recreate the project's testing
+approach using the specified testing tools.
+
 ### Example 9: Reverse-engineer a GitLab repository
 
 ```text
@@ -578,31 +610,23 @@ between the two projects.
 /reverse https://gitlab.com/my-namespace/my-project --tech python --create my-py-port
 ```
 
-You want a creation prompt focused on the testing infrastructure of a
-project:
-
-```text
-/reverse example/well-tested-app --tech "Rust with proptest and mockall"
-```
-
-The generated prompt emphasises how to recreate the project's testing
-approach using the specified testing tools.
-
 ---
 
 ## 12. Tips for good results
 
-- **Use specific tech stacks.** `--tech rust` is good, but
-  `--tech "Rust with axum and SQLx"` gives the LLM more guidance and
-  produces a more targeted prompt.
+- **Use specific tech stacks.** `--tech rust` is good, but unquoted values
+  end at the first space — quote multi-word stacks
+  (`--tech "Rust with axum and SQLx"`) or use hyphenated descriptors
+  like `--tech rust-axum-sqlx` for more targeted prompts.
 - **Review the generated prompt before acting.** The synthetic prompt is a
   starting point — review it for accuracy and adjust before feeding it to
   a coding agent.
 - **Use `--create` for structured workflows.** Chaining into `/spec create`
   gives you a formal spec, plan, and test plan — much more actionable than
   a raw prompt.
-- **Set `GITHUB_TOKEN` for frequent use.** The unauthenticated rate limit is
-  60 requests/hour; authenticated is 5,000/hour.
+- **Set `GITHUB_TOKEN` for frequent use.** A token is required to run the
+  command at all; the unauthenticated API allows only 60 requests/hour,
+  authenticated is 5,000/hour.
 - **Use full URLs for clarity.** `/reverse https://github.com/owner/repo`
   is unambiguous; `/reverse owner/repo` is faster to type.
 - **Combine with `/spec` commands.** After `--create`, use `/spec validate`,

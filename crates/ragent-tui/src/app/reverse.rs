@@ -29,6 +29,52 @@ struct ReverseArgs {
     depth: Option<String>,
 }
 
+/// Tokenize `/reverse` arguments into shell-like tokens: runs of
+/// whitespace split tokens unless they appear inside single or double
+/// quotes, so `--tech "Next.js + Rails"` yields the single token
+/// `Next.js + Rails`.  The quote characters themselves are stripped;
+/// adjacent unquoted text is preserved (`--tech"Next.js"` -> `--techNext.js`
+/// mirrors POSIX behaviour, though in practice values are separated).
+fn tokenize_reverse_args(args: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut quote: Option<char> = None;
+
+    for ch in args.chars() {
+        match quote {
+            Some(q) if ch == q => {
+                // Closing quote: if the quoted span was empty and carried no
+                // unquoted text (`""`), it does not form a token.
+                if current.is_empty() {
+                    in_token = false;
+                }
+                quote = None;
+            }
+            Some(_) => current.push(ch),
+            None if ch == '\'' || ch == '"' => {
+                quote = Some(ch);
+                in_token = true;
+            }
+            None if ch.is_whitespace() => {
+                if in_token {
+                    tokens.push(std::mem::take(&mut current));
+                    in_token = false;
+                }
+            }
+            None => {
+                current.push(ch);
+                in_token = true;
+            }
+        }
+    }
+
+    if in_token {
+        tokens.push(current);
+    }
+    tokens
+}
+
 /// Parse `/reverse` arguments.
 ///
 /// Accepts:
@@ -39,6 +85,8 @@ struct ReverseArgs {
 /// - `/reverse help` — usage message
 ///
 /// Flags may appear in any order after the positional repo argument.
+/// Quoted flag values (single or double quotes) are captured whole, so
+/// `--tech "Next.js + Rails"` yields the stack `Next.js + Rails`.
 fn parse_reverse_args(args: &str) -> Option<ReverseArgs> {
     let args = args.trim();
     if args.is_empty() || args == "help" {
@@ -50,25 +98,25 @@ fn parse_reverse_args(args: &str) -> Option<ReverseArgs> {
     let mut create: Option<String> = None;
     let mut depth: Option<String> = None;
 
-    let mut tokens = args.split_whitespace().peekable();
+    let mut tokens = tokenize_reverse_args(args).into_iter();
     while let Some(tok) = tokens.next() {
-        match tok {
+        match tok.as_str() {
             "--tech" => {
                 let val = tokens.next()?;
-                tech = Some(val.to_string());
+                tech = Some(val);
             }
             "--create" => {
                 let val = tokens.next()?;
-                create = Some(val.to_string());
+                create = Some(val);
             }
             "--depth" => {
                 let val = tokens.next()?;
-                depth = Some(val.to_string());
+                depth = Some(val);
             }
             _ => {
                 // First non-flag token is the repo identifier.
                 if repo_input.is_none() {
-                    repo_input = Some(tok.to_string());
+                    repo_input = Some(tok);
                 }
             }
         }
@@ -488,7 +536,8 @@ fn reverse_help_message() -> String {
        - HTTPS URL: `https://github.com/owner/repo` or `https://gitlab.com/ns/proj`\n\
        - SSH URL: `git@github.com:owner/repo.git` or `git@gitlab.com:ns/proj.git`\n\n\
      **Optional flags:**\n\
-     - `--tech <stack>` — constrain the generated prompt to a technology stack\n\
+     - `--tech <stack>` — constrain the generated prompt to a technology \
+     stack (quote values containing spaces, e.g. `--tech \"Next.js + Rails\"`)\n\
      - `--create <name>` — after generation, chain into `/spec create <name>`\n\
      - `--depth <N>` — directory levels to fetch (1–10, default 1)\n\n\
      **Prerequisites:**\n\
@@ -519,6 +568,40 @@ mod tests {
         assert_eq!(args.repo_input, "octocat/Hello-World");
         assert_eq!(args.tech.as_deref(), Some("Rust"));
         assert!(args.create.is_none());
+    }
+
+    #[test]
+    fn test_parse_reverse_args_with_quoted_tech_double_quotes() {
+        let args = parse_reverse_args("octocat/Hello-World --tech \"Next.js + Rails\"").unwrap();
+        assert_eq!(args.repo_input, "octocat/Hello-World");
+        assert_eq!(args.tech.as_deref(), Some("Next.js + Rails"));
+    }
+
+    #[test]
+    fn test_parse_reverse_args_with_quoted_tech_single_quotes() {
+        let args = parse_reverse_args("octocat/Hello-World --tech 'Vue + Vite'").unwrap();
+        assert_eq!(args.tech.as_deref(), Some("Vue + Vite"));
+    }
+
+    #[test]
+    fn test_tokenize_reverse_args_preserves_inner_quotes() {
+        let tokens = tokenize_reverse_args("repo --tech \"a 'b' c\" --depth 2");
+        assert_eq!(
+            tokens,
+            vec![
+                "repo".to_string(),
+                "--tech".to_string(),
+                "a 'b' c".to_string(),
+                "--depth".to_string(),
+                "2".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_reverse_args_empty_quoted_value_splits_nothing() {
+        let tokens = tokenize_reverse_args("--tech \"\" Rust");
+        assert_eq!(tokens, vec!["--tech".to_string(), "Rust".to_string(),]);
     }
 
     #[test]

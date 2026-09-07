@@ -279,6 +279,38 @@ Note: When using blueprints, teammates are spawned automatically — do NOT re-s
 - `team_message` — Send direct message to a teammate
 - `team_read_messages` — Read inbox messages
 - `team_broadcast` — Send message to all teammates
+- `team_assign_task` — Lead assigns a specific task to a teammate
+- `team_idle` — Teammate signals it has no more work
+- `team_cleanup` — Lead tears the team down after all teammates have stopped
+
+### 6.7 Plan approval (optional)
+
+When `settings.require_plan_approval` is `true` in the team config,
+teammates must get sign-off before mutating work:
+
+1. Teammate calls `team_submit_plan` with its plan.
+2. The lead reviews and calls `team_approve_plan` (accept or reject).
+   Member state tracks `plan_status` / `plan_request_id` for correlation.
+
+### 6.8 Team memory
+
+Teammates can persist shared notes via `team_memory_read` /
+`team_memory_write`, backed by the SQLite memory store (default bucket
+`MEMORY.md`). Access is gated by the member's `memory` scope
+(`"user"` or `"project"` in the member profile); members with
+`"none"` cannot use team memory.
+
+### 6.9 Per-teammate model override
+
+Team members accept a `model_override` field (and `team_spawn` a matching
+parameter) to pin a teammate to a specific `provider:model` instead of the
+globally selected model.
+
+### 6.10 Team hooks
+
+`TeamSettings.hooks` accepts hook entries (`HookEvent` + command) that the
+runtime executes via `run_team_hook` at team lifecycle events — the same
+`HookEntry` format as global session hooks.
 
 ---
 
@@ -329,7 +361,9 @@ Columns:
 
 - **id**: Short agent ID (last 8 chars of session UUID for lead, tm-NNN for teammates)
 - **name**: Teammate name (35 chars max) or agent type for lead
-- **status**: `active`, `working`, `idle`, `failed`, `spawning`
+- **status**: `active`, `working`, `idle`, `failed`, `spawning` (a
+  `stopped` state also exists on disk for shutdown teammates and is
+  filtered from the panel)
 - **elapsed**: Time since teammate was created
 - **steps**: Number of tool calls executed. This count reflects individual
   tool invocations, not agent loop iterations. A single loop step may contain
@@ -429,9 +463,11 @@ This section shows representative file formats used by Teams.
 
 ```json
 {
+  "schema_version": 1,
   "name": "feature-squad",
   "lead_session_id": "sess-lead-123",
   "created_at": "2026-03-19T10:00:00Z",
+  "updated_at": "2026-03-19T10:21:00Z",
   "status": "active",
   "members": [
     {
@@ -442,16 +478,24 @@ This section shows representative file formats used by Teams.
       "status": "working",
       "current_task_id": "task-001",
       "plan_status": "none",
+      "model_override": null,
+      "memory_scope": "project",
       "created_at": "2026-03-19T10:01:00Z"
     }
   ],
   "settings": {
     "max_teammates": 8,
     "require_plan_approval": false,
-    "auto_claim_tasks": true
+    "auto_claim_tasks": true,
+    "hooks": []
   }
 }
 ```
+
+> **Schema note:** `TeamConfig` and `Task` are deserialised with
+> `deny_unknown_fields`, so hand-edited files containing unknown keys (e.g.
+> a typo'd field name) are rejected on load. Fields omitted above all carry
+> `#[serde(default)]` values.
 
 ### 10.2 Example `tasks.json`
 
@@ -474,7 +518,7 @@ This section shows representative file formats used by Teams.
       "id": "task-002",
       "title": "Implement UI flow",
       "description": "Build screens and interactions.",
-      "status": "inprogress",
+      "status": "in_progress",
       "assigned_to": "tm-002",
       "depends_on": ["task-001"],
       "created_at": "2026-03-19T10:04:00Z",
@@ -545,12 +589,18 @@ task-002      Implement UI flow                   in-progress   tm-002
 task-003      Add feature regression tests        pending       ---
 ```
 
-Status meanings:
+Status meanings (canonical on-disk values in `tasks.json` are snake_case;
+the table renders them with hyphens):
 
 - `pending`: waiting to be claimed
-- `in-progress`: currently being worked
+- `in_progress`: currently being worked (displayed as `in-progress`)
 - `completed`: finished
 - `cancelled`: intentionally stopped
+
+Completion is idempotent for the completing agent: the same agent calling
+`team_task_complete` again succeeds without mutation (the task records
+`completed_by`), but a *different* agent completing an already-completed
+task is rejected.
 
 ---
 
@@ -702,7 +752,7 @@ With a default agent type:
 
 ## 16) Related docs and examples
 
-- Team guide: `docs/teams.md`
+- Team guide: `docs/userdocs/TEAMS.md`
 - Quickstart: `QUICKSTART.md` (Teams section)
 - Blueprint location: `[PROJECT]/.ragent/blueprints/teams/` or `~/.ragent/blueprints/teams/`
 - Example bundles:

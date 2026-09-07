@@ -48,6 +48,20 @@ pub struct Config {
     /// Per-agent configuration overrides keyed by agent name.
     #[serde(default)]
     pub agent: HashMap<String, AgentConfig>,
+    /// Agentic loop defaults (spec `agentloop`).
+    ///
+    /// Loop-level fallbacks applied to every `/loop` run: the step budget
+    /// ([`LoopConfig::max_steps`], default 512), the token cost budget
+    /// ([`LoopConfig::cost_limit`]), the recoverable-error retry allowance
+    /// ([`LoopConfig::error_retry_allowance`], default 3), and the
+    /// destructive-action checkpoint switch ([`LoopConfig::checkpoints`],
+    /// default on).
+    #[serde(
+        default,
+        rename = "loop",
+        skip_serializing_if = "LoopConfig::is_default"
+    )]
+    pub r#loop: LoopConfig,
     /// User-defined slash-command shortcuts.
     #[serde(default)]
     pub command: HashMap<String, CommandDef>,
@@ -307,7 +321,8 @@ pub struct ToolVisibilityConfig {
     /// (tracked by [`ToolVisibilitySpecified::browser`]).
     pub browser: bool,
     /// Finance tools (`stock_quote`, `stock_history`, `stock_fundamentals`,
-    /// `currency_rate`, `currency_history`, `stock_search`, `stock_options`).
+    /// `stock_recommendations`, `currency_rate`, `currency_history`,
+    /// `stock_search`, `stock_options`).
     /// Default `true` — the finance tools are visible by default.
     /// When serialised, this field is only written if the user explicitly set it
     /// (tracked by [`ToolVisibilitySpecified::finance`]).
@@ -522,6 +537,117 @@ impl AgentPerfConfig {
     }
 }
 
+/// Agentic loop defaults (spec `agentloop`, FR-013 - FR-015).
+///
+/// Configured under the `loop` key in `ragent.json`. These are the
+/// loop-level fallbacks applied to every `/loop` run unless the setup
+/// dialog overrides them; a per-agent `agent.<name>.max_steps` still wins
+/// over the loop-level step budget:
+///
+/// ```json
+/// {
+///   "loop": {
+///     "max_steps": 512,
+///     "cost_limit": 200000,
+///     "error_retry_allowance": 3,
+///     "checkpoints": true
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LoopConfig {
+    /// Maximum loop iterations before the loop stops with termination
+    /// status `budget_exhausted` (FR-013). Default: 512.
+    #[serde(default = "default_loop_max_steps")]
+    pub max_steps: u32,
+    /// Token cost budget: maximum accumulated tokens (input + output)
+    /// across a loop run before it stops with termination status
+    /// `budget_exhausted` (FR-014). `None` (default) means no token-cost
+    /// gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_limit: Option<u64>,
+    /// Consecutive recoverable-failure tolerance: the loop stops with
+    /// termination status `error` once consecutive recoverable failures
+    /// exceed this count (FR-012). Default: 3.
+    #[serde(default = "default_error_retry_allowance")]
+    pub error_retry_allowance: u32,
+    /// Whether destructive-action checkpoints are forced before destructive
+    /// tool calls even when an allow rule would auto-approve them (FR-015).
+    /// Default: `true`.
+    #[serde(default = "default_true")]
+    pub checkpoints: bool,
+    /// Seconds a forced destructive-action checkpoint prompt waits for the
+    /// user's reply before the prompt is treated as denial (FR-015: the
+    /// intervention defaults to the safe choice). Default: 120.
+    #[serde(default = "default_checkpoint_timeout_secs")]
+    pub checkpoint_timeout_secs: u32,
+}
+
+/// Loop checkpoint-prompt default: 120 seconds before a timeout counts as
+/// denial (FR-015).
+pub const DEFAULT_CHECKPOINT_TIMEOUT_SECS: u32 = 120;
+
+const fn default_checkpoint_timeout_secs() -> u32 {
+    DEFAULT_CHECKPOINT_TIMEOUT_SECS
+}
+
+/// Loop step-budget default: 512 iterations (FR-013).
+pub const DEFAULT_LOOP_MAX_STEPS: u32 = 512;
+
+/// Loop retry-allowance default: 3 consecutive recoverable failures
+/// (FR-012).
+pub const DEFAULT_ERROR_RETRY_ALLOWANCE: u32 = 3;
+
+const fn default_loop_max_steps() -> u32 {
+    DEFAULT_LOOP_MAX_STEPS
+}
+
+const fn default_error_retry_allowance() -> u32 {
+    DEFAULT_ERROR_RETRY_ALLOWANCE
+}
+
+impl Default for LoopConfig {
+    fn default() -> Self {
+        Self {
+            max_steps: DEFAULT_LOOP_MAX_STEPS,
+            cost_limit: None,
+            error_retry_allowance: DEFAULT_ERROR_RETRY_ALLOWANCE,
+            checkpoints: true,
+            checkpoint_timeout_secs: DEFAULT_CHECKPOINT_TIMEOUT_SECS,
+        }
+    }
+}
+
+impl LoopConfig {
+    /// Returns `true` when every field equals the compiled default, so the
+    /// `loop` block can be omitted from the serialised `ragent.json`.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Merge `other` (the higher-precedence overlay) into `self`: fields
+    /// the overlay configured away from the compiled default take
+    /// precedence, untouched overlay fields keep the base (global) values.
+    pub fn merge(&mut self, other: &Self) {
+        if other.max_steps != DEFAULT_LOOP_MAX_STEPS {
+            self.max_steps = other.max_steps;
+        }
+        if other.cost_limit.is_some() {
+            self.cost_limit = other.cost_limit;
+        }
+        if other.error_retry_allowance != DEFAULT_ERROR_RETRY_ALLOWANCE {
+            self.error_retry_allowance = other.error_retry_allowance;
+        }
+        if !other.checkpoints {
+            self.checkpoints = false;
+        }
+        if other.checkpoint_timeout_secs != DEFAULT_CHECKPOINT_TIMEOUT_SECS {
+            self.checkpoint_timeout_secs = other.checkpoint_timeout_secs;
+        }
+    }
+}
+
 impl Default for ToolVisibilityConfig {
     fn default() -> Self {
         Self {
@@ -688,6 +814,7 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
             "stock_quote",
             "stock_history",
             "stock_fundamentals",
+            "stock_recommendations",
             "currency_rate",
             "currency_history",
             "stock_search",
@@ -1079,6 +1206,9 @@ pub struct AgentConfig {
     #[serde(default)]
     pub permission: Vec<crate::permission::PermissionRule>,
     /// Maximum agentic loop iterations.
+    ///
+    /// Per-agent override of the loop step budget; when unset the
+    /// loop-level default applies ([`LoopConfig::max_steps`], default 512).
     pub max_steps: Option<u32>,
     /// Skill names to preload into this agent's prompt context.
     #[serde(default)]
@@ -2098,6 +2228,10 @@ impl Config {
         // Pie gap flags: OR semantics — a flag enabled in either base or overlay
         // stays enabled. All flags default to false (opt-in, FR-016/FR-018).
         base.piegap.merge(&overlay.piegap);
+
+        // Loop defaults: overlay takes precedence for explicitly set fields
+        // (values configured away from the compiled defaults).
+        base.r#loop.merge(&overlay.r#loop);
 
         // Research settings: overlay takes precedence for explicitly set fields.
         // Contact email and OA threshold override base when present; the recovery

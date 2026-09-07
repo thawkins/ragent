@@ -8,7 +8,7 @@ mod state;
 pub use self::state::*;
 
 mod helpers;
-pub use helpers::{image_dimensions_or_placeholder, sanitize_for_display};
+pub use helpers::{hard_break_lines, image_dimensions_or_placeholder, sanitize_for_display};
 
 mod bench;
 mod compress;
@@ -16,7 +16,8 @@ pub mod cron;
 mod event_handler;
 mod init;
 mod input_handler;
-mod md_worker;
+mod loop_dialog;
+pub mod md_worker;
 pub use self::md_worker::MdWorker;
 
 mod models;
@@ -33,6 +34,12 @@ mod session_ops;
 pub mod skillgen;
 mod slash;
 mod swarm;
+
+pub use self::loop_dialog::{
+    LoopOverrides, LoopSetupField, LoopSetupState, apply_loop_overrides, build_spec_from_state,
+    handle_loop_setup_key, open_loop_setup, parse_comma_list, parse_loop_flags, parse_optional_u64,
+    show_loop_help,
+};
 
 /// Shared helpers for listing installed team blueprints.
 pub mod blueprints;

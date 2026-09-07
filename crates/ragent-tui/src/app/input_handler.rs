@@ -1511,7 +1511,18 @@ impl App {
                 InputAction::CancelAgent => {
                     if let Some(ref flag) = self.cancel_flag {
                         flag.store(true, Ordering::Relaxed);
-                        self.status = "halting agent…".to_string();
+                        // T-011 (FR-016): an active goal-driven loop stops at
+                        // the next inter-stage safe point with status
+                        // `interrupted` instead of dying silently.
+                        if let Some(ref sid) = self.session_id
+                            && self.session_processor.request_loop_interrupt(sid)
+                        {
+                            self.status =
+                                "loop: interrupt requested — stopping after the current stage…"
+                                    .to_string();
+                        } else {
+                            self.status = "halting agent…".to_string();
+                        }
                         self.push_log_no_agent(
                             LogLevel::Warn,
                             "User pressed Esc or Ctrl+X — halting agent".to_string(),
@@ -1536,6 +1547,68 @@ impl App {
                             "forcecleanup cancelled".to_string(),
                         );
                         self.status = "forcecleanup cancelled".to_string();
+                    }
+                }
+                InputAction::ConfirmRollback => {
+                    if let Some(offer) = self.pending_rollback.take() {
+                        // FR-020 / T-013: restore the workspace from the
+                        // pre-loop capture. The processor drops the capture
+                        // on success and keeps it on restore failure so a
+                        // retry is possible.
+                        let sid = offer.session_id.clone();
+                        let processor = self.session_processor.clone();
+                        self.status = "rolling back to pre-loop snapshot…".to_string();
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            format!(
+                                "rollback accepted · restoring {} file{}",
+                                offer.files.len(),
+                                if offer.files.len() == 1 { "" } else { "s" }
+                            ),
+                        );
+                        tokio::spawn(async move {
+                            match processor.rollback_loop(&sid).await {
+                                Ok(true) => {
+                                    tracing::info!(
+                                        session_id = %sid,
+                                        "rollback completed (FR-020): pre-loop snapshot restored"
+                                    );
+                                }
+                                Ok(false) => {
+                                    tracing::info!(
+                                        session_id = %sid,
+                                        "rollback had no pending capture (nothing to restore)"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        session_id = %sid,
+                                        error = %e,
+                                        "rollback failed; the capture is kept for retry"
+                                    );
+                                }
+                            }
+                        });
+                    }
+                }
+                InputAction::CancelRollback => {
+                    if self.pending_rollback.take().is_some() {
+                        // FR-020 / T-013: declining keeps every change the
+                        // loop made; the pending capture is dropped so no
+                        // later rollback can resurrect it.
+                        let processor = self.session_processor.clone();
+                        tokio::spawn(async move {
+                            processor.clear_loop_captures().await;
+                        });
+                        self.append_assistant_text(
+                            "Rollback declined — all changes made by the loop are kept.",
+                        );
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            "rollback declined; changes kept".to_string(),
+                        );
+                        self.status = "rollback declined — changes kept".to_string();
+                        self.needs_redraw = true;
                     }
                 }
                 InputAction::ConfirmRouterSave => {

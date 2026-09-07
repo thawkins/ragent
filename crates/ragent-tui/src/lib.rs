@@ -245,6 +245,12 @@ pub async fn run_tui(
     let mut terminal = Terminal::new(backend)?;
     startup.record("Terminal setup", t0.elapsed());
 
+    // Shared counter of dropped broadcast events: the bridge task increments
+    // it on every `Lagged` observation so `poll_active_tasks_reconcile` can
+    // repair the Agents panel from the task registry (a lag burst can drop
+    // `SubagentStart`/`SubagentComplete`, leaving the button count stale).
+    let tui_event_lag = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
     let t0 = Instant::now();
     let mut app = App::new(
         event_bus.clone(),
@@ -256,6 +262,10 @@ pub async fn run_tui(
         db_path,
     );
     let app_new_elapsed = t0.elapsed();
+
+    // Hand the bridge's lag counter to the app so the reconcile poll can
+    // detect dropped broadcast events and repair the Agents panel.
+    app.set_tui_event_lag_counter(Arc::clone(&tui_event_lag));
 
     // Clean up orphaned clipboard image temp files before the session starts.
     // This is a one-time, best-effort sweep; individual errors are logged.
@@ -316,7 +326,13 @@ pub async fn run_tui(
     // every event regardless of drain speed.
     let (event_tx, mut event_rx) =
         tokio::sync::mpsc::unbounded_channel::<ragent_agent::event::Event>();
+    // Shared counter of dropped broadcast events: the bridge task increments
+    // it on every `Lagged` observation so `poll_active_tasks_reconcile` can
+    // repair the Agents panel from the task registry (a lag burst can drop
+    // `SubagentStart`/`SubagentComplete`, leaving the button count stale).
+    let tui_event_lag = Arc::new(std::sync::atomic::AtomicU64::new(0));
     {
+        let lag_counter = Arc::clone(&tui_event_lag);
         let mut bus_rx = event_bus.subscribe();
         tokio::spawn(async move {
             loop {
@@ -327,6 +343,7 @@ pub async fn run_tui(
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        lag_counter.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
                         tracing::warn!("{n} broadcast events skipped in TUI bridge task");
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -767,6 +784,10 @@ pub async fn run_tui(
         // `*Finished` events after a broadcast Lagged burst).
         app.poll_stale_spinners();
 
+        // Re-sync the Agents panel with the task registry after a broadcast
+        // lag burst (dropped SubagentStart/Complete events).
+        app.poll_active_tasks_reconcile();
+
         // Transition slash-command statuses to "ready" after a grace period.
         app.poll_status_expiry();
 
@@ -1009,6 +1030,11 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
     if app.swarm_state.is_some() {
         deadline = deadline.min(now + Duration::from_secs(2));
     }
+
+    // Periodic Agents-panel reconcile: the poll runs on its own interval so
+    // the button/count self-heals even when no event-bus lag was observed.
+    deadline =
+        deadline.min(app.active_tasks_reconcile_last + crate::app::AGENTS_RECONCILE_INTERVAL);
 
     // Cap at the idle redraw interval so that any missed needs_redraw still
     // renders within a reasonable window.

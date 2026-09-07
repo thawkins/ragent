@@ -1,5 +1,104 @@
 # Changelog
 
+## Version: 1.0.82
+
+### Added
+
+- **Agentic loop programming (`/loop`)** — this release ships the goal-driven
+  loop programming feature: a `LoopSpec`/`LoopTracker`/`StopCondition` state
+  machine that runs a goal to a stop condition (`completed`, `budget_exhausted`,
+  `error`, `interrupted`), a verification gate for verify commands, restriction
+  layers (tool set -> read-only -> scope, invalid globs failing closed),
+  pre-loop snapshot/git capture with post-loop rollback, and an interactive TUI
+  setup dialog. Configured via the `loop` section of `ragent.json`
+  (`loop.max_steps` 512 default, `cost_limit`, `error_retry_allowance`,
+  `checkpoints`, `checkpoint_timeout_secs`); documented in
+  `docs/howtos/loopprogramming.md`. One-shot `/loop <agent> [flags] <goal>`
+  accepts `--max-steps N`, `--cost_limit N`/`--cost-limit N`, and `--timeout N`.
+  See the "Uncommitted (post 1.0.81)" section below for the full change list
+  accumulated on the way to this release.
+
+### Changed
+
+- Version bump to 1.0.82 (agentic loop programming).
+- `cargo check` passes (only the pre-existing future-incompat notice for the external `attribute-derive-macro` crate).
+- `cargo audit` reports only the allowed warnings (unmaintained `ttf-parser`, unsound `lru`, yanked `chacha20` transitive dependencies); no actionable security failures.
+
+## Uncommitted (post 1.0.81)
+
+Working-tree changes (staged + unstaged) on top of commit `429c9190`
+("Version: 1.0.81 - updated codeindex indexing tooling").
+
+### Added
+
+- **Goal-driven loop programming (`/loop`, spec agentloop)** — a goal-driven
+  agentic loop that runs a spec to a stop condition: `LoopSpec`/`LoopTracker`/
+  `StopCondition` state machine (`crates/ragent-agent/src/session/loop_state.rs`),
+  pre-loop snapshot/git capture with rollback (`loop_capture.rs`, FR-018/FR-020),
+  a verification gate for verify commands (`verification.rs`, 600 s timeout,
+  head 8000 + tail 2000 output capture), `build_goal_loop_section` system-prompt
+  injection (prompt_builders.rs), `LoopConfig` tunables in `ragent.json`
+  (`loop.max_steps` 512, `cost_limit`, `error_retry_allowance` 3, `checkpoints`
+  true, `checkpoint_timeout_secs` 120), SSE `LoopTerminated`/`LoopChangeSummary`
+  mappings, and the TUI interactive setup dialog + rollback flow
+  (`loop_dialog.rs`, `test_loop_dialog.rs`, `test_rollback_flow.rs`).
+  Loop runs enforce restrictions in `deny_reason` order: tool set -> read-only
+  -> scope, with invalid globs failing closed.
+- **`/loop` one-shot flags and higher step budget** — the one-shot form
+  `/loop <agent> [flags] <goal>` now accepts `--max-steps N` (step budget),
+  `--cost_limit N` / `--cost-limit N` (token-cost budget), and `--timeout N`
+  (checkpoint-prompt seconds), in any position with `--flag value` or
+  `--flag=value`; invalid values stop the loop from starting and name the
+  offending flag (`LoopSpec.checkpoint_timeout_secs` override plumbed through
+  `SessionProcessor::start_loop` into the permission layer). The default step
+  budget (`loop.max_steps`) was raised from 25 to 512.
+- **How-to documentation set** — three new how-tos in `docs/howtos/`:
+  `reactagent.md` (core per-turn Reason+Act+Observe loop, explicitly not
+  `/loop`), `loopprogramming.md` (the `/loop` goal-driven feature), and
+  `office.md` (office + PDF tool families: `office_read/write/info`,
+  `libre_read/write/info`, `pdf_read/write`, formats, examples, and
+  `tool_visibility.office` configuration).
+- **How-to documentation accuracy sweep** — all 18 how-to manuals in
+  `docs/howtos/` were re-verified against the source code and corrected where
+  they had drifted: bash security-layer execution order, hook timeout
+  behaviour (`PreToolUse` runs unwrapped), tool category counts (168 static
+  tools + dynamic `mcp_tool`), the finance tool-visibility family (now 8
+  tools including `stock_recommendations`), quoted `--tech` values in
+  `/reverse`, config sections 7.35 `loop` / 7.36 `activity_log` and
+  `dirs.allowed_roots`, and stale cross-references. The PDF set under
+  `docs/howtos/pdf/` was regenerated from the updated sources (18 A4
+  xelatex PDFs).
+
+### Fixed
+
+- **`stock_recommendations` was not hidden by the finance visibility family**
+  — `tool_family_names("finance")` listed 7 tools and omitted
+  `stock_recommendations`, so switching the finance family off still
+  advertised `stock_recommendations` to the model. It is now a member of the
+  family (8 tools), with a regression assertion in
+  `test_tool_visibility.rs` and updated `docs/howtos/tool-visibility.md`.
+- **Quoted `--tech` values silently truncated in `/reverse`** —
+  `parse_reverse_args` split the argument string on whitespace only, so
+  `/reverse owner/repo --tech "Next.js + Rails"` silently truncated the
+  stack to `Next.js`. A new shell-like tokenizer (`tokenize_reverse_args`)
+  groups single/double-quoted spans into one token and strips the quote
+  characters; an empty quoted value (`""`) does not form a token. Help text
+  and `docs/howtos/reverse.md` now document the quoting requirement.
+- **Agents button not enabling / showing the sub-agent count with many
+  concurrent sub-agents** — the v1.0.81 reconcile only fired when the TUI's
+  event-bus bridge observed a broadcast `Lagged` burst, but the bridge
+  forwards into an unbounded mpsc and rarely lags itself, and `SubagentStart`
+  events for nested sub-agents can be filtered by the session-lineage guard
+  before reaching `active_tasks` — so with 18 instantiating sub-agents the
+  Agents button stayed disabled with no count for the entire run. The
+  reconcile poll now also fires periodically (every 1.5 s,
+  `AGENTS_RECONCILE_INTERVAL`) independent of lag detection: it fetches the
+  authoritative `AgentManager::tasks_snapshot` off-thread and merges it
+  (re-adding missing running agents, removing ghosts), and the TUI event
+  loop wakes at the reconcile deadline so the panel self-heals within ~1.5 s
+  regardless of the loss cause. The merge is idempotent and logs only on
+  change, so the periodic path is cheap and silent when already in sync.
+
 ## Version: 1.0.81
 
 ### Changed

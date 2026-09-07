@@ -1,13 +1,14 @@
 # ragent Tools Reference
 
-A complete catalog of every tool available to ragent agents, organized by
+A catalog of the tools available to ragent agents, organized by
 category. Each tool includes its name, description, use cases, parameter
 schema, the system instruction the model receives, and a worked example.
 
-> **Scope:** Tool names, schemas, and usage patterns. For TUI workflow see
+> **Scope:** Tool names, schemas, and usage patterns (168 statically
+> registered tools plus the dynamic `mcp_tool`). For TUI workflow see
 > `docs/howtos/tutorial.md`. For hiding/exposing tool families see
 > `docs/howtos/tool-visibility.md`. For team coordination see
-> `docs/howtos/howto_teams.md`.
+> `docs/howtos/teams.md`.
 
 ---
 
@@ -16,7 +17,7 @@ schema, the system instruction the model receives, and a worked example.
 | # | Category | Count | Visibility Switch |
 |---|----------|-------|-------------------|
 | 1 | File Operations | 18 | always on |
-| 2 | Shell | 5 | always on |
+| 2 | Shell | 4 | always on |
 | 3 | Search | 1 | always on |
 | 4 | Web | 3 | always on |
 | 5 | Browser Automation | 1 | `browser` |
@@ -37,9 +38,10 @@ schema, the system instruction the model receives, and a worked example.
 | 20 | MCP | 1 | always on |
 | 21 | Skills | 1 | always on |
 | 22 | Interactive | 4 | always on |
-| 23 | Finance | 8 | `finance` |
-| 24 | Communications | 2 | always on |
-| 25 | Plot | 6 | always on |
+| 23 | Utility | 1 | always on |
+| 24 | Finance | 8 | `finance` |
+| 25 | Communications | 2 | always on |
+| 26 | Plot | 6 | always on |
 
 Switches default `off` for `github`, `gitlab`, `teams`, `agents`, `plan`,
 `office`; the rest default `on`. See `docs/howtos/tool-visibility.md`.
@@ -91,7 +93,6 @@ edit file_path="src/main.rs" old_string="fn main() {" new_string="fn main() -> R
 | `bash` | Execute a shell command (7-layer security). |
 | `bash_reset` | Reset persistent shell state. |
 | `bg` | Manage background shell tasks (spawn, list, wait, cancel). |
-| `run_code` | Alias for `bash` accepting `code` as `command`. |
 | `open` | Open a file/folder/URL via the desktop handler. |
 
 **Use cases:** running builds, tests, git operations, long-running tasks.
@@ -369,7 +370,7 @@ pdf_read path="spec.pdf"
 | `team_memory_read` | Read team memory bucket. |
 | `team_memory_write` | Write team memory bucket. |
 
-See `docs/howtos/howto_teams.md` for the full team manual.
+See `docs/howtos/teams.md` for the full team manual.
 
 ---
 
@@ -498,7 +499,15 @@ get_env name="ANTHROPIC_API_KEY"
 
 ---
 
-## 23. Finance
+## 23. Utility
+
+| Tool | Description |
+|------|-------------|
+| `model_info` | Report the active provider/model, capabilities, context window, and cost tier. |
+
+---
+
+## 24. Finance
 
 | Tool | Description |
 |------|-------------|
@@ -522,7 +531,7 @@ currency_rate base="USD" quote="EUR"
 
 ---
 
-## 24. Communications
+## 25. Communications
 
 | Tool | Description |
 |------|-------------|
@@ -539,7 +548,7 @@ send_channel_message action="send" message="Build passed" channel="telegram"
 
 ---
 
-## 25. Plot
+## 26. Plot
 
 Scientific/terminal plotting rendered off-screen to a text canvas via
 `ratatui-plt`. Every tool returns the canvas as plain text and mirrors it into
@@ -579,7 +588,7 @@ plot_heatmap grid={"values":[[0,1],[2,3]]} colormap="viridis"
 |----------|--------|
 | `docs/howtos/tutorial.md` | End-to-end TUI workflow tutorial |
 | `docs/howtos/tool-visibility.md` | Hiding and exposing tool families |
-| `docs/howtos/howto_teams.md` | Multi-agent team coordination |
+| `docs/howtos/teams.md` | Multi-agent team coordination |
 | `docs/howtos/communications.md` | Gmail and messaging channel tools |
 | `docs/howtos/finance.md` | Stock and currency tools |
 | `docs/howtos/spec.md` | Spec management and SDD workflow |

@@ -18,7 +18,7 @@ This document covers:
 
 ## Overview
 
-The tool is implemented in `crates/ragent-tools-core/src/bash.rs` (~1500 lines) as the
+The tool is implemented in `crates/ragent-tools-core/src/bash.rs` (~1750 lines) as the
 `BashTool` struct. It is a unit struct with no fields of its own — all behaviour is
 driven by the global `ragent_config` at execution time, populated from your config files.
 
@@ -116,16 +116,16 @@ The tool reads from this snapshot at execution time through helpers such as
 
 ## The seven-layer security model
 
-Every command is validated by seven layers, in order. The table below summarises them;
-full detail follows.
+Every command is validated by seven layers; all seven must pass. The table below
+summarises them in the order the checks actually execute, full detail follows.
 
-| Layer | Check                   | Source                              | Bypassed by YOLO | Bypassed by allowlist |
+| Order | Check                   | Source                              | Bypassed by YOLO | Bypassed by allowlist |
 | ----- | ----------------------- | ----------------------------------- | ---------------- | --------------------- |
 | 1     | Safe-command whitelist  | `SAFE_COMMANDS` const               | —                | —                     |
 | 2     | Banned commands         | `BANNED_COMMANDS` const             | yes              | **yes**               |
-| 3     | Denied commands & patterns | `DENIED_COMMANDS`, `DENIED_COMMAND_PATTERNS`, `DENIED_PATTERNS` consts | yes | no |
-| 4     | Directory-escape        | `is_directory_escape_attempt()`     | —                | —                     |
-| 5     | Syntax validation       | `validate_bash_syntax()`            | —                | —                     |
+| 3     | Directory-escape        | `is_directory_escape_attempt()`     | —                | —                     |
+| 4     | Syntax validation       | `validate_bash_syntax()`            | —                | —                     |
+| 5     | Denied commands & patterns | `DENIED_COMMANDS`, `DENIED_COMMAND_PATTERNS`, `DENIED_PATTERNS` consts | yes | no |
 | 6     | User denylist           | `matches_denylist()`                | yes              | no                    |
 | 7     | Obfuscation detection   | `validate_no_obfuscation()`         | yes              | no                    |
 
@@ -188,7 +188,28 @@ if contains_banned_command(command) {
 }
 ```
 
-### Layer 3 — Denied commands & patterns
+### Layer 3 — Directory-escape prevention
+
+`is_directory_escape_attempt(command, &ctx.working_dir)` rejects commands that `cd` or
+`pushd` out of the working directory via `..`, `~`, `$HOME`, `${HOME}`, or absolute `/`
+paths (and, on Windows, `C:\` / `\` drive roots). This keeps the agent's filesystem view
+inside its sandbox. This layer is **never** overridden.
+
+### Layer 4 — Syntax validation
+
+`validate_bash_syntax()` runs the command through the shell's own parser with a **1-second
+timeout** and `kill_on_drop(true)`:
+
+```bash
+bash -n -c "<command>"
+```
+
+A non-zero exit produces `Bash syntax error: <stderr>` and the command is rejected. This
+uses the actual discovered shell (not a hardcoded `sh`) so it works on Git Bash too.
+Syntax validation is **skipped for PowerShell** (which has its own runtime parser and no
+`-n` equivalent). This layer is never overridden.
+
+### Layer 5 — Denied commands & patterns
 
 Three sub-checks that are **never** bypassed by the allowlist (only by YOLO):
 
@@ -244,27 +265,6 @@ const DENIED_PATTERNS: &[&str] = &[
     "systemctl disable", "systemctl mask", "chattr +i",
 ];
 ```
-
-### Layer 4 — Directory-escape prevention
-
-`is_directory_escape_attempt(command, &ctx.working_dir)` rejects commands that `cd` or
-`pushd` out of the working directory via `..`, `~`, `$HOME`, `${HOME}`, or absolute `/`
-paths (and, on Windows, `C:\` / `\` drive roots). This keeps the agent's filesystem view
-inside its sandbox. This layer is **never** overridden.
-
-### Layer 5 — Syntax validation
-
-`validate_bash_syntax()` runs the command through the shell's own parser with a **1-second
-timeout** and `kill_on_drop(true)`:
-
-```bash
-bash -n -c "<command>"
-```
-
-A non-zero exit produces `Bash syntax error: <stderr>` and the command is rejected. This
-uses the actual discovered shell (not a hardcoded `sh`) so it works on Git Bash too.
-Syntax validation is **skipped for PowerShell** (which has its own runtime parser and no
-`-n` equivalent). This layer is never overridden.
 
 ### Layer 6 — User denylist
 
@@ -328,14 +328,24 @@ Before spawning, the tool acquires a process permit from a semaphore that caps
 with a separate cap of 5 concurrent tools, this prevents an agent from forking runaway
 process trees.
 
-### `kill_on_drop`
+### `kill_on_drop` and process groups
 
-Every process builder sets `kill_on_drop(true)`. This is critical: if a command times out
-or the future is dropped, the child process (and its descendants) are **killed** rather
-than being orphaned and left spinning at 100% CPU. This was a real bug fixed in v1.0.59 —
-repeated bash timeouts previously accumulated orphaned processes. The flag is now present
-at every spawn site (syntax check, all three execute branches, and all background-shell
-paths).
+Every process builder sets `kill_on_drop(true)` **and** `process_group(0)`.
+`kill_on_drop(true)` kills the *direct child* if the command's future is dropped;
+it does not reach grandchildren. On **timeout**, ragent additionally SIGKILLs
+the entire process group via `kill_process_group` (`libc::killpg`), so descendant
+processes (e.g. a deadlocked `cargo test` child) are reaped too. Without the
+timeout path, a plain dropped future kills the direct child only. This closed a
+real bug fixed in v1.0.60 — repeated bash timeouts previously accumulated orphaned
+processes. The flags are present at every spawn site (syntax check, all three
+execute branches, and all background-shell paths).
+
+### Post-exit drain and capture cap
+
+After a command exits, the tool drains remaining pipe output for up to a bounded
+window (`POST_EXIT_DRAIN_TIMEOUT_SECS` = 5 s) so trailing lines are captured
+without hanging, and per-stream in-memory capture is capped at `MAX_CAPTURE_BYTES`
+= 2 MiB to bound memory on chatty processes.
 
 ### Output truncation
 
@@ -416,4 +426,4 @@ either the global or project config it stays enabled (OR merge semantics).
 
 ---
 
-*This document describes the bash tool as implemented across ragent v1.0.59.*
+*This document describes the bash tool as implemented in ragent v1.0.81.*

@@ -151,7 +151,7 @@ fn bytes_to_tokens(bytes: usize) -> u64 {
 impl App {
     /// Clone the current agent info, apply the selected model/thinking settings,
     /// and inject the role-mode system prompt addition when active.
-    fn prepare_agent_for_dispatch(&self) -> ragent_agent::agent::AgentInfo {
+    pub(crate) fn prepare_agent_for_dispatch(&self) -> ragent_agent::agent::AgentInfo {
         let mut agent = self.agent_info.clone();
         self.apply_selected_model_and_thinking(&mut agent);
         if let Some(ref mode) = self.role_mode {
@@ -1001,6 +1001,7 @@ impl App {
             "status" => Some("[clear]".to_string()),
             "alog" => Some("[help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes]".to_string()),
             "log" => Some("[clear subagents|panics|research|editlog|help]".to_string()),
+            "loop" => Some("[help | <agent> <goal text...>]".to_string()),
             "blueprints" => Some("[help|list|<name>]".to_string()),
             "research" => Some(
                 "[create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [--clarify|--no-clarify] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--tier light|full|dissertation] [--depth shallow|standard|deep] [--iterations N] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--use-pdf] [--no-papers] [--web-time N] <name> <topic...>] | [list|open|search|show|delete|archive|cluster]".to_string(),

@@ -157,8 +157,9 @@ pub struct RagentAgentPayload {
 /// A single permission rule in a `ragent/agent/v1` payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RagentPermissionRule {
-    /// Permission type: `"read"`, `"edit"`, `"bash"`, `"web"`, `"question"`,
-    /// `"todo"`, `"plan_enter"`, `"plan_exit"`.
+    /// Permission type: `"read"`, `"edit"`, `"bash"`, `"web"`, `"ask_user"`,
+    /// `"todo"`, `"plan_enter"`, `"plan_exit"`. The legacy `"question"` string
+    /// still parses for old payloads but no tool uses it.
     pub permission: String,
     /// Glob pattern the rule applies to (e.g. `"**"`, `"src/**"`).
     pub pattern: String,

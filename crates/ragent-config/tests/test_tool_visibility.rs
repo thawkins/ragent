@@ -90,6 +90,7 @@ fn test_tool_family_names_returns_expected_family_members() {
     let finance = tool_family_names("finance").expect("finance family should exist");
     assert!(finance.contains(&"stock_quote"));
     assert!(finance.contains(&"stock_options"));
+    assert!(finance.contains(&"stock_recommendations"));
     assert!(tool_family_names("missing").is_none());
 }
 

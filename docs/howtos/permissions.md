@@ -49,7 +49,8 @@ This guide covers every part of that pipeline:
 
 Every tool call in ragent passes through a permission check before it
 executes. The check is performed by `PermissionChecker` (defined in
-`crates/ragent-config/src/permission.rs`) and the session processor's
+`crates/ragent-config/src/permission.rs` and re-exported via
+`crates/ragent-agent/src/permission/mod.rs`) and the session processor's
 `check_permission_with_prompt` helper (defined in
 `crates/ragent-agent/src/session/permissions.rs`).
 
@@ -59,7 +60,7 @@ The decision flow has five stages, applied in order:
 Tool Call
    │
    ▼
-1. Hardwired rules      ── codeindex, team, task, ask_user tools auto-approve
+1. Hardwired rules      ── codeindex, team, task, agent, ask_user, model_info tools auto-approve
    │
    ▼
 2. Auto-approve flags   ── --yes / auto_approve / YOLO short-circuit to Allow
@@ -117,7 +118,8 @@ A permission rule maps a **permission category** and a **glob pattern** to an
 | `pattern`     | string | Glob pattern matched against the resource path. `"*"` matches all.|
 | `action`      | string | What to do when the rule matches: `allow`, `deny`, or `ask`.      |
 
-The Rust struct lives in `crates/ragent-config/src/permission.rs`:
+The Rust struct lives in `crates/ragent-config/src/permission.rs`
+(re-exported through `crates/ragent-agent/src/permission/mod.rs`):
 
 ```rust
 pub struct PermissionRule {
@@ -214,7 +216,8 @@ variant, so rules keyed on `"read"` match tools that report `"file:read"`.
 | `mcp`                | `Permission::Custom`   | `mcp_tool`                               |
 | `none`               | (no permission needed) | `think`, `agent_complete`, `list_agents`, `wait_agents` |
 
-The `Permission` enum is defined in `crates/ragent-config/src/permission.rs`:
+The `Permission` enum is defined in `crates/ragent-config/src/permission.rs`
+(re-exported through `crates/ragent-agent/src/permission/mod.rs`):
 
 ```rust
 pub enum Permission {
@@ -253,10 +256,12 @@ pub fn default_permissions() -> PermissionRuleset {
         rule(Permission::Web, "*", PermissionAction::Ask),
         rule(Permission::PlanEnter, "*", PermissionAction::Ask),
         rule(Permission::Task, "*", PermissionAction::Allow),
-        // Auto-approve all codeindex tools
+        // Auto-approve the six codeindex read/index tools...
         rule(Permission::Custom("tool:codeindex_search".into()), "*", PermissionAction::Allow),
         rule(Permission::Custom("tool:codeindex_symbols".into()), "*", PermissionAction::Allow),
-        // ... (all 6 codeindex tools)
+        // ... (codeindex_references, _dependencies, _status, _reindex)
+        // ... plus model_info
+        rule(Permission::Custom("tool:model_info".into()), "*", PermissionAction::Allow),
     ]
 }
 ```
@@ -689,8 +694,9 @@ To run fully autonomously without any prompts, combine autopilot with one of:
 
 - **`--yes` CLI flag** — auto-approves all permissions without checking
   rules or prompting (sets `auto_approve = true` on the session processor)
-- **YOLO mode** — bypasses all bash security layers and auto-approves all
-  permissions (see [Section 7](#7-yolo-mode))
+- **YOLO mode** — bypasses the bash banned/denied/obfuscation checks and the
+  user bash denylist (see [Section 7](#7-yolo-mode)); directory-escape and
+  syntax validation still apply
 - **Permissive ruleset** — configure `allow` rules for the categories the
   agent needs (e.g. `"edit": "allow"` for `src/**`)
 
@@ -782,7 +788,7 @@ if ragent_config::yolo::is_enabled() {
 
 ### 7.2 Enabling YOLO Mode
 
-There are three ways to enable YOLO mode:
+There are two ways to enable YOLO mode:
 
 **1. Slash command (TUI):**
 ```
@@ -794,16 +800,19 @@ There are three ways to enable YOLO mode:
 Alt+Y
 ```
 
-**3. CLI flag:**
+**2. CLI flag (permission auto-approve only):**
 ```bash
 ragent --yes
 # or the alias:
 ragent --no-prompt
 ```
 
-The `--yes` flag sets `auto_approve = true` on the session processor, which
-short-circuits `check_permission_with_prompt` before any rules are checked.
-It does **not** persist to config — it only lasts for the current session.
+> **Note:** `--yes` is *not* YOLO mode. It sets `auto_approve = true` on the
+> session processor, which short-circuits `check_permission_with_prompt`
+> before any rules are checked — but it does **not** set the YOLO flag, so
+> the bash security layers (banned commands, denied patterns, obfuscation
+> detection, user denylist) remain enforced. It does not persist to config —
+> it only lasts for the current session.
 
 The `/yolo` slash command and `Alt+Y` shortcut toggle the persistent YOLO
 flag, which is saved to `ragent.json` and restored on the next startup.
@@ -904,11 +913,22 @@ while the dialog is visible.
 - When the timeout is reached, the dialog shows **`(EXPIRED)`** and the
   request is auto-denied
 
-The timeout is implemented in `check_permission_with_prompt`:
+The timeout is implemented in `check_permission_with_prompt`. The prompt
+window defaults to **120 seconds**; on timeout the request is auto-denied.
+Loop runs can override the window per run via `--timeout N`, which flows
+into `checkpoint_timeout_secs` (`Option<u32>` on the `LoopSpec`; `None`
+falls back to the `loop.checkpoint_timeout_secs` config value, default
+120):
 
 ```rust
-let timeout = tokio::time::Duration::from_mins(2);
-let deadline = tokio::time::Instant::now() + timeout;
+// Reply window: loop checkpoint override, else the 120-second default.
+let reply_window_secs = if checkpoint_forced {
+    checkpoint_timeout_secs
+} else {
+    120
+};
+let deadline = tokio::time::Instant::now()
+    + tokio::time::Duration::from_secs(u64::from(reply_window_secs));
 
 loop {
     let recv_timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -1028,6 +1048,15 @@ Defined in `crates/ragent-agent/src/session/permissions.rs`:
 
 ```rust
 pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
+    is_hardwired_codeindex_tool(tool_name)
+        || tool_name.starts_with("team_")
+        || AUTO_APPROVED_AGENT_TOOLS.contains(&tool_name)
+        || tool_name.starts_with("task_")
+        || tool_name == "ask_user"
+        || tool_name == "model_info"
+}
+
+pub(crate) fn is_hardwired_codeindex_tool(tool_name: &str) -> bool {
     const AUTO_APPROVED_CODEINDEX_TOOLS: &[&str] = &[
         "codeindex_search",
         "codeindex_symbols",
@@ -1036,19 +1065,16 @@ pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
         "codeindex_status",
         "codeindex_reindex",
     ];
-    const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
-        "new_agent",
-        "cancel_agent",
-        "list_agents",
-        "wait_agents",
-        "agent_complete",
-    ];
     AUTO_APPROVED_CODEINDEX_TOOLS.contains(&tool_name)
-        || tool_name.starts_with("team_")
-        || AUTO_APPROVED_AGENT_TOOLS.contains(&tool_name)
-        || tool_name.starts_with("task_")
-        || tool_name == "ask_user"
 }
+
+const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
+    "new_agent",
+    "cancel_agent",
+    "list_agents",
+    "wait_agents",
+    "agent_complete",
+];
 ```
 
 | Tool family             | Tools                                                     |
@@ -1058,6 +1084,11 @@ pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
 | Team tools              | All tools starting with `team_` (20 tools)                |
 | Task management         | All tools starting with `task_` (`task_create`, `task_update`, `task_get`, `task_list`) |
 | Interactive question    | `ask_user`                                                |
+| Model introspection     | `model_info`                                              |
+
+> **Note:** the graph tools (`codeindex_explain`, `codeindex_path`,
+> `codeindex_communities`, `codeindex_godnodes`) are **not** in the
+> hardwired codeindex list above; they follow the normal permission path.
 
 These tools are checked **first** in `check_permission_with_prompt`, before
 any other layer. See `docs/howtos/codeindex.md` for details on the code

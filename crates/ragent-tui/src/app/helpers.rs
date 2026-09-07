@@ -158,6 +158,26 @@ pub(crate) fn open_verified_alog(
     Ok((log, count))
 }
 
+/// Render the status-aware termination banner for a goal-driven loop (spec
+/// `agentloop`, task T-025 / FR-019): maps the termination label to a
+/// human-readable phrase (`completed`, `error`, `budget exhausted`,
+/// `interrupted`) with a status icon, plus the iteration count. Unknown
+/// labels fall back to the raw status string.
+#[must_use]
+pub(crate) fn loop_termination_banner(status: &str, iterations: u64) -> String {
+    let iterations_label = format!(
+        "{iterations} iteration{s}",
+        s = if iterations == 1 { "" } else { "s" },
+    );
+    match status {
+        "completed" => format!("✓ Goal loop completed — {iterations_label}"),
+        "error" => format!("✗ Goal loop failed — {iterations_label}"),
+        "budget_exhausted" => format!("⏳ Goal loop budget exhausted — {iterations_label}"),
+        "interrupted" => format!("⏹ Goal loop interrupted — {iterations_label}"),
+        other => format!("• Goal loop {other} — {iterations_label}"),
+    }
+}
+
 pub(crate) fn summarise_error(raw: &str) -> String {
     // Try to extract just the human-readable message from common patterns
     // e.g. "LLM call failed: Unknown model: claude-haiku-4.5"
@@ -233,6 +253,31 @@ pub fn sanitize_for_display(text: &str) -> String {
         }
     }
     out
+}
+
+/// Convert single newlines in a markdown block into hard breaks (two
+/// trailing spaces) so the markdown-to-HTML-to-text pipeline keeps the
+/// line structure.
+///
+/// `html2text` collapses every newline inside an HTML paragraph into a
+/// single space (see `vendor/html2text` `WrappedBlock::add_text`), so a
+/// plain multi-line summary fed to the pipeline renders as one wrapped
+/// paragraph. Markdown hard breaks survive: `pulldown-cmark` emits
+/// `<br />` and the vendored `html2text` renders `<br>` via
+/// `new_line_hard`.
+#[must_use]
+pub fn hard_break_lines(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            let trimmed = line.trim_end();
+            if trimmed.is_empty() || trimmed.ends_with("  ") {
+                line.to_string()
+            } else {
+                format!("{trimmed}  ")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Resolve an image reference to a placeholder description for terminal display.

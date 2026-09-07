@@ -2,6 +2,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use ragent_agent::session::loop_state::LoopSpec;
 use ragent_agent::{event::Event, mcp::McpClient, message::Message, tool::TeamManagerInterface};
 use ragent_team::team::{
     self, Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamStore,
@@ -114,6 +115,7 @@ impl App {
             "websearch" => {
                 vec!["show".to_string(), "test".to_string(), "help".to_string()]
             }
+            "loop" => vec!["help".to_string()],
             "status" => {
                 vec!["clear".to_string()]
             }
@@ -8662,6 +8664,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     // Store/FTS lock held by a background
                                     // reindex or graph build. Report busy
                                     // immediately from the lock-free atomics.
+                                    // Attribute the lock holder before claiming
+                                    // the index is busy: a graph build holds the
+                                    // store lock only briefly (snapshot/persist),
+                                    // so during a graph build the index itself is
+                                    // still available.
                                     let (done, total) = idx.reindex_progress();
                                     let reindexing = total > 0 && done < total;
                                     let graph_busy = idx.graph_busy();
@@ -8676,21 +8683,31 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                             "\u{2717} no"
                                         }
                                     ));
-                                    output.push_str(
-                                        "**Index:** busy — the store lock is held by a \
-                                         background operation\n",
-                                    );
                                     if reindexing {
+                                        output
+                                            .push_str("**Index:** busy — reindexing in progress\n");
                                         output.push_str(&format!(
                                             "**Reindexing:** {done}/{total} files\n"
                                         ));
-                                    }
-                                    if graph_busy {
+                                        if graph_busy {
+                                            output.push_str(&format!(
+                                                "**Graph:** building ({gdone}/{gtotal} files)\n"
+                                            ));
+                                        }
+                                    } else if graph_busy {
                                         output.push_str(&format!(
                                             "**Graph:** building ({gdone}/{gtotal} files)\n"
                                         ));
-                                    }
-                                    if !reindexing && !graph_busy {
+                                        output.push_str(
+                                            "**Index:** available — the graph build holds the \
+                                             store lock only briefly for its \
+                                             snapshot/persist phases\n",
+                                        );
+                                    } else {
+                                        output.push_str(
+                                            "**Index:** busy — the store lock is held by a \
+                                             background operation\n",
+                                        );
                                         output.push_str(
                                             "Wait a moment and retry — the background \
                                              operation will release the lock when done.\n",
@@ -8698,7 +8715,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     }
 
                                     self.append_assistant_text(&output);
-                                    self.status = "codeindex: busy".to_string();
+                                    self.status = if reindexing {
+                                        "codeindex: busy (reindexing)".to_string()
+                                    } else if graph_busy {
+                                        "codeindex: graph building".to_string()
+                                    } else {
+                                        "codeindex: busy".to_string()
+                                    };
                                 }
                             }
                         } else {
@@ -9487,6 +9510,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "triggers" => self.handle_triggers_command(args),
             // ── /inbox ────────────────────────────────────
             "inbox" => self.handle_inbox_command(args),
+            // ── /loop ────────────────────────────────────────────────────
+            "loop" => handle_loop_command(self, args),
             _ => {
                 let working_dir = std::env::current_dir().unwrap_or_default();
                 let skill_dirs = ragent_agent::Config::load()
@@ -11417,4 +11442,78 @@ Cleared {cleared} file{} from `{}`.",
         dir.display()
     ));
     app.status = status.to_string();
+}
+/// Handle the `/loop` slash command (spec `agentloop`, FR-001, FR-003, FR-005).
+///
+/// Behaviour:
+/// - `/loop help` shows the usage help for every loop command and option.
+/// - `/loop` (no arguments) opens the interactive loop setup dialog
+///   (FR-002), restoring any previously cancelled draft (FR-004).
+/// - `/loop <agent> <goal text...>` starts the loop immediately with the
+///   documented defaults: config step limit (default 512), config cost
+///   limit, checkpoints on, and no verification/scope/constraint/tool-set
+///   restriction (FR-003).
+/// - `/loop <agent> --max-steps N --cost_limit N --timeout N <goal...>`
+///   overrides the step budget, token-cost budget, and checkpoint-prompt
+///   timeout for that one run (both `--cost_limit` and `--cost-limit`
+///   spellings are accepted, values may use `--flag value` or
+///   `--flag=value`, and flags may appear anywhere before or after the
+///   goal text).
+/// - `/loop <agent>` with an empty (or whitespace-only) goal shows an
+///   error naming the missing field and returns to the dialog (FR-005).
+fn handle_loop_command(app: &mut App, args: &str) {
+    if args.trim() == "help" {
+        crate::app::loop_dialog::show_loop_help(app);
+        return;
+    }
+    if args.is_empty() {
+        // FR-002: no-arg form opens (or re-opens) the setup dialog.
+        crate::app::open_loop_setup(app);
+        return;
+    }
+
+    // One-shot form: `/<agent> [flags...] <goal text...>`. Flags are
+    // extracted from anywhere in the argument tokens; of the remaining
+    // tokens the first is the agent preset and the rest are the goal.
+    let tokens: Vec<String> = args.split_whitespace().map(str::to_string).collect();
+    let (remaining, overrides) = match crate::app::loop_dialog::parse_loop_flags(&tokens) {
+        Ok(parsed) => parsed,
+        Err(message) => {
+            app.append_assistant_text(&format!(
+                "From: /loop\n\n**Error:** {message}\n\nUsage: `/loop <agent> \
+                     --max-steps N --cost_limit N --timeout N <goal text...>`\nRun \
+                     `/loop help` for every option."
+            ));
+            app.status = "loop: invalid argument".to_string();
+            return;
+        }
+    };
+    let (agent, goal) = match remaining.split_first() {
+        Some((first, rest)) => (first.as_str(), rest.join(" ").trim().to_string()),
+        None => (args.trim(), String::new()),
+    };
+    if goal.is_empty() {
+        // FR-005: an empty goal cannot start a loop — name the missing
+        // field and re-open the dialog so the user can complete the form.
+        app.append_assistant_text(&format!(
+            r"From: /loop
+
+**Error:** missing field: goal — a loop cannot start without a goal.
+
+Usage: `/loop <agent> <goal text...>` or `/loop` for the setup dialog.
+Re-opening the setup dialog with your agent (`{agent}`) pre-selected."
+        ));
+        app.status = "loop: missing field: goal".to_string();
+        crate::app::open_loop_setup(app);
+        return;
+    }
+
+    // FR-003: start immediately with the documented defaults. `LoopSpec`
+    // defaults are exactly the documented one-shot defaults (checkpoints
+    // on, no extra restrictions); the step/cost budgets fall through to
+    // the config defaults inside `start_goal_loop`. Explicit one-shot
+    // flags override those fallbacks for this run only.
+    let mut spec = LoopSpec::new(agent, goal);
+    crate::app::loop_dialog::apply_loop_overrides(&mut spec, &overrides);
+    app.start_goal_loop(spec);
 }

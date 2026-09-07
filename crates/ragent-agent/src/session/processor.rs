@@ -28,6 +28,7 @@ use uuid::Uuid;
 
 use crate::agent::AgentInfo;
 use crate::cost::{UsageRecord, compute_run_cost, merged_prices};
+use crate::error::classify_message;
 use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent, ToolDefinition};
 use crate::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
@@ -36,6 +37,7 @@ use crate::provider::ProviderRegistry;
 use crate::session::SessionManager;
 use crate::session::cache::SystemPromptCache;
 use crate::session::history::PendingToolCall;
+use crate::session::loop_state::LoopSpec;
 use crate::session::permissions::{
     extract_command_name, extract_resource_from_input, split_bash_command,
 };
@@ -222,6 +224,52 @@ pub struct SessionProcessor {
     /// contributing directory's mtime changes) eliminates that per-turn
     /// disk I/O.
     pub skill_registry_cache: parking_lot::Mutex<Option<CachedSkillRegistry>>,
+    /// Active goal-driven loop runs (spec `agentloop`), keyed by session id.
+    ///
+    /// Set via [`SessionProcessor::start_loop`] when a loop is launched (TUI
+    /// `/loop` or HTTP `POST /loop`), and removed on termination. Plain chat
+    /// turns have no entry and behave exactly as before; loop runs enforce
+    /// the loop stop conditions (FR-010, FR-013, FR-014) in the agent loop.
+    pub active_loops: tokio::sync::RwLock<HashMap<String, crate::session::loop_state::LoopTracker>>,
+    /// The [`LoopSpec`] of each active goal-driven loop run, keyed by session
+    /// id (spec `agentloop` T-009).
+    ///
+    /// Maintained alongside [`SessionProcessor::active_loops`]: inserted by
+    /// [`SessionProcessor::start_loop`], removed on termination and by
+    /// [`SessionProcessor::clear_loop`]. The permission layer consults the
+    /// spec before every tool execution to enforce the loop's tool-set
+    /// restriction (FR-008/FR-009), read-only constraints (FR-021), and
+    /// scope boundaries (FR-022) — denials return observations to the model.
+    /// T-003: the stored spec carries the resolved budgets (spec value or
+    /// the `loop` config default) so consumers see effective limits.
+    pub active_loop_specs:
+        tokio::sync::RwLock<HashMap<String, std::sync::Arc<crate::session::loop_state::LoopSpec>>>,
+    /// FR-025: set to `true` when the loop telemetry record
+    /// ([`SessionRecorder::record_agent_loop`] plus the per-run tool-call
+    /// total) has been published for the current loop run, so it is recorded
+    /// exactly once per run. Cleared by [`SessionProcessor::start_loop`]
+    /// when a new run starts.
+    pub loop_telemetry_recorded: std::sync::atomic::AtomicBool,
+    /// FR-016 (T-011): the human-interrupt flag for each active goal-driven
+    /// loop run, keyed by session id. Raised by
+    /// [`SessionProcessor::request_loop_interrupt`] (the TUI `Esc` path) and
+    /// consulted at every inter-stage safe point in the agent loop; a set
+    /// flag stops the run with [`StopCondition::HumanIntervention`]
+    /// (termination status `interrupted`). Created by
+    /// [`SessionProcessor::start_loop`], removed on termination and by
+    /// [`SessionProcessor::clear_loop`].
+    pub active_loop_interrupts: parking_lot::RwLock<HashMap<String, Arc<AtomicBool>>>,
+    /// FR-018 (T-012): the pre-loop workspace capture of each goal-driven
+    /// loop run, keyed by session id. Armed lazily by
+    /// [`SessionProcessor::ensure_pre_loop_capture`] immediately before the
+    /// loop's first write action, consulted on termination to compute the
+    /// change summary ([`Event::LoopChangeSummary`], FR-019), and consumed
+    /// by the rollback flow ([`SessionProcessor::rollback_loop`], FR-020).
+    /// Survives termination until rollback or an explicit
+    /// [`SessionProcessor::clear_loop`] so the post-loop rollback offer can
+    /// still restore it.
+    pub active_loop_captures:
+        tokio::sync::RwLock<HashMap<String, Arc<crate::session::loop_capture::LoopCapture>>>,
 }
 
 /// C-001: a cached [`crate::skill::SkillRegistry`] plus the inputs used to
@@ -268,6 +316,457 @@ impl SessionProcessor {
     /// can be wired unconditionally and `/alog off` simply suppresses writes.
     pub fn set_activity_log(&self, log: Arc<ragent_storage::ActivityLog>) {
         let _ = self.activity_log.set(log);
+    }
+
+    /// Start a goal-driven loop run for `session_id` (spec `agentloop`).
+    ///
+    ///
+    /// Registers a [`LoopTracker`] initialised from `spec` so the agent
+    /// loop enforces the loop stop conditions (FR-010, FR-013, FR-014).
+    /// T-003: budget fallbacks are resolved here — when the spec leaves a
+    /// budget unset, the loop config defaults (`ragent-config` T-002:
+    /// `loop.max_steps`, `loop.cost_limit`) apply, so the pre-request
+    /// budget gates in the agent loop always have limits to enforce. An
+    /// explicitly configured spec value wins over the config default.
+    /// Starting a loop for a session that already has one replaces the
+    /// previous tracker. The tracker is removed when the loop terminates
+    /// (any stop condition) — plain chat turns have no entry and behave
+    /// exactly as before.
+    pub async fn start_loop(&self, session_id: &str, mut spec: LoopSpec) {
+        // T-003 (FR-013, FR-014): a `None` budget in the spec means "the
+        // config default applies" (T-002 semantics); resolve it here so
+        // the tracker's budget_breach gates are always armed.
+        let loop_defaults = self.load_config_cached().r#loop.clone();
+        if spec.max_steps.is_none() {
+            spec.max_steps = Some(loop_defaults.max_steps);
+        }
+        if spec.cost_limit.is_none() {
+            spec.cost_limit = loop_defaults.cost_limit;
+        }
+        // Checkpoint-prompt timeout: a `None` spec value resolves to the
+        // config default so `active_loop_specs` always holds the effective
+        // value (the permission layer reads it from the spec).
+        if spec.checkpoint_timeout_secs.is_none() {
+            spec.checkpoint_timeout_secs = Some(loop_defaults.checkpoint_timeout_secs);
+        }
+        // T-017 (FR-025): a fresh run must publish its own telemetry record,
+        // so clear the exactly-once flag here.
+        self.loop_telemetry_recorded
+            .store(false, std::sync::atomic::Ordering::Release);
+        let tracker = crate::session::loop_state::LoopTracker::new(&spec);
+        {
+            let mut loops = self.active_loops.write().await;
+            loops.insert(session_id.to_string(), tracker);
+        }
+        // T-009: record the spec so the permission layer can enforce the
+        // loop's tool-set/scope/constraint restrictions on every tool call.
+        let mut specs = self.active_loop_specs.write().await;
+        specs.insert(session_id.to_string(), std::sync::Arc::new(spec));
+        // T-011 (FR-016): arm a fresh human-interrupt flag for this run.
+        self.active_loop_interrupts
+            .write()
+            .insert(session_id.to_string(), Arc::new(AtomicBool::new(false)));
+        // T-012 (FR-018): record the workspace's git state when the session
+        // directory sits inside a repository; when it does not, warn that
+        // rollback will be snapshot-only so the user can confirm before the
+        // loop writes anything. The capture itself is deferred to
+        // `ensure_pre_loop_capture` (the first-write safe point).
+        let working_dir = self
+            .session_manager
+            .get_session(session_id)
+            .ok()
+            .flatten()
+            .map(|session| session.directory)
+            .unwrap_or_default();
+        let git = crate::session::loop_capture::git_state(&working_dir).await;
+        match &git {
+            Some(state) => tracing::info!(
+                session_id = %session_id,
+                git = %state.describe(),
+                "loop workspace git state recorded (FR-018)"
+            ),
+            None => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    "loop workspace is not inside a git repository (FR-018); \
+                     rollback will be snapshot-only"
+                );
+                self.event_bus.publish(Event::AgentNotice {
+                    session_id: session_id.to_string(),
+                    message: "loop: workspace is not inside a git repository \
+                              — rollback will be snapshot-only. Confirm to \
+                              continue."
+                        .to_string(),
+                });
+            }
+        }
+        self.active_loop_captures.write().await.insert(
+            session_id.to_string(),
+            Arc::new(crate::session::loop_capture::LoopCapture {
+                snapshot: None,
+                git,
+            }),
+        );
+    }
+
+    /// Whether a goal-driven loop is active for `session_id`.
+    pub async fn loop_active(&self, session_id: &str) -> bool {
+        self.active_loops.read().await.contains_key(session_id)
+    }
+
+    /// Drop every pending pre-loop capture (FR-020, T-013).
+    ///
+    /// Called when the user declines a rollback offer: there is no pending
+    /// offer left to honour, so the captures are discarded and no later
+    /// rollback can resurrect them. A no-op when no captures are pending.
+    pub async fn clear_loop_captures(&self) {
+        self.active_loop_captures.write().await.clear();
+    }
+
+    /// Remove the active loop tracker for `session_id`, if any.
+    ///
+    /// Called after termination so subsequent plain chat turns do not
+    /// consult loop budgets (FR-017: no iteration after a stop condition).
+    pub async fn clear_loop(&self, session_id: &str) {
+        self.active_loops.write().await.remove(session_id);
+        self.active_loop_specs.write().await.remove(session_id);
+        self.active_loop_interrupts.write().remove(session_id);
+        // T-012: an explicit clear discards the pre-loop capture as well —
+        // there is no pending rollback offer to honour.
+        self.active_loop_captures.write().await.remove(session_id);
+    }
+
+    /// Raise the human-interrupt flag for `session_id`'s active goal-driven
+    /// loop (FR-016, T-011).
+    ///
+    /// Called when the user presses `Esc` while a loop is running: the agent
+    /// loop aborts at the next inter-stage safe point and terminates with
+    /// termination status `interrupted`, leaving the session persisted and
+    /// resumable. A no-op returning `false` when no loop is active for the
+    /// session (plain turns cancel through the cancel flag alone, exactly as
+    /// before).
+    ///
+    /// Returns `true` when an active loop's interrupt flag was raised.
+    pub fn request_loop_interrupt(&self, session_id: &str) -> bool {
+        let flag = self.active_loop_interrupts.read().get(session_id).cloned();
+        match flag {
+            Some(flag) => {
+                flag.store(true, Ordering::Relaxed);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Arm the pre-loop workspace capture for `session_id`'s loop run
+    /// (FR-018, T-012), unless it is already armed.
+    ///
+    /// Called at the first-write safe point — immediately before the loop's
+    /// first write action executes — so the snapshot records the workspace
+    /// exactly as the loop found it. A no-op when no loop run exists for the
+    /// session or when the capture already holds a snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the storage-backed snapshot write fails; the
+    /// caller surfaces the failure as a tool error observation.
+    pub async fn ensure_pre_loop_capture(
+        &self,
+        session_id: &str,
+        working_dir: &std::path::Path,
+        message_id: &str,
+    ) -> Result<(), anyhow::Error> {
+        let existing = self
+            .active_loop_captures
+            .read()
+            .await
+            .get(session_id)
+            .cloned();
+        let Some(capture) = existing else {
+            return Ok(()); // No loop run: plain chat turn, nothing to capture.
+        };
+        if capture.snapshot.is_some() {
+            return Ok(()); // Already captured before an earlier write action.
+        }
+        let snapshot = crate::session::loop_capture::capture_pre_loop_snapshot(
+            session_id,
+            message_id,
+            working_dir,
+        )
+        .await?;
+        tracing::info!(
+            session_id = %session_id,
+            files = snapshot.as_ref().map_or(0, |s| s.files.len()),
+            "pre-loop workspace snapshot captured (FR-018)"
+        );
+        // Only the snapshot slot is updated; the recorded git state stays.
+        let mut updated = (*capture).clone();
+        updated.snapshot = snapshot;
+        self.active_loop_captures
+            .write()
+            .await
+            .insert(session_id.to_string(), Arc::new(updated));
+        Ok(())
+    }
+
+    /// Restore the workspace from `session_id`'s pre-loop capture (FR-020,
+    /// T-013) and drop the capture.
+    ///
+    /// Returns `true` when a capture existed and was restored; `false` when
+    /// no capture is pending (nothing was written, or rollback already ran).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the snapshot restore fails; the capture is
+    /// kept so the caller can retry.
+    pub async fn rollback_loop(&self, session_id: &str) -> Result<bool, anyhow::Error> {
+        let Some(capture) = self.active_loop_captures.write().await.remove(session_id) else {
+            return Ok(false);
+        };
+        crate::session::loop_capture::rollback_to_capture(&capture).await?;
+        tracing::info!(
+            session_id = %session_id,
+            "workspace rolled back to the pre-loop snapshot (FR-020)"
+        );
+        Ok(true)
+    }
+
+    /// Publish [`Event::LoopChangeSummary`] for a terminated loop run
+    /// (FR-019), comparing the live workspace against the pre-loop capture.
+    ///
+    /// A no-op when the session has no capture (the capture is armed lazily
+    /// before the first write action, so read-only loops never publish a
+    /// summary).
+    async fn publish_loop_change_summary(
+        &self,
+        session_id: &str,
+        status: &str,
+        iterations: u64,
+        working_dir: &std::path::Path,
+    ) {
+        let Some(capture) = self
+            .active_loop_captures
+            .read()
+            .await
+            .get(session_id)
+            .cloned()
+        else {
+            return;
+        };
+        let dir_owned = working_dir.to_path_buf();
+        let summary = tokio::task::spawn_blocking(move || {
+            crate::session::loop_capture::compute_change_summary(&capture, &dir_owned)
+        })
+        .await
+        .unwrap_or_default();
+        tracing::info!(
+            session_id = %session_id,
+            status,
+            modified = summary.modified,
+            created = summary.created,
+            deleted = summary.deleted,
+            diffstat = %summary.diffstat(),
+            "loop change summary published (FR-019)"
+        );
+        self.event_bus.publish(Event::LoopChangeSummary {
+            session_id: session_id.to_string(),
+            status: status.to_string(),
+            iterations,
+            files_modified: summary.modified,
+            files_created: summary.created,
+            files_deleted: summary.deleted,
+            diffstat: summary.diffstat(),
+            files: summary.files,
+        });
+    }
+
+    /// Terminate the loop for `session_id` with `condition` (FR-010-FR-013):
+    /// stop the tracker, publish [`Event::LoopTerminated`], and remove the
+    /// tracker so no further stage can run (FR-017). The published `status`
+    /// is the stable termination label (`completed`, `error`,
+    /// `budget_exhausted`, `interrupted`).
+    ///
+    /// Returns the effective stop condition, or `None` when no loop is
+    /// active for the session.
+    ///
+    /// Note: this external path carries no run-start instant, so the
+    /// FR-025 telemetry record is not published here; in-run termination
+    /// paths (inside [`SessionProcessor::process_user_message`]) record it.
+    pub async fn terminate_loop(
+        &self,
+        session_id: &str,
+        condition: crate::session::loop_state::StopCondition,
+        verification: Option<String>,
+        reason: Option<String>,
+    ) -> Option<crate::session::loop_state::StopCondition> {
+        self.terminate_loop_inner(
+            session_id,
+            condition,
+            None,
+            None,
+            verification,
+            reason,
+            None,
+        )
+        .await
+    }
+
+    /// Shared termination path: take the tracker out of the active map,
+    /// optionally tally the final exchange's tokens, apply the stop
+    /// condition (first stop wins, FR-017), publish
+    /// [`Event::LoopTerminated`] exactly once, and — T-017 (FR-025) —
+    /// record the loop telemetry (`iterations` + `duration_ms`) exactly
+    /// once per run when `run_start` is supplied.
+    ///
+    /// T-012 (FR-019): when the run captured a pre-loop workspace snapshot,
+    /// a [`Event::LoopChangeSummary`] is published after the termination
+    /// event with the modified/created/deleted counts and the diffstat. The
+    /// capture survives termination so the rollback offer (T-013) can still
+    /// restore it; `clear_loop` discards it.
+    async fn terminate_loop_inner(
+        &self,
+        session_id: &str,
+        condition: crate::session::loop_state::StopCondition,
+        run_start: Option<Instant>,
+        final_tokens: Option<(u64, u64)>,
+        verification: Option<String>,
+        reason: Option<String>,
+        working_dir: Option<&std::path::Path>,
+    ) -> Option<crate::session::loop_state::StopCondition> {
+        let mut tracker = self.active_loops.write().await.remove(session_id)?;
+        self.active_loop_specs.write().await.remove(session_id);
+        // T-011 (FR-016): the run is over — drop its interrupt flag.
+        self.active_loop_interrupts.write().remove(session_id);
+        if let Some((input_tokens, output_tokens)) = final_tokens {
+            tracker.record_tokens(input_tokens, output_tokens);
+        }
+        // First stop condition wins (FR-017); a tracker that already
+        // stopped keeps its original condition.
+        let effective = tracker.stop(condition);
+        let iterations = tracker.steps();
+        let tokens = tracker.tokens();
+        let status = effective.as_str();
+        self.event_bus.publish(Event::LoopTerminated {
+            session_id: session_id.to_string(),
+            status: status.to_string(),
+            iterations: u64::from(iterations),
+            verification,
+            reason,
+        });
+        // T-017 (FR-025): record the loop telemetry exactly once per run —
+        // the iteration count and total duration via the existing agent-loop
+        // instruments, plus the per-iteration tool-call tally published as
+        // the per-session tool-call total.
+        if run_start.is_some()
+            && !self
+                .loop_telemetry_recorded
+                .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            let elapsed_ms = run_start.map_or(0, |start| {
+                u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
+            });
+            let duration_ms = elapsed_ms as f64;
+            let recorder = SessionRecorder::from_subsystem(&self.telemetry);
+            recorder.record_agent_loop(duration_ms, u64::from(iterations));
+            recorder.record_tool_calls_per_session(tracker.tool_calls());
+            tracing::info!(
+                session_id = %session_id,
+                status,
+                iterations,
+                duration_ms,
+                tool_calls = tracker.tool_calls(),
+                tokens,
+                "loop telemetry recorded (FR-025)"
+            );
+        }
+        tracing::info!(
+            session_id = %session_id,
+            status,
+            iterations,
+            tokens,
+            "goal-driven loop terminated"
+        );
+        // T-012 (FR-019): a run that captured the workspace publishes the
+        // change summary alongside the termination event. `working_dir` is
+        // supplied only by in-run termination paths; the public external
+        // path (`terminate_loop`) has no directory and skips the summary.
+        if let Some(dir) = working_dir {
+            self.publish_loop_change_summary(session_id, status, u64::from(iterations), dir)
+                .await;
+        }
+        Some(effective)
+    }
+
+    /// Terminate an active goal-driven loop after a run stage failed
+    /// unrecoverably (FR-011: provider transport failure, permission
+    /// hard-deny, tool panic, context overflow, watchdog abort).
+    ///
+    /// Publishes the loop-termination event with termination status `error`
+    /// and the surfaced failure reason; the failed stage is not retried —
+    /// the caller propagates the error so the turn ends. A no-op when no
+    /// loop is active for `session_id` (plain chat turns are unaffected).
+    async fn terminate_loop_on_fatal_error(
+        &self,
+        session_id: &str,
+        err: &anyhow::Error,
+        run_start: Option<Instant>,
+        working_dir: Option<&std::path::Path>,
+    ) {
+        let active = self.active_loops.read().await.contains_key(session_id);
+        if !active {
+            return;
+        }
+        let reason = format!("unrecoverable error: {err:#}");
+        tracing::error!(
+            session_id = %session_id,
+            reason,
+            "loop terminated by unrecoverable error (FR-011); no retry"
+        );
+        self.terminate_loop_inner(
+            session_id,
+            crate::session::loop_state::StopCondition::UnrecoverableError,
+            run_start,
+            None,
+            None,
+            Some(reason),
+            working_dir,
+        )
+        .await;
+    }
+
+    /// Terminate an active goal-driven loop because the user interrupted it
+    /// (FR-016, T-011: `Esc` during a loop aborts at the next inter-stage
+    /// safe point). Publishes [`Event::LoopTerminated`] with termination
+    /// status `interrupted`; the caller persists the partial assistant
+    /// message and ends the turn normally so the session stays persisted and
+    /// resumable. A no-op when no loop is active for `session_id`.
+    ///
+    /// Token tallies are already persisted by the loop before the safe
+    /// point, so no final-token adjustment is passed here.
+    async fn terminate_loop_on_interrupt(
+        &self,
+        session_id: &str,
+        run_start: Option<Instant>,
+        working_dir: Option<&std::path::Path>,
+    ) {
+        let active = self.active_loops.read().await.contains_key(session_id);
+        if !active {
+            return;
+        }
+        tracing::info!(
+            session_id = %session_id,
+            "loop interrupted by user (FR-016); stopping at the safe point"
+        );
+        self.terminate_loop_inner(
+            session_id,
+            crate::session::loop_state::StopCondition::HumanIntervention,
+            run_start,
+            None,
+            None,
+            Some("interrupted by user (Esc)".to_string()),
+            working_dir,
+        )
+        .await;
     }
 
     /// Record an activity-log event if logging is enabled.
@@ -708,9 +1207,21 @@ impl SessionProcessor {
         .await;
 
         // 2. Prepare LLM client, config, working dir, team context
-        let turn = self
+        // T-007 (FR-011): a stage failure before the loop body (missing
+        // model/provider, unusable key, client construction failure) is an
+        // unrecoverable provider-stage error — terminate an active loop with
+        // status `error` and surface the reason; no retry of the stage.
+        let turn = match self
             .prepare_client(session_id, &user_msg.id, agent, &profiler)
-            .await?;
+            .await
+        {
+            Ok(turn) => turn,
+            Err(e) => {
+                self.terminate_loop_on_fatal_error(session_id, &e, None, None)
+                    .await;
+                return Err(e);
+            }
+        };
 
         // T-012: per-run cost tracking. Set up a listener for `Event::TokenUsage`
         // so we can accumulate usage across the init exchange and all loop
@@ -798,6 +1309,7 @@ impl SessionProcessor {
         // 3. Build system prompt
         let system_prompt = self
             .build_turn_system_prompt(
+                session_id,
                 agent,
                 &turn.session_config,
                 &turn.working_dir,
@@ -852,8 +1364,37 @@ impl SessionProcessor {
         // 6. Agent loop setup
         let max_steps = agent.max_steps.unwrap_or(1024) as usize;
         self.event_bus.set_step(session_id, 0);
+        // T-009 (FR-008): when a goal-driven loop with a configured tool set
+        // is active, the loop's tool surface is exactly that set plus the
+        // mandatory safety tools — other tools stay visible to the rest of
+        // the application but are not offered to this loop's requests.
+        let loop_tool_set: Option<std::collections::HashSet<String>> = {
+            let specs = self.active_loop_specs.read().await;
+            specs
+                .get(session_id)
+                .filter(|spec| spec.has_tool_set())
+                .map(|spec| {
+                    let mut allowed: std::collections::HashSet<String> =
+                        spec.tool_set.iter().cloned().collect();
+                    for name in crate::session::loop_state::LOOP_ALWAYS_ALLOWED_TOOLS {
+                        allowed.insert((*name).to_string());
+                    }
+                    for name in crate::tool::always_allowed_tool_names() {
+                        allowed.insert(name.to_string());
+                    }
+                    allowed
+                })
+        };
         let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> = if max_steps <= 1 {
             std::sync::Arc::new(Vec::new())
+        } else if let Some(allowed) = loop_tool_set {
+            let all = self.get_cached_tool_definitions();
+            std::sync::Arc::new(
+                all.iter()
+                    .filter(|def| allowed.contains(def.name.as_str()))
+                    .cloned()
+                    .collect(),
+            )
         } else {
             self.get_cached_tool_definitions()
         };
@@ -908,7 +1449,94 @@ impl SessionProcessor {
         // provider registry a second time.
 
         // 7. Agent loop
+        // T-008: take a working copy of the loop tracker (when a goal-driven
+        // loop is active) so the FR-017 guard below can consult and update it
+        // without holding the `active_loops` lock across an await point.
+        // Plain chat turns have no tracker entry and skip the guard entirely.
+        let mut loop_tracker: Option<crate::session::loop_state::LoopTracker> =
+            self.active_loops.read().await.get(session_id).cloned();
+        // T-011 (FR-016): the human-interrupt flag for this session's loop,
+        // raised by the TUI `Esc` path
+        // ([`SessionProcessor::request_loop_interrupt`]). Plain chat turns
+        // have no flag and keep cancelling through `cancel_flag` alone.
+        let loop_interrupt_flag = self.active_loop_interrupts.read().get(session_id).cloned();
+        let interrupt_requested = |cancel_flag: &AtomicBool| -> bool {
+            cancel_flag.load(Ordering::Relaxed)
+                || loop_interrupt_flag
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        };
+        // T-011 (FR-016): set when a safe-point interrupt check fired — the
+        // post-loop handler persists the partial turn and ends it normally.
+        let mut loop_interrupted = false;
         loop {
+            // T-008 (FR-010, FR-013, FR-014, FR-017): the stop-flag guard.
+            // No stage of this iteration may run once the loop's stop flag is
+            // set; a budget breach stops the run BEFORE the LLM request, and
+            // the per-iteration step counter is persisted back so the gate is
+            // visible to the next iteration and to external terminations.
+            if let Some(tracker) = loop_tracker.as_ref() {
+                if tracker.is_stopped() {
+                    debug!("Loop already stopped; no further stage will run");
+                    break;
+                }
+            }
+            // T-011 (FR-016): inter-stage safe point — an interrupt raised
+            // since the last stage boundary aborts the loop before any
+            // further stage runs, ahead even of the budget gate (first stop
+            // wins; the user's intervention takes precedence).
+            if loop_tracker.is_some() && interrupt_requested(&cancel_flag) {
+                self.terminate_loop_on_interrupt(
+                    session_id,
+                    Some(total_start),
+                    Some(&turn.working_dir),
+                )
+                .await;
+                loop_interrupted = true;
+                break;
+            }
+            if let Some(tracker) = loop_tracker.as_mut() {
+                if !tracker.begin_step() {
+                    // FR-013/FR-014: the step or token budget was reached —
+                    // terminate with `budget_exhausted` before sending
+                    // another LLM request.
+                    let breach = tracker
+                        .budget_breach()
+                        .unwrap_or(crate::session::loop_state::StopCondition::BudgetExhausted);
+                    let reason = if tracker
+                        .cost_limit()
+                        .is_some_and(|limit| tracker.tokens() >= limit)
+                    {
+                        format!(
+                            "token cost budget exhausted ({} tokens accumulated)",
+                            tracker.tokens()
+                        )
+                    } else {
+                        format!(
+                            "step budget exhausted ({}/{} iterations)",
+                            tracker.steps(),
+                            tracker.max_steps().unwrap_or(0)
+                        )
+                    };
+                    self.terminate_loop_inner(
+                        session_id,
+                        breach,
+                        Some(total_start),
+                        None,
+                        None,
+                        Some(reason),
+                        Some(&turn.working_dir),
+                    )
+                    .await;
+                    break;
+                }
+                // Persist the incremented step counter so the next iteration
+                // (and any external termination) sees it.
+                self.active_loops
+                    .write()
+                    .await
+                    .insert(session_id.to_string(), tracker.clone());
+            }
             let _step_scope = profiler.scope("loop.step.total");
             let step = {
                 let _scope = profiler.scope("loop.step.setup");
@@ -1112,7 +1740,12 @@ impl SessionProcessor {
                 last_reported_input_tokens,
                 last_finish_reason: last_finish_reason.clone(),
             };
-            let mut llm_result = self
+            // T-007 (FR-011): an exhausted LLM-stage failure (transport error
+            // after the internal retry budget, permanent API error, context
+            // overflow that no compaction path could recover) is unrecoverable
+            // — terminate an active loop with status `error`, surface the
+            // reason, and stop without another request.
+            let mut llm_result = match self
                 .call_llm_step(
                     session_id,
                     agent,
@@ -1124,7 +1757,20 @@ impl SessionProcessor {
                     llm_request_start,
                     &profiler,
                 )
-                .await?;
+                .await
+            {
+                Ok(result) => result,
+                Err(e) => {
+                    self.terminate_loop_on_fatal_error(
+                        session_id,
+                        &e,
+                        Some(total_start),
+                        Some(&turn.working_dir),
+                    )
+                    .await;
+                    return Err(e);
+                }
+            };
             chat_messages = loop_state.chat_messages;
             compressed_this_turn = loop_state.compressed_this_turn;
             compaction_attempted_this_turn = loop_state.compaction_attempted_this_turn;
@@ -1146,6 +1792,16 @@ impl SessionProcessor {
                         guard.set_last_reported_input_tokens(llm_result.last_input_tokens);
                     }
                 }
+            }
+            // T-008 (FR-014): tally this exchange's tokens into the loop
+            // tracker so the next iteration's budget gate sees the updated
+            // cost (the gate fires BEFORE the next request).
+            if let Some(tracker) = loop_tracker.as_mut() {
+                tracker.record_tokens(llm_result.last_input_tokens, llm_result.last_output_tokens);
+                self.active_loops
+                    .write()
+                    .await
+                    .insert(session_id.to_string(), tracker.clone());
             }
 
             // Collect parts from this turn
@@ -1253,6 +1909,139 @@ impl SessionProcessor {
                     });
                     continue;
                 }
+                // T-005 (FR-007, FR-010): the verification gate. A
+                // no-tool-call response from a loop with a verification
+                // command does not complete the run directly — the command's
+                // exit status decides. Success terminates with `completed`;
+                // failure with steps remaining appends the failure output as
+                // an observation and continues; failure with the budget
+                // breached ends the run as `budget_exhausted`.
+                // Bind the spec outside the `if let` scrutinee so the
+                // `active_loop_specs` read guard drops immediately (clippy
+                // significant_drop_in_scrutinee).
+                let loop_spec = self.active_loop_specs.read().await.get(session_id).cloned();
+                if let Some(spec) = loop_spec {
+                    if let Some(verify_cmd) = spec.verify_cmd.clone() {
+                        let outcome = crate::session::verification::run_verification_command(
+                            &verify_cmd,
+                            &turn.working_dir,
+                        )
+                        .await
+                        .unwrap_or_else(|e| {
+                            crate::session::verification::VerificationOutcome::Failure {
+                                reason: format!("gate error: {e}"),
+                                output: String::new(),
+                            }
+                        });
+                        let label = outcome.label();
+                        let output = outcome.output().to_string();
+                        tracing::info!(
+                            session_id = %session_id,
+                            passed = outcome.passed(),
+                            "verification gate ran"
+                        );
+                        if outcome.passed() {
+                            self.terminate_loop_inner(
+                                session_id,
+                                crate::session::loop_state::StopCondition::GoalAchieved,
+                                Some(total_start),
+                                Some((llm_result.last_input_tokens, llm_result.last_output_tokens)),
+                                Some(label),
+                                None,
+                                Some(&turn.working_dir),
+                            )
+                            .await;
+                            break;
+                        }
+                        // Failure: with no step remaining the loop cannot
+                        // retry the verification, so the run is a budget
+                        // exhaustion (FR-007); otherwise the failure output
+                        // becomes the next observation and the loop continues.
+                        let steps_remaining = loop_tracker
+                            .as_ref()
+                            .is_none_or(|tracker| tracker.budget_breach().is_none());
+                        if !steps_remaining {
+                            // A silent failure still needs an informative
+                            // verification field, so fall back to the label.
+                            let verification_summary = if output.is_empty() {
+                                label.clone()
+                            } else {
+                                output.clone()
+                            };
+                            let reason = format!(
+                                "verification command failed and no steps remain ({label})"
+                            );
+                            self.terminate_loop_inner(
+                                session_id,
+                                crate::session::loop_state::StopCondition::BudgetExhausted,
+                                Some(total_start),
+                                None,
+                                Some(verification_summary),
+                                Some(reason),
+                                Some(&turn.working_dir),
+                            )
+                            .await;
+                            break;
+                        }
+                        let observation =
+                            crate::session::verification::verification_failure_observation(
+                                &verify_cmd,
+                                &outcome,
+                            );
+                        self.event_bus.publish(Event::AgentNotice {
+                            session_id: session_id.to_string(),
+                            message: format!(
+                                "Verification gate failed - {label}. Appending \
+                                 the failure output as an observation and \
+                                 continuing the loop."
+                            ),
+                        });
+                        Arc::make_mut(&mut chat_messages).push(ChatMessage {
+                            role: "user".to_string(),
+                            content: ChatContent::Text(observation),
+                        });
+                        // The verification observation is a successful
+                        // observation append: reset the consecutive-failure
+                        // counter so unrelated recoverable failures do not
+                        // accumulate against the retry allowance (FR-012).
+                        if let Some(tracker) = loop_tracker.as_mut() {
+                            tracker.record_success();
+                            self.active_loops
+                                .write()
+                                .await
+                                .insert(session_id.to_string(), tracker.clone());
+                        }
+                        continue;
+                    }
+                }
+                // Goal-driven loop stop condition 1 (FR-010): a no-tool-call
+                // response with no verification command means the goal was
+                // reached — terminate with `GoalAchieved`, publish
+                // `Event::LoopTerminated`, and stop.
+                self.terminate_loop_inner(
+                    session_id,
+                    crate::session::loop_state::StopCondition::GoalAchieved,
+                    Some(total_start),
+                    Some((llm_result.last_input_tokens, llm_result.last_output_tokens)),
+                    None,
+                    None,
+                    Some(&turn.working_dir),
+                )
+                .await;
+                break;
+            }
+
+            // T-011 (FR-016): safe point between the LLM response and the
+            // tool phase — an interrupt raised while the model was responding
+            // aborts the run before any tool executes.
+            if loop_tracker.is_some() && interrupt_requested(&cancel_flag) {
+                self.terminate_loop_on_interrupt(
+                    session_id,
+                    Some(total_start),
+                    Some(&turn.working_dir),
+                )
+                .await;
+                loop_interrupted = true;
                 break;
             }
 
@@ -1330,6 +2119,10 @@ impl SessionProcessor {
                 // The per-call events are still published inside the spawned
                 // task as a fallback (PERFPLAN Milestone D risk note).
                 let mut batch_entries: Vec<ragent_types::event::ToolCallBatchEntry> = Vec::new();
+                // T-007 (FR-011): set when a tool task panicked or failed to
+                // join — an unrecoverable failure that terminates an active
+                // loop after the tool phase.
+                let mut tool_panic: Option<String> = None;
                 let mut handle_tool_execution_result = |result: ToolExecutionResult| {
                     let _scope = result_profiler.scope("loop.tool_phase.handle_result");
                     match result {
@@ -1407,6 +2200,7 @@ impl SessionProcessor {
                         }
                         Err(e) => {
                             warn!(error = %e, "Tool execution task panicked");
+                            tool_panic = Some(e.to_string());
                             false
                         }
                     }
@@ -1459,9 +2253,64 @@ impl SessionProcessor {
                     let extraction_engine = self.extraction_engine.clone();
                     let storage_clone = self.session_manager.storage().clone();
                     let profiler_clone = profiler.clone();
-                    let auto_approve = self.auto_approve;
                     let team_context_cache = self.team_context_cache.clone();
                     let telemetry_clone = Arc::clone(&self.telemetry);
+                    // T-009 (FR-008/FR-009/FR-021/FR-022): the loop
+                    // restriction guard runs inside the task, before hooks
+                    // and the permission checker, so a restricted loop
+                    // cannot execute a call outside its tool set or scope.
+                    let loop_spec = self.active_loop_specs.read().await.get(session_id).cloned();
+                    // T-010 (FR-015): when the loop has destructive-action
+                    // checkpoints enabled, `auto_approve` becomes `None` so
+                    // `check_permission_with_prompt` forces the checkpoint
+                    // prompt for destructive calls even under allow rules and
+                    // in auto-approve mode (FR-024). Plain turns keep
+                    // `Some(self.auto_approve)`.
+                    let loop_checkpoint = loop_spec.as_ref().is_some_and(|spec| spec.checkpoints);
+                    let auto_approve = if loop_checkpoint {
+                        None
+                    } else {
+                        Some(self.auto_approve)
+                    };
+                    let checkpoint_timeout_secs = loop_spec
+                        .as_ref()
+                        .and_then(|spec| spec.checkpoint_timeout_secs)
+                        .map_or_else(
+                            || u64::from(self.load_config_cached().r#loop.checkpoint_timeout_secs),
+                            u64::from,
+                        );
+                    // T-012 (FR-018): capture the workspace BEFORE the first
+                    // write action executes. The check is cheap when already
+                    // captured (a map read); when armed, the storage-backed
+                    // snapshot runs synchronously here so no write can slip
+                    // through before the capture. Failures surface as a tool
+                    // error observation instead of executing the call.
+                    if loop_tracker.is_some()
+                        && crate::session::loop_state::LOOP_WRITE_TOOLS.contains(&tc.name.as_str())
+                    {
+                        if let Err(e) = self
+                            .ensure_pre_loop_capture(session_id, &turn.working_dir, &tc.id)
+                            .await
+                        {
+                            let err_msg = format!("pre-loop workspace snapshot failed: {e:#}");
+                            tracing::error!(
+                                session_id = %session_id,
+                                reason = %err_msg,
+                                "loop terminated: workspace capture failed (FR-018)"
+                            );
+                            self.terminate_loop_inner(
+                                session_id,
+                                crate::session::loop_state::StopCondition::UnrecoverableError,
+                                Some(total_start),
+                                None,
+                                None,
+                                Some(format!("unrecoverable error: {err_msg}")),
+                                Some(&turn.working_dir),
+                            )
+                            .await;
+                            return Err(anyhow::anyhow!(err_msg));
+                        }
+                    }
                     let fut = tokio::spawn(async move {
                         let _tool_total_scope =
                             profiler_clone.scope_with(|| format!("tool.total:{}", tc_clone.name));
@@ -1471,6 +2320,54 @@ impl SessionProcessor {
                             tool: tc_clone.name.clone(),
                         });
                         event_bus.increment_tool_calls(&session_id_str);
+                        // T-010 (FR-015): the destructive-action checkpoint
+                        // applies per call — only when the loop has
+                        // checkpoints enabled AND this invocation is marked
+                        // destructive (deletion, config write, dependency
+                        // installation, destructive git). Plain write tools
+                        // keep the normal permission path.
+                        let call_input: Value = serde_json::from_str(&tc_clone.args_json)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let checkpoint_forced = loop_checkpoint
+                            && crate::session::permissions::is_destructive_tool(
+                                &tc_clone.name,
+                                &call_input,
+                            );
+                        // T-009: per-loop tool-set / scope / read-only
+                        // restriction (FR-008, FR-009, FR-021, FR-022).
+                        // A violation returns a denial observation to the
+                        // model instead of executing the tool. This check is
+                        // unconditional: it applies in auto-approve / YOLO
+                        // mode too (FR-024 — the permission layer is always
+                        // in the path).
+                        if let Some(spec) = &loop_spec {
+                            let early_input: Value = serde_json::from_str(&tc_clone.args_json)
+                                .unwrap_or_else(|_| serde_json::json!({}));
+                            if let Some(reason) = spec.deny_reason(&tc_clone.name, &early_input) {
+                                tracing::info!(
+                                    tool = %tc_clone.name,
+                                    reason = %reason,
+                                    "loop restriction denied tool execution"
+                                );
+                                event_bus.publish(Event::ToolCallEnd {
+                                    session_id: session_id_str.clone(),
+                                    call_id: tc_clone.id.clone(),
+                                    tool: tc_clone.name.clone(),
+                                    error: Some(reason.clone()),
+                                    duration_ms: 0,
+                                });
+                                return (
+                                    tc_clone.clone(),
+                                    early_input,
+                                    ToolCallStatus::Error,
+                                    None,
+                                    Some(reason),
+                                    0u64,
+                                    String::new(),
+                                    None,
+                                );
+                            }
+                        }
                         let pre_hook_result = {
                             crate::hooks::run_pre_tool_use_hooks(
                                 &hook_configs,
@@ -1589,6 +2486,8 @@ impl SessionProcessor {
                                                         &tc_clone.name,
                                                         auto_approve,
                                                         Some(&tool_ctx.canonical_cache),
+                                                        checkpoint_forced,
+                                                        checkpoint_timeout_secs,
                                                     )
                                                     .await;
                                                 match permission_action {
@@ -1631,6 +2530,8 @@ impl SessionProcessor {
                                             &tc_clone.name,
                                             auto_approve,
                                             Some(&tool_ctx.canonical_cache),
+                                            checkpoint_forced,
+                                            checkpoint_timeout_secs,
                                         )
                                         .await;
                                         match permission_action {
@@ -1638,9 +2539,25 @@ impl SessionProcessor {
                                                 tool.execute(tool_input, &tool_ctx).await
                                             }
                                             Ok(crate::permission::PermissionAction::Deny) => {
-                                                Err(anyhow::anyhow!(
-                                                    "Permission denied by user or policy"
-                                                ))
+                                                // T-010 (FR-015): when the denial
+                                                // comes from a forced
+                                                // destructive-action checkpoint
+                                                // (timeout or refusal), surface
+                                                // the checkpoint explanation so
+                                                // the model understands the
+                                                // safe-default intervention.
+                                                if checkpoint_forced {
+                                                    Err(anyhow::anyhow!(
+                                                        crate::session::permissions::checkpoint_reason(
+                                                            &tc_clone.name,
+                                                            &resource
+                                                        )
+                                                    ))
+                                                } else {
+                                                    Err(anyhow::anyhow!(
+                                                        "Permission denied by user or policy"
+                                                    ))
+                                                }
                                             }
                                             Ok(crate::permission::PermissionAction::Ask) => {
                                                 Err(anyhow::anyhow!(
@@ -1932,6 +2849,7 @@ impl SessionProcessor {
                             }
                             Err(e) => {
                                 warn!(error = %e, "Tool execution task failed to join");
+                                tool_panic = Some(e.to_string());
                                 break;
                             }
                         }
@@ -1976,14 +2894,97 @@ impl SessionProcessor {
                             .ok();
                         }
                     }
+                    // T-017 (FR-025): tally this iteration's tool calls into
+                    // the loop tracker so the run's tool-call total is
+                    // published with the loop telemetry on termination. The
+                    // tool-dispatch phase only runs when the response carried
+                    // tool calls, so a no-tool-call step cannot double-count.
+                    if let Some(tracker) = loop_tracker.as_mut() {
+                        tracker.record_tool_calls(llm_result.tool_calls.len() as u64);
+                        self.active_loops
+                            .write()
+                            .await
+                            .insert(session_id.to_string(), tracker.clone());
+                    }
                     self.event_bus.publish(Event::ToolCallBatch {
                         session_id: session_id_arc.to_string(),
                         step: step as u64,
-                        calls: batch_entries,
+                        calls: batch_entries.clone(),
                     });
                 }
                 if agent_switch_requested || agent_complete_requested || watchdog_timed_out {
                     break;
+                }
+                // T-007 (FR-011, FR-012): classify this step's tool results.
+                // A panic/join failure or a permission hard-deny terminates an
+                // active loop immediately (FR-011, no retry); recoverable
+                // failures were appended as observations above and only
+                // terminate the loop once the consecutive count exceeds the
+                // retry allowance (FR-012). Successful steps reset the
+                // consecutive-failure counter.
+                if let Some(tracker) = loop_tracker.as_mut() {
+                    let step_errors: Vec<String> = batch_entries
+                        .iter()
+                        .filter(|entry| !entry.success)
+                        .filter_map(|entry| entry.error.clone())
+                        .collect();
+                    let hard_failure = tool_panic.clone().or_else(|| {
+                        step_errors
+                            .iter()
+                            .find(|msg| classify_message(msg).is_unrecoverable())
+                            .cloned()
+                    });
+                    if let Some(failure) = hard_failure {
+                        let reason = format!("unrecoverable tool failure: {failure}");
+                        tracing::error!(
+                            session_id = %session_id,
+                            reason,
+                            "loop terminated by unrecoverable tool failure (FR-011); no retry"
+                        );
+                        self.terminate_loop_inner(
+                            session_id,
+                            crate::session::loop_state::StopCondition::UnrecoverableError,
+                            Some(total_start),
+                            None,
+                            None,
+                            Some(reason),
+                            Some(&turn.working_dir),
+                        )
+                        .await;
+                        break;
+                    }
+                    if step_errors.is_empty() {
+                        tracker.record_success();
+                    } else if tracker.record_failure() {
+                        let reason = format!(
+                            "retry allowance exceeded ({} consecutive recoverable \
+                             tool failures: {})",
+                            tracker.consecutive_failures(),
+                            step_errors.join("; ")
+                        );
+                        tracing::error!(
+                            session_id = %session_id,
+                            reason,
+                            "loop terminated at the retry allowance (FR-012)"
+                        );
+                        self.terminate_loop_inner(
+                            session_id,
+                            crate::session::loop_state::StopCondition::UnrecoverableError,
+                            Some(total_start),
+                            None,
+                            None,
+                            Some(reason),
+                            Some(&turn.working_dir),
+                        )
+                        .await;
+                        break;
+                    }
+                    // Persist the updated failure counter so the next
+                    // iteration (and any external termination) sees it.
+                    self.active_loops
+                        .write()
+                        .await
+                        .insert(session_id.to_string(), tracker.clone());
                 }
                 // Auto task status updates (P-10: reuse the `active_spec_id`
                 // already read above for the `ToolContext`, and short-circuit
@@ -2174,6 +3175,37 @@ impl SessionProcessor {
             }
         }
 
+        // T-011 (FR-016): a human interrupt stops the loop with `interrupted`
+        // (terminated at the safe point above); persist the partial assistant
+        // message and end the turn normally so the session stays persisted
+        // and resumable.
+        if loop_interrupted {
+            let total_elapsed_ms = total_start.elapsed().as_millis() as u64;
+            let parts_owned =
+                std::sync::Arc::try_unwrap(assistant_parts).unwrap_or_else(|arc| (*arc).clone());
+            let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
+            assistant_msg.id = assistant_msg_id;
+            let interrupted_id = assistant_msg.id.clone();
+            self.storage_op(move |s| s.update_message(&assistant_msg))
+                .await?;
+            self.event_bus.publish(Event::MessageEnd {
+                session_id: session_id.to_string(),
+                message_id: interrupted_id,
+                reason: FinishReason::Cancelled,
+            });
+            // Activity log: record the user interruption.
+            let run_id_for_interrupt = run_id.clone();
+            self.record_activity_event(move |log| {
+                log.record_termination(
+                    &run_id_for_interrupt,
+                    ragent_types::activity::TerminationReason::Interrupted,
+                )
+            })
+            .await;
+            publish_run_cost_summary(total_elapsed_ms);
+            return Ok(Message::new(session_id, Role::Assistant, vec![]));
+        }
+
         // Watchdog termination: persist the accumulated assistant parts, end the
         // message with the cancelled reason (the closest existing variant to a
         // watchdog-forced stop), and return a fatal error for the run.
@@ -2202,10 +3234,20 @@ impl SessionProcessor {
             })
             .await;
             publish_run_cost_summary(total_elapsed_ms);
-            return Err(anyhow::anyhow!(
+            // T-007 (FR-011): a watchdog abort is an unrecoverable tool-stage
+            // failure — terminate an active loop with status `error`.
+            let watchdog_err = anyhow::anyhow!(
                 "agent run terminated: tool call stalled beyond the {}s watchdog timeout",
                 TOOL_WATCHDOG_TIMEOUT.as_secs()
-            ));
+            );
+            self.terminate_loop_on_fatal_error(
+                session_id,
+                &watchdog_err,
+                Some(total_start),
+                Some(&turn.working_dir),
+            )
+            .await;
+            return Err(watchdog_err);
         }
 
         // 8. Finalize

@@ -328,6 +328,59 @@ pub enum Event {
         dimensions: Vec<(String, f64)>,
     },
 
+    // ── Goal-driven loop lifecycle (spec `agentloop`) ───────────────────
+    /// A goal-driven loop run has terminated (spec `agentloop`, FR-010).
+    ///
+    /// Published exactly once when a loop stop condition fires; `status` is
+    /// the termination label (`completed`, `error`, `budget_exhausted`,
+    /// `interrupted`), `iterations` the completed step count, `verification`
+    /// the verification-command output summary when one ran, and `reason`
+    /// an optional human-readable explanation for non-success terminations.
+    LoopTerminated {
+        /// Session the loop ran in.
+        session_id: String,
+        /// Termination status label (`completed` | `error` |
+        /// `budget_exhausted` | `interrupted`).
+        status: String,
+        /// Number of completed iterations.
+        iterations: u64,
+        /// Verification-command outcome summary, when a verification command
+        /// was configured and executed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        verification: Option<String>,
+        /// Human-readable failure reason for non-success terminations.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    /// A goal-driven loop terminated and its workspace change summary is
+    /// available (spec `agentloop`, FR-019).
+    ///
+    /// Published once per terminated loop run that captured a pre-loop
+    /// workspace snapshot: `files_modified` / `files_created` /
+    /// `files_deleted` count workspace files changed since the capture,
+    /// `diffstat` is the aggregate added/deleted line summary, and `files`
+    /// lists the affected paths. `status` and `iterations` mirror the
+    /// corresponding [`Event::LoopTerminated`] fields so consumers can pair
+    /// the two events.
+    LoopChangeSummary {
+        /// Session the loop ran in.
+        session_id: String,
+        /// Termination status label (mirrors [`Event::LoopTerminated`]).
+        status: String,
+        /// Number of completed iterations (mirrors [`Event::LoopTerminated`]).
+        iterations: u64,
+        /// Count of workspace files whose contents changed since capture.
+        files_modified: u64,
+        /// Count of workspace files created since capture.
+        files_created: u64,
+        /// Count of workspace files deleted since capture.
+        files_deleted: u64,
+        /// Aggregate diffstat summary, e.g. `"+12 -3 lines across 4 files"`.
+        diffstat: String,
+        /// Affected workspace paths (sorted, relative to the workspace root).
+        files: Vec<String>,
+    },
+
     // ── Model download progress (e.g. local providers) ─────────────────
     /// A local provider started downloading a model.
     ModelDownloadStarted {
@@ -944,6 +997,8 @@ impl Event {
             Self::McpStatusChanged { .. } => "McpStatusChanged",
             Self::TokenUsage { .. } => "TokenUsage",
             Self::RunCostSummary { .. } => "RunCostSummary",
+            Self::LoopTerminated { .. } => "LoopTerminated",
+            Self::LoopChangeSummary { .. } => "LoopChangeSummary",
             Self::RequestStarted { .. } => "RequestStarted",
             Self::ToolsSent { .. } => "ToolsSent",
             Self::ModelResponse { .. } => "ModelResponse",
@@ -1027,6 +1082,8 @@ impl Event {
             | Self::ServiceStartError { session_id, .. }
             | Self::TokenUsage { session_id, .. }
             | Self::RunCostSummary { session_id, .. }
+            | Self::LoopTerminated { session_id, .. }
+            | Self::LoopChangeSummary { session_id, .. }
             | Self::RequestStarted { session_id, .. }
             | Self::ToolsSent { session_id, .. }
             | Self::ModelResponse { session_id, .. }

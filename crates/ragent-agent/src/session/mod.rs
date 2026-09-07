@@ -8,12 +8,15 @@ pub mod archive;
 pub mod cache;
 pub mod compaction_ops;
 pub mod history;
+pub mod loop_capture;
+pub mod loop_state;
 pub mod loop_steps;
 pub mod permissions;
 pub mod processor;
 pub mod profiler;
 pub mod prompt_builders;
 pub mod stream_buffer;
+pub mod verification;
 
 use crate::event::FinishReason;
 

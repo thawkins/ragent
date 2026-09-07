@@ -34,7 +34,8 @@ Before you begin, make sure you have:
 - At least one LLM provider configured. ragent supports Anthropic, OpenAI,
   Google Gemini, Hugging Face, GitHub Copilot, Ollama (local and cloud),
   Generic OpenAI-compatible endpoints, Azure AI Foundry, Azure Resource,
-  Amazon Bedrock, Microsoft Foundry Local, XAI, and a Model Router cluster.
+  Amazon Bedrock, Microsoft Foundry Local, OpenRouter, XAI, and a Model Router
+  cluster.
   For a fully local setup, install Ollama and pull a model such as
   `qwen2.5-coder:7b`.
 - A terminal supporting 256 colours and Unicode.
@@ -170,7 +171,7 @@ binary crate called "my-app" with:
 - A .gitignore for the target/ directory
 ```
 
-ragent calls `bash` to run `cargo init --lib --bin`, then `write` and
+ragent calls `bash` to run `cargo init`, then `write` and
 `edit` to create the files. When it requests permission, respond with `y`
 (allow once) or `a` (allow always for this session). To skip prompts
 entirely, press `Alt+Y` to toggle YOLO mode, or start with `--yes`.
@@ -310,7 +311,10 @@ environment variable overrides
 ```
 
 ragent generates `SPEC.md`, `PLAN.md`, and `TESTPLAN.md` under
-`specs/add-config-file/`. Validate, then implement:
+`specs/add-config-file/`. Validate, then implement by asking ragent to run
+the spec's implementation command (e.g. `/spec impl add-config-file` to
+execute the plan's tasks in dependency order, or `/spec impl add-config-file
+--dry-run` to preview it):
 
 ```text
 /spec validate add-config-file
@@ -365,7 +369,7 @@ For features split into independent streams (API, UI, tests), use teams:
 
 ragent spawns teammates from a blueprint with role-specific prompts. The
 lead coordinates via a shared task queue and mailbox messaging. See
-`docs/howtos/howto_teams.md` for the full manual.
+`docs/howtos/teams.md` for the full manual.
 
 ---
 
@@ -580,6 +584,7 @@ See `docs/howtos/custom-agents.md` for the full schema.
 | `Alt+T` | Toggle TASKS panel |
 | `Alt+M` | Toggle Memory panel |
 | `Alt+O` | Toggle Telemetry panel |
+| `Alt+X` | Toggle Context side panel |
 | `Alt+V` | Paste image from clipboard |
 | `Alt+Y` | Toggle YOLO mode |
 | `@` | Open file mention picker |
@@ -598,7 +603,7 @@ dragging.
 |----------|--------|
 | `TUI-QUICKSTART.md` | Full TUI layout, panels, startup options |
 | `docs/howtos/custom-agents.md` | Custom agent profiles and OASF schema |
-| `docs/howtos/howto_teams.md` | Multi-agent team coordination |
+| `docs/howtos/teams.md` | Multi-agent team coordination |
 | `docs/howtos/spec.md` | Spec management and SDD workflow |
 | `docs/howtos/research.md` | Research system and report synthesis |
 | `docs/howtos/reverse.md` | Repository reverse-engineering |

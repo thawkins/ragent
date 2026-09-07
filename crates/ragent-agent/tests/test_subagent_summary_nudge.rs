@@ -208,6 +208,11 @@ fn make_processor(
         bg_service: std::sync::OnceLock::new(),
         activity_log: std::sync::OnceLock::new(),
         skill_registry_cache: parking_lot::Mutex::new(None),
+        active_loops: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        active_loop_specs: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
+        active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
+        active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
     };
 
     let tmp = tempfile::tempdir().expect("tempdir");

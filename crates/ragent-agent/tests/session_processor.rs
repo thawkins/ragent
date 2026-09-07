@@ -34,8 +34,10 @@ async fn test_hardwired_team_tool_is_auto_approved() {
         "tool:execute",
         "tool:team_status",
         "team_status",
-        false,
+        Some(false),
         None,
+        false,
+        120,
     )
     .await
     .expect("permission check should succeed");
@@ -55,8 +57,10 @@ async fn test_hardwired_task_suffix_tool_is_auto_approved() {
         "tool:execute",
         "tool:new_agent",
         "new_agent",
-        false,
+        Some(false),
         None,
+        false,
+        120,
     )
     .await
     .expect("permission check should succeed");
@@ -76,8 +80,10 @@ async fn test_hardwired_ask_user_tool_is_auto_approved() {
         "ask_user",
         "Which provider?",
         "ask_user",
-        false,
+        Some(false),
         None,
+        false,
+        120,
     )
     .await
     .expect("permission check should succeed");
@@ -97,8 +103,10 @@ async fn test_hardwired_wait_agents_is_auto_approved() {
         "wait_agents",
         "waiting",
         "wait_agents",
-        false,
+        Some(false),
         None,
+        false,
+        120,
     )
     .await
     .expect("permission check should succeed");
@@ -121,8 +129,10 @@ async fn test_hardwired_agent_complete_is_auto_approved() {
         "agent_complete",
         "summary",
         "agent_complete",
-        false,
+        Some(false),
         None,
+        false,
+        120,
     )
     .await
     .expect("permission check should succeed");
@@ -145,8 +155,10 @@ async fn test_hardwired_list_agents_is_auto_approved() {
         "list_agents",
         "list",
         "list_agents",
-        false,
+        Some(false),
         None,
+        false,
+        120,
     )
     .await
     .expect("permission check should succeed");
@@ -168,8 +180,10 @@ async fn test_hardwired_task_create_is_auto_approved() {
         "task",
         "create task",
         "task_create",
-        false,
+        Some(false),
         None,
+        false,
+        120,
     )
     .await
     .expect("permission check should succeed");
@@ -191,8 +205,10 @@ async fn test_hardwired_task_update_is_auto_approved() {
         "task",
         "update task",
         "task_update",
-        false,
+        Some(false),
         None,
+        false,
+        120,
     )
     .await
     .expect("permission check should succeed");
@@ -214,8 +230,10 @@ async fn test_hardwired_task_get_is_auto_approved() {
         "task",
         "get task",
         "task_get",
-        false,
+        Some(false),
         None,
+        false,
+        120,
     )
     .await
     .expect("permission check should succeed");
@@ -237,8 +255,10 @@ async fn test_hardwired_task_list_is_auto_approved() {
         "task",
         "list tasks",
         "task_list",
-        false,
+        Some(false),
         None,
+        false,
+        120,
     )
     .await
     .expect("permission check should succeed");

@@ -6,8 +6,10 @@ lets you create EARS-notation specifications, generate implementation plans,
 validate compliance, manage lifecycle status, and drive implementation — all
 from the interactive TUI.
 
-The same commands are available as `ragent spec <subcommand>` on the CLI (where
-supported) and the spec lifecycle is managed by the `ragent-specs` crate.
+The commands are exposed via the `/spec` slash command family (TUI) and the
+`spec_*` LLM tools (`spec_read`, `spec_list`, `spec_search`, `spec_coverage`,
+`spec_task_update`); the spec lifecycle is managed by the `ragent-specs`
+crate.
 
 > **Scope:** `/spec` slash commands, EARS requirements notation, the SDD
 > (Spec-Driven Development) workflow, lifecycle status transitions, task
@@ -143,13 +145,13 @@ specs/
 
 ### Naming rules
 
-Spec IDs must be valid directory names: lowercase letters, digits, and
-hyphens. The `SpecId` type validates this at creation time.
+Spec IDs must be valid directory names: alphanumeric characters, hyphens,
+and underscores. The `SpecId` type validates this at creation time.
 
-Valid IDs: `websocket`, `auth-refactor`, `q3-review`, `api-v2`
+Valid IDs: `websocket`, `auth-refactor`, `q3-review`, `api-v2`,
+`auth_refactor`
 
-Invalid IDs: `WebSocket` (uppercase), `auth_refactor` (underscore),
-`api.v2` (dots)
+Invalid IDs: `WebSocket` (uppercase), `api.v2` (dots)
 
 ---
 
@@ -1084,7 +1086,22 @@ The `sdd.feedback_loop` flag enables this feature:
 
 ---
 
-## 18. Troubleshooting
+## 18. LLM tool surface
+
+Specs are also accessible to the agent as first-class LLM tools, so a
+coding agent can read and track specs without slash commands:
+
+| Tool | Purpose |
+|------|---------|
+| `spec_read` | Read a specification by ID (full SPEC.md content, requirements, tasks, status) |
+| `spec_list` | List specifications, optionally filtered by status |
+| `spec_search` | Keyword search across spec titles and content |
+| `spec_task_update` | Update a task's status (`pending`/`in_progress`/`completed`/`blocked`) within a spec |
+| `spec_coverage` | Generate a requirement-coverage report showing which requirements are linked to completed tasks |
+
+---
+
+## 19. Troubleshooting
 
 | Symptom | Likely cause | What to do |
 |---------|--------------|------------|

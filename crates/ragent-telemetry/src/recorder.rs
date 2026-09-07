@@ -501,6 +501,7 @@ impl Default for ToolRecorder {
 /// | [`record_session_start`](SessionRecorder::record_session_start) | `ragent.sessions.active` (up), `ragent.sessions.total` | FR-011 |
 /// | [`record_session_end`](SessionRecorder::record_session_end) | `ragent.sessions.active` (down) | FR-011 |
 /// | [`record_agent_loop`](SessionRecorder::record_agent_loop) | `ragent.agent_loop.duration`, `ragent.agent_loop.iterations` | FR-010 |
+/// | [`record_tool_calls_per_session`](SessionRecorder::record_tool_calls_per_session) | `ragent.tool.calls_per_session` | FR-025 |
 #[cfg(feature = "telemetry")]
 #[derive(Clone)]
 pub struct SessionRecorder {
@@ -561,17 +562,36 @@ impl SessionRecorder {
         }
     }
 
-    /// Record agent-loop metrics for a completed session (FR-010).
+    /// Record agent-loop metrics for a completed session (FR-010, FR-025 of
+    /// spec `agentloop`).
     ///
     /// `duration_ms` is the total wall-clock duration of the agent loop and
     /// `iterations` is the number of loop iterations completed.
+    ///
+    /// The last-value snapshot gauges are updated unconditionally (the
+    /// in-memory mirror is independent of the OTEL export pipeline), so loop
+    /// depth and duration stay observable in the diagnostics surfaces even
+    /// when the OTEL provider is disabled.
     pub fn record_agent_loop(&self, duration_ms: f64, iterations: u64) {
         if let Some(reg) = &self.registry {
             reg.agent_loop_duration.record(duration_ms, &[]);
-            crate::counters::set_agent_loop_duration_last(duration_ms);
             reg.agent_loop_iterations.record(iterations, &[]);
-            crate::counters::set_agent_loop_iterations_last(iterations);
         }
+        crate::counters::set_agent_loop_duration_last(duration_ms);
+        crate::counters::set_agent_loop_iterations_last(iterations);
+    }
+
+    /// Record the tool-call total for a completed agent-loop run (FR-025 of
+    /// spec `agentloop`): records to the `ragent.tool.calls_per_session`
+    /// histogram and updates the last-value snapshot gauge.
+    ///
+    /// Like [`record_agent_loop`](Self::record_agent_loop), the snapshot
+    /// gauge is updated even when the OTEL provider is disabled.
+    pub fn record_tool_calls_per_session(&self, count: u64) {
+        if let Some(reg) = &self.registry {
+            reg.tool_calls_per_session.record(count, &[]);
+        }
+        crate::counters::set_tool_calls_per_session_last(count);
     }
 }
 
@@ -601,8 +621,18 @@ impl SessionRecorder {
     /// No-op: record session end.
     pub fn record_session_end(&self) {}
 
-    /// No-op: record agent-loop metrics.
-    pub fn record_agent_loop(&self, _duration_ms: f64, _iterations: u64) {}
+    /// Record agent-loop metrics; the last-value snapshot gauges are still
+    /// updated (the mirror is independent of the OTEL pipeline).
+    pub fn record_agent_loop(&self, duration_ms: f64, iterations: u64) {
+        crate::counters::set_agent_loop_duration_last(duration_ms);
+        crate::counters::set_agent_loop_iterations_last(iterations);
+    }
+
+    /// Record the per-run tool-call total; the last-value snapshot gauge is
+    /// still updated (the mirror is independent of the OTEL pipeline).
+    pub fn record_tool_calls_per_session(&self, count: u64) {
+        crate::counters::set_tool_calls_per_session_last(count);
+    }
 }
 
 impl Default for SessionRecorder {

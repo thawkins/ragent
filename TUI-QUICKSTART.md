@@ -4,6 +4,21 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.82)
+
+- **Goal-driven loop programming (`/loop`)** — a new slash-command family that
+  runs a goal-driven agentic loop: `/loop` opens an interactive setup dialog
+  (agent, goal, success state, verify command, scope, tool set, budget), and
+  `/loop <agent> <goal text...>` starts immediately with documented defaults.
+  Loops end with a status banner (`completed` / `error` / `budget_exhausted` /
+  `interrupted`), capture a pre-loop snapshot, and offer a rollback flow:
+  Enter restores the pre-loop snapshot, Esc keeps the loop's changes. See
+  `docs/howtos/loopprogramming.md`.
+- **New how-to manuals** — `docs/howtos/reactagent.md` (the core per-turn
+  ReACT loop), `docs/howtos/loopprogramming.md` (goal-driven loops with
+  `/loop`), and `docs/howtos/office.md` (office + PDF tool families with
+  format matrix, JSON examples, and `tool_visibility.office` configuration).
+
 ## Highlights (1.0.79)
 
 - **`/research create --max-search-calls N`** — hard, run-scoped cap on total web-search calls per research run, shared across every supervisor/competitive researcher and gather pass.
@@ -422,7 +437,98 @@ The dialog title shows a live countdown (e.g. `Permission Required (1:45 remaini
 
 ---
 
-## 5. Research with `/research`
+## 5. Goal-driven loops with `/loop`
+
+The **`/loop`** slash command runs a goal-driven agentic loop: ragent picks
+the agent you name, then iterates **plan → act → observe** — planning the
+next action, executing tool calls, feeding each observation back into the
+model's context — until a stop condition fires. Four stop conditions end the
+loop, each rendered as a status-aware end banner with the iteration count:
+
+| Termination status | Stop condition |
+| ------------------ | -------------- |
+| `completed` | Goal achieved (model responded without tool calls; when a verification command is configured it must exit successfully) |
+| `error` | An unrecoverable stage failure (provider transport, tool panic, context overflow, permission hard-deny); the failed stage is **not** retried |
+| `budget_exhausted` | The step limit or token-cost budget was consumed **before** the next LLM request |
+| `interrupted` | You pressed `Esc` mid-loop; the session stays resumable and a rollback offer may follow |
+
+### Usage
+
+```text
+/loop                              # open the interactive setup dialog
+/loop <agent> <goal text...>       # start immediately with documented defaults
+```
+
+The one-shot form activates the documented defaults: step limit **512**
+(or `loop.max_steps` from `ragent.json`), config cost limit, checkpoints
+**on**, no verification command, and no restrictions. Three flags override
+the run's budgets: `--max-steps N`, `--cost_limit N` (or `--cost-limit N`),
+and `--timeout N` (checkpoint-prompt seconds). An empty or
+whitespace-only goal never starts a loop — the dialog shows an error naming
+the missing field (`goal`) and re-opens for correction; the one-shot form
+prints usage help instead.
+
+### Goal format
+
+A goal is the structured contract the loop iterates against. All fields
+except the success state are optional:
+
+| Field | Meaning |
+| ----- | ------- |
+| **Success state** | What must be true for the loop to complete (plain text) |
+| **Verification command** | Runs automatically when the model responds without tool calls; success completes the loop, failure appends its output as the next observation (steps remaining) or ends `budget_exhausted` (no steps left) |
+| **Scope boundaries** | Path globs the loop's file operations must stay inside |
+| **Constraints** | Read-only path globs — writes are denied and returned as observations (anti-cheat: never satisfy the goal by modifying them) |
+| **Tool set** | Restricted tool surface; calls outside the set are denied with a scope observation |
+| **Budget** | Maximum iterations and maximum accumulated tokens before `budget_exhausted` |
+
+### Setup dialog
+
+With no arguments, `/loop` opens a setup dialog with an agent selector
+(arrow keys), goal field, verification-command field, scope field
+(comma-separated globs), constraints field, tool-set field, step-limit field (default 512), cost-limit field (from
+config), and a checkpoints toggle
+(default on). `Esc` cancels without starting anything and preserves all
+entered values for the next `/loop` in the same session.
+
+### Budget + checkpoint tunables
+
+```json
+{
+  "loop": {
+    "max_steps": 512,
+    "cost_limit": 200000,
+    "error_retry_allowance": 3,
+    "checkpoints": true,
+    "checkpoint_timeout_secs": 120
+  }
+}
+```
+
+- `max_steps` — iterations before `budget_exhausted` (FR-013); a per-agent
+  `agent.<name>.max_steps` wins over the loop-level budget.
+- `cost_limit` — accumulated input + output tokens before
+  `budget_exhausted` (FR-014); `null` disables the gate.
+- `error_retry_allowance` — consecutive recoverable tool failures before the
+  loop stops with `error` (FR-012).
+- `checkpoints` — force a human-approval prompt before destructive actions
+  (file deletion, config writes, dependency installation, destructive git
+  operations) even when an allow rule would auto-approve them (FR-015); a
+  prompt timeout is treated as denial.
+- `checkpoint_timeout_secs` — seconds a checkpoint prompt waits before the
+  safe-choice denial applies.
+
+### Rollback flow
+
+When a loop terminates, ragent renders the change summary as a diffstat line
+and offers a **one-key rollback**: `Enter` accepts and restores the pre-loop
+workspace snapshot; `Esc` (or any other key) declines and keeps the changes.
+Rollback is snapshot-only when the workspace is not inside a git repository —
+the loop warns you before writing anything in that case.
+
+---
+
+## 6. Research with `/research`
 
 Use the **`/research`** slash command to gather information from the web and
 cross-reference it with local files.
@@ -504,7 +610,7 @@ traceable.
 
 ---
 
-## 6. Creating a specification and plan with `/spec`
+## 7. Creating a specification and plan with `/spec`
 
 The **`/spec`** slash command creates a tracked specification (`SPEC.md`) and
 an implementation plan (`PLAN.md`) for a feature.
@@ -554,7 +660,7 @@ to commit them.
 
 ---
 
-## 7. Stopping the agent with the Escape key
+## 8. Stopping the agent with the Escape key
 
 While ragent is actively streaming a response or running tools, press
 **`Escape`** to cancel the current operation.
@@ -568,7 +674,7 @@ agent step.
 
 ---
 
-## 8. Quitting ragent
+## 9. Quitting ragent
 
 To exit the TUI safely:
 
@@ -586,7 +692,7 @@ You can also press **`Ctrl+C`** to arm quit mode, then **`Ctrl+D`** to confirm.
 
 ---
 
-## 9. Log panel — `Alt+L`
+## 10. Log panel — `Alt+L`
 
 Press **`Alt+L`** to toggle the **Log panel** on the right side of the screen.
 
@@ -619,7 +725,7 @@ with Log on top.
 
 ---
 
-## 10. Profile panel — `Alt+P`
+## 11. Profile panel — `Alt+P`
 
 Press **`Alt+P`** to toggle the **Profile panel** on the right side of the
 screen.
@@ -657,7 +763,7 @@ can be shown together).
 
 ---
 
-## 11. TASKS panel — `Alt+T`
+## 12. TASKS panel — `Alt+T`
 
 Press **`Alt+T`** to toggle the **TASKS panel** on the right side of the screen.
 
@@ -712,7 +818,7 @@ The scrollbar gutter runs along the right edge of the panel.
 
 ---
 
-## 12. Memory panel — `Alt+M`
+## 13. Memory panel — `Alt+M`
 
 Press **`Alt+M`** to toggle the **Memory panel** on the right side of the screen.
 
@@ -851,5 +957,5 @@ shortcut again to close the panel.
 
 - Read the full `QUICKSTART.md` for CLI, server, and configuration options.
 - See `docs/custom-agents.md` to create your own agent profiles.
-- See `docs/howtos/howto_teams.md` to coordinate multi-agent teams.
+- See `docs/howtos/teams.md` to coordinate multi-agent teams.
 - Run `ragent --help` for a complete list of command-line options.

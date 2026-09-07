@@ -24,11 +24,11 @@ pub mod yolo;
 pub use compaction::{CompactionConfig, KeepConfig};
 pub use config::{
     AgentConfig, AgentPerfConfig, AutoExtractConfig, BrowserConfig, Capabilities, ChannelsConfig,
-    Config, Cost, CrossProjectConfig, DiscordChannelConfig, GitLabIntegrationConfig, GmailConfig,
-    McpServerConfig, McpTransport, MemoryConfig, ModelConfig, PieGapConfig, PriceEntry,
-    ProviderConfig, ResearchConfig, ResearchEvaluateConfig, ResearchModelsConfig,
-    ResearchSupervisorConfig, SddConfig, StreamConfig, TelegramChannelConfig, ToolVisibilityConfig,
-    tool_family_names,
+    Config, Cost, CrossProjectConfig, DEFAULT_ERROR_RETRY_ALLOWANCE, DEFAULT_LOOP_MAX_STEPS,
+    DiscordChannelConfig, GitLabIntegrationConfig, GmailConfig, LoopConfig, McpServerConfig,
+    McpTransport, MemoryConfig, ModelConfig, PieGapConfig, PriceEntry, ProviderConfig,
+    ResearchConfig, ResearchEvaluateConfig, ResearchModelsConfig, ResearchSupervisorConfig,
+    SddConfig, StreamConfig, TelegramChannelConfig, ToolVisibilityConfig, tool_family_names,
 };
 pub use permission::{
     Permission, PermissionAction, PermissionChecker, PermissionDecision, PermissionRequest,

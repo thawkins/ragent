@@ -25,6 +25,7 @@ behaviour without changing any code.
 - [Persistent Memory](#persistent-memory)
 - [Examples](#examples)
 - [Using Profiles in Team Blueprints](#using-profiles-in-team-blueprints)
+- [Built-in agent presets](#built-in-agent-presets)
 - [Slash Commands](#slash-commands)
 
 ---
@@ -134,14 +135,14 @@ model can interpret as instructions.
 | `name` | string | — | **Required.** Unique agent identifier (kebab-case, no spaces). |
 | `description` | string | — | **Required.** One-line summary shown in `/agents` and the picker. |
 | `mode` | string | `"all"` | Availability: `"primary"`, `"subagent"`, or `"all"`. |
-| `model` | string | *inherited* | Lock to a specific model: `"provider:model"` format (e.g. `"anthropic:claude-sonnet-4-20250514"`). When omitted the agent inherits the globally-selected model from `/provider`. |
-| `max_steps` | integer | `100` | Maximum tool-call steps before the agent stops. |
+| `model` | string | *inherited* | Lock to a specific model: `"provider:model"` or `"provider:model@vendor"` format (e.g. `"anthropic:claude-sonnet-4-20250514"`). When omitted the agent inherits the globally-selected model from `/provider`. |
+| `max_steps` | integer | `1024` | Maximum tool-call steps before the agent stops. |
 | `temperature` | float | provider default | Sampling temperature in `[0.0, 2.0]`. |
 | `top_p` | float | provider default | Nucleus sampling probability in `[0.0, 1.0]`. |
 | `hidden` | bool | `false` | When `true`, hidden from picker but available via `/agent <name>`. |
 | `memory` | string | `"none"` | Persistent memory scope: `"none"`, `"user"`, or `"project"`. See [Persistent Memory](#persistent-memory). |
 | `permissions` | object[] | default ruleset | [Permission rules](#permission-rules). |
-| `skills` | string[] | `[]` | Skill names the agent can invoke. |
+| `skills` | string[] | `[]` | Skill names preloaded for this agent. |
 | `options` | object | `{}` | Provider-specific options passed through verbatim. |
 
 The markdown body supports [template variables](#template-variables) just like
@@ -161,8 +162,8 @@ the `ragent/agent/v1` module payload.
 |-------|------|----------|-------------|
 | `name` | string | ✅ | Unique agent identifier. No spaces. Used as the agent selector key. |
 | `description` | string | ✅ | One-line summary shown in `/agents` and the picker. |
-| `version` | string | | Semantic version of this agent definition. |
-| `schema_version` | string | | OASF schema version (e.g. `"0.7.0"`). |
+| `version` | string | ✅ | Semantic version of this agent definition (required for `.json` records; markdown profiles synthesise it). |
+| `schema_version` | string | ✅ | OASF schema version (e.g. `"0.7.0"`; required for `.json` records). |
 | `authors` | string[] | | List of author names or email addresses. |
 | `created_at` | string | | ISO 8601 creation timestamp. |
 | `skills` | object[] | | OASF skill taxonomy annotations (informational only). |
@@ -176,15 +177,16 @@ the `ragent/agent/v1` module payload.
 |-------|------|---------|-------------|
 | `system_prompt` | string | — | **Required.** The agent's system prompt. Supports [template variables](#template-variables). Max 32,768 chars. |
 | `mode` | string | `"all"` | Availability: `"primary"` (user-selectable), `"subagent"` (delegation only), `"all"` (both). |
-| `max_steps` | integer | `100` | Maximum tool-call steps before the agent stops. Must be ≥ 1. |
+| `max_steps` | integer | `1024` | Maximum tool-call steps before the agent stops. Must be ≥ 1. |
 | `temperature` | float | provider default | Sampling temperature in `[0.0, 2.0]`. |
 | `top_p` | float | provider default | Nucleus sampling probability in `[0.0, 1.0]`. |
-| `model` | string | *inherited* | Lock to a specific model: `"provider:model"` format (e.g. `"anthropic:claude-opus-4-5"`). When omitted the agent inherits the globally-selected model. |
+| `model` | string | *inherited* | Lock to a specific model: `"provider:model"` or `"provider:model@vendor"` format (e.g. `"anthropic:claude-opus-4-5"`, `"openai:gpt-4o@azure"`). When omitted the agent inherits the globally-selected model. |
 | `hidden` | bool | `false` | When `true`, the agent is available for direct switch (`/agent <name>`) but not shown in the picker or `/agents` list. |
 | `memory` | string | `"none"` | Persistent memory scope: `"none"`, `"user"`, or `"project"`. See [Persistent Memory](#persistent-memory). |
 | `permissions` | object[] | default ruleset | [Permission rules](#permission-rules). Omit to inherit the default ruleset. |
 | `options` | object | `{}` | Provider-specific options passed through verbatim (e.g. `{"max_tokens": 4096}`). |
-| `skills` | string[] | `[]` | Skill names the agent can invoke (e.g. `"simplify"`). |
+| `skills` | string[] | `[]` | Ragent skill names preloaded for this agent (e.g. `"simplify"`). |
+| `thinking` | object | *inherit* | Extended-thinking config (`{"enabled": true, "level": "high", "budget_tokens": 16000}`). Omit to inherit the provider/model default. |
 
 ---
 
@@ -197,6 +199,8 @@ The following placeholders in `system_prompt` are substituted at session start:
 | `{{WORKING_DIR}}` | Absolute path of the current working directory |
 | `{{FILE_TREE}}` | Two-level directory listing of the working directory |
 | `{{AGENTS_MD}}` | Contents of `AGENTS.md` in the project root (if it exists) |
+| `{{GIT_STATUS}}` | Output of `git status` for the working directory |
+| `{{README}}` | Contents of the project `README.md` (if it exists) |
 | `{{DATE}}` | Current date in `YYYY-MM-DD` format (UTC) |
 
 Sections whose content was already embedded via a template variable are not
@@ -224,7 +228,7 @@ match wins.
 
 | Field | Values | Description |
 |-------|--------|-------------|
-| `permission` | `read`, `edit`, `bash`, `question` | Operation category |
+| `permission` | `read`, `edit` (alias `write`), `bash` (alias `execute`), `web` (alias `fetch`), `task`, `plan_enter` (alias `plan`), `plan_exit` | Operation category. `question` is legacy-only; namespaced forms (e.g. `file:read`) are normalised to the base type; unknown names are accepted as custom permissions. |
 | `pattern` | glob string | Files or commands the rule matches (e.g. `"**"`, `"src/**/*.rs"`) |
 | `action` | `allow`, `deny`, `ask` | What to do when matched |
 
@@ -268,8 +272,8 @@ startup in the log panel and in `/agents → Diagnostics`).
 | `mode` is unrecognised | `unknown mode '<value>'; expected primary, subagent, or all` |
 | `temperature` outside `[0.0, 2.0]` | `temperature N out of range [0.0, 2.0]` |
 | `top_p` outside `[0.0, 1.0]` | `top_p N out of range [0.0, 1.0]` |
-| `model` not in `provider:model` format | `model '<value>' must be in 'provider:model' format` |
-| `memory` not one of `none`, `user`, `project` | `unknown memory scope '<value>'; expected none, user, or project` |
+| `model` not in `provider:model` format | `model '<value>' must be in 'provider:model' or 'provider:model@vendor' format` |
+| `memory` not one of `none`, `user`, `project` | `unknown memory scope '<value>'; expected user, project, or none` |
 | `max_steps` is 0 | `max_steps must be greater than 0` |
 | Permission `action` unrecognised | `unknown action '<value>'; expected allow, deny, or ask` |
 | `name` collides with a built-in | Warning (not skip): loaded as `custom:<name>` |

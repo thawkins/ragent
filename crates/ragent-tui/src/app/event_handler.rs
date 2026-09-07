@@ -20,11 +20,11 @@ use ragent_telemetry::counters as telemetry_counters;
 use crate::app::state::{
     App, BgTaskView, LlmRequestStat, LogLevel, ModelDownloadState, ModelLoadingState,
     OutputViewLineCache, OutputViewState, OutputViewTarget, PlanApprovalState, ProviderSetupStep,
-    QuestionRequest, ResearchViewState,
+    QuestionRequest, ResearchViewState, RollbackOfferState,
 };
 
 // Helpers
-use crate::app::helpers::{short_session_id, summarise_error};
+use crate::app::helpers::{hard_break_lines, short_session_id, summarise_error};
 use crate::app::session_ops::recover_poisoned;
 use crate::widgets::message_widget::truncate_str;
 
@@ -773,8 +773,14 @@ impl App {
                 // plain text.  Normal LLM streaming text bypasses markdown
                 // rendering (it arrives in fragments), but the agent_complete
                 // summary is a complete, self-contained message.
+                //
+                // `hard_break_lines` is required because the pipeline's
+                // html2text step collapses newlines inside a paragraph into
+                // spaces: without it, a plain multi-line summary renders as
+                // one continuous paragraph with its line ends stripped.
                 let rendered = self.render_markdown_unconditionally(&format!(
-                    "[ok] **Task Complete**\n\n{summary}"
+                    "[ok] **Task Complete**\n\n{}",
+                    hard_break_lines(summary)
                 ));
                 self.force_new_message = true;
                 self.append_assistant_text(&rendered);
@@ -946,6 +952,108 @@ impl App {
                 // context size sent to the model this turn ("Sent to model"
                 // row), so refresh the Context panel snapshot immediately.
                 self.schedule_context_snapshot_refresh();
+                self.needs_redraw = true;
+            }
+            Event::LoopTerminated {
+                ref session_id,
+                ref status,
+                iterations,
+                ref verification,
+                ref reason,
+            } if self.is_current_session(session_id) => {
+                // T-025 (FR-019): the termination renders as a status-aware
+                // banner in the message window — icon + phrase + iteration
+                // count — with verification outcome and failure reason
+                // appended when present. The log panel carries the same
+                // detail on a single line.
+                let mut banner = crate::app::helpers::loop_termination_banner(status, iterations);
+                let mut line = format!(
+                    "loop terminated · {status} · {iterations} iteration{s}",
+                    s = if iterations == 1 { "" } else { "s" },
+                );
+                if let Some(outcome) = verification {
+                    banner.push_str(&format!("\nVerification: {outcome}"));
+                    line.push_str(&format!(" · verification: {outcome}"));
+                }
+                if let Some(why) = reason {
+                    banner.push_str(&format!("\nReason: {why}"));
+                    line.push_str(&format!(" · {why}"));
+                }
+                self.force_new_message = true;
+                self.append_assistant_text(&banner);
+                self.push_log_no_agent(LogLevel::Info, line);
+                self.needs_redraw = true;
+            }
+            Event::LoopChangeSummary {
+                ref session_id,
+                ref status,
+                iterations,
+                files_modified,
+                files_created,
+                files_deleted,
+                ref diffstat,
+                ref files,
+            } if self.is_current_session(session_id) => {
+                // T-012 (FR-019): the change summary is surfaced as a log
+                // line (diffstat + counts + affected files). T-025 renders
+                // the same summary as a diffstat line in the message window
+                // and arms the interactive rollback offer.
+                let mut line = format!(
+                    "loop changes · {status} · {iterations} iteration{s} · \
+                     {modified} modified, {created} created, {deleted} deleted · \
+                     {diffstat}",
+                    s = if iterations == 1 { "" } else { "s" },
+                    modified = files_modified,
+                    created = files_created,
+                    deleted = files_deleted,
+                );
+                if !files.is_empty() {
+                    let preview = files.iter().take(8).cloned().collect::<Vec<_>>().join(", ");
+                    let more = files.len().saturating_sub(8);
+                    line.push_str(&format!(" · files: {preview}"));
+                    if more > 0 {
+                        line.push_str(&format!(" (+{more} more)"));
+                    }
+                }
+                // Diffstat line in the message window: counts + diffstat +
+                // affected paths, mirroring the log line.
+                let mut summary_line = format!(
+                    "⟳ Loop changes ({status}, {iterations} iteration{s}): \
+                     {modified} modified, {created} created, {deleted} deleted — {diffstat}",
+                    s = if iterations == 1 { "" } else { "s" },
+                    modified = files_modified,
+                    created = files_created,
+                    deleted = files_deleted,
+                );
+                if !files.is_empty() {
+                    let preview = files.iter().take(8).cloned().collect::<Vec<_>>().join(", ");
+                    let more = files.len().saturating_sub(8);
+                    summary_line.push_str(&format!(" · files: {preview}"));
+                    if more > 0 {
+                        summary_line.push_str(&format!(" (+{more} more)"));
+                    }
+                }
+                summary_line.push_str(
+                    "\nRoll back to the pre-loop snapshot? Enter: roll back, Esc: keep changes",
+                );
+                self.force_new_message = true;
+                self.append_assistant_text(&summary_line);
+                self.push_log_no_agent(LogLevel::Info, line);
+                // T-013 (FR-020): offer a one-key rollback to the pre-loop
+                // snapshot. Enter accepts (restores the snapshot), Esc
+                // declines (changes are kept). The offer arms only when the
+                // loop made workspace changes; a no-write loop never
+                // publishes a change summary in the first place.
+                self.pending_rollback = Some(RollbackOfferState {
+                    session_id: session_id.clone(),
+                    status: status.clone(),
+                    iterations,
+                    diffstat: diffstat.clone(),
+                    files: files.clone(),
+                });
+                self.status =
+                    "loop ended — Enter: roll back to pre-loop snapshot, Esc: keep changes"
+                        .to_string();
                 self.needs_redraw = true;
             }
             Event::RunCostSummary {

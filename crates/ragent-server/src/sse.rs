@@ -148,6 +148,27 @@ struct RequestStartedP<'a> {
 }
 
 #[derive(Serialize)]
+struct LoopTerminatedP<'a> {
+    session_id: &'a str,
+    status: &'a str,
+    iterations: u64,
+    verification: &'a Option<String>,
+    reason: &'a Option<String>,
+}
+
+#[derive(Serialize)]
+struct LoopChangeSummaryP<'a> {
+    session_id: &'a str,
+    status: &'a str,
+    iterations: u64,
+    files_modified: u64,
+    files_created: u64,
+    files_deleted: u64,
+    diffstat: &'a str,
+    files: &'a [String],
+}
+
+#[derive(Serialize)]
 struct ToolsSentP<'a> {
     session_id: &'a str,
     tools: &'a [String],
@@ -306,6 +327,8 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::McpStatusChanged { .. } => "mcp_status_changed",
         Event::TokenUsage { .. } => "token_usage",
         Event::RunCostSummary { .. } => "run_cost_summary",
+        Event::LoopTerminated { .. } => "loop_terminated",
+        Event::LoopChangeSummary { .. } => "loop_change_summary",
         Event::RequestStarted { .. } => "request_started",
         Event::ToolsSent { .. } => "tools_sent",
         Event::ModelResponse { .. } => "model_response",
@@ -533,6 +556,40 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             output_tokens: *output_tokens,
             total_cost_usd: *total_cost_usd,
             duration_ms: *duration_ms,
+        }),
+
+        Event::LoopTerminated {
+            session_id,
+            status,
+            iterations,
+            verification,
+            reason,
+        } => to_data(&LoopTerminatedP {
+            session_id,
+            status,
+            iterations: *iterations,
+            verification,
+            reason,
+        }),
+
+        Event::LoopChangeSummary {
+            session_id,
+            status,
+            iterations,
+            files_modified,
+            files_created,
+            files_deleted,
+            diffstat,
+            files,
+        } => to_data(&LoopChangeSummaryP {
+            session_id,
+            status,
+            iterations: *iterations,
+            files_modified: *files_modified,
+            files_created: *files_created,
+            files_deleted: *files_deleted,
+            diffstat,
+            files,
         }),
 
         Event::RequestStarted {

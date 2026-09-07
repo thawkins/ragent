@@ -27,6 +27,14 @@ calls. If the paid provider does not implement a specific endpoint
 optionally fall back to the free Yahoo adapter so the tool still returns
 data instead of an error.
 
+> **Fallback scope:** the endpoint fallback applies to `stock_fundamentals`
+> and `stock_recommendations` only. `stock_quote` and `stock_history` have a
+> separate fallback that triggers only on "symbol missing or invalid" errors.
+> `stock_options`, `stock_search`, and the `currency_*` tools always surface
+> paid-provider errors. Every finance tool publishes an `AgentNotice` naming
+> the provider that served the call (visible in the TUI log panel), and
+> symbols/base/quote inputs are uppercased before provider calls.
+
 ## Architecture Overview
 
 The finance module lives in
@@ -108,7 +116,7 @@ the selection chain:
 
 ### Yahoo Fallback
 
-Some tools (`stock_fundamentals`, `stock_recommendations`) use the
+Only `stock_fundamentals` and `stock_recommendations` use the
 `with_yahoo_fallback` helper. This helper calls the paid provider first.
 If the paid provider returns a `ProviderFailure` whose message indicates
 the endpoint is "not implemented", "does not exist", or "not available
@@ -117,6 +125,13 @@ transparently retries the call against the free Yahoo adapter. This lets
 you mix a paid provider for quotes/history with Yahoo for fundamentals
 and recommendations without changing any tool calls.
 
+`stock_quote` and `stock_history` carry a narrower inline fallback that
+fires only when the paid provider reports the *symbol* as missing or
+invalid. `stock_options`, `stock_search`, `stock_recommendations`
+(direct call), and the `currency_*` tools have **no** fallback — a
+configured paid provider's errors (including its not-implemented options
+stub) surface as tool errors even with `yahoo_fallback: true`.
+
 The `yahoo_fallback` flag defaults to:
 - **Enabled** when no paid provider is configured (Yahoo is the only
   provider, so "fallback" is a no-op).
@@ -124,6 +139,10 @@ The `yahoo_fallback` flag defaults to:
   paid-provider errors are surfaced clearly instead of being masked by
   Yahoo rate-limit messages. Set `"yahoo_fallback": true` in the finance
   config block to enable cross-provider fallback.
+
+If a configured paid provider cannot even be constructed (for example a
+malformed `base_url`), `default_provider` logs a warning and falls back to
+Yahoo silently — config mistakes degrade quietly rather than erroring.
 
 ## Configuration
 

@@ -764,6 +764,18 @@ impl AgentManager {
             .count()
     }
 
+    /// Returns a snapshot of every task entry in the map, regardless of
+    /// parent session or status.
+    ///
+    /// Used by the TUI to reconcile its event-driven `active_tasks` view
+    /// after a broadcast-channel `Lagged` burst drops `SubagentStart` /
+    /// `SubagentComplete` events: this map is the authoritative record of
+    /// sub-agent lifecycle, so re-reading it repairs any divergence between
+    /// the UI's tracked list and the actual running agents.
+    pub async fn tasks_snapshot(&self) -> Vec<TaskEntry> {
+        self.tasks.iter().map(|r| r.value().clone()).collect()
+    }
+
     /// Cancels all running tasks for a given parent session.
     pub async fn cancel_all(&self, parent_session_id: &str) {
         // PERF (FR-016): DashMap — iterate tasks; for each running task,

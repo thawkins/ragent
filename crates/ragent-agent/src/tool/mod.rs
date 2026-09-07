@@ -1190,6 +1190,27 @@ pub(crate) fn is_allowed_tool(tool_name: &str, allowed: &HashSet<String>) -> boo
     allowed.contains(tool_name)
 }
 
+/// The hardwired always-allowed tool names: the codeindex tools plus the
+/// skill always-allowed control tools. Used by the loop's tool-set filter
+/// (spec `agentloop` FR-008) so a restricted loop keeps its safety surface.
+pub(crate) fn always_allowed_tool_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> =
+        crate::session::permissions::SKILL_ALWAYS_ALLOWED_TOOLS.to_vec();
+    names.extend([
+        "codeindex_search",
+        "codeindex_symbols",
+        "codeindex_references",
+        "codeindex_dependencies",
+        "codeindex_status",
+        "codeindex_reindex",
+        "codeindex_explain",
+        "codeindex_path",
+        "codeindex_communities",
+        "codeindex_godnodes",
+    ]);
+    names
+}
+
 /// A registry that maps tool names to their implementations.
 ///
 /// Tools are registered by name and can be looked up, listed, or exported

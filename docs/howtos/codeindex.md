@@ -100,21 +100,21 @@ The code index ships tree-sitter parsers for these languages:
 |-------------|-----------|-------|
 | `rust` | `.rs` | Edition 2024 syntax |
 | `python` | `.py`, `.pyi` | |
-| `typescript` | `.ts`, `.tsx` | |
+| `typescript` | `.ts`, `.tsx` | Also `tsx`, `javascript`, `jsx` variants of the same grammar |
 | `javascript` | `.js`, `.jsx` | Shares the TS grammar |
 | `go` | `.go` | |
 | `c` | `.c`, `.h` | |
 | `cpp` | `.cpp`, `.cc`, `.cxx` | |
 | `java` | `.java` | |
-| `kotlin` | `.kt`, `.kts` | |
-| `ruby` | `.rb` | |
-| `swift` | `.swift` | |
 | `terraform` | `.tf` (HCL) | |
 | `openscad` | `.scad` | |
 | `cmake` | `CMakeLists.txt`, `.cmake` | |
 | `gradle` | `.gradle` (Groovy DSL) | |
 | `gradle_kts` | `.gradle.kts` (Kotlin DSL) | |
 | `maven` | `pom.xml` | |
+
+> The scanner detects extensions for more languages (Kotlin, Ruby, Swift, and
+> others), but files with no registered parser are not symbol-extracted.
 
 Filter by language in `codeindex_search` and `codeindex_symbols` using the
 `language` parameter (e.g. `"rust"`).
@@ -125,8 +125,9 @@ Language-specific visibility:
 /codeindex lang rust
 ```
 
-This restricts indexing to a single language. Use `/codeindex show` to see
-which languages are currently active.
+This restricts indexing to a single language; a bare `/codeindex lang` lists
+the supported language IDs. Use `/codeindex show` to see which languages are
+currently active.
 
 ---
 
@@ -184,9 +185,26 @@ Output (busy — store lock held by a background operation):
 ## Code Index Status
 
 Index:          busy (lock held by a background operation)
+The store lock is held by another operation. Wait a moment and retry.
+```
+
+While a reindex runs, the busy report instead shows live progress:
+
+```text
+Index:          busy (reindexing in progress)
 Reindexing:     180/342 files
 Graph building: 90/342 files
 ```
+
+While only the graph build is running, the index itself stays available
+(the graph build holds the store lock only briefly for its snapshot/persist
+phases):
+
+```text
+Graph building: 90/342 files
+Index:          available (the graph build holds the store lock only briefly for its snapshot/persist phases)
+```
+
 The busy report is also returned in `metadata` as
 `{"busy": true, "error": "codeindex_busy", "reindexing": true,
 "reindex_done": 180, "reindex_total": 342, "graph_building": true,
@@ -400,9 +418,9 @@ the dependency chain between modules; find the coupling distance.
 
 Name resolution prefers exact matches over the underlying substring query
 and ranks definition kinds (struct/function/trait/class/enum/interface)
-above impl/module containers, so a trait like `CachedSessionProcessor` no
-longer shadows the struct `SessionProcessor` when you ask for a path from
-`SessionProcessor`.
+above impl/module containers. This ranking applies to **both**
+`codeindex_path` and `codeindex_explain`, so a trait like
+`CachedSessionProcessor` no longer shadows the struct `SessionProcessor`.
 
 **Schema:**
 ```json
@@ -601,16 +619,18 @@ All codeindex slash commands are available in the TUI:
 /codeindex on              Enable codebase indexing
 /codeindex off             Disable codebase indexing
 /codeindex show            Show index and graph status & statistics
-/codeindex lang <language> Set language filter (e.g. rust)
+/codeindex status          Alias of `show`
+/codeindex lang <language> Set language filter (e.g. rust); bare `lang` lists supported languages
 /codeindex reindex         Trigger a full re-index
 /codeindex rebuild         Rebuild the FTS index
 /codeindex graph build     Build the semantic edge graph
-/codeindex graph export    Export the graph for external analysis
+/codeindex graph export    Export graph.json and GRAPH_REPORT.md
 /codeindex graph lang <l>  Filter the graph to a single language
 /codeindex explain <sym>   Explain a symbol's connections
 /codeindex path <A> <B>    Shortest path between two symbols
 /codeindex communities     List detected communities
 /codeindex godnodes        List high-degree hub symbols
+/codeindex skillgen        Install the graphify skill to ~/.ragent/skills/
 /codeindex help            Show available sub-commands
 ```
 
@@ -730,7 +750,7 @@ The full-text search index has no documents. Run:
 
 | Document | Covers |
 |----------|--------|
-| `docs/howtos/tools.md` | Full tool catalog (all 163 tools) |
+| `docs/howtos/tools.md` | Full tool catalog (all 168 static + 1 dynamic tool) |
 | `docs/howtos/tool-visibility.md` | Hiding and exposing tool families |
 | `docs/howtos/tutorial.md` | End-to-end TUI workflow tutorial |
 | `docs/howtos/custom-agents.md` | Custom agent profiles |

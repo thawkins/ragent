@@ -47,7 +47,10 @@ Each hook entry has three fields:
 |----------------|---------|---------|--------------------------------------------------|
 | `trigger`      | string  | —       | When to fire (see [triggers](#other-hook-triggers)) |
 | `command`      | string  | —       | Shell command to execute (runs via `sh -c`)      |
-| `timeout_secs` | integer | 30      | Timeout in seconds                               |
+| `timeout_secs` | integer | 30      | Timeout in seconds. Enforced for `post_tool_use` and the fire-and-forget triggers; **not** enforced for `pre_tool_use` (see [PreToolUse Hooks](#pretooluse-hooks)). |
+
+Invalid hook entries (for example an unknown `trigger` string) are skipped
+at load time with a log warning — no startup error surfaces to the user.
 
 ---
 
@@ -164,8 +167,14 @@ out of all tool use.
    decision (`allow`, `deny`, `modified_input`, or `Blocked`) wins; remaining
    hooks are not executed.
 
-4. **Spawn failure / timeout** is treated as exit code ≥ 3 (hook error). The
-   tool call falls through to the normal permission flow.
+4. **Spawn failure** is treated as exit code ≥ 3 (hook error). The tool call
+   falls through to the normal permission flow.
+
+   > **No timeout on the pre-hook path:** PreToolUse hooks are spawned
+   > synchronously via `std::process::Command::output()` with no timeout
+   > wrapper, so `timeout_secs` is silently ignored here — a hanging pre-hook
+   > blocks every tool call until it exits. `timeout_secs` *is* enforced for
+   > `post_tool_use` hooks and the fire-and-forget triggers.
 
 ---
 
@@ -237,6 +246,9 @@ triggers:
 | `on_session_end`       | Fired after a session completes processing a user message. |
 | `on_error`             | Fired when an LLM call or tool execution returns an error. |
 | `on_permission_denied` | Fired when a tool call is rejected due to a permission rule. |
+| `on_turn_start`        | Fired at the start of each agent turn/iteration.         |
+| `on_turn_end`          | Fired at the end of each agent turn/iteration.           |
+| `on_compaction`        | Fired when context compaction is performed.              |
 
 These triggers fire asynchronously — errors are logged but never fatal. The
 `RAGENT_ERROR` environment variable is set for `on_error` hooks.
@@ -251,6 +263,12 @@ All hooks receive these environment variables:
 |----------------------|------------------------------------------------------|
 | `RAGENT_TRIGGER`     | The trigger name (e.g. `pre_tool_use`)               |
 | `RAGENT_WORKING_DIR` | The session working directory                        |
+
+`on_error` hooks additionally receive:
+
+| Variable             | Description                                          |
+|----------------------|------------------------------------------------------|
+| `RAGENT_ERROR`       | The error message                                    |
 
 PreToolUse hooks additionally receive:
 
@@ -267,6 +285,15 @@ PostToolUse hooks additionally receive:
 | `RAGENT_TOOL_INPUT`   | JSON string of the tool arguments                    |
 | `RAGENT_TOOL_OUTPUT`  | JSON string of the tool output                       |
 | `RAGENT_TOOL_SUCCESS` | `"true"` or `"false"`                                |
+
+Turn and compaction triggers additionally receive:
+
+| Variable                        | Description                                    |
+|---------------------------------|------------------------------------------------|
+| `RAGENT_TURN_NUMBER`            | Current agent turn/iteration number (`on_turn_start`, `on_turn_end`) |
+| `RAGENT_COMPACTION_REASON`      | Why compaction fired (`on_compaction`)         |
+| `RAGENT_COMPACTION_TOKENS_BEFORE` | Token count before compaction (`on_compaction`) |
+| `RAGENT_COMPACTION_TOKENS_AFTER`  | Token count after compaction (`on_compaction`)  |
 
 ---
 
@@ -346,7 +373,11 @@ exit 0
 | Exit 2          | Block (publish denial to agent)         | Flag (publish `ToolResultFlagged`)      |
 | Exit ≥ 3        | Hook error → normal permission flow     | Hook error → no effect on result        |
 | Spawn failure    | Treated as exit ≥ 3                     | Treated as exit ≥ 3                     |
-| Timeout          | Treated as exit ≥ 3                     | Treated as exit ≥ 3                     |
+| Timeout          | Not enforced (no timeout wrapper)       | Treated as exit ≥ 3 (`timeout_secs`)    |
+
+When multiple PostToolUse hooks fire, the aggregated outcome follows the
+precedence **Flagged > Warn > Ok**, and among Ok results the last
+`modified_output` wins.
 
 The two mechanisms (JSON decisions and exit codes) are **complementary**:
 JSON decisions provide fine-grained control (allow / deny / modify), while

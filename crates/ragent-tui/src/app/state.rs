@@ -24,6 +24,7 @@ use ragent_config::OtelProtocol;
 use ragent_team::team::{SwarmState, TeamConfig, TeamMember};
 use serde::Serialize;
 
+use crate::app::session_ops::recover_poisoned;
 use crate::theme::StatusHistory;
 
 // Pending confirmation field is stored on App (defined in app.rs) as Option<PendingForceCleanup>.
@@ -755,6 +756,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Log panel: /log [clear subagents|panics|research|editlog|help]",
     },
     SlashCommandDef {
+        trigger: "loop",
+        description: "Goal-driven agent loop: /loop opens setup, /loop <agent> <goal> starts, /loop help shows usage",
+    },
+    SlashCommandDef {
         trigger: "profile",
         description: "Toggle the agent-loop profiler panel (/profile on|off)",
     },
@@ -1015,6 +1020,25 @@ pub struct PendingForceCleanup {
     pub team_name: String,
     /// Active teammate display names (for modal listing).
     pub active_members: Vec<String>,
+}
+
+/// Pending rollback offer after a goal-driven loop terminated (FR-020, T-013).
+///
+/// Populated when [`Event::LoopChangeSummary`] arrives: the user is offered a
+/// one-key rollback to the pre-loop workspace snapshot. `Enter` accepts
+/// (restores the snapshot), `Esc` declines (changes are kept).
+#[derive(Debug, Clone)]
+pub struct RollbackOfferState {
+    /// Session whose loop terminated and whose capture is pending.
+    pub session_id: String,
+    /// Termination status label (mirrors `LoopTerminated`).
+    pub status: String,
+    /// Number of completed iterations.
+    pub iterations: u64,
+    /// Aggregate diffstat summary from the change summary.
+    pub diffstat: String,
+    /// Affected workspace paths (sorted, relative to the workspace root).
+    pub files: Vec<String>,
 }
 
 /// State of the `/history` picker overlay.
@@ -1652,6 +1676,11 @@ pub struct App {
     pub code_index_watch_session: Option<ragent_codeindex::WatchSession>,
     /// Active MCP discovery dialog, if any.
     pub mcp_discover: Option<McpDiscoverState>,
+    /// Active `/loop` setup dialog, if any (spec `agentloop` T-014).
+    pub loop_setup: Option<super::loop_dialog::LoopSetupState>,
+    /// Draft values of a cancelled `/loop` setup dialog, restored on
+    /// re-open (FR-004: Esc cancels without starting and keeps values).
+    pub loop_setup_draft: Option<super::loop_dialog::LoopSetupState>,
     /// When true, the next assistant text delta starts a new message instead
     /// of appending to the current one. Set by `MessageEnd` events to
     /// separate init-exchange output from the main response.
@@ -1671,6 +1700,8 @@ pub struct App {
     pub pending_plan_restore: Option<String>,
     /// Pending confirmation for destructive force-cleanup modal.
     pub pending_forcecleanup: Option<PendingForceCleanup>,
+    /// Pending rollback offer after a terminated loop (FR-020, T-013).
+    pub pending_rollback: Option<RollbackOfferState>,
     /// Whether the agent is currently processing a message.
     pub is_processing: bool,
     /// Cancellation flag shared with the processor task; set to `true` on ESC.
@@ -1707,6 +1738,23 @@ pub struct App {
     pub next_agent_index: u32,
     /// Active background sub-agent tasks (F14).
     pub active_tasks: Vec<ragent_agent::task::TaskEntry>,
+    /// Shared lag counter incremented by the TUI's event-bus bridge task
+    /// whenever the broadcast channel reports `Lagged` (events dropped).
+    /// `poll_active_tasks_reconcile` watches this for changes to trigger a
+    /// registry-backed repair of `active_tasks`.
+    pub tui_event_lag: Arc<std::sync::atomic::AtomicU64>,
+    /// Last value of `tui_event_lag` seen by the reconcile poll.
+    pub seen_event_lag: u64,
+    /// Deposit slot for the task-registry snapshot fetched off-thread after
+    /// a lag burst; adopted by `poll_active_tasks_reconcile`.
+    pub active_tasks_reconcile_result:
+        Arc<std::sync::Mutex<Option<Vec<ragent_agent::task::TaskEntry>>>>,
+    /// Last wall-clock time the reconcile poll started a snapshot fetch.
+    /// Drives the periodic (lag-independent) trigger so the panel self-heals
+    /// even when no `Lagged` was observed.
+    pub active_tasks_reconcile_last: std::time::Instant,
+    /// Whether a reconcile snapshot fetch is currently in flight.
+    pub active_tasks_reconcile_inflight: bool,
     /// Active background shell tasks spawned via the `bg` tool (M3).
     pub bg_tasks: Vec<BgTaskView>,
     /// Whether the keybindings help panel is currently visible.
@@ -2405,7 +2453,141 @@ impl App {
             self.needs_redraw = true;
         }
     }
+
+    /// Register the shared event-lag counter used by the TUI bridge task.
+    ///
+    /// Called once from `run_tui` after `App::new`; the bridge task holds a
+    /// clone of the same `Arc` and increments it with the number of dropped
+    /// broadcast events on every `Lagged` observation.
+    pub fn set_tui_event_lag_counter(&mut self, counter: Arc<std::sync::atomic::AtomicU64>) {
+        self.tui_event_lag = counter;
+    }
+
+    /// Reconcile `active_tasks` against the agent task registry after the
+    /// TUI's broadcast bridge drops events.
+    ///
+    /// With many parallel sub-agents the per-`TextDelta` streaming events can
+    /// overflow the event-bus broadcast buffer; the bridge task then reports
+    /// `Lagged` and the dropped window can silently swallow a `SubagentStart`
+    /// or `SubagentComplete`, leaving the Agents button count stale (e.g. the
+    /// intermittent "Agents" button shows no count with 18 concurrent agents).
+    /// When the shared lag counter changes, this poll fetches a snapshot of
+    /// the registry's task map off-thread and adopts it on a later frame —
+    /// the map is authoritative, so the merge repairs the event-driven
+    /// divergence in both directions (missing entries re-added, ghosts of
+    /// dropped completions removed).
+    ///
+    /// Called from the TUI main loop each wake.
+    ///
+    /// Triggers:
+    /// - **Lag-triggered (immediate)**: the shared lag counter changed — a
+    ///   burst was observed, reconcile immediately.
+    /// - **Periodic (safety net)**: at least
+    ///   [`AGENTS_RECONCILE_INTERVAL`] has elapsed since the last fetch.
+    ///   The bridge forwards into an unbounded mpsc and rarely reports
+    ///   `Lagged` itself, and events for nested sub-agents can be filtered
+    ///   by the session-lineage guard, so lag detection alone cannot be
+    ///   relied on: the periodic poll repairs any divergence (including the
+    ///   "18 agents but no count" screenshot) within ~1.5 s regardless of
+    ///   cause. The merge is idempotent and only logs on change, so the
+    ///   periodic path is cheap and silent when already in sync.
+    pub fn poll_active_tasks_reconcile(&mut self) {
+        // Adopt a landed snapshot first (two-phase: fetch runs off-thread).
+        let deposited = {
+            let mut guard = recover_poisoned(
+                self.active_tasks_reconcile_result.lock(),
+                "active_tasks_reconcile_result",
+            );
+            guard.take()
+        };
+        if let Some(snapshot) = deposited {
+            self.active_tasks_reconcile_inflight = false;
+            self.apply_registry_reconciliation(snapshot);
+        }
+
+        let latest = self
+            .tui_event_lag
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let lag_changed = latest != self.seen_event_lag;
+        let interval_elapsed =
+            self.active_tasks_reconcile_last.elapsed() >= AGENTS_RECONCILE_INTERVAL;
+        if (!lag_changed && !interval_elapsed) || self.active_tasks_reconcile_inflight {
+            return;
+        }
+        self.seen_event_lag = latest;
+        self.active_tasks_reconcile_last = std::time::Instant::now();
+        let Some(tm) = self.session_processor.agent_manager.get().cloned() else {
+            return;
+        };
+        self.active_tasks_reconcile_inflight = true;
+        let slot = Arc::clone(&self.active_tasks_reconcile_result);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let snapshot = tm.tasks_snapshot().await;
+                if let Ok(mut guard) = slot.lock() {
+                    *guard = Some(snapshot);
+                } else {
+                    tracing::error!(
+                        "active_tasks_reconcile_result mutex poisoned, snapshot dropped"
+                    );
+                }
+            });
+        } else {
+            self.active_tasks_reconcile_inflight = false;
+        }
+    }
+
+    /// Merge a task-registry snapshot into `active_tasks` (idempotent).
+    ///
+    /// Merge semantics:
+    /// - entries tracked by the registry but no longer `Running` (completed,
+    ///   failed, cancelled, terminating) are removed from `active_tasks`;
+    /// - registry `Running` entries missing from `active_tasks` are added
+    ///   (repairing a dropped `SubagentStart` event);
+    /// - entries NOT tracked by the registry (bench tasks, shell views) are
+    ///   left untouched.
+    pub fn apply_registry_reconciliation(&mut self, snapshot: Vec<ragent_agent::task::TaskEntry>) {
+        use ragent_agent::task::TaskStatus;
+        let registry: HashMap<String, ragent_agent::task::TaskEntry> =
+            snapshot.into_iter().map(|e| (e.id.clone(), e)).collect();
+
+        // Remove entries the registry tracks but that are no longer running.
+        let before = self.active_tasks.len();
+        self.active_tasks.retain(|t| match registry.get(&t.id) {
+            Some(entry) => entry.status == TaskStatus::Running,
+            None => true, // not registry-tracked (bench etc.) — keep
+        });
+        let removed = before - self.active_tasks.len();
+
+        // Add missing running entries; refresh status for tracked ones.
+        let mut added = 0usize;
+        for (id, entry) in &registry {
+            if let Some(existing) = self.active_tasks.iter_mut().find(|t| &t.id == id) {
+                existing.status = entry.status.clone();
+            } else if entry.status == TaskStatus::Running {
+                self.active_tasks.push(entry.clone());
+                added += 1;
+            }
+        }
+
+        if removed > 0 || added > 0 {
+            self.push_log_no_agent(
+                LogLevel::Info,
+                format!(
+                    "[reconcile] Agents panel synced with task registry after dropped events \
+                     (+{added} / -{removed})"
+                ),
+            );
+            self.needs_redraw = true;
+        }
+    }
 }
+
+/// Interval between periodic (lag-independent) Agents-panel reconciles.
+///
+/// The registry snapshot is authoritative and the merge idempotent, so this
+/// poll is both cheap and silent when the panel is already in sync.
+pub const AGENTS_RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// Auto-dismiss timeout (in seconds) for the transient run-cost banner.
 pub const RUN_COST_BANNER_EXPIRY_SECS: u64 = 15;

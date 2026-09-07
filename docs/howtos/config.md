@@ -32,7 +32,7 @@ the project root `README.md` and the **Tutorial** in
    - 7.9  [`skill_dirs`](#79-skill_dirs)
    - 7.10 [`experimental`](#710-experimental)
    - 7.11 [`hooks`](#711-hooks)
-   - 7.12 [`bash`](#72-bash)
+   - 7.12 [`bash`](#712-bash)
    - 7.13 [`dirs`](#713-dirs)
    - 7.14 [`tool_visibility`](#714-tool_visibility)
    - 7.15 [`code_index`](#715-code_index)
@@ -55,6 +55,8 @@ the project root `README.md` and the **Tutorial** in
    - 7.32 [`trigger`](#732-trigger)
    - 7.33 [`piegap`](#733-piegap)
    - 7.34 [`research`](#734-research)
+   - 7.35 [`loop`](#735-loop)
+   - 7.36 [`activity_log`](#736-activity_log)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -494,7 +496,7 @@ built-in agent defaults.
 | `mode` | `Option<String>` | `None` | Agent mode: `"primary"`, `"subagent"`, or `"all"`. |
 | `hidden` | `bool` | `false` | Hide from user-facing listings. |
 | `permission` | `Vec<PermissionRule>` | `[]` | Permission rules specific to this agent. |
-| `max_steps` | `Option<u32>` | `None` | Maximum agentic loop iterations. |
+| `max_steps` | `Option<u32>` | `None` | Maximum agentic loop iterations. Per-agent override of the loop step budget; when unset the `loop.max_steps` default (512) applies. |
 | `skills` | `Vec<String>` | `[]` | Skill names to preload into the prompt. |
 | `options` | `HashMap<String, Value>` | `{}` | Arbitrary agent-specific options. |
 
@@ -742,6 +744,7 @@ User-defined directory/file path allowlist and denylist additions.
 | ----- | ---- | ------- | ----------- |
 | `allowlist` | `Vec<String>` | `[]` | Glob patterns for paths automatically allowed (no prompt). |
 | `denylist` | `Vec<String>` | `[]` | Glob patterns unconditionally rejected. |
+| `allowed_roots` | `Vec<String>` | `[]` | Extra directory roots permitted for path-escape checking (multi-root / sub-agent access); canonicalized at load. |
 
 Both lists are unioned across config layers. **Denylist takes precedence over
 allowlist.** The `/dirs add` and `/dirs remove` slash commands mutate these
@@ -1439,40 +1442,93 @@ enabled.
 
 ### 7.34 `research`
 
-Research subsystem configuration.  ```json
-  {
-    "research": {
-      "open_access_recovery": true,
-      "contact_email": "user@example.com",
-      "oa_min_full_text_chars": 1000,
-      "evaluate": {
-        "enabled": true
-      }
+Research subsystem configuration.
+
+```json
+{
+  "research": {
+    "open_access_recovery": true,
+    "contact_email": "user@example.com",
+    "oa_min_full_text_chars": 1000,
+    "evaluate": {
+      "enabled": true
     }
   }
-  ```
-  
-  #### `ResearchConfig` schema
-  
-  | Field | Type | Default | Description |
-  | ----- | ---- | ------- | ----------- |
-  | `open_access_recovery` | `bool` | `false` | Enable open-access recovery via Unpaywall and Europe PMC for short scholarly sources (FR-011). |
-  | `contact_email` | `Option<String>` | `None` | Contact email required by Unpaywall's terms of service (FR-012). |
-  | `oa_min_full_text_chars` | `usize` | `1000` | Minimum full-text length (chars) that triggers OA recovery. |
-  | `evaluate` | `ResearchEvaluateConfig` | `{"enabled": false}` | Self-evaluation scorecard settings (FR-015 of specs/opendeepresearch). When `enabled`, the research pipeline appends a deterministic quality scorecard (quality, relevance, groundedness, completeness, structure) to the report. |
-  
-  As of v1.0.77, `evaluate` can be configured in `ragent.json` and is omitted from
-  serialized output when at its default value (`enabled: false`).
-  
-  As of v1.0.76, the default web-phase timeout is 60 seconds and can be overridden
-  per run with `--web-time N` (or `--web-phase-timeout-secs N`); `0` disables the
-  deadline. When the deadline elapses, the run continues with the sources gathered    so far. See [`docs/howtos/research.md`](research.md) for the full research workflow.
-  
-  `open_access_recovery` uses OR semantics on merge. `contact_email` and
-  `oa_min_full_text_chars` override base when present. `is_empty()` returns
-  `true` when at default values.
-  
-  For the research system, see [`docs/howtos/research.md`](research.md).
+}
+```
+
+#### `ResearchConfig` schema
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `open_access_recovery` | `bool` | `false` | Enable open-access recovery via Unpaywall and Europe PMC for short scholarly sources (FR-011). |
+| `contact_email` | `Option<String>` | `None` | Contact email required by Unpaywall's terms of service (FR-012). |
+| `oa_min_full_text_chars` | `usize` | `1000` | Minimum full-text length (chars) that triggers OA recovery. |
+| `evaluate` | `ResearchEvaluateConfig` | `{"enabled": false}` | Self-evaluation scorecard settings (FR-015 of specs/opendeepresearch). When `enabled`, the research pipeline appends a deterministic quality scorecard (quality, relevance, groundedness, completeness, structure) to the report. |
+
+As of v1.0.77, `evaluate` can be configured in `ragent.json` and is omitted from
+serialized output when at its default value (`enabled: false`).
+
+As of v1.0.76, the default web-phase timeout is 60 seconds and can be overridden
+per run with `--web-time N` (or `--web-phase-timeout-secs N`); `0` disables the
+deadline. When the deadline elapses, the run continues with the sources gathered
+so far. See [`docs/howtos/research.md`](research.md) for the full research workflow.
+
+`open_access_recovery` uses OR semantics on merge. `contact_email` and
+`oa_min_full_text_chars` override base when present. `is_empty()` returns
+`true` when at default values.
+
+For the research system, see [`docs/howtos/research.md`](research.md).
+
+---
+
+### 7.35 `loop`
+
+Goal-driven `/loop` run budgets and checkpoints (see
+[`docs/howtos/loopprogramming.md`](loopprogramming.md)). The whole section is
+omitted from serialized output when every field is at its default.
+
+```json
+{
+  "loop": {
+    "max_steps": 512,
+    "cost_limit": null,
+    "error_retry_allowance": 3,
+    "checkpoints": true,
+    "checkpoint_timeout_secs": 120
+  }
+}
+```
+
+#### `LoopConfig` schema
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `max_steps` | `u32` | `512` | Default step budget for a loop run (`DEFAULT_LOOP_MAX_STEPS`). A per-agent `agent.<name>.max_steps` override takes precedence. |
+| `cost_limit` | `Option<u64>` | `None` | Token-cost budget (accumulated input + output) across a loop run; `None` means no gate. |
+| `error_retry_allowance` | `u32` | `3` | Consecutive recoverable-failure tolerance before the loop stops with status `error`. |
+| `checkpoints` | `bool` | `true` | Force destructive-action checkpoints before destructive tool calls even when an allow rule would auto-approve. Merge is monotonic: once disabled it stays disabled. |
+| `checkpoint_timeout_secs` | `u32` | `120` | Seconds a forced checkpoint prompt waits for a reply before the timeout counts as denial. |
+
+Merge is sentinel-based: overlay fields equal to the compiled default keep the
+base (global) values; only fields the overlay configured away from the default
+win.
+
+---
+
+### 7.36 `activity_log`
+
+```json
+{
+  "activity_log": true
+}
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `activity_log` | `bool` | `true` | Record agent events to the activity-log SQLite store (append-only JSONL-style event log with `RunId`/`EventId` identifiers). |
+
+Toggle at runtime with `/alog on|off`.
 
 ---
 
@@ -1586,7 +1642,11 @@ need all of these — every section has defaults, so an empty `{}` is valid.
       "gitlab": false,
       "teams": true,
       "agents": true,
-      "plan": true
+      "plan": true,
+      "codeindex": true,
+      "masterfetch": true,
+      "browser": true,
+      "finance": true
     },
 
     "code_index": {
@@ -1722,16 +1782,28 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "triggers": false,
     "hooks": false,
     "undo": false
-  },    "research": {
-      "open_access_recovery": false,
-      "contact_email": null,
-      "oa_min_full_text_chars": 1000,
-      "evaluate": {
-        "enabled": false
-      }
+  },
+
+  "research": {
+    "open_access_recovery": false,
+    "contact_email": null,
+    "oa_min_full_text_chars": 1000,
+    "evaluate": {
+      "enabled": false
     }
-  }
-  ```
+  },
+
+  "loop": {
+    "max_steps": 512,
+    "cost_limit": null,
+    "error_retry_allowance": 3,
+    "checkpoints": true,
+    "checkpoint_timeout_secs": 120
+  },
+
+  "activity_log": true
+}
+```
   
   ---
   

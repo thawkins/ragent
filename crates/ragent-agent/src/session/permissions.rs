@@ -189,24 +189,270 @@ const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
     "agent_complete",
 ];
 
+/// Destructive tool names (FR-015, T-010): tool calls that irreversibly
+/// mutate the workspace or protected state and therefore require a
+/// destructive-action checkpoint before they execute. Deletion, config
+/// writes, dependency installation, and destructive git operations are all
+/// marked here; the checkpoint layer (`SessionProcessor` tool dispatch)
+/// consults [`is_destructive_tool`] before every permission check.
+pub const DESTRUCTIVE_TOOLS: &[&str] = &[
+    // Deletion
+    "rm",
+    // Config writes (ragent.json and agent/config state)
+    "config_write",
+    "config_save",
+    // Dependency installation
+    "npm_install",
+    "cargo_install",
+];
+
+/// Destructive git tool names (T-010). The destructive variants are keyed
+/// on the request flags carried in the resource string — `git_push` only
+/// with `--force`, `git_reset` only for hard modes, `git_stash` only for
+/// drop/clear — so read-only git workflows are not blocked.
+pub const DESTRUCTIVE_GIT_TOOLS: &[&str] = &[
+    "git_push",
+    "git_reset",
+    "git_checkout",
+    "git_stash",
+    "git_tag",
+    "git_merge",
+    "git_cherry_pick",
+    "git_commit",
+    "git_clone",
+];
+
+/// Bash command prefixes that count as destructive actions for the
+/// checkpoint layer (T-010): deletion, destructive git sub-commands, config
+/// writes, and dependency installation. Package/build commands (cargo test,
+/// npm run, ...) stay on the normal permission path.
+pub(crate) const BASH_DESTRUCTIVE_COMMANDS: &[&str] = &[
+    // Deletion (the safe-command allowlist already excludes rm; the
+    // checkpoint additionally intercepts it when a loop runs).
+    "rm",
+    "rmdir",
+    "shred",
+    // Destructive git sub-commands (checkpointed even under the `git`
+    // safe-command allowlist).
+    "git push --force",
+    "git push -f",
+    "git reset --hard",
+    "git checkout -- .",
+    "git stash drop",
+    "git tag -d",
+    "git branch -D",
+    // Config writes
+    "ragent config",
+    // Dependency installation
+    "cargo install",
+    "npm install",
+    "yarn add",
+    "pnpm add",
+];
+
+/// Whether a tool call performs a destructive action (FR-015, T-010).
+///
+/// Consulted by the checkpoint layer with the parsed tool input. Deletion
+/// (`rm`), config writes, dependency installation, and destructive git
+/// operations are marked; destructive git variants are keyed on the request
+/// flags (`git_push` only with `force`, `git_reset` only for hard modes, so
+/// read-only git workflows are not blocked). `false` when the call is not
+/// destructive and the normal permission path applies unchanged. `bash` is
+/// special-cased: its sub-commands are scanned for destructive command
+/// prefixes.
+pub(crate) fn is_destructive_tool(tool_name: &str, input: &Value) -> bool {
+    if DESTRUCTIVE_TOOLS.contains(&tool_name) {
+        return true;
+    }
+    if DESTRUCTIVE_GIT_TOOLS.contains(&tool_name) {
+        return is_destructive_git_invocation(tool_name, input);
+    }
+    if tool_name == "bash" {
+        let command = input.get("command").and_then(Value::as_str).unwrap_or("");
+        return bash_has_destructive_command(command);
+    }
+    false
+}
+
+/// Whether one git tool invocation is destructive (T-010), keyed on the
+/// request flags in the tool input JSON.
+fn is_destructive_git_invocation(tool_name: &str, input: &Value) -> bool {
+    match tool_name {
+        "git_push" => input.get("force").and_then(Value::as_bool).unwrap_or(false),
+        "git_reset" => {
+            matches!(
+                input.get("mode").and_then(Value::as_str),
+                Some("hard") | Some("keep")
+            )
+        }
+        "git_checkout" => {
+            input.get("paths").is_some()
+                || input.get("force").and_then(Value::as_bool).unwrap_or(false)
+        }
+        "git_stash" => {
+            matches!(
+                input.get("action").and_then(Value::as_str),
+                Some("drop") | Some("clear")
+            )
+        }
+        "git_tag" => {
+            matches!(input.get("action").and_then(Value::as_str), Some("delete"))
+        }
+        // Merge/cherry-pick always rewrite or create history and count as
+        // destructive for the checkpoint layer.
+        _ => true,
+    }
+}
+
+/// Whether one bash sub-command is destructive (best-effort word-boundary
+/// match against [`BASH_DESTRUCTIVE_COMMANDS`], mirroring the
+/// `is_safe_command` prefix logic).
+fn bash_is_destructive(sub_command: &str) -> bool {
+    BASH_DESTRUCTIVE_COMMANDS.iter().any(|pattern| {
+        sub_command == *pattern
+            || sub_command
+                .strip_prefix(pattern)
+                .is_some_and(|rest| rest.starts_with(' '))
+    })
+}
+
+/// Whether a bash command string contains a destructive sub-command
+/// (FR-015, T-010). Best-effort, mirroring the permission layer's bash
+/// splitting: the command is split on `&&`/`||`/`;` and each sub-command is
+/// checked against [`BASH_DESTRUCTIVE_COMMANDS`].
+pub(crate) fn bash_has_destructive_command(command: &str) -> bool {
+    split_bash_command(command)
+        .iter()
+        .any(|sub| bash_is_destructive(sub))
+}
+
+/// The denial observation text appended to the model's context when a
+/// destructive-action checkpoint is denied (timeout or user refusal).
+pub(crate) fn checkpoint_reason(tool_name: &str, resource: &str) -> String {
+    format!(
+        "checkpoint denied: destructive action '{tool_name}' on '{resource}' was \
+         not approved — a human-approval checkpoint protects destructive \
+         actions (file deletion, config writes, dependency installation, \
+         destructive git) for this loop. Continue without performing the \
+         destructive action, or ask the user to approve it manually."
+    )
+}
+
+/// Test-only re-export of [`checkpoint_reason`]: integration tests live in a
+/// separate crate and cannot reach the `pub(crate)` helper directly.
+#[doc(hidden)]
+pub fn checkpoint_reason_for_test(tool_name: &str, resource: &str) -> String {
+    checkpoint_reason(tool_name, resource)
+}
+
+/// Test-only re-export of [`is_destructive_tool`]: integration tests live in
+/// a separate crate and cannot reach the `pub(crate)` helper directly.
+#[doc(hidden)]
+pub fn is_destructive_tool_for_test(tool_name: &str, input: &Value) -> bool {
+    is_destructive_tool(tool_name, input)
+}
+
+/// Drive one interactive permission prompt: publish a
+/// `PermissionRequested` event and wait for the matching
+/// `PermissionReplied` event up to `timeout_secs`; a timeout counts as
+/// denial (FR-015: the intervention defaults to the safe choice).
+///
+/// "Always" grants recorded via the reply are stored permanently on the
+/// checker.
+async fn prompt_for_permission(
+    checker: &Arc<parking_lot::RwLock<PermissionChecker>>,
+    event_bus: &Arc<EventBus>,
+    session_id: &str,
+    permission: &str,
+    resource: &str,
+    tool_name: &str,
+    timeout_secs: u64,
+) -> Result<PermissionAction> {
+    let request_id = Uuid::new_v4().to_string();
+    let mut rx = event_bus.subscribe();
+
+    // Publish request.
+    event_bus.publish(Event::PermissionRequested {
+        session_id: session_id.to_string(),
+        request_id: request_id.clone(),
+        permission: permission.to_string(),
+        description: format!("{tool_name}: {resource}"),
+        options: vec![],
+    });
+
+    let timeout = tokio::time::Duration::from_secs(timeout_secs);
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    loop {
+        let recv_timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if recv_timeout.is_zero() {
+            debug!("Permission request timeout for {tool_name}");
+            return Ok(PermissionAction::Deny);
+        }
+
+        match tokio::time::timeout(recv_timeout, rx.recv()).await {
+            Ok(Ok(Event::PermissionReplied {
+                request_id: rid,
+                allowed,
+                decision,
+                ..
+            })) if rid == request_id => {
+                // If user chose 'Always', record the grant.
+                if allowed && decision == crate::permission::PermissionDecision::Always {
+                    let mut c = checker.write();
+                    c.record_always(permission, resource);
+                    debug!(
+                        "Recorded always-grant for permission={permission}, resource={resource}"
+                    );
+                }
+                return Ok(if allowed {
+                    PermissionAction::Allow
+                } else {
+                    PermissionAction::Deny
+                });
+            }
+            Ok(Err(RecvError::Lagged(_))) => {
+                // Idle-CPU fix: yield briefly so a lagged subscriber resyncs
+                // without pinning a core (see the main prompt loop below).
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            Ok(Err(_)) => {
+                bail!("Event bus closed during permission check");
+            }
+            Err(_) => {
+                // Timeout counts as denial (FR-015).
+                debug!("Permission request timeout for {tool_name}");
+                return Ok(PermissionAction::Deny);
+            }
+            _ => continue,
+        }
+    }
+}
+
 /// Tools that are always available to an agent even when a skill's
 /// `allowed_tools` list is being enforced. These are essential control and
 /// introspection tools that must not be removed from the LLM's tool list.
-pub(crate) const SKILL_ALWAYS_ALLOWED_TOOLS: &[&str] = &[
-    "think",
-    "question",
-    "ask_user",
-    "agent_complete",
-    "model_info",
-];
+pub(crate) const SKILL_ALWAYS_ALLOWED_TOOLS: &[&str] =
+    &["think", "ask_user", "agent_complete", "model_info"];
 
 /// Check permission for a tool execution, prompting the user if necessary.
 ///
 /// Returns `Allow` or `Deny`. If the policy says `Ask`, this publishes a
-/// `PermissionRequested` event and waits up to 2 minutes for a user reply.
+/// `PermissionRequested` event and waits for a user reply up to the
+/// checkpoint timeout; a timeout is treated as denial.
 ///
-/// If `auto_approve` is true, always returns `Allow` without checking rules
-/// or prompting.
+/// `auto_approve` distinguishes the plain auto-approve flag from a loop
+/// destructive-action checkpoint (FR-015, FR-024, T-010):
+///
+/// - `Some(true)` — the plain `--yes`/autopilot auto-approval path: prompts
+///   are answered automatically and `Allow` is returned without prompting.
+/// - `Some(false)` — interactive mode: a `Deny` verdict denies without
+///   prompting and an `Ask` verdict prompts the user with the standard
+///   120-second timeout.
+/// - `None` — a loop run with checkpoints enabled: `checkpoint_forced` is
+///   `true` for destructive calls and forces the human-approval prompt
+///   with the reply window controlled by `checkpoint_timeout_secs`, even
+///   under allow rules and in auto-approve mode.
 ///
 /// # Errors
 ///
@@ -218,16 +464,22 @@ pub async fn check_permission_with_prompt(
     permission: &str,
     resource: &str,
     tool_name: &str,
-    auto_approve: bool,
+    auto_approve: Option<bool>,
     canonical_cache: Option<&ragent_tools_core::CanonicalPathCache>,
+    checkpoint_forced: bool,
+    checkpoint_timeout_secs: u64,
 ) -> Result<PermissionAction> {
-    // Short-circuit if --yes / --no-prompt flag is set
-    if auto_approve {
+    // Short-circuit if --yes / --no-prompt flag is set. A forced
+    // destructive-action checkpoint (FR-015) suppresses this: auto-approval
+    // may answer prompts automatically, but loop checkpoints are still
+    // enforced (FR-024).
+    if auto_approve == Some(true) && !checkpoint_forced {
         return Ok(PermissionAction::Allow);
     }
 
-    // YOLO mode bypasses interactive permission prompts for all tools
-    if ragent_config::yolo::is_enabled() {
+    // YOLO mode bypasses interactive permission prompts for all tools. A
+    // forced destructive-action checkpoint still applies (FR-024).
+    if ragent_config::yolo::is_enabled() && !checkpoint_forced {
         return Ok(PermissionAction::Allow);
     }
 
@@ -241,10 +493,14 @@ pub async fn check_permission_with_prompt(
     // BEFORE any filesystem I/O.  When an explicit rule already grants or
     // denies the request, the blocking `canonicalize()` in the file:read
     // auto-grant below is never reached.
-    if permission.starts_with("file:")
+    //
+    // FR-015 (T-010): a forced destructive-action checkpoint suppresses the
+    // allowlist auto-approve so the request reaches the checkpoint prompt.
+    if (permission.starts_with("file:")
         || permission == "read"
         || permission == "edit"
-        || permission == "write"
+        || permission == "write")
+        && !checkpoint_forced
     {
         use ragent_config::dir_lists::{get_compiled_allowlist, get_compiled_denylist};
 
@@ -270,6 +526,22 @@ pub async fn check_permission_with_prompt(
 
     match action {
         PermissionAction::Allow | PermissionAction::Deny => {
+            // FR-015 (T-010): a forced destructive-action checkpoint
+            // overrides an allow verdict — the call goes to a human
+            // checkpoint prompt even when a rule would auto-approve it
+            // (FR-024: the permission layer is always in the path).
+            if checkpoint_forced && action == PermissionAction::Allow {
+                return prompt_for_permission(
+                    checker,
+                    event_bus,
+                    session_id,
+                    permission,
+                    resource,
+                    tool_name,
+                    checkpoint_timeout_secs,
+                )
+                .await;
+            }
             // Explicit policy decision — no prompt needed, no I/O performed.
             Ok(action)
         }
@@ -282,7 +554,12 @@ pub async fn check_permission_with_prompt(
             // short-circuited, the canonicalise syscall fires only when no
             // rule exists for the resource — i.e. on the first access to a
             // new file, not on every call.
-            if permission == "file:read" || permission == "read" {
+            //
+            // FR-015 (T-010): with a forced destructive-action checkpoint the
+            // auto-grant is skipped — an allow rule never auto-approves a
+            // destructive call; the request goes to a human checkpoint
+            // prompt whose timeout counts as denial (FR-024).
+            if !checkpoint_forced && (permission == "file:read" || permission == "read") {
                 if let Ok(cwd) = std::env::current_dir() {
                     // FR-017: use the per-step canonical path cache when
                     // available to avoid a blocking canonicalize syscall.
@@ -301,72 +578,20 @@ pub async fn check_permission_with_prompt(
                 }
             }
 
-            // Need user interaction
-            let request_id = Uuid::new_v4().to_string();
-            let mut rx = event_bus.subscribe();
-
-            // Publish request
-            event_bus.publish(Event::PermissionRequested {
-                session_id: session_id.to_string(),
-                request_id: request_id.clone(),
-                permission: permission.to_string(),
-                description: format!("{tool_name}: {resource}"),
-                options: vec![],
-            });
-
-            // Wait for reply with 120s timeout
-            let timeout = tokio::time::Duration::from_mins(2);
-            let deadline = tokio::time::Instant::now() + timeout;
-
-            loop {
-                let recv_timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
-                if recv_timeout.is_zero() {
-                    debug!("Permission request timeout for {tool_name}");
-                    return Ok(PermissionAction::Deny);
-                }
-
-                match tokio::time::timeout(recv_timeout, rx.recv()).await {
-                    Ok(Ok(Event::PermissionReplied {
-                        request_id: rid,
-                        allowed,
-                        decision,
-                        ..
-                    })) if rid == request_id => {
-                        // If user chose 'Always', record the grant
-                        if allowed && decision == crate::permission::PermissionDecision::Always {
-                            let mut c = checker.write();
-                            c.record_always(permission, resource);
-                            debug!(
-                                "Recorded always-grant for permission={permission}, resource={resource}"
-                            );
-                        }
-                        return Ok(if allowed {
-                            PermissionAction::Allow
-                        } else {
-                            PermissionAction::Deny
-                        });
-                    }
-                    Ok(Err(RecvError::Lagged(_))) => {
-                        // Idle-CPU fix: `broadcast::recv()` returns
-                        // `Err(Lagged)` immediately (no await) when the
-                        // subscriber is behind, so an unqualified `continue`
-                        // here degenerates into a hot resync loop while the
-                        // bus is saturated. Yield briefly so the loop makes
-                        // progress without pinning a core.
-                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                        continue;
-                    }
-                    Ok(Err(_)) => {
-                        bail!("Event bus closed during permission check");
-                    }
-                    Err(_) => {
-                        // Timeout
-                        debug!("Permission request timeout for {tool_name}");
-                        return Ok(PermissionAction::Deny);
-                    }
-                    _ => continue,
-                }
-            }
+            return prompt_for_permission(
+                checker,
+                event_bus,
+                session_id,
+                permission,
+                resource,
+                tool_name,
+                if checkpoint_forced {
+                    checkpoint_timeout_secs
+                } else {
+                    120
+                },
+            )
+            .await;
         }
     }
 }

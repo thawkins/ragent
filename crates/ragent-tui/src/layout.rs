@@ -32,6 +32,7 @@ use crate::theme;
 use crate::utils::{
     ResponsiveBreakpoint, centered_rect, centered_rect_max, is_below_minimum_size, shorten_middle,
 };
+use ragent_team::team::MemberStatus;
 
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 use ragent_storage::storage::MemoryRow;
@@ -232,16 +233,74 @@ fn render_run_cost_banner(frame: &mut Frame, app: &mut App) {
     );
 }
 
+/// Compute the widths for the Agents/Teams side buttons.
+///
+/// Each button width is its label width plus 2 for borders, with a minimum of
+/// 7. When the two buttons and their gap no longer fit in `button_col_area`
+/// the widths are scaled down proportionally so they still fit.
+///
+/// Returns `(agents_width, teams_width)`.
+pub(crate) fn input_side_button_widths(app: &App, button_col_w: u16) -> (u16, u16) {
+    let gap = 1u16;
+    let agents_label = agents_button_label(app);
+    let teams_label = teams_button_label(app);
+    let agents_w = (agents_label.chars().count() as u16 + 2).max(7);
+    let teams_w = (teams_label.chars().count() as u16 + 2).max(7);
+    let total = agents_w.saturating_add(gap).saturating_add(teams_w);
+    if total <= button_col_w {
+        return (agents_w, teams_w);
+    }
+    // Scale down proportionally so both buttons still fit in the column.
+    let scale = f64::from(button_col_w) / f64::from(total);
+    let scaled_agents = ((f64::from(agents_w) * scale) as u16).max(7);
+    let scaled_teams = ((f64::from(teams_w) * scale) as u16).max(7);
+    (scaled_agents, scaled_teams)
+}
+
+/// Total width the button column needs so the Agents/Teams labels are not
+/// truncated. Never narrower than the responsive breakpoint width.
+pub(crate) fn input_side_buttons_total_width(app: &App) -> u16 {
+    let (agents_w, teams_w) = input_side_button_widths(app, u16::MAX);
+    let gap = 1u16;
+    agents_w.saturating_add(gap).saturating_add(teams_w).max(12)
+}
+
+/// Label for the Agents button. Shows the number of live sub-agent and
+/// background-shell tasks in parentheses when any exist.
+fn agents_button_label(app: &App) -> String {
+    let count = app.active_tasks.len() + app.bg_tasks.len();
+    if count == 0 {
+        " Agents ".to_string()
+    } else {
+        format!(" Agents ({count}) ")
+    }
+}
+
+/// Label for the Teams button. Shows the number of active (non-terminal)
+/// team members in parentheses when an active team exists.
+fn teams_button_label(app: &App) -> String {
+    let count = app
+        .team_members
+        .iter()
+        .filter(|m| !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed))
+        .count();
+    if count == 0 {
+        " Teams ".to_string()
+    } else {
+        format!(" Teams ({count}) ")
+    }
+}
+
 fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Rect) {
     let gap = 1u16;
-    let button_w = ((button_col_area.width.saturating_sub(gap)) / 2).max(7);
+    let (agents_w, teams_w) = input_side_button_widths(app, button_col_area.width);
     let agents_x = button_col_area.x;
-    let teams_x = agents_x.saturating_add(button_w).saturating_add(gap);
+    let teams_x = agents_x.saturating_add(agents_w).saturating_add(gap);
     let y = button_col_area.y;
     let h = button_col_area.height.max(3);
 
-    app.agents_button_area = Rect::new(agents_x, y, button_w, h);
-    app.teams_button_area = Rect::new(teams_x, y, button_w, h);
+    app.agents_button_area = Rect::new(agents_x, y, agents_w, h);
+    app.teams_button_area = Rect::new(teams_x, y, teams_w, h);
 
     let agents_enabled = !app.active_tasks.is_empty() || !app.bg_tasks.is_empty();
     let teams_enabled = app.active_team.is_some();
@@ -293,23 +352,29 @@ fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Re
     };
 
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(" Agents ", agents_text_style)))
-            .style(agents_text_style)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(agents_border_style),
-            ),
+        Paragraph::new(Line::from(Span::styled(
+            agents_button_label(app),
+            agents_text_style,
+        )))
+        .style(agents_text_style)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(agents_border_style),
+        ),
         app.agents_button_area,
     );
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(" Teams ", teams_text_style)))
-            .style(teams_text_style)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(teams_border_style),
-            ),
+        Paragraph::new(Line::from(Span::styled(
+            teams_button_label(app),
+            teams_text_style,
+        )))
+        .style(teams_text_style)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(teams_border_style),
+        ),
         app.teams_button_area,
     );
 }
@@ -2925,8 +2990,12 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     // Check minimum size (for graceful degradation if needed)
     let _below_min = is_below_minimum_size(chat_area);
 
-    // Use responsive button column width
-    let button_col_w = breakpoint.button_column_width();
+    // Use responsive button column width, grown as needed so the Agents/Teams
+    // labels (which may include live counts) are not truncated. This narrows
+    // the input field only when the labels demand it.
+    let button_col_w = breakpoint
+        .button_column_width()
+        .max(input_side_buttons_total_width(app));
     let input_inner_width = chat_area
         .width
         .saturating_sub(button_col_w)
@@ -3126,6 +3195,11 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     // Provider setup dialog overlay (if active, e.g. via /provider command)
     if app.provider_setup.is_some() {
         render_provider_setup_dialog(frame, app);
+    }
+
+    // /loop setup dialog overlay (spec `agentloop` T-014)
+    if app.loop_setup.is_some() {
+        render_loop_setup_dialog(frame, app);
     }
 
     // Router save confirmation modal overlay
@@ -5898,6 +5972,154 @@ fn render_force_cleanup_dialog(frame: &mut Frame, app: &App) {
             .alignment(Alignment::Center);
         frame.render_widget(paragraph, area);
     }
+}
+
+/// Render the `/loop` setup dialog overlay (spec `agentloop` T-014).
+///
+/// Layout: agent picker at the top (navigated with arrow keys), then the
+/// goal / verification / scope / constraints / tool-set text fields, the
+/// step and cost limit fields, the checkpoints toggle, and a footer with
+/// the active-field cursor marker plus any validation error.
+fn render_loop_setup_dialog(frame: &mut Frame, app: &App) {
+    let Some(state) = app.loop_setup.as_ref() else {
+        return;
+    };
+    let area = centered_rect_max(80, 80, 90, 40, frame.area());
+    frame.render_widget(Clear, area);
+
+    let mut lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            "Start a goal-driven loop",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    // Agent picker row.
+    let agent_marker = if state.active_field == crate::app::LoopSetupField::Agent {
+        "> "
+    } else {
+        "  "
+    };
+    let mut agent_line = vec![Span::styled(
+        format!("{agent_marker}agent "),
+        Style::default().fg(Color::Yellow),
+    )];
+    for (i, (name, _desc)) in state.agents.iter().enumerate() {
+        let style = if i == state.selected_agent {
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        agent_line.push(Span::styled(format!("[{name}] "), style));
+    }
+    lines.push(Line::from(agent_line));
+
+    // Text fields.
+    let text_fields: [(
+        &str,
+        crate::app::LoopSetupField,
+        &crate::input_field::InputField,
+    ); 7] = [
+        ("goal", crate::app::LoopSetupField::Goal, &state.goal_field),
+        (
+            "verify cmd",
+            crate::app::LoopSetupField::VerifyCmd,
+            &state.verify_cmd_field,
+        ),
+        (
+            "scope",
+            crate::app::LoopSetupField::Scope,
+            &state.scope_field,
+        ),
+        (
+            "read-only",
+            crate::app::LoopSetupField::ReadOnly,
+            &state.read_only_field,
+        ),
+        (
+            "tools",
+            crate::app::LoopSetupField::ToolSet,
+            &state.tool_set_field,
+        ),
+        (
+            "max steps",
+            crate::app::LoopSetupField::MaxSteps,
+            &state.max_steps_field,
+        ),
+        (
+            "cost limit",
+            crate::app::LoopSetupField::CostLimit,
+            &state.cost_limit_field,
+        ),
+    ];
+    for (label, field, input) in text_fields {
+        let marker = if state.active_field == field {
+            "> "
+        } else {
+            "  "
+        };
+        let cursor = if state.active_field == field {
+            input.cursor()
+        } else {
+            input.text().chars().count()
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{marker}{label} "),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::styled(
+                with_cursor_marker(input.text(), cursor),
+                Style::default().fg(Color::White),
+            ),
+        ]));
+    }
+
+    // Checkpoints toggle.
+    let cp_marker = if state.active_field == crate::app::LoopSetupField::Checkpoints {
+        "> "
+    } else {
+        "  "
+    };
+    let (cp_label, cp_style) = if state.checkpoints {
+        ("on", Style::default().fg(Color::Green))
+    } else {
+        ("off", Style::default().fg(Color::DarkGray))
+    };
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("{cp_marker}checkpoints "),
+            Style::default().fg(Color::Cyan),
+        ),
+        Span::styled(cp_label, cp_style),
+    ]));
+
+    lines.push(Line::from(""));
+    if let Some(error) = &state.error {
+        lines.push(Line::from(Span::styled(
+            format!("error: {error}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        "Tab next field - Up/Down navigate - Enter start - Esc cancel",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" /loop setup ")
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, area);
 }
 
 /// Render the interactive MCP discovery dialog overlay.

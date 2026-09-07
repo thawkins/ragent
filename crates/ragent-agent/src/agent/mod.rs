@@ -2943,14 +2943,17 @@ fn build_system_prompt_with_storage_inner(
     );
 
     // -------------------------------------------------------------------
-    // ask_user / question guidance — keep in sync with the tool schema.
+    // ask_user guidance — keep in sync with the tool schema. The old
+    // standalone `question` tool was removed; `ask_user` is the only
+    // interactive-question tool.
     // -------------------------------------------------------------------
     prompt.push_str(
-        "## Question / AskUser Tools\n\n\
+        "## AskUser Tool\n\n\
          - `ask_user` required parameter: `question` (string). Optional: `options` (array of \
-           strings). When `options` is provided the user picks one; otherwise they type free text.\n\
-         - `question` is the legacy alias for `ask_user`; prefer `ask_user`.\n\
-         - Use `ask_user` for clarification, prioritisation, or confirmation before proceeding.\n\n",
+           strings). When `options` is provided the user picks one; otherwise they type free text.\
+           \n\
+         - Use `ask_user` for clarification, prioritisation, or confirmation before proceeding.\
+           \n\n",
     );
 
     // -------------------------------------------------------------------

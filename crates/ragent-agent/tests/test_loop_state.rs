@@ -1,526 +1,275 @@
-#![allow(clippy::assert_is_empty)]
-//! Integration tests for the stateful loop cron mode (spec `piegap` T-005).
+//! External tests for `session/loop_state.rs` (spec `agentloop`, task
+//! T-001): `LoopSpec` restriction predicates, `StopCondition` mapping, and
+//! `LoopTracker` budget-gate behaviour (FR-006, FR-013, FR-014).
 //!
-//! Tests the `<loop-state>` / `<inbox>` tag protocol, state file persistence,
-//! inbox JSONL writing, prompt injection, and all character/count caps.
+//! The module is also compiled inline (via `#[path]` include in the source)
+//! for private-field access; the tests here run through the public API.
 
-use std::fs;
+// Pedantic-level warnings on collection-emptiness asserts are accepted in
+// this suite (same treatment as the pre-agentloop test files).
+#![allow(clippy::assert_is_empty)]
 
-use ragent_agent::loop_state::{
-    INBOX_ENTRY_MAX_CHARS, INBOX_MAX_PER_RUN, InboxEntry, LOOP_STATE_MAX_CHARS, LoopState,
-    inject_state_into_prompt, parse_tags, read_inbox, strip_tags, write_inbox_entries,
-};
+use ragent_agent::session::loop_state::{LoopSpec, LoopTracker, StopCondition};
 
-/// Helper: create a unique temp directory for test isolation.
-fn temp_dir() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "ragent-loop-state-int-{}-{}",
-        std::process::id(),
-        uuid::Uuid::new_v4()
-    ));
-    fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
-// ── Tag Parsing ───────────────────────────────────────────────────────
+// --- LoopSpec construction -------------------------------------------------
 
 #[test]
-fn test_parse_tags_extracts_loop_state() {
-    let output = "Work done.\n<loop-state>\nCheck build status next time.\n</loop-state>\nDone.";
-    let parsed = parse_tags(output);
-    assert_eq!(parsed.loop_state, "Check build status next time.");
-    assert!(parsed.inbox_entries.is_empty());
+fn test_loop_spec_new_defaults_checkpoints_on_and_no_limits() {
+    let spec = LoopSpec::new("coder", "all existing tests should pass");
+    assert_eq!(spec.agent, "coder");
+    assert_eq!(spec.goal, "all existing tests should pass");
+    assert!(spec.verify_cmd.is_none());
+    assert!(spec.scope.is_empty());
+    assert!(spec.read_only.is_empty());
+    assert!(spec.tool_set.is_empty());
+    assert!(spec.max_steps.is_none());
+    assert!(spec.cost_limit.is_none());
+    // Checkpoints default on (destructive-action safety, FR-015).
+    assert!(spec.checkpoints);
 }
 
 #[test]
-fn test_parse_tags_extracts_inbox_entries() {
-    let output = "<inbox>Found a bug in module X</inbox>\n<inbox>Need to update docs</inbox>";
-    let parsed = parse_tags(output);
-    assert_eq!(parsed.inbox_entries.len(), 2);
-    assert_eq!(parsed.inbox_entries[0], "Found a bug in module X");
-    assert_eq!(parsed.inbox_entries[1], "Need to update docs");
+fn test_loop_spec_has_scope_and_has_tool_set() {
+    let mut spec = LoopSpec::new("coder", "goal");
+    assert!(!spec.has_scope());
+    assert!(!spec.has_tool_set());
+
+    spec.scope = vec!["src/**".to_string()];
+    spec.tool_set = vec!["read".to_string()];
+    assert!(spec.has_scope());
+    assert!(spec.has_tool_set());
 }
 
-#[test]
-fn test_parse_tags_extracts_both() {
-    let output = "Running checks...\n<loop-state>Iteration 3 complete</loop-state>\n<inbox>Flaky test found</inbox>";
-    let parsed = parse_tags(output);
-    assert_eq!(parsed.loop_state, "Iteration 3 complete");
-    assert_eq!(parsed.inbox_entries.len(), 1);
-    assert_eq!(parsed.inbox_entries[0], "Flaky test found");
-}
+// --- StopCondition mapping -------------------------------------------------
 
 #[test]
-fn test_parse_tags_no_tags_returns_empty() {
-    let parsed = parse_tags("Just some output text.");
-    assert!(parsed.loop_state.is_empty());
-    assert!(parsed.inbox_entries.is_empty());
-}
-
-#[test]
-fn test_parse_tags_empty_input() {
-    let parsed = parse_tags("");
-    assert!(parsed.loop_state.is_empty());
-    assert!(parsed.inbox_entries.is_empty());
-}
-
-#[test]
-fn test_parse_tags_last_loop_state_wins() {
-    let output =
-        "<loop-state>first attempt</loop-state> middle <loop-state>corrected notes</loop-state>";
-    let parsed = parse_tags(output);
-    assert_eq!(parsed.loop_state, "corrected notes");
-}
-
-#[test]
-fn test_parse_tags_malformed_missing_close_ignored() {
-    let parsed = parse_tags("<loop-state>no closing tag here");
-    assert!(parsed.loop_state.is_empty());
-}
-
-#[test]
-fn test_parse_tags_malformed_inbox_missing_close_ignored() {
-    let parsed = parse_tags("<inbox>incomplete finding");
-    assert!(parsed.inbox_entries.is_empty());
-}
-
-#[test]
-fn test_parse_tags_nested_tags_not_supported() {
-    // Tags are not nested — inner tags are treated as text content.
-    let output = "<loop-state>notes <inbox>not a real finding</inbox> more notes</loop-state>";
-    let parsed = parse_tags(output);
-    assert!(parsed.loop_state.contains("notes"));
-    assert!(parsed.loop_state.contains("not a real finding"));
-}
-
-// ── Caps ──────────────────────────────────────────────────────────────
-
-#[test]
-fn test_loop_state_capped_at_max_chars() {
-    let long = "x".repeat(LOOP_STATE_MAX_CHARS + 500);
-    let output = format!("<loop-state>{long}</loop-state>");
-    let parsed = parse_tags(&output);
-    assert!(
-        parsed.loop_state.chars().count() <= LOOP_STATE_MAX_CHARS,
-        "loop state must be capped at {} chars, got {}",
-        LOOP_STATE_MAX_CHARS,
-        parsed.loop_state.chars().count()
-    );
-    assert!(parsed.loop_state.ends_with('…'));
-}
-
-#[test]
-fn test_inbox_entry_capped_at_max_chars() {
-    let long = "y".repeat(INBOX_ENTRY_MAX_CHARS + 200);
-    let output = format!("<inbox>{long}</inbox>");
-    let parsed = parse_tags(&output);
-    assert_eq!(parsed.inbox_entries.len(), 1);
-    assert!(
-        parsed.inbox_entries[0].chars().count() <= INBOX_ENTRY_MAX_CHARS,
-        "inbox entry must be capped at {} chars, got {}",
-        INBOX_ENTRY_MAX_CHARS,
-        parsed.inbox_entries[0].chars().count()
-    );
-    assert!(parsed.inbox_entries[0].ends_with('…'));
-}
-
-#[test]
-fn test_inbox_max_per_run_findings() {
-    let mut output = String::new();
-    for i in 0..(INBOX_MAX_PER_RUN + 10) {
-        output.push_str(&format!("<inbox>finding {i}</inbox>\n"));
+fn test_stop_condition_labels_round_trip() {
+    for (condition, label) in [
+        (StopCondition::GoalAchieved, "completed"),
+        (StopCondition::UnrecoverableError, "error"),
+        (StopCondition::BudgetExhausted, "budget_exhausted"),
+        (StopCondition::HumanIntervention, "interrupted"),
+    ] {
+        assert_eq!(condition.as_str(), label);
+        assert_eq!(StopCondition::from_str_label(label), Some(condition));
     }
-    let parsed = parse_tags(&output);
+    assert_eq!(StopCondition::from_str_label("nonsense"), None);
+}
+
+#[test]
+fn test_stop_condition_success_only_goal_achieved() {
+    assert!(StopCondition::GoalAchieved.is_success());
+    assert!(!StopCondition::UnrecoverableError.is_success());
+    assert!(!StopCondition::BudgetExhausted.is_success());
+    assert!(!StopCondition::HumanIntervention.is_success());
+}
+
+// --- LoopTracker: budget gates (FR-013 / FR-014) ---------------------------
+
+#[test]
+fn test_tracker_step_budget_breach_before_request() {
+    let mut tracker = LoopTracker::with_budgets(Some(2), None);
+    // Two iterations fit within the budget.
+    assert!(tracker.begin_step());
+    assert!(tracker.begin_step());
+    assert_eq!(tracker.steps(), 2);
+    // FR-013: the gate fires BEFORE a third request is sent.
     assert_eq!(
-        parsed.inbox_entries.len(),
-        INBOX_MAX_PER_RUN,
-        "at most {} findings per run, got {}",
-        INBOX_MAX_PER_RUN,
-        parsed.inbox_entries.len()
+        tracker.budget_breach(),
+        Some(StopCondition::BudgetExhausted)
     );
-    assert_eq!(parsed.inbox_entries[0], "finding 0");
+    assert!(!tracker.begin_step());
+    assert_eq!(tracker.steps(), 2);
+}
+
+#[test]
+fn test_tracker_token_budget_breach_before_request() {
+    let mut tracker = LoopTracker::with_budgets(None, Some(1500));
+    assert!(tracker.budget_breach().is_none());
+    tracker.record_tokens(700, 300); // 1000 total, under the limit
+    assert!(tracker.budget_breach().is_none());
+    tracker.record_tokens(600, 0); // 1600 total, breaches 1500
+    // FR-014: gate fires before the next request.
     assert_eq!(
-        parsed.inbox_entries[INBOX_MAX_PER_RUN - 1],
-        format!("finding {}", INBOX_MAX_PER_RUN - 1)
+        tracker.budget_breach(),
+        Some(StopCondition::BudgetExhausted)
     );
+    assert!(!tracker.begin_step());
 }
 
 #[test]
-fn test_loop_state_exact_max_not_truncated() {
-    let exact = "x".repeat(LOOP_STATE_MAX_CHARS);
-    let output = format!("<loop-state>{exact}</loop-state>");
-    let parsed = parse_tags(&output);
-    assert_eq!(parsed.loop_state.chars().count(), LOOP_STATE_MAX_CHARS);
-    assert!(!parsed.loop_state.ends_with('…'));
-}
-
-#[test]
-fn test_inbox_entry_exact_max_not_truncated() {
-    let exact = "y".repeat(INBOX_ENTRY_MAX_CHARS);
-    let output = format!("<inbox>{exact}</inbox>");
-    let parsed = parse_tags(&output);
-    assert_eq!(
-        parsed.inbox_entries[0].chars().count(),
-        INBOX_ENTRY_MAX_CHARS
-    );
-    assert!(!parsed.inbox_entries[0].ends_with('…'));
-}
-
-// ── State File I/O ────────────────────────────────────────────────────
-
-#[test]
-fn test_loop_state_save_and_load() {
-    let dir = temp_dir();
-    let state = LoopState {
-        content: "Remember to check CI status".to_string(),
-    };
-    state.save(&dir, "event-save-load").unwrap();
-
-    let loaded = LoopState::load(&dir, "event-save-load").unwrap();
-    assert_eq!(loaded.content, "Remember to check CI status");
-
-    fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn test_loop_state_load_missing_returns_empty() {
-    let dir = temp_dir();
-    let loaded = LoopState::load(&dir, "nonexistent-event").unwrap();
-    assert!(loaded.content.is_empty());
-    fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn test_loop_state_overwrite_on_save() {
-    let dir = temp_dir();
-    let state1 = LoopState {
-        content: "first run notes".to_string(),
-    };
-    state1.save(&dir, "event-overwrite").unwrap();
-
-    let state2 = LoopState {
-        content: "second run notes".to_string(),
-    };
-    state2.save(&dir, "event-overwrite").unwrap();
-
-    let loaded = LoopState::load(&dir, "event-overwrite").unwrap();
-    assert_eq!(loaded.content, "second run notes");
-
-    fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn test_loop_state_save_truncates_content() {
-    let dir = temp_dir();
-    let long = "z".repeat(LOOP_STATE_MAX_CHARS + 1000);
-    let state = LoopState { content: long };
-    state.save(&dir, "event-trunc-save").unwrap();
-
-    let loaded = LoopState::load(&dir, "event-trunc-save").unwrap();
-    assert!(loaded.content.chars().count() <= LOOP_STATE_MAX_CHARS);
-    assert!(loaded.content.ends_with('…'));
-
-    fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn test_loop_state_creates_parent_directory() {
-    let dir = temp_dir();
-    // The state file goes to <dir>/loop-state/<event>.txt — the
-    // loop-state subdirectory should be created automatically.
-    let state = LoopState {
-        content: "test".to_string(),
-    };
-    state.save(&dir, "event-mkdir").unwrap();
-    assert!(dir.join("loop-state").join("event-mkdir.txt").exists());
-    fs::remove_dir_all(&dir).ok();
-}
-
-// ── Inbox JSONL ───────────────────────────────────────────────────────
-
-#[test]
-fn test_inbox_write_and_read() {
-    let dir = temp_dir();
-    let entries = vec![
-        InboxEntry::new("event-a", "first finding"),
-        InboxEntry::new("event-a", "second finding"),
-        InboxEntry::new("event-b", "cross-event finding"),
-    ];
-    write_inbox_entries(&dir, &entries).unwrap();
-
-    let read = read_inbox(&dir).unwrap();
-    assert_eq!(read.len(), 3);
-    assert_eq!(read[0].content, "first finding");
-    assert_eq!(read[0].source_event_id, "event-a");
-    assert_eq!(read[1].content, "second finding");
-    assert_eq!(read[2].content, "cross-event finding");
-    assert_eq!(read[2].source_event_id, "event-b");
-    assert_eq!(read[0].status, "open");
-
-    fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn test_inbox_read_missing_returns_empty() {
-    let dir = temp_dir();
-    let read = read_inbox(&dir).unwrap();
-    assert!(read.is_empty());
-    fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn test_inbox_append_to_existing() {
-    let dir = temp_dir();
-    let first_batch = vec![InboxEntry::new("event-1", "first")];
-    write_inbox_entries(&dir, &first_batch).unwrap();
-
-    let second_batch = vec![InboxEntry::new("event-1", "second")];
-    write_inbox_entries(&dir, &second_batch).unwrap();
-
-    let read = read_inbox(&dir).unwrap();
-    assert_eq!(read.len(), 2);
-    assert_eq!(read[0].content, "first");
-    assert_eq!(read[1].content, "second");
-
-    fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn test_inbox_empty_write_creates_no_file() {
-    let dir = temp_dir();
-    write_inbox_entries(&dir, &[]).unwrap();
-    assert!(!dir.join("log").join("inbox").join("inbox.jsonl").exists());
-    fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn test_inbox_entry_truncation_in_constructor() {
-    let long = "w".repeat(INBOX_ENTRY_MAX_CHARS + 300);
-    let entry = InboxEntry::new("event-1", &long);
-    assert!(entry.content.chars().count() <= INBOX_ENTRY_MAX_CHARS);
-    assert!(entry.content.ends_with('…'));
-}
-
-#[test]
-fn test_inbox_entry_has_unique_id() {
-    let entry1 = InboxEntry::new("event-1", "finding a");
-    let entry2 = InboxEntry::new("event-1", "finding b");
-    assert_ne!(entry1.id, entry2.id);
-}
-
-#[test]
-fn test_inbox_jsonl_format() {
-    let dir = temp_dir();
-    let entry = InboxEntry::new("event-fmt", "test finding");
-    write_inbox_entries(&dir, &[entry]).unwrap();
-
-    let content = fs::read_to_string(dir.join("log").join("inbox").join("inbox.jsonl")).unwrap();
-    // Each line should be valid JSON.
-    let parsed: serde_json::Value = serde_json::from_str(content.trim()).unwrap();
-    assert_eq!(parsed["content"], "test finding");
-    assert_eq!(parsed["source_event_id"], "event-fmt");
-    assert_eq!(parsed["status"], "open");
-    assert!(!parsed["id"].as_str().unwrap().is_empty());
-    assert!(!parsed["timestamp"].as_str().unwrap().is_empty());
-
-    fs::remove_dir_all(&dir).ok();
-}
-
-// ── Prompt Injection ──────────────────────────────────────────────────
-
-#[test]
-fn test_inject_state_empty_returns_original() {
-    let state = LoopState::default();
-    let prompt = "run cargo test";
-    let result = inject_state_into_prompt(prompt, &state);
-    assert_eq!(result, prompt);
-}
-
-#[test]
-fn test_inject_state_with_content_prepends_block() {
-    let state = LoopState {
-        content: "previous iteration notes".to_string(),
-    };
-    let prompt = "run cargo test";
-    let result = inject_state_into_prompt(prompt, &state);
-    assert!(result.starts_with("<loop-state>"));
-    assert!(result.contains("previous iteration notes"));
-    assert!(result.contains("run cargo test"));
-    // The original prompt should come after the state block.
-    let prompt_pos = result.find("run cargo test").unwrap();
-    let state_end = result.find("</loop-state>").unwrap();
-    assert!(prompt_pos > state_end);
-}
-
-#[test]
-fn test_inject_state_whitespace_only_returns_original() {
-    let state = LoopState {
-        content: "   \n  ".to_string(),
-    };
-    let prompt = "do work";
-    let result = inject_state_into_prompt(prompt, &state);
-    assert_eq!(result, prompt);
-}
-
-// ── Strip Tags ────────────────────────────────────────────────────────
-
-#[test]
-fn test_strip_tags_removes_all_protocol_tags() {
-    let output = "Work done.\n<loop-state>notes</loop-state>\nMore text.\n<inbox>finding</inbox>";
-    let stripped = strip_tags(output);
-    assert!(!stripped.contains("<loop-state>"));
-    assert!(!stripped.contains("</loop-state>"));
-    assert!(!stripped.contains("<inbox>"));
-    assert!(!stripped.contains("</inbox>"));
-    assert!(stripped.contains("Work done."));
-    assert!(stripped.contains("More text."));
-}
-
-#[test]
-fn test_strip_tags_no_tags_unchanged() {
-    assert_eq!(strip_tags("plain text"), "plain text");
-}
-
-#[test]
-fn test_strip_tags_multiple_inbox() {
-    let output = "<inbox>a</inbox><inbox>b</inbox>text";
-    let stripped = strip_tags(output);
-    assert_eq!(stripped, "text");
-}
-
-#[test]
-fn test_strip_tags_malformed_preserves_text() {
-    let output = "text <loop-state>no close";
-    let stripped = strip_tags(output);
-    // Malformed tag is left in place since there's no close tag to match.
-    assert!(stripped.contains("text"));
-}
-
-// ── End-to-End Stateful Loop Simulation ──────────────────────────────
-
-#[test]
-fn test_e2e_stateful_loop_cycle() {
-    let dir = temp_dir();
-    let event_id = "e2e-loop-event";
-
-    // ── Run 1: no previous state, agent outputs state + inbox ──
-    let state_before = LoopState::load(&dir, event_id).unwrap();
-    assert!(state_before.content.is_empty());
-
-    let prompt = "check build status";
-    let injected_prompt = inject_state_into_prompt(prompt, &state_before);
-    assert_eq!(injected_prompt, prompt); // no state to inject
-
-    // Simulate agent output after run 1.
-    let agent_output_1 = "Build succeeded.\n<loop-state>\nLast check: green. Next: run tests.\n</loop-state>\n<inbox>\nAll tests passed.\n</inbox>";
-    let parsed_1 = parse_tags(agent_output_1);
-
-    // Save state from run 1.
-    let state_after_1 = LoopState {
-        content: parsed_1.loop_state.clone(),
-    };
-    state_after_1.save(&dir, event_id).unwrap();
-
-    // Write inbox from run 1.
-    let inbox_entries_1: Vec<_> = parsed_1
-        .inbox_entries
-        .iter()
-        .map(|c| InboxEntry::new(event_id, c))
-        .collect();
-    write_inbox_entries(&dir, &inbox_entries_1).unwrap();
-
-    // ── Run 2: previous state is injected, agent outputs new state ──
-    let state_before_2 = LoopState::load(&dir, event_id).unwrap();
-    assert_eq!(
-        state_before_2.content,
-        "Last check: green. Next: run tests."
-    );
-
-    let injected_prompt_2 = inject_state_into_prompt(prompt, &state_before_2);
-    assert!(injected_prompt_2.starts_with("<loop-state>"));
-    assert!(injected_prompt_2.contains("Last check: green"));
-    assert!(injected_prompt_2.contains("check build status"));
-
-    // Simulate agent output after run 2.
-    let agent_output_2 = "Tests failed.\n<loop-state>\nLast check: tests failed. Next: fix module X.\n</loop-state>\n<inbox>\nFlaky test in module X.\n</inbox>\n<inbox>\nTimeout in integration test.\n</inbox>";
-    let parsed_2 = parse_tags(agent_output_2);
-
-    // Save state from run 2 (overwrites run 1 state).
-    let state_after_2 = LoopState {
-        content: parsed_2.loop_state.clone(),
-    };
-    state_after_2.save(&dir, event_id).unwrap();
-
-    // Write inbox from run 2.
-    let inbox_entries_2: Vec<_> = parsed_2
-        .inbox_entries
-        .iter()
-        .map(|c| InboxEntry::new(event_id, c))
-        .collect();
-    write_inbox_entries(&dir, &inbox_entries_2).unwrap();
-
-    // ── Verify: state file has run 2's notes ──
-    let final_state = LoopState::load(&dir, event_id).unwrap();
-    assert_eq!(
-        final_state.content,
-        "Last check: tests failed. Next: fix module X."
-    );
-
-    // ── Verify: inbox has 3 entries total (1 from run 1, 2 from run 2) ──
-    let inbox = read_inbox(&dir).unwrap();
-    assert_eq!(inbox.len(), 3);
-    assert_eq!(inbox[0].content, "All tests passed.");
-    assert_eq!(inbox[1].content, "Flaky test in module X.");
-    assert_eq!(inbox[2].content, "Timeout in integration test.");
-    assert!(inbox.iter().all(|e| e.source_event_id == event_id));
-
-    fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn test_e2e_stateful_loop_with_caps() {
-    let dir = temp_dir();
-    let event_id = "e2e-caps-event";
-
-    // Agent outputs more than the allowed caps.
-    let long_state = "s".repeat(LOOP_STATE_MAX_CHARS + 500);
-    let long_finding = "f".repeat(INBOX_ENTRY_MAX_CHARS + 200);
-    let mut output = format!("<loop-state>{long_state}</loop-state>");
-    for i in 0..(INBOX_MAX_PER_RUN + 5) {
-        output.push_str(&format!("<inbox>finding {i}: {long_finding}</inbox>"));
+fn test_tracker_unbounded_budgets_never_breach() {
+    let mut tracker = LoopTracker::with_budgets(None, None);
+    for _ in 0..100 {
+        assert!(tracker.begin_step());
     }
+    assert!(tracker.budget_breach().is_none());
+    tracker.record_tokens(u64::MAX, 10); // saturating, must not panic
+    assert!(tracker.budget_breach().is_none());
+}
 
-    let parsed = parse_tags(&output);
+#[test]
+fn test_tracker_stop_is_idempotent_first_condition_wins() {
+    let mut tracker = LoopTracker::with_budgets(Some(5), None);
+    assert!(tracker.stop_condition().is_none());
+    assert!(!tracker.is_stopped());
+    let first = tracker.stop(StopCondition::BudgetExhausted);
+    assert_eq!(first, StopCondition::BudgetExhausted);
+    assert!(tracker.is_stopped());
+    // FR-017: once stopped, a later condition cannot override.
+    let second = tracker.stop(StopCondition::HumanIntervention);
+    assert_eq!(second, StopCondition::BudgetExhausted);
+    assert_eq!(
+        tracker.stop_condition(),
+        Some(StopCondition::BudgetExhausted)
+    );
+    // No steps may begin after the stop flag is set.
+    assert!(!tracker.begin_step());
+}
 
-    // State is capped.
-    assert!(parsed.loop_state.chars().count() <= LOOP_STATE_MAX_CHARS);
+#[test]
+fn test_tracker_consecutive_failures_stop_at_allowance() {
+    let mut tracker = LoopTracker::with_budgets(None, None);
+    // Allowance is 3: three failures in a row are still tolerated.
+    assert!(!tracker.record_failure());
+    assert!(!tracker.record_failure());
+    assert!(!tracker.record_failure());
+    assert_eq!(tracker.consecutive_failures(), 3);
+    // The fourth consecutive failure exceeds the allowance.
+    assert!(tracker.record_failure());
+    // A success resets the counter.
+    tracker.record_success();
+    assert_eq!(tracker.consecutive_failures(), 0);
+    assert!(!tracker.record_failure());
+}
 
-    // Only MAX_PER_RUN findings are kept, each capped.
-    assert_eq!(parsed.inbox_entries.len(), INBOX_MAX_PER_RUN);
-    for entry in &parsed.inbox_entries {
-        assert!(entry.chars().count() <= INBOX_ENTRY_MAX_CHARS);
-    }
+// --- LoopTracker from LoopSpec ---------------------------------------------
 
-    // Save and verify persistence respects caps.
-    let state = LoopState {
-        content: parsed.loop_state.clone(),
+#[test]
+fn test_tracker_new_applies_spec_budgets() {
+    let spec = LoopSpec {
+        max_steps: Some(7),
+        cost_limit: Some(20000),
+        ..LoopSpec::new("coder", "goal")
     };
-    state.save(&dir, event_id).unwrap();
-    let loaded = LoopState::load(&dir, event_id).unwrap();
-    assert!(loaded.content.chars().count() <= LOOP_STATE_MAX_CHARS);
-
-    // Write inbox and verify.
-    let entries: Vec<_> = parsed
-        .inbox_entries
-        .iter()
-        .map(|c| InboxEntry::new(event_id, c))
-        .collect();
-    write_inbox_entries(&dir, &entries).unwrap();
-    let read = read_inbox(&dir).unwrap();
-    assert_eq!(read.len(), INBOX_MAX_PER_RUN);
-    for entry in &read {
-        assert!(entry.content.chars().count() <= INBOX_ENTRY_MAX_CHARS);
+    let mut tracker = LoopTracker::new(&spec);
+    assert_eq!(tracker.steps(), 0);
+    assert!(tracker.budget_breach().is_none());
+    for _ in 0..7 {
+        assert!(tracker.begin_step());
     }
+    assert_eq!(
+        tracker.budget_breach(),
+        Some(StopCondition::BudgetExhausted)
+    );
+    tracker.record_tokens(20_000, 0);
+    // Step budget fires first but both gates point at the same condition.
+    assert_eq!(tracker.stop_condition(), None);
+    let breach = tracker.budget_breach().unwrap();
+    assert_eq!(breach, StopCondition::BudgetExhausted);
+    tracker.stop(breach);
+    assert!(tracker.is_stopped());
+}
 
-    fs::remove_dir_all(&dir).ok();
+// --- Tool-call tally (FR-025, T-017) ----------------------------------------
+
+#[test]
+fn test_tracker_tool_call_tally_accumulates_per_iteration() {
+    let mut tracker = LoopTracker::with_budgets(Some(5), None);
+    assert_eq!(tracker.tool_calls(), 0);
+    // Two iterations of tool work: two calls in the first, one in the second.
+    assert!(tracker.begin_step());
+    tracker.record_tool_calls(2);
+    assert!(tracker.begin_step());
+    tracker.record_tool_calls(1);
+    assert_eq!(tracker.tool_calls(), 3, "per-iteration counts accumulate");
+    // The tally does not consume the step budget.
+    assert!(tracker.budget_breach().is_none());
+    assert_eq!(tracker.steps(), 2);
+    // The tally is unaffected by stopping the loop.
+    tracker.stop(StopCondition::GoalAchieved);
+    assert_eq!(tracker.tool_calls(), 3);
+}
+
+// --- LoopSpec restriction predicates (used by T-009) ------------------------
+
+#[test]
+fn test_spec_allows_tool_with_and_without_tool_set() {
+    let mut spec = LoopSpec::new("coder", "goal");
+    // No tool set: every tool allowed (FR-008 "empty list means all tools").
+    assert!(spec.allows_tool("read"));
+    assert!(spec.allows_tool("bash"));
+
+    spec.tool_set = vec!["read".to_string(), "grep".to_string()];
+    assert!(spec.allows_tool("read"));
+    assert!(spec.allows_tool("grep"));
+    assert!(!spec.allows_tool("bash"));
+    assert!(!spec.allows_tool("write"));
+}
+
+#[test]
+fn test_spec_path_in_scope_globs() {
+    let spec = LoopSpec {
+        scope: vec!["src/**".to_string(), "*.md".to_string()],
+        ..LoopSpec::new("coder", "goal")
+    };
+    assert!(spec.path_in_scope("src/main.rs"));
+    assert!(spec.path_in_scope("src/agent/loop.rs"));
+    assert!(spec.path_in_scope("README.md"));
+    assert!(!spec.path_in_scope("target/debug/foo"));
+    assert!(!spec.path_in_scope("docs/deep/nested/file.txt"));
+}
+
+#[test]
+fn test_spec_path_in_scope_empty_means_everything() {
+    let spec = LoopSpec::new("coder", "goal");
+    assert!(spec.path_in_scope("anything/at/all.rs"));
+    assert!(spec.path_in_scope("/etc/passwd"));
+}
+
+#[test]
+fn test_spec_path_is_read_only_globs() {
+    let spec = LoopSpec {
+        read_only: vec!["tests/**".to_string()],
+        ..LoopSpec::new("coder", "goal")
+    };
+    // FR-021: protected files such as tests cannot be written.
+    assert!(spec.path_is_read_only("tests/test_foo.rs"));
+    assert!(spec.path_is_read_only("tests/unit/bar.rs"));
+    assert!(!spec.path_is_read_only("src/main.rs"));
+    // No constraints configured: nothing is read-only.
+    let unrestricted = LoopSpec::new("coder", "goal");
+    assert!(!unrestricted.path_is_read_only("tests/test_foo.rs"));
+}
+
+#[test]
+fn test_spec_invalid_glob_patterns_are_skipped_safely() {
+    let spec = LoopSpec {
+        scope: vec!["[unclosed".to_string(), "src/**".to_string()],
+        ..LoopSpec::new("coder", "goal")
+    };
+    // The invalid pattern must not panic or match everything; the valid one
+    // still applies.
+    assert!(spec.path_in_scope("src/lib.rs"));
+    assert!(!spec.path_in_scope("other/file.rs"));
+}
+
+// --- Serde round trip -------------------------------------------------------
+
+#[test]
+fn test_loop_spec_serde_round_trip() {
+    let spec = LoopSpec {
+        verify_cmd: Some("cargo test".to_string()),
+        scope: vec!["src/**".to_string()],
+        read_only: vec!["tests/**".to_string()],
+        tool_set: vec!["read".to_string(), "edit".to_string()],
+        max_steps: Some(25),
+        cost_limit: Some(100_000),
+        checkpoints: false,
+        checkpoint_timeout_secs: Some(45),
+        ..LoopSpec::new("coder", "make the tests pass")
+    };
+    let json = serde_json::to_string(&spec).expect("serialize");
+    let back: LoopSpec = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back, spec);
 }

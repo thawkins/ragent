@@ -13,8 +13,11 @@ pub struct CodeIndexStatusTool;
 /// Build a busy-state status output from the lock-free progress atomics.
 ///
 /// Used when the store/FTS mutex is currently held (background reindex or
-/// graph build): instead of blocking or retrying, report immediately that the
-/// index is busy along with whatever progress can be read atomically.
+/// graph build): instead of blocking or retrying, report immediately with
+/// whatever progress can be read atomically. The lock holder is attributed
+/// from the progress atomics before the index is labelled busy: a graph
+/// build only holds the store lock briefly (snapshot/persist), so during a
+/// graph build the index itself is still available.
 fn status_busy_output(idx: &CodeIndex) -> ToolOutput {
     let (reindex_done, reindex_total) = idx.reindex_progress();
     let reindexing = reindex_total > 0 && reindex_done < reindex_total;
@@ -22,18 +25,29 @@ fn status_busy_output(idx: &CodeIndex) -> ToolOutput {
     let (graph_done, graph_total) = idx.graph_build_progress();
 
     let mut output = String::from("## Code Index Status\n\n");
-    output.push_str("Index:          busy (lock held by a background operation)\n");
+    // Attribute the lock holder before claiming the index is busy: the graph
+    // build holds the store lock only briefly (snapshot/persist phases), so
+    // "Index: busy" would be misleading while only the graph phase is running.
     if reindexing {
+        output.push_str("Index:          busy (reindexing in progress)\n");
         output.push_str(&format!(
             "Reindexing:     {reindex_done}/{reindex_total} files\n"
         ));
-    }
-    if graph_building {
+        if graph_building {
+            output.push_str(&format!(
+                "Graph building: {graph_done}/{graph_total} files\n"
+            ));
+        }
+    } else if graph_building {
         output.push_str(&format!(
             "Graph building: {graph_done}/{graph_total} files\n"
         ));
-    }
-    if !reindexing && !graph_building {
+        output.push_str(
+            "Index:          available (the graph build holds the store lock only \
+             briefly for its snapshot/persist phases)\n",
+        );
+    } else {
+        output.push_str("Index:          busy (lock held by a background operation)\n");
         output.push_str("The store lock is held by another operation. Wait a moment and retry.\n");
     }
 

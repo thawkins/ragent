@@ -1,7 +1,7 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.80</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.82</p>
         <p style="font-size: 1.1em;">
           <strong>Date:</strong> 2026-09-06
       </p>
@@ -98,14 +98,30 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.79). The core architecture, tool system,
+Ragent is in **beta** (v1.0.82). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.44 → v1.0.79):**
+**Current Release Highlights (v1.0.44 → v1.0.82):**
+
+- **Goal-driven loop programming (`/loop`, spec agentloop)** — a goal-driven
+  agentic loop that runs a `LoopSpec` to a stop condition: `completed` (goal
+  achieved or verification passed), `budget_exhausted`, `error`, or
+  `interrupted`. Includes a verification gate for verify commands (600 s
+  timeout), restriction layers checked in `deny_reason` order (tool set ->
+  read-only -> scope, invalid globs failing closed), pre-loop snapshot/git
+  capture, forced checkpoints, and a post-loop rollback flow. Tunables live in
+  the `loop` section of `ragent.json` (`loop.max_steps` 512, `cost_limit`,
+  `error_retry_allowance` 3, `checkpoints` true, `checkpoint_timeout_secs`
+  120); documented in `docs/howtos/loopprogramming.md` (v1.0.81 cycle,
+  uncommitted).
+- **How-to documentation set** — `docs/howtos/reactagent.md` (core per-turn
+  ReACT loop), `docs/howtos/loopprogramming.md` (goal-driven loops), and
+  `docs/howtos/office.md` (office + PDF tool families, format matrix, and
+  `tool_visibility.office` configuration).
 
 - **Research web-search quota controls** — `--max-search-calls N` places a hard, run-scoped cap on total web-search calls per research run, shared via `Arc` across every supervisor/competitive researcher and gather pass; a run-scoped query cache memoises identical sub-queries so parallel researchers reuse cached hits instead of re-issuing paid calls (FR-016 of specs/opendeepresearch).
 - **`--depth` bounds web volume by default** — the effective web-source budget is derived from the selected depth (shallow 6 / standard 9 / deep 15) unless `--max-web-results` is passed explicitly, so `--depth shallow` now actually limits search/fetch volume.
@@ -2678,6 +2694,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| uncommitted | 2026-09-07 | Goal-driven loop programming (`/loop`, spec agentloop): `LoopSpec`/`LoopTracker`/`StopCondition` state machine with stop conditions `completed`/`budget_exhausted`/`error`/`interrupted`; verification gate for verify commands (600 s timeout, head 8000 + tail 2000 capture); restriction layers via `deny_reason` (tool set -> read-only -> scope, invalid globs fail closed); pre-loop snapshot/git capture + rollback (`loop_capture.rs`, FR-018/FR-020); `LoopConfig` in `ragent.json` (`loop.max_steps` 512, `cost_limit`, `error_retry_allowance` 3, `checkpoints` true, `checkpoint_timeout_secs` 120); SSE `LoopTerminated`/`LoopChangeSummary`; TUI setup dialog + rollback flow (`loop_dialog.rs`, `test_loop_dialog.rs`, `test_rollback_flow.rs`). One-shot `/loop` flags: `--max-steps N`, `--cost_limit N`/`--cost-limit N`, `--timeout N` (any position, `--flag value` or `--flag=value`, per-run overrides resolved in `start_loop`). Fixes: `stock_recommendations` added to the finance tool-visibility family (8 tools, was hidden-family escapee); `/reverse` accepts quoted `--tech` values via a shell-like tokenizer (`tokenize_reverse_args`, single/double quotes grouped and stripped). How-to documentation set: `docs/howtos/reactagent.md` (core per-turn ReACT loop, NOT `/loop`), `docs/howtos/loopprogramming.md` (`/loop` feature), `docs/howtos/office.md` (office + PDF tool families: `office_read/write/info`, `libre_read/write/info`, `pdf_read/write`, format matrix, JSON examples, `tool_visibility.office` configuration); all 18 how-tos re-verified against source (accuracy sweep) and the A4 xelatex PDF set regenerated. |
 | v1.0.79 | 2026-09-06 | Research web-search quota controls (`--max-search-calls`, run-scoped `SearchBudget` + `SharedQueryCache`); `--depth` bounds web volume by default (shallow 6 / standard 9 / deep 15); competitive researcher count capped at `max_concurrent_research_units`; `/research update <name>` invocation replay (CLI/TUI/HTTP `PUT /research/{name}`); `--mode competitive` defaults `--format` to `comparison-table`; GitHub `blob/` URLs rewritten to `raw.githubusercontent.com` and non-HTML content bypasses the readability gate; `/clip` slash command; `/research list` human-readable table restored (JSON behind `--json`); `/research create` TUI progress display simplified; provider-search-request counting (`search_providers` RunStep) |
 | uncommitted | 2026-09-06 | Config load-cache coherence fix (M-025 CI failure run 34023696563): `Config::load` re-snapshots candidate mtimes after `load_uncached`, `save`/`save_to_source` call the new public `Config::invalidate_load_cache`, cache moved into a shared `load_cache_slot()` so saves are immediately visible to loads. `codeindex_path`/`codeindex_explain` name-resolution fix (exact-match + definition-kind ranking over the substring query). `codeindex_status` tool non-blocking busy report from lock-free atomics (no `with_retry`). `IndexStats` gains `graph_total_edges`/`graph_nodes`/`graph_communities`. Pinned nightly toolchain (`rust-toolchain.toml`) + `TOOLCHAIN.md` review. |
 | uncommitted | 2026-09-06 | `plot_*` tool family (`plot_line`/`plot_scatter`/`plot_bar`/`plot_histogram`/`plot_pie`/`plot_heatmap`) via `ratatui-plt` 0.0.2 (GPL-3.0 accepted, allow-listed in `deny.toml`); inline ANSI plot rendering in the TUI message window (`plot_output_lines` + `ansi_line_to_styled`); tool input summaries for code-index graph, `model_info`, and plot tools; 31 new tests (25 plot tools + 6 TUI rendering); how-to PDF set completed (15 A4 xelatex PDFs) |

@@ -10,7 +10,7 @@ The same commands are available in three surfaces:
 
 - **TUI** — `/research` slash commands in the interactive terminal interface
 - **CLI** — `ragent research <subcommand>` from the shell
-- **HTTP API** — `GET/POST/DELETE /research` endpoints on the ragent server
+- **HTTP API** — `GET/POST/PUT/DELETE /research` endpoints on the ragent server
 
 This document is written for the terminal interface but covers all three.
 
@@ -169,6 +169,7 @@ Run a research session and write `RESEARCH.md`. This is the primary command.
   [--from-url <URL>] [--from-file <PATH>]
   [--iterations N] [--depth shallow|standard|deep]
   [--tier light|full|dissertation]
+  [--mode normal|supervisor|competitive]
   [--format report|executive-summary|comparison-table|source-bibliography|imrad]
   [--sources-dir <path>] [--template <name>]
   [--fetch-concurrently N] [--local-concurrently N]
@@ -179,6 +180,10 @@ Run a research session and write `RESEARCH.md`. This is the primary command.
   [--max-web-results N] [--max-search-calls N]
   [--use-local] [--use-specs] [--use-low-relevance] [--no-papers] [--use-pdf]
 ```
+
+`--mode competitive` runs the multi-researcher competitive pipeline and
+implicitly defaults `--format` to `comparison-table`, so it need not be
+passed explicitly.
 
 If the first argument after `/research create` is not a recognised
 subcommand, the parser treats the whole line as `<name> <topic>`; this lets
@@ -304,7 +309,8 @@ List research items, newest first.
 /research list --all   # include archived items
 ```
 
-Output shows name, title, status, created and modified timestamps.
+The default output is a fixed-width `NAME/TITLE/STATUS/CREATED/MODIFIED`
+table; JSON is available behind a `--json` flag (CLI and HTTP).
 
 ### 4.4 `/research show <name>`
 
@@ -408,7 +414,7 @@ flag is required; without it the command prompts and refuses.
 /research delete rust-async --yes
 ```
 
-### 4.9 `/research archive <name>`
+### 4.10 `/research archive <name>`
 
 Mark an item as `archived`. Archived items are hidden from default `list`
 output but kept on disk. Use `/research list --all` to see archived items.
@@ -417,7 +423,7 @@ output but kept on disk. Use `/research list --all` to see archived items.
 /research archive rust-async
 ```
 
-### 4.10 `/research continue <name> [message]`
+### 4.11 `/research continue <name> [message]`
 
 Resume an in-progress item. Loads state and appends a follow-up sub-question
 to the plan. The optional message is added to the plan as a new sub-question.
@@ -678,9 +684,16 @@ These flags control the performance and resilience of the gathering phases.
 | `--search-max-retries N` | 2 | Retries per failed sub-query. `0` disables retries. |
 | `--search-retry-base-delay-ms N` | 200 | First retry delay in ms, doubled each retry (200, 400, 800...). |
 | `--search-circuit-breaker-threshold N` | 3 | Consecutive search failures before circuit breaker opens. `0` disables. |
+| `--max-search-calls N` | derived from `--depth` | Hard, run-scoped cap on total web-search calls, shared via `Arc` across every supervisor/competitive researcher and gather pass. A run-scoped query cache memoises identical sub-queries so parallel researchers reuse cached hits instead of re-issuing paid calls. |
+| `--max-web-results N` | derived from `--depth` (shallow 6 / standard 9 / deep 15) | Cap on the web-source budget. |
 | `--use-low-relevance` | off | Keep sources that would normally be filtered out as low-relevance. |
 | `--no-papers` | off | Disable scholarly backends (OpenAlex) so only general web results are captured. |
 | `--use-pdf` | off | Allow PDF documents from web search or `--from-url` to be captured as sources. |
+
+GitHub `blob/` file-view URLs (`github.com/owner/repo/blob/...`) are
+rewritten to `raw.githubusercontent.com` before fetching and non-HTML
+content bypasses the readability gate, so GitHub file URLs no longer fail
+gathering with a readability error.
 
 ### Performance tuning examples
 
@@ -1132,11 +1145,33 @@ by title similarity).
 - `404 Not Found` — item not found (includes closest matches)
 - `400 Bad Request` — invalid name
 
+### PUT /research/{name}
+
+Replay the item's recorded invocation line: re-runs the full pipeline and
+overwrites `RESEARCH.md` and its associated files with freshly gathered
+results. This is the HTTP equivalent of `/research update <name>` (and
+`ragent research update <name>`). The response uses the same envelope as
+`POST /research`.
+
+```bash
+curl -s -X PUT http://localhost:9100/research/rust-async \
+  -H "Authorization: Bearer $RAGENT_TOKEN"
+```
+
+**Error codes:**
+
+- `404 Not Found` — item not found
+- `409 Conflict` — a run for this item is already in flight
+
 ### DELETE /research/{name}
 
 Delete a research item. Requires a confirmation token.
 
 **Query parameter:** `?confirm=delete-{name}`
+
+The examples below assume a server started with
+`ragent serve --addr 127.0.0.1:9100` (the default bind address is
+`127.0.0.1:3000`).
 
 ```bash
 curl -X DELETE http://localhost:9100/research/rust-async?confirm=delete-rust-async \
@@ -1182,11 +1217,13 @@ ragent research help
 ragent research create rust-async "Rust async patterns" --tier full --use-local
 ragent research create from-url --from-url https://example.com/article
 ragent research create from-doc --from-file docs/design.md --use-local
+ragent research create comp "vector db landscape" --mode competitive
 ragent research open rust-async
 ragent research list
 ragent research list --all
 ragent research search "vector database"
 ragent research show rust-async
+ragent research update rust-async
 ragent research delete rust-async --yes
 ragent research archive rust-async
 ragent research continue rust-async "Also cover tokio vs async-std"
@@ -1214,7 +1251,10 @@ Research-specific configuration lives under the `research` key in
     "research": {
         "open_access_recovery": true,
         "contact_email": "you@example.com",
-        "oa_min_full_text_chars": 1000
+        "oa_min_full_text_chars": 1000,
+        "evaluate": {
+            "enabled": true
+        }
     }
 }
 ```
@@ -1224,6 +1264,7 @@ Research-specific configuration lives under the `research` key in
 | `open_access_recovery` | bool | `false` | Enable OA recovery via Unpaywall and Europe PMC |
 | `contact_email` | string? | `null` | Email required by Unpaywall's ToS |
 | `oa_min_full_text_chars` | usize | `1000` | Minimum body length that triggers OA recovery |
+| `evaluate` | `ResearchEvaluateConfig` | `{"enabled": false}` | Self-evaluation scorecard settings (FR-015 of specs/opendeepresearch). When enabled, the pipeline appends a deterministic quality scorecard (quality, relevance, groundedness, completeness, structure) to the report. |
 
 Web search engine keys are top-level in `ragent.json`:
 

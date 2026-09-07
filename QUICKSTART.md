@@ -689,8 +689,8 @@ Use `team_spawn` with a role-specific prompt:
 
 For full details and advanced workflows (plan approval, hooks, graceful shutdown), see:
 
-- [`docs/teams.md`](docs/teams.md)
-- [`docs/howtos/howto_teams.md`](docs/howtos/howto_teams.md)
+- [`docs/userdocs/TEAMS.md`](docs/userdocs/TEAMS.md)
+- [`docs/howtos/teams.md`](docs/howtos/teams.md)
 - [`examples/teams/`](examples/teams/)
 
 ---
@@ -708,7 +708,7 @@ The AI agent can use these tools during a session:
 | `grep`     | Search file contents with regex                | `file:read`     |
 | `glob`     | Find files by name pattern                     | `file:read`     |
 | `list`     | List directory contents (2 levels deep)         | `file:read`     |
-| `question` | Ask the user a clarifying question             | `question`      |
+| `ask_user` | Ask the user a clarifying question              | `ask_user`      |
 | `plot_line`| Render an XY line plot on the message window   | `system`        |
 | `plot_bar` | Render a bar chart (stacked/horizontal)        | `system`        |
 | `plot_pie` | Render a pie/donut chart                       | `system`        |
@@ -717,6 +717,21 @@ The AI agent can use these tools during a session:
 TUI to list them all. The `plot_*` family (`plot_line`, `plot_scatter`,
 `plot_bar`, `plot_histogram`, `plot_pie`, `plot_heatmap`) renders ASCII-art
 graphs, coloured via ANSI, inline in the message window.
+
+The **office + PDF family** (`office_read`, `office_write`, `office_info`,
+`libre_read`, `libre_write`, `libre_info`, `pdf_read`, `pdf_write`) reads and
+writes Word/Excel/PowerPoint (OOXML), OpenDocument (ODT/ODS/ODP), and PDF
+files entirely in-process — no `soffice`/Word installation is required. The
+family is hidden from the model by default; enable it with `/tools office on`
+(see [`docs/howtos/office.md`](docs/howtos/office.md)).
+
+Goal-driven loop programming is available via the **`/loop` slash command**:
+it runs a `LoopSpec` (agent, goal, verify command, scope, tool set, budget) to
+a stop condition, with checkpoint capture and an optional post-loop rollback.
+The one-shot form `/loop <agent> [flags] <goal>` accepts `--max-steps N`,
+`--cost_limit N`, and `--timeout N` overrides in any position; the default
+step budget is 512 (`loop.max_steps` in `ragent.json`).
+See [`docs/howtos/loopprogramming.md`](docs/howtos/loopprogramming.md).
 
 MCP servers can provide additional tools that are automatically discovered and
 made available to the agent (see [SPEC.md §3.11](SPEC.md#311-mcp-client)). MCP

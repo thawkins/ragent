@@ -323,8 +323,8 @@ Quick flow:
 
 Docs and examples:
 
-- Guide: [`docs/teams.md`](docs/teams.md)
-- How-to manual: [`docs/howtos/howto_teams.md`](docs/howtos/howto_teams.md)
+- Guide: [`docs/userdocs/TEAMS.md`](docs/userdocs/TEAMS.md)
+- How-to manual: [`docs/howtos/teams.md`](docs/howtos/teams.md)
 - Example bundles: [`examples/teams/`](examples/teams/)
 
 ## Architecture
@@ -398,11 +398,33 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.80** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.82** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **Goal-driven loop programming (`/loop`)** — a goal-driven agentic loop that
+  runs a `LoopSpec` to a stop condition (goal achieved, verification passed,
+  budget exhausted, or interrupted), with a verification gate for verify
+  commands, restriction layers (tool set, read-only globs, scope globs),
+  pre-loop snapshot capture, and a post-loop rollback flow (Enter restores the
+  pre-loop snapshot, Esc keeps changes). The one-shot form
+  `/loop <agent> [flags] <goal>` accepts `--max-steps N`, `--cost_limit N`,
+  and `--timeout N` overrides in any position. Configured via the `loop`
+  section of `ragent.json` (`loop.max_steps` 512 default, `loop.cost_limit`,
+  `loop.error_retry_allowance`, `loop.checkpoints`,
+  `loop.checkpoint_timeout_secs`); see `docs/howtos/loopprogramming.md`
+  (shipped in v1.0.82)
+- **Agents panel reconciliation** — with many concurrent sub-agents the TUI
+  Agents button previously could stay disabled with a zero count: the
+  reconcile poll now also fires periodically (every 1.5 s) and merges the
+  authoritative `AgentManager::tasks_snapshot`, so the panel self-heals
+  regardless of broadcast-lag event loss (shipped in v1.0.82)
+- **How-to documentation set** — three new how-to manuals in `docs/howtos/`:
+  `reactagent.md` (the core per-turn ReACT loop), `loopprogramming.md`
+  (goal-driven loops with `/loop`), and `office.md` (office + PDF tool
+  families with format matrix, JSON examples, and configuration)
 
 - **Code index status improvements** — the `codeindex_status` tool never
   blocks on the store lock: when a background reindex or graph build holds

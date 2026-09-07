@@ -3,9 +3,11 @@
 //! These functions assemble the per-turn system prompt sections that are
 //! injected into every [`crate::session::processor::SessionProcessor`] turn:
 //! the codebase-index guidance (active vs. disabled), the compact and detailed
-//! tool-reference listings, and the universal tool-calling directive.
+//! tool-reference listings, the universal tool-calling directive, and the
+//! goal-loop structured-goal section (FR-006).
 
 use crate::llm::ToolDefinition;
+use crate::session::loop_state::LoopSpec;
 
 /// Universal tool-calling guidance injected into every session's system prompt.
 ///
@@ -20,6 +22,77 @@ pub const TOOL_CALLING_GUIDANCE: &str = "\n## Tool Use — Critical Instructions
     Do NOT write text describing what you are going to do — just call the tool.\n\
     Do NOT say 'Let me explore...' or 'I will analyze...' — instead, call the relevant tool now.\n\n\
     Rule: every response where you need information or need to act MUST start with a tool call.\n\n";
+
+/// Compose the structured goal section (FR-006) for a goal-driven loop.
+///
+/// Rendered once when a loop turn starts and pushed into the loop's system
+/// prompt so the model knows — before its first action — what must be true
+/// to succeed, how success will be verified, which paths are in scope, which
+/// paths are read-only, and which budget limits bound the run.
+///
+/// # Arguments
+/// * `spec` - The loop specification captured when the loop started.
+///
+/// # Returns
+/// A markdown section; empty sections are skipped so a minimal spec renders
+/// only the success state and the active budget knobs.
+#[must_use]
+pub fn build_goal_loop_section(spec: &LoopSpec) -> String {
+    let mut section = String::new();
+    section.push_str("\n## Goal Loop\n\n");
+    section.push_str(&format!(
+        "You are executing a **goal-driven loop** as the `{}` agent.\n\n\
+         ### Success state\n\n\
+         The loop ends successfully when this is true: {}\n\n",
+        spec.agent, spec.goal
+    ));
+    if let Some(cmd) = &spec.verify_cmd {
+        section.push_str(&format!(
+            "When you respond without tool calls, the verification command `{cmd}` \
+             runs automatically. The loop completes only if it exits successfully; \
+             a failing run appends its output as your next observation, so treat \
+             it as the authoritative progress signal.\n\n"
+        ));
+    }
+    if spec.has_scope() {
+        section.push_str(&format!(
+            "### Scope boundaries\n\n\
+             File operations must stay inside these patterns: {}\n\n",
+            spec.scope.join(", ")
+        ));
+    }
+    if !spec.read_only.is_empty() {
+        section.push_str(&format!(
+            "### Read-only constraints\n\n\
+             These patterns are read-only. Writes are denied and returned as \
+             observations — never satisfy the goal by modifying them: {}\n\n",
+            spec.read_only.join(", ")
+        ));
+    }
+    if spec.has_tool_set() {
+        section.push_str(&format!(
+            "### Tool set\n\n\
+             Only these tools (plus mandatory safety tools) are available: {}\n\n",
+            spec.tool_set.join(", ")
+        ));
+    }
+    if let Some(steps) = spec.max_steps {
+        section.push_str(&format!(
+            "### Budget\n\n\
+             - Step budget: at most {steps} loop iterations.\n"
+        ));
+    }
+    if let Some(cost) = spec.cost_limit {
+        section.push_str(&format!(
+            "- Cost budget: at most {cost} accumulated tokens across the run.\n"
+        ));
+    }
+    section.push_str(
+        "Iterate plan-act-observe: act with a tool, read the observation, and \
+         either continue or signal completion without tool calls.\n",
+    );
+    section
+}
 
 /// Build a system-prompt section describing the codebase index tools.
 ///

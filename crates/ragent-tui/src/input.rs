@@ -89,6 +89,12 @@ pub enum InputAction {
     ConfirmForceCleanup,
     /// Cancel a pending forcecleanup modal (Esc -> cancel).
     CancelForceCleanup,
+    /// Accept a pending rollback offer (Enter -> restore the pre-loop
+    /// snapshot, FR-020 / T-013).
+    ConfirmRollback,
+    /// Decline a pending rollback offer (Esc -> keep the loop's changes,
+    /// FR-020 / T-013).
+    CancelRollback,
     /// Confirm the router save confirmation modal (Enter -> save).
     ConfirmRouterSave,
     /// Cancel the router save confirmation modal (Esc -> cancel).
@@ -257,6 +263,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     // If MCP discover dialog is active, route all keys there
     if app.mcp_discover.is_some() {
         handle_mcp_discover_key(app, key);
+        return None;
+    }
+
+    // If the /loop setup dialog is active, route all keys there (T-014).
+    if app.loop_setup.is_some() {
+        crate::app::handle_loop_setup_key(app, key);
         return None;
     }
 
@@ -435,6 +447,18 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         match key.code {
             KeyCode::Enter => return Some(InputAction::ConfirmForceCleanup),
             KeyCode::Esc => return Some(InputAction::CancelForceCleanup),
+            _ => return None,
+        }
+    }
+
+    // If a rollback offer is pending after a terminated loop, intercept
+    // Enter/Esc (FR-020, T-013): Enter rolls the workspace back to the
+    // pre-loop snapshot, Esc keeps the changes. All other keys are consumed
+    // so stray typing does not leak into the input box mid-decision.
+    if app.pending_rollback.is_some() {
+        match key.code {
+            KeyCode::Enter => return Some(InputAction::ConfirmRollback),
+            KeyCode::Esc => return Some(InputAction::CancelRollback),
             _ => return None,
         }
     }

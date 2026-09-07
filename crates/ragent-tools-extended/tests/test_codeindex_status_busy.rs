@@ -79,10 +79,22 @@ async fn test_status_tool_busy_output_reports_graph_build_progress() {
     let ctx = make_ctx(Arc::clone(&idx));
     let output = CodeIndexStatusTool.execute(json!({}), &ctx).await.unwrap();
 
-    assert!(output.content.contains("busy"));
+    // The graph build holds the store lock only briefly, so the busy output
+    // must attribute the lock holder to the graph phase, not the index.
     assert!(
-        output.content.contains("3/10"),
-        "should show graph progress"
+        output.content.contains("Graph building: 3/10"),
+        "should show graph progress with attribution: {}",
+        output.content
+    );
+    assert!(
+        output.content.contains("Index:          available"),
+        "index must not be labelled busy during a graph build: {}",
+        output.content
+    );
+    assert!(
+        !output.content.contains("Index:          busy"),
+        "no index-busy line while only the graph phase runs: {}",
+        output.content
     );
     let metadata = output.metadata.unwrap();
     assert_eq!(metadata["graph_building"], json!(true));

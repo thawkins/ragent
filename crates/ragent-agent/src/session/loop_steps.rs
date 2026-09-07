@@ -43,7 +43,7 @@ use crate::session::processor::SessionProcessor;
 use crate::session::prompt_builders::{
     TOOL_CALLING_GUIDANCE, build_codeindex_guidance_section_active,
     build_codeindex_guidance_section_disabled, build_detailed_tool_reference_from_defs,
-    build_tool_reference_from_defs,
+    build_goal_loop_section, build_tool_reference_from_defs,
 };
 use crate::session::stream_buffer::StreamBuffer;
 use crate::tool::TeamContext;
@@ -361,6 +361,7 @@ impl SessionProcessor {
     /// Returns the prompt frozen into an `Arc<str>` (PERF-006).
     pub(crate) async fn build_turn_system_prompt(
         &self,
+        session_id: &str,
         agent: &AgentInfo,
         session_config: &ragent_config::Config,
         working_dir: &std::path::Path,
@@ -419,6 +420,37 @@ impl SessionProcessor {
 
         let is_subagent = agent.mode == crate::agent::AgentMode::Subagent;
         let allowed_set = crate::tool::build_allowed_tool_set(agent.allowed_tools.as_deref());
+        // T-016 (FR-006): compose the structured goal section once per loop
+        // turn so the model knows its success state, verification command,
+        // scope, constraints, and budget before the first action.
+        let goal_section = {
+            let spec = self.active_loop_specs.read().await.get(session_id).cloned();
+            spec.as_deref().map(build_goal_loop_section)
+        };
+        if let Some(section) = goal_section {
+            system_prompt.push_str(&section);
+        }
+        // T-009 (FR-008): when a goal-driven loop with a configured tool set
+        // is active, the system-prompt tool reference is restricted to that
+        // set plus the mandatory safety tools — matching the filtered tool
+        // definitions sent on the wire.
+        let loop_tool_set: Option<std::collections::HashSet<String>> = {
+            let specs = self.active_loop_specs.read().await;
+            specs
+                .get(session_id)
+                .filter(|spec| spec.has_tool_set())
+                .map(|spec| {
+                    let mut allowed: std::collections::HashSet<String> =
+                        spec.tool_set.iter().cloned().collect();
+                    for name in crate::session::loop_state::LOOP_ALWAYS_ALLOWED_TOOLS {
+                        allowed.insert((*name).to_string());
+                    }
+                    for name in crate::tool::always_allowed_tool_names() {
+                        allowed.insert(name.to_string());
+                    }
+                    allowed
+                })
+        };
         let effective_defs: Arc<Vec<ToolDefinition>> = if allowed_set.is_empty() {
             self.system_prompt_cache()
                 .get_tool_definitions(&self.tool_registry)
@@ -432,6 +464,17 @@ impl SessionProcessor {
                     .cloned()
                     .collect(),
             )
+        };
+        let effective_defs: Arc<Vec<ToolDefinition>> = if let Some(allowed) = loop_tool_set {
+            Arc::new(
+                effective_defs
+                    .iter()
+                    .filter(|d| allowed.contains(d.name.as_str()))
+                    .cloned()
+                    .collect(),
+            )
+        } else {
+            effective_defs
         };
         let tool_reference = if is_subagent {
             build_detailed_tool_reference_from_defs(&effective_defs)
