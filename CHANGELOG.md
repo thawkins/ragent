@@ -1,5 +1,26 @@
 # Changelog
 
+## Version: 1.0.83
+
+### Fixed
+
+- **CI Clippy and Rustfmt jobs failing with missing toolchain components** —
+  the checked-in `rust-toolchain.toml` pins a dated nightly
+  (`nightly-2026-09-04`) that overrides the stable toolchain installed by
+  `dtolnay/rust-toolchain@stable`, so the Clippy and Rustfmt jobs failed with
+  "'cargo-clippy' is not installed for the toolchain
+  nightly-2026-09-04-x86_64-unknown-linux-gnu" because the pinned nightly's
+  minimal profile did not include those components. Both jobs now run an
+  explicit `rustup component add clippy` / `rustup component add rustfmt`
+  step after toolchain setup, installing the components into the pinned
+  toolchain that `cargo` actually resolves.
+
+### Changed
+
+- Version bump to 1.0.83 (CI toolchain component fix).
+- `cargo check` passes (only the pre-existing future-incompat notice for the external `attribute-derive-macro` crate).
+- `cargo audit` reports only the 10 allowed warnings (unmaintained `ttf-parser`, unsound `lru`, yanked `chacha20` transitive dependencies); no actionable security failures.
+
 ## Version: 1.0.82
 
 ### Added

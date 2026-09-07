@@ -95,6 +95,11 @@ jobs:
         with:
           toolchain: stable
           components: clippy
+      # The checked-in rust-toolchain.toml pins a dated nightly that overrides
+      # the stable toolchain installed above; install the component into the
+      # pinned toolchain so `cargo clippy` finds a clippy-driver.
+      - name: Add clippy component to pinned toolchain
+        run: rustup component add clippy
       - uses: Swatinem/rust-cache@v2
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings -A clippy::used_underscore_items -A clippy::redundant_pub_crate -A clippy::wildcard_imports
@@ -108,5 +113,10 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt
+      # The checked-in rust-toolchain.toml pins a dated nightly that overrides
+      # the stable toolchain installed above; install the component into the
+      # pinned toolchain so `cargo fmt` finds a rustfmt binary.
+      - name: Add rustfmt component to pinned toolchain
+        run: rustup component add rustfmt
       - name: Check formatting
         run: cargo fmt --all -- --check
