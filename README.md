@@ -398,7 +398,7 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.88** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.89** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
@@ -526,7 +526,7 @@ Recent highlights:
 - **Token counting fixes** — TUI context panel percentages now use a consistent
   bytes-to-tokens conversion so they align with the status-bar usage figure
   (v1.0.72)
-- **Context side panel** — toggleable `Alt+X` panel showing live, quantified
+- **Context side panel** — toggleable `Alt+C` panel showing live, quantified
   context-window occupancy (v1.0.71)
 - **Research clustering** — `/research cluster` concept extraction and a new
   `cluster.rs` payload builder (v1.0.71)

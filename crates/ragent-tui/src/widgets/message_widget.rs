@@ -3296,7 +3296,16 @@ impl<'a> MessageWidget<'a> {
                                 .add_modifier(Modifier::BOLD),
                             5,
                         ),
-                        Role::Assistant | Role::Compaction => (
+                        Role::Compaction => (
+                            // Sub-agent / primary context-refresh summaries are
+                            // NOT the agent's own output: label them so a
+                            // mid-run compaction summary is never mistaken for
+                            // a completion report in the output overlay.
+                            "[compaction] ",
+                            Style::default().fg(Color::DarkGray),
+                            13,
+                        ),
+                        Role::Assistant => (
                             "● ",
                             Style::default()
                                 .fg(Color::Magenta)

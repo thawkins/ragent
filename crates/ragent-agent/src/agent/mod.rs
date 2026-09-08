@@ -2803,6 +2803,37 @@ fn build_system_prompt_with_storage_inner(
         prompt.push_str(&section);
     }
 
+    // Sub-agent terminal-signal guidance — shown for sub-agent mode only.
+    //
+    // Without an explicit terminal action most models end with a text-only
+    // message and the loop terminates via the no-tool-call path; several
+    // models also narrate further work after writing their report, keeping
+    // the task entry Running (and `wait_agents` waiting) longer than the
+    // visible report implies. Instructing the model to call `agent_complete`
+    // as its FINAL action makes the completion boundary deterministic: the
+    // tool result breaks the loop immediately (verified: the one sampled run
+    // that called it completed the moment the tool executed).
+    if agent.mode == AgentMode::Subagent {
+        prompt.push_str(
+            "## Sub-Agent Completion Protocol\n\n\
+             You are running as a sub-agent. The parent session waits on your \
+             completion, so end your run deterministically:\n\n\
+             - **ALWAYS call `agent_complete(summary: \"...\")` as your FINAL \
+               action**, immediately after your work is done and your findings \
+               are written. The tool result ends your session loop \
+               immediately — this is the ONLY prompt way to stop.\n\
+             - Put the complete findings in the `summary` argument (this is \
+               what the parent reads). Do not rely on plain text after the \
+               tool call.\n\
+             - Do NOT produce further text or tool calls after \
+               `agent_complete` — the loop breaks when its result is \
+               processed.\n\
+             - Note: a `[compaction]`-labelled summary may appear in your \
+               transcript mid-run; that is internal context bookkeeping, NOT \
+               your completion signal, and it does not end your run.\n\n",
+        );
+    }
+
     // Tool usage guidelines
     prompt.push_str(
         "## Guidelines\n\

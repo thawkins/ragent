@@ -1279,7 +1279,7 @@ Type `/` in the input to open an autocomplete menu:
 | `/codeindex communities` | Run community detection and list communities |
 | `/codeindex godnodes [n]` | Show top-N most-connected symbols |
 | `/codeindex help` | Show code index help |
-| `/context` | Toggle the `Alt+X` context panel (live context-window breakdown) |
+| `/context` | Toggle the `Alt+C` context panel (live context-window breakdown) |
 | `/cron add \|remove\|enable\|disable\|list\|detail\|log\|help` | Schedule and manage recurring agent runs |
 | `/spec create <name> <title> [--from-research <name>]` | Create a new spec (SPEC.md + PLAN.md + TESTPLAN.md) |
 | `/spec specify <name> <feature> [--from-research <name>]` | Generate SPEC.md only (EARS spec with clarification markers) |
@@ -1431,7 +1431,7 @@ Notes:
 | `Tab` / `Shift+Tab` | Cycle agents |
 | `PageUp/PageDown` | Scroll messages |
 | `Ctrl+PageUp/Down` | Scroll log panel |
-| `Alt+X` | Toggle the live context-window panel |
+| `Alt+C` | Toggle the live context-window panel |
 | `Ctrl+C` | Abort / exit |
 
 ---
@@ -1631,6 +1631,21 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.89
+
+Changes in and on top of v1.0.88 (the research-crate simplify pass), summarised
+for quickstart relevance:
+
+- **Context panel rebind** — the context side panel moved from `Alt+X` to
+  `Alt+C`; all other side-panel chords (`Alt+L`, `Alt+P`, `Alt+T`, `Alt+O`,
+  `Alt+M`) are unchanged.
+- **Stable toolchain** — `rust-toolchain.toml` now pins the stable channel
+  instead of `nightly-2026-09-04`; no user-visible behaviour change.
+- **Sub-agent termination protocol** — sub-agents are now prompted to finish
+  with a single `agent_complete` call, and their mid-run auto-compaction
+  summaries are labelled `[compaction]` in the transcript so they are not
+  mistaken for completion reports. No configuration changes.
 
 ## Version 1.0.88
 

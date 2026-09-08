@@ -3,7 +3,7 @@
 //! - **T-016**: Machine-executable validation of `specs/contextpanel/TESTPLAN.md`.
 //!
 //! Each test walks one manual test case (TC-001..TC-007) through the real TUI
-//! pipeline: `handle_key_event` for the Alt+X binding and a full-frame
+//! pipeline: `handle_key_event` for the Alt+C binding and a full-frame
 //! `layout::render` on a ratatui `TestBackend`, asserting the results the
 //! plan spells out without a human at the terminal. Interactive-only aspects
 //! that cannot run headlessly (a live LLM turn, real font/terminal rendering)
@@ -41,9 +41,9 @@ fn draw(app: &mut App, cols: u16, rows: u16) -> ratatui::backend::TestBackend {
     terminal.backend().clone()
 }
 
-/// Send the Alt+X key chord TC-001 presses.
-fn press_alt_x(app: &mut App) {
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT));
+/// Send the Alt+C key chord TC-001 presses.
+fn press_alt_c(app: &mut App) {
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::ALT));
 }
 
 /// Wait for a scheduled background snapshot to be adopted (FR-015 refresh
@@ -74,12 +74,12 @@ fn registry_models(app: &App) -> Vec<(String, String, usize)> {
 }
 
 #[tokio::test]
-async fn tc001_alt_x_toggles_panel_open_and_closed() {
+async fn tc001_alt_c_toggles_panel_open_and_closed() {
     let mut app = support::make_app();
     assert!(!app.show_context_panel, "precondition: panel starts hidden");
 
-    // Step 1: the first Alt+X opens the panel.
-    press_alt_x(&mut app);
+    // Step 1: the first Alt+C opens the panel.
+    press_alt_c(&mut app);
     assert!(app.show_context_panel, "step 1: panel opens");
     assert_eq!(app.status, "context panel visible");
 
@@ -107,17 +107,17 @@ async fn tc001_alt_x_toggles_panel_open_and_closed() {
 
     drain_snapshot_polling(&mut app).await;
 
-    // Step 3: the second Alt+X closes it; full width returns.
-    press_alt_x(&mut app);
+    // Step 3: the second Alt+C closes it; full width returns.
+    press_alt_c(&mut app);
     assert!(!app.show_context_panel, "step 3: panel closes");
     assert_eq!(app.status, "context panel hidden");
     draw(&mut app, 100, 30);
     assert_eq!(app.context_panel_area.width, 0);
     assert_eq!(app.message_area.width, 100);
 
-    // Step 5: the third Alt+X reopens it in the same place (the plan's step 4
+    // Step 5: the third Alt+C reopens it in the same place (the plan's step 4
     // is only a pause between key presses).
-    press_alt_x(&mut app);
+    press_alt_c(&mut app);
     assert!(app.show_context_panel, "step 5: panel reopens");
     draw(&mut app, 100, 30);
     assert_eq!(app.context_panel_area, first_area);

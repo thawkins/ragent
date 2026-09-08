@@ -71,12 +71,12 @@ impl ResponsiveBreakpoint {
     }
 
     /// Get the percentage split for the side panel (log, memory, telemetry,
-    /// tasks, and the Alt+X Context panel).
+    /// tasks, and the Alt+C Context panel).
     /// Returns (messages_percent, log_percent)
     pub fn log_split(&self) -> (u16, u16) {
         match self {
             // Side panel narrowed by ~30% to keep the chat area readable
-            // when the Context panel (Alt+X) is open.
+            // when the Context panel (Alt+C) is open.
             Self::Small => (79, 21), // 30% narrower than the previous (70, 30)
             Self::Medium => (72, 28), // 30% narrower than the previous (60, 40)
             Self::Large => (68, 32), // ~29% narrower than the previous (55, 45)

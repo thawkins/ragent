@@ -99,6 +99,10 @@ pub enum InputAction {
     ConfirmRouterSave,
     /// Cancel the router save confirmation modal (Esc -> cancel).
     CancelRouterSave,
+    /// Confirm the Alt+X stop-agent dialog (Enter -> halt the agent / loop).
+    ConfirmStopAgent,
+    /// Cancel the Alt+X stop-agent dialog (Esc -> keep the agent running).
+    CancelStopAgent,
     /// Confirm the plan approval dialog (Enter when cursor_approve = true).
     ApprovePlan,
     /// Reject the plan approval dialog (Enter when cursor_approve = false, or `r`/Esc).
@@ -161,7 +165,7 @@ pub enum InputAction {
     MemoryViewLineDown,
     /// Toggle the Telemetry side panel visibility (Alt+O).
     ToggleTelemetry,
-    /// Toggle the Context side panel visibility (Alt+X).
+    /// Toggle the Context side panel visibility (Alt+C).
     ToggleContextPanel,
     /// Toggle YOLO mode (Alt+Y).
     ToggleYolo,
@@ -236,6 +240,18 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         match key.code {
             KeyCode::Enter => return Some(InputAction::ConfirmRouterSave),
             KeyCode::Esc => return Some(InputAction::CancelRouterSave),
+            _ => return None,
+        }
+    }
+
+    // If the Alt+X stop-agent confirmation modal is active, intercept
+    // Enter/Esc before any other dialog so the confirmation always takes
+    // precedence. Note: like the modals above, pickers/windows handled by
+    // `handle_key_event`'s pre-checks still outrank this dialog.
+    if app.pending_stop_confirm {
+        match key.code {
+            KeyCode::Enter => return Some(InputAction::ConfirmStopAgent),
+            KeyCode::Esc => return Some(InputAction::CancelStopAgent),
             _ => return None,
         }
     }
@@ -823,7 +839,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleTelemetry)
         }
-        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::ALT) => {
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleContextPanel)
         }
         KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::ALT) => {
@@ -832,6 +848,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         // Alt+E toggles edit-operation logging.
         KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleEditLog)
+        }
+        // Alt+X opens the stop-agent confirmation dialog (only while a turn
+        // is running — placed before generic char-insert handling so the `x`
+        // is never inserted into the input buffer — NFR-002).
+        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::ALT) => {
+            if app.is_processing {
+                app.pending_stop_confirm = true;
+                app.needs_redraw = true;
+            }
+            None
         }
         KeyCode::Char(c) => {
             if app.is_input_blocked() {

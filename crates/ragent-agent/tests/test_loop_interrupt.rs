@@ -276,6 +276,30 @@ fn drain_terminated(rx: &mut tokio::sync::broadcast::Receiver<Event>) -> Vec<Eve
     events
 }
 
+/// Poll until the session's loop interrupt flag is armable (the loop is
+/// active), with a 5-second budget. The notify channel unblocks at LLM-call
+/// time, but under heavy scheduler load the scripted stream, tool phase and
+/// second LLM call can all complete before the test task resumes — by which
+/// point the loop has finished and the interrupt flag is gone. Polling
+/// between attempts (asserting the loop is still active) makes the race
+/// window deterministic: either the flag is raised while the loop runs, or
+/// the test fails loudly because the loop ended before the interrupt.
+async fn raise_interrupt_until_armed(processor: &Arc<SessionProcessor>, session_id: &str) -> bool {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if processor.request_loop_interrupt(session_id) {
+            return true;
+        }
+        if !processor.loop_active(session_id).await {
+            return false; // The loop ended before the interrupt could arm.
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+}
+
 fn make_agent() -> AgentInfo {
     let mut agent = AgentInfo::new("general", "General");
     agent.model = Some(ModelRef {
@@ -338,7 +362,10 @@ async fn test_esc_between_iterations_stops_loop_with_interrupted() -> Result<()>
         .await
         .expect("the scripted client was called")
         .expect("channel open");
-    assert!(processor.request_loop_interrupt(&session.id));
+    assert!(
+        raise_interrupt_until_armed(&processor, &session.id).await,
+        "the loop was still active after the first LLM call, so the interrupt armed"
+    );
 
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), turn)
         .await
@@ -423,7 +450,10 @@ async fn test_esc_mid_llm_response_stops_before_tool_phase() -> Result<()> {
         .await
         .expect("the scripted client was called")
         .expect("channel open");
-    assert!(processor.request_loop_interrupt(&session.id));
+    assert!(
+        raise_interrupt_until_armed(&processor, &session.id).await,
+        "the loop was still active while the LLM stream was open, so the interrupt armed"
+    );
 
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), turn)
         .await

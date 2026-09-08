@@ -1489,7 +1489,7 @@ pub struct App {
     pub show_memory: bool,
     /// Whether the Telemetry panel is visible (toggled via Alt+O).
     pub show_telemetry: bool,
-    /// Whether the Context panel is visible (toggled via Alt+X).
+    /// Whether the Context panel is visible (toggled via Alt+C).
     pub show_context_panel: bool,
     /// Log entries displayed in the log panel.
     pub log_entries: Vec<LogEntry>,
@@ -2014,6 +2014,9 @@ pub struct App {
     pub router_draft_selected_ids: Vec<String>,
     /// Pending confirmation for saving the current router draft configuration.
     pub pending_router_save: Option<ragent_llm::providers::router_config::RouterConfig>,
+    /// Pending Alt+X stop-agent confirmation. When `true`, Enter confirms the
+    /// halt and Esc keeps the agent running (nothing is stopped until Yes).
+    pub pending_stop_confirm: bool,
 
     // ── Research progress (`/research create`) ───────────────────────────────
     /// Live progress trackers for all running/completed `/research create`

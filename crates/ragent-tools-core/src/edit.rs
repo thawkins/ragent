@@ -540,6 +540,10 @@ impl Tool for EditTool {
 /// `tokio::fs::read_to_string` fails with the same opaque message for a
 /// missing file and a non-UTF-8 file; the edit tools need the model to know
 /// the difference (a missing path vs an encoding problem).
+///
+/// `#[allow(dead_code)]` — used by the lib build (run_edit) but not by the
+/// test target that re-imports this source via `#[path]`.
+#[allow(dead_code)]
 async fn read_utf8_file(path: &Path) -> anyhow::Result<String> {
     let bytes = tokio::fs::read(path).await.with_context(|| {
         format!(

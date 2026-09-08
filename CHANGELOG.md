@@ -1,5 +1,66 @@
 # Changelog
 
+## Version: 1.0.89
+
+Toolchain and sub-agent lifecycle polish on top of the v1.0.88 research-crate
+simplify pass: the workspace now builds on the stable Rust channel, sub-agents
+are prompted to terminate themselves via `agent_complete`, mid-run compaction
+summaries are visually disambiguated from sub-agent completion reports, and the
+Context side panel moved to the `Alt+C` side-panel chord.
+
+### Changed
+
+- **Rust toolchain pinned to stable** — `rust-toolchain.toml` moved from
+  `nightly-2026-09-04` to the `stable` channel (stable 1.98.1 at time of
+  release); local builds, CI, and user shells now compile with stable Rust.
+- **Context panel keybinding `Alt+X` → `Alt+C`** — the Context side panel
+  toggle moved to `Alt+C`, keeping the side-panel chord family
+  (`Alt+L` log, `Alt+P` profiler, `Alt+T` tasks, `Alt+O` telemetry,
+  `Alt+C` context) mnemonic-consistent. Updated the key-handling arm
+  (`input.rs`), the help-table entry (`layout.rs`), related doc comments
+  (`utils.rs`, `state.rs`, `input_handler.rs`), the contextpanel spec
+  (`specs/contextpanel/`), and the user-facing docs (TUI-QUICKSTART,
+  QUICKSTART, README, SPEC, tutorial how-to). The TC-001 test now drives
+  `Alt+C` (`test_context_panel_t016.rs`).
+
+### Added
+
+- **Sub-agent completion protocol** — a new sub-agent-mode-only
+  "Sub-Agent Completion Protocol" section in the system prompt
+  (`ragent-agent/src/agent/mod.rs`) instructs spawned sub-agents to always
+  finish with a single `agent_complete(summary=...)` call, so background
+  tasks break their loop promptly instead of lingering in a running state
+  after their final report.
+
+### Fixed
+
+- **Compaction label disambiguation** — mid-run auto-compaction summaries
+  now render with a dim `[compaction]` label in the transcript
+  (`layout.rs`/`message_widget.rs`) instead of the assistant `●` marker, so a
+  compaction summary is no longer mistaken for a sub-agent's completion report
+  in the output overlay (root cause of the "agent stays active ~120s after
+  completion" misdiagnosis).
+- **Edit-tool test hygiene** — `read_utf8_file` in
+  `ragent-tools-core/src/edit.rs` carries an `#[allow(dead_code)]` with a
+  reason comment, matching the existing `create_file` pattern for items used
+  by the lib target but not by the `#[path]`-importing test target.
+- **Loop-interrupt test robustness** — `test_loop_interrupt` re-applies the
+  polling `raise_interrupt_until_armed()` helper so the Esc-interrupt test no
+  longer flakes when CI scheduling runs the loop to completion before the
+  interrupt request lands.
+
+### Verification
+
+- Full `/rust-hygiene` suite (10 checks) green on the release tree:
+  `cargo check --workspace`, cargo-machete (no unused dependencies),
+  `cargo check --tests --workspace`, full `cargo test --workspace` (490 test
+  binaries, exit 0), dead-code lint (`-D unreachable_pub -D dead_code
+  -D unused_imports` over `--workspace --lib --all-features`),
+  `scripts/check-dead-code-reasons.sh`, clippy `-D warnings`,
+  `cargo fmt --all -- --check`, `cargo audit` (0 errors; 1 allowed yanked
+  chacha20 warning), and `cargo deny check` (advisories/bans/licenses/sources
+  ok).
+
 ## Version: 1.0.88
 
 Research-crate simplify pass: a `/simplify` code-quality audit over the

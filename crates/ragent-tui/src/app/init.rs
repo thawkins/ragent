@@ -430,6 +430,7 @@ impl App {
             router_draft_providers: Vec::new(),
             router_draft_selected_ids: Vec::new(),
             pending_router_save: None,
+            pending_stop_confirm: false,
             research_progress: Vec::new(),
             skill_registry_cache: None,
             skill_dirs_cache: Vec::new(),

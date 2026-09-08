@@ -4,6 +4,22 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.89)
+
+- **Stable toolchain** — the pinned `rust-toolchain.toml` moved from
+  `nightly-2026-09-04` to the current stable channel; builds, CI, and user
+  shells now compile with stable Rust (1.98.1 at time of release).
+- **Sub-agent termination protocol** — a new sub-agent-mode system-prompt
+  section instructs spawned sub-agents to always finish with a single
+  `agent_complete` call, so background tasks report completion promptly
+  instead of lingering in a running state.
+- **Compaction label disambiguation** — mid-run auto-compaction summaries
+  render with a dim `[compaction]` prefix rather than the assistant marker,
+  so they are no longer mistaken for a sub-agent's completion report.
+- **Context panel rebind** — the context side panel moved from `Alt+X` to
+  `Alt+C`, keeping the `Alt+<letter>` side-panel family (log, profiler,
+  tasks, telemetry, context) mnemonic-consistent.
+
 ## Highlights (v1.0.88)
 
 - **Status bar last-prompt tag** — the top status line now renders the most
@@ -919,9 +935,9 @@ Remember that we prefer tracing over println in this project
 
 The scrollbar gutter runs along the right edge of the panel.
 
-## Context panel — `Alt+X`
+## Context panel — `Alt+C`
 
-Press **`Alt+X`** to toggle the **Context panel** on the right side of the
+Press **`Alt+C`** to toggle the **Context panel** on the right side of the
 screen. It shows a live, quantified breakdown of what currently occupies the
 active session's context window:
 
@@ -956,7 +972,7 @@ compaction.
 
 - **`Scroll`** with the mouse wheel.
 - **`Drag`** the scrollbar thumb.
-- Press **`Alt+X`** again to hide the panel.
+- Press **`Alt+C`** again to hide the panel.
 
 The Context panel is display-only: its contents are never sent to the model.
 
@@ -971,7 +987,7 @@ The Context panel is display-only: its contents are never sent to the model.
 | `Alt+T` | TASKS    | Session tasks and status                         |
 | `Alt+M` | Memory    | Project/user memory and structured-memory summary |
 | `Alt+O` | Telemetry | OpenTelemetry metrics and counters                |
-| `Alt+X` | Context   | Token breakdown of the context window             |
+| `Alt+C` | Context   | Token breakdown of the context window             |
 
 Log and Profile can be shown together (Log above, Profile below). The other
 panels are mutually exclusive: opening one closes the others.
@@ -995,7 +1011,7 @@ shortcut again to close the panel.
 | `Alt+T`                       | Toggle TASKS panel                           |
 | `Alt+M`                       | Toggle Memory panel                         |
 | `Alt+O`                       | Toggle Telemetry panel                      |
-| `Alt+X`                       | Toggle Context panel                        |
+| `Alt+C`                       | Toggle Context panel                        |
 | `Alt+V`                       | Paste image from clipboard                  |
 | `Alt+Y`                       | Toggle YOLO mode on/off                     |
 | `@`                           | Open file mention picker                    |

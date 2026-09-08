@@ -761,6 +761,30 @@ impl App {
         }
     }
 
+    /// Halt the running agent turn (Esc / Ctrl+X / confirmed Alt+X): set the
+    /// turn cancel flag and raise the goal-driven loop interrupt (FR-016).
+    /// A no-op when no turn is running (`cancel_flag` unset).
+    fn halt_running_agent(&mut self) {
+        if let Some(ref flag) = self.cancel_flag {
+            flag.store(true, Ordering::Relaxed);
+            // T-011 (FR-016): an active goal-driven loop stops at
+            // the next inter-stage safe point with status
+            // `interrupted` instead of dying silently.
+            if let Some(ref sid) = self.session_id
+                && self.session_processor.request_loop_interrupt(sid)
+            {
+                self.status =
+                    "loop: interrupt requested — stopping after the current stage…".to_string();
+            } else {
+                self.status = "halting agent…".to_string();
+            }
+            self.push_log_no_agent(
+                LogLevel::Warn,
+                "User pressed Esc or Ctrl+X — halting agent".to_string(),
+            );
+        }
+    }
+
     /// Dispatch a key event to the active UI region (history picker, agent /
     /// teams dialog, slash menu, context menu, or the main input editor).
     /// Asserts UI invariants and logs the transition for diagnostics.
@@ -783,7 +807,14 @@ impl App {
             let is_plain_char = matches!(key.code, KeyCode::Char(_))
                 && !key.modifiers.contains(KeyModifiers::CONTROL)
                 && !key.modifiers.contains(KeyModifiers::ALT);
-            if !is_plain_char {
+            // Alt+X (open the stop dialog) and every key while the stop
+            // dialog is open fall through to normal processing instead of
+            // being consumed by the banner — the stop confirmation must
+            // never appear dead mid-run.
+            let is_stop_confirm = self.pending_stop_confirm
+                || (matches!(key.code, KeyCode::Char('x'))
+                    && key.modifiers.contains(KeyModifiers::ALT));
+            if !is_plain_char && !is_stop_confirm {
                 return;
             }
         }
@@ -1257,7 +1288,7 @@ impl App {
                     self.needs_redraw = true;
                 }
                 InputAction::ToggleContextPanel => {
-                    // Toggle the Context side panel visibility (Alt+X). Mutually
+                    // Toggle the Context side panel visibility (Alt+C). Mutually
                     // exclusive with the other side panels so only one occupies the
                     // side column. On hide, clear any active context-panel text
                     // selection or context menu.
@@ -1515,25 +1546,7 @@ impl App {
                     self.execute_slash_command(&cmd);
                 }
                 InputAction::CancelAgent => {
-                    if let Some(ref flag) = self.cancel_flag {
-                        flag.store(true, Ordering::Relaxed);
-                        // T-011 (FR-016): an active goal-driven loop stops at
-                        // the next inter-stage safe point with status
-                        // `interrupted` instead of dying silently.
-                        if let Some(ref sid) = self.session_id
-                            && self.session_processor.request_loop_interrupt(sid)
-                        {
-                            self.status =
-                                "loop: interrupt requested — stopping after the current stage…"
-                                    .to_string();
-                        } else {
-                            self.status = "halting agent…".to_string();
-                        }
-                        self.push_log_no_agent(
-                            LogLevel::Warn,
-                            "User pressed Esc or Ctrl+X — halting agent".to_string(),
-                        );
-                    }
+                    self.halt_running_agent();
                 }
                 InputAction::ConfirmForceCleanup => {
                     if self.pending_forcecleanup.is_some() {
@@ -1621,6 +1634,18 @@ impl App {
                         );
                         self.status = "rollback declined — changes kept".to_string();
                         self.needs_redraw = true;
+                    }
+                }
+                InputAction::ConfirmStopAgent => {
+                    if self.pending_stop_confirm {
+                        self.pending_stop_confirm = false;
+                        self.halt_running_agent();
+                    }
+                }
+                InputAction::CancelStopAgent => {
+                    if self.pending_stop_confirm {
+                        self.pending_stop_confirm = false;
+                        self.status = "stop cancelled — agent still running".to_string();
                     }
                 }
                 InputAction::ConfirmRouterSave => {

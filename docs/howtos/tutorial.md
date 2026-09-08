@@ -584,7 +584,7 @@ See `docs/howtos/custom-agents.md` for the full schema.
 | `Alt+T` | Toggle TASKS panel |
 | `Alt+M` | Toggle Memory panel |
 | `Alt+O` | Toggle Telemetry panel |
-| `Alt+X` | Toggle Context side panel |
+| `Alt+C` | Toggle Context side panel |
 | `Alt+V` | Paste image from clipboard |
 | `Alt+Y` | Toggle YOLO mode |
 | `@` | Open file mention picker |

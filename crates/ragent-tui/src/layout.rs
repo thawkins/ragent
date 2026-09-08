@@ -2694,7 +2694,7 @@ fn format_tokens(tokens: u64) -> String {
     }
 }
 
-/// Render the Context side panel (toggled via `Alt+X`, contextpanel spec).
+/// Render the Context side panel (toggled via `Alt+C`, contextpanel spec).
 ///
 /// FR-018: titled "Context" with a border consistent with the active theme.
 /// FR-005..FR-012: lists every context partition with its byte/token estimate
@@ -3209,6 +3209,11 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_router_save_dialog(frame, app);
     }
 
+    // Alt+X stop-agent confirmation modal overlay
+    if app.pending_stop_confirm {
+        render_stop_confirm_dialog(frame);
+    }
+
     // MCP discover dialog overlay
     if app.mcp_discover.is_some() {
         render_mcp_discover_dialog(frame, app);
@@ -3401,6 +3406,39 @@ fn render_memory_delete_dialog(frame: &mut Frame, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Confirm Delete ")
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Center);
+    frame.render_widget(paragraph, area);
+}
+
+/// Render the Alt+X stop-agent confirmation modal.
+fn render_stop_confirm_dialog(frame: &mut Frame) {
+    let area = centered_rect(50, 24, frame.area());
+    frame.render_widget(Clear, area);
+
+    let lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            "Are you sure?",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("Stop the running agent? Any goal-driven loop will"),
+        Line::from("terminate with status `interrupted` (session stays resumable)."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Enter Yes  Esc Cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Stop Agent ")
         .border_style(Style::default().fg(Color::Yellow));
 
     let paragraph = Paragraph::new(lines)
@@ -5008,7 +5046,16 @@ fn messages_to_lines(
                                 .add_modifier(Modifier::BOLD),
                             5,
                         ),
-                        Role::Assistant | Role::Compaction => (
+                        // Context-compaction summaries are internal
+                        // bookkeeping, not the agent's own output: label them
+                        // so a mid-run auto-compaction summary (which uses the
+                        // same "## Objective / ## Work State" shape as a
+                        // sub-agent's final report) is never mistaken for the
+                        // completion report in the output overlay.
+                        Role::Compaction => {
+                            ("[compaction] ", Style::default().fg(Color::DarkGray), 13)
+                        }
+                        Role::Assistant => (
                             "● ",
                             Style::default()
                                 .fg(Color::Magenta)
@@ -5606,8 +5653,9 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+P", "Toggle profiler panel visibility"),
     ("Alt+T", "Toggle Tasks panel visibility"),
     ("Alt+O", "Toggle telemetry panel visibility"),
-    ("Alt+X", "Toggle context panel visibility"),
+    ("Alt+C", "Toggle context panel visibility"),
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),
+    ("Alt+X", "Stop the running agent (asks Are you sure?)"),
     // ── Sending ─────────────────────────────────────────────────────────
     ("Enter", "Send message / confirm"),
     ("Ctrl+C, Ctrl+D", "Quit application (guarded sequence)"),
