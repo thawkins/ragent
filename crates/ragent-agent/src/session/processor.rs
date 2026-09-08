@@ -269,7 +269,7 @@ pub struct SessionProcessor {
     /// [`SessionProcessor::clear_loop`] so the post-loop rollback offer can
     /// still restore it.
     pub active_loop_captures:
-        tokio::sync::RwLock<HashMap<String, Arc<crate::session::loop_capture::LoopCapture>>>,
+        tokio::sync::RwLock<HashMap<String, crate::session::loop_capture::LoopCapture>>,
 }
 
 /// C-001: a cached [`crate::skill::SkillRegistry`] plus the inputs used to
@@ -402,10 +402,10 @@ impl SessionProcessor {
         }
         self.active_loop_captures.write().await.insert(
             session_id.to_string(),
-            Arc::new(crate::session::loop_capture::LoopCapture {
+            crate::session::loop_capture::LoopCapture {
                 snapshot: None,
                 git,
-            }),
+            },
         );
     }
 
@@ -476,13 +476,13 @@ impl SessionProcessor {
         working_dir: &std::path::Path,
         message_id: &str,
     ) -> Result<(), anyhow::Error> {
-        let existing = self
+        let Some(capture) = self
             .active_loop_captures
             .read()
             .await
             .get(session_id)
-            .cloned();
-        let Some(capture) = existing else {
+            .cloned()
+        else {
             return Ok(()); // No loop run: plain chat turn, nothing to capture.
         };
         if capture.snapshot.is_some() {
@@ -500,12 +500,12 @@ impl SessionProcessor {
             "pre-loop workspace snapshot captured (FR-018)"
         );
         // Only the snapshot slot is updated; the recorded git state stays.
-        let mut updated = (*capture).clone();
+        let mut updated = capture;
         updated.snapshot = snapshot;
         self.active_loop_captures
             .write()
             .await
-            .insert(session_id.to_string(), Arc::new(updated));
+            .insert(session_id.to_string(), updated);
         Ok(())
     }
 
@@ -523,7 +523,7 @@ impl SessionProcessor {
         let Some(capture) = self.active_loop_captures.write().await.remove(session_id) else {
             return Ok(false);
         };
-        crate::session::loop_capture::rollback_to_capture(&capture).await?;
+        crate::session::loop_capture::rollback_to_capture(capture).await?;
         tracing::info!(
             session_id = %session_id,
             "workspace rolled back to the pre-loop snapshot (FR-020)"
@@ -554,11 +554,24 @@ impl SessionProcessor {
             return;
         };
         let dir_owned = working_dir.to_path_buf();
-        let summary = tokio::task::spawn_blocking(move || {
+        // A panicked or aborted change-summary computation must not be
+        // published as an all-zero summary (misleading UI data); warn and
+        // skip the event instead.
+        let summary = match tokio::task::spawn_blocking(move || {
             crate::session::loop_capture::compute_change_summary(&capture, &dir_owned)
         })
         .await
-        .unwrap_or_default();
+        {
+            Ok(summary) => summary,
+            Err(e) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    error = %e,
+                    "loop change summary computation failed; summary not published",
+                );
+                return;
+            }
+        };
         tracing::info!(
             session_id = %session_id,
             status,
@@ -697,6 +710,66 @@ impl SessionProcessor {
         Some(effective)
     }
 
+    /// Shared implementation behind the two loop-termination entry points:
+    /// checks activity, logs, and forwards to [`Self::terminate_loop_inner`].
+    async fn terminate_loop_with(
+        &self,
+        session_id: &str,
+        condition: crate::session::loop_state::StopCondition,
+        reason: String,
+        log_line: String,
+        run_start: Option<Instant>,
+        working_dir: Option<&std::path::Path>,
+    ) {
+        let active = self.active_loops.read().await.contains_key(session_id);
+        if !active {
+            return;
+        }
+        tracing::info!(session_id = %session_id, "{log_line}");
+        self.terminate_loop_inner(
+            session_id,
+            condition,
+            run_start,
+            None,
+            None,
+            Some(reason),
+            working_dir,
+        )
+        .await;
+    }
+
+    /// Persist the provider-reported input-token figure into the session
+    /// state cache so the next turn starts with the same usage value shown
+    /// in the TUI. Shared by the compaction and post-LLM call sites.
+    fn persist_last_reported_input_tokens(&self, session_id: &str, tokens: u64) {
+        let session_state_lock = self
+            .session_manager
+            .as_ref()
+            .session_state_cache(session_id);
+        if let Ok(mut guard) = session_state_lock.lock() {
+            guard.set_last_reported_input_tokens(tokens);
+        } else {
+            warn!(
+                session_id = %session_id,
+                "session state cache lock poisoned; input-token figure not persisted"
+            );
+        }
+    }
+
+    /// Write a mutated loop tracker back to `active_loops` so budget gates
+    /// and interrupt handling observe the latest tallies. Shared by the
+    /// post-LLM and stage-completion call sites.
+    async fn persist_loop_tracker(
+        &self,
+        session_id: &str,
+        tracker: &crate::session::loop_state::LoopTracker,
+    ) {
+        self.active_loops
+            .write()
+            .await
+            .insert(session_id.to_string(), tracker.clone());
+    }
+
     /// Terminate an active goal-driven loop after a run stage failed
     /// unrecoverably (FR-011: provider transport failure, permission
     /// hard-deny, tool panic, context overflow, watchdog abort).
@@ -712,23 +785,14 @@ impl SessionProcessor {
         run_start: Option<Instant>,
         working_dir: Option<&std::path::Path>,
     ) {
-        let active = self.active_loops.read().await.contains_key(session_id);
-        if !active {
-            return;
-        }
         let reason = format!("unrecoverable error: {err:#}");
-        tracing::error!(
-            session_id = %session_id,
-            reason,
-            "loop terminated by unrecoverable error (FR-011); no retry"
-        );
-        self.terminate_loop_inner(
+        tracing::error!(session_id = %session_id, reason, "fatal loop error detail");
+        self.terminate_loop_with(
             session_id,
             crate::session::loop_state::StopCondition::UnrecoverableError,
+            reason,
+            "loop terminated by unrecoverable error (FR-011); no retry".to_string(),
             run_start,
-            None,
-            None,
-            Some(reason),
             working_dir,
         )
         .await;
@@ -749,21 +813,12 @@ impl SessionProcessor {
         run_start: Option<Instant>,
         working_dir: Option<&std::path::Path>,
     ) {
-        let active = self.active_loops.read().await.contains_key(session_id);
-        if !active {
-            return;
-        }
-        tracing::info!(
-            session_id = %session_id,
-            "loop interrupted by user (FR-016); stopping at the safe point"
-        );
-        self.terminate_loop_inner(
+        self.terminate_loop_with(
             session_id,
             crate::session::loop_state::StopCondition::HumanIntervention,
+            "interrupted by user (Esc)".to_string(),
+            "loop interrupted by user (FR-016); stopping at the safe point".to_string(),
             run_start,
-            None,
-            None,
-            Some("interrupted by user (Esc)".to_string()),
             working_dir,
         )
         .await;
@@ -996,8 +1051,16 @@ impl SessionProcessor {
                 return cached.config.clone();
             }
         }
-        // Cache miss (or invalid): reload from disk.
-        let cfg = ragent_config::Config::load().unwrap_or_default();
+        // Cache miss (or invalid): reload from disk. A broken ragent.json
+        // falls back to defaults, but the failure is logged so silent config
+        // degradation is diagnosable.
+        let cfg = match ragent_config::Config::load() {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                tracing::warn!(error = %e, "config load failed; using default config");
+                ragent_config::Config::default()
+            }
+        };
         let file_mtimes: Vec<(PathBuf, SystemTime)> = cfg
             .config_paths
             .iter()
@@ -1054,18 +1117,8 @@ impl SessionProcessor {
             }
         }
 
-        // Record mtimes of the directories that actually exist.
-        let dir_mtimes: Vec<(PathBuf, std::time::SystemTime)> = dirs
-            .into_iter()
-            .filter_map(|d| {
-                std::fs::metadata(&d)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .map(|mt| (d, mt))
-            })
-            .collect();
-
-        // Fast path: cached registry still valid.
+        // Fast path: cached registry still valid (checked before collecting
+        // fresh mtimes so a cache hit does no directory stat sweep).
         {
             let guard = self.skill_registry_cache.lock();
             if let Some(cached) = guard.as_ref()
@@ -1081,6 +1134,18 @@ impl SessionProcessor {
                 return Some(cached.registry.clone());
             }
         }
+
+        // Record mtimes of the directories that actually exist. Needed only
+        // to populate a new cache entry, so it runs after the fast path.
+        let dir_mtimes: Vec<(PathBuf, std::time::SystemTime)> = dirs
+            .into_iter()
+            .filter_map(|d| {
+                std::fs::metadata(&d)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .map(|mt| (d, mt))
+            })
+            .collect();
 
         // Cache miss or invalid: reload from disk.
         let registry = crate::skill::SkillRegistry::load(working_dir, extra_dirs);
@@ -1293,7 +1358,11 @@ impl SessionProcessor {
                 };
                 let storage_for_persist = storage.clone();
                 tokio::task::spawn_blocking(move || {
-                    let _ = storage_for_persist.create_run_cost_summary(&row);
+                    // Best-effort persist: a failure silently breaks the
+                    // `--include-cost` export, so at least log it.
+                    if let Err(e) = storage_for_persist.create_run_cost_summary(&row) {
+                        tracing::debug!(error = %e, "run cost summary persist failed");
+                    }
                 });
                 bus.publish(Event::RunCostSummary {
                     session_id: sid.clone(),
@@ -1321,12 +1390,7 @@ impl SessionProcessor {
         // 4. Build chat messages from history
         // P-3: `build_turn_chat_messages` also returns the resolved
         // `context_window` so the orchestrator does not re-resolve it below.
-        let (
-            chat_messages_vec,
-            mut compressed_this_turn,
-            mut last_reported_input_tokens,
-            context_window,
-        ) = self
+        let (chat_messages_vec, mut last_reported_input_tokens, context_window) = self
             .build_turn_chat_messages(
                 session_id,
                 agent,
@@ -1335,6 +1399,9 @@ impl SessionProcessor {
                 &profiler,
             )
             .await?;
+        // Compression hysteresis for this turn starts false; the LLM stage
+        // sets it through `LoopState` when compaction actually runs.
+        let mut compressed_this_turn = false;
         // P-6: hold the per-turn chat history as `Arc<Vec<ChatMessage>>`
         // so the per-retry `ChatRequest` can share it by refcount bump
         // instead of cloning the entire `Vec` on every attempt.
@@ -1532,10 +1599,7 @@ impl SessionProcessor {
                 }
                 // Persist the incremented step counter so the next iteration
                 // (and any external termination) sees it.
-                self.active_loops
-                    .write()
-                    .await
-                    .insert(session_id.to_string(), tracker.clone());
+                self.persist_loop_tracker(session_id, &tracker).await;
             }
             let _step_scope = profiler.scope("loop.step.total");
             let step = {
@@ -1702,17 +1766,10 @@ impl SessionProcessor {
                             chat_messages = Arc::new(new_chat);
                             compressed_this_turn = true;
                             last_reported_input_tokens = outcome.compressed_tokens as u64;
-                            {
-                                let session_state_lock = self
-                                    .session_manager
-                                    .as_ref()
-                                    .session_state_cache(session_id);
-                                if let Ok(mut guard) = session_state_lock.lock() {
-                                    guard.set_last_reported_input_tokens(
-                                        outcome.compressed_tokens as u64,
-                                    );
-                                }
-                            }
+                            self.persist_last_reported_input_tokens(
+                                session_id,
+                                outcome.compressed_tokens as u64,
+                            );
                             tracing::info!(
                                 original_tokens = outcome.original_tokens,
                                 compressed_tokens = outcome.compressed_tokens,
@@ -1783,25 +1840,14 @@ impl SessionProcessor {
                 last_reported_input_tokens = llm_result.last_input_tokens;
                 // Persist the provider-reported input tokens into the session state cache
                 // so the next turn starts with the same usage value shown in the TUI.
-                {
-                    let session_state_lock = self
-                        .session_manager
-                        .as_ref()
-                        .session_state_cache(session_id);
-                    if let Ok(mut guard) = session_state_lock.lock() {
-                        guard.set_last_reported_input_tokens(llm_result.last_input_tokens);
-                    }
-                }
+                self.persist_last_reported_input_tokens(session_id, llm_result.last_input_tokens);
             }
             // T-008 (FR-014): tally this exchange's tokens into the loop
             // tracker so the next iteration's budget gate sees the updated
             // cost (the gate fires BEFORE the next request).
             if let Some(tracker) = loop_tracker.as_mut() {
                 tracker.record_tokens(llm_result.last_input_tokens, llm_result.last_output_tokens);
-                self.active_loops
-                    .write()
-                    .await
-                    .insert(session_id.to_string(), tracker.clone());
+                self.persist_loop_tracker(session_id, tracker).await;
             }
 
             // Collect parts from this turn
@@ -2006,10 +2052,7 @@ impl SessionProcessor {
                         // accumulate against the retry allowance (FR-012).
                         if let Some(tracker) = loop_tracker.as_mut() {
                             tracker.record_success();
-                            self.active_loops
-                                .write()
-                                .await
-                                .insert(session_id.to_string(), tracker.clone());
+                            self.persist_loop_tracker(session_id, &tracker).await;
                         }
                         continue;
                     }
@@ -2901,10 +2944,7 @@ impl SessionProcessor {
                     // tool calls, so a no-tool-call step cannot double-count.
                     if let Some(tracker) = loop_tracker.as_mut() {
                         tracker.record_tool_calls(llm_result.tool_calls.len() as u64);
-                        self.active_loops
-                            .write()
-                            .await
-                            .insert(session_id.to_string(), tracker.clone());
+                        self.persist_loop_tracker(session_id, &tracker).await;
                     }
                     self.event_bus.publish(Event::ToolCallBatch {
                         session_id: session_id_arc.to_string(),
@@ -2981,10 +3021,7 @@ impl SessionProcessor {
                     }
                     // Persist the updated failure counter so the next
                     // iteration (and any external termination) sees it.
-                    self.active_loops
-                        .write()
-                        .await
-                        .insert(session_id.to_string(), tracker.clone());
+                    self.persist_loop_tracker(session_id, &tracker).await;
                 }
                 // Auto task status updates (P-10: reuse the `active_spec_id`
                 // already read above for the `ToolContext`, and short-circuit

@@ -25,18 +25,20 @@
 //!
 //! ```no_run
 //! use ragent_telemetry::{OtelConfig, TelemetrySubsystem, shutdown::ShutdownGuard};
+//! use std::sync::Arc;
 //!
 //! let config = OtelConfig::default(); // or from ragent.json
-//! let subsystem = TelemetrySubsystem::new(config).expect("telemetry subsystem");
+//! let subsystem = Arc::new(TelemetrySubsystem::new(config).expect("telemetry subsystem"));
 //!
 //! // Install the guard — it will flush+shutdown on Drop.
-//! let _guard = ShutdownGuard::new(subsystem);
+//! let _guard = ShutdownGuard::new(Arc::clone(&subsystem));
 //!
 //! // ... run the agent loop ...
 //! // When the function returns (or panics), _guard drops and flushes.
 //! ```
 
 use crate::subsystem::TelemetrySubsystem;
+use std::sync::Arc;
 
 /// RAII guard that flushes and shuts down the [`TelemetrySubsystem`] on `Drop`.
 ///
@@ -54,41 +56,46 @@ use crate::subsystem::TelemetrySubsystem;
 ///
 /// ```
 /// use ragent_telemetry::{OtelConfig, TelemetrySubsystem, shutdown::ShutdownGuard};
+/// use std::sync::Arc;
 ///
 /// let config = OtelConfig::default(); // disabled
-/// let subsystem = TelemetrySubsystem::new(config).expect("subsystem");
-/// let _guard = ShutdownGuard::new(subsystem);
+/// let subsystem = Arc::new(TelemetrySubsystem::new(config).expect("subsystem"));
+/// let _guard = ShutdownGuard::new(Arc::clone(&subsystem));
 /// // ... do work ...
 /// // _guard drops here, flushing and shutting down.
 /// ```
 pub struct ShutdownGuard {
-    subsystem: TelemetrySubsystem,
+    subsystem: Option<Arc<TelemetrySubsystem>>,
 }
 
 impl ShutdownGuard {
     /// Create a new guard that will flush+shutdown the given subsystem on
     /// `Drop`.
     ///
-    /// The subsystem is moved into the guard. Use [`Self::subsystem`] to
-    /// get a reference for recording metrics while the guard is alive.
+    /// The subsystem is shared behind an `Arc`: the guard keeps the live
+    /// subsystem alive (and flushes *that* instance) even when other handles
+    /// to the same `Arc` are still in scope — which is the normal case when
+    /// the subsystem is also handed to recorders/processors.
     #[must_use]
-    pub const fn new(subsystem: TelemetrySubsystem) -> Self {
-        Self { subsystem }
+    pub fn new(subsystem: Arc<TelemetrySubsystem>) -> Self {
+        Self {
+            subsystem: Some(subsystem),
+        }
     }
 
     /// Returns a reference to the wrapped [`TelemetrySubsystem`].
     ///
     /// Use this to obtain instruments and record metrics while the guard is
     /// alive.
+    ///
+    /// # Panics
+    /// Panics if the subsystem was already moved out via
+    /// [`Self::into_inner`].
     #[must_use]
-    pub const fn subsystem(&self) -> &TelemetrySubsystem {
-        &self.subsystem
-    }
-
-    /// Returns a mutable reference to the wrapped [`TelemetrySubsystem`].
-    #[must_use]
-    pub const fn subsystem_mut(&mut self) -> &mut TelemetrySubsystem {
-        &mut self.subsystem
+    pub fn subsystem(&self) -> &TelemetrySubsystem {
+        self.subsystem
+            .as_deref()
+            .expect("subsystem taken by into_inner")
     }
 
     /// Manually trigger a flush without dropping the guard (FR-006).
@@ -103,7 +110,11 @@ impl ShutdownGuard {
     /// should log the error but must not propagate it in a way that would
     /// crash the agent loop (FR-031, FR-033).
     pub fn flush(&self) -> crate::Result<()> {
-        self.subsystem.flush()
+        // No-op after `into_inner` released the subsystem (nothing left to
+        // flush).
+        self.subsystem
+            .as_deref()
+            .map_or(Ok(()), TelemetrySubsystem::flush)
     }
 
     /// Release the guard without flushing, returning the wrapped subsystem.
@@ -112,21 +123,28 @@ impl ShutdownGuard {
     /// sequence. The caller becomes responsible for calling
     /// [`TelemetrySubsystem::flush`] and [`TelemetrySubsystem::shutdown`].
     #[must_use]
-    pub fn into_inner(self) -> TelemetrySubsystem {
-        // Manually destructure to avoid running Drop on self.
-
-        std::mem::take(&mut std::mem::ManuallyDrop::new(self).subsystem)
+    pub fn into_inner(mut self) -> Arc<TelemetrySubsystem> {
+        // Take the Arc out; `Option::take` leaves `None`, which makes the
+        // later `Drop` a no-op — no `ManuallyDrop` dance needed.
+        self.subsystem
+            .take()
+            .unwrap_or_else(|| Arc::new(TelemetrySubsystem::disabled()))
     }
 }
 
 impl Drop for ShutdownGuard {
     fn drop(&mut self) {
-        // FR-019: flush all pending metric exports on process termination.
-        // FR-031/FR-033: exporter errors must be logged but never panic.
-        if let Err(e) = self.subsystem.flush() {
+        // `into_inner` empties the slot, making this a no-op after a manual
+        // release. FR-019: flush all pending metric exports on process
+        // termination. FR-031/FR-033: exporter errors must be logged but
+        // never panic.
+        let Some(subsystem) = self.subsystem.take() else {
+            return;
+        };
+        if let Err(e) = subsystem.flush() {
             tracing::warn!(error = %e, "Telemetry flush on shutdown failed");
         }
-        if let Err(e) = self.subsystem.shutdown() {
+        if let Err(e) = subsystem.shutdown() {
             tracing::warn!(error = %e, "Telemetry shutdown failed");
         }
     }

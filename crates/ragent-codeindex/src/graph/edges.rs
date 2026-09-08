@@ -344,12 +344,14 @@ pub struct GraphInputs {
 pub fn load_graph_inputs(store: &IndexStore) -> Result<GraphInputs> {
     let all_symbols = store.query_symbols(&crate::types::SymbolFilter::default())?;
     let all_refs = store.query_all_refs()?;
-    let files = store.list_files()?;
-    let file_ids: HashMap<String, i64> = store
-        .list_files_with_ids()?
-        .into_iter()
-        .map(|(id, path)| (path, id))
+    // One scan serves both the `files` list and the `file_ids` map.
+    let file_rows = store.list_files_with_entries()?;
+    let file_ids: HashMap<String, i64> = file_rows
+        .iter()
+        .map(|(id, entry)| (entry.path.clone(), *id))
         .collect();
+    let files: Vec<crate::types::FileEntry> =
+        file_rows.into_iter().map(|(_, entry)| entry).collect();
 
     let mut imports_by_file: HashMap<i64, Vec<crate::types::ImportEntry>> = HashMap::new();
     for (file_id, imp) in store.list_all_imports()? {
@@ -518,8 +520,17 @@ pub fn persist_edges(store: &IndexStore, edges: &[GraphEdge]) -> Result<BuildRes
     }
     result?;
 
-    let edges_extracted = store.edge_count_by_confidence_typed(Confidence::Extracted)? as usize;
-    let edges_inferred = store.edge_count_by_confidence_typed(Confidence::Inferred)? as usize;
+    // The edge table was just cleared and repopulated with exactly the
+    // `edges` slice, so the confidence split can be counted in memory —
+    // two SQL scans under the store lock are unnecessary.
+    let edges_extracted = edges
+        .iter()
+        .filter(|e| e.confidence == Confidence::Extracted)
+        .count();
+    let edges_inferred = edges
+        .iter()
+        .filter(|e| e.confidence == Confidence::Inferred)
+        .count();
 
     debug!(
         "persist_edges: {} edges ({} EXTRACTED, {} INFERRED) in {}ms",

@@ -1,3 +1,10 @@
+//! Criterion benchmark for the research extension engine (IterativeEngine).
+//!
+//! Measures full `IterativeEngine::run` end-to-end cycles against a no-op
+//! analysis engine and no-op web tool stack.
+
+#![allow(missing_docs)]
+
 use async_trait::async_trait;
 use criterion::{Criterion, criterion_group, criterion_main};
 use ragent_research::analysis::NoopAnalysisEngine;
@@ -73,5 +80,6 @@ fn researchext_benchmark(c: &mut Criterion) {
     });
 }
 
+// researchext registration.
 criterion_group!(benches, researchext_benchmark);
 criterion_main!(benches);

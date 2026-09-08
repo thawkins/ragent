@@ -947,7 +947,7 @@ fn test_slash_clip_copies_rendered_message_lines() {
     app.message_content_lines = vec![
         "You: hello world".to_string(),
         "Assistant: hi there".to_string(),
-        "".to_string(),
+        String::new(),
         "Assistant: second block".to_string(),
     ];
 
@@ -979,7 +979,7 @@ fn test_slash_clip_registered_in_help() {
 fn test_slash_clip_empty_window_shows_hint() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
-    assert!(app.message_content_lines.is_empty());
+    assert!(app.message_content_lines.is_empty(), "window starts empty");
 
     app.execute_slash_command("/clip");
 
@@ -3498,9 +3498,10 @@ fn test_slash_config_no_args_shows_usage() {
 
     app.execute_slash_command("/config");
 
-    assert_eq!(app.status, "config: usage");
+    // `/config` with no args now shows the help table (same content family as
+    // `/config help`); the status reflects help rather than the usage hint.
+    assert_eq!(app.status, "config: help");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("Usage:"), "should show usage hint");
     assert!(
         text.contains("/config show"),
         "usage should mention /config show: {text}"

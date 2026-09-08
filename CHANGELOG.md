@@ -1,5 +1,72 @@
 # Changelog
 
+## Version: 1.0.84
+
+The /simplify all pass fixes (post 1.0.83) reviewed by parallel sub-agents over the diff since 1.0.83, plus slash-command help coverage.
+
+### Added
+
+- **Codeindex store helpers** — `list_files_with_entries()` (single-scan file +
+  entry enumeration), `get_symbol_by_exact_name()` (exact-match-first bounded
+  symbol lookup before the substring fallback).
+- **TUI helper functions** — `plural(n, word)`, `files_preview(files, take)`,
+  `current_working_dir()` (replaces 63 silent `unwrap_or_default()` cwd
+  resolutions that would resolve paths against the filesystem root), and
+  `loop_config_defaults()` for the /loop dialog.
+- **Rollback result polling slot** — the post-/loop rollback flow now polls a
+  dedicated `rollback_result` slot instead of fire-and-forget logging, so the
+  status line no longer sticks at "rolling back..." forever.
+- **Codeindex background result slot type change** — the fragile
+  `"\n\nSTATUS:"` magic-marker payload became a typed
+  `Option<Result<(String, String), String>>` slot.
+
+### Fixed
+
+- **Real panic in research comparison** — `comparison.rs` sliced byte offsets
+  from `to_lowercase()` against the ORIGINAL string; a character that lengthens
+  under lowercase (U+0130) violated char boundaries. Now slices the lowercased
+  text with an `is_char_boundary` guard plus line fallback; summaries are
+  prepared once per profile (PreparedSummary) instead of per cell.
+- **Dead TUI event-lag reconcile** — two separate `tui_event_lag` Arcs were
+  created (bridge incremented one, app watched the other); now a single shared
+  Arc drives the lag-driven reconcile.
+- **Verification zombie child** — `try_wait`-error branch now `child.wait()`s
+  to reap the zombie; output truncation uses a single `char_indices` pass.
+- **Telemetry shutdown** — `into_inner` uses `Option<Arc>` + `take()` with a
+  post-take no-op Drop (replacing ManuallyDrop tricks); `flush()` no-ops when
+  the slot is empty; `TelemetrySubsystem::disabled()` replaces an unwrap in
+  the disabled path.
+- **Config from_value deep clone removed** — parses the Value once for the
+  defaultAgent probe, then re-parses with `from_str` so typed parse errors keep
+  real line/column caret diagnostics (caught by test_config_parse_errors).
+- **Loop capture by value** — `rollback_to_capture` takes `LoopCapture` by
+  value (no deep byte cloning); captures stored as `LoopCapture` not
+  `Arc<LoopCapture>`; metadata filtering happens BEFORE `take_snapshot` (files
+  were being read twice).
+- **Loop deny_reason glob compilation** — glob matchers compile once per check
+  (was recompiled per path token); `bash_path_tokens` filters URL and
+  non-path-like `key=value` tokens.
+- **Slash command output fixes** — `/spec list` returns a real count, `/spec
+  coverage` marker de-unicode-fied, `/spec impl` surfaces runner errors,
+  `/spec activate` reuses the SpecManager Arc, `/autopilot` flag parse errors
+  are surfaced instead of silently `.ok()`-ed, compact/compress arms share
+  `start_compaction_or_warn()`, and /mcp help no longer gets its status
+  clobbered by the match-end fallthrough.
+- **Bang command off the async runtime** — the `!` shell passthrough in main.rs
+  wraps `sh -c` in `spawn_blocking`; `Runtime::new` failures map to a clean
+  error; invalid `--log-level` warns instead of being ignored.
+- **codeindex_status dead branch** — removed hardcoded "Enabled: no" branch.
+- **Lowercase-slicing guards** in research comparison tests (3 new tests).
+
+### Changed
+
+- `drain_completed` fuses the pending scan into the retain closure; dead
+  `run_verification_command_owned` and `path_within` deleted (verified 0
+  callers).
+- New tests: `test_slash_help.rs` (30 tests covering every slash-command help
+  arm), loop-capture/rollback test updates, telemetry shutdown test updates,
+  finance/comparison/codeindex test updates.
+
 ## Version: 1.0.83
 
 ### Fixed
@@ -6102,27 +6169,3 @@ removed dead code, migrated inline tests, and cleaned up repository hygiene.
 ### Added
 - **Initial commit** — Project created.
 
-# Changelog
-
-## Version: 1.0.67
-
-### Added
-
-- **CORPA.md research companion file** — QA render sections (Contradiction Graph,
-  Loci Analysis, Depth Investigation, Cross-Locus Reconcile, Source Tensions,
-  Synthesis Audit, Corpus Critic) are now written to a per-research
-  `research/<name>/CORPA.md` companion instead of being embedded in
-  `RESEARCH.md`. `AssembledDocument` gained a `corpa` field; the
-  layout-independent `assemble_corpa_body` renders the seven QA sections with
-  top-level `##` headings shared between the report and IMRaD paths.
-  `create_with_format` writes a CORPA skeleton via the new
-  `ResearchIo::corpa_md_path`, and `write_document` writes the assembled CORPA
-  content. (spec: `corpaAnalysis`)
-
-### Tests
-
-- New `tests/test_corpa_companion.rs` (6 tests including manager
-  create/write integration); `test_hyperresearch_manual.rs` now asserts the QA
-  sections land in the corpa payload and are absent from the report body;
-  `test_scoreboard_imrad.rs` checks Contradiction Graph via `assembled.corpa`.
-  821 `ragent-research` tests, 896 agent+server tests pass; fmt/clippy clean.

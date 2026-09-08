@@ -48,8 +48,6 @@ use crate::session::prompt_builders::{
 use crate::session::stream_buffer::StreamBuffer;
 use crate::tool::TeamContext;
 
-// Re-imports for pub(crate) items used within the steps.
-
 /// Immutable per-turn context created by [`SessionProcessor::prepare_client`].
 pub(crate) struct TurnClient {
     /// The agent's model reference (provider id + model id).
@@ -285,11 +283,20 @@ impl SessionProcessor {
             }
         };
 
-        // Resolve working directory.
+        // Resolve working directory. A deleted CWD falls back to `.` (never
+        // an empty path, which would silently misdirect context collection).
         let working_dir = {
             let _scope = profiler.scope("session.resolve_working_dir");
             self.session_manager.get_session(session_id)?.map_or_else(
-                || std::env::current_dir().unwrap_or_default(),
+                || {
+                    std::env::current_dir().unwrap_or_else(|e| {
+                        tracing::warn!(
+                            error = %e,
+                            "current_dir failed; using '.' as working directory",
+                        );
+                        std::path::PathBuf::from(".")
+                    })
+                },
                 |s| s.directory,
             )
         };
@@ -328,13 +335,27 @@ impl SessionProcessor {
         let session_config: Arc<ragent_config::Config> = cfg;
         let parsed_hook_configs = crate::hooks::parse_hook_configs(&session_config.hooks);
 
-        // Fire on_session_start hook when this is the first message.
+        // Fire on_session_start hook when this is the first message. A
+        // storage error defaults to "messages exist" (the conservative
+        // choice: suppresses duplicate hook firing) and is logged.
         let has_prior_messages = {
             let _scope = profiler.scope("history.check_prior_assistant");
-            self.session_manager
+            match self
+                .session_manager
                 .storage()
                 .has_assistant_messages(session_id)
-                .unwrap_or(false)
+            {
+                Ok(exists) => exists,
+                Err(e) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        error = %e,
+                        "has_assistant_messages failed; assuming history exists so \
+                         on_session_start does not re-fire",
+                    );
+                    true
+                }
+            }
         };
         if !has_prior_messages {
             let _scope = profiler.scope("hooks.on_session_start");
@@ -371,10 +392,9 @@ impl SessionProcessor {
         // Load skill registry for system prompt injection. C-001: the
         // registry is cached keyed by skill-directory mtimes, so this only
         // touches disk on the first turn (or when a skill directory changes).
-        let skill_dirs = session_config.skill_dirs.clone();
         let skill_registry = {
             let _scope = profiler.scope("skills.load_registry");
-            self.skill_registry(working_dir, &skill_dirs)
+            self.skill_registry(working_dir, &session_config.skill_dirs)
         };
         let (git_status, readme, agents_md, file_tree) = {
             let _scope = profiler.scope("prompt.collect_context");
@@ -451,31 +471,30 @@ impl SessionProcessor {
                     allowed
                 })
         };
-        let effective_defs: Arc<Vec<ToolDefinition>> = if allowed_set.is_empty() {
-            self.system_prompt_cache()
-                .get_tool_definitions(&self.tool_registry)
-                .unwrap_or_else(|| self.tool_registry.definitions())
-        } else {
-            let all_defs = self.tool_registry.definitions();
-            Arc::new(
-                all_defs
-                    .iter()
-                    .filter(|d| crate::tool::is_allowed_tool(&d.name, &allowed_set))
-                    .cloned()
-                    .collect(),
-            )
-        };
-        let effective_defs: Arc<Vec<ToolDefinition>> = if let Some(allowed) = loop_tool_set {
-            Arc::new(
-                effective_defs
-                    .iter()
-                    .filter(|d| allowed.contains(d.name.as_str()))
-                    .cloned()
-                    .collect(),
-            )
-        } else {
-            effective_defs
-        };
+        let effective_defs: Arc<Vec<ToolDefinition>> =
+            if allowed_set.is_empty() && loop_tool_set.is_none() {
+                self.system_prompt_cache()
+                    .get_tool_definitions(&self.tool_registry)
+                    .unwrap_or_else(|| self.tool_registry.definitions())
+            } else {
+                // One fused pass: the agent allowlist (when non-empty) and the
+                // loop tool set (when configured) both filter in a single
+                // iteration, avoiding an intermediate allocation.
+                Arc::new(
+                    self.tool_registry
+                        .definitions()
+                        .iter()
+                        .filter(|d| {
+                            (allowed_set.is_empty()
+                                || crate::tool::is_allowed_tool(&d.name, &allowed_set))
+                                && loop_tool_set
+                                    .as_ref()
+                                    .is_none_or(|allowed| allowed.contains(d.name.as_str()))
+                        })
+                        .cloned()
+                        .collect(),
+                )
+            };
         let tool_reference = if is_subagent {
             build_detailed_tool_reference_from_defs(&effective_defs)
         } else {
@@ -645,7 +664,9 @@ impl SessionProcessor {
     /// Load the session history and convert to provider-facing `ChatMessage`s
     /// with the per-session version cache (FR-006 / PERF-007).
     ///
-    /// Returns `(chat_messages, compressed_this_turn, last_reported_input_tokens, context_window)`.
+    /// Returns `(chat_messages, last_reported_input_tokens, context_window)`.
+    /// Compression hysteresis lives in [`crate::session::loop_steps::LoopState`]
+    /// (set by the LLM stage itself); the loader no longer reports it.
     pub(crate) async fn build_turn_chat_messages(
         &self,
         session_id: &str,
@@ -653,7 +674,7 @@ impl SessionProcessor {
         model_ref: &crate::agent::ModelRef,
         _session_config: &ragent_config::Config,
         profiler: &Arc<crate::session::profiler::AgentLoopProfiler>,
-    ) -> Result<(Vec<ChatMessage>, bool, u64, usize)> {
+    ) -> Result<(Vec<ChatMessage>, u64, usize)> {
         let history = {
             let _scope = profiler.scope("history.load");
             // P-1: route `get_messages` through `storage_op` so the SQLite
@@ -663,7 +684,6 @@ impl SessionProcessor {
             self.storage_op(move |s| s.get_messages(&sid)).await?
         };
 
-        let compressed_this_turn = false;
         let last_reported_input_tokens: u64 = {
             let session_state_lock = self
                 .session_manager
@@ -716,8 +736,13 @@ impl SessionProcessor {
                     .session_manager
                     .as_ref()
                     .session_state_cache(session_id);
-                if let Ok(mut state_guard) = session_state_lock.lock() {
-                    state_guard.store_chat_messages(built.clone(), None);
+                match session_state_lock.lock() {
+                    Ok(mut state_guard) => {
+                        state_guard.store_chat_messages(built.clone(), None);
+                    }
+                    Err(_) => {
+                        tracing::warn!(session_id, "session_state cache lock poisoned");
+                    }
                 }
                 built
             }
@@ -725,12 +750,7 @@ impl SessionProcessor {
 
         // P-3: return `context_window` so the orchestrator can reuse it
         // instead of resolving the identical value a second time.
-        Ok((
-            chat_messages,
-            compressed_this_turn,
-            last_reported_input_tokens,
-            context_window,
-        ))
+        Ok((chat_messages, last_reported_input_tokens, context_window))
     }
 
     /// Run the display-only AGENTS.md acknowledgement exchange (streams to the

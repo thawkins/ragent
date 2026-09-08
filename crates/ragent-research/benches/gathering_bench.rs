@@ -4,6 +4,8 @@
 //! web + local tool stack. Use to track regressions in the gathering
 //! pipeline as the codebase evolves.
 
+#![allow(missing_docs)]
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use ragent_research::{
     GrepMatch, InputConfig, LocalConfig, LocalGatherer, LocalTool, ResearchManager,
@@ -190,5 +192,6 @@ fn bench_gathering(c: &mut Criterion) {
     });
 }
 
+// gathering registration.
 criterion_group!(benches, bench_gathering);
 criterion_main!(benches);

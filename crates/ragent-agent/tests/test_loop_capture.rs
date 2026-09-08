@@ -324,7 +324,7 @@ async fn test_pre_loop_snapshot_captured_before_first_write() -> Result<()> {
         .get(&session.id)
         .cloned()
         .expect("the loop armed a pre-loop capture");
-    let LoopCapture { snapshot, git } = &*capture;
+    let LoopCapture { snapshot, git } = &capture;
     let snapshot = snapshot
         .as_ref()
         .expect("a write happened so a snapshot exists");

@@ -119,7 +119,7 @@ fn test_shutdown_guard_drop_does_not_panic_and_flushes() {
         .expect("enabled subsystem has instruments");
     reg.sessions_total.add(1, &[]);
 
-    let guard = ShutdownGuard::new(sub);
+    let guard = ShutdownGuard::new(std::sync::Arc::new(sub));
     // Explicitly flush via the guard. The signal handler also calls flush
     // first; dropping the guard then runs shutdown. Both must complete
     // without panicking and the flushed metrics must be visible.

@@ -14,6 +14,23 @@ use crate::app::blueprints::{self};
 use ragent_config::OtelConfig;
 use ragent_telemetry::counters::{TelemetryCountersContent, current_values};
 
+/// Convert a `(name, kind, description, value)` metric tuple row into owned
+/// strings for the `TelemetryCountersContent` payload (shared by all four
+/// metric tables).
+fn tuples_to_strings<'a>(
+    rows: impl Iterator<Item = &'a (&'static str, &'static str, &'static str, String)>,
+) -> Vec<(String, String, String, String)> {
+    rows.map(|(n, k, d, v)| {
+        (
+            (*n).to_string(),
+            (*k).to_string(),
+            (*d).to_string(),
+            v.clone(),
+        )
+    })
+    .collect()
+}
+
 use crate::research_adapter::RagentCompleter;
 
 // Prompt optimization templates
@@ -67,6 +84,7 @@ impl App {
                     "message".to_string(),
                     "tasks".to_string(),
                     "cleanup".to_string(),
+                    "help".to_string(),
                 ]
             }
             "memory" => {
@@ -76,11 +94,12 @@ impl App {
                     "add".to_string(),
                     "forget".to_string(),
                     "config".to_string(),
+                    "help".to_string(),
                 ]
             }
             "agent" | "agents" => {
                 // Suggest agent-related subcommands
-                vec!["list".to_string(), "switch".to_string()]
+                vec!["list".to_string(), "switch".to_string(), "help".to_string()]
             }
             "thinking" => {
                 vec![
@@ -92,7 +111,12 @@ impl App {
                 ]
             }
             "codeindex" => {
-                vec!["on".to_string(), "off".to_string(), "sync".to_string()]
+                vec![
+                    "on".to_string(),
+                    "off".to_string(),
+                    "sync".to_string(),
+                    "help".to_string(),
+                ]
             }
             "tools" => vec![
                 "show".to_string(),
@@ -110,12 +134,12 @@ impl App {
                 ]
             }
             "mouse" => {
-                vec!["on".to_string(), "off".to_string()]
+                vec!["on".to_string(), "off".to_string(), "help".to_string()]
             }
             "websearch" => {
                 vec!["show".to_string(), "test".to_string(), "help".to_string()]
             }
-            "loop" => vec!["help".to_string()],
+            "loop" => vec!["help".to_string(), "--help".to_string(), "-h".to_string()],
             "status" => {
                 vec!["clear".to_string()]
             }
@@ -145,12 +169,14 @@ impl App {
             "reverse" => {
                 vec![
                     "help".to_string(),
+                    "--help".to_string(),
                     "--tech".to_string(),
                     "--create".to_string(),
                 ]
             }
             "router" => {
                 vec![
+                    "help".to_string(),
                     "on".to_string(),
                     "off".to_string(),
                     "status".to_string(),
@@ -164,7 +190,12 @@ impl App {
                 ]
             }
             "config" => {
-                vec!["show".to_string(), "save".to_string(), "list".to_string()]
+                vec![
+                    "show".to_string(),
+                    "save".to_string(),
+                    "list".to_string(),
+                    "help".to_string(),
+                ]
             }
             "triggers" => {
                 vec![
@@ -178,6 +209,7 @@ impl App {
             }
             "research" => {
                 vec![
+                    "help".to_string(),
                     "create".to_string(),
                     "list".to_string(),
                     "open".to_string(),
@@ -206,11 +238,12 @@ impl App {
                 ]
             }
             "init" => {
-                vec!["config".to_string()]
+                vec!["config".to_string(), "help".to_string()]
             }
             "alog" => {
                 vec![
                     "help".to_string(),
+                    "--help".to_string(),
                     "on".to_string(),
                     "off".to_string(),
                     "config".to_string(),
@@ -265,7 +298,7 @@ impl App {
             // so typing a `/` prefix does not re-run `current_dir()` +
             // `Config::load()` + `SkillRegistry::load()` per keystroke.
             let registry = self.cached_skill_registry.get_or_insert_with(|| {
-                let working_dir = std::env::current_dir().unwrap_or_default();
+                let working_dir = crate::app::helpers::current_working_dir();
                 let skill_dirs = ragent_agent::Config::load()
                     .map(|c| c.skill_dirs)
                     .unwrap_or_default();
@@ -436,8 +469,6 @@ impl App {
     /// duplicating the metric definitions and keeps the panel and the chat
     /// output in sync.
     pub(crate) fn telemetry_counters_content() -> TelemetryCountersContent {
-        use std::fmt::Write;
-
         let values = current_values();
 
         let mut out = String::from("From: /telemetry counters\n\n## Telemetry counters\n\n");
@@ -660,6 +691,7 @@ impl App {
         ];
 
         let write_group = |out: &mut String, title: &str, group: &[(&str, &str, &str, String)]| {
+            use std::fmt::Write;
             let _ = writeln!(out, "### {title}");
             for (name, kind, desc, value) in group {
                 let _ = writeln!(out, "- `{name}` — **{value}** — *{kind}* — {desc}");
@@ -691,22 +723,10 @@ impl App {
         );
 
         TelemetryCountersContent {
-            usage: usage
-                .iter()
-                .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
-                .collect(),
-            performance: performance
-                .iter()
-                .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
-                .collect(),
-            cost: cost
-                .iter()
-                .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
-                .collect(),
-            effectiveness: effectiveness
-                .iter()
-                .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
-                .collect(),
+            usage: tuples_to_strings(usage.iter()),
+            performance: tuples_to_strings(performance.iter()),
+            cost: tuples_to_strings(cost.iter()),
+            effectiveness: tuples_to_strings(effectiveness.iter()),
             markdown: out,
         }
     }
@@ -715,7 +735,7 @@ impl App {
     fn handle_telemetry_command(&mut self, args: &str) {
         let sub = args.split_whitespace().next().unwrap_or("");
         match sub {
-            "help" | "" => {
+            "help" | "--help" | "-h" | "" => {
                 self.append_assistant_text(
                     "From: /telemetry help
 
@@ -813,7 +833,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
             parts.collect::<Vec<_>>().join(" ")
         };
         match sub.as_str() {
-            "" | "help" => self.handle_alog_help(),
+            "" | "help" | "--help" | "-h" => self.handle_alog_help(),
             "on" => match ragent_config::activity_log::persist_activity_log(true) {
                 Ok(()) => {
                     self.append_assistant_text(
@@ -1314,7 +1334,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         use ragent_tools_core::edit_log::clear_edit_log_contents;
         let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
         match sub.as_str() {
-            "help" | "" => {
+            "help" | "--help" | "-h" | "" => {
                 self.append_assistant_text(
                     "From: /editlog help\n\n## /editlog — Edit-operation logging\n\n| Subcommand | Description |\n|---|---|\n| `/editlog help` | Show this help |\n| `/editlog status` | Show whether logging is enabled and the log directory |\n| `/editlog on` | Enable logging of `edit` and `multi_edit` operations |\n| `/editlog off` | Disable logging |\n| `/editlog show` | Show counts, outcomes, and success/failure ratio per tool |\n| `/editlog analyse` | Analyse failed edits for `old_str` characteristics that may cause failures |\n| `/editlog clear` | Empty the contents of the editlog files (files are kept) |",
                 );
@@ -1367,7 +1387,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 self.show_editlog_analysis();
             }
             "clear" => {
-                let working_dir = std::env::current_dir().unwrap_or_default();
+                let working_dir = crate::app::helpers::current_working_dir();
                 let cleared = clear_edit_log_contents(&working_dir);
                 self.append_assistant_text(&format!(
                     "From: /editlog clear\n\n[ok] Cleared {cleared} edit-log file{}.",
@@ -1387,7 +1407,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
     /// Render aggregate edit-log statistics into the assistant output.
     fn show_editlog_stats(&mut self) {
         use ragent_tools_core::edit_log::edit_log_stats;
-        let working_dir = std::env::current_dir().unwrap_or_default();
+        let working_dir = crate::app::helpers::current_working_dir();
         let log_dir = working_dir.join("log");
 
         let Some(stats) = edit_log_stats(&working_dir) else {
@@ -1443,7 +1463,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
     /// Render an analysis of failed `old_str` values into the assistant output.
     fn show_editlog_analysis(&mut self) {
         use ragent_tools_core::edit_log::{OldStrRisk, edit_log_analyse};
-        let working_dir = std::env::current_dir().unwrap_or_default();
+        let working_dir = crate::app::helpers::current_working_dir();
         let log_dir = working_dir.join("log");
 
         let Some(analysis) = edit_log_analyse(&working_dir) else {
@@ -1624,6 +1644,13 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 self.status = "about".to_string();
             }
             "agent" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /agent help\n\n## /agent \u{2014} Agent selection\n\n| Subcommand | Description |\n|---|---|\n| `/agent` | Open the interactive agent picker |\n| `/agent <name>` | Switch directly to a named agent (e.g. `coder`, `general`, `architect`) |\n| `/agent help` | Show this help |\n\nUse `/agents` to list every available agent with descriptions.",
+                    );
+                    self.status = "agent: help".to_string();
+                    return;
+                }
                 if args.is_empty() {
                     // Open the agent picker dialog
                     let custom_names: std::collections::HashSet<String> = self
@@ -1752,17 +1779,29 @@ Usage: `/telemetry help|on|off|setup|counters`",
                     self.push_log_no_agent(LogLevel::Info, "context cache cleared".to_string());
                     self.status = "context refreshed".to_string();
                 }
+                "help" | "" => {
+                    self.append_assistant_text(
+                                                        "From: /context help\n\n## /context — Prompt context cache\n\n| Subcommand | Description |\n|---|---|\n| `/context refresh` | Clear the cached file tree, git status, and README so the next message recomputes them |\n| `/context help` | Show this help |"
+                                                    );
+                    self.status = "context: help".to_string();
+                }
                 _ => {
                     self.append_assistant_text(
-                                                        "From: /context\nUsage: `/context refresh` — clears cached file tree, git status, and README context"
-                                                    );
+                        "From: /context\nUsage: `/context refresh` | `/context help`",
+                    );
                 }
             },
 
             // ── /config ──────────────────────────────────────────────────────
             "config" => match args.trim() {
+                "help" | "" => {
+                    self.append_assistant_text(
+                        "From: /config help\n\n## /config — Configuration inspection and backup\n\n| Subcommand | Description |\n|---|---|\n| `/config show` | Display application paths and resolved config values (with source: global/project/env) |\n| `/config save` | Back up the global `ragent.json` into the config `saves/` directory |\n| `/config list` | Browse saved backups and restore one (interactive picker) |\n| `/config help` | Show this help |",
+                    );
+                    self.status = "config: help".to_string();
+                }
                 "show" => {
-                    let cwd = std::env::current_dir().unwrap_or_default();
+                    let cwd = crate::app::helpers::current_working_dir();
                     let home = dirs::home_dir().unwrap_or_default();
                     let data_dir = dirs::data_dir().unwrap_or_default().join("ragent");
                     let config_dir = dirs::config_dir().unwrap_or_default().join("ragent");
@@ -2164,10 +2203,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 }
                 _ => {
                     self.append_assistant_text(
-                        "From: /config\nUsage:\n  `/config show` — display application paths \
-                         and resolved config values (with source: global/project/env)\n  \
-                         `/config save` — back up the global ragent.json\n  \
-                         `/config list` — browse saved backups and restore one",
+                        "From: /config\nUsage: `/config show` | `/config save` | `/config list` | `/config help`",
                     );
                     self.status = "config: usage".to_string();
                 }
@@ -2175,6 +2211,13 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
             // ── /init ────────────────────────────────────────────────────────
             "init" => match args.trim() {
+                // /init help — show usage without starting the analysis run.
+                "help" => {
+                    self.append_assistant_text(
+                        "From: /init help\n\n## /init — Project analysis and default config\n\n| Subcommand | Description |\n|---|---|\n| `/init` | Analyse the project and write a summary to `.ragent/memory/PROJECT_ANALYSIS.md` for future sessions |\n| `/init config` | Write a default `ragent.json` to the global config directory (skipped if one exists) |\n| `/init help` | Show this help |",
+                    );
+                    self.status = "init: help".to_string();
+                }
                 // /init config — write a default ragent.json to the global
                 // config directory (~/.config/ragent/ragent.json on Linux,
                 // ~/Library/Application Support/ragent/ragent.json on macOS,
@@ -2366,6 +2409,13 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 );
             }
             "cancel" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /cancel help\n\n## /cancel \u{2014} Cancel a running task\n\n| Subcommand | Description |\n|---|---|\n| `/cancel <task_id_prefix>` | Cancel a running background task or benchmark by ID prefix |\n| `/cancel help` | Show this help |",
+                    );
+                    self.status = "cancel: help".to_string();
+                    return;
+                }
                 if args.is_empty() {
                     self.status =
                         "[warn] Please provide a task ID prefix: /cancel <id>".to_string();
@@ -2524,7 +2574,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 }
             },
             "compact" => {
-                let _ = self.start_compaction(false);
+                self.start_compaction_or_warn();
             }
             // `/compress` is a deprecated alias for `/compact` (FR-009).
             // It forwards to the same LLM summarisation path so existing
@@ -2535,7 +2585,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     LogLevel::Info,
                     "/compress is a deprecated alias for /compact".to_string(),
                 );
-                let _ = self.start_compaction(false);
+                self.start_compaction_or_warn();
             }
             "cost" => {
                 let Some(output) = self.cost_summary() else {
@@ -2565,7 +2615,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             "actionloop" => {
                 let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
                 match sub.as_str() {
-                    "help" => {
+                    "help" | "--help" | "-h" => {
                         self.append_assistant_text(
                                           "From: /actionloop help\n\n## /actionloop — agent action-loop timing\n\n| Subcommand | Description |\n|---|---|\n| `/actionloop help` | Show this help |\n| `/actionloop` | Show average timing of the agent action-loop buckets |\n| `/actionloop clip` | Copy the timing data to the system clipboard |",
                                       );
@@ -2638,7 +2688,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 }
 
                 // Append user-invocable skills
-                let working_dir = std::env::current_dir().unwrap_or_default();
+                let working_dir = crate::app::helpers::current_working_dir();
                 let skill_dirs = ragent_agent::Config::load()
                     .map(|c| c.skill_dirs)
                     .unwrap_or_default();
@@ -2667,7 +2717,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             }
             "opt" => {
                 // /opt help => show markdown table of available optimization methods
-                if args.is_empty() || args == "help" {
+                if args.is_empty() || matches!(args.trim(), "help" | "--help" | "-h") {
                     let table = OptMethod::help_table();
                     self.append_assistant_text(&format!("From: /opt help\n\n{}", table));
 
@@ -2916,7 +2966,7 @@ Usage: `/log [clear subagents|panics|research|editlog|logwindow|help]`",
                             if rest.is_empty() { None } else { Some(&rest) },
                             "task list",
                         ),
-                        "help" | "" => {
+                        "help" | "--help" | "-h" | "" => {
                             let help = "\
 From: /task help
 
@@ -3004,6 +3054,12 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 };
             }
             "profile" => match args {
+                "help" | "" => {
+                    self.append_assistant_text(
+                        "From: /profile help\n\n## /profile \u{2014} Agent-loop profiler panel\n\n| Subcommand | Description |\n|---|---|\n| `/profile on` | Enable the agent-loop profiler side panel (reads `AgentLoopProfiler::snapshot()`) |\n| `/profile off` | Disable the profiler panel |\n| `/profile help` | Show this help |\n\nAlias: `/perf` behaves identically.",
+                    );
+                    self.status = "profile: help".to_string();
+                }
                 "on" => {
                     self.set_profile_panel_enabled(true);
                 }
@@ -3012,7 +3068,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 }
                 _ => {
                     self.append_assistant_text(
-                        "From: /profile\nUsage: `/profile on` or `/profile off`\n",
+                        "From: /profile\nUsage: `/profile on` | `/profile off` | `/profile help`\n",
                     );
                     self.status = "profile usage".to_string();
                 }
@@ -3022,6 +3078,12 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             // `AgentLoopProfiler::snapshot()`. The panel itself already
             // existed as `/profile`; the alias matches the PERFPLAN wording.
             "perf" => match args {
+                "help" | "" => {
+                    self.append_assistant_text(
+                        "From: /perf help\n\n## /perf \u{2014} Agent-loop profiler panel (alias of /profile)\n\n| Subcommand | Description |\n|---|---|\n| `/perf on` | Enable the agent-loop profiler side panel |\n| `/perf off` | Disable the profiler panel |\n| `/perf help` | Show this help |",
+                    );
+                    self.status = "perf: help".to_string();
+                }
                 "on" => {
                     self.set_profile_panel_enabled(true);
                 }
@@ -3030,7 +3092,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 }
                 _ => {
                     self.append_assistant_text(
-                        "From: /perf\nUsage: `/perf on` or `/perf off` (alias for /profile)\n",
+                        "From: /perf\nUsage: `/perf on` | `/perf off` | `/perf help` (alias for /profile)\n",
                     );
                     self.status = "perf usage".to_string();
                 }
@@ -3070,6 +3132,13 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 self.status = "llm stats".to_string();
             }
             "history" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /history help\n\n## /history — Input history\n\n| Subcommand | Description |\n|---|---|\n| `/history` | Open the history picker (newest first; ↑/↓ to select, Enter to insert) |\n| `/history <filter>` | Restrict the picker to entries containing `<filter>` |\n| `/history help` | Show this help |",
+                    );
+                    self.status = "history: help".to_string();
+                    return;
+                }
                 let filter = args.trim().to_lowercase();
                 if self.input_history.is_empty() {
                     self.status = "No input history yet".to_string();
@@ -3171,6 +3240,12 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                         self.status = "[warn] No active model selected".to_string();
                     }
                 }
+                "help" => {
+                    self.append_assistant_text(
+                        "From: /model help\n\n## /model \u{2014} Model selection and metadata\n\n| Subcommand | Description |\n|---|---|\n| `/model` | Open the model picker for the configured provider (or the provider picker when none is configured) |\n| `/model show` | Print the active model’s metadata report into the chat |\n| `/model help` | Show this help |",
+                    );
+                    self.status = "model: help".to_string();
+                }
                 _ => {
                     self.status = "Usage: /model [show]".to_string();
                 }
@@ -3262,11 +3337,15 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                         force_key_entry: true,
                     });
                 }
+                "help" => {
+                    self.append_assistant_text(
+                        "From: /provider help\n\n## /provider \u{2014} Provider configuration\n\n| Subcommand | Description |\n|---|---|\n| `/provider` | Open the interactive provider setup dialog |\n| `/provider show` | Show configured providers (and the router virtual provider when configured) |\n| `/provider router` | Open the model-router setup dialog seeded from configured providers |\n| `/provider help` | Show this help |",
+                    );
+                    self.status = "provider: help".to_string();
+                }
                 _ => {
                     self.append_assistant_text(
-                        "From: /provider
-  Usage: /provider [show|router]
-  ",
+                        "From: /provider\nUsage: `/provider` | `/provider show` | `/provider router` | `/provider help`",
                     );
                     self.status = "provider: usage".to_string();
                 }
@@ -3278,6 +3357,13 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 self.is_running = false;
             }
             "reload" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /reload help\n\n## /reload \u{2014} Reload customizations\n\n| Subcommand | Description |\n|---|---|\n| `/reload` or `/reload all` | Reload agents, config, MCP servers, and skills |\n| `/reload agents` | Re-scan custom agent definitions (`.ragent/agents/`, `~/.ragent/agents/`) |\n| `/reload config` | Re-read `ragent.json` from disk |\n| `/reload mcp` | Re-read the `mcp` section of the config |\n| `/reload skills` | Re-scan skill directories |\n| `/reload help` | Show this help |",
+                    );
+                    self.status = "reload: help".to_string();
+                    return;
+                }
                 let sub = args.split_whitespace().next().unwrap_or("all");
                 let do_agents = matches!(sub, "all" | "agents");
                 let do_config = matches!(sub, "all" | "config");
@@ -3288,7 +3374,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
 
                 // ── reload agents ──────────────────────────────────────────────────
                 if do_agents {
-                    let cwd_path = std::env::current_dir().unwrap_or_default();
+                    let cwd_path = crate::app::helpers::current_working_dir();
                     let builtin_agents = ragent_agent::agent::create_builtin_agents();
                     let builtin_names: std::collections::HashSet<String> =
                         builtin_agents.iter().map(|a| a.name.clone()).collect();
@@ -3460,6 +3546,13 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 ragent_agent::dir_lists::load_from_config();
             }
             "resume" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /resume help\n\n## /resume — Resume a halted agent\n\n| Subcommand | Description |\n|---|---|\n| `/resume` | Continue a halted agent from where it was interrupted by the user |\n| `/resume help` | Show this help |",
+                    );
+                    self.status = "resume: help".to_string();
+                    return;
+                }
                 if !self.agent_halted {
                     self.status = "Nothing to resume — agent was not halted".to_string();
                     self.push_log_no_agent(LogLevel::Warn, "Nothing to resume".to_string());
@@ -3497,6 +3590,13 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 });
             }
             "system" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /system help\n\n## /system \u{2014} System prompt override\n\n| Subcommand | Description |\n|---|---|\n| `/system` | Show the current agent system prompt |\n| `/system <prompt>` | Override the active agent’s system prompt for this session |\n| `/system help` | Show this help |",
+                    );
+                    self.status = "system: help".to_string();
+                    return;
+                }
                 if args.is_empty() {
                     // Show current system prompt
                     if let Some(ref prompt) = self.agent_info.prompt {
@@ -3522,7 +3622,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                         self.append_assistant_text(&self.render_tool_visibility_table());
                         self.status = "tools".to_string();
                     }
-                    ["help"] | ["usage"] => {
+                    ["help"] | ["--help"] | ["-h"] | ["usage"] => {
                         self.append_assistant_text(
                                                   "From: /tools\nUsage: `/tools` | `/tools show` | `/tools help` | `/tools <switch>` | `/tools <switch> on|off`\n\nValid switches: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
                                               );
@@ -3606,7 +3706,14 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             }
 
             "skills" => {
-                let working_dir = std::env::current_dir().unwrap_or_default();
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /skills help\n\n## /skills \u{2014} Registered skill packs\n\n| Subcommand | Description |\n|---|---|\n| `/skills` | List every registered skill with scope, access, and description |\n| `/skills help` | Show this help |\n\nSkills are discovered from `~/.ragent/skills/<name>/SKILL.md` (personal) and `.ragent/skills/<name>/SKILL.md` (project). Reload with `/reload skills`.",
+                    );
+                    self.status = "skills: help".to_string();
+                    return;
+                }
+                let working_dir = crate::app::helpers::current_working_dir();
                 let skill_dirs = ragent_agent::Config::load()
                     .map(|c| c.skill_dirs)
                     .unwrap_or_default();
@@ -3695,6 +3802,13 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 self.status = "skills".to_string();
             }
             "tasks" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /tasks help\n\n## /tasks \u{2014} Session task list (alias of /task list)\n\n| Subcommand | Description |\n|---|---|\n| `/tasks` | List task items for the current session |\n| `/tasks <status>` | Restrict the list to a status (e.g. `pending`, `in_progress`, `completed`) |\n| `/tasks help` | Show this help |\n\nSee `/task help` for the full task-management command family.",
+                    );
+                    self.status = "tasks: help".to_string();
+                    return;
+                }
                 if !self.ensure_session() {
                     return;
                 }
@@ -3712,6 +3826,13 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 let mcp_args: Vec<&str> = args.split_whitespace().collect();
                 let sub = mcp_args.first().copied().unwrap_or("");
                 match sub {
+                    "help" => {
+                        self.append_assistant_text(
+                            "From: /mcp help\n\n## /mcp \u{2014} Model Context Protocol servers\n\n| Subcommand | Description |\n|---|---|\n| `/mcp` | Show all registered servers and their connection status |\n| `/mcp discover` | Scan the environment for known MCP servers and open the discover dialog |\n| `/mcp connect <id>` | Connect to a server configured in `ragent.json` (placeholder \u{2014} not yet implemented) |\n| `/mcp disconnect <id>` | Disconnect a server (placeholder \u{2014} not yet implemented) |\n| `/mcp help` | Show this help |",
+                        );
+                        self.status = "mcp: help".to_string();
+                        return;
+                    }
                     "discover" => {
                         // Run discovery synchronously using block_in_place.
                         let found = tokio::task::block_in_place(|| {
@@ -3801,7 +3922,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
                 let sub = if sub.is_empty() { "status" } else { sub };
                 match sub {
-                    "help" => {
+                    "help" | "--help" | "-h" => {
                         let output = "From: /team help
 ## /team command reference
 
@@ -3892,7 +4013,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         }
                         let name = name.expect("name guaranteed Some above");
 
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let sid = self.session_id.clone().unwrap_or_default();
                         match TeamStore::create(&name, &sid, &working_dir, true) {
                             Ok(store) => {
@@ -3993,7 +4114,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     }
 
                     "show" => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         if rest.is_empty() {
                             let teams = TeamStore::list_teams(&working_dir);
                             let mut output = String::from("From: /team show\n");
@@ -4135,7 +4256,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 return;
                             }
                         }
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         match TeamStore::load_by_name(rest, &working_dir) {
                             Ok(store) => match std::fs::remove_dir_all(&store.dir) {
                                 Ok(_) => {
@@ -4183,7 +4304,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         }
                     }
                     "blueprint" | "blueprints" => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let blueprint_dirs = blueprints::list_installed_blueprints(&working_dir);
 
                         if rest.is_empty() {
@@ -4215,7 +4336,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         let member = self.team_members.iter().find(|m| m.name == name).cloned();
                         match (self.active_team.clone(), member) {
                             (Some(team), Some(member)) => {
-                                let working_dir = std::env::current_dir().unwrap_or_default();
+                                let working_dir = crate::app::helpers::current_working_dir();
                                 match TeamStore::load_by_name(&team.name, &working_dir) {
                                     Ok(store) => {
                                         match Mailbox::open(&store.dir, &member.agent_id) {
@@ -4263,7 +4384,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     "tasks" => {
                         let team_opt = self.active_team.clone();
                         if let Some(team) = team_opt {
-                            let working_dir = std::env::current_dir().unwrap_or_default();
+                            let working_dir = crate::app::helpers::current_working_dir();
                             match TeamStore::load_by_name(&team.name, &working_dir) {
                                 Ok(store) => match store.task_store() {
                                     Ok(task_store) => match task_store.read() {
@@ -4322,7 +4443,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     "clear" => {
                         let team_opt = self.active_team.clone();
                         if let Some(team) = team_opt {
-                            let working_dir = std::env::current_dir().unwrap_or_default();
+                            let working_dir = crate::app::helpers::current_working_dir();
                             match TeamStore::load_by_name(&team.name, &working_dir) {
                                 Ok(store) => {
                                     let tasks_path = store.dir.join("tasks.json");
@@ -4420,7 +4541,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 return;
                             }
 
-                            let working_dir = std::env::current_dir().unwrap_or_default();
+                            let working_dir = crate::app::helpers::current_working_dir();
                             let team_name = team.name.clone();
                             let removed = match TeamStore::load_by_name(&team_name, &working_dir) {
                                 Ok(store) => std::fs::remove_dir_all(&store.dir).is_ok(),
@@ -4511,7 +4632,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         // If confirmed, perform the force cleanup
                         let team_opt = self.active_team.clone();
                         if let Some(team) = team_opt {
-                            let working_dir = std::env::current_dir().unwrap_or_default();
+                            let working_dir = crate::app::helpers::current_working_dir();
                             let team_name = team.name.clone();
                             match TeamStore::load_by_name(&team_name, &working_dir) {
                                 Ok(mut store) => {
@@ -4694,7 +4815,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
 
                 match sub {
-                    "help" | "" => {
+                    "help" | "--help" | "-h" | "" => {
                         let help = "\
 From: /bash help
 
@@ -4945,7 +5066,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                     .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
 
                 match sub {
-                    "help" | "" => {
+                    "help" | "--help" | "-h" | "" => {
                         let help = "\
             From: /dirs help
             
@@ -5247,6 +5368,14 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
             }
             "yolo" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /yolo help\n\n## /yolo \u{2014} YOLO mode toggle\n\n| Subcommand | Description |\n|---|---|\n| `/yolo` | Toggle YOLO mode \u{2014} bypasses bash denied-pattern checks, the dynamic context allowlist, MCP config validation, and obfuscation detection |\n| `/yolo help` | Show this help |\n\n[warn] YOLO mode lets the agent execute any command without restriction. The state persists in the config across restarts.",
+                    );
+                    self.status = "yolo: help".to_string();
+                    self.needs_redraw = true;
+                    return;
+                }
                 match ragent_config::yolo::toggle_persist() {
                     Ok(new_state) => {
                         let label = if new_state {
@@ -5297,6 +5426,13 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
             // FR-014: Remove the last user/assistant turn pair from the conversation.
             // This allows users to correct mistakes or backtrack from unhelpful responses.
             "undo" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /undo help\n\n## /undo — Remove the last turn\n\n| Subcommand | Description |\n|---|---|\n| `/undo` | Remove the last user message and everything after it (typically one assistant response) from the conversation |\n| `/undo help` | Show this help |",
+                    );
+                    self.status = "undo: help".to_string();
+                    return;
+                }
                 if self.session_id.is_none() {
                     self.status = "[warn] No active session to undo".to_string();
                     return;
@@ -5349,6 +5485,13 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
             // FR-015: Set a human-readable display name on the active session.
             // The name is persisted in session metadata and appears in session lists.
             "name" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /name help\n\n## /name \u{2014} Session display name\n\n| Subcommand | Description |\n|---|---|\n| `/name <display-name>` | Set a human-readable name for the active session (persists in session metadata) |\n| `/name` | Clear the session name |\n| `/name help` | Show this help |",
+                    );
+                    self.status = "name: help".to_string();
+                    return;
+                }
                 if self.session_id.is_none() {
                     self.status = "[warn] No active session to name".to_string();
                     return;
@@ -5407,7 +5550,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                     .split_once(char::is_whitespace)
                     .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
                 match sub {
-                    "help" => {
+                    "help" | "--help" | "-h" => {
                         let help = "\
 From: /swarm help\n\
 ## Swarm — Fleet-Style Auto-Decomposition\n\n\
@@ -5521,26 +5664,55 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "autopilot" => {
                 let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
                 match sub.as_str() {
+                    "help" | "" => {
+                        self.append_assistant_text(
+                            "From: /autopilot help\n\n## /autopilot \u{2014} Autonomous operation\n\n| Subcommand | Description |\n|---|---|\n| `/autopilot on` | Enable autonomous operation (the agent keeps working without user prompts) |\n| `/autopilot on --max-tokens N` | Cap the total tokens an autopilot run may consume |\n| `/autopilot on --max-time N` | Cap the autopilot wall-clock time in seconds |\n| `/autopilot off` | Return to interactive mode |\n| `/autopilot status` | Show whether autopilot is running and for how long |\n| `/autopilot help` | Show this help |\n\nWhile autopilot is active the agent calls `task_complete` to signal completion, or you can run `/autopilot off`.",
+                        );
+                        self.status = "autopilot: help".to_string();
+                    }
                     "on" => {
                         // Parse optional flags: --max-tokens N  --max-time N
                         let mut token_budget: Option<u64> = None;
                         let mut time_secs: Option<u64> = None;
                         let parts: Vec<&str> = args.split_whitespace().collect();
                         let mut i = 1; // skip "on"
+                        let mut parse_error: Option<String> = None;
                         while i < parts.len() {
                             match parts[i] {
                                 "--max-tokens" if i + 1 < parts.len() => {
-                                    token_budget = parts[i + 1].parse().ok();
+                                    match parts[i + 1].parse() {
+                                        Ok(v) => token_budget = Some(v),
+                                        Err(_) => {
+                                            parse_error =
+                                                Some(format!("--max-tokens {}", parts[i + 1]));
+                                            break;
+                                        }
+                                    }
                                     i += 2;
                                 }
                                 "--max-time" if i + 1 < parts.len() => {
-                                    time_secs = parts[i + 1].parse().ok();
+                                    match parts[i + 1].parse() {
+                                        Ok(v) => time_secs = Some(v),
+                                        Err(_) => {
+                                            parse_error =
+                                                Some(format!("--max-time {}", parts[i + 1]));
+                                            break;
+                                        }
+                                    }
                                     i += 2;
                                 }
                                 _ => {
                                     i += 1;
                                 }
                             }
+                        }
+                        if let Some(bad) = parse_error {
+                            self.append_assistant_text(&format!(
+                                "From: /autopilot\n[err] invalid value for `{bad}` — \
+                                 expected a positive integer."
+                            ));
+                            self.status = "autopilot: invalid argument".to_string();
+                            return;
                         }
                         self.autopilot_enabled = true;
                         self.autopilot_token_budget = token_budget;
@@ -5585,7 +5757,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     _ => {
                         self.append_assistant_text(
                             "From: /autopilot\n\
-                             Usage: `/autopilot on [--max-tokens N] [--max-time N]` | `off` | `status`"
+                             Usage: `/autopilot on [--max-tokens N] [--max-time N]` | `off` | `status` | `help`"
                         );
                     }
                 }
@@ -5593,13 +5765,23 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
             // ── /plan ────────────────────────────────────────────────────────
             "plan" => {
-                if args.is_empty() {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                                      "From: /plan help\n\
+                                       ## /plan \u{2014} Delegate planning to the plan agent\n\
+                                       Usage: `/plan <task description>`\n\n\
+                                       The plan agent will analyse the codebase and produce a plan for your task. \
+                                       You will be asked to approve or reject the plan before implementation begins."
+                                  );
+                    self.status = "plan: help".to_string();
+                } else if args.is_empty() {
                     self.append_assistant_text(
                                       "From: /plan\n\
                                        Usage: `/plan <task description>`\n\n\
                                        The plan agent will analyse the codebase and produce a plan for your task. \
                                        You will be asked to approve or reject the plan before implementation begins."
                                   );
+                    self.status = "plan: usage".to_string();
                 } else {
                     let sid = self.session_id.clone().unwrap_or_default();
                     self.execute_plan_delegation(&sid, args.to_string(), String::new());
@@ -5674,7 +5856,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         force,
                         agent,
                     } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
 
                         // FR-008: validate spec ID format
@@ -5692,7 +5874,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         };
 
-                        let mgr = SpecManager::new(&specs_root);
                         let spec_dir = specs_root.join(id.as_str());
                         let spec_md_path = spec_dir.join("SPEC.md");
                         let jtbd_path = spec_dir.join("JTBD.md");
@@ -5746,7 +5927,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         };
 
                         // FR-003: refuse if JTBD.md exists and --force not given
-                        let _ = mgr; // SpecManager kept for parity / future use
                         if jtbd_exists && !force {
                             self.status = format!("spec jtbd: {} already has JTBD.md", spec_id);
                             self.append_assistant_text(&format!(
@@ -5860,7 +6040,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             sdd_cfg.constitution,
                             sdd_cfg.feedback_loop,
                         );
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
                         let mgr = SpecManager::new(&specs_root);
                         let rt = tokio::runtime::Handle::current();
@@ -5919,7 +6099,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::List { args } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
                         let mgr = SpecManager::new(&specs_root);
                         let mut filter = SpecFilter::new();
@@ -5936,47 +6116,47 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         }
                         let rt = tokio::runtime::Handle::current();
-                        let result: Result<String, String> = tokio::task::block_in_place(|| {
-                            rt.block_on(async {
-                                let specs = match mgr.list_specs(&filter).await {
-                                    Ok(s) => s,
-                                    Err(e) => return Err(format!("spec: list failed: {}", e)),
-                                };
-                                if specs.is_empty() {
-                                    return Ok("No specs found.".to_string());
-                                }
-                                let mut lines = vec!["From: /spec list".to_string(), String::new()];
-                                lines.push(format!(
-                                    "| {:<20} | {:<12} | {:<30} |",
-                                    "ID", "Status", "Title"
-                                ));
-                                lines.push(
-                                    "|".to_string()
-                                        + &"-".repeat(22)
-                                        + "|"
-                                        + &"-".repeat(14)
-                                        + "|"
-                                        + &"-".repeat(32)
-                                        + "|",
-                                );
-                                for spec in &specs {
+                        let result: Result<(usize, String), String> =
+                            tokio::task::block_in_place(|| {
+                                rt.block_on(async {
+                                    let specs = match mgr.list_specs(&filter).await {
+                                        Ok(s) => s,
+                                        Err(e) => return Err(format!("spec: list failed: {}", e)),
+                                    };
+                                    let count = specs.len();
+                                    if specs.is_empty() {
+                                        return Ok((0, "No specs found.".to_string()));
+                                    }
+                                    let mut lines =
+                                        vec!["From: /spec list".to_string(), String::new()];
                                     lines.push(format!(
                                         "| {:<20} | {:<12} | {:<30} |",
-                                        spec.id.as_str(),
-                                        spec.status.as_str(),
-                                        spec.title.chars().take(30).collect::<String>()
+                                        "ID", "Status", "Title"
                                     ));
-                                }
-                                Ok(lines.join("\n"))
-                            })
-                        });
+                                    lines.push(
+                                        "|".to_string()
+                                            + &"-".repeat(22)
+                                            + "|"
+                                            + &"-".repeat(14)
+                                            + "|"
+                                            + &"-".repeat(32)
+                                            + "|",
+                                    );
+                                    for spec in &specs {
+                                        lines.push(format!(
+                                            "| {:<20} | {:<12} | {:<30} |",
+                                            spec.id.as_str(),
+                                            spec.status.as_str(),
+                                            spec.title.chars().take(30).collect::<String>()
+                                        ));
+                                    }
+                                    Ok((count, lines.join("\n")))
+                                })
+                            });
                         match result {
-                            Ok(output) => {
+                            Ok((count, output)) => {
                                 self.append_assistant_text(&output);
-                                self.status = format!(
-                                    "spec: {} spec(s) listed",
-                                    output.lines().count().saturating_sub(4)
-                                );
+                                self.status = format!("spec: {count} spec(s) listed");
                             }
                             Err(e) => {
                                 self.status = format!("spec: {}", e);
@@ -5984,7 +6164,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Search { query } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
                         let mgr = SpecManager::new(&specs_root);
                         let rt = tokio::runtime::Handle::current();
@@ -6027,7 +6207,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         spec_id,
                         new_status,
                     } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
                         let mgr = SpecManager::new(&specs_root);
                         let id = match ragent_specs::spec::SpecId::new(&spec_id) {
@@ -6095,7 +6275,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         task_id,
                         new_status,
                     } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
                         let mgr = SpecManager::new(&specs_root);
                         let id = match ragent_specs::spec::SpecId::new(&spec_id) {
@@ -6184,7 +6364,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Activate { spec_id } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
                         let mgr = SpecManager::new(&specs_root);
                         let id = match ragent_specs::spec::SpecId::new(&spec_id) {
@@ -6225,7 +6405,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 let _ = self
                                     .session_processor
                                     .spec_manager
-                                    .set(Arc::new(SpecManager::new(&specs_root)));
+                                    // Reuse the manager Arc built above instead of
+                                    // constructing a second SpecManager for the same
+                                    // specs_root.
+                                    .set(self.spec_manager.clone().unwrap_or_else(|| {
+                                        Arc::new(SpecManager::new(&specs_root))
+                                    }));
                                 self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                      "From: /spec activate\n\n[ok] **{}** is now the active spec.\n\n\
                                                                                                                                                                                                                                                                                                                                                                                        Status: {}\n\
                                                                                                                                                                                                                                                                                                                                                                                        Title: {}\n\
@@ -6265,7 +6450,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Delete { spec_id, yes } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
                         let mgr = SpecManager::new(&specs_root);
                         let id = match ragent_specs::spec::SpecId::new(&spec_id) {
@@ -6315,7 +6500,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         });
                     }
                     SpecCommand::Coverage { spec_id } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
                         let mgr = SpecManager::new(&specs_root);
                         let id = match ragent_specs::spec::SpecId::new(&spec_id) {
@@ -6375,7 +6560,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     let total =
                                         req_to_total.get(req.id.as_str()).map_or(0, |v| v.len());
                                     let covered = completed > 0 && completed == total;
-                                    let symbol = if covered { "[ok]" } else { "⚪" };
+                                    let symbol = if covered { "[ok]" } else { "[  ]" };
                                     let detail = if total > 0 {
                                         format!(
                                             " ({} of {} linked tasks completed)",
@@ -6435,7 +6620,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         dry_run,
                     } => {
                         use ragent_specs::{ImplOptions, SpecImplRunner};
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
 
                         // Validate spec exists
@@ -6536,7 +6721,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     rt.block_on(async {
                                         match runner.run().await {
                                             Ok(r) => Ok(r),
-                                            Err(e) => Err(format!("{}", e)),
+                                            Err(e) => Err(format!("spec impl failed: {e}")),
                                         }
                                     })
                                 });
@@ -6651,7 +6836,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             SpecCommand::build_add_log(&spec_id, &feature),
                         );
 
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
                         let mgr = SpecManager::new(&specs_root);
                         let rt = tokio::runtime::Handle::current();
@@ -6797,7 +6982,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Update { spec_id } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
 
                         // FR-006: validate spec ID format
@@ -6930,7 +7115,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         // FR-009: optionally create a git branch for the spec.
                         let sdd_cfg = ragent_agent::Config::load().unwrap_or_default().sdd;
                         if sdd_cfg.branch_per_spec {
-                            let working_dir = std::env::current_dir().unwrap_or_default();
+                            let working_dir = crate::app::helpers::current_working_dir();
                             let branch_result =
                                 ragent_specs::create_spec_branch(&specname, &working_dir);
                             self.append_assistant_text(&SpecCommand::build_branch_message(
@@ -6975,7 +7160,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         spec_id,
                         tech_context,
                     } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
 
                         // FR-006: validate spec ID format
@@ -7113,7 +7298,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         });
                     }
                     SpecCommand::Tasks { spec_id } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
 
                         // FR-006: validate spec ID format
@@ -7283,7 +7468,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Feedback { spec_id, note } => {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let working_dir = crate::app::helpers::current_working_dir();
                         let specs_root = working_dir.join("specs");
 
                         // Validate spec ID format
@@ -7401,7 +7586,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             // ── /mode ────────────────────────────────────────────────────────
             "mode" => {
                 let sub = args.trim().to_lowercase();
-                if sub.is_empty() || sub == "status" {
+                if sub == "help" {
+                    self.append_assistant_text(
+                        "From: /mode help\n\n## /mode \u{2014} Agent role mode\n\n| Subcommand | Description |\n|---|---|\n| `/mode` or `/mode status` | Show the current role mode |\n| `/mode architect` | Focus the agent on architecture and design tasks |\n| `/mode coder` | Focus the agent on implementation tasks |\n| `/mode reviewer` | Focus the agent on code review |\n| `/mode debugger` | Focus the agent on debugging and diagnosis |\n| `/mode tester` | Focus the agent on testing tasks |\n| `/mode off` (or `normal`) | Return to normal mode (no role focus) |\n| `/mode help` | Show this help |",
+                    );
+                    self.status = "mode: help".to_string();
+                } else if sub.is_empty() || sub == "status" {
                     let current = self
                         .role_mode
                         .as_ref()
@@ -7439,7 +7629,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 }
             }
             "memory" => {
-                let project_dir = std::env::current_dir().unwrap_or_default();
+                let project_dir = crate::app::helpers::current_working_dir();
 
                 match args.trim() {
                     "show" | "" => {
@@ -7516,7 +7706,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                         self.append_assistant_text(&output);
                     }
-                    "help" => {
+                    "help" | "--help" | "-h" => {
                         self.append_assistant_text(
                             "From: /memory\nUsage: `/memory show` | `/memory help`",
                         );
@@ -7530,6 +7720,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
 
             "github" => match args.trim() {
+                "help" => {
+                    self.append_assistant_text(
+                        "From: /github help\n\n## /github \u{2014} GitHub authentication\n\n| Subcommand | Description |\n|---|---|\n| `/github login` | Authenticate via the OAuth device flow (opens the pending dialog) |\n| `/github logout` | Remove the stored GitHub token |\n| `/github status` | Show whether a GitHub token is configured (env `GITHUB_TOKEN` or `~/.ragent/github_token`) |\n| `/github help` | Show this help |",
+                    );
+                    self.status = "github: help".to_string();
+                }
                 "login" => {
                     // Start the device flow synchronously so we can show the
                     // same OAuth pending dialog that Copilot uses.
@@ -7655,11 +7851,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 },
                 _ => {
                     self.append_assistant_text(
-                                          "From: /github\nUsage: `/github login` | `/github logout` | `/github status`",
+                                          "From: /github\nUsage: `/github login` | `/github logout` | `/github status` | `/github help`",
                                       );
                 }
             },
             "gitlab" => match args.trim() {
+                "help" => {
+                    self.append_assistant_text(
+                        "From: /gitlab help\n\n## /gitlab \u{2014} GitLab authentication\n\n| Subcommand | Description |\n|---|---|\n| `/gitlab setup` | Open the setup dialog for instance URL, username, and personal access token |\n| `/gitlab logout` | Remove the stored token and config |\n| `/gitlab status` | Show the current GitLab configuration state |\n| `/gitlab help` | Show this help |",
+                    );
+                    self.status = "gitlab: help".to_string();
+                }
                 "setup" => {
                     // Pre-fill from existing config if available
                     let (url, _user) = {
@@ -7730,12 +7932,18 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 }
                 _ => {
                     self.append_assistant_text(
-                        "From: /gitlab\nUsage: `/gitlab setup` | `/gitlab logout` | `/gitlab status`",
+                        "From: /gitlab\nUsage: `/gitlab setup` | `/gitlab logout` | `/gitlab status` | `/gitlab help`",
                     );
                 }
             },
 
             "update" => match args.trim() {
+                "help" => {
+                    self.append_assistant_text(
+                        "From: /update help\n\n## /update \u{2014} Self-update check and install\n\n| Subcommand | Description |\n|---|---|\n| `/update` | Check the latest GitHub release and report whether an update is available |\n| `/update install` | Download and replace the running binary, then restart ragent |\n| `/update help` | Show this help |",
+                    );
+                    self.status = "update: help".to_string();
+                }
                 "install" => {
                     self.append_assistant_text(
                         "From: /update install\n⬇️ Downloading latest release…",
@@ -7825,10 +8033,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             },
 
             "doctor" => {
+                if args.trim() == "help" {
+                    self.append_assistant_text(
+                        "From: /doctor help\n\n## /doctor — System diagnostics\n\n| Subcommand | Description |\n|---|---|\n| `/doctor` | Check git, ripgrep, GitHub token, config, and other environment prerequisites, then print a diagnostic report |\n| `/doctor help` | Show this help |",
+                    );
+                    self.status = "doctor: help".to_string();
+                    return;
+                }
                 self.append_assistant_text("From: /doctor\n🩺 Running diagnostics…");
                 let event_bus = self.event_bus.clone();
                 let sid = self.session_id.clone().unwrap_or_default();
-                let working_dir = std::env::current_dir().unwrap_or_default();
+                let working_dir = crate::app::helpers::current_working_dir();
                 let storage = self.storage.clone();
                 let configured_provider = self.configured_provider.clone();
                 let selected_model = self.selected_model.clone();
@@ -8147,7 +8362,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         );
                     }
                 }
-                "help" | "status" | "" => {
+                "help" | "--help" | "-h" | "status" | "" => {
                     let base = format!("http://{}", self.webapi_addr);
                     let status = if self.webapi_server.is_some() {
                         format!("🟢 **Running** — {base}")
@@ -8221,7 +8436,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "websearch" => {
                 let sub = args.split_whitespace().next().unwrap_or("");
                 match sub {
-                    "help" => {
+                    "help" | "--help" | "-h" => {
                         self.append_assistant_text(
                                                     "From: /websearch\n\
                                                     Web search engine diagnostics.\n\n\
@@ -8237,58 +8452,69 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                     "test" => {
                         self.status = "websearch: testing engines...".to_string();
-                        let config = ragent_config::Config::load().unwrap_or_default();
-                        let ctx = ragent_tools_extended::ToolContext {
-                            session_id: String::new(),
-                            working_dir: std::env::current_dir().unwrap_or_default(),
-                            event_bus: Arc::new(ragent_agent::event::EventBus::new(16)),
-                            storage: None,
-                            code_index: None,
-                            config: Some(Arc::new(config)),
-                            read_timestamps: Arc::new(std::sync::RwLock::new(
-                                std::collections::HashMap::new(),
-                            )),
-                        };
-                        use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
-                        let results = tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(MfSearchTool::engine_test(&ctx))
-                        });
-                        let mut output = String::from(
-                            "From: /websearch test\n\n\
-                                                                | Engine | Returned | Count |\n\
-                                                                |--------|:--------:|------:|\n",
-                        );
-                        let mut total = 0usize;
-                        for r in &results {
-                            let returned = if r.returned_results {
-                                "[ok] yes"
-                            } else {
-                                "[err] no"
+                        self.append_assistant_text("Starting Websearch test....\n");
+                        // Run the live engine probe off the UI thread: the
+                        // acknowledgement above must render before the network
+                        // round-trips complete, so the rendered table is
+                        // deposited into `websearch_test_result` and drained by
+                        // `poll_websearch_test_result` on a later frame.
+                        let websearch_result = Arc::clone(&self.websearch_test_result);
+                        tokio::spawn(async move {
+                            let config = ragent_config::Config::load().unwrap_or_default();
+                            let ctx = ragent_tools_extended::ToolContext {
+                                session_id: String::new(),
+                                working_dir: crate::app::helpers::current_working_dir(),
+                                event_bus: Arc::new(ragent_agent::event::EventBus::new(16)),
+                                storage: None,
+                                code_index: None,
+                                config: Some(Arc::new(config)),
+                                read_timestamps: Arc::new(std::sync::RwLock::new(
+                                    std::collections::HashMap::new(),
+                                )),
                             };
-                            output.push_str(&format!(
-                                "| {:<10} | {} | {:>5} |\n",
-                                r.name, returned, r.result_count
-                            ));
-                            total += r.result_count;
-                        }
-                        output.push_str(&format!("\nTotal raw results: {total}"));
-                        let failed: Vec<_> =
-                            results.iter().filter(|r| !r.error.is_empty()).collect();
-                        if !failed.is_empty() {
-                            output.push_str("\n\nErrors:");
-                            for r in failed {
-                                output.push_str(&format!("\n• {} — {}", r.name, r.error));
+                            use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
+                            let results = MfSearchTool::engine_test(&ctx).await;
+                            let mut output = String::from(
+                                "From: /websearch test\n\n\
+                                 | Engine | Returned | Count |\n\
+                                 |--------|:--------:|------:|\n",
+                            );
+                            let mut total = 0usize;
+                            for r in &results {
+                                let returned = if r.returned_results {
+                                    "[ok] yes"
+                                } else {
+                                    "[err] no"
+                                };
+                                output.push_str(&format!(
+                                    "| {:<10} | {} | {:>5} |\n",
+                                    r.name, returned, r.result_count
+                                ));
+                                total += r.result_count;
                             }
-                        }
-                        self.append_assistant_text(&output);
-                        self.status = "websearch: engine test complete".to_string();
+                            output.push_str(&format!("\nTotal raw results: {total}"));
+                            let failed: Vec<_> =
+                                results.iter().filter(|r| !r.error.is_empty()).collect();
+                            if !failed.is_empty() {
+                                output.push_str("\n\nErrors:");
+                                for r in failed {
+                                    output.push_str(&format!("\n• {} — {}", r.name, r.error));
+                                }
+                            }
+                            if let Ok(mut guard) = websearch_result.lock() {
+                                *guard = Some(output);
+                            } else {
+                                tracing::error!(
+                                    "websearch_test_result mutex poisoned, result dropped"
+                                );
+                            }
+                        });
                     }
                     "show" | "" => {
                         let config = ragent_config::Config::load().unwrap_or_default();
                         let ctx = ragent_tools_extended::ToolContext {
                             session_id: String::new(),
-                            working_dir: std::env::current_dir().unwrap_or_default(),
+                            working_dir: crate::app::helpers::current_working_dir(),
                             event_bus: Arc::new(ragent_agent::event::EventBus::new(16)),
                             storage: None,
                             code_index: None,
@@ -8338,6 +8564,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "mouse" => {
                 let sub = args.split_whitespace().next().unwrap_or("");
                 match sub {
+                    "help" => {
+                        self.append_assistant_text(
+                            "From: /mouse help\n\n## /mouse \u{2014} Mouse support\n\n| Subcommand | Description |\n|---|---|\n| `/mouse on` | Enable mouse support (scrolling, clicking, selection) |\n| `/mouse off` | Disable mouse support and switch to keyboard-only mode |\n| `/mouse help` | Show this help |\n\nRunning `/mouse` with no subcommand shows the current state.",
+                        );
+                        self.status = "mouse: help".to_string();
+                    }
                     "on" => {
                         self.mouse_enabled = true;
                         self.append_assistant_text(
@@ -8359,7 +8591,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             "disabled"
                         };
                         self.append_assistant_text(&format!(
-                                                                              "From: /mouse\n\nMouse support is currently **{}**.\n\nUsage: `/mouse on` | `/mouse off`",
+                                                                              "From: /mouse\n\nMouse support is currently **{}**.\n\nUsage: `/mouse on` | `/mouse off` | `/mouse help`",
                                                                               status
                                                                           ));
                         self.status = format!("mouse: {}", status);
@@ -8410,7 +8642,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         } else {
                             // Create and initialize the code index
-                            let cwd = std::env::current_dir().unwrap_or_default();
+                            let cwd = crate::app::helpers::current_working_dir();
                             let index_config = ragent_codeindex::types::CodeIndexConfig {
                                 enabled: true,
                                 project_root: cwd.clone(),
@@ -9170,7 +9402,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         }
                     }
-                    "help" => {
+                    "help" | "--help" | "-h" => {
                         self.append_assistant_text(
                                                   "## /codeindex \u{2014} Codebase Index Management\n\n\
                                                    **Sub-commands:**\n\n\
@@ -9250,7 +9482,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                     "reload" => {
                         // Find the config file path
-                        let cwd = std::env::current_dir().unwrap_or_default();
+                        let cwd = crate::app::helpers::current_working_dir();
                         let project_config = cwd.join(".ragent").join("ragent.json");
                         let config_dir = dirs::config_dir()
                             .unwrap_or_else(|| cwd.clone())
@@ -9513,7 +9745,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             // ── /loop ────────────────────────────────────────────────────
             "loop" => handle_loop_command(self, args),
             _ => {
-                let working_dir = std::env::current_dir().unwrap_or_default();
+                let working_dir = crate::app::helpers::current_working_dir();
                 let skill_dirs = ragent_agent::Config::load()
                     .map(|c| c.skill_dirs)
                     .unwrap_or_default();
@@ -9539,7 +9771,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                     // Ensure a session exists
                     if self.session_id.is_none() {
-                        let dir = std::env::current_dir().unwrap_or_default();
+                        let dir = crate::app::helpers::current_working_dir();
                         match self.session_processor.session_manager.create_session(dir) {
                             Ok(session) => {
                                 self.session_id = Some(session.id.clone());
@@ -9584,7 +9816,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                     let flag = Arc::new(AtomicBool::new(false));
                     self.cancel_flag = Some(flag.clone());
-                    let working_dir = std::env::current_dir().unwrap_or_default();
+                    let working_dir = crate::app::helpers::current_working_dir();
 
                     tokio::spawn(async move {
                         match ragent_agent::skill::invoke::invoke_skill(
@@ -9764,7 +9996,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "list" => self.handle_cron_list(),
             "detail" => self.handle_cron_detail(rest),
             "log" => self.handle_cron_log(rest),
-            "help" => self.handle_cron_help(),
+            "help" | "--help" | "-h" => self.handle_cron_help(),
             _ => {
                 self.append_assistant_text(&format!(
                     "From: /cron\n[warn] Unknown sub-command '{sub}'. Use `/cron help` for usage."
@@ -10157,7 +10389,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     /// Handle `/cron log [event_id]` — display execution log.
     fn handle_cron_log(&mut self, rest: &str) {
         let filter = rest.trim();
-        let working_dir = std::env::current_dir().unwrap_or_default();
+        let working_dir = crate::app::helpers::current_working_dir();
         let event_id = if filter.is_empty() {
             None
         } else {
@@ -10237,7 +10469,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "disable" => self.handle_triggers_set_enabled(rest, false),
             "remove" => self.handle_triggers_remove(rest),
             "status" => self.handle_triggers_status(),
-            "help" => self.handle_triggers_help(),
+            "help" | "--help" | "-h" => self.handle_triggers_help(),
             _ => {
                 self.append_assistant_text(&format!(
                     "From: /triggers\n[warn] Unknown sub-command '{sub}'. Use `/triggers help` for usage."
@@ -10462,7 +10694,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         let filename = format!("bug-report-{}.md", timestamp);
 
         // Determine output directory: prefer project root `log/`, fallback to data dir
-        let cwd = std::env::current_dir().unwrap_or_default();
+        let cwd = crate::app::helpers::current_working_dir();
         let log_dir = cwd.join("log");
         if let Err(e) = fs::create_dir_all(&log_dir) {
             self.append_assistant_text(&format!(
@@ -10676,7 +10908,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "claim" => self.handle_inbox_set_status(rest, "claimed"),
             "dismiss" => self.handle_inbox_set_status(rest, "dismissed"),
             "clear" => self.handle_inbox_clear(),
-            "help" => self.handle_inbox_help(),
+            "help" | "--help" | "-h" => self.handle_inbox_help(),
             _ => {
                 self.append_assistant_text(&format!(
                     "From: /inbox\n[warn] Unknown sub-command '{sub}'. Use `/inbox help` for usage."
@@ -10688,7 +10920,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
     /// Handle `/inbox list` — display all inbox findings.
     fn handle_inbox_list(&mut self) {
-        let data_dir = std::env::current_dir().unwrap_or_default();
+        let data_dir = crate::app::helpers::current_working_dir();
         let entries = match ragent_agent::loop_state::read_inbox(&data_dir) {
             Ok(entries) => entries,
             Err(e) => {
@@ -10749,7 +10981,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             self.status = format!("inbox: {new_status} usage");
             return;
         }
-        let data_dir = std::env::current_dir().unwrap_or_default();
+        let data_dir = crate::app::helpers::current_working_dir();
         match ragent_agent::loop_state::update_inbox_entry_status(&data_dir, entry_id, new_status) {
             Ok(true) => {
                 let mark = if new_status == "claimed" {
@@ -10785,7 +11017,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
     /// Handle `/inbox clear` — remove all inbox findings.
     fn handle_inbox_clear(&mut self) {
-        let data_dir = std::env::current_dir().unwrap_or_default();
+        let data_dir = crate::app::helpers::current_working_dir();
         match ragent_agent::loop_state::clear_inbox(&data_dir) {
             Ok(count) => {
                 self.append_assistant_text(&format!(
@@ -11181,12 +11413,12 @@ fn create_spec_impl_session_tasks(
 /// - `/blueprints help` — show the list (same as no args)
 /// - `/blueprints <name>` — show detailed summary of a specific blueprint
 fn handle_blueprints_command(app: &mut App, args: &str) {
-    let working_dir = std::env::current_dir().unwrap_or_default();
+    let working_dir = crate::app::helpers::current_working_dir();
     let blueprint_dirs = blueprints::list_installed_blueprints(&working_dir);
     let sub = args.split_whitespace().next().unwrap_or("").trim();
 
     match sub {
-        "" | "list" | "help" => {
+        "" | "list" | "help" | "--help" | "-h" => {
             let output = blueprints::render_blueprint_list(&blueprint_dirs, "/blueprints");
             app.append_assistant_text(&output);
             app.status = if sub == "help" {
@@ -11217,6 +11449,14 @@ fn handle_blueprints_command(app: &mut App, args: &str) {
 /// - `/template <name> <args>` — apply template with arguments
 fn handle_template_command(app: &mut App, args: &str) {
     use ragent_agent::template::{TemplateInfo, discover_templates};
+
+    if args.trim() == "help" {
+        app.append_assistant_text(
+            "From: /template help\n\n## /template \u{2014} Reusable prompt templates\n\n| Subcommand | Description |\n|---|---|\n| `/template` | List all available templates with descriptions and placeholders |\n| `/template <name>` | Show a template applied with no arguments and pre-fill the input buffer |\n| `/template <name> <args>` | Apply the template, substituting `<args>` for `{{arguments}}` |\n| `/template help` | Show this help |\n\nTemplates are discovered from `~/.ragent/templates/` (personal) and `.ragent/templates/` (project).",
+        );
+        app.status = "template: help".to_string();
+        return;
+    }
 
     let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let templates = discover_templates(&working_dir);
@@ -11395,7 +11635,7 @@ Use `/goal set <description>` to set a goal first.";
         }
         _ => {
             let output = format!(
-                "Unknown goal command: '{}'\n\nUsage: `/goal set|clear|show|test`",
+                "Unknown goal command: '{}'\n\nUsage: `/goal set|clear|show|test|help`",
                 subcmd
             );
             app.append_assistant_text(&output);
@@ -11431,7 +11671,7 @@ fn clear_dir_contents(dir: &std::path::Path) -> usize {
 /// `parent` is `"log"` or `"logs"`, `name` is the subdirectory name, and
 /// `status` is the status string to set after clearing.
 fn clear_log_subdir(app: &mut App, parent: &str, name: &str, status: &str) {
-    let working_dir = std::env::current_dir().unwrap_or_default();
+    let working_dir = crate::app::helpers::current_working_dir();
     let dir = working_dir.join(parent).join(name);
     let cleared = clear_dir_contents(&dir);
     app.append_assistant_text(&format!(
@@ -11462,7 +11702,7 @@ Cleared {cleared} file{} from `{}`.",
 /// - `/loop <agent>` with an empty (or whitespace-only) goal shows an
 ///   error naming the missing field and returns to the dialog (FR-005).
 fn handle_loop_command(app: &mut App, args: &str) {
-    if args.trim() == "help" {
+    if matches!(args.trim(), "help" | "--help" | "-h") {
         crate::app::loop_dialog::show_loop_help(app);
         return;
     }

@@ -7,6 +7,8 @@
 //! NFR-002: "The system shall support rebuilding a projection for a run of
 //! 100,000 events in under 5 seconds on commodity hardware."
 
+#![allow(missing_docs)]
+
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use ragent_storage::activity_log::ActivityLog;
 use ragent_types::activity::{EventKind, Projection};
@@ -93,6 +95,7 @@ fn bench_read_run(c: &mut Criterion) {
     group.finish();
 }
 
+// activity-log registration.
 criterion_group!(
     benches,
     bench_append_latency,

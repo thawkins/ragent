@@ -5,6 +5,8 @@
 //! fetch ordering, or local candidate ranking are visible without running a
 //! full end-to-end session.
 
+#![allow(missing_docs)]
+
 use async_trait::async_trait;
 use criterion::{Criterion, criterion_group, criterion_main};
 use ragent_research::{
@@ -167,5 +169,6 @@ fn bench_local_gatherer(c: &mut Criterion) {
     });
 }
 
+// gatherer registration.
 criterion_group!(benches, bench_web_gatherer, bench_local_gatherer);
 criterion_main!(benches);

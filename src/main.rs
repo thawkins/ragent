@@ -32,7 +32,7 @@ mod panic_hook;
 
 /// Top-level CLI arguments parsed by clap.
 #[derive(Parser)]
-#[command(name = "ragent", about = "An Rust AI coding agent for the terminal")]
+#[command(name = "ragent", about = "A Rust AI coding agent for the terminal")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -248,7 +248,15 @@ async fn async_main() -> Result<()> {
     // For non-TUI modes (--no-tui, headless run, server, etc.): fall back to
     // the normal fmt subscriber so logs appear in the terminal as usual.
     let t0 = Instant::now();
-    let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| {
+        // Surface the fallback: a typo'd --log-level would otherwise be
+        // silently downgraded to `warn` with no hint to the user.
+        eprintln!(
+            "warning: invalid log level '{}' — falling back to 'warn'",
+            cli.log_level
+        );
+        EnvFilter::new("warn")
+    });
     let tui_will_run = !cli.no_tui
         && matches!(
             cli.command,
@@ -539,10 +547,10 @@ async fn async_main() -> Result<()> {
             Arc::new(TelemetrySubsystem::disabled())
         }
     };
-    let telemetry_guard_holder = Arc::clone(&telemetry);
-    let _telemetry_guard = ShutdownGuard::new(
-        Arc::try_unwrap(telemetry_guard_holder).unwrap_or_else(|arc| (*arc).clone_disabled()),
-    );
+    // The guard shares the live subsystem via `Arc` — with the same handle
+    // also wired into the session processor below, the shared-instance guard
+    // flushes the actual provider rather than a disabled clone.
+    let _telemetry_guard = ShutdownGuard::new(Arc::clone(&telemetry));
     startup.record("Telemetry init", t0.elapsed());
 
     // Create session manager and processor
@@ -792,7 +800,18 @@ async fn async_main() -> Result<()> {
                 if cmd.is_empty() {
                     prompt.clone()
                 } else {
-                    let output = std::process::Command::new("sh").arg("-c").arg(cmd).output();
+                    // Async context: spawn_blocking keeps a slow/hanging shell
+                    // command from stalling the tokio worker thread (the bash
+                    // tool applies the same principle via kill_on_drop).
+                    let owned_cmd = cmd.to_string();
+                    let output = tokio::task::spawn_blocking(move || {
+                        std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(&owned_cmd)
+                            .output()
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("bang command task failed: {e}"))?;
                     ragent_agent::bang_command::bang_command_prompt_from_output(cmd, &output)
                 }
             } else {
@@ -1178,7 +1197,8 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
 /// the process alive burning CPU after the TUI had already exited. Arming a
 /// `shutdown_timeout` bounds that wait so the prompt returns promptly.
 fn main() -> Result<()> {
-    let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|e| anyhow::anyhow!("failed to create tokio runtime: {e}"))?;
     let result = runtime.block_on(async_main());
     // Give leftover blocking tasks 2 seconds, then abandon (not abort) them
     // and return: outstanding blocking tasks finish in the background while

@@ -158,6 +158,19 @@ pub(crate) fn open_verified_alog(
     Ok((log, count))
 }
 
+/// Pluralize `word` for `n` occurrences (`1 iteration` / `3 iterations`).
+/// Shared by the loop-termination banner, the change-summary log line, and
+/// the message-window summary so the wording stays consistent by
+/// construction.
+#[must_use]
+pub(crate) fn plural(n: u64, word: &str) -> String {
+    if n == 1 {
+        format!("{n} {word}")
+    } else {
+        format!("{n} {word}s")
+    }
+}
+
 /// Render the status-aware termination banner for a goal-driven loop (spec
 /// `agentloop`, task T-025 / FR-019): maps the termination label to a
 /// human-readable phrase (`completed`, `error`, `budget exhausted`,
@@ -165,16 +178,35 @@ pub(crate) fn open_verified_alog(
 /// labels fall back to the raw status string.
 #[must_use]
 pub(crate) fn loop_termination_banner(status: &str, iterations: u64) -> String {
-    let iterations_label = format!(
-        "{iterations} iteration{s}",
-        s = if iterations == 1 { "" } else { "s" },
-    );
+    let iterations_label = plural(iterations, "iteration");
     match status {
         "completed" => format!("✓ Goal loop completed — {iterations_label}"),
         "error" => format!("✗ Goal loop failed — {iterations_label}"),
         "budget_exhausted" => format!("⏳ Goal loop budget exhausted — {iterations_label}"),
         "interrupted" => format!("⏹ Goal loop interrupted — {iterations_label}"),
         other => format!("• Goal loop {other} — {iterations_label}"),
+    }
+}
+
+/// Render a truncated, comma-joined preview of `files`: at most `take`
+/// entries plus a `(+N more)` suffix. Shared by the change-summary log line
+/// and the message-window summary line.
+#[must_use]
+pub(crate) fn files_preview(files: &[String], take: usize) -> String {
+    if files.is_empty() {
+        return String::new();
+    }
+    let preview = files
+        .iter()
+        .take(take)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = files.len().saturating_sub(take);
+    if more > 0 {
+        format!(" · files: {preview} (+{more} more)")
+    } else {
+        format!(" · files: {preview}")
     }
 }
 
@@ -286,7 +318,6 @@ pub fn hard_break_lines(text: &str) -> String {
 /// be inspected, or `[Image: alt text (path)]` otherwise. Terminal TUI panels
 /// cannot render bitmaps directly, so this placeholder keeps the layout useful.
 #[must_use]
-/// Render an image reference as placeholder text showing dimensions.
 pub fn image_dimensions_or_placeholder(alt: &str, src: &str, base_dir: &std::path::Path) -> String {
     let is_url = src.starts_with("http://") || src.starts_with("https://");
     let resolved = if is_url {
@@ -294,14 +325,11 @@ pub fn image_dimensions_or_placeholder(alt: &str, src: &str, base_dir: &std::pat
     } else {
         base_dir.join(src).to_string_lossy().to_string()
     };
-    let dims = if is_url {
-        None
-    } else {
-        std::fs::metadata(&resolved).ok().and_then(|_| {
-            let p = std::path::Path::new(&resolved);
-            image_dimensions(p)
-        })
-    };
+    // `image_dimensions` reads the file and returns `None` for missing or
+    // unreadable paths, so no separate `metadata()` stat is needed.
+    let dims = (!is_url)
+        .then(|| image_dimensions(std::path::Path::new(&resolved)))
+        .flatten();
     match dims {
         Some((w, h)) => format!("[Image: {alt} ({w}x{h})]"),
         None => format!("[Image: {alt} ({resolved})]"),
@@ -346,4 +374,13 @@ fn image_dimensions(path: &std::path::Path) -> Option<(u32, u32)> {
         }
     }
     None
+}
+
+/// The current working directory, falling back to `.` when the process has
+/// no readable cwd (e.g. the directory was deleted). A shared fallback keeps
+/// `unwrap_or_default()` (an empty `PathBuf`, which resolves paths against
+/// the filesystem root) out of the codebase.
+#[must_use]
+pub(crate) fn current_working_dir() -> std::path::PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
 }

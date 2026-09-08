@@ -228,7 +228,7 @@ async fn arm_capture(app: &App) -> (tempfile::TempDir, std::path::PathBuf) {
         .active_loop_captures
         .write()
         .await
-        .insert("sess-rollback".to_string(), Arc::new(capture));
+        .insert("sess-rollback".to_string(), capture);
     (dir, target)
 }
 

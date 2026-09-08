@@ -16,14 +16,10 @@ use ragent_agent::{
 
 use crate::tips;
 
-// Prompt optimization templates
-
 // State types from app/state.rs
 use crate::app::state::{App, LogLevel, ScreenMode};
 
-// Helpers
-
-// Re-export status types from theme
+// Theme status types
 use crate::theme::StatusHistory;
 
 impl App {
@@ -85,7 +81,10 @@ impl App {
 
         let t0 = Instant::now();
         let configured_provider = Self::detect_provider(&storage);
-        let _ = storage.delete_discovered_models("huggingface");
+        // Best-effort startup cleanup; failure leaves stale rows only.
+        if let Err(e) = storage.delete_discovered_models("huggingface") {
+            tracing::debug!(error = %e, "stale huggingface model cleanup failed");
+        }
         sub.record("App: provider detect", t0.elapsed());
 
         // Ensure the initial agent_info has a model if none was provided.
@@ -370,6 +369,8 @@ impl App {
             bench_mock_outputs: None,
             opt_result: Arc::new(std::sync::Mutex::new(None)),
             compact_result: Arc::new(std::sync::Mutex::new(None)),
+            rollback_result: Arc::new(std::sync::Mutex::new(None)),
+            websearch_test_result: Arc::new(std::sync::Mutex::new(None)),
             db_path,
             history_dirty: false,
             history_save_deadline: None,

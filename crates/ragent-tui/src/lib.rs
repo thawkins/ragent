@@ -326,12 +326,11 @@ pub async fn run_tui(
     // every event regardless of drain speed.
     let (event_tx, mut event_rx) =
         tokio::sync::mpsc::unbounded_channel::<ragent_agent::event::Event>();
-    // Shared counter of dropped broadcast events: the bridge task increments
-    // it on every `Lagged` observation so `poll_active_tasks_reconcile` can
-    // repair the Agents panel from the task registry (a lag burst can drop
-    // `SubagentStart`/`SubagentComplete`, leaving the button count stale).
-    let tui_event_lag = Arc::new(std::sync::atomic::AtomicU64::new(0));
     {
+        // `tui_event_lag` (created above, shared with the app) is the single
+        // lag counter: the bridge increments it on `Lagged` and the reconcile
+        // poll reads it. A second Arc here would leave the app watching a
+        // counter nothing writes to.
         let lag_counter = Arc::clone(&tui_event_lag);
         let mut bus_rx = event_bus.subscribe();
         tokio::spawn(async move {
@@ -767,6 +766,12 @@ pub async fn run_tui(
 
         // Check for completed off-thread codeindex graph builds / reindexes.
         app.poll_codeindex_bg_result();
+
+        // Surface the loop-rollback outcome (status + message window).
+        app.poll_rollback_result();
+
+        // Surface the /websearch test engine-diagnostic outcome.
+        app.poll_websearch_test_result();
 
         // Check for completed compaction runs.
         app.poll_compaction_result();

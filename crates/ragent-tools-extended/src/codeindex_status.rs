@@ -149,14 +149,9 @@ impl Tool for CodeIndexStatusTool {
         };
 
         let mut output = String::from("## Code Index Status\n\n");
-        output.push_str(&format!(
-            "Enabled:        {}\n",
-            if ctx.code_index.is_some() {
-                "yes"
-            } else {
-                "no"
-            }
-        ));
+        // The `None` case returned `codeindex_not_available` above, so the
+        // success path always implies an enabled index.
+        output.push_str("Enabled:        yes\n");
         output.push_str(&format!("Files indexed:  {}\n", stats.files_indexed));
         output.push_str(&format!("Total symbols:  {}\n", stats.total_symbols));
         output.push_str(&format!("FTS index:      {fts_state}\n"));
@@ -207,7 +202,7 @@ impl Tool for CodeIndexStatusTool {
         Ok(ToolOutput {
             content: output,
             metadata: Some(json!({
-                "enabled": ctx.code_index.is_some(),
+                "enabled": true,
                 "files_indexed": stats.files_indexed,
                 "total_symbols": stats.total_symbols,
                 "index_size_bytes": stats.index_size_bytes,

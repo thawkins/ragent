@@ -142,7 +142,7 @@ pub fn parse_bench_command(args: &str) -> Result<BenchCommand> {
     };
 
     match sub {
-        "help" => Ok(BenchCommand::Help),
+        "help" | "--help" | "-h" => Ok(BenchCommand::Help),
         "list" => Ok(BenchCommand::List),
         "show" => Ok(BenchCommand::Show),
         "status" => Ok(BenchCommand::Status),

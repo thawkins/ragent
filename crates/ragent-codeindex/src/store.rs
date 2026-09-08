@@ -276,6 +276,44 @@ impl IndexStore {
         Ok(name)
     }
 
+    /// Get a symbol by its exact (case-sensitive) name.
+    ///
+    /// A keyed equality lookup; use this instead of the substring
+    /// [`Self::query_symbols`] when the caller only wants the exact symbol,
+    /// so a short name (`new`, `mod`) does not pull thousands of substring
+    /// rows out of the store under the lock.
+    pub fn get_symbol_by_exact_name(&self, name: &str) -> Result<Option<Symbol>> {
+        let raw = self
+            .conn
+            .query_row(
+                "SELECT id, file_id, name, qualified_name, kind, visibility,
+                        start_line, end_line, start_col, end_col,
+                        parent_id, signature, doc_comment, body_hash
+                 FROM symbols WHERE name = ?1",
+                [name],
+                |row| {
+                    Ok(RawSymbolRow {
+                        id: row.get(0)?,
+                        file_id: row.get(1)?,
+                        name: row.get(2)?,
+                        qualified_name: row.get(3)?,
+                        kind: row.get(4)?,
+                        visibility: row.get(5)?,
+                        start_line: row.get(6)?,
+                        end_line: row.get(7)?,
+                        start_col: row.get(8)?,
+                        end_col: row.get(9)?,
+                        parent_id: row.get(10)?,
+                        signature: row.get(11)?,
+                        doc_comment: row.get(12)?,
+                        body_hash: row.get(13)?,
+                    })
+                },
+            )
+            .optional()?;
+        raw.map(raw_to_symbol).transpose()
+    }
+
     /// Get a file entry by its ID.
     pub fn get_file_by_id(&self, file_id: i64) -> Result<Option<FileEntry>> {
         let row = self.conn.query_row(
@@ -339,6 +377,40 @@ impl IndexStore {
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// List all indexed files together with their row IDs in a single scan.
+    ///
+    /// Callers that need both the [`FileEntry`] list and the `path → id`
+    /// mapping (e.g. the graph-derivation input snapshot) should prefer this
+    /// over calling [`Self::list_files`] and [`Self::list_files_with_ids`]
+    /// separately, which reads the table twice under the store lock.
+    pub fn list_files_with_entries(&self) -> Result<Vec<(i64, FileEntry)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT id, path, content_hash, byte_size, language, last_indexed, mtime_ns, \
+             line_count
+             FROM indexed_files ORDER BY path",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                RawFileRow {
+                    path: row.get(1)?,
+                    content_hash: row.get(2)?,
+                    byte_size: row.get::<_, i64>(3)?,
+                    language: row.get(4)?,
+                    last_indexed: row.get::<_, String>(5)?,
+                    mtime_ns: row.get(6)?,
+                    line_count: row.get::<_, i64>(7)?,
+                },
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, raw) = r?;
+            out.push((id, raw_to_file_entry(raw)?));
         }
         Ok(out)
     }

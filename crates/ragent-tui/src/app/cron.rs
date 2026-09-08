@@ -202,10 +202,13 @@ async fn cron_tick(
                     // running, skip this cycle and log "skipped".
                     let is_repeating = is_repeating_event(event);
                     if is_repeating {
+                        // FR-012 fail-safe: if the mutex is poisoned we cannot
+                        // know whether the previous run finished, so treat the
+                        // event as still running (skip) rather than risk a
+                        // concurrent double-fire.
                         let already_running = running_events
                             .lock()
-                            .map(|set| set.contains(&event.id))
-                            .unwrap_or(false);
+                            .map_or(true, |set| set.contains(&event.id));
                         if already_running {
                             tracing::info!(
                                 event_id = %event.id,
@@ -321,8 +324,20 @@ async fn fire_cron_event(
     // For stateful events, load the cross-run loop state and inject it
     // into the prompt (FR-004).
     let effective_prompt = if event.stateful {
-        let state =
-            ragent_agent::loop_state::LoopState::load(working_dir, &event.id).unwrap_or_default();
+        // A corrupt or unreadable state file falls back to a fresh state, but
+        // the loss of accumulated cross-run context is surfaced so it can be
+        // diagnosed.
+        let state = match ragent_agent::loop_state::LoopState::load(working_dir, &event.id) {
+            Ok(state) => state,
+            Err(e) => {
+                tracing::warn!(
+                    event_id = %event.id,
+                    error = %e,
+                    "failed to load loop state; starting fresh",
+                );
+                ragent_agent::loop_state::LoopState::default()
+            }
+        };
         ragent_agent::loop_state::inject_state_into_prompt(&event.prompt, &state)
     } else {
         event.prompt.clone()

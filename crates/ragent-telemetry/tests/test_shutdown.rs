@@ -11,7 +11,7 @@ use std::sync::Arc;
 #[test]
 fn test_shutdown_guard_disabled_noop() {
     let sub = TelemetrySubsystem::disabled();
-    let guard = ShutdownGuard::new(sub);
+    let guard = ShutdownGuard::new(std::sync::Arc::new(sub));
     // Drop the guard — should not panic even with a disabled subsystem.
     drop(guard);
 }
@@ -22,7 +22,7 @@ fn test_shutdown_guard_disabled_noop() {
 fn test_shutdown_guard_from_config_noop() {
     let config = OtelConfig::default();
     let sub = TelemetrySubsystem::new(config).expect("disabled subsystem");
-    let guard = ShutdownGuard::new(sub);
+    let guard = ShutdownGuard::new(std::sync::Arc::new(sub));
     drop(guard);
 }
 
@@ -31,7 +31,7 @@ fn test_shutdown_guard_from_config_noop() {
 #[test]
 fn test_shutdown_guard_subsystem_accessor() {
     let sub = TelemetrySubsystem::disabled();
-    let guard = ShutdownGuard::new(sub);
+    let guard = ShutdownGuard::new(std::sync::Arc::new(sub));
     assert!(!guard.subsystem().is_enabled());
 }
 
@@ -40,7 +40,7 @@ fn test_shutdown_guard_subsystem_accessor() {
 #[test]
 fn test_shutdown_guard_flush_disabled() {
     let sub = TelemetrySubsystem::disabled();
-    let guard = ShutdownGuard::new(sub);
+    let guard = ShutdownGuard::new(std::sync::Arc::new(sub));
     assert!(
         guard.flush().is_ok(),
         "flush on disabled subsystem should succeed"
@@ -52,7 +52,7 @@ fn test_shutdown_guard_flush_disabled() {
 #[test]
 fn test_shutdown_guard_into_inner() {
     let sub = TelemetrySubsystem::disabled();
-    let guard = ShutdownGuard::new(sub);
+    let guard = ShutdownGuard::new(std::sync::Arc::new(sub));
     let recovered = guard.into_inner();
     assert!(!recovered.is_enabled());
     // recovered should still be usable.
@@ -63,7 +63,7 @@ fn test_shutdown_guard_into_inner() {
 #[test]
 fn test_shutdown_guard_debug() {
     let sub = TelemetrySubsystem::disabled();
-    let guard = ShutdownGuard::new(sub);
+    let guard = ShutdownGuard::new(std::sync::Arc::new(sub));
     let debug = format!("{guard:?}");
     assert!(
         debug.contains("ShutdownGuard"),
@@ -84,7 +84,7 @@ fn test_shutdown_guard_enabled_no_panic_on_drop() {
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async { TelemetrySubsystem::new(config).expect("enabled subsystem") });
-    let guard = ShutdownGuard::new(sub);
+    let guard = ShutdownGuard::new(std::sync::Arc::new(sub));
     // Drop the guard — flush+shutdown may fail (no collector) but must
     // not panic (FR-031, FR-033).
     drop(guard);

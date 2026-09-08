@@ -65,8 +65,15 @@ where
         .lock_exclusive()
         .map_err(|e| format!("lock {}: {e}", lock_path.display()))?;
 
-    // Read current content while holding the lock.
-    let raw = std::fs::read_to_string(config_path).unwrap_or_default();
+    // Read current content while holding the lock. A missing file is a
+    // legitimate empty start; a read failure on an existing file is not, so
+    // surface it instead of silently treating it as empty.
+    let raw = if config_path.exists() {
+        std::fs::read_to_string(config_path)
+            .map_err(|e| format!("read {}: {e}", config_path.display()))?
+    } else {
+        String::new()
+    };
 
     let mut json: serde_json::Value = if raw.trim().is_empty() {
         serde_json::json!({})
@@ -689,7 +696,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "agent",
-        description: "Switch the active agent",
+        description: "Switch the active agent: /agent [<name>] | /agent help",
     },
     SlashCommandDef {
         trigger: "agents",
@@ -713,15 +720,15 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "cancel",
-        description: "Cancel a background task (/cancel <task_id_prefix>)",
+        description: "Cancel a background task (/cancel <task_id_prefix> | /cancel help)",
     },
     SlashCommandDef {
         trigger: "config",
-        description: "Show application paths and configuration files: /config show",
+        description: "Configuration: /config show|save|list|help",
     },
     SlashCommandDef {
         trigger: "context",
-        description: "Manage context cache: /context refresh",
+        description: "Manage context cache: /context refresh | /context help",
     },
     SlashCommandDef {
         trigger: "cron",
@@ -745,7 +752,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "history",
-        description: "Browse and re-use previous inputs; /history [filter] restricts to matching entries (↑/↓ to select, Enter to insert)",
+        description: "Browse and re-use previous inputs; /history [filter] restricts to matching entries (↑/↓ to select, Enter to insert); /history help",
     },
     SlashCommandDef {
         trigger: "inputdiag",
@@ -761,11 +768,11 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "profile",
-        description: "Toggle the agent-loop profiler panel (/profile on|off)",
+        description: "Toggle the agent-loop profiler panel (/profile on|off|help)",
     },
     SlashCommandDef {
         trigger: "perf",
-        description: "Alias for /profile — toggle the agent-loop perf panel (/perf on|off)",
+        description: "Alias for /profile — toggle the agent-loop perf panel (/perf on|off|help)",
     },
     SlashCommandDef {
         trigger: "llmstats",
@@ -773,7 +780,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "model",
-        description: "Switch the active model, or show metadata with /model show",
+        description: "Switch the active model, or show metadata with /model show (/model help for usage)",
     },
     SlashCommandDef {
         trigger: "thinking",
@@ -781,7 +788,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "provider",
-        description: "Change provider, show config, or configure model router: /provider [show|router]",
+        description: "Change provider, show config, or configure model router: /provider [show|router|help]",
     },
     SlashCommandDef {
         trigger: "provider_reset",
@@ -801,11 +808,11 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "resume",
-        description: "Resume the agent from where it was halted",
+        description: "Resume the agent from where it was halted (/resume help)",
     },
     SlashCommandDef {
         trigger: "system",
-        description: "Override the agent system prompt (/system <prompt>)",
+        description: "Override the agent system prompt (/system <prompt> | /system help)",
     },
     SlashCommandDef {
         trigger: "template",
@@ -821,7 +828,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "skills",
-        description: "List all registered skills and their descriptions",
+        description: "List all registered skills and their descriptions (/skills help)",
     },
     SlashCommandDef {
         trigger: "opt",
@@ -833,7 +840,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "mcp",
-        description: "Show MCP server status (/mcp discover | /mcp connect <id> | /mcp disconnect <id>)",
+        description: "MCP servers: /mcp [status] | /mcp discover | /mcp connect <id> | /mcp disconnect <id> | /mcp help",
     },
     SlashCommandDef {
         trigger: "task",
@@ -861,7 +868,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "yolo",
-        description: "Toggle YOLO mode — bypass all command validation and tool restrictions",
+        description: "Toggle YOLO mode — bypass all command validation and tool restrictions (/yolo help)",
     },
     SlashCommandDef {
         trigger: "spec",
@@ -877,15 +884,15 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "autopilot",
-        description: "Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] | off | status",
+        description: "Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] | off | status | help",
     },
     SlashCommandDef {
         trigger: "plan",
-        description: "Delegate planning to the plan agent: /plan <task description>",
+        description: "Delegate planning to the plan agent: /plan <task description> | /plan help",
     },
     SlashCommandDef {
         trigger: "mode",
-        description: "Set agent role mode: /mode architect|coder|reviewer|debugger|tester|off",
+        description: "Set agent role mode: /mode architect|coder|reviewer|debugger|tester|off|help",
     },
     SlashCommandDef {
         trigger: "memory",
@@ -893,19 +900,19 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "github",
-        description: "GitHub integration: /github login | logout | status",
+        description: "GitHub integration: /github login | logout | status | help",
     },
     SlashCommandDef {
         trigger: "gitlab",
-        description: "GitLab integration: /gitlab setup | logout | status",
+        description: "GitLab integration: /gitlab setup | logout | status | help",
     },
     SlashCommandDef {
         trigger: "update",
-        description: "Check for or install updates: /update | /update install",
+        description: "Check for or install updates: /update | /update install | /update help",
     },
     SlashCommandDef {
         trigger: "doctor",
-        description: "Run system diagnostics (providers, git, ripgrep, MCP, memory)",
+        description: "Run system diagnostics (providers, git, ripgrep, MCP, memory); /doctor help for details",
     },
     SlashCommandDef {
         trigger: "webapi",
@@ -917,7 +924,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "init",
-        description: "Analyse the project and write a summary, or create a default config: /init [config]",
+        description: "Analyse the project and write a summary, or create a default config: /init [config|help]",
     },
     SlashCommandDef {
         trigger: "codeindex",
@@ -933,7 +940,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "mouse",
-        description: "Toggle mouse support: /mouse on | off",
+        description: "Toggle mouse support: /mouse on | off | help",
     },
     SlashCommandDef {
         trigger: "telemetry",
@@ -945,7 +952,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "tools",
-        description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex] [on|off]",
+        description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex] [on|off] | /tools help",
     },
     SlashCommandDef {
         trigger: "router",
@@ -973,11 +980,11 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "undo",
-        description: "Remove the last user/assistant turn pair from the conversation",
+        description: "Remove the last user/assistant turn pair from the conversation (/undo help)",
     },
     SlashCommandDef {
         trigger: "name",
-        description: "Set a human-readable display name for the session: /name <display-name>",
+        description: "Set a human-readable display name for the session: /name <display-name> | /name help",
     },
     SlashCommandDef {
         trigger: "alog",
@@ -1669,9 +1676,12 @@ pub struct App {
     /// against overlapping `/codeindex reindex` commands.
     pub code_index_reindex_spawned: bool,
     /// Completion result from an off-thread codeindex graph build or full
-    /// reindex: the rendered assistant message on success, or the error
-    /// text. Drained by `poll_codeindex_bg_result` on the UI thread.
-    pub code_index_bg_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// reindex: `(message, status)` on success — the rendered assistant text
+    /// plus the status-bar line — or the error text. Drained by
+    /// `poll_codeindex_bg_result` on the UI thread. The tuple replaces an
+    /// earlier `"\n\nSTATUS:"` string marker, which any message text
+    /// containing that marker could corrupt.
+    pub code_index_bg_result: Arc<std::sync::Mutex<Option<Result<(String, String), String>>>>,
     /// Active file watcher + background worker session for the code index.
     pub code_index_watch_session: Option<ragent_codeindex::WatchSession>,
     /// Active MCP discovery dialog, if any.
@@ -1853,6 +1863,19 @@ pub struct App {
     /// Pending result from an async compaction call: the replacement history
     /// (`[compaction, ...recent]`) on success, or the error message.
     pub compact_result: Arc<std::sync::Mutex<Option<Result<Vec<Message>, String>>>>,
+    /// Pending result from the async loop-rollback task (FR-020/T-013):
+    /// `Ok(true)` restored the pre-loop snapshot, `Ok(false)` there was no
+    /// pending capture, `Err(reason)` the restore failed (capture kept for
+    /// retry). Drained by `poll_rollback_result` on the UI thread; the
+    /// spawned task only logs, so this slot is what keeps the UI status from
+    /// being stuck at "rolling back…" forever.
+    pub rollback_result: Arc<std::sync::Mutex<Option<Result<bool, String>>>>,
+    /// Pending result from the async `/websearch test` engine diagnostic:
+    /// the fully rendered result-table markdown. Deposited by the spawned
+    /// test task and drained by `poll_websearch_test_result` on the UI
+    /// thread, so the "Starting Websearch test…" acknowledgement renders
+    /// immediately instead of after the whole network probe finishes.
+    pub websearch_test_result: Arc<std::sync::Mutex<Option<String>>>,
     /// Whether input history has been modified since last save.
     pub history_dirty: bool,
     /// Deadline after which a dirty history should be flushed to disk.

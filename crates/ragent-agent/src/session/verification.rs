@@ -15,7 +15,6 @@
 //! Dependencies: `tokio` (blocking offload), `std::process::Command`.
 
 use std::process::Command;
-use std::sync::Arc;
 use std::time::Duration;
 
 /// Wall-clock limit for one verification-command run (10 minutes).
@@ -34,12 +33,26 @@ const VERIFICATION_TAIL_CHARS: usize = 2000;
 /// Truncate `text` to at most head + tail characters, joined by an elision
 /// marker. The cut always falls on a UTF-8 character boundary.
 fn truncate_head_tail(text: &str, head: usize, tail: usize) -> String {
-    if text.chars().count() <= head + tail {
+    // Count once and reuse for the early-exit, the tail offset, and the
+    // elided-character figure. Walks the string a single time via
+    // `char_indices` so the byte offsets for the head/tail slices are
+    // captured in the same pass.
+    let total = text.chars().count();
+    if total <= head + tail {
         return text.to_string();
     }
-    let head_text: String = text.chars().take(head).collect();
-    let total = text.chars().count();
-    let tail_text: String = text.chars().skip(total - tail).collect();
+    let mut head_end = text.len();
+    let mut tail_start = 0usize;
+    for (n, (offset, _)) in text.char_indices().enumerate() {
+        if n == head {
+            head_end = offset;
+        }
+        if n == total - tail {
+            tail_start = offset;
+        }
+    }
+    let head_text = &text[..head_end];
+    let tail_text = &text[tail_start..];
     format!(
         "{head_text}\n... [output truncated: {} characters elided] ...\n{tail_text}",
         total - head - tail
@@ -169,6 +182,9 @@ fn execute_verification_script(
             Ok(None) => {}
             Err(e) => {
                 let _ = child.kill();
+                // Reap the killed child so it does not linger as a zombie
+                // (the timeout branch below pairs kill() with wait() too).
+                let _ = child.wait();
                 let _ = stdout_handle.join();
                 let _ = stderr_handle.join();
                 return Ok(VerificationOutcome::Failure {
@@ -196,8 +212,16 @@ fn execute_verification_script(
         waited += poll_interval;
     };
 
-    let stdout = stdout_handle.join().unwrap_or_default();
-    let stderr = stderr_handle.join().unwrap_or_default();
+    // A panicked drain thread poisons the join; surface that rather than
+    // silently substituting empty output for the verdict evidence.
+    let stdout = match stdout_handle.join() {
+        Ok(out) => out,
+        Err(_) => "(output capture failed)".to_string(),
+    };
+    let stderr = match stderr_handle.join() {
+        Ok(err) => err,
+        Err(_) => "(output capture failed)".to_string(),
+    };
 
     let mut captured = stdout;
     if !stderr.trim().is_empty() {
@@ -261,15 +285,6 @@ pub fn verification_failure_observation(cmd: &str, outcome: &VerificationOutcome
         outcome.label(),
         outcome.output()
     )
-}
-
-/// Convenience wrapper used by tests and callers that only need the async
-/// result as an `Arc`-friendly owned value.
-pub async fn run_verification_command_owned(
-    cmd: Arc<String>,
-    working_dir: &std::path::Path,
-) -> anyhow::Result<VerificationOutcome> {
-    run_verification_command(&cmd, working_dir).await
 }
 
 #[cfg(test)]

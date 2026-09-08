@@ -204,18 +204,17 @@ impl<'a> SymbolGraph<'a> {
             *degree_map.entry(edge.target_sym).or_default() += 1;
         }
 
-        // Look up symbol names and file paths.
+        // Look up symbol names and file paths. File paths are resolved once
+        // in a single pass instead of one SQL query per symbol (N+1).
         let all_symbols = self
             .store
             .query_symbols(&crate::types::SymbolFilter::default())?;
+        let file_paths: std::collections::HashMap<i64, String> =
+            self.store.list_files_with_ids()?.into_iter().collect();
         let sym_lookup: std::collections::HashMap<i64, (String, String)> = all_symbols
             .iter()
             .map(|s| {
-                let file = self
-                    .store
-                    .get_file_by_id(s.file_id)
-                    .map(|opt| opt.map(|f| f.path).unwrap_or_default())
-                    .unwrap_or_default();
+                let file = file_paths.get(&s.file_id).cloned().unwrap_or_default();
                 (s.id, (s.name.clone(), file))
             })
             .collect();

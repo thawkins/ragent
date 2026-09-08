@@ -14,8 +14,6 @@ use ragent_team::team::{
 };
 use ragent_telemetry::counters as telemetry_counters;
 
-// Prompt optimization templates
-
 // State types from app/state.rs
 use crate::app::state::{
     App, BgTaskView, LlmRequestStat, LogLevel, ModelDownloadState, ModelLoadingState,
@@ -28,9 +26,15 @@ use crate::app::helpers::{hard_break_lines, short_session_id, summarise_error};
 use crate::app::session_ops::recover_poisoned;
 use crate::widgets::message_widget::truncate_str;
 
-// Re-export status types from theme
-
 impl App {
+    /// Render a swarm failure uniformly: status line, chat panel message,
+    /// and a warn-level log entry.
+    fn report_swarm_failure(&mut self, title: &str, msg: &str) {
+        self.status = format!("[warn] swarm failed: {msg}");
+        self.append_assistant_text(&format!("From: /swarm\n## [err] {title}\n\n{msg}\n"));
+        self.push_log_no_agent(LogLevel::Warn, format!("Swarm error: {msg}"));
+    }
+
     /// Poll the pending swarm decomposition result and, if ready, render the
     /// team summary (or surface an error) into the chat log.
     pub(crate) fn poll_pending_swarm(&mut self) {
@@ -50,25 +54,12 @@ impl App {
                         self.execute_swarm_decomposition(decomposition);
                     }
                     Err(msg) => {
-                        self.status = "[warn] swarm: decomposition parse error".to_string();
-                        self.append_assistant_text(&format!(
-                            "From: /swarm\n## [err] Decomposition Failed\n\n{}\n",
-                            msg
-                        ));
-                        self.push_log_no_agent(
-                            LogLevel::Warn,
-                            format!("Swarm parse error: {}", msg),
-                        );
+                        self.report_swarm_failure("Decomposition Failed", &msg);
                     }
                 }
             }
             Err(msg) => {
-                self.status = format!("[warn] swarm failed: {}", msg);
-                self.append_assistant_text(&format!(
-                    "From: /swarm\n## [err] Swarm Error\n\n{}\n",
-                    msg
-                ));
-                self.push_log_no_agent(LogLevel::Warn, format!("Swarm error: {}", msg));
+                self.report_swarm_failure("Swarm Error", &msg);
             }
         }
     }
@@ -968,8 +959,8 @@ impl App {
                 // detail on a single line.
                 let mut banner = crate::app::helpers::loop_termination_banner(status, iterations);
                 let mut line = format!(
-                    "loop terminated · {status} · {iterations} iteration{s}",
-                    s = if iterations == 1 { "" } else { "s" },
+                    "loop terminated · {status} · {}",
+                    crate::app::helpers::plural(iterations, "iteration"),
                 );
                 if let Some(outcome) = verification {
                     banner.push_str(&format!("\nVerification: {outcome}"));
@@ -999,40 +990,26 @@ impl App {
                 // the same summary as a diffstat line in the message window
                 // and arms the interactive rollback offer.
                 let mut line = format!(
-                    "loop changes · {status} · {iterations} iteration{s} · \
+                    "loop changes · {status} · {} · \
                      {modified} modified, {created} created, {deleted} deleted · \
                      {diffstat}",
-                    s = if iterations == 1 { "" } else { "s" },
+                    crate::app::helpers::plural(iterations, "iteration"),
                     modified = files_modified,
                     created = files_created,
                     deleted = files_deleted,
                 );
-                if !files.is_empty() {
-                    let preview = files.iter().take(8).cloned().collect::<Vec<_>>().join(", ");
-                    let more = files.len().saturating_sub(8);
-                    line.push_str(&format!(" · files: {preview}"));
-                    if more > 0 {
-                        line.push_str(&format!(" (+{more} more)"));
-                    }
-                }
+                line.push_str(&crate::app::helpers::files_preview(files, 8));
                 // Diffstat line in the message window: counts + diffstat +
                 // affected paths, mirroring the log line.
                 let mut summary_line = format!(
-                    "⟳ Loop changes ({status}, {iterations} iteration{s}): \
+                    "⟳ Loop changes ({status}, {}): \
                      {modified} modified, {created} created, {deleted} deleted — {diffstat}",
-                    s = if iterations == 1 { "" } else { "s" },
+                    crate::app::helpers::plural(iterations, "iteration"),
                     modified = files_modified,
                     created = files_created,
                     deleted = files_deleted,
                 );
-                if !files.is_empty() {
-                    let preview = files.iter().take(8).cloned().collect::<Vec<_>>().join(", ");
-                    let more = files.len().saturating_sub(8);
-                    summary_line.push_str(&format!(" · files: {preview}"));
-                    if more > 0 {
-                        summary_line.push_str(&format!(" (+{more} more)"));
-                    }
-                }
+                summary_line.push_str(&crate::app::helpers::files_preview(files, 8));
                 summary_line.push_str(
                     "\nRoll back to the pre-loop snapshot? Enter: roll back, Esc: keep changes",
                 );
@@ -1965,10 +1942,17 @@ impl App {
             ref api_base,
         } = event
         {
-            let _ = self.storage.set_provider_auth("copilot", token);
-
-            let _ = self.storage.set_setting("copilot_api_base", api_base);
-            let _ = self.storage.delete_setting("provider_copilot_disabled");
+            // Fire-and-forget persistence, but a silent failure here would
+            // lose the token on next restart, so log the outcome.
+            if let Err(e) = self.storage.set_provider_auth("copilot", token) {
+                tracing::warn!(error = %e, "failed to persist copilot auth token");
+            }
+            if let Err(e) = self.storage.set_setting("copilot_api_base", api_base) {
+                tracing::warn!(error = %e, "failed to persist copilot api base");
+            }
+            if let Err(e) = self.storage.delete_setting("provider_copilot_disabled") {
+                tracing::warn!(error = %e, "failed to clear copilot disabled flag");
+            }
             self.push_log_no_agent(
                 LogLevel::Info,
                 format!("Copilot authorised (api: {api_base})"),
@@ -2044,7 +2028,9 @@ impl App {
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(bg) = bg {
-                    let _ = bg.cancel(&id).await;
+                    if let Err(e) = bg.cancel(&id).await {
+                        tracing::warn!(task_id = %id, error = %e, "failed to cancel background task");
+                    }
                 }
             });
         }
@@ -2056,7 +2042,9 @@ impl App {
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
-                    let _ = tm.suspend_task(&id).await;
+                    if let Err(e) = tm.suspend_task(&id).await {
+                        tracing::warn!(task_id = %id, error = %e, "failed to suspend agent task");
+                    }
                 }
             });
         }
@@ -2068,7 +2056,9 @@ impl App {
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
-                    let _ = tm.resume_task(&id).await;
+                    if let Err(e) = tm.resume_task(&id).await {
+                        tracing::warn!(task_id = %id, error = %e, "failed to resume agent task");
+                    }
                 }
             });
         }
@@ -2080,7 +2070,9 @@ impl App {
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
-                    let _ = tm.kill_task(&id).await;
+                    if let Err(e) = tm.kill_task(&id).await {
+                        tracing::warn!(task_id = %id, error = %e, "failed to kill agent task");
+                    }
                 }
             });
         }

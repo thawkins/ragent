@@ -679,11 +679,9 @@ impl AgentManager {
 
     /// Kill a running or suspended task (forcible termination).
     ///
-    /// M7-T2: uses a blocking `write()` (not `try_write()`) to set the cancel
-    /// flag so the cancel signal is never lost due to lock contention. The
-    /// `kill_flags` field has been removed — the cancel flag alone is
-    /// sufficient; the 10-second force-kill escalation path remains for
-    /// tasks that don't observe the flag in time.
+    /// M7-T2: the cancel flag is set through the `DashMap` entry atomically so
+    /// the cancel signal is never lost; the 10-second force-kill escalation
+    /// path remains for tasks that don't observe the flag in time.
     pub async fn kill_task(&self, task_id: &str) -> anyhow::Result<()> {
         // PERF (FR-016): DashMap — get_mut returns a short-lived shard guard.
         let mut entry = self
@@ -724,20 +722,23 @@ impl AgentManager {
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
             // PERF (FR-016): DashMap — get_mut returns a short-lived guard.
+            // The escalation is only relevant while the task is still
+            // terminating: a task that completed (or was already reaped)
+            // must not receive a spurious force-kill event.
             if let Some(mut entry) = tasks2.get_mut(&tid) {
                 if entry.status == TaskStatus::Terminating {
                     entry.status = TaskStatus::Failed;
                     entry.error = Some(Arc::from("Force-killed after timeout"));
                     entry.completed_at = Some(Utc::now());
+                    flags2.remove(&tid);
+                    eb2.publish(Event::SubagentKilled {
+                        session_id: parent,
+                        task_id: tid,
+                        child_session_id: child,
+                        force: true,
+                    });
                 }
             }
-            flags2.remove(&tid);
-            eb2.publish(Event::SubagentKilled {
-                session_id: parent,
-                task_id: tid,
-                child_session_id: child,
-                force: true,
-            });
         });
         Ok(())
     }
@@ -827,24 +828,37 @@ impl AgentManager {
         }
         // P-11: clear the flag when no unreported background tasks remain
         // for this parent, so subsequent loop steps skip the lock+scan.
-        let still_pending = self.tasks.iter().any(|e| {
-            e.parent_session_id == parent_session_id
-                && e.background
-                && !e.reported
-                && e.status != TaskStatus::Running
-                && e.waiter_count == 0
-        });
-        if !still_pending {
-            self.has_pending_background.store(false, Ordering::Relaxed);
-        }
         // R-2: Reap completed, reported, non-running entries with no active
         // waiters so the DashMap does not grow without bound. Each entry holds
         // its full `result: Arc<str>` (up to 32 KB) and prompt string; without
         // reaping, every sub-agent ever spawned stays in memory for the
-        // process lifetime.
+        // process lifetime. The reap is scoped to the same parent so a
+        // concurrent drain from another parent cannot swallow this parent's
+        // reported-but-not-yet-injected result.
+        // The `any` scan and the `retain` share the same predicate family, so
+        // they are fused into a single pass: `retain` reaps same-parent
+        // entries, folding `still_pending` (same-parent, background,
+        // unreported, non-running) out of the survivors.
+        let mut still_pending = false;
         self.tasks.retain(|_k, e| {
-            !(e.reported && e.status != TaskStatus::Running && e.waiter_count == 0)
+            let same_parent = e.parent_session_id == parent_session_id;
+            if same_parent && e.reported && e.status != TaskStatus::Running && e.waiter_count == 0 {
+                // Reportable and drained: reap.
+                return false;
+            }
+            if same_parent
+                && e.background
+                && !e.reported
+                && e.status != TaskStatus::Running
+                && e.waiter_count == 0
+            {
+                still_pending = true;
+            }
+            true
         });
+        if !still_pending {
+            self.has_pending_background.store(false, Ordering::Relaxed);
+        }
         completed
     }
 

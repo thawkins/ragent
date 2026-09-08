@@ -17,6 +17,8 @@
 //! - `interim_save_hash` — per-step change-detection hash (P-12).
 //! - `mock_llm_chat_stream` — `MockLlmClient` stream throughput (F-1).
 
+#![allow(missing_docs)]
+
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -280,6 +282,7 @@ fn bench_mock_llm_chat_stream(c: &mut Criterion) {
     group.finish();
 }
 
+// agent-loop registration.
 criterion_group!(
     benches,
     bench_history_to_chat_messages,

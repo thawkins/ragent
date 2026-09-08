@@ -1193,6 +1193,11 @@ pub(crate) fn is_allowed_tool(tool_name: &str, allowed: &HashSet<String>) -> boo
 /// The hardwired always-allowed tool names: the codeindex tools plus the
 /// skill always-allowed control tools. Used by the loop's tool-set filter
 /// (spec `agentloop` FR-008) so a restricted loop keeps its safety surface.
+///
+/// The codeindex entries mirror the six-name auto-approved subset in
+/// `permissions::is_hardwired_codeindex_tool` plus the four graph tools; the
+/// skill tools are a strict subset of `LOOP_ALWAYS_ALLOWED_TOOLS` (kept here
+/// so this list is self-contained for non-loop callers).
 pub(crate) fn always_allowed_tool_names() -> Vec<&'static str> {
     let mut names: Vec<&'static str> =
         crate::session::permissions::SKILL_ALWAYS_ALLOWED_TOOLS.to_vec();

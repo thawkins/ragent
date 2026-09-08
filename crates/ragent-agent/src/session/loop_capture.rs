@@ -132,10 +132,13 @@ fn read_for_capture(path: &Path) -> Option<Vec<u8>> {
 #[must_use]
 pub async fn git_state(dir: &Path) -> Option<GitState> {
     async fn run_git(dir: &Path, args: &[&str]) -> Option<String> {
+        // kill_on_drop: if the caller's timeout drops this future, the child
+        // is terminated rather than left running past the probe budget.
         let output = tokio::process::Command::new("git")
             .args(["-C"])
             .arg(dir)
             .args(args)
+            .kill_on_drop(true)
             .output()
             .await
             .ok()?;
@@ -174,32 +177,38 @@ pub async fn capture_pre_loop_snapshot(
     message_id: &str,
     dir: &Path,
 ) -> Result<Option<Snapshot>> {
-    let files: Vec<PathBuf> = workspace_files(dir)
-        .into_iter()
-        .filter(|path| read_for_capture(path).is_some())
-        .collect();
-    if files.is_empty() {
-        return Ok(None);
-    }
     let session_id = session_id.to_string();
     let message_id = message_id.to_string();
+    let dir = dir.to_path_buf();
+    // All file I/O (walk, guard-checked reads) happens on the blocking
+    // thread. Files are guard-filtered by metadata BEFORE reading so each
+    // file's bytes are read at most once: the previous shape read every file
+    // via `take_snapshot` and then re-read it inside the retain closure to
+    // re-apply the guard.
     let snapshot = tokio::task::spawn_blocking(move || -> Result<Snapshot> {
-        let existing: Vec<PathBuf> = files
-            .iter()
-            .filter(|path| path.is_file())
-            .cloned()
+        let candidates: Vec<PathBuf> = workspace_files(&dir);
+        let files: Vec<PathBuf> = candidates
+            .into_iter()
+            .filter(|path| {
+                // Mirror `read_for_capture`'s guard with a metadata-only
+                // probe: skip oversized or non-file entries up front.
+                std::fs::metadata(path)
+                    .is_ok_and(|m| m.is_file() && m.len() <= MAX_CAPTURED_FILE_BYTES)
+            })
             .collect();
-        let mut snapshot = take_snapshot(&session_id, &message_id, &existing)?;
-        // Replace each stored buffer with the guard-checked read so oversized
-        // or unreadable entries never enter the snapshot.
+        let mut snapshot = take_snapshot(&session_id, &message_id, &files)?;
+        // Rare TOCTOU only: a file that passed the metadata filter but was
+        // deleted (or grew past the cap) between the probe and the read.
+        // `read_for_capture` returning `None` removes the entry.
         snapshot
             .files
-            .retain(|path, _| read_for_capture(path).is_some());
-        for (path, content) in snapshot.files.iter_mut() {
-            if let Some(checked) = read_for_capture(path) {
-                *content = checked;
-            }
-        }
+            .retain(|path, stored| match read_for_capture(path) {
+                Some(checked) => {
+                    *stored = checked;
+                    true
+                }
+                None => false,
+            });
         Ok(snapshot)
     })
     .await
@@ -208,11 +217,6 @@ pub async fn capture_pre_loop_snapshot(
         return Ok(None);
     }
     Ok(Some(snapshot))
-}
-
-/// Whether `path` is inside (or equal to) `dir`.
-fn path_is_under(dir: &Path, path: &Path) -> bool {
-    path.starts_with(dir)
 }
 
 /// The post-loop change summary for a terminated loop run (FR-019).
@@ -274,14 +278,23 @@ pub fn compute_change_summary(capture: &LoopCapture, dir: &Path) -> ChangeSummar
             continue;
         }
         match read_for_capture(path) {
-            Some(live) if live != *stored => {
+            Some(live) if live == *stored => {}
+            // A read failure (or a file grown past the capture size cap after
+            // an unknown-size change) cannot prove the content unchanged, so
+            // count it as modified — the conservative choice for a change
+            // summary.
+            None => {
+                summary.modified += 1;
+                summary.files.push(relative_path(dir, path));
+            }
+            // Contents changed: full diff.
+            Some(live) => {
                 summary.modified += 1;
                 summary.files.push(relative_path(dir, path));
                 let (added, removed) = count_diff_lines(stored, &live);
                 summary.added_lines += added;
                 summary.deleted_lines += removed;
             }
-            _ => {}
         }
     }
 
@@ -341,9 +354,12 @@ fn count_diff_lines(old: &[u8], new: &[u8]) -> (u64, u64) {
 /// # Errors
 ///
 /// Returns an error when a captured file cannot be written back.
-pub async fn rollback_to_capture(capture: &LoopCapture) -> Result<()> {
-    if let Some(snapshot) = &capture.snapshot {
-        let snapshot = snapshot.clone();
+pub async fn rollback_to_capture(capture: LoopCapture) -> Result<()> {
+    // Consume the capture instead of cloning: rollback is terminal (the
+    // caller removes the capture from the map when invoking this), so
+    // deep-copying every captured file's bytes purely to move them into the
+    // blocking task wasted memory exactly when the workspace was large.
+    if let Some(snapshot) = capture.snapshot {
         tokio::task::spawn_blocking(move || {
             restore_snapshot(&snapshot).context("restoring the pre-loop workspace snapshot failed")
         })
@@ -360,12 +376,6 @@ pub fn capture_is_rollbackable(capture: &LoopCapture) -> bool {
         .snapshot
         .as_ref()
         .is_some_and(|s| !s.files.is_empty())
-}
-
-/// Whether `path` sits inside `dir` (re-exported helper for processors).
-#[must_use]
-pub fn path_within(dir: &Path, path: &Path) -> bool {
-    path_is_under(dir, path)
 }
 
 #[cfg(test)]
@@ -455,7 +465,7 @@ mod tests {
             .build()
             .expect("runtime");
         runtime
-            .block_on(async { rollback_to_capture(&capture).await })
+            .block_on(async { rollback_to_capture(capture).await })
             .expect("rollback");
 
         let restored = std::fs::read_to_string(root.join("a.txt")).expect("read a");
@@ -464,7 +474,8 @@ mod tests {
             root.join("created.txt").exists(),
             "created files are outside the snapshot's file set and are kept"
         );
-        assert!(capture_is_rollbackable(&capture));
+        // Rollback is terminal: the capture was consumed by the call above.
+        let _ = capture;
     }
 
     #[tokio::test]

@@ -180,7 +180,7 @@ fn test_shutdown_guard_drop_does_not_panic_on_unreachable_endpoint() {
     // attempt to flush+shutdown against the unreachable endpoint. The errors
     // must be logged but not panicked.
     {
-        let guard = ragent_telemetry::shutdown::ShutdownGuard::new(sub);
+        let guard = ragent_telemetry::shutdown::ShutdownGuard::new(std::sync::Arc::new(sub));
         // Use the guard so it's not optimised away.
         assert_eq!(guard.subsystem().state(), TelemetryState::Enabled);
         // guard drops here — must not panic.
@@ -192,7 +192,7 @@ fn test_shutdown_guard_drop_does_not_panic_on_unreachable_endpoint() {
 #[test]
 fn test_shutdown_guard_drop_disabled_is_clean() {
     let sub = TelemetrySubsystem::disabled();
-    let guard = ragent_telemetry::shutdown::ShutdownGuard::new(sub);
+    let guard = ragent_telemetry::shutdown::ShutdownGuard::new(std::sync::Arc::new(sub));
     drop(guard); // must not panic or hang
 }
 

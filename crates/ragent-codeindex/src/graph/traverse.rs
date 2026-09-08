@@ -142,13 +142,17 @@ pub fn explain(store: &IndexStore, name: &str) -> Result<Option<ExplainResult>> 
     let mut incoming: Vec<Connection> = Vec::new();
     let mut outgoing: Vec<Connection> = Vec::new();
 
-    // Build a lookup of all symbols for name/file resolution.
+    // Build a lookup of all symbols for name resolution.
     let all_symbols = store.query_symbols(&crate::types::SymbolFilter::default())?;
     let sym_lookup: HashMap<i64, &crate::types::Symbol> =
         all_symbols.iter().map(|s| (s.id, s)).collect();
 
+    // Resolve file paths once in a single pass instead of one SQL query per
+    // connection (N+1).
+    let file_paths: HashMap<i64, String> = store.list_files_with_ids()?.into_iter().collect();
+
     for edge in &incident {
-        let conn = edge_to_connection(edge, symbol.id, &sym_lookup, store)?;
+        let conn = edge_to_connection(edge, symbol.id, &sym_lookup, &file_paths)?;
         if edge.source_sym == symbol.id {
             // Outgoing: this symbol is the source.
             outgoing.push(conn);
@@ -174,9 +178,10 @@ pub fn explain(store: &IndexStore, name: &str) -> Result<Option<ExplainResult>> 
         } else {
             half
         };
-        let out_limit = MAX_CONNECTIONS - inc_limit.min(incoming.len());
         incoming.truncate(inc_limit);
-        outgoing.truncate(out_limit.max(half));
+        // Give outgoing the true remaining budget so the combined count never
+        // exceeds MAX_CONNECTIONS (no minimum-floor overflow).
+        outgoing.truncate(MAX_CONNECTIONS.saturating_sub(incoming.len()));
     }
 
     Ok(Some(ExplainResult {
@@ -198,7 +203,7 @@ fn edge_to_connection(
     edge: &GraphEdge,
     explained_sym_id: i64,
     sym_lookup: &HashMap<i64, &crate::types::Symbol>,
-    store: &IndexStore,
+    file_paths: &HashMap<i64, String>,
 ) -> Result<Connection> {
     // The "other" symbol is the one that is NOT the explained symbol.
     let other_id = if edge.source_sym == explained_sym_id {
@@ -209,10 +214,7 @@ fn edge_to_connection(
 
     let (symbol_name, source_file) = match sym_lookup.get(&other_id) {
         Some(s) => {
-            let file = store
-                .get_file_by_id(s.file_id)?
-                .map(|f| f.path)
-                .unwrap_or_default();
+            let file = file_paths.get(&s.file_id).cloned().unwrap_or_default();
             (s.name.clone(), file)
         }
         None => (format!("sym#{other_id}"), String::new()),
@@ -260,9 +262,12 @@ fn resolution_rank(sym: &crate::types::Symbol) -> (u8, i64) {
     (kind_rank, sym.id)
 }
 
-/// Pick the best candidate from a ranked list of symbols.
-fn best_candidate(symbols: &[crate::types::Symbol]) -> Option<&crate::types::Symbol> {
-    symbols.iter().min_by_key(|s| resolution_rank(s))
+/// Pick the best candidate from a ranked list of symbols. Accepts both owned
+/// slices and vectors of references (exact-match shortlists).
+fn best_candidate<'a>(
+    symbols: impl IntoIterator<Item = &'a crate::types::Symbol>,
+) -> Option<&'a crate::types::Symbol> {
+    symbols.into_iter().min_by_key(|s| resolution_rank(s))
 }
 
 /// Find the symbol ID best matching the given name.
@@ -277,17 +282,15 @@ fn find_symbol_id(store: &IndexStore, name: &str) -> Result<Option<i64>> {
 /// definition kinds. Returns the full [`Symbol`] so the caller has access to
 /// file_id, start_line, etc.
 fn find_symbol(store: &IndexStore, name: &str) -> Result<Option<crate::types::Symbol>> {
-    // Exact match first (no LIKE wildcards in the query value).
-    let exact = store.query_symbols(&crate::types::SymbolFilter {
-        name: Some(name.to_string()),
-        ..Default::default()
-    })?;
-    let exact: Vec<_> = exact.into_iter().filter(|s| s.name == name).collect();
-    if let Some(sym) = best_candidate(&exact) {
-        return Ok(Some(sym.clone()));
+    // Exact-match first: a keyed equality query is a bounded index lookup,
+    // where the substring fallback can return thousands of rows (a query for
+    // `new` or `mod` on a large index) that all have to be cloned and ranked
+    // while the store mutex is held.
+    if let Some(sym) = store.get_symbol_by_exact_name(name)? {
+        return Ok(Some(sym));
     }
-
-    // Fall back to substring matches (query_symbols is case-insensitive).
+    // query_symbols is a case-insensitive substring match, so a single query
+    // yields the wider (non-exact) candidates for the ranked fallback.
     let candidates = store.query_symbols(&crate::types::SymbolFilter {
         name: Some(name.to_string()),
         ..Default::default()

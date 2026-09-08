@@ -85,27 +85,49 @@ pub fn build_comparison_table_body(
     }
     body.push_str(" --- |\n");
 
+    // Profile lookup is keyed once instead of an O(entities x profiles)
+    // linear scan per table cell and per profile section.
+    let by_entity: std::collections::HashMap<&str, &CompetitiveProfile> =
+        profiles.iter().map(|p| (p.entity.as_str(), p)).collect();
+
+    // Filtering + lowercasing a summary is O(summary); prepare each profile
+    // once instead of once per (entity, criterion) table cell.
+    let mut prepared_by_entity: std::collections::HashMap<&str, PreparedSummary> =
+        std::collections::HashMap::new();
+    for profile in profiles {
+        prepared_by_entity
+            .entry(profile.entity.as_str())
+            .or_insert_with(|| prepare_summary(&profile.summary));
+    }
+
     for entity in entities {
-        let profile = profiles.iter().find(|p| p.entity == entity.name);
-        body.push_str(&format!("| {} |", escape_pipe(&entity.name)));
+        let profile = by_entity.get(entity.name.as_str()).copied();
+        body.push_str("| ");
+        body.push_str(&escape_pipe(&entity.name));
+        body.push_str(" |");
         for criterion in criteria {
             let cell = profile
-                .map(|p| extract_criterion_cell(&p.summary, criterion))
+                .and_then(|p| prepared_by_entity.get(p.entity.as_str()))
+                .map(|prepared| criterion_cell(prepared, criterion))
                 .unwrap_or_else(|| "—".to_string());
-            body.push_str(&format!(" {} |", escape_pipe(&cell)));
+            body.push(' ');
+            body.push_str(&escape_pipe(&cell));
+            body.push_str(" |");
         }
         let profile_summary = profile
             .filter(|p| !p.summary.trim().is_empty())
             .map(|p| compact_profile_summary(&p.summary))
             .unwrap_or_else(|| "—".to_string());
-        body.push_str(&format!(" {} |\n", escape_pipe(&profile_summary)));
+        body.push(' ');
+        body.push_str(&escape_pipe(&profile_summary));
+        body.push_str(" |\n");
     }
     body.push('\n');
 
     // ── Entity Profiles ─────────────────────────────────────────────────
     body.push_str("## Entity Profiles\n\n");
     for entity in entities {
-        let profile = profiles.iter().find(|p| p.entity == entity.name);
+        let profile = by_entity.get(entity.name.as_str()).copied();
         let category_note = entity
             .category
             .as_ref()
@@ -150,48 +172,89 @@ fn is_researcher_boilerplate(line: &str) -> bool {
         .any(|label| t.starts_with(label))
 }
 
-/// Extract a short cell value for `criterion` from `summary`.
-///
-/// The heuristic searches for the criterion keyword and returns the sentence
-/// or phrase that contains it, truncated to keep table cells readable. When
-/// the criterion is not mentioned, returns `"—"`. Heading-style lines (the
-/// researcher header) and mission-brief boilerplate lines are skipped so the
-/// cell reflects profile content.
-fn extract_criterion_cell(summary: &str, criterion: &str) -> String {
+/// A summary prepared once per profile for criterion-cell extraction: the
+/// content body with headings and researcher boilerplate removed, plus its
+/// lowercased copy for case-insensitive keyword search.
+struct PreparedSummary {
+    /// Filtered body (heading-style and boilerplate lines removed).
+    body: String,
+    /// Lowercased copy of `body` for keyword search.
+    lower: String,
+}
+
+/// Filter heading-style and researcher-boilerplate lines out of a summary,
+/// returning the content body and its lowercased copy.
+fn prepare_summary(summary: &str) -> PreparedSummary {
     let body = summary
         .lines()
         .filter(|l| !l.trim_start().starts_with('#') && !is_researcher_boilerplate(l))
         .collect::<Vec<_>>()
         .join("\n");
-    let search_text = if body.is_empty() { summary } else { &body };
-    let lower_summary = search_text.to_lowercase();
+    let lower = body.to_lowercase();
+    PreparedSummary { body, lower }
+}
+
+/// Truncate `s` to at most `max` characters at a char boundary, appending an
+/// ellipsis when the text was cut.
+fn truncate_cell(s: &str, max: usize) -> String {
+    if s.len() > max {
+        format!("{}…", s[..s.floor_char_boundary(max)].trim_end())
+    } else {
+        s.to_string()
+    }
+}
+
+/// Extract a short cell value for `criterion` from a prepared summary.
+///
+/// The heuristic searches for the criterion keyword and returns the sentence
+/// or phrase that contains it, truncated to keep table cells readable. When
+/// the criterion is not mentioned, returns `"—"`.
+fn criterion_cell(prepared: &PreparedSummary, criterion: &str) -> String {
+    if prepared.body.is_empty() {
+        // Every line was researcher boilerplate or a heading: there is no
+        // profile content to quote, and falling back to the raw summary
+        // would put mission-brief prose in the cell.
+        return "—".to_string();
+    }
     let lower_criterion = criterion.to_lowercase();
     let keyword = lower_criterion
         .split_whitespace()
         .next()
         .unwrap_or(&lower_criterion);
 
-    if let Some(idx) = lower_summary.find(keyword) {
+    let Some(idx) = prepared.lower.find(keyword) else {
+        return "—".to_string();
+    };
+
+    // The end-of-sentence scan begins AFTER the keyword so a criterion
+    // containing a '.' (e.g. "Node.js support") does not terminate the
+    // snippet mid-keyword.
+    let from = (idx + keyword.len()).min(prepared.body.len());
+    // Byte offsets found in the lowercased text are only valid for slicing
+    // the original text when the lowercase mapping preserved every
+    // character's UTF-8 length; guard the boundaries before slicing.
+    if prepared.body.is_char_boundary(idx) && prepared.body.is_char_boundary(from) {
         // Find the start of the sentence/line containing the keyword.
-        let start = search_text[..idx]
+        let start = prepared.body[..idx]
             .rfind(['\n', '.', ';'])
             .map(|i| i + 1)
             .unwrap_or(0);
-        let end = search_text[idx..]
+        let end = prepared.body[from..]
             .find(['\n', '.', ';'])
-            .map(|i| idx + i + 1)
-            .unwrap_or(search_text.len());
-        let snippet = search_text[start..end].trim();
-        if snippet.len() > 120 {
-            format!(
-                "{}…",
-                snippet[..snippet.floor_char_boundary(120)].trim_end()
-            )
-        } else {
-            snippet.to_string()
-        }
+            .map(|i| from + i + 1)
+            .unwrap_or(prepared.body.len());
+        truncate_cell(prepared.body[start..end].trim(), 120)
     } else {
-        "—".to_string()
+        // A character changed byte length under `to_lowercase` (e.g. U+0130),
+        // so the lowercased offsets cannot be mapped back — degrade to the
+        // first content line containing the keyword instead of risking a
+        // mid-character slice panic.
+        let line = prepared
+            .body
+            .lines()
+            .find(|l| l.to_lowercase().contains(keyword))
+            .unwrap_or("—");
+        truncate_cell(line.trim(), 120)
     }
 }
 
@@ -205,14 +268,7 @@ fn compact_profile_summary(summary: &str) -> String {
         .map(str::trim)
         .find(|l| !l.is_empty() && !l.starts_with('#') && !is_researcher_boilerplate(l))
         .unwrap_or(summary.lines().next().unwrap_or(summary).trim());
-    if first_line.len() > 140 {
-        format!(
-            "{}…",
-            first_line[..first_line.floor_char_boundary(140)].trim_end()
-        )
-    } else {
-        first_line.to_string()
-    }
+    truncate_cell(first_line, 140)
 }
 
 /// Render a researcher summary under an entity's `### {Entity}` subsection.
@@ -268,7 +324,7 @@ mod tests {
     #[test]
     fn empty_entities_yields_empty_body() {
         let body = build_comparison_table_body(&[], &["pricing".into()], &[]);
-        assert!(body.is_empty());
+        assert_eq!(body, "");
     }
 
     #[test]
@@ -320,9 +376,40 @@ mod tests {
     fn criterion_cell_skips_researcher_header() {
         let summary = "# Researcher researcher-3: Research Groq for 'topic'\n\n\
                        Groq delivers the fastest LLM inference via custom silicon.";
-        let cell = extract_criterion_cell(summary, "LLM inference");
+        let prepared = prepare_summary(summary);
+        let cell = criterion_cell(&prepared, "LLM inference");
         assert!(cell.contains("fastest LLM inference"));
         assert!(!cell.contains("Researcher"));
+    }
+
+    #[test]
+    fn dotted_criterion_does_not_truncate_mid_keyword() {
+        // The end-of-sentence scan must not stop at the '.' inside the
+        // matched keyword itself.
+        let entities = vec![entity("Acme")];
+        let criteria = vec!["Node.js support".to_string()];
+        let profiles = vec![CompetitiveProfile::new(
+            &entities[0],
+            "Acme ships first-class Node.js support with a native SDK.",
+        )];
+        let body = build_comparison_table_body(&entities, &criteria, &profiles);
+        assert!(body.contains("Node.js support with a native SDK"), "{body}");
+    }
+
+    #[test]
+    fn length_changing_lowercase_does_not_panic() {
+        // U+0130 (İ) lowercases to a 3-byte sequence, shifting every later
+        // byte offset between the lowercased probe text and the original
+        // summary; the non-ASCII keyword can then land mid-character in the
+        // original. Must degrade gracefully instead of panicking.
+        let entities = vec![entity("Test")];
+        let criteria = vec!["Ω".to_string()];
+        let profiles = vec![CompetitiveProfile::new(&entities[0], "İΩ pricing cheap.")];
+        let body = build_comparison_table_body(&entities, &criteria, &profiles);
+        assert!(
+            body.contains("Ω pricing cheap.") || body.contains("| — |"),
+            "{body}"
+        );
     }
 
     #[test]

@@ -302,7 +302,7 @@ impl App {
     /// therefore tracks the stable prompt core. The assembled prompt's byte
     /// length is converted to tokens via [`BYTES_PER_TOKEN`].
     pub fn system_prompt_token_count(&self) -> u64 {
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let working_dir = crate::app::helpers::current_working_dir();
         let config = self.current_config();
         let memory_config = config.memory.clone();
         let skills = self
@@ -333,7 +333,7 @@ impl App {
     /// can show where the prompt's weight comes from. Uses the same
     /// discovery-and-load precedence as the prompt builder.
     pub fn agents_md_token_count(&self) -> u64 {
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let working_dir = crate::app::helpers::current_working_dir();
         let (content, _) =
             ragent_agent::agent::collect_agents_md_content_with_discovery(&working_dir);
         bytes_to_tokens(content.len())
@@ -346,7 +346,7 @@ impl App {
     /// section builder the agent loop passes through `spawn_blocking` is
     /// measured here synchronously.
     pub fn memory_injection_token_count(&self) -> u64 {
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let working_dir = crate::app::helpers::current_working_dir();
         let config = self.current_config();
         bytes_to_tokens(
             ragent_agent::agent::build_memory_prompt_section(
@@ -366,7 +366,7 @@ impl App {
     /// can never drift from what the model actually receives. Zero when no
     /// agent-invocable skills resolve for the active agent.
     pub fn skills_token_count(&self) -> u64 {
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let working_dir = crate::app::helpers::current_working_dir();
         let config = self.current_config();
         let Some(registry) = self
             .session_processor
@@ -428,7 +428,7 @@ impl App {
     /// reference implementation the blocking refresh task mirrors via
     /// [`compute_disk_context_partitions`].
     pub fn context_partition_snapshot(&self) -> ContextPartitionSnapshot {
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let working_dir = crate::app::helpers::current_working_dir();
         let config = self.current_config();
         // Pre-compute the UI-thread-safe partitions (registry caches only)
         // before handing the disk/SQLite-bound work to the shared helper.
@@ -475,7 +475,7 @@ impl App {
         }
         self.context_refresh_inflight = true;
 
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let working_dir = crate::app::helpers::current_working_dir();
         let agent = self.prepare_agent_for_dispatch();
         let storage = Arc::clone(&self.storage);
         let session_processor = Arc::clone(&self.session_processor);
@@ -592,16 +592,27 @@ impl App {
         self.last_input_tokens > threshold
     }
 
+    /// Start manual compaction (the `/compact` / `/compress` slash commands)
+    /// and warn when it cannot start (no active session or no messages).
+    /// Shared so both command arms log identically.
+    pub(crate) fn start_compaction_or_warn(&mut self) {
+        if !self.start_compaction(false) {
+            tracing::warn!("compaction did not start (no active session or no messages)");
+        }
+    }
+
+    /// Begin compaction of the active session's history. `auto_triggered`
+    /// marks the threshold-driven path, which blocks the next send until the
+    /// compacted history is applied.
     pub(crate) fn start_compaction(&mut self, auto_triggered: bool) -> bool {
-        if self.session_id.is_none() {
+        let Some(sid) = self.session_id.clone() else {
             self.status = "[warn] No active session to compact".to_string();
             return false;
-        }
+        };
         if self.messages.is_empty() {
             self.status = "[warn] No messages to compact".to_string();
             return false;
         }
-        let sid = self.session_id.clone().unwrap_or_default();
         self.start_provider_compaction_for_session(&sid, auto_triggered)
     }
 
@@ -656,7 +667,7 @@ impl App {
 
         // Build a minimal tool context so the validated `bash` tool can run
         // the command with the same security and timeout as a normal tool call.
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let working_dir = crate::app::helpers::current_working_dir();
         let tool_ctx = ToolContext {
             session_id: sid.clone(),
             working_dir: working_dir.clone(),
@@ -756,7 +767,7 @@ impl App {
         self.cancel_flag = Some(flag.clone());
         tokio::spawn(async move {
             let final_text = if has_refs {
-                let wd = std::env::current_dir().unwrap_or_default();
+                let wd = crate::app::helpers::current_working_dir();
                 match ragent_agent::reference::resolve::resolve_all_refs(&text, &wd).await {
                     Ok((resolved, _)) => resolved,
                     Err(e) => {
@@ -982,7 +993,7 @@ impl App {
             "team" => Some("<subcommand>".to_string()),
             "memory" => Some("<subcommand> [<arg>]".to_string()),
             "agent" => Some("[<name>]".to_string()),
-            "codeindex" => Some("[on|off|sync]".to_string()),
+            "codeindex" => Some("[on|off|show|sync|reindex|help]".to_string()),
             "tools" => Some(
                 "[show|help|office|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
             ),
@@ -991,13 +1002,13 @@ impl App {
             "router" => {
                 Some("[on|off|status|tiers|weights|boundaries|test|stats|reload|help]".to_string())
             }
-            "config" => Some("[show]".to_string()),
+            "config" => Some("[show|save|list|help]".to_string()),
             "triggers" => Some("[list|enable|disable|remove|status|help]".to_string()),
             "websearch" => Some("[show|help]".to_string()),
-            "init" => Some("[config]".to_string()),
+            "init" => Some("[config|help]".to_string()),
             "thinking" => Some("[auto|off|low|medium|high]".to_string()),
             "theme" => Some("[toggle|light|dark]".to_string()),
-            "mouse" => Some("[on|off]".to_string()),
+            "mouse" => Some("[on|off|help]".to_string()),
             "status" => Some("[clear]".to_string()),
             "alog" => Some("[help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes]".to_string()),
             "log" => Some("[clear subagents|panics|research|editlog|help]".to_string()),
@@ -1019,7 +1030,7 @@ impl App {
     }
 
     pub(crate) fn refresh_project_files_cache(&mut self) {
-        let wd = std::env::current_dir().unwrap_or_default();
+        let wd = crate::app::helpers::current_working_dir();
         let files = ragent_agent::reference::fuzzy::collect_project_files(&wd, 10_000);
         self.project_files_cache_count = files.len();
         self.project_files_cache = Some(files);
@@ -1085,7 +1096,6 @@ impl App {
         }
         let byte_start = self.cursor_byte_pos_at_char_index(clamped_start);
         let byte_end = self.cursor_byte_pos_at_char_index(clamped_end);
-        let _removed = clamped_end - clamped_start;
         self.input.replace_range(byte_start..byte_end, "");
         self.set_cursor_char_index_clamped(clamped_start);
         self.refresh_input_menus();
@@ -1168,28 +1178,60 @@ impl App {
         if self.input_cursor == 0 {
             return;
         }
-        let chars: Vec<char> = self.input.chars().collect();
-        let mut i = self.input_cursor.min(chars.len());
-        while i > 0 && chars[i - 1].is_whitespace() {
-            i -= 1;
+        // Walk backwards from the cursor byte position without materialising
+        // the whole input into a char vector on every keypress.
+        let cursor_byte = self.cursor_byte_pos();
+        let mut cursor_chars = self.input_cursor;
+        let mut byte = cursor_byte;
+        let prev_is_ws = |b: usize| {
+            self.input[..b]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace)
+        };
+        while cursor_chars > 0 && prev_is_ws(byte) {
+            // Step back one char.
+            let prev = self.input[..byte]
+                .char_indices()
+                .next_back()
+                .map(|(b, _)| b)
+                .unwrap_or(0);
+            byte = prev;
+            cursor_chars -= 1;
         }
-        while i > 0 && !chars[i - 1].is_whitespace() {
-            i -= 1;
+        while cursor_chars > 0 && !prev_is_ws(byte) {
+            let prev = self.input[..byte]
+                .char_indices()
+                .next_back()
+                .map(|(b, _)| b)
+                .unwrap_or(0);
+            byte = prev;
+            cursor_chars -= 1;
         }
-        self.set_cursor_char_index_clamped(i);
+        self.set_cursor_char_index_clamped(cursor_chars);
     }
 
     pub(crate) fn cursor_move_word_right(&mut self) {
-        let chars: Vec<char> = self.input.chars().collect();
-        let len = chars.len();
-        let mut i = self.input_cursor.min(len);
-        while i < len && !chars[i].is_whitespace() {
-            i += 1;
+        let mut cursor_chars = self.input_cursor;
+        let mut byte = self.cursor_byte_pos();
+        let total_chars = self.input_len_chars();
+        let at_char = |b: usize| {
+            self.input[b..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
+        };
+        while cursor_chars < total_chars && !at_char(byte) {
+            let next = byte + self.input[byte..].chars().next().map_or(1, char::len_utf8);
+            byte = next;
+            cursor_chars += 1;
         }
-        while i < len && chars[i].is_whitespace() {
-            i += 1;
+        while cursor_chars < total_chars && at_char(byte) {
+            let next = byte + self.input[byte..].chars().next().map_or(1, char::len_utf8);
+            byte = next;
+            cursor_chars += 1;
         }
-        self.set_cursor_char_index_clamped(i);
+        self.set_cursor_char_index_clamped(cursor_chars);
     }
 
     pub(crate) fn cursor_move_home(&mut self) {
@@ -1481,10 +1523,7 @@ impl App {
                         )
                     })
                 };
-                let payload = match outcome {
-                    Ok((message, status)) => Ok(format!("{message}\n\nSTATUS:{status}")),
-                    Err(e) => Err(format!("graph build failed: {e}")),
-                };
+                let payload = outcome.map_err(|e| format!("graph build failed: {e}"));
                 if let Ok(mut guard) = results.lock() {
                     *guard = Some(payload);
                 }
@@ -1514,15 +1553,19 @@ impl App {
             .name("codeindex-manual-reindex".into())
             .spawn(move || {
                 let payload = match idx.full_reindex() {
-                    Ok(result) => Ok(format!(
-                        "[ok] Re-index complete: +{} ~{} -{} files, {} symbols in {}ms.\n\n\
-                         STATUS:codeindex: reindexed {} files",
-                        result.files_added,
-                        result.files_updated,
-                        result.files_removed,
-                        result.symbols_extracted,
-                        result.elapsed_ms,
-                        result.files_added + result.files_updated
+                    Ok(result) => Ok((
+                        format!(
+                            "[ok] Re-index complete: +{} ~{} -{} files, {} symbols in {}ms.",
+                            result.files_added,
+                            result.files_updated,
+                            result.files_removed,
+                            result.symbols_extracted,
+                            result.elapsed_ms
+                        ),
+                        format!(
+                            "codeindex: reindexed {} files",
+                            result.files_added + result.files_updated
+                        ),
                     )),
                     Err(e) => Err(format!("Re-index failed: {e}")),
                 };
@@ -1539,8 +1582,8 @@ impl App {
 
     /// Drain the completion result from an off-thread codeindex graph build
     /// or full reindex and surface it in the message window. Mirrors
-    /// `poll_pending_opt`; the `\n\nSTATUS:` suffix carries the status-bar
-    /// text back from the worker thread.
+    /// `poll_pending_opt`; the success payload carries the message and the
+    /// status-bar text as a tuple.
     pub fn poll_codeindex_bg_result(&mut self) {
         let outcome = {
             let mut guard = match self.code_index_bg_result.lock() {
@@ -1555,11 +1598,7 @@ impl App {
         self.code_index_graph_spawned = false;
         self.code_index_reindex_spawned = false;
         match outcome {
-            Ok(rendered) => {
-                let (message, status) = match rendered.split_once("\n\nSTATUS:") {
-                    Some((m, s)) => (m.to_string(), s.to_string()),
-                    None => (rendered.clone(), "codeindex: done".to_string()),
-                };
+            Ok((message, status)) => {
                 self.append_assistant_text(&message);
                 self.status = status;
                 self.arm_status_expiry();
@@ -1577,6 +1616,69 @@ impl App {
         self.needs_redraw = true;
     }
 
+    /// Drain the loop-rollback result (FR-020/T-013) deposited by the async
+    /// rollback task and surface it in the status line and message window.
+    /// Without this poll the status stays at "rolling back to pre-loop
+    /// snapshot…" forever and a failed restore is invisible to the user.
+    pub fn poll_rollback_result(&mut self) {
+        let outcome = {
+            let mut guard = match self.rollback_result.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            guard.take()
+        };
+        let Some(outcome) = outcome else {
+            return;
+        };
+        match outcome {
+            Ok(true) => {
+                self.status = "rollback complete".to_string();
+                self.append_assistant_text(
+                    "[ok] Rolled back to the pre-loop snapshot; loop changes reverted.",
+                );
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    "Loop rollback completed (FR-020)".to_string(),
+                );
+            }
+            Ok(false) => {
+                self.status = "rollback: nothing to restore".to_string();
+                self.append_assistant_text("No pending pre-loop capture was found to restore.");
+            }
+            Err(e) => {
+                self.status = format!("[err] rollback failed: {e}");
+                self.append_assistant_text(&format!(
+                    "[err] Rollback failed: {e}. The pre-loop capture is kept — retry \
+                     the rollback to try again."
+                ));
+                self.push_log_no_agent(LogLevel::Error, format!("rollback error: {e}"));
+            }
+        }
+        self.needs_redraw = true;
+    }
+
+    /// Drain the `/websearch test` engine-diagnostic result deposited by the
+    /// spawned test task and surface it in the message window. Without this
+    /// poll the command would have to block the UI thread for the whole
+    /// multi-engine network probe, deferring the "Starting Websearch
+    /// test…" acknowledgement until after the test had already finished.
+    pub fn poll_websearch_test_result(&mut self) {
+        let outcome = {
+            let mut guard = match self.websearch_test_result.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            guard.take()
+        };
+        let Some(output) = outcome else {
+            return;
+        };
+        self.append_assistant_text(&output);
+        self.status = "websearch: engine test complete".to_string();
+        self.needs_redraw = true;
+    }
+
     /// Test hook: exposes the crate-internal stats refresh to integration
     /// tests (busy-latch regression coverage). Not part of the public API.
     #[doc(hidden)]
@@ -1591,7 +1693,7 @@ impl App {
         }
         self.memory_stats_last_refresh = std::time::Instant::now();
         let storage = self.storage.clone();
-        let project_dir = std::env::current_dir().unwrap_or_default();
+        let project_dir = crate::app::helpers::current_working_dir();
         let pending = self.memory_entry_count_pending.clone();
         tokio::task::spawn_blocking(move || {
             let count = storage
@@ -1659,7 +1761,7 @@ impl App {
         if self.session_id.is_some() {
             return true;
         }
-        let dir = std::env::current_dir().unwrap_or_default();
+        let dir = crate::app::helpers::current_working_dir();
         match self.session_processor.session_manager.create_session(dir) {
             Ok(session) => {
                 self.session_id = Some(session.id.clone());
@@ -1694,7 +1796,7 @@ impl App {
         let Some(team_name) = self.active_team.as_ref().map(|t| t.name.clone()) else {
             return;
         };
-        let working_dir = std::env::current_dir().unwrap_or_default();
+        let working_dir = crate::app::helpers::current_working_dir();
         let Ok(store) = TeamStore::load_by_name(&team_name, &working_dir) else {
             return;
         };
@@ -1987,7 +2089,7 @@ impl App {
         }
 
         // Lazily populate or refresh the project file cache when cwd changes.
-        let wd = std::env::current_dir().unwrap_or_default();
+        let wd = crate::app::helpers::current_working_dir();
         let cache_stale = self
             .project_files_cache_cwd
             .as_ref()
@@ -2276,7 +2378,7 @@ impl App {
     /// still attached (the user may intentionally want a screenshot or asset
     /// from elsewhere), but the warning provides a visible security nudge.
     fn warn_if_path_outside_safe_scope(&mut self, path: &std::path::Path) {
-        let cwd = std::env::current_dir().unwrap_or_default();
+        let cwd = crate::app::helpers::current_working_dir();
         let home = dirs::home_dir().unwrap_or_default();
         let inside_cwd = path.strip_prefix(&cwd).is_ok();
         let inside_home = path.strip_prefix(&home).is_ok();
@@ -2473,6 +2575,28 @@ impl App {
         }
     }
 
+    /// Append a single formatted log line to the log-window spool file.
+    fn append_log_entry_to_spool(&self, path: &std::path::Path, level: LogLevel, message: &str) {
+        use std::io::Write;
+        let level_str = match level {
+            LogLevel::Info => "INF",
+            LogLevel::Tool => "TUL",
+            LogLevel::Warn => "WRN",
+            LogLevel::Error => "ERR",
+        };
+        let ts = chrono::Utc::now().to_rfc3339();
+        let line = format!("{ts} {level_str} {message}\n");
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            if let Err(e) = file.write_all(line.as_bytes()) {
+                tracing::warn!(error = %e, "failed to append log entry to spool");
+            }
+        }
+    }
+
     /// Convenience wrapper for [`push_log_for`](Self::push_log_for) that stamps
     /// the entry with the primary TUI session id.
     pub(crate) fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
@@ -2508,38 +2632,39 @@ impl App {
         }
     }
 
-    /// Append a single formatted log line to the log-window spool file.
-    fn append_log_entry_to_spool(&self, path: &std::path::Path, level: LogLevel, message: &str) {
-        use std::io::Write;
-        let level_str = match level {
-            LogLevel::Info => "INF",
-            LogLevel::Tool => "TUL",
-            LogLevel::Warn => "WRN",
-            LogLevel::Error => "ERR",
-        };
-        let ts = chrono::Utc::now().to_rfc3339();
-        let line = format!("{ts} {level_str} {message}\n");
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-        {
-            let _ = file.write_all(line.as_bytes());
-        }
-    }
-
     /// Flush every current log entry to the log-window spool file. Called when
     /// the log panel is toggled on so the file contains the full history that
-    /// is currently visible in the panel.
+    /// is currently visible in the panel. The file is opened once and all
+    /// entries are written in a single buffered pass instead of one open/write
+    /// syscall per entry.
     pub(crate) fn spool_log_window_history(&mut self) {
+        use std::io::Write;
         if !self.show_log {
             return;
         }
         let Some(ref path) = self.log_window_path else {
             return;
         };
+        let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        else {
+            return;
+        };
         for entry in &self.log_entries {
-            self.append_log_entry_to_spool(path, entry.level, &entry.message);
+            let level_str = match entry.level {
+                LogLevel::Info => "INF",
+                LogLevel::Tool => "TUL",
+                LogLevel::Warn => "WRN",
+                LogLevel::Error => "ERR",
+            };
+            let ts = chrono::Utc::now().to_rfc3339();
+            let line = format!("{ts} {level_str} {}\n", entry.message);
+            if let Err(e) = file.write_all(line.as_bytes()) {
+                tracing::warn!(error = %e, "failed to spool log entry");
+                break;
+            }
         }
     }
 

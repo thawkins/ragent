@@ -90,6 +90,16 @@ pub(crate) fn split_bash_command(command: &str) -> Vec<String> {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
 
+    // Flush a completed sub-command into `parts` (trim + strip timeout prefix).
+    let mut flush = |current: &mut String| {
+        let trimmed = current.trim();
+        if !trimmed.is_empty() {
+            // Strip timeout prefix before adding to parts
+            parts.push(strip_timeout_prefix(trimmed).to_string());
+        }
+        current.clear();
+    };
+
     while let Some(c) = chars.next() {
         match c {
             '\'' if !in_double_quote => {
@@ -104,19 +114,9 @@ pub(crate) fn split_bash_command(command: &str) -> Vec<String> {
                 // Check for && or ||
                 if (c == '&' || c == '|') && chars.peek() == Some(&c) {
                     chars.next(); // consume the second character
-                    let trimmed = current.trim();
-                    if !trimmed.is_empty() {
-                        // Strip timeout prefix before adding to parts
-                        parts.push(strip_timeout_prefix(trimmed).to_string());
-                    }
-                    current.clear();
+                    flush(&mut current);
                 } else if c == ';' {
-                    let trimmed = current.trim();
-                    if !trimmed.is_empty() {
-                        // Strip timeout prefix before adding to parts
-                        parts.push(strip_timeout_prefix(trimmed).to_string());
-                    }
-                    current.clear();
+                    flush(&mut current);
                 } else {
                     // Single & or | - add to current command
                     current.push(c);
@@ -127,12 +127,7 @@ pub(crate) fn split_bash_command(command: &str) -> Vec<String> {
     }
 
     // Add the final part
-    let trimmed = current.trim();
-    if !trimmed.is_empty() {
-        // Strip timeout prefix before adding to parts
-        parts.push(strip_timeout_prefix(trimmed).to_string());
-    }
-
+    flush(&mut current);
     // If no delimiters found, return the original command (with timeout stripped)
     if parts.is_empty() {
         vec![strip_timeout_prefix(command).to_string()]
@@ -384,11 +379,9 @@ async fn prompt_for_permission(
     let deadline = tokio::time::Instant::now() + timeout;
 
     loop {
+        // A zero remaining timeout resolves `tokio::time::timeout` to `Err`
+        // on the first pass, so no separate deadline check is needed here.
         let recv_timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if recv_timeout.is_zero() {
-            debug!("Permission request timeout for {tool_name}");
-            return Ok(PermissionAction::Deny);
-        }
 
         match tokio::time::timeout(recv_timeout, rx.recv()).await {
             Ok(Ok(Event::PermissionReplied {
@@ -571,9 +564,19 @@ pub async fn check_permission_with_prompt(
                         if resource_path.starts_with(&cwd) {
                             return Ok(PermissionAction::Allow);
                         }
-                    } else if !resource.starts_with('/') && !resource.starts_with("..") {
-                        // Relative path within project, not yet created
-                        return Ok(PermissionAction::Allow);
+                    } else if !resource.starts_with('/') {
+                        // Relative path within project, not yet created.
+                        // Reject embedded `..` components: after lexical
+                        // normalisation the path could resolve outside the
+                        // project (e.g. `foo/../../etc/target`), and
+                        // canonicalise could not verify containment because
+                        // the file does not exist yet.
+                        let escapes = std::path::Path::new(resource)
+                            .components()
+                            .any(|c| c == std::path::Component::ParentDir);
+                        if !escapes {
+                            return Ok(PermissionAction::Allow);
+                        }
                     }
                 }
             }

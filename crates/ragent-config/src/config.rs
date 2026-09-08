@@ -1453,17 +1453,8 @@ impl Config {
             }
         }
 
-        // Cache miss / invalid: read each candidate that exists and record both
-        // its mtime and size for the next fast-path check.
-        let mut mtimes: Vec<(PathBuf, std::time::SystemTime, u64)> = Vec::new();
-        for path in &candidates {
-            if path.exists()
-                && let Ok(meta) = std::fs::metadata(path)
-                && let Ok(mt) = meta.modified()
-            {
-                mtimes.push((path.clone(), mt, meta.len()));
-            }
-        }
+        // Cache miss / invalid: load, then snapshot the candidate mtimes AFTER
+        // the load (see comment below) so the new entry keys the fast path.
         let cfg = Self::load_uncached();
         if let Ok(cfg) = &cfg {
             // Re-snapshot AFTER load_uncached: a first-time load in a fresh
@@ -1574,40 +1565,57 @@ impl Config {
             }
         }
 
-        // Inline config from environment variable
+        // Inline config from environment variable. Parsed once into a raw
+        // `Value` so the `specified_default_agent` probe and the typed
+        // conversion share a single JSON parse.
         if let Ok(content) = std::env::var("RAGENT_CONFIG_CONTENT") {
-            let mut overlay: Self = serde_json::from_str(&content).map_err(|e| {
-                let line = e.line();
-                let column = e.column();
-                let problematic_line = content
-                    .lines()
-                    .nth(line.saturating_sub(1))
-                    .unwrap_or("<line not found>");
-
-                anyhow::anyhow!(
-                    "Failed to parse RAGENT_CONFIG_CONTENT environment variable:\n\
-                     Error at line {}, column {}:\n\
-                     {}\n\
-                     Problematic line:\n\
-                     {}\n\
-                     {}^\n\
-                     Parse error: {}",
-                    line,
-                    column,
-                    "─".repeat(80),
-                    problematic_line,
-                    " ".repeat(column.saturating_sub(1)),
-                    e
-                )
-            })?;
-            let overlay_value: serde_json::Value =
-                serde_json::from_str(&content).expect("valid JSON already parsed into Config");
-            overlay.specified_default_agent = overlay_value.get("defaultAgent").is_some()
+            let label = "RAGENT_CONFIG_CONTENT environment variable";
+            let overlay_value: serde_json::Value = serde_json::from_str(&content)
+                .map_err(|e| Self::json_parse_error(label, &content, e))?;
+            let specified = overlay_value.get("defaultAgent").is_some()
                 || overlay_value.get("default_agent").is_some();
+            // The typed conversion deliberately re-parses from the raw text
+            // instead of `from_value`: `from_str` errors carry real
+            // line/column positions, which the diagnostic contract (and the
+            // caret rendering) requires; `from_value` errors report line 0,
+            // column 0.
+            let mut overlay: Self = serde_json::from_str(&content)
+                .map_err(|e| Self::json_parse_error(label, &content, e))?;
+            overlay.specified_default_agent = specified;
             config = Self::merge(config, overlay);
         }
 
         Ok(config)
+    }
+
+    /// Build the actionable parse diagnostic shared by the
+    /// `RAGENT_CONFIG_CONTENT` and config-file parse paths.
+    fn json_parse_error(
+        label: impl std::fmt::Display,
+        content: &str,
+        e: serde_json::Error,
+    ) -> anyhow::Error {
+        let line = e.line();
+        let column = e.column();
+        let problematic_line = content
+            .lines()
+            .nth(line.saturating_sub(1))
+            .unwrap_or("<line not found>");
+        anyhow::anyhow!(
+            "Failed to parse {label}:\n\
+             Error at line {}, column {}:\n\
+             {}\n\
+             Problematic line:\n\
+             {}\n\
+             {}^\n\
+             Parse error: {}",
+            line,
+            column,
+            "─".repeat(80),
+            problematic_line,
+            " ".repeat(column.saturating_sub(1)),
+            e
+        )
     }
 
     pub(crate) fn load_file(path: &Path) -> anyhow::Result<Self> {
@@ -1617,42 +1625,35 @@ impl Config {
         Self::parse_file(path, &content)
     }
 
+    /// Merge-deduplicate `src` into `dst`, preserving order: items already in
+    /// `dst` are skipped, new items are appended in source order. Used by
+    /// [`Config::merge`] for every unioned list (bash allow/deny, hidden
+    /// tools, dirs allow/deny/roots).
+    fn union_into<T: PartialEq>(dst: &mut Vec<T>, src: impl IntoIterator<Item = T>) {
+        for item in src {
+            if !dst.contains(&item) {
+                dst.push(item);
+            }
+        }
+    }
+
     /// M-025: parse a config file's content into a [`Config`], computing
-    /// `specified_default_agent` from the already-read bytes so the file is
-    /// not read and JSON-parsed twice.
+    /// `specified_default_agent` from the already-read bytes. The content is
+    /// JSON-parsed once into a raw [`serde_json::Value`]; both the
+    /// `specified_default_agent` probe and the typed conversion derive from
+    /// that single parse.
     pub(crate) fn parse_file(path: &Path, content: &str) -> anyhow::Result<Self> {
-        let mut config: Self = serde_json::from_str(content).map_err(|e| {
-            // Extract line and column from serde_json error
-            let line = e.line();
-            let column = e.column();
-
-            // Get the problematic line from the content
-            let problematic_line = content
-                .lines()
-                .nth(line.saturating_sub(1))
-                .unwrap_or("<line not found>");
-
-            anyhow::anyhow!(
-                "Failed to parse config file '{}':\n\
-                 Error at line {}, column {}:\n\
-                 {}\n\
-                 Problematic line:\n\
-                 {}\n\
-                 {}^\n\
-                 Parse error: {}",
-                path.display(),
-                line,
-                column,
-                "─".repeat(80),
-                problematic_line,
-                " ".repeat(column.saturating_sub(1)),
-                e
-            )
-        })?;
-        let config_value: serde_json::Value =
-            serde_json::from_str(content).expect("valid JSON already parsed into Config");
-        config.specified_default_agent = config_value.get("defaultAgent").is_some()
+        let label = format!("config file '{}'", path.display());
+        let config_value: serde_json::Value = serde_json::from_str(content)
+            .map_err(|e| Self::json_parse_error(&label, content, e))?;
+        let specified = config_value.get("defaultAgent").is_some()
             || config_value.get("default_agent").is_some();
+        // Re-parse from raw text for the typed conversion so type-mismatch
+        // errors keep real line/column positions (`from_value` errors report
+        // line 0, column 0 and would break the caret diagnostic).
+        let mut config: Self = serde_json::from_str(content)
+            .map_err(|e| Self::json_parse_error(&label, content, e))?;
+        config.specified_default_agent = specified;
 
         Ok(config)
     }
@@ -2013,7 +2014,7 @@ impl Config {
         hidden
     }
 
-    /// Deep merge two configs, with overlay taking precedence for set fields.    ///
+    /// Deep merge two configs, with overlay taking precedence for set fields.
     /// # Examples
     ///
     /// ```
@@ -2098,16 +2099,8 @@ impl Config {
         base.hooks.extend(overlay.hooks);
 
         // Bash lists are unioned across global + project configs
-        for entry in overlay.bash.allowlist {
-            if !base.bash.allowlist.contains(&entry) {
-                base.bash.allowlist.push(entry);
-            }
-        }
-        for entry in overlay.bash.denylist {
-            if !base.bash.denylist.contains(&entry) {
-                base.bash.denylist.push(entry);
-            }
-        }
+        Self::union_into(&mut base.bash.allowlist, overlay.bash.allowlist);
+        Self::union_into(&mut base.bash.denylist, overlay.bash.denylist);
 
         // GitLab: overlay fields override base
         if overlay.gitlab.instance_url.is_some() {
@@ -2168,11 +2161,7 @@ impl Config {
         }
 
         // hidden_tools: union of base and overlay (both lists are honoured)
-        for name in overlay.hidden_tools {
-            if !base.hidden_tools.contains(&name) {
-                base.hidden_tools.push(name);
-            }
-        }
+        Self::union_into(&mut base.hidden_tools, overlay.hidden_tools);
 
         // code_index: overlay takes precedence only for explicitly set fields.
         // The `specified` flags from the overlay are propagated onto the base so
@@ -2238,12 +2227,13 @@ impl Config {
         // flag uses OR semantics because it is opt-in.
         base.research.open_access_recovery |= overlay.research.open_access_recovery;
         if overlay.research.contact_email.is_some() {
-            base.research.contact_email = overlay.research.contact_email.clone();
+            base.research.contact_email = overlay.research.contact_email;
         }
         if overlay.research.oa_min_full_text_chars != default_oa_min_full_text_chars() {
             base.research.oa_min_full_text_chars = overlay.research.oa_min_full_text_chars;
         }
-        base.research.evaluate.merge(&overlay.research.evaluate); // Finance provider config: overlay takes precedence when it contains
+        base.research.evaluate.merge(&overlay.research.evaluate);
+        // Finance provider config: overlay takes precedence when it contains
         // any explicit setting, so project-level Alpha Vantage credentials are
         // not silently discarded by the default Yahoo config.
         if overlay.finance.is_explicitly_configured() {
@@ -2251,21 +2241,9 @@ impl Config {
         }
 
         // dirs: union of allowlist, denylist, and allowed_roots from both configs
-        for pattern in overlay.dirs.allowlist {
-            if !base.dirs.allowlist.contains(&pattern) {
-                base.dirs.allowlist.push(pattern);
-            }
-        }
-        for pattern in overlay.dirs.denylist {
-            if !base.dirs.denylist.contains(&pattern) {
-                base.dirs.denylist.push(pattern);
-            }
-        }
-        for path in overlay.dirs.allowed_roots {
-            if !base.dirs.allowed_roots.contains(&path) {
-                base.dirs.allowed_roots.push(path);
-            }
-        }
+        Self::union_into(&mut base.dirs.allowlist, overlay.dirs.allowlist);
+        Self::union_into(&mut base.dirs.denylist, overlay.dirs.denylist);
+        Self::union_into(&mut base.dirs.allowed_roots, overlay.dirs.allowed_roots);
 
         base
     }

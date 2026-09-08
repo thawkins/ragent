@@ -1,6 +1,6 @@
 # Project Statistics
 
-**Version:** 1.0.82
+**Version:** 1.0.84
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
@@ -9,17 +9,17 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 422,085 (419,555 in `crates/` + 2,530 in root `src/`/`examples/`) |
-| Total Rust files | 1,024 (workspace crates) + 5 (root `src/`/`examples/`) |
-| Tests defined | ~7,884 (5,636 in `tests/` + 2,248 inline `#[cfg(test)]`) |
-| Test files | 468 (incl. inline helper files) |
+| Total Rust lines | 423176 (420626 in `crates/` + 2550 in root `src/`/`examples/`) |
+| Total Rust files | 1025 (workspace crates) + 5 (root `src/`/`examples/`) |
+| Tests defined | ~8385 (469 external test-file tests + 7916 inline `#[cfg(test)]`) |
+| Test files | 469 external + 195 inline-bearing |
 | Test binaries | ~484 (468 integration test files + 16 lib/bin targets) |
 | Benchmark files | 13 (+1 in `vendor/html2text`) |
 | Tools registered | 168 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 17 |
 | Authors | 1 |
-| Version | 1.0.82 |
+| Version | 1.0.84 |
 
 ---
 
@@ -29,26 +29,25 @@ The project is organised as a Cargo workspace of 17 focused crates. The table be
 shows the file count, line count, and test-file count for each crate (including
 `src/`, `tests/`, `benches/`, and `examples/` directories where present).
 
-| Crate | Rust Files | Lines | Test Files | Description |
-|-------|-----------:|------:|-----------:|-------------|
-| `ragent-tui` | 131 | 79,454 | 81 | Ratatui terminal interface |
-| `ragent-agent` | 213 | 73,889 | 80 | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry |
-| `ragent-tools-extended` | 153 | 58,042 | 57 | Extended document/web/memory/codeindex/plot tools |
-| `ragent-research` | 102 | 55,251 | 39 | Research system: web/local gathering, synthesis, RESEARCH.md output |
-| `ragent-codeindex` | 68 | 22,817 | 39 | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher, semantic graph |
-| `ragent-llm` | 49 | 22,714 | 20 | Provider clients and model/provider registry |
-| `ragent-specs` | 26 | 17,464 | 13 | Spec lifecycle management: discovery, validation, status transitions, review, archival |
-| `ragent-tools-core` | 51 | 16,554 | 16 | Core shell/file/search tools |
-| `ragent-storage` | 35 | 14,268 | 30 | SQLite-backed storage, snapshots, encrypted credentials |
-| `ragent-tools-vcs` | 47 | 13,153 | 13 | GitHub and GitLab tool surface |
-| `ragent-telemetry` | 25 | 10,247 | 16 | OpenTelemetry instrumentation and OTLP export |
-| `ragent-config` | 37 | 9,714 | 24 | Configuration types, defaults, and parsing |
-| `ragent-bench` | 24 | 8,433 | 3 | Benchmark runner shared between TUI and CLI |
-| `ragent-types` | 34 | 8,404 | 16 | Shared IDs, events, messages, and sanitization primitives |
-| `ragent-server` | 11 | 5,694 | 5 | Axum HTTP routes and SSE streaming |
-| `ragent-team` | 15 | 2,770 | 14 | Team coordination runtime and team tools |
-| `ragent-prompt_opt` | 3 | 687 | 2 | Prompt optimization templates and completer abstraction |
-| **Total** | **1,024** | **419,555** | **468** | |
+| Crate | Rust files | Rust lines | Test files |
+|---|---|---|---|
+| `ragent-agent` | 213 | 74037 | 80 |
+| `ragent-bench` | 24 | 8436 | 3 |
+| `ragent-codeindex` | 68 | 22898 | 39 |
+| `ragent-config` | 37 | 9692 | 24 |
+| `ragent-llm` | 49 | 22714 | 20 |
+| `ragent-prompt_opt` | 3 | 687 | 2 |
+| `ragent-research` | 102 | 55352 | 39 |
+| `ragent-server` | 11 | 5697 | 5 |
+| `ragent-specs` | 26 | 17464 | 13 |
+| `ragent-storage` | 35 | 14271 | 30 |
+| `ragent-team` | 15 | 2770 | 14 |
+| `ragent-telemetry` | 25 | 10265 | 16 |
+| `ragent-tools-core` | 51 | 16554 | 16 |
+| `ragent-tools-extended` | 153 | 58037 | 57 |
+| `ragent-tools-vcs` | 47 | 13153 | 13 |
+| `ragent-tui` | 132 | 80195 | 82 |
+| `ragent-types` | 34 | 8404 | 16 |
 
 ---
 

@@ -193,11 +193,10 @@ fn test_poll_codeindex_bg_result_drains_completion() {
     app.code_index_graph_spawned = true;
     app.status = "[wait] codeindex: building graph…".to_string();
 
-    let payload = Ok(
-        "\u{2705} Graph built: 42 edges (30 EXTRACTED, 12 INFERRED) in 100ms.\n\n\
-         STATUS:codeindex: graph built (42 edges)"
-            .to_string(),
-    );
+    let payload = Ok((
+        "\u{2705} Graph built: 42 edges (30 EXTRACTED, 12 INFERRED) in 100ms.".to_string(),
+        "codeindex: graph built (42 edges)".to_string(),
+    ));
     {
         let mut guard = app.code_index_bg_result.lock().unwrap();
         *guard = Some(payload);

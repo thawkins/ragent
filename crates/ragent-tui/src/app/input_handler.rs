@@ -367,7 +367,9 @@ impl App {
                                                                                                                                                                               let id = member.agent_id.clone();
                                                                                                                                                                               handle.spawn(async move {
                                                                                                                                                                                   if let Some(tm) = tm {
-                                                                                                                                                                                      let _ = tm.shutdown_teammate(&id, false).await;
+                                                                                                                                                                                      if let Err(e) = tm.shutdown_teammate(&id, false).await {
+                                                                                                                                                                                          tracing::warn!(teammate = %id, error = %e, "failed to shutdown teammate");
+                                                                                                                                                                                      }
                                                                                                                                                                                   }
                                                                                                                                                                               });
                                                                                                                                                                           }
@@ -836,7 +838,9 @@ impl App {
                         let id = focused.clone();
                         handle.spawn(async move {
                             if let Some(tm) = tm {
-                                let _ = tm.shutdown_teammate(&id, false).await;
+                                if let Err(e) = tm.shutdown_teammate(&id, false).await {
+                                    tracing::warn!(teammate = %id, error = %e, "failed to shutdown teammate");
+                                }
                             }
                         });
                     }
@@ -850,7 +854,9 @@ impl App {
                         let id = focused.clone();
                         handle.spawn(async move {
                             if let Some(tm) = tm {
-                                let _ = tm.shutdown_teammate(&id, false).await;
+                                if let Err(e) = tm.shutdown_teammate(&id, false).await {
+                                    tracing::warn!(teammate = %id, error = %e, "failed to shutdown teammate");
+                                }
                             }
                         });
                     }
@@ -1557,28 +1563,31 @@ impl App {
                         // retry is possible.
                         let sid = offer.session_id.clone();
                         let processor = self.session_processor.clone();
+                        let results = self.rollback_result.clone();
                         self.status = "rolling back to pre-loop snapshot…".to_string();
                         self.push_log_no_agent(
                             LogLevel::Info,
                             format!(
-                                "rollback accepted · restoring {} file{}",
-                                offer.files.len(),
-                                if offer.files.len() == 1 { "" } else { "s" }
+                                "rollback accepted · restoring {}",
+                                crate::app::helpers::plural(offer.files.len() as u64, "file")
                             ),
                         );
                         tokio::spawn(async move {
+                            // The task only logs; the outcome is deposited in
+                            // `rollback_result` for `poll_rollback_result` so
+                            // the UI status cannot stay stuck at "rolling
+                            // back…" and a failed restore is visible in the
+                            // message window.
                             match processor.rollback_loop(&sid).await {
-                                Ok(true) => {
+                                Ok(outcome) => {
                                     tracing::info!(
                                         session_id = %sid,
-                                        "rollback completed (FR-020): pre-loop snapshot restored"
+                                        "rollback finished (FR-020), restored={}",
+                                        outcome
                                     );
-                                }
-                                Ok(false) => {
-                                    tracing::info!(
-                                        session_id = %sid,
-                                        "rollback had no pending capture (nothing to restore)"
-                                    );
+                                    if let Ok(mut guard) = results.lock() {
+                                        *guard = Some(Ok(outcome));
+                                    }
                                 }
                                 Err(e) => {
                                     tracing::error!(
@@ -1586,6 +1595,9 @@ impl App {
                                         error = %e,
                                         "rollback failed; the capture is kept for retry"
                                     );
+                                    if let Ok(mut guard) = results.lock() {
+                                        *guard = Some(Err(e.to_string()));
+                                    }
                                 }
                             }
                         });

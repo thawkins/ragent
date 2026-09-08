@@ -200,15 +200,7 @@ pub struct LoopTracker {
 impl LoopTracker {
     /// Create a tracker for a run bounded by `spec`'s budgets.
     pub fn new(spec: &LoopSpec) -> Self {
-        Self {
-            steps: 0,
-            tokens: 0,
-            consecutive_failures: 0,
-            tool_calls: 0,
-            stopped: None,
-            max_steps: spec.max_steps,
-            cost_limit: spec.cost_limit,
-        }
+        Self::with_budgets(spec.max_steps, spec.cost_limit)
     }
 
     /// Create a tracker with explicit budgets (test helper).
@@ -340,11 +332,23 @@ impl LoopTracker {
 }
 
 /// Compile a glob pattern list into matchers; invalid patterns are skipped
-/// (they cannot match anything).
-fn compile_globs(patterns: &[String]) -> Vec<GlobMatcher> {
+/// (they cannot match anything). Invalid patterns are logged so a silently
+/// emptied restriction set is diagnosable.
+fn compile_globs(patterns: &[String], kind: &str) -> Vec<GlobMatcher> {
     patterns
         .iter()
-        .filter_map(|p| Glob::new(p).ok().map(|g| g.compile_matcher()))
+        .filter_map(|p| match Glob::new(p) {
+            Ok(g) => Some(g.compile_matcher()),
+            Err(e) => {
+                tracing::warn!(
+                    pattern = %p,
+                    kind,
+                    error = %e,
+                    "invalid glob pattern in loop restriction; it will not match anything",
+                );
+                None
+            }
+        })
         .collect()
 }
 
@@ -366,14 +370,34 @@ impl LoopSpec {
         if !self.has_scope() {
             return true;
         }
-        let matchers = compile_globs(&self.scope);
+        let matchers = compile_globs(&self.scope, "scope");
         matchers.iter().any(|m| m.is_match(path))
     }
 
     /// Whether `path` is protected by a read-only constraint (FR-021).
     pub fn path_is_read_only(&self, path: &str) -> bool {
-        let matchers = compile_globs(&self.read_only);
+        let matchers = compile_globs(&self.read_only, "read_only");
         matchers.iter().any(|m| m.is_match(path))
+    }
+
+    /// The read-only-constraint denial message for `path` (FR-021). Shared by
+    /// the bash and write-tool branches of [`LoopSpec::deny_reason`].
+    fn read_only_violation(&self, path: &str) -> String {
+        format!(
+            "constraint violation: path '{path}' is read-only for this loop \
+             (read-only constraints: {}). The goal must be satisfied without \
+             modifying protected paths.",
+            self.read_only.join(", ")
+        )
+    }
+
+    /// The scope-boundary violation message for `path` (FR-022).
+    fn scope_violation(&self, path: &str) -> String {
+        format!(
+            "scope violation: path '{path}' is outside the loop's scope \
+             boundaries ({}). Restrict file operations to the configured scope.",
+            self.scope.join(", ")
+        )
     }
 }
 /// Tools that mutate the workspace or protected state (FR-021).
@@ -458,7 +482,7 @@ fn candidate_paths(input: &Value) -> Vec<String> {
                 }
             }
         }
-        _ => {}
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::Object(_) => {}
     };
     for name in PATH_PARAM_NAMES {
         if let Some(value) = input.get(*name) {
@@ -487,6 +511,15 @@ fn candidate_paths(input: &Value) -> Vec<String> {
 fn bash_path_tokens(command: &str) -> Vec<String> {
     command
         .split_whitespace()
+        // URLs (`https://...`) are not filesystem paths, and `key=value`
+        // tokens whose value side is not path-like (e.g. `--format=json`)
+        // are options, not write targets. Treating either as a path produced
+        // spurious scope-violation denials for ordinary commands.
+        .filter(|token| !token.contains("://"))
+        .filter(|token| match token.split_once('=') {
+            Some((name, value)) => value.contains('/') && (name.is_empty() || !name.contains('/')),
+            None => true,
+        })
         .filter(|token| token.contains('/') || token.starts_with('~'))
         .map(|token| {
             token
@@ -523,9 +556,19 @@ fn bash_sub_command_is_write(sub_command: &str) -> bool {
     if BASH_WRITE_COMMANDS.contains(name) {
         return true;
     }
-    if *name == "sed" && tokens.iter().any(|t| *t == "-i" || t.starts_with("-i")) {
-        return true;
+    if *name == "sed" {
+        // In-place edit detection: the short bundled form (`-i`, `-ibak`),
+        // any bundled short-flag cluster containing `i` after the dash, and
+        // the long `--in-place` form.
+        let in_place = tokens.iter().any(|t| {
+            (*t == "--in-place")
+                || (t.starts_with('-') && !t.starts_with("--") && t.len() > 1 && t.contains('i'))
+        });
+        if in_place {
+            return true;
+        }
     }
+    // Output redirection writes the target path; detect both `>` and `>>`.
     sub_command.contains('>')
 }
 
@@ -567,7 +610,7 @@ impl LoopSpec {
     pub fn deny_reason(&self, tool_name: &str, input: &Value) -> Option<String> {
         // FR-008/FR-009: outside the loop's tool set (mandatory safety tools
         // excepted). No configured tool set means every tool is allowed.
-        if self.has_tool_set() && !self.allows_tool(tool_name) {
+        if !self.allows_tool(tool_name) {
             let mandatory = LOOP_ALWAYS_ALLOWED_TOOLS.contains(&tool_name);
             if !mandatory {
                 return Some(format!(
@@ -591,11 +634,21 @@ impl LoopSpec {
             candidate_paths(input)
         };
 
+        // Compile each matcher list once per denial check: this function runs
+        // for every tool call in a loop, and both branches below call the
+        // path predicates per token, so recompiling the glob sets inside the
+        // loops multiplied the same expensive work by the token count.
+        let read_only_matchers =
+            (!self.read_only.is_empty()).then(|| compile_globs(&self.read_only, "read_only"));
+        let scope_matchers = self
+            .has_scope()
+            .then(|| compile_globs(&self.scope, "scope"));
+
         if tool_name == "bash" {
             // FR-021: a filesystem-mutating bash sub-command whose write
             // target matches a read-only constraint is denied. Scope checks
             // below still apply to every path token in the command.
-            if !self.read_only.is_empty() {
+            if let Some(matchers) = &read_only_matchers {
                 let command = input.get("command").and_then(Value::as_str).unwrap_or("");
                 for sub_command in bash_sub_commands(command) {
                     let targets: Vec<String> = if bash_sub_command_is_write(&sub_command) {
@@ -608,41 +661,28 @@ impl LoopSpec {
                         candidates.push(target);
                     }
                     for path in &candidates {
-                        if self.path_is_read_only(path) {
-                            return Some(format!(
-                                "constraint violation: path '{path}' is read-only \
-                                 for this loop (read-only constraints: {}). The goal \
-                                 must be satisfied without modifying protected paths.",
-                                self.read_only.join(", ")
-                            ));
+                        if matchers.iter().any(|m| m.is_match(path)) {
+                            return Some(self.read_only_violation(path));
                         }
                     }
                 }
             }
-        } else if LOOP_WRITE_TOOLS.contains(&tool_name) && !self.read_only.is_empty() {
-            for path in &paths {
-                if self.path_is_read_only(path) {
-                    return Some(format!(
-                        "constraint violation: path '{path}' is read-only for this \
-                         loop (read-only constraints: {}). The goal must be satisfied \
-                         without modifying protected paths.",
-                        self.read_only.join(", ")
-                    ));
+        } else if LOOP_WRITE_TOOLS.contains(&tool_name) {
+            if let Some(matchers) = &read_only_matchers {
+                for path in &paths {
+                    if matchers.iter().any(|m| m.is_match(path)) {
+                        return Some(self.read_only_violation(path));
+                    }
                 }
             }
         }
 
         // FR-022: every file-operation path must be inside the scope
         // boundaries (when configured).
-        if self.has_scope() {
+        if let Some(matchers) = &scope_matchers {
             for path in &paths {
-                if !self.path_in_scope(path) {
-                    return Some(format!(
-                        "scope violation: path '{path}' is outside the loop's scope \
-                         boundaries ({}). Restrict file operations to the configured \
-                         scope.",
-                        self.scope.join(", ")
-                    ));
+                if !matchers.iter().any(|m| m.is_match(path)) {
+                    return Some(self.scope_violation(path));
                 }
             }
         }

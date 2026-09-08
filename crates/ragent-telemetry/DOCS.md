@@ -89,5 +89,5 @@ sensitive-data redaction, Prometheus exposition, and graceful shutdown.
 
 ## Module: shutdown
 
-- **ShutdownGuard** (struct) — RAII guard; methods: `new`, `subsystem`, `subsystem_mut`, `flush`, `into_inner`. Implements `Drop` (flush + shutdown).
+- **ShutdownGuard** (struct) — RAII guard wrapping `Arc<TelemetrySubsystem>`; methods: `new(Arc<…>)`, `subsystem`, `flush`, `into_inner`. Implements `Drop` (flush + shutdown).
 - **flush_on_signal_arc(subsystem)** (async fn) — Background task listening for SIGINT/SIGTERM and flushing.

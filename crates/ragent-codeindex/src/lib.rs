@@ -304,14 +304,21 @@ impl CodeIndex {
                 Ok(g) => g,
                 Err(_) => return Ok(None),
             };
+            // Resolve the language for each candidate path up front (paths are
+            // unique keys) so the retain itself does not issue SQL per result.
+            let langs: std::collections::HashMap<String, Option<String>> = results
+                .iter()
+                .map(|r| {
+                    let lang = store
+                        .get_file(&r.file_path)
+                        .ok()
+                        .flatten()
+                        .and_then(|f| f.language);
+                    (r.file_path.clone(), lang)
+                })
+                .collect();
             results.retain(|r| {
-                store
-                    .get_file(&r.file_path)
-                    .ok()
-                    .flatten()
-                    .and_then(|f| f.language)
-                    .as_deref()
-                    == Some(lang.as_str())
+                langs.get(&r.file_path).and_then(|l| l.as_deref()) == Some(lang.as_str())
             });
         }
         if let Some(ref pattern) = query.file_pattern {
@@ -619,14 +626,7 @@ impl CodeIndex {
     /// can show a live indicator; the flag is cleared on success and failure
     /// alike.
     pub fn build_graph(&self) -> Result<graph::BuildResult> {
-        self.graph_busy.store(true, Ordering::Relaxed);
-        self.graph_done.store(0, Ordering::Relaxed);
-        self.graph_total.store(0, Ordering::Relaxed);
-        let result = self.graph_build_phased(None);
-        self.graph_done.store(0, Ordering::Relaxed);
-        self.graph_total.store(0, Ordering::Relaxed);
-        self.graph_busy.store(false, Ordering::Relaxed);
-        result
+        self.build_graph_inner(None)
     }
 
     /// Build (or rebuild) the semantic edge graph restricted to symbols from a
@@ -637,10 +637,16 @@ impl CodeIndex {
     /// Lock behaviour matches [`build_graph()`]: brief load + brief persist,
     /// derivation runs lock-free (FR-026).
     pub fn build_graph_for_language(&self, language: &str) -> Result<graph::BuildResult> {
+        self.build_graph_inner(Some(language))
+    }
+
+    /// Shared graph-build entry: owns the busy-flag prologue/epilogue around
+    /// the phased build so both public variants stay in lock-step.
+    fn build_graph_inner(&self, language: Option<&str>) -> Result<graph::BuildResult> {
         self.graph_busy.store(true, Ordering::Relaxed);
         self.graph_done.store(0, Ordering::Relaxed);
         self.graph_total.store(0, Ordering::Relaxed);
-        let result = self.graph_build_phased(Some(language));
+        let result = self.graph_build_phased(language);
         self.graph_done.store(0, Ordering::Relaxed);
         self.graph_total.store(0, Ordering::Relaxed);
         self.graph_busy.store(false, Ordering::Relaxed);
@@ -725,13 +731,9 @@ impl CodeIndex {
         store.edge_count()
     }
 
-    /// Return summary statistics for the semantic edge graph.
-    ///
-    /// Aggregates edge/node/community counts so the TUI `/codeindex status`
-    /// command can report on the graph data set alongside the index stats.
-    /// Blocks until the store lock is acquired.
-    pub fn graph_status(&self) -> Result<GraphStatus> {
-        let store = self.store_guard();
+    /// Shared implementation backing both [`graph_status()`] (blocking, `?`
+    /// propagation) and [`try_graph_status()`] (non-blocking, error-to-None).
+    fn graph_status_from_store(store: &crate::store::IndexStore) -> Result<GraphStatus> {
         Ok(GraphStatus {
             total_edges: store.edge_count()?,
             edges_extracted: store.edge_count_by_confidence_typed(types::Confidence::Extracted)?,
@@ -747,6 +749,16 @@ impl CodeIndex {
         })
     }
 
+    /// Return summary statistics for the semantic edge graph.
+    ///
+    /// Aggregates edge/node/community counts so the TUI `/codeindex status`
+    /// command can report on the graph data set alongside the index stats.
+    /// Blocks until the store lock is acquired.
+    pub fn graph_status(&self) -> Result<GraphStatus> {
+        let store = self.store_guard();
+        Self::graph_status_from_store(&store)
+    }
+
     /// Non-blocking variant of [`graph_status()`] (FR-017).
     ///
     /// Returns `None` if the `SQLite` store lock is currently held (e.g. by a
@@ -754,23 +766,7 @@ impl CodeIndex {
     /// immediately instead of stalling.
     pub fn try_graph_status(&self) -> Option<GraphStatus> {
         let store = self.store.try_lock().ok()?;
-        Some(GraphStatus {
-            total_edges: store.edge_count().ok()?,
-            edges_extracted: store
-                .edge_count_by_confidence_typed(types::Confidence::Extracted)
-                .ok()?,
-            edges_inferred: store
-                .edge_count_by_confidence_typed(types::Confidence::Inferred)
-                .ok()?,
-            nodes: store.graph_node_count().ok()?,
-            edges_calls: store.edge_count_by_kind("calls").ok()?,
-            edges_imports: store.edge_count_by_kind("imports").ok()?,
-            edges_inherits: store.edge_count_by_kind("inherits").ok()?,
-            edges_references: store.edge_count_by_kind("references").ok()?,
-            edges_mixes_in: store.edge_count_by_kind("mixes_in").ok()?,
-            edges_implements: store.edge_count_by_kind("implements").ok()?,
-            communities: store.community_count().ok()?,
-        })
+        Self::graph_status_from_store(&store).ok()
     }
 
     /// Returns `(done, total)` for the current reindex operation.

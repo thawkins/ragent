@@ -6,6 +6,8 @@
 //! cargo bench -p ragent-agent
 //! ```
 
+#![allow(missing_docs)]
+
 use std::path::Path;
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
@@ -144,6 +146,7 @@ fn bench_canonical_path_cache(c: &mut Criterion) {
     });
 }
 
+// hot-path registration.
 criterion_group!(
     benches,
     bench_task_entry_clone,

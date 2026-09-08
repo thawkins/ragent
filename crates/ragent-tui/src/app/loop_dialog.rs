@@ -385,8 +385,7 @@ pub fn open_loop_setup(app: &mut App) {
         .iter()
         .map(|a| (a.name.clone(), a.description.clone()))
         .collect();
-    let defaults = ragent_agent::Config::load()
-        .map_or_else(|_| LoopConfig::default(), |config| config.r#loop.clone());
+    let defaults = loop_config_defaults();
     let mut state = LoopSetupState::new(agents, app.current_agent_index);
     state.max_steps_field = InputField::with_text(defaults.max_steps.to_string());
     if let Some(cost_limit) = defaults.cost_limit {
@@ -420,8 +419,7 @@ pub fn handle_loop_setup_key(app: &mut App, key: KeyEvent) {
     let is_text = state.active_field.is_text();
     match key.code {
         KeyCode::Enter => {
-            let defaults = ragent_agent::Config::load()
-                .map_or_else(|_| LoopConfig::default(), |config| config.r#loop);
+            let defaults = loop_config_defaults();
             match build_spec_from_state(&state, &defaults) {
                 Ok(spec) => {
                     app.loop_setup_draft = None;
@@ -553,6 +551,15 @@ See docs/howtos/loopprogramming.md for worked examples.",
     app.status = "loop: help".to_string();
 }
 
+/// Resolve the configured `loop` section once, falling back to defaults when
+/// no config can be loaded. The dialog open → confirm → dispatch sequence
+/// previously re-loaded the config at each step; the M-025 cache makes each
+/// call cheap, but `build_spec_from_state` still needs the same value the
+/// dialog was seeded with, so both read through this one helper.
+fn loop_config_defaults() -> LoopConfig {
+    ragent_agent::Config::load().map_or_else(|_| LoopConfig::default(), |config| config.r#loop)
+}
+
 impl App {
     /// Start a goal-driven loop for the current session (FR-002 confirm
     /// path).
@@ -606,7 +613,10 @@ impl App {
                 .process_message(&sid, &goal_text, &agent, flag)
                 .await
             {
-                tracing::debug!(error = %e, "Failed to process loop goal message");
+                // Escalate above debug: the user already saw "loop running",
+                // so a silent swallow here would leave the loop apparently
+                // running while the goal message never processed.
+                tracing::error!(error = %e, "Failed to process loop goal message");
             }
         });
     }
@@ -617,7 +627,7 @@ impl App {
     /// the currently selected agent so a typo never silently changes the
     /// driver.
     fn loop_dispatch_agent(&self, spec: &LoopSpec) -> AgentInfo {
-        let config = ragent_agent::Config::load().unwrap_or_default();
+        let config = self.current_config();
         if let Ok(agent) = ragent_agent::agent::resolve_agent(&spec.agent, &config) {
             let mut agent = Arc::unwrap_or_clone(agent);
             self.apply_selected_model_and_thinking(&mut agent);

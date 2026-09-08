@@ -192,7 +192,7 @@ impl SpecCommand {
             .map_or((args.trim(), ""), |(s, r)| (s.trim(), r.trim()));
 
         match sub {
-            "help" | "" => Self::Help,
+            "help" | "--help" | "-h" | "" => Self::Help,
             "create" => {
                 let (specname, feature, from_research) = parse_feature_with_research(rest);
                 if specname.is_empty() || feature.is_empty() {

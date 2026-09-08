@@ -278,7 +278,7 @@ mod disabled_zero_traffic {
     #[test]
     fn test_shutdown_guard_disabled_no_traffic() {
         let sub = TelemetrySubsystem::disabled();
-        let guard = ragent_telemetry::shutdown::ShutdownGuard::new(sub);
+        let guard = ragent_telemetry::shutdown::ShutdownGuard::new(std::sync::Arc::new(sub));
         // Drop the guard — it calls flush()+shutdown(), both no-ops.
         drop(guard);
         // No assertion needed: if the guard tried to contact a collector,

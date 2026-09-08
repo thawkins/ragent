@@ -4,7 +4,7 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.82)
+## Highlights (v1.0.84)
 
 - **Goal-driven loop programming (`/loop`)** — a new slash-command family that
   runs a goal-driven agentic loop: `/loop` opens an interactive setup dialog
@@ -28,21 +28,28 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 - **`/clip`** — copies the rendered message-window transcript to the system clipboard in one step.
 - **`/research list` renders a human-readable table again** — the fixed-width `NAME/TITLE/STATUS/CREATED/MODIFIED` table is the default output, with JSON behind the `--json` flag.
 
-## Highlights (uncommitted, post 1.0.80)
+## Highlights (v1.0.84)
 
-- **Config saves are now immediately visible** — `/codeindex off`, `/tools`,
-  and every other config-writing slash command invalidate the on-disk config
-  load cache, so a save followed by a load in the same session always sees
-  the saved state (fixes the v1.0.80 CI failure in
-  `test_tools_visibility_command`).
-- **Code index busy indicators never lie** — the `idx` and `graph` status-bar
-  tags track their own phases: a graph build holding the store lock no longer
-  lights the `idx` tag, and the tags no longer vanish simultaneously at build
-  completion.
-- **`codeindex_status` never blocks** — when a background reindex or graph
-  build holds the store lock, the tool answers instantly with a busy report
-  (metadata `busy: true`, `error: "codeindex_busy"`) including live
-  `done/total` progress for both reindex and graph phases.
+- **/simplify quality pass** — ~40 fixes across 48 files: research comparison
+  lowercase-slicing panic fix, single shared `tui_event_lag` Arc so the TUI
+  lag reconcile actually runs, typed codeindex background result slots (no
+  more `"\n\nSTATUS:"` magic markers), a new rollback-result poll slot so the
+  /loop rollback status no longer sticks at "rolling back...", loop glob
+  matchers compiled once per check, config parse that keeps real line/col
+  caret diagnostics without the deep clone, telemetry shutdown/flush rework,
+  and `current_working_dir()` replacing 63 silent root-relative path
+  resolutions in slash commands.
+- **Slash-command help coverage** — every slash command with a help form is
+  covered by 30 new tests in `test_slash_help.rs`; `/config`, `/init`,
+  `/context`, `/profile`, `/model`, `/provider`, `/mcp`, `/autopilot`,
+  `/github`, `/gitlab`, `/mouse`, `/yolo`, `/skills`, `/agent` and friends now
+  all answer `help` without triggering side effects.
+- **Complete slash-command help set** — help subcommands and `--help`/`-h`
+  aliases added across the dispatcher (config, init, context, mcp, profile,
+  model, provider, mode, autopilot, github, gitlab, update, mouse, yolo,
+  skills, agent, cancel, system, undo, name, resume, doctor, history, tasks,
+  template, plan), with `/init help` placed before the side-effecting bare
+  form.
 
 ## Highlights (1.0.80)
 
