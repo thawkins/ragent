@@ -211,13 +211,14 @@ impl Constitution {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
             if trimmed.starts_with("## ") {
+                // Any subsequent section heading closes the Amendment Log
+                // section. The former inner `else if` duplicate of this
+                // assignment was unreachable and has been removed.
                 if section_start.is_some() && section_end.is_none() {
                     section_end = Some(i);
                 }
                 if trimmed == "## Amendment Log" {
                     section_start = Some(i);
-                } else if section_start.is_some() && section_end.is_none() {
-                    section_end = Some(i);
                 }
             }
             if section_start.is_some() && section_end.is_none() && trimmed.starts_with('|') {
@@ -487,14 +488,23 @@ fn parse_amendments(content: &str) -> Vec<Amendment> {
 /// Expected format: `| date | article | rationale | compatibility |`
 fn parse_amendment_row(row: &str) -> Option<Amendment> {
     let cells: Vec<&str> = row.split('|').collect::<Vec<_>>();
-    // Leading/trailing empty strings from the outer pipes
+    // Leading/trailing empty strings from the outer pipes; a well-formed row
+    // has 6 cells. When the rationale itself contains a literal `|`, extra
+    // cells appear between article and compatibility — rejoin them so the
+    // row is not silently mis-parsed.
     if cells.len() < 6 {
         return None;
     }
     let date = cells[1].trim().to_string();
     let article = cells[2].trim().to_string();
-    let rationale = cells[3].trim().to_string();
-    let compatibility = cells[4].trim().to_string();
+    let rationale = if cells.len() > 6 {
+        cells[3..cells.len() - 2].join("|")
+    } else {
+        cells[3].to_string()
+    }
+    .trim()
+    .to_string();
+    let compatibility = cells[cells.len() - 2].trim().to_string();
     Some(Amendment {
         date,
         article,

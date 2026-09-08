@@ -187,3 +187,96 @@ async fn test_ollama_parses_reasoning_and_tool_calls_from_stream() {
         .count();
     assert_eq!(finish_count, 1, "expected a finish event");
 }
+#[tokio::test]
+async fn test_ollama_suppresses_text_after_tool_calls_seen() {
+    // F6: once a tool_calls frame has been seen, later content deltas are
+    // duplicate narration and must be suppressed (stream-scoped).
+    let sse = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"I'll check that.\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"tool_calls\":[{\"id\":\"call_1\",\"index\":0,\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{}\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"get_weather(\\\"London\\\")\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n"
+    );
+
+    let url = spawn_ollama_sse_server(sse.to_string())
+        .await
+        .expect("server");
+    let client = OllamaProvider::with_url(&url)
+        .create_client("", None, &HashMap::new())
+        .await
+        .expect("client");
+
+    let request = make_request("ornith:latest", vec![]);
+    let mut stream: Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>> =
+        client.chat(request).await.expect("chat");
+
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        events.push(event);
+    }
+
+    let text: String = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::TextDelta { text } => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        text.contains("I'll check that."),
+        "pre-tool narration should still be emitted; got: {text}"
+    );
+    assert!(
+        !text.contains("get_weather("),
+        "post-tool narration must be suppressed; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_ollama_object_form_arguments() {
+    // F4: some Ollama-compatible servers emit `arguments` as a JSON object
+    // rather than a string; the args must be serialised, not dropped.
+    let sse = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"id\":\"call_obj\",\"index\":0,\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":{\"location\":\"London\"}}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n"
+    );
+
+    let url = spawn_ollama_sse_server(sse.to_string())
+        .await
+        .expect("server");
+    let client = OllamaProvider::with_url(&url)
+        .create_client("", None, &HashMap::new())
+        .await
+        .expect("client");
+
+    let request = make_request("llama3:latest", vec![]);
+    let mut stream: Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>> =
+        client.chat(request).await.expect("chat");
+
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        events.push(event);
+    }
+
+    let args: String = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallDelta { args_json, .. } => Some(args_json.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        args.contains("London"),
+        "object-form arguments must be serialised into the delta; got: {args}"
+    );
+    let starts: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallStart { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(starts, vec!["get_weather".to_string()]);
+}

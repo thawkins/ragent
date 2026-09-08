@@ -1631,14 +1631,18 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
-## Version 1.0.84
 
-Working-tree changes on top of v1.0.83, summarised for quickstart relevance:
+## Version 1.0.85
 
-- **/simplify quality pass** — internal robustness fixes across 48 files
-  (research comparison panic fix, TUI event-lag reconcile, codeindex result
-  slots, loop rollback polling, config caret diagnostics). No configuration
-  or command syntax changes.
+Working-tree changes on top of v1.0.84, summarised for quickstart relevance:
+
+- **Tool-calling audit remediation** — provider stream parsers, tool dispatch,
+  and the edit-tool family hardened: OpenAI Responses API and Gemini final-chunk
+  tool calls are no longer silently dropped, malformed tool arguments fail fast
+  with a corrective LLM-visible error, required-args schema validation runs
+  before execution, object-form `arguments` from llama.cpp/vLLM-style servers
+  are accepted, and CRLF files keep their line endings through edits. No
+  configuration or command syntax changes.
 - **Slash-command help** — every slash command now has a `help` subcommand or
   `--help`/`-h` alias; type `/config help`, `/mcp help`, `/autopilot help`,
   `/yolo help`, etc. to see usage without triggering side effects.

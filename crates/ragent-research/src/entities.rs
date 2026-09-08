@@ -141,7 +141,14 @@ fn strip_comparison_prefixes(phrase: &str) -> String {
     ];
     for prefix in &prefixes {
         if lower.starts_with(prefix) {
-            return phrase[prefix.len()..].trim().to_string();
+            // The index comes from `lower`, whose byte length can differ from
+            // `phrase` after Unicode lowercasing; fall back to `lower` when the
+            // original byte offset is no longer a char boundary.
+            let idx = prefix.len();
+            if phrase.is_char_boundary(idx) {
+                return phrase[idx..].trim().to_string();
+            }
+            return lower[idx..].trim().to_string();
         }
     }
     phrase.trim().to_string()
@@ -160,8 +167,25 @@ fn strip_dimension_suffixes(phrase: &str) -> String {
     ];
     let mut result = phrase.trim().to_string();
     for sep in &separators {
-        if let Some(idx) = result.to_lowercase().rfind(sep) {
+        // The index comes from the lowercased copy, whose byte length can differ
+        // from `result` after Unicode lowercasing; when the byte offset is not a
+        // char boundary in `result`, cut at the nearest boundary at or before
+        // the separator so the original casing is preserved rather than
+        // replacing the whole phrase with its lowercased form.
+        let lower = result.to_lowercase();
+        let idx = match lower.rfind(sep) {
+            Some(idx) => idx,
+            None => continue,
+        };
+        if result.is_char_boundary(idx) {
             result.truncate(idx);
+        } else {
+            let cut = result
+                .char_indices()
+                .rev()
+                .find(|(i, _)| *i <= idx)
+                .map_or(0, |(i, _)| i);
+            result.truncate(cut);
         }
     }
     result

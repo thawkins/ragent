@@ -204,20 +204,26 @@ impl SpecImplRunner {
         let mut index: HashMap<String, usize> = HashMap::new();
         for &idx in &self.execution_order {
             let task = &self.tasks[idx];
-            let name = task
-                .milestone
-                .clone()
-                .unwrap_or_else(|| "Unmapped Tasks".to_string());
-            match index.get(&name) {
+            // Borrow the milestone name when present; allocate only for the
+            // synthetic unmapped group label.
+            let owned_name;
+            let name: &str = match task.milestone.as_deref() {
+                Some(m) => m,
+                None => {
+                    owned_name = "Unmapped Tasks".to_string();
+                    &owned_name
+                }
+            };
+            match index.get(name) {
                 Some(&i) => {
                     groups[i].task_ids.push(task.id.clone());
                 }
                 None => {
-                    index.insert(name.clone(), groups.len());
+                    index.insert(name.to_string(), groups.len());
                     groups.push(MilestoneGroup {
-                        name: name.clone(),
+                        name: name.to_string(),
                         deliverable: deliverables
-                            .get(name.as_str())
+                            .get(name)
                             .map(|s| s.to_string())
                             .unwrap_or_default(),
                         task_ids: vec![task.id.clone()],
@@ -610,11 +616,17 @@ impl SpecImplRunner {
         for &(rank, task, tier) in tiered.iter().skip(1) {
             if tier < max_tier_seen {
                 // Find the task that established the higher tier
-                let offender = tiered
+                // Find the task that established the higher tier. The element
+                // that set `max_tier_seen` always precedes the current rank, so
+                // the rfind cannot fail; a miss would only skip the advisory
+                // line, never panic.
+                let Some(&(offender_rank, offender_task, _)) = tiered
                     .iter()
                     .take(rank)
-                    .rfind(|&&(_, _, t)| t == max_tier_seen);
-                let (offender_rank, offender_task, _) = offender.unwrap();
+                    .rfind(|&&(_, _, t)| t == max_tier_seen)
+                else {
+                    continue;
+                };
                 violations.push(format!(
                     "  - `{}` (step {}) appears after `{}` (step {}): \
                      {} should come before {} per the test-first ordering",

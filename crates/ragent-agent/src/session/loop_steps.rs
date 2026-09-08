@@ -29,6 +29,19 @@ use futures::StreamExt;
 use tracing::debug;
 use uuid::Uuid;
 
+/// Upper bound on a single tool call's accumulated `args_json` (1 MiB).
+///
+/// Deltas past the cap are dropped so the malformed buffer fails the
+/// dispatch-time JSON parse and the model receives a corrective error
+/// instead of the accumulator growing without bound.
+const MAX_TOOL_CALL_ARGS_BYTES: usize = 1024 * 1024;
+
+/// Marker appended once when the args accumulator first trips the cap. The
+/// appended text guarantees the dispatch-time JSON parse fails (so the model
+/// still receives the corrective parse error) while making the truncation
+/// visible in logs exactly once per call.
+const TRUNCATED_ARGS_SENTINEL: &str = "\" __args_truncated__";
+
 use crate::agent::AgentInfo;
 use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent, ToolDefinition};
@@ -1252,7 +1265,32 @@ impl SessionProcessor {
                         }
                         StreamEvent::ToolCallDelta { id, args_json } => {
                             if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == id) {
-                                tc.args_json.push_str(&args_json);
+                                // B4: bound the accumulation buffer. A
+                                // provider that streams endless argument
+                                // deltas could otherwise grow the buffer
+                                // without limit; past the cap the remaining
+                                // deltas are dropped so dispatch fails the
+                                // args-JSON parse and the model receives a
+                                // corrective error. The drop is logged (once
+                                // per call) so legitimate large-args calls
+                                // are visible instead of failing silently.
+                                if tc.args_json.len() + args_json.len()
+                                    > MAX_TOOL_CALL_ARGS_BYTES
+                                    && !tc.args_json.ends_with(TRUNCATED_ARGS_SENTINEL)
+                                {
+                                    tracing::warn!(
+                                        tool = %tc.name,
+                                        id = %tc.id,
+                                        cap = MAX_TOOL_CALL_ARGS_BYTES,
+                                        "tool-call arguments exceeded the accumulation cap; \
+                                         further deltas dropped"
+                                    );
+                                    tc.args_json.push_str(TRUNCATED_ARGS_SENTINEL);
+                                } else if tc.args_json.len() + args_json.len()
+                                    <= MAX_TOOL_CALL_ARGS_BYTES
+                                {
+                                    tc.args_json.push_str(&args_json);
+                                }
                             }
                         }
                         StreamEvent::ToolCallEnd { id } => {

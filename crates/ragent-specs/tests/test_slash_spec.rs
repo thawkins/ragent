@@ -43,7 +43,7 @@ fn test_slash_spec_create_starts_generation() {
         "status should indicate generation"
     );
 
-    let msg = SpecCommand::build_create_message(&specname, &feature);
+    let msg = SpecCommand::build_create_message(&specname);
     assert!(
         msg.contains("specs/websocket/SPEC.md"),
         "message should contain spec file path"
@@ -339,7 +339,7 @@ fn test_specify_status_mentions_only_spec_md() {
 
 #[test]
 fn test_specify_message_mentions_spec_md_and_plan_hint() {
-    let msg = SpecCommand::build_specify_message("myspec", "Add notifications");
+    let msg = SpecCommand::build_specify_message("myspec");
     assert!(
         msg.contains("specs/myspec/SPEC.md"),
         "message should mention SPEC.md: {msg}"

@@ -88,9 +88,10 @@ async fn test_edit_exact_match_baseline() {
 #[tokio::test]
 async fn test_edit_cascade_accepts_crlf_mismatch_via_flexible_lane() {
     // The old exact-only matcher rejected LF needles against CRLF files. The
-    // flexible fallback lane now resolves the unique match and rewrites only
-    // the matched span, converting those lines to LF (the caller's
-    // `new_string` is inserted verbatim by design).
+    // flexible fallback lane resolves the unique match; F-1 CRLF preservation
+    // converts the caller's LF new_string to the file's CRLF style so the
+    // edited region keeps its original line endings instead of silently
+    // becoming LF-only.
     let tmp = TempDir::new().unwrap();
     let path = write_file(tmp.path(), "a.rs", "fn foo() {\r\n    bar\r\n}\r\n");
     let input = json!({
@@ -109,8 +110,8 @@ async fn test_edit_cascade_accepts_crlf_mismatch_via_flexible_lane() {
     );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "fn foo() {\n    baz\n}\n",
-        "matched span (including its trailing CRLF) is replaced by verbatim new_string"
+        "fn foo() {\r\n    baz\r\n}\r\n",
+        "matched span keeps the file's CRLF line endings (F-1)"
     );
 }
 

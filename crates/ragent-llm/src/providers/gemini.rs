@@ -549,6 +549,10 @@ impl LlmClient for GeminiClient {
         let event_stream = async_stream::stream! {
             let mut buffer = String::new();
             let mut pending_tool_calls: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
+            // Stream-scoped call counter: ids must stay unique for the whole
+            // stream even though the pending buffer is drained at each
+            // finishReason flush (a length-derived id would collide there).
+            let mut next_tool_call_id: u64 = 0;
             // Bounded retries for a line that stays unparseable even after more
             // data arrives. A genuinely malformed line (e.g. truncated garbage
             // from a proxy) would otherwise be re-queued on every chunk and
@@ -661,21 +665,59 @@ impl LlmClient for GeminiClient {
                         for candidate in candidates {
                             let content = &candidate["content"];
 
+                            // F2: parse content parts BEFORE the finish-reason
+                            // flush. The final Gemini frame commonly carries
+                            // BOTH `finishReason` and a `functionCall` part;
+                            // processing the finish reason first cleared the
+                            // pending buffer and the tool call pushed
+                            // afterwards was never emitted (lost).
+                            if let Some(parts) = content["parts"].as_array() {
+                                for part in parts {
+                                    // Text content
+                                    if let Some(text) = part["text"].as_str()
+                                        && !text.is_empty()
+                                    {
+                                        yield StreamEvent::TextDelta {
+                                            text: text.to_string(),
+                                        };
+                                    }
+
+                                    // Function calls (tool use)
+                                    if let Some(function_call) = part.get("functionCall") {
+                                        let name = function_call["name"]
+                                            .as_str()
+                                            .unwrap_or("unknown")
+                                            .to_string();
+                                        let args = function_call["args"]
+                                            .as_object()
+                                            .map(|o| json!(o).to_string())
+                                            .unwrap_or_else(|| "{}".to_string());
+                                        let id = format!("fc_{}_{}", name, next_tool_call_id);
+                                        next_tool_call_id += 1;
+
+                                        // Buffer tool call to emit at end
+                                        pending_tool_calls.push((id, name, args));
+                                    }
+                                }
+                            }
+
                             // Handle finish reason
                             if let Some(finish_reason) = candidate["finishReason"].as_str() {
-                                // Emit any pending tool calls
-                                for (id, name, args) in &pending_tool_calls {
+                                // Emit any pending tool calls (drain: ownership
+                                // makes the clones below unnecessary)
+                                for (id, name, args) in
+                                    std::mem::take(&mut pending_tool_calls)
+                                {
                                     yield StreamEvent::ToolCallStart {
                                         id: id.clone(),
-                                        name: name.clone(),
+                                        name,
                                     };
                                     yield StreamEvent::ToolCallDelta {
                                         id: id.clone(),
-                                        args_json: args.clone(),
+                                        args_json: args,
                                     };
-                                    yield StreamEvent::ToolCallEnd { id: id.clone() };
+                                    yield StreamEvent::ToolCallEnd { id };
                                 }
-                                pending_tool_calls.clear();
 
                                 let reason = match finish_reason {
                                     "STOP" => FinishReason::Stop,
@@ -685,32 +727,6 @@ impl LlmClient for GeminiClient {
                                     _ => FinishReason::Stop,
                                 };
                                 yield StreamEvent::Finish { reason };
-                            }
-
-                            // Handle content parts
-                            if let Some(parts) = content["parts"].as_array() {
-                                for part in parts {
-                                    // Text content
-                                    if let Some(text) = part["text"].as_str()
-                                        && !text.is_empty() {
-                                            yield StreamEvent::TextDelta { text: text.to_string() };
-                                        }
-
-                                    // Function calls (tool use)
-                                    if let Some(function_call) = part.get("functionCall") {
-                                        let name = function_call["name"].as_str()
-                                            .unwrap_or("unknown")
-                                            .to_string();
-                                        let args = function_call["args"]
-                                            .as_object()
-                                            .map(|o| json!(o).to_string())
-                                            .unwrap_or_else(|| "{}".to_string());
-                                        let id = format!("fc_{}_{}", name, pending_tool_calls.len());
-
-                                        // Buffer tool call to emit at end
-                                        pending_tool_calls.push((id, name, args));
-                                    }
-                                }
                             }
                         }
                     }
@@ -729,6 +745,23 @@ impl LlmClient for GeminiClient {
                                 yield StreamEvent::Usage { input_tokens, output_tokens };
                             }
                         }
+            }
+
+            // F2: end-of-stream flush. A `functionCall` pushed into the
+            // pending buffer after the finishReason flush (or in a stream
+            // that ends without a finishReason frame) was previously dropped
+            // here. Emit any remaining buffered calls; ids are unique per
+            // stream, so no call can be re-emitted.
+            for (id, name, args) in pending_tool_calls {
+                yield StreamEvent::ToolCallStart {
+                    id: id.clone(),
+                    name,
+                };
+                yield StreamEvent::ToolCallDelta {
+                    id: id.clone(),
+                    args_json: args,
+                };
+                yield StreamEvent::ToolCallEnd { id };
             }
 
             // Ensure we emit a finish event if not already done

@@ -567,6 +567,9 @@ impl LlmClient for OllamaCloudClient {
         let model_name = request.model.clone();
         let event_stream = async_stream::stream! {
             let mut buffer = String::new();
+            // F6: set once any tool call is seen in the stream; later content
+            // deltas are suppressed as duplicate narration.
+            let mut tool_calls_seen = false;
             let mut open_tool_calls: HashMap<String, String> = HashMap::new();
             let mut stream_done = false;
             let mut line_count = 0usize;
@@ -656,10 +659,17 @@ impl LlmClient for OllamaCloudClient {
                             .get("tool_calls")
                             .and_then(|v| v.as_array())
                             .is_some_and(|a| !a.is_empty());
+                        // F6: stream-scoped suppression — once real tool calls
+                        // have been seen, later content is duplicate narration
+                        // (pre-call narration cannot be retracted).
+                        if has_tool_calls {
+                            tool_calls_seen = true;
+                        }
 
                         if let Some(content) = message.get("content").and_then(|v| v.as_str())
                             && !content.is_empty()
                             && !has_tool_calls
+                            && !tool_calls_seen
                         {
                             yield StreamEvent::TextDelta { text: content.to_string() };
                         }

@@ -37,7 +37,7 @@ pub use plan_parser::{
     Effort, Milestone, PhaseMinusOneGate, PhaseMinusOneGates, PlanParser, PlanTask, Priority,
     REQUIRED_GATE_NAMES,
 };
-pub use spec::{Plan, Requirement, Spec, SpecId, SpecStatus, Task, TaskStatus};
+pub use spec::{EarsTemplate, Plan, Requirement, Spec, SpecId, SpecStatus, Task, TaskStatus};
 pub use templates::{ConstitutionTemplate, FeedbackTemplate, PlanTemplate, SpecTemplate};
 pub use validate::{
     AmbiguityIssue, AmbiguityKind, Category, ClarificationMarker, ContradictionIssue,

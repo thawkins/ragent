@@ -186,7 +186,7 @@ fn create_status_is_well_formed() {
 
 #[test]
 fn create_message_contains_paths() {
-    let m = SpecCommand::build_create_message("bar", "baz");
+    let m = SpecCommand::build_create_message("bar");
     assert!(m.contains("specs/bar"));
 }
 

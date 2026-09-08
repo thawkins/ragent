@@ -399,6 +399,11 @@ impl OpenAiClient {
             let mut buffer = String::new();
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
             let mut yielded_event = false;
+            // A2: indices whose ToolCallStart has already been emitted, so a
+            // provider repeating `function.name` across delta frames cannot
+            // produce duplicate Start events.
+            let mut started_tool_call_indices: std::collections::HashSet<u64> =
+                std::collections::HashSet::new();
 
             if let Some(ev) = rate_limit_event {
                 yield ev;
@@ -524,28 +529,40 @@ impl OpenAiClient {
                                 }
 
                                 if let Some(function) = tc.get("function") {
+                                    let tc_id = tool_call_ids
+                                        .get(&index)
+                                        .cloned()
+                                        .unwrap_or_else(|| format!("tc_{index}"));
                                     if let Some(name) = function["name"].as_str() {
-                                        let tc_id = tool_call_ids
-                                            .get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        yield StreamEvent::ToolCallStart {
-                                            id: tc_id,
-                                            name: name.to_string(),
-                                        };
-                                        yielded_event = true;
+                                        // A2: guard against duplicate Start
+                                        // events when `function.name` repeats
+                                        // across delta frames for the same
+                                        // index. Scoped to the Start emission
+                                        // only so a repeated-name frame that
+                                        // also carries arguments still yields
+                                        // its delta below.
+                                        if started_tool_call_indices.insert(index) {
+                                            yield StreamEvent::ToolCallStart {
+                                                id: tc_id.clone(),
+                                                name: name.to_string(),
+                                            };
+                                            yielded_event = true;
+                                        }
                                     }
 
-                                    if let Some(args) = function["arguments"].as_str()
-                                        && !args.is_empty()
+                                    // F4: accept both argument forms. String
+                                    // form preserves delta semantics; object
+                                    // form (llama.cpp / vLLM servers) is
+                                    // serialised whole — the previous
+                                    // `.as_str()`-only read yielded empty
+                                    // args for those servers.
+                                    let args_json = super::tool_cache::tool_arguments_json(function);
+                                    if let Some(args) =
+                                        args_json.filter(|args| !args.is_empty())
                                     {
-                                        let tc_id = tool_call_ids
-                                            .get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
                                         yield StreamEvent::ToolCallDelta {
                                             id: tc_id,
-                                            args_json: args.to_string(),
+                                            args_json: args,
                                         };
                                         yielded_event = true;
                                     }

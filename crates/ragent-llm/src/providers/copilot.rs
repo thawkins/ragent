@@ -583,15 +583,18 @@ impl LlmClient for CopilotClient {
                                         };
                                     }
 
-                                    if let Some(args) = function["arguments"].as_str()
-                                        && !args.is_empty()
+                                    // F4: accept both argument forms (string
+                                    // deltas and a whole JSON object).
+                                    let args_json = super::tool_cache::tool_arguments_json(function);
+                                    if let Some(args) =
+                                        args_json.filter(|args| !args.is_empty())
                                     {
                                         let tc_id = tool_call_ids.get(&index)
                                             .cloned()
                                             .unwrap_or_else(|| format!("tc_{index}"));
                                         yield StreamEvent::ToolCallDelta {
                                             id: tc_id,
-                                            args_json: args.to_string(),
+                                            args_json: args,
                                         };
                                     }
                                 }

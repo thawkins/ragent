@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use tokio::time::sleep;
 
 use super::{McpClientBackend, McpToolDef};
@@ -274,15 +274,7 @@ impl McpClientBackend for HttpMcpClient {
     }
 
     async fn call_tool(&self, _server_id: &str, tool_name: &str, input: Value) -> Result<Value> {
-        let arguments = match input {
-            Value::Object(map) => map,
-            Value::Null => Map::new(),
-            other => {
-                let mut map = Map::new();
-                map.insert("value".to_string(), other);
-                map
-            }
-        };
+        let arguments = super::normalize_mcp_arguments(input);
 
         let params = serde_json::json!({
             "name": tool_name,
@@ -317,7 +309,7 @@ fn parse_tool_list(value: Value) -> Vec<McpToolDef> {
             let parameters = tool
                 .get("inputSchema")
                 .cloned()
-                .unwrap_or_else(|| Value::Object(Map::new()));
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
             Some(McpToolDef {
                 name,
                 description,

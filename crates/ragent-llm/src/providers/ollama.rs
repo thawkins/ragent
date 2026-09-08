@@ -396,6 +396,14 @@ impl OllamaClient {
             let cached = cached_tools(ToolFormat::OpenAi, tools);
             body["tools"] = cached.openai_tools_array();
             // Explicitly tell Ollama-compatible models they may use tools.
+            //
+            // F3 note (capability gating): the Ollama `/api/tags` catalog does
+            // not report tool capability and discovered models are declared
+            // `tool_use: true` by default, so per-model gating is not possible
+            // here. A local model without tool support narrates the invocation
+            // as text; the agent loop's text-format recovery pass is the
+            // fallback for those models.
+            //
             // Some models (e.g. Ornith) narrate their reasoning as text
             // unless tool_choice is set.
             body["tool_choice"] = json!("auto");
@@ -472,8 +480,11 @@ impl LlmClient for OllamaClient {
         let stream = response.bytes_stream();
         let event_stream = async_stream::stream! {
               let mut buffer = String::new();
-              let mut tool_call_ids: BTreeMap<u64, String> = BTreeMap::new();
-              let mut stream_done = false;
+            // F6: set once any tool call is seen in the stream; later content
+            // deltas are suppressed as duplicate narration.
+            let mut tool_calls_seen = false;
+            let mut tool_call_ids: BTreeMap<u64, String> = BTreeMap::new();
+            let mut stream_done = false;
             let mut yielded_event = false;
 
             futures::pin_mut!(stream);
@@ -570,9 +581,18 @@ impl LlmClient for OllamaClient {
                         let has_tool_calls = delta["tool_calls"]
                             .as_array()
                             .is_some_and(|a| !a.is_empty());
+                        // F6: the suppression is stream-scoped. Once the model
+                        // has emitted real tool calls, any LATER content text
+                        // in the same response is duplicate narration too and
+                        // is suppressed. (Narration streamed BEFORE the first
+                        // tool-call frame cannot be retracted retroactively.)
+                        if has_tool_calls {
+                            tool_calls_seen = true;
+                        }
 
                         // Text content
                         if !has_tool_calls
+                            && !tool_calls_seen
                             && let Some(content) = delta["content"].as_str()
                             && !content.is_empty()
                         {
@@ -618,8 +638,12 @@ impl LlmClient for OllamaClient {
                                         yielded_event = true;
                                     }
 
-                                    if let Some(args) = function["arguments"].as_str()
-                                        && !args.is_empty()
+                                    // F4: accept both argument forms (string
+                                    // deltas and a whole JSON object, as some
+                                    // Ollama-compatible servers emit).
+                                    let args_json = super::tool_cache::tool_arguments_json(function);
+                                    if let Some(args) =
+                                        args_json.filter(|args| !args.is_empty())
                                     {
                                         let tc_id = tool_call_ids
                                             .get(&index)
@@ -627,7 +651,7 @@ impl LlmClient for OllamaClient {
                                             .unwrap_or_else(|| format!("tc_{index}"));
                                         yield StreamEvent::ToolCallDelta {
                                             id: tc_id,
-                                            args_json: args.to_string(),
+                                            args_json: args,
                                         };
                                         yielded_event = true;
                                     }

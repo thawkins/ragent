@@ -313,33 +313,37 @@ impl Report {
         self.issues.iter().any(|i| i.severity == Severity::Warning)
     }
 
+    /// Returns `true` if any issue falls in one of `categories`.
+    fn any_in(&self, categories: &[Category]) -> bool {
+        self.issues.iter().any(|i| categories.contains(&i.category))
+    }
+
+    /// Count issues that fall in one of `categories`.
+    fn count_in(&self, categories: &[Category]) -> usize {
+        self.issues
+            .iter()
+            .filter(|i| categories.contains(&i.category))
+            .count()
+    }
+
     /// Returns `true` if the report contains any clarification-marker issues
     /// (FR-002).
     #[must_use]
     pub fn has_clarifications(&self) -> bool {
-        self.issues
-            .iter()
-            .any(|i| i.category == Category::Clarification)
+        self.any_in(&[Category::Clarification])
     }
 
     /// Count clarification-marker issues in the report (FR-002).
     #[must_use]
     pub fn clarification_count(&self) -> usize {
-        self.issues
-            .iter()
-            .filter(|i| i.category == Category::Clarification)
-            .count()
+        self.count_in(&[Category::Clarification])
     }
 
     /// Returns `true` if the report contains any consistency-check issues
     /// (ambiguity, contradiction, or gap) (FR-015).
     #[must_use]
     pub fn has_consistency_issues(&self) -> bool {
-        self.issues.iter().any(|i| {
-            i.category == Category::Ambiguity
-                || i.category == Category::Contradiction
-                || i.category == Category::Gap
-        })
+        self.any_in(&[Category::Ambiguity, Category::Contradiction, Category::Gap])
     }
 
     /// Count consistency-check issues in the report (FR-015).
@@ -347,14 +351,7 @@ impl Report {
     /// Includes ambiguity, contradiction, and gap issues.
     #[must_use]
     pub fn consistency_issue_count(&self) -> usize {
-        self.issues
-            .iter()
-            .filter(|i| {
-                i.category == Category::Ambiguity
-                    || i.category == Category::Contradiction
-                    || i.category == Category::Gap
-            })
-            .count()
+        self.count_in(&[Category::Ambiguity, Category::Contradiction, Category::Gap])
     }
 
     /// Count issues by category.
@@ -370,18 +367,13 @@ impl Report {
     /// (FR-008).
     #[must_use]
     pub fn has_phase_gate_issues(&self) -> bool {
-        self.issues
-            .iter()
-            .any(|i| i.category == Category::PhaseMinusOneGate)
+        self.any_in(&[Category::PhaseMinusOneGate])
     }
 
     /// Count Phase -1 gate issues in the report (FR-008).
     #[must_use]
     pub fn phase_gate_issue_count(&self) -> usize {
-        self.issues
-            .iter()
-            .filter(|i| i.category == Category::PhaseMinusOneGate)
-            .count()
+        self.count_in(&[Category::PhaseMinusOneGate])
     }
 
     /// Count issues by severity.
@@ -423,7 +415,11 @@ impl Report {
             self.requirement_count, self.valid_ears_count
         ));
 
-        for (template, count) in &self.template_counts {
+        // Sort by template name so report output is deterministic (a HashMap
+        // iterates in random order across runs).
+        let mut counts: Vec<(&EarsTemplate, &usize)> = self.template_counts.iter().collect();
+        counts.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        for (template, count) in counts {
             lines.push(format!("  {}: {}", template.as_str(), count));
         }
 

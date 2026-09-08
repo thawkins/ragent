@@ -123,6 +123,13 @@ impl Provider for HuggingFaceProvider {
     }
 }
 
+thread_local! {
+    /// Per-thread cache of the default-model catalog so capability lookups
+    /// avoid rebuilding the ~13-entry `Vec` on every request.
+    static CATALOG: std::cell::RefCell<Option<Vec<ModelInfo>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// Returns the curated default model catalog for HuggingFace.
 #[must_use]
 pub fn huggingface_default_models() -> Vec<ModelInfo> {
@@ -228,6 +235,23 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
             thinking_config: None,
         },
     ]
+}
+
+/// Tool-use capability for a curated-catalog model id.
+///
+/// Returns `Some(false)` only for catalog models known to lack tool use
+/// (e.g. DeepSeek-R1); `None` for ids outside the catalog, which callers
+/// treat as capable. Cheaper than building the full catalog `Vec` per
+/// request: the catalog is allocated once and cached.
+#[must_use]
+pub fn huggingface_model_tool_use(id: &str) -> Option<bool> {
+    CATALOG.with_borrow_mut(|models| {
+        models
+            .get_or_insert_with(huggingface_default_models)
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| m.capabilities.tool_use)
+    })
 }
 
 /// HTTP client for the HuggingFace Inference API with streaming SSE support.
@@ -407,10 +431,25 @@ impl HuggingFaceClient {
             body["max_tokens"] = json!(max_tokens);
         }
         if !request.tools.is_empty() {
-            // H2: reuse the cached serialised tool list (with the `t_` name
-            // prefix) instead of building a fresh `Vec<Value>` on every call.
-            let cached = cached_tools(ToolFormat::HuggingFace, &request.tools);
-            body["tools"] = cached.openai_tools_array();
+            // F3: capability gating. Models declared `tool_use: false`
+            // (e.g. DeepSeek-R1) cannot return native tool calls — sending
+            // the tools array only invites the model to narrate the
+            // invocation as text. Skip attaching the tools entirely.
+            let model_supports_tools = huggingface_model_tool_use(&request.model)
+                .unwrap_or(true);
+            if model_supports_tools {
+                // H2: reuse the cached serialised tool list (with the `t_`
+                // name prefix) instead of building a fresh `Vec<Value>` on
+                // every call.
+                let cached = cached_tools(ToolFormat::HuggingFace, &request.tools);
+                body["tools"] = cached.openai_tools_array();
+            } else {
+                tracing::info!(
+                    model = %request.model,
+                    "HuggingFace: model lacks tool-use capability; \
+                     omitting tools from the request"
+                );
+            }
         }
 
         if should_warn_unsupported_thinking(request) {
@@ -623,15 +662,18 @@ impl LlmClient for HuggingFaceClient {
                                         };
                                     }
 
-                                    if let Some(args) = function["arguments"].as_str()
-                                        && !args.is_empty()
+                                    // F4: accept both argument forms (string
+                                    // deltas and a whole JSON object).
+                                    let args_json = super::tool_cache::tool_arguments_json(function);
+                                    if let Some(args) =
+                                        args_json.filter(|args| !args.is_empty())
                                     {
                                         let tc_id = tool_call_ids.get(&index)
                                             .cloned()
                                             .unwrap_or_else(|| format!("tc_{index}"));
                                         yield StreamEvent::ToolCallDelta {
                                             id: tc_id,
-                                            args_json: args.to_string(),
+                                            args_json: args,
                                         };
                                     }
                                 }

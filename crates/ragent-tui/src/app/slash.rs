@@ -11,7 +11,9 @@ use ragent_types::ThinkingLevel;
 use ragent_types::strutil::truncate_bytes;
 
 use crate::app::blueprints::{self};
+
 use ragent_config::OtelConfig;
+use ragent_specs::SpecManager;
 use ragent_telemetry::counters::{TelemetryCountersContent, current_values};
 
 /// Convert a `(name, kind, description, value)` metric tuple row into owned
@@ -5799,9 +5801,21 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             // ── /spec ────────────────────────────────────────────────────────
             "spec" => {
                 use ragent_specs::spec::SpecStatus;
-                use ragent_specs::{
-                    SddFlags, SpecCommand, SpecFilter, SpecManager, validate_with_flags,
-                };
+                use ragent_specs::{SddFlags, SpecCommand, SpecFilter, validate_with_flags};
+
+                /// Build the canonical `SpecManager` for the current working
+                /// directory. Single construction point for the `/spec` arms
+                /// so the specs root is derived in one place instead of 15
+                /// duplicated `current_working_dir().join("specs")` sites.
+                fn spec_manager() -> SpecManager {
+                    let specs_root = crate::app::helpers::current_working_dir().join("specs");
+                    SpecManager::new(&specs_root)
+                }
+
+                /// Parse a spec ID from a command argument.
+                fn parse_spec_id(spec_id: &str) -> Option<ragent_specs::spec::SpecId> {
+                    ragent_specs::spec::SpecId::new(spec_id)
+                }
                 let cmd = SpecCommand::parse(args);
                 match cmd {
                     SpecCommand::Help => {
@@ -5814,9 +5828,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         from_research,
                     } => {
                         let sid = self.session_id.clone().unwrap_or_default();
-                        self.append_assistant_text(&SpecCommand::build_create_message(
-                            &specname, &feature,
-                        ));
+                        self.append_assistant_text(&SpecCommand::build_create_message(&specname));
                         self.push_log_no_agent(
                             LogLevel::Info,
                             SpecCommand::build_create_log(&specname, &feature),
@@ -6040,9 +6052,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             sdd_cfg.constitution,
                             sdd_cfg.feedback_loop,
                         );
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-                        let mgr = SpecManager::new(&specs_root);
+                        let mgr = spec_manager();
                         let rt = tokio::runtime::Handle::current();
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
@@ -6099,9 +6109,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::List { args } => {
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-                        let mgr = SpecManager::new(&specs_root);
+                        let mgr = spec_manager();
                         let mut filter = SpecFilter::new();
                         // Parse simple --status and --prefix args
                         for token in args.split_whitespace() {
@@ -6164,9 +6172,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Search { query } => {
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-                        let mgr = SpecManager::new(&specs_root);
+                        let mgr = spec_manager();
                         let rt = tokio::runtime::Handle::current();
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
@@ -6207,15 +6213,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         spec_id,
                         new_status,
                     } => {
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-                        let mgr = SpecManager::new(&specs_root);
-                        let id = match ragent_specs::spec::SpecId::new(&spec_id) {
-                            Some(id) => id,
-                            None => {
-                                self.status = format!("spec: invalid spec ID: {}", spec_id);
-                                return;
-                            }
+                        let mgr = spec_manager();
+                        let Some(id) = parse_spec_id(&spec_id) else {
+                            self.status = format!("spec: invalid spec ID: {}", spec_id);
+                            return;
                         };
                         let rt = tokio::runtime::Handle::current();
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
@@ -6275,15 +6276,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         task_id,
                         new_status,
                     } => {
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-                        let mgr = SpecManager::new(&specs_root);
-                        let id = match ragent_specs::spec::SpecId::new(&spec_id) {
-                            Some(id) => id,
-                            None => {
-                                self.status = format!("spec: invalid spec ID: {}", spec_id);
-                                return;
-                            }
+                        let mgr = spec_manager();
+                        let Some(id) = parse_spec_id(&spec_id) else {
+                            self.status = format!("spec: invalid spec ID: {}", spec_id);
+                            return;
                         };
                         let rt = tokio::runtime::Handle::current();
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
@@ -6364,15 +6360,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Activate { spec_id } => {
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-                        let mgr = SpecManager::new(&specs_root);
-                        let id = match ragent_specs::spec::SpecId::new(&spec_id) {
-                            Some(id) => id,
-                            None => {
-                                self.status = format!("spec: invalid spec ID: {}", spec_id);
-                                return;
-                            }
+                        let mgr = spec_manager();
+                        let Some(id) = parse_spec_id(&spec_id) else {
+                            self.status = format!("spec: invalid spec ID: {}", spec_id);
+                            return;
                         };
                         let rt = tokio::runtime::Handle::current();
                         let result: Result<_, String> = tokio::task::block_in_place(|| {
@@ -6408,9 +6399,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     // Reuse the manager Arc built above instead of
                                     // constructing a second SpecManager for the same
                                     // specs_root.
-                                    .set(self.spec_manager.clone().unwrap_or_else(|| {
-                                        Arc::new(SpecManager::new(&specs_root))
-                                    }));
+                                    .set(
+                                        self.spec_manager
+                                            .clone()
+                                            .unwrap_or_else(|| Arc::new(spec_manager())),
+                                    );
                                 self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                      "From: /spec activate\n\n[ok] **{}** is now the active spec.\n\n\
                                                                                                                                                                                                                                                                                                                                                                                        Status: {}\n\
                                                                                                                                                                                                                                                                                                                                                                                        Title: {}\n\
@@ -6450,9 +6443,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Delete { spec_id, yes } => {
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-                        let mgr = SpecManager::new(&specs_root);
+                        let mgr = spec_manager();
                         let id = match ragent_specs::spec::SpecId::new(&spec_id) {
                             Some(id) => id,
                             None => {
@@ -6500,15 +6491,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         });
                     }
                     SpecCommand::Coverage { spec_id } => {
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-                        let mgr = SpecManager::new(&specs_root);
-                        let id = match ragent_specs::spec::SpecId::new(&spec_id) {
-                            Some(id) => id,
-                            None => {
-                                self.status = format!("spec: invalid spec ID: {}", spec_id);
-                                return;
-                            }
+                        let mgr = spec_manager();
+                        let Some(id) = parse_spec_id(&spec_id) else {
+                            self.status = format!("spec: invalid spec ID: {}", spec_id);
+                            return;
                         };
                         let rt = tokio::runtime::Handle::current();
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
@@ -6522,82 +6508,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                         ));
                                     }
                                 };
-                                let mut lines = vec![
-                                    format!(
-                                        "From: /spec coverage\n\n## Coverage Report: {}",
-                                        spec.id
-                                    ),
-                                    String::new(),
-                                    format!("**Overall Coverage:** {:.1}%", spec.coverage_pct()),
-                                    String::new(),
-                                ];
-                                let mut req_to_completed: std::collections::HashMap<
-                                    &str,
-                                    Vec<&str>,
-                                > = std::collections::HashMap::new();
-                                let mut req_to_total: std::collections::HashMap<&str, Vec<&str>> =
-                                    std::collections::HashMap::new();
-                                for task in &spec.tasks {
-                                    for req_id in &task.linked_requirements {
-                                        req_to_total
-                                            .entry(req_id.as_str())
-                                            .or_default()
-                                            .push(task.id.as_str());
-                                        if task.status == ragent_specs::spec::TaskStatus::Completed
-                                        {
-                                            req_to_completed
-                                                .entry(req_id.as_str())
-                                                .or_default()
-                                                .push(task.id.as_str());
-                                        }
-                                    }
-                                }
-                                lines.push("### Requirements".to_string());
-                                for req in &spec.requirements {
-                                    let completed = req_to_completed
-                                        .get(req.id.as_str())
-                                        .map_or(0, |v| v.len());
-                                    let total =
-                                        req_to_total.get(req.id.as_str()).map_or(0, |v| v.len());
-                                    let covered = completed > 0 && completed == total;
-                                    let symbol = if covered { "[ok]" } else { "[  ]" };
-                                    let detail = if total > 0 {
-                                        format!(
-                                            " ({} of {} linked tasks completed)",
-                                            completed, total
-                                        )
-                                    } else {
-                                        " (no linked tasks)".to_string()
-                                    };
-                                    lines.push(format!(
-                                        "{} `{}` — {}{}",
-                                        symbol, req.id, req.text, detail
-                                    ));
-                                }
-                                lines.push(String::new());
-                                lines.push("### Tasks".to_string());
-                                for task in &spec.tasks {
-                                    let reqs = if task.linked_requirements.is_empty() {
-                                        "(unlinked)".to_string()
-                                    } else {
-                                        format!("[{}]", task.linked_requirements.join(", "))
-                                    };
-                                    let symbol = match task.status {
-                                        ragent_specs::spec::TaskStatus::Completed => "[ok]",
-                                        ragent_specs::spec::TaskStatus::InProgress => "[sync]",
-                                        ragent_specs::spec::TaskStatus::Blocked => "[stop]",
-                                        ragent_specs::spec::TaskStatus::Pending => "[wait]",
-                                    };
-                                    lines.push(format!(
-                                        "{} `{}` — {} ({}) {}",
-                                        symbol,
-                                        task.id,
-                                        task.title,
-                                        task.status.as_str(),
-                                        reqs
-                                    ));
-                                }
-                                Ok(lines.join("\n"))
+                                // Rendering lives in `Spec::coverage_report`
+                                // (ragent-specs) so this arm and the
+                                // `spec_coverage` agent tool always agree on
+                                // format and status symbols.
+                                Ok(spec.coverage_report())
                             })
                         });
                         match result {
@@ -6836,9 +6751,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             SpecCommand::build_add_log(&spec_id, &feature),
                         );
 
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-                        let mgr = SpecManager::new(&specs_root);
+                        let mgr = spec_manager();
                         let rt = tokio::runtime::Handle::current();
 
                         // Load existing spec to get content and next IDs
@@ -6907,7 +6820,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 self.status = SpecCommand::build_add_status(&spec_id);
 
                                 let event_bus = self.event_bus.clone();
-                                let specs_root_phase2 = specs_root.clone();
+                                let specs_root_phase2 =
+                                    crate::app::helpers::current_working_dir().join("specs");
                                 let spec_id_phase2 = spec_id.clone();
                                 tokio::spawn(async move {
                                     // Phase 1: incremental add — the LLM uses the
@@ -7104,9 +7018,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         from_research,
                     } => {
                         let sid = self.session_id.clone().unwrap_or_default();
-                        self.append_assistant_text(&SpecCommand::build_specify_message(
-                            &specname, &feature,
-                        ));
+                        self.append_assistant_text(&SpecCommand::build_specify_message(&specname));
                         self.push_log_no_agent(
                             LogLevel::Info,
                             SpecCommand::build_specify_log(&specname, &feature),
@@ -10277,11 +10189,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 for row in &rows {
                     // Reconstruct a human-readable schedule description from the row.
                     let desc = row_to_human_readable(row);
-                    let prompt_preview = if row.prompt.len() > 40 {
-                        format!("{}…", &row.prompt[..40])
-                    } else {
-                        row.prompt.clone()
-                    };
+                    let prompt_preview = truncate_field(&row.prompt, 41);
                     let enabled_str = if row.enabled { "✓" } else { "✗" };
                     let next_due_display = format_next_due(&row.next_due, row.enabled);
                     output.push_str(&format!(
@@ -10417,11 +10325,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
              |---|---|---|---|---|\n",
         );
         for entry in &entries {
-            let prompt_preview = if entry.prompt.len() > 40 {
-                format!("{}…", &entry.prompt[..40])
-            } else {
-                entry.prompt.clone()
-            };
+            let prompt_preview = truncate_field(&entry.prompt, 41);
             let outcome_icon = match entry.outcome.as_str() {
                 "success" => "[ok]",
                 "error" => "[err]",
@@ -10818,12 +10722,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     ragent_types::Role::Compaction => "[spin] Compaction",
                 };
                 let content = redact_secrets(&msg.text_content());
-                // Truncate long messages for the report
-                let content = if content.len() > 500 {
-                    format!("{}...", &content[..500])
-                } else {
-                    content
-                };
+                // Truncate long messages for the report (char-boundary-safe).
+                let content = truncate_field(&content, 501);
                 lines.push_str(&format!("**{}**: {}\n\n", role, content));
             }
             lines

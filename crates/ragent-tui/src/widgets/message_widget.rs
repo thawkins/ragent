@@ -21,7 +21,8 @@ pub(crate) fn is_agent_notice(text: &str) -> bool {
     text.trim_start().starts_with(AGENT_NOTICE_PREFIX)
 }
 
-/// Render an agent-notice bubble as bright-yellow lines, one item per line.
+/// Render an agent-notice bubble as bright-yellow lines, one item per line,
+/// followed by a trailing blank line to separate the bubble from following content.
 pub(crate) fn render_agent_notice_lines(text: &str) -> Vec<Line<'static>> {
     let style = Style::default()
         .fg(Color::Yellow)
@@ -40,6 +41,8 @@ pub(crate) fn render_agent_notice_lines(text: &str) -> Vec<Line<'static>> {
             )));
         }
     }
+    // Trailing blank line keeps the notice visually separated from what follows.
+    lines.push(Line::from(Span::styled(String::new(), style)));
     lines
 }
 
@@ -3303,6 +3306,10 @@ impl<'a> MessageWidget<'a> {
                     };
                     for (i, line) in text.lines().enumerate() {
                         if i == 0 {
+                            // Blank line before the "You:" prompt for visual separation.
+                            if self.message.role == Role::User {
+                                lines.push(Line::from(String::new()));
+                            }
                             lines.push(Line::from(vec![
                                 Span::styled(dot, dot_style),
                                 Span::raw(line.to_string()),

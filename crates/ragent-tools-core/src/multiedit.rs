@@ -279,12 +279,32 @@ impl Tool for MultiEditTool {
 
         // Phase 1: Read all target files once. Each edit is resolved against
         // this ORIGINAL content so byte ranges are stable and comparable.
+        //
+        // F-5: bytes + explicit UTF-8 validation give a precise encoding
+        // error instead of the blanket read-failure context.
+        //
+        // F-4: a leading UTF-8 BOM is stripped for matching and re-prefixed
+        // on write (Phase 5), so first-line edits can match and the file
+        // keeps its original encoding.
         let mut file_contents: HashMap<PathBuf, String> = HashMap::new();
+        let mut had_bom: HashMap<PathBuf, bool> = HashMap::new();
         for path in &unique_paths {
-            let content = tokio::fs::read_to_string(path)
+            let bytes = tokio::fs::read(path)
                 .await
                 .with_context(|| format!("Failed to read file: {}", path.display()))?;
-            file_contents.insert(path.clone(), content);
+            let content = String::from_utf8(bytes).map_err(|_| {
+                anyhow::anyhow!(
+                    "Failed to read file {}: the file is not valid UTF-8; \
+                     edit tools require UTF-8 text files",
+                    path.display()
+                )
+            })?;
+            let (bom, stripped) = match content.strip_prefix('\u{feff}') {
+                Some(rest) => (true, rest.to_string()),
+                None => (false, content),
+            };
+            had_bom.insert(path.clone(), bom);
+            file_contents.insert(path.clone(), stripped);
         }
 
         // Phase 1b: Stale-file detection (editrenewal FR-003 / FR-009).
@@ -493,6 +513,12 @@ impl Tool for MultiEditTool {
                 .with_context(|| format!("Missing live content for {}", path.display()))?;
 
             for edit in &mut *edits {
+                // F-3: splice offsets come from the matcher lanes; assert the
+                // char-boundary invariant in debug builds so a lane regression
+                // panics instead of slicing mid-char.
+                debug_assert!(
+                    content.is_char_boundary(edit.start) && content.is_char_boundary(edit.end)
+                );
                 *content = format!(
                     "{}{}{}",
                     &content[..edit.start],
@@ -519,11 +545,19 @@ impl Tool for MultiEditTool {
         }
 
         // Phase 5: Write all modified files (skipped in dry-run mode).
+        // F-4: files whose BOM was stripped at read time get it re-prefixed.
         let mut write_errors: Vec<String> = Vec::new();
         if !dry_run {
             for (path, content) in &file_contents {
                 if file_stats.contains_key(path) {
-                    if let Err(e) = tokio::fs::write(path, content)
+                    let bytes: Vec<u8> = if had_bom.get(path).copied().unwrap_or(false) {
+                        let mut bytes = b"\xef\xbb\xbf".to_vec();
+                        bytes.extend_from_slice(content.as_bytes());
+                        bytes
+                    } else {
+                        content.as_bytes().to_vec()
+                    };
+                    if let Err(e) = tokio::fs::write(path, &bytes)
                         .await
                         .with_context(|| format!("Failed to write file: {}", path.display()))
                     {

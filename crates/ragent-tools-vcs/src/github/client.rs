@@ -728,11 +728,15 @@ pub fn classify_api_error(
                 String::new()
             } else {
                 let trimmed = body.trim();
-                if trimmed.len() > 200 {
-                    format!("\nResponse: {}...", &trimmed[..200])
+                // Char-boundary-safe truncation: byte slicing can panic on
+                // multibyte bodies.
+                let head: String = trimmed.chars().take(200).collect();
+                let head = if trimmed.chars().count() > 200 {
+                    format!("{head}...")
                 } else {
-                    format!("\nResponse: {trimmed}")
-                }
+                    head
+                };
+                format!("\nResponse: {head}")
             };
             format!(
                 "GitHub API error (HTTP {status}) for repository \

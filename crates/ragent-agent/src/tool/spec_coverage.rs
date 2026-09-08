@@ -59,72 +59,6 @@ impl Tool for SpecCoverageTool {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to read spec '{}': {}", spec_id_str, e))?;
 
-        let mut lines = vec![
-            format!("## Coverage Report: {}", spec.id),
-            String::new(),
-            format!("**Overall Coverage:** {:.1}%", spec.coverage_pct()),
-            String::new(),
-        ];
-
-        // Build a map of requirement ID → linked completed tasks
-        let mut req_to_completed: std::collections::HashMap<&str, Vec<&str>> =
-            std::collections::HashMap::new();
-        let mut req_to_total: std::collections::HashMap<&str, Vec<&str>> =
-            std::collections::HashMap::new();
-
-        for task in &spec.tasks {
-            for req_id in &task.linked_requirements {
-                req_to_total
-                    .entry(req_id.as_str())
-                    .or_default()
-                    .push(task.id.as_str());
-                if task.status == ragent_specs::spec::TaskStatus::Completed {
-                    req_to_completed
-                        .entry(req_id.as_str())
-                        .or_default()
-                        .push(task.id.as_str());
-                }
-            }
-        }
-
-        lines.push("### Requirements".to_string());
-        for req in &spec.requirements {
-            let completed = req_to_completed.get(req.id.as_str()).map_or(0, |v| v.len());
-            let total = req_to_total.get(req.id.as_str()).map_or(0, |v| v.len());
-            let covered = completed > 0 && completed == total;
-            let symbol = if covered { "✅" } else { "⚪" };
-            let detail = if total > 0 {
-                format!(" ({} of {} linked tasks completed)", completed, total)
-            } else {
-                " (no linked tasks)".to_string()
-            };
-            lines.push(format!("{} `{}` — {}{}", symbol, req.id, req.text, detail));
-        }
-
-        lines.push(String::new());
-        lines.push("### Tasks".to_string());
-        for task in &spec.tasks {
-            let reqs = if task.linked_requirements.is_empty() {
-                "(unlinked)".to_string()
-            } else {
-                format!("[{}]", task.linked_requirements.join(", "))
-            };
-            let symbol = match task.status {
-                ragent_specs::spec::TaskStatus::Completed => "✅",
-                ragent_specs::spec::TaskStatus::InProgress => "🔄",
-                ragent_specs::spec::TaskStatus::Blocked => "🚫",
-                ragent_specs::spec::TaskStatus::Pending => "⏳",
-            };
-            lines.push(format!(
-                "{} `{}` — {} ({}) {}",
-                symbol,
-                task.id,
-                task.title,
-                task.status.as_str(),
-                reqs
-            ));
-        }
-
         let metadata = json!({
             "spec_id": spec_id_str,
             "coverage_pct": spec.coverage_pct(),
@@ -133,7 +67,10 @@ impl Tool for SpecCoverageTool {
         });
 
         Ok(ToolOutput {
-            content: lines.join("\n"),
+            // Rendering lives in `Spec::coverage_report` (ragent-specs) so
+            // this tool and the TUI /spec coverage arm always agree on
+            // format and status symbols.
+            content: spec.coverage_report(),
             metadata: Some(metadata),
         })
     }

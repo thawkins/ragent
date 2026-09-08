@@ -253,12 +253,11 @@ impl Tool for EditTool {
         }
 
         // ── Read the file ────────���────────────────────────────────────────────
-        let content = tokio::fs::read_to_string(&path).await.with_context(|| {
-            format!(
-                "Cannot read file '{}': file may not exist or is not accessible",
-                path.display()
-            )
-        });
+        // F-5: read bytes and validate UTF-8 explicitly so an encoding
+        // failure gets a precise, corrective message (the blanket
+        // "file may not exist" context buried the actual cause and sent the
+        // model retrying a path problem that did not exist).
+        let content = read_utf8_file(&path).await;
         if let Err(ref e) = content {
             log_edit_operation(
                 &ctx.working_dir,
@@ -272,6 +271,14 @@ impl Tool for EditTool {
         }
         let content = content?;
 
+        // F-4: strip a leading UTF-8 BOM for matching. A BOM at byte 0 sits
+        // outside any needle composed from a BOM-less read, so edits of the
+        // file's very first line could never match. The BOM is re-prefixed
+        // on write below so the file keeps its original encoding.
+        let (had_bom, content) = match content.strip_prefix('\u{feff}') {
+            Some(stripped) => (true, stripped.to_string()),
+            None => (false, content),
+        };
         // ── Stale-file detection (FR-003) ─────────────────────────────────────
         if let Err(e) = check_stale_file(&path, ctx) {
             // P1.3: refresh the session's read timestamp once so the model's
@@ -441,9 +448,22 @@ impl Tool for EditTool {
         }
 
         // ── Apply the replacement ────────────────────────────────────────────────────────────────
+        // F-3: the splice offsets come from the matcher lanes, which are
+        // char-boundary-safe by construction; assert it so a future lane
+        // regression panics in debug builds instead of slicing mid-char.
+        debug_assert!(content.is_char_boundary(start) && content.is_char_boundary(end));
         let new_content = format!("{}{}{}", &content[..start], new_str, &content[end..]);
 
-        let write_result = tokio::fs::write(&path, &new_content)
+        // F-4: re-prefix the BOM that was stripped for matching.
+        let bytes_to_write: Vec<u8> = if had_bom {
+            let mut bytes = b"\xef\xbb\xbf".to_vec();
+            bytes.extend_from_slice(new_content.as_bytes());
+            bytes
+        } else {
+            new_content.as_bytes().to_vec()
+        };
+
+        let write_result = tokio::fs::write(&path, &bytes_to_write)
             .await
             .with_context(|| format!("Failed to write file: {}", path.display()));
         if let Err(ref e) = write_result {
@@ -468,6 +488,8 @@ impl Tool for EditTool {
         let snippet = build_snippet(&new_content, start, start + new_str.len());
 
         // `old_string` may be the user-provided text; report the replaced byte span size.
+        // F-3: boundary assert for the second splice site (see above).
+        debug_assert!(content.is_char_boundary(start) && content.is_char_boundary(end));
         let old_lines = content[start..end].lines().count().max(1);
         let new_lines = new_str.lines().count();
         let lines_changed = old_lines.max(new_lines);
@@ -513,6 +535,27 @@ impl Tool for EditTool {
 
 /// Handle the create-file operation (FR-006): `old_string` is empty and the
 /// file must not already exist. Writes `new_string` to a new file and returns
+/// F-5: reads a file's bytes and validates UTF-8 with a precise error.
+///
+/// `tokio::fs::read_to_string` fails with the same opaque message for a
+/// missing file and a non-UTF-8 file; the edit tools need the model to know
+/// the difference (a missing path vs an encoding problem).
+async fn read_utf8_file(path: &Path) -> anyhow::Result<String> {
+    let bytes = tokio::fs::read(path).await.with_context(|| {
+        format!(
+            "Cannot read file '{}': file may not exist or is not accessible",
+            path.display()
+        )
+    })?;
+    String::from_utf8(bytes).map_err(|_| {
+        anyhow::anyhow!(
+            "Cannot read file '{}': the file is not valid UTF-8; \
+             edit tools require UTF-8 text files",
+            path.display()
+        )
+    })
+}
+
 /// a snippet of the created content.
 ///
 /// `#[allow(dead_code)]` — used by the lib build but not by the test target that

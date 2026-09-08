@@ -76,9 +76,9 @@ const SUBAGENT_NARRATION_BYTE_LIMIT: usize = 2000;
 
 /// Build the watchdog-timeout error message for a tool that stalled past
 /// [`TOOL_WATCHDOG_TIMEOUT`].
-fn watchdog_timeout_msg(tool_desc: &str) -> String {
+fn watchdog_timeout_msg(tool_name: &str, call_id: &str) -> String {
     format!(
-        "Tool call {tool_desc} stalled for over {}s \
+        "Tool call '{tool_name}' ({call_id}) stalled for over {}s \
          (watchdog timeout); aborting the run.",
         TOOL_WATCHDOG_TIMEOUT.as_secs()
     )
@@ -100,7 +100,260 @@ enum ToolTaskError {
     WatchdogAbort,
 }
 
-/// Drives the agentic conversation loop for a single session.///
+/// Structured identity of a tool call whose watchdog fired, captured BEFORE
+/// the per-call future moves `tc` so the drain loop can publish `ToolCallEnd`
+/// with the real call id without re-parsing a display string.
+type WatchdogIdentity = (String, String);
+
+/// Returns `true` when at least one of `tool_calls` is a file-writing tool
+/// whose path argument resolves inside the given spec directory.
+///
+/// Guards the auto task-completion heuristic so writes elsewhere in the
+/// workspace cannot complete spec tasks.
+fn writes_in_spec_dir(
+    tool_calls: &[crate::session::history::PendingToolCall],
+    working_dir: &std::path::Path,
+    specs_root: &std::path::Path,
+    spec_id: &ragent_specs::spec::SpecId,
+) -> bool {
+    let spec_dir = specs_root.join(spec_id.as_str());
+    tool_calls.iter().any(|tc| {
+        if !matches!(
+            tc.name.as_str(),
+            "write" | "edit" | "multiedit" | "multi_edit" | "patch" | "apply_patch" | "create"
+                | "append_to_file"
+        ) {
+            return false;
+        }
+        let Ok(args): Result<serde_json::Value, _> = serde_json::from_str(&tc.args_json) else {
+            tracing::warn!(
+                tool = %tc.name,
+                "unparseable args in spec-dir write check"
+            );
+            return false;
+        };
+        let mut args_paths = ["path", "file_path"]
+            .iter()
+            .filter_map(|k| args[k].as_str())
+            .chain(
+                // The multiedit family carries one path per edit entry.
+                args["edits"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|e| ["path", "file_path"].iter().filter_map(|k| e[k].as_str())),
+            );
+        args_paths
+            .any(|p| {
+                let resolved = if std::path::Path::new(p).is_absolute() {
+                    std::path::PathBuf::from(p)
+                } else {
+                    working_dir.join(p)
+                };
+                resolved.starts_with(&spec_dir)
+            })
+    })
+}
+
+/// C5: builds the unknown-tool error message, attaching a "did you mean"
+/// hint when a registered tool name is similar to the hallucinated one.
+///
+/// Similarity is deliberately cheap: case-insensitive equality, prefix match,
+/// containment, or a small edit distance against the registry's tool list.
+/// Structural matches (equality/prefix/containment) always outrank edit
+/// distance, and among equals the smallest distance wins — a `find` over
+/// registry order would otherwise let a loose containment match on an
+/// early-listed tool beat a minimal-distance match later on.
+fn unknown_tool_error(registry: &crate::tool::ToolRegistry, name: &str) -> anyhow::Error {
+    let lowered = name.to_lowercase();
+    let lowered_len = lowered.chars().count();
+    let max_distance = usize::max(2, lowered_len / 3);
+    // Rank tiers: 0 = equality, 1 = prefix (either direction), 2 = containment
+    // (either direction), 3 = edit distance. Within a tier, smaller edit
+    // distance wins; ties keep the first candidate.
+    let mut best: Option<(u8, usize, String)> = None;
+    for candidate in registry.list() {
+        let cand_lower = candidate.to_lowercase();
+        let rank = if cand_lower == lowered {
+            0
+        } else if cand_lower.starts_with(&lowered) || lowered.starts_with(&cand_lower) {
+            1
+        } else if cand_lower.contains(&lowered) || lowered.contains(&cand_lower) {
+            2
+        } else {
+            // Bail before building the distance matrix when the length
+            // difference alone already exceeds the budget.
+            let cand_len = cand_lower.chars().count();
+            if cand_len.abs_diff(lowered_len) > max_distance {
+                continue;
+            }
+            let distance = edit_distance(&cand_lower, &lowered);
+            if distance > max_distance {
+                continue;
+            }
+            3
+        };
+        let distance = edit_distance(&cand_lower, &lowered);
+        let better = match &best {
+            None => true,
+            Some((best_rank, best_distance, _)) => {
+                rank < *best_rank || (rank == *best_rank && distance < *best_distance)
+            }
+        };
+        if better {
+            best = Some((rank, distance, candidate));
+        }
+    }
+    match best {
+        Some((_, _, candidate)) => {
+            anyhow::anyhow!("Unknown tool: '{name}'. Did you mean '{candidate}'?")
+        }
+        None => anyhow::anyhow!("Unknown tool: '{name}'"),
+    }
+}
+
+/// Levenshtein edit distance between two tool names.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    let mut current = vec![0usize; b.len() + 1];
+    for (i, a_char) in a.iter().enumerate() {
+        current[0] = i + 1;
+        for (j, b_char) in b.iter().enumerate() {
+            let substitution_cost = usize::from(a_char != b_char);
+            current[j + 1] = (previous[j + 1] + 1)
+                .min(current[j] + 1)
+                .min(previous[j] + substitution_cost);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    previous[b.len()]
+}
+
+/// B3: validates a tool call's arguments against the tool's declared
+/// `parameters_schema()`. Shared by the B1 args-parse gate (where the payload
+/// is unparseable and `Value::Null` is validated) and the pre-dispatch gate in
+/// the execution task, so both sites report identical corrective reasons.
+fn schema_violation(
+    registry: &crate::tool::ToolRegistry,
+    tool_name: &str,
+    input: &Value,
+) -> Result<(), String> {
+    match registry.get(tool_name) {
+        Some(tool) => {
+            ragent_tools_core::schema::validate_required_args(&tool.parameters_schema(), input)
+        }
+        None => Err("tool not registered".to_string()),
+    }
+}
+
+/// B3: dispatches a validated tool call through the permission layer.
+///
+/// Extracted from the inline task body so the schema-validation gate and the
+/// permission checks live in one readable place. The behaviour is unchanged
+/// from the previous inline implementation.
+#[allow(clippy::too_many_arguments)]
+async fn dispatch_tool_with_permissions(
+    tool: &std::sync::Arc<dyn crate::tool::Tool>,
+    tool_input: Value,
+    tc: &crate::session::history::PendingToolCall,
+    tool_ctx: &ToolContext,
+    permission_checker: &Arc<parking_lot::RwLock<crate::permission::PermissionChecker>>,
+    event_bus: &Arc<EventBus>,
+    session_id_for_perm: &str,
+    auto_approve: Option<bool>,
+    checkpoint_forced: bool,
+    checkpoint_timeout_secs: u64,
+) -> anyhow::Result<crate::tool::ToolOutput> {
+    let perm_category = tool.permission_category();
+    if perm_category.is_empty() || perm_category == "none" {
+        return tool.execute(tool_input, tool_ctx).await;
+    }
+    let resource = extract_resource_from_input(&tool_input, &tc.name);
+    if tc.name == "bash" {
+        let sub_commands = split_bash_command(&resource);
+        use ragent_tools_core::bash::is_safe_command;
+        let all_safe = sub_commands.iter().all(|cmd| {
+            let cmd_name = extract_command_name(cmd);
+            is_safe_command(&cmd_name)
+        });
+        if all_safe {
+            return tool.execute(tool_input, tool_ctx).await;
+        }
+        let mut all_approved = true;
+        for sub_cmd in &sub_commands {
+            let cmd_name = extract_command_name(sub_cmd);
+            let permission_action = check_permission_with_prompt(
+                permission_checker,
+                event_bus,
+                session_id_for_perm,
+                perm_category,
+                &cmd_name,
+                &tc.name,
+                auto_approve,
+                Some(&tool_ctx.canonical_cache),
+                checkpoint_forced,
+                checkpoint_timeout_secs,
+            )
+            .await;
+            match permission_action {
+                Ok(crate::permission::PermissionAction::Allow) => continue,
+                Ok(
+                    crate::permission::PermissionAction::Deny
+                    | crate::permission::PermissionAction::Ask,
+                )
+                | Err(_) => {
+                    all_approved = false;
+                    break;
+                }
+            }
+        }
+        return if all_approved {
+            tool.execute(tool_input, tool_ctx).await
+        } else {
+            Err(anyhow::anyhow!(
+                "Permission denied for one or more sub-commands"
+            ))
+        };
+    }
+    let permission_action = check_permission_with_prompt(
+        permission_checker,
+        event_bus,
+        session_id_for_perm,
+        perm_category,
+        &resource,
+        &tc.name,
+        auto_approve,
+        Some(&tool_ctx.canonical_cache),
+        checkpoint_forced,
+        checkpoint_timeout_secs,
+    )
+    .await;
+    match permission_action {
+        Ok(crate::permission::PermissionAction::Allow) => tool.execute(tool_input, tool_ctx).await,
+        Ok(crate::permission::PermissionAction::Deny) => {
+            // T-010 (FR-015): when the denial comes from a forced
+            // destructive-action checkpoint (timeout or refusal), surface
+            // the checkpoint explanation so the model understands the
+            // safe-default intervention.
+            if checkpoint_forced {
+                Err(anyhow::anyhow!(
+                    crate::session::permissions::checkpoint_reason(&tc.name, &resource)
+                ))
+            } else {
+                Err(anyhow::anyhow!("Permission denied by user or policy"))
+            }
+        }
+        Ok(crate::permission::PermissionAction::Ask) => Err(anyhow::anyhow!(
+            "Permission check returned Ask (internal error)"
+        )),
+        Err(e) => Err(e),
+    }
+}
+
+/// Drives the agentic conversation loop for a single session.
+///
 /// Holds shared references to the session manager, LLM provider registry,
 /// tool registry, permission checker, and event bus.
 pub struct SessionProcessor {
@@ -1895,6 +2148,42 @@ impl SessionProcessor {
                 }
             }
 
+            // F9: text-format tool-call recovery. Some providers and models
+            // cannot emit native tool-call fields and narrate the invocation
+            // as text (markup dialects or bare tool-call JSON). When the step
+            // produced NO native tool calls, attempt a conservative extraction
+            // from the text buffer so the call is executed instead of left as
+            // prose. Ordinary prose never matches (markup tags must be
+            // literally present, or the whole response must be the JSON).
+            // Recovered spans are blanked from the buffer so the model does
+            // not see its own narration duplicated alongside the ToolUse part
+            // on the next round-trip.
+            if llm_result.tool_calls.is_empty() && !llm_result.text_buffer.is_empty() {
+                let (recovered, spans) =
+                    crate::session::text_toolcalls::extract_text_tool_calls_with_spans(
+                        &llm_result.text_buffer,
+                    );
+                if !recovered.is_empty() {
+                    tracing::info!(
+                        session_id = %session_id,
+                        count = recovered.len(),
+                        "recovered tool call(s) from text-format output"
+                    );
+                    self.event_bus.publish(Event::AgentNotice {
+                        session_id: session_id.to_string(),
+                        message: format!(
+                            "Recovered {} tool call(s) from text-format output.",
+                            recovered.len()
+                        ),
+                    });
+                    llm_result.tool_calls = recovered;
+                    crate::session::text_toolcalls::blank_spans(
+                        &mut llm_result.text_buffer,
+                        &spans,
+                    );
+                }
+            }
+
             // No tool calls — the loop ends here. The agent's text response
             // is the final answer for this turn.
             if llm_result.tool_calls.is_empty() {
@@ -2155,6 +2444,23 @@ impl SessionProcessor {
                     ),
                     ToolTaskError,
                 >;
+                // Builds the synthetic error result shared by the B1
+                // args-parse gate and the sequential/parallel join-failure
+                // paths (C1). One construction site keeps the 8-field tuple
+                // consistent as fields evolve.
+                let synthetic_error_result =
+                    |tc: &PendingToolCall, msg: &str| -> ToolExecutionResult {
+                        Ok((
+                            tc.clone(),
+                            Value::Null,
+                            ToolCallStatus::Error,
+                            None,
+                            Some(msg.to_string()),
+                            0u64,
+                            format!("Error: {msg}"),
+                            None,
+                        ))
+                    };
                 let result_profiler = profiler.clone();
                 // P-15: collect one `ToolCallBatchEntry` per tool call so a
                 // single `Event::ToolCallBatch` can be published at the end of
@@ -2164,8 +2470,12 @@ impl SessionProcessor {
                 let mut batch_entries: Vec<ragent_types::event::ToolCallBatchEntry> = Vec::new();
                 // T-007 (FR-011): set when a tool task panicked or failed to
                 // join — an unrecoverable failure that terminates an active
-                // loop after the tool phase.
+                // loop after the tool phase. Panics discovered OUTSIDE the
+                // result handler are staged here first: the closure captures
+                // `tool_panic` mutably, so direct writes elsewhere are
+                // rejected by the borrow checker.
                 let mut tool_panic: Option<String> = None;
+                let mut staged_tool_panic: Option<String> = None;
                 let mut handle_tool_execution_result = |result: ToolExecutionResult| {
                     let _scope = result_profiler.scope("loop.tool_phase.handle_result");
                     match result {
@@ -2251,10 +2561,72 @@ impl SessionProcessor {
 
                 for tc in &llm_result.tool_calls {
                     let _scope = profiler.scope("loop.tool_phase.prepare_call");
-                    let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
-                        warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
-                        json!({})
-                    });
+                    // C4: an interrupt raised mid-phase stops further
+                    // dispatch. Not-yet-started calls have no `ToolUse`
+                    // record in the assistant parts, so breaking here keeps
+                    // the conversation history consistent (no orphaned
+                    // tool_use); in-flight tasks complete under the
+                    // watchdog as before.
+                    if interrupt_requested(&cancel_flag) {
+                        tracing::info!(
+                            session_id = %session_id,
+                            "interrupt during tool phase; skipping remaining tool calls"
+                        );
+                        break;
+                    }
+                    // B1: parse the arguments ONCE per call. A malformed args
+                    // JSON used to be silently coerced to `{}` (six parse
+                    // sites), so the tool executed with empty arguments and
+                    // the model only saw a misleading "missing parameter X"
+                    // error. The parse result is now computed once and reused
+                    // through every guard/hook stage; a parse failure
+                    // short-circuits execution with a corrective,
+                    // LLM-visible error so the model can resend valid JSON.
+                    let parsed_input: Result<Value, String> =
+                        serde_json::from_str(&tc.args_json).map_err(|e| e.to_string());
+                    let input: Value = match &parsed_input {
+                        Ok(value) => value.clone(),
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                args = %tc.args_json,
+                                "Failed to parse tool call arguments"
+                            );
+                            // B3: even a parse failure is validated against
+                            // the schema so a non-object payload gets the
+                            // same corrective treatment.
+                            let schema_error = schema_violation(
+                                &self.tool_registry,
+                                &tc.name,
+                                &Value::Null,
+                            );
+                            let err_msg = format!(
+                                "Invalid arguments JSON for tool '{}': {e}. \
+                                 Arguments must be a single valid JSON object; \
+                                 resend the complete tool call with corrected \
+                                 JSON.{}",
+                                tc.name,
+                                schema_error
+                                    .err()
+                                    .map(|reason| format!(" ({reason})"))
+                                    .unwrap_or_default()
+                            );
+                            let synthetic = Ok((
+                                tc.clone(),
+                                Value::Null,
+                                ToolCallStatus::Error,
+                                None,
+                                Some(err_msg.clone()),
+                                0u64,
+                                format!("Error: {err_msg}"),
+                                None,
+                            ));
+                            if handle_tool_execution_result(synthetic) {
+                                break;
+                            }
+                            continue;
+                        }
+                    };
                     assistant_content_parts.push(ContentPart::ToolUse {
                         id: tc.id.clone(),
                         name: tc.name.clone(),
@@ -2354,6 +2726,14 @@ impl SessionProcessor {
                             return Err(anyhow::anyhow!(err_msg));
                         }
                     }
+                    // B2: the loop restriction must run even when the args
+                    // JSON failed to parse — fail closed. Unparseable args
+                    // used to be coerced to `{}`, letting path-based scope
+                    // checks pass vacuously.
+                    let loop_restriction_input = match &parsed_input {
+                        Ok(value) => value.clone(),
+                        Err(_) => Value::Null,
+                    };
                     let fut = tokio::spawn(async move {
                         let _tool_total_scope =
                             profiler_clone.scope_with(|| format!("tool.total:{}", tc_clone.name));
@@ -2369,12 +2749,10 @@ impl SessionProcessor {
                         // destructive (deletion, config write, dependency
                         // installation, destructive git). Plain write tools
                         // keep the normal permission path.
-                        let call_input: Value = serde_json::from_str(&tc_clone.args_json)
-                            .unwrap_or_else(|_| serde_json::json!({}));
                         let checkpoint_forced = loop_checkpoint
                             && crate::session::permissions::is_destructive_tool(
                                 &tc_clone.name,
-                                &call_input,
+                                &loop_restriction_input,
                             );
                         // T-009: per-loop tool-set / scope / read-only
                         // restriction (FR-008, FR-009, FR-021, FR-022).
@@ -2384,8 +2762,10 @@ impl SessionProcessor {
                         // mode too (FR-024 — the permission layer is always
                         // in the path).
                         if let Some(spec) = &loop_spec {
-                            let early_input: Value = serde_json::from_str(&tc_clone.args_json)
-                                .unwrap_or_else(|_| serde_json::json!({}));
+                            // B2: unparseable args fail closed — a denied call
+                            // is returned to the model instead of silently
+                            // evaluating the restriction against `{}`.
+                            let early_input = loop_restriction_input.clone();
                             if let Some(reason) = spec.deny_reason(&tc_clone.name, &early_input) {
                                 tracing::info!(
                                     tool = %tc_clone.name,
@@ -2421,10 +2801,11 @@ impl SessionProcessor {
                                 Some(&event_bus),
                             )
                         };
-                        let tool_input = match pre_hook_result {
+                        let tool_input: Value = match pre_hook_result {
                             crate::hooks::PreToolUseResult::Allow => {
-                                serde_json::from_str(&tc_clone.args_json)
-                                    .unwrap_or_else(|_| serde_json::json!({}))
+                                // Unparseable args never reach here: the B1
+                                // gate short-circuits before the task runs.
+                                parsed_input.unwrap_or(Value::Null)
                             }
                             crate::hooks::PreToolUseResult::Deny { reason } => {
                                 tracing::info!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook denied tool execution");
@@ -2436,8 +2817,7 @@ impl SessionProcessor {
                                     error: Some(err_msg.clone()),
                                     duration_ms: 0,
                                 });
-                                let input_val: Value = serde_json::from_str(&tc_clone.args_json)
-                                    .unwrap_or_else(|_| serde_json::json!({}));
+                                let input_val = parsed_input.unwrap_or(Value::Null);
                                 return (
                                     tc_clone.clone(),
                                     input_val,
@@ -2459,8 +2839,7 @@ impl SessionProcessor {
                                     error: Some(err_msg.clone()),
                                     duration_ms: 0,
                                 });
-                                let input_val: Value = serde_json::from_str(&tc_clone.args_json)
-                                    .unwrap_or_else(|_| serde_json::json!({}));
+                                let input_val = parsed_input.unwrap_or(Value::Null);
                                 return (
                                     tc_clone.clone(),
                                     input_val,
@@ -2474,14 +2853,24 @@ impl SessionProcessor {
                             }
                             crate::hooks::PreToolUseResult::ModifiedInput { input } => input,
                             crate::hooks::PreToolUseResult::NoDecision => {
-                                serde_json::from_str(&tc_clone.args_json)
-                                    .unwrap_or_else(|_| serde_json::json!({}))
+                                parsed_input.unwrap_or(Value::Null)
                             }
                         };
                         let _permit = match crate::resource::acquire_tool_permit().await {
                             Ok(permit) => permit,
                             Err(e) => {
                                 let err_msg = format!("tool permit acquisition failed: {e}");
+                                // C3: close out the UI tool call — no
+                                // `ToolCallEnd` is published on this early
+                                // return, which used to leave the TUI spinner
+                                // stuck on the in-flight call.
+                                event_bus.publish(Event::ToolCallEnd {
+                                    session_id: session_id_str.clone(),
+                                    call_id: tc_clone.id.clone(),
+                                    tool: tc_clone.name.clone(),
+                                    error: Some(err_msg.clone()),
+                                    duration_ms: 0,
+                                });
                                 return (
                                     tc_clone.clone(),
                                     tool_input,
@@ -2499,119 +2888,36 @@ impl SessionProcessor {
                             .unwrap_or_else(|_| tc_clone.args_json.clone());
                         let result = registry
                             .get(&tc_clone.name)
-                            .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc_clone.name));
+                            .ok_or_else(|| unknown_tool_error(&registry, &tc_clone.name));
                         let result = match result {
                             Ok(tool) => {
-                                let perm_category = tool.permission_category();
-                                if !perm_category.is_empty() && perm_category != "none" {
-                                    let resource =
-                                        extract_resource_from_input(&tool_input, &tc_clone.name);
-                                    if tc_clone.name == "bash" {
-                                        let sub_commands = split_bash_command(&resource);
-                                        use ragent_tools_core::bash::is_safe_command;
-                                        let all_safe = sub_commands.iter().all(|cmd| {
-                                            let cmd_name = extract_command_name(cmd);
-                                            is_safe_command(&cmd_name)
-                                        });
-                                        if all_safe {
-                                            tool.execute(tool_input, &tool_ctx).await
-                                        } else {
-                                            let mut all_approved = true;
-                                            for sub_cmd in &sub_commands {
-                                                let cmd_name = extract_command_name(sub_cmd);
-                                                let permission_action =
-                                                    check_permission_with_prompt(
-                                                        &permission_checker,
-                                                        &event_bus,
-                                                        &session_id_for_perm,
-                                                        perm_category,
-                                                        &cmd_name,
-                                                        &tc_clone.name,
-                                                        auto_approve,
-                                                        Some(&tool_ctx.canonical_cache),
-                                                        checkpoint_forced,
-                                                        checkpoint_timeout_secs,
-                                                    )
-                                                    .await;
-                                                match permission_action {
-                                                    Ok(
-                                                        crate::permission::PermissionAction::Allow,
-                                                    ) => continue,
-                                                    Ok(
-                                                        crate::permission::PermissionAction::Deny,
-                                                    ) => {
-                                                        all_approved = false;
-                                                        break;
-                                                    }
-                                                    Ok(
-                                                        crate::permission::PermissionAction::Ask,
-                                                    ) => {
-                                                        all_approved = false;
-                                                        break;
-                                                    }
-                                                    Err(_) => {
-                                                        all_approved = false;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                            if all_approved {
-                                                tool.execute(tool_input, &tool_ctx).await
-                                            } else {
-                                                Err(anyhow::anyhow!(
-                                                    "Permission denied for one or more sub-commands"
-                                                ))
-                                            }
-                                        }
-                                    } else {
-                                        let permission_action = check_permission_with_prompt(
-                                            &permission_checker,
-                                            &event_bus,
-                                            &session_id_for_perm,
-                                            perm_category,
-                                            &resource,
-                                            &tc_clone.name,
-                                            auto_approve,
-                                            Some(&tool_ctx.canonical_cache),
-                                            checkpoint_forced,
-                                            checkpoint_timeout_secs,
-                                        )
-                                        .await;
-                                        match permission_action {
-                                            Ok(crate::permission::PermissionAction::Allow) => {
-                                                tool.execute(tool_input, &tool_ctx).await
-                                            }
-                                            Ok(crate::permission::PermissionAction::Deny) => {
-                                                // T-010 (FR-015): when the denial
-                                                // comes from a forced
-                                                // destructive-action checkpoint
-                                                // (timeout or refusal), surface
-                                                // the checkpoint explanation so
-                                                // the model understands the
-                                                // safe-default intervention.
-                                                if checkpoint_forced {
-                                                    Err(anyhow::anyhow!(
-                                                        crate::session::permissions::checkpoint_reason(
-                                                            &tc_clone.name,
-                                                            &resource
-                                                        )
-                                                    ))
-                                                } else {
-                                                    Err(anyhow::anyhow!(
-                                                        "Permission denied by user or policy"
-                                                    ))
-                                                }
-                                            }
-                                            Ok(crate::permission::PermissionAction::Ask) => {
-                                                Err(anyhow::anyhow!(
-                                                    "Permission check returned Ask (internal error)"
-                                                ))
-                                            }
-                                            Err(e) => Err(e),
-                                        }
-                                    }
+                                // B3: central required-argument validation.
+                                // The tool's declared `parameters_schema()`
+                                // has always been shown to the model but never
+                                // enforced; required-field presence and
+                                // primitive types are now checked before
+                                // permissions so the model gets a corrective
+                                // error naming the offending parameter.
+                                if let Err(schema_err) = schema_violation(
+                                    &registry,
+                                    &tc_clone.name,
+                                    &tool_input,
+                                ) {
+                                    Err(anyhow::anyhow!("Invalid tool arguments: {schema_err}"))
                                 } else {
-                                    tool.execute(tool_input, &tool_ctx).await
+                                    dispatch_tool_with_permissions(
+                                        &tool,
+                                        tool_input,
+                                        &tc_clone,
+                                        &tool_ctx,
+                                        &permission_checker,
+                                        &event_bus,
+                                        &session_id_for_perm,
+                                        auto_approve,
+                                        checkpoint_forced,
+                                        checkpoint_timeout_secs,
+                                    )
+                                    .await
                                 }
                             }
                             Err(e) => Err(e),
@@ -2803,37 +3109,66 @@ impl SessionProcessor {
                         )
                     });
                     if parallel_tool_calls {
-                        // Capture a human-readable descriptor for the watchdog
-                        // timeout path before `tc` is borrowed/moved.
-                        let watchdog_tool_desc = format!("'{}' ({})", tc.name, tc.id);
+                        // Capture the real call identity for the watchdog and
+                        // panic paths BEFORE `tc` is borrowed/moved. C2 used
+                        // to publish a placeholder `watchdog-parallel` call id
+                        // and C1 dropped sibling results on the first failure.
+                        let parallel_call_id = tc.id.clone();
+                        let parallel_tool_name = tc.name.clone();
+                        let parallel_args_json = tc.args_json.clone();
+                        let watchdog_identity: WatchdogIdentity =
+                            (tc.id.clone(), tc.name.clone());
                         let abort_handle = fut.abort_handle();
                         futures.push(async move {
                             match tokio::time::timeout(TOOL_WATCHDOG_TIMEOUT, fut).await {
-                                Ok(result) => (result.map_err(ToolTaskError::Join), None),
+                                Ok(Ok(ok)) => (Ok(ok), None, None),
+                                Ok(Err(join_err)) => {
+                                    // C1: the tool task panicked or failed to
+                                    // join. Synthesise an error result so the
+                                    // tool_use record is not orphaned in the
+                                    // conversation history, and surface the
+                                    // panic so loop sessions still terminate.
+                                    let msg = format!("Tool task failed: {join_err}");
+                                    let synthetic_tc = crate::session::history::PendingToolCall {
+                                        id: parallel_call_id,
+                                        name: parallel_tool_name,
+                                        args_json: parallel_args_json,
+                                    };
+                                    (
+                                        synthetic_error_result(&synthetic_tc, &msg),
+                                        None,
+                                        Some(join_err.to_string()),
+                                    )
+                                }
                                 Err(_) => {
                                     abort_handle.abort();
-                                    (Err(ToolTaskError::WatchdogAbort), Some(watchdog_tool_desc))
+                                    (
+                                        Err(ToolTaskError::WatchdogAbort),
+                                        Some(watchdog_identity),
+                                        None,
+                                    )
                                 }
                             }
                         });
                     } else {
-                        let watchdog_tool_desc = format!("'{}' ({})", tc.name, tc.id);
-                        let watchdog_call_id = tc.id.clone();
-                        let watchdog_tool_name = tc.name.clone();
+                        let watchdog_identity: WatchdogIdentity = (tc.id.clone(), tc.name.clone());
                         let abort_handle = fut.abort_handle();
                         let result = match tokio::time::timeout(TOOL_WATCHDOG_TIMEOUT, fut).await {
                             Ok(result) => result.map_err(ToolTaskError::Join),
                             Err(_) => {
                                 abort_handle.abort();
                                 watchdog_timed_out = true;
-                                let msg = watchdog_timeout_msg(&watchdog_tool_desc);
+                                let msg = watchdog_timeout_msg(
+                                    &watchdog_identity.1,
+                                    &watchdog_identity.0,
+                                );
                                 warn!("{}", msg);
                                 // Close out the tool call in the UI: no `ToolCallEnd`
                                 // was published because the spawned task was aborted.
                                 self.event_bus.publish(Event::ToolCallEnd {
                                     session_id: session_id.to_string(),
-                                    call_id: watchdog_call_id,
-                                    tool: watchdog_tool_name,
+                                    call_id: watchdog_identity.0,
+                                    tool: watchdog_identity.1,
                                     error: Some(msg.clone()),
                                     duration_ms: TOOL_WATCHDOG_TIMEOUT.as_millis() as u64,
                                 });
@@ -2849,8 +3184,42 @@ impl SessionProcessor {
                                 break;
                             }
                         };
-                        if handle_tool_execution_result(result) {
-                            break;
+                        match result {
+                            Ok(ok) => {
+                                if handle_tool_execution_result(Ok(ok)) {
+                                    break;
+                                }
+                            }
+                            Err(join_err) => {
+                                // C1: a panicked/failed tool task must not
+                                // orphan its tool_use record. Synthesise an
+                                // error result (rendered through the normal
+                                // handler) and stage the panic so active
+                                // loops still terminate (T-007).
+                                let msg = format!("Tool task failed: {join_err}");
+                                warn!(error = %join_err, "Tool execution task panicked");
+                                staged_tool_panic = Some(join_err.to_string());
+                                self.event_bus.publish(Event::ToolCallEnd {
+                                    session_id: session_id.to_string(),
+                                    call_id: tc.id.clone(),
+                                    tool: tc.name.clone(),
+                                    error: Some(msg.clone()),
+                                    duration_ms: 0,
+                                });
+                                let synthetic = Ok((
+                                    tc.clone(),
+                                    Value::Null,
+                                    ToolCallStatus::Error,
+                                    None,
+                                    Some(msg.clone()),
+                                    0u64,
+                                    format!("Error: {msg}"),
+                                    None,
+                                ));
+                                if handle_tool_execution_result(synthetic) {
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -2859,18 +3228,19 @@ impl SessionProcessor {
                         let _scope = profiler.scope("loop.tool_phase.join_parallel");
                         futures::future::join_all(futures).await
                     };
-                    for (result, stalled_tool) in results {
-                        if let Some(ref tool_desc) = stalled_tool {
+                    for (result, stalled_tool, panic_msg) in results {
+                        if let Some((call_id, tool_name)) = stalled_tool {
                             watchdog_timed_out = true;
-                            let msg = watchdog_timeout_msg(tool_desc);
+                            let msg = watchdog_timeout_msg(&tool_name, &call_id);
                             warn!("{}", msg);
-                            // Close out the tool call in the UI: the spawned
-                            // task was aborted so no `ToolCallEnd` was emitted
-                            // by the normal completion path.
+                            // C2: close out the stalled call with its REAL
+                            // call id (a placeholder id left the TUI part
+                            // open) and keep draining sibling results so
+                            // completed calls are not dropped.
                             self.event_bus.publish(Event::ToolCallEnd {
                                 session_id: session_id.to_string(),
-                                call_id: "watchdog-parallel".to_string(),
-                                tool: "unknown".to_string(),
+                                call_id,
+                                tool: tool_name,
                                 error: Some(msg.clone()),
                                 duration_ms: TOOL_WATCHDOG_TIMEOUT.as_millis() as u64,
                             });
@@ -2882,7 +3252,10 @@ impl SessionProcessor {
                                 session_id: session_id.to_string(),
                                 message: msg,
                             });
-                            break;
+                            continue;
+                        }
+                        if let Some(panic) = panic_msg {
+                            staged_tool_panic = Some(panic);
                         }
                         match result {
                             Ok(ok) => {
@@ -2891,12 +3264,24 @@ impl SessionProcessor {
                                 }
                             }
                             Err(e) => {
-                                warn!(error = %e, "Tool execution task failed to join");
-                                tool_panic = Some(e.to_string());
-                                break;
+                                // Defense-in-depth: the wrapper converts every
+                                // join `Err` into `Ok(synthetic)` + a panic
+                                // message, and the only remaining `Err` here is
+                                // `WatchdogAbort`, which is paired with
+                                // `stalled_tool` and handled above. If this arm
+                                // ever fires, log LOUDLY — it means the wrapper
+                                // contract was broken.
+                                warn!(error = %e, "unreachable: tool task returned Err without a stalled-tool identity; wrapper contract violated");
+                                staged_tool_panic = Some(e.to_string());
+                                // C2: keep draining sibling results.
+                                continue;
                             }
                         }
                     }
+                }
+                // Merge any staged panic from the parallel drain paths.
+                if tool_panic.is_none() {
+                    tool_panic = staged_tool_panic.take();
                 }
                 // P-15: publish a single `ToolCallBatch` for this step with
                 // all per-call summaries, so consumers can render atomically.
@@ -3043,6 +3428,12 @@ impl SessionProcessor {
                         })
                         && let Some(id) = ragent_specs::spec::SpecId::new(spec_id_str)
                         && let Ok(mut spec) = spec_mgr.read_spec(&id).await
+                        // Only auto-complete tasks when a write tool actually
+                        // touched a path inside this spec's own directory: an
+                        // unrelated write elsewhere in the workspace (docs,
+                        // scratch files, snapshots) must not silently complete
+                        // spec tasks and corrupt PLAN.md.
+                        && writes_in_spec_dir(&llm_result.tool_calls, &turn.working_dir, spec_mgr.root(), &id)
                     {
                         let mut updated = false;
                         for task in spec.tasks.iter_mut() {

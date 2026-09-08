@@ -155,31 +155,46 @@ pub enum SpecCommand {
 /// The `--from-research <name>` flag may appear at the end of the feature
 /// text. If present, it is stripped from the feature and returned as the
 /// third element. If absent, `None` is returned.
-fn parse_feature_with_research(rest: &str) -> (&str, &str, Option<&str>) {
+fn parse_feature_with_research(rest: &str) -> (String, String, Option<String>) {
     let (specname, after_specname) = rest
         .split_once(char::is_whitespace)
         .map_or((rest, ""), |(s, r)| (s.trim(), r.trim()));
     let (feature, from_research) = extract_from_research(after_specname);
-    (specname, feature, from_research)
+    (specname.to_string(), feature, from_research)
 }
 
 /// Split `--from-research <name>` from the end of a feature string.
 ///
 /// Returns `(feature_without_flag, Some(research_name))` when the flag is
-/// present, or `(feature, None)` when it is not.
-fn extract_from_research(feature: &str) -> (&str, Option<&str>) {
-    // Look for the flag as a standalone token.
-    if let Some(pos) = feature.find("--from-research") {
-        let before = feature[..pos].trim_end();
-        let after = feature[pos + "--from-research".len()..].trim();
-        if after.is_empty() {
-            // Flag present but no name — treat as not provided.
-            return (feature, None);
-        }
-        return (before, Some(after));
-    }
-    (feature, None)
+/// present with a name, or `(feature, None)` when it is not. A dangling flag
+/// with no name is stripped from the feature so it is not passed through into
+/// the generated prompt.
+fn extract_from_research(feature: &str) -> (String, Option<String>) {
+    // Token scan so only a standalone `--from-research` token splits the
+    // feature text (a substring find would also match prose like
+    // "the --from-research flag").
+    let tokens: Vec<&str> = feature.split_whitespace().collect();
+    let Some(flag_pos) = tokens.iter().position(|t| *t == "--from-research") else {
+        return (feature.to_string(), None);
+    };
+    let name = tokens
+        .get(flag_pos + 1)
+        .copied()
+        .filter(|t| !t.starts_with("--"))
+        .map(String::from);
+    // Rebuild the feature from the tokens before the flag; the dangling flag
+    // is always stripped, even when no name follows.
+    let before = tokens[..flag_pos].join(" ");
+    (before, name)
 }
+
+/// Subcommands that signal missing-argument usage errors via
+/// `Self::Unknown(<name>)`. Kept in one place so [`SpecCommand::parse`]
+/// construction sites and [`SpecCommand::is_usage_error`] stay in sync.
+const USAGE_SUBCOMMANDS: &[&str] = &[
+    "create", "validate", "status", "task", "activate", "coverage", "impl", "add", "delete",
+    "jtbd", "update", "specify", "plan", "tasks", "feedback",
+];
 
 impl SpecCommand {
     /// Parse a `/spec` argument string into a command.
@@ -200,9 +215,9 @@ impl SpecCommand {
                     Self::Unknown("create".to_string())
                 } else {
                     Self::Create {
-                        specname: specname.to_string(),
-                        feature: feature.to_string(),
-                        from_research: from_research.map(|s| s.to_string()),
+                        specname,
+                        feature,
+                        from_research,
                     }
                 }
             }
@@ -378,9 +393,9 @@ impl SpecCommand {
                     Self::Unknown("specify".to_string())
                 } else {
                     Self::Specify {
-                        specname: specname.to_string(),
-                        feature: feature.to_string(),
-                        from_research: from_research.map(|s| s.to_string()),
+                        specname,
+                        feature,
+                        from_research,
                     }
                 }
             }
@@ -425,26 +440,14 @@ impl SpecCommand {
     }
 
     /// Returns `true` if this is a usage-error variant.
+    ///
+    /// Usage errors are represented as `Unknown(<subcommand>)` where the
+    /// subcommand is one that exists but was given missing arguments; the
+    /// accepted names come from [`USAGE_SUBCOMMANDS`] so they cannot drift
+    /// from the subcommands parsed above.
     #[must_use]
     pub fn is_usage_error(&self) -> bool {
-        matches!(
-            self,
-            Self::Unknown(s) if s == "create"
-                || s == "validate"
-                || s == "status"
-                || s == "task"
-                || s == "activate"
-                || s == "coverage"
-                || s == "impl"
-                || s == "add"
-                || s == "delete"
-                || s == "jtbd"
-                || s == "update"
-                || s == "specify"
-                || s == "plan"
-                || s == "tasks"
-                || s == "feedback"
-        )
+        matches!(self, Self::Unknown(s) if USAGE_SUBCOMMANDS.contains(&s.as_str()))
     }
 
     /// Build the static help message shown by `/spec help`.
@@ -486,7 +489,7 @@ impl SpecCommand {
 
     /// Build the assistant message shown when a spec generation starts.
     #[must_use]
-    pub fn build_create_message(specname: &str, _feature: &str) -> String {
+    pub fn build_create_message(specname: &str) -> String {
         format!(
             "From: /spec\n📝 **Generating specification and plan…**\n\n\
              Creating spec directory `specs/{specname}` with:\n\
@@ -566,7 +569,7 @@ impl SpecCommand {
 
     /// Build the assistant message shown when a specify operation starts.
     #[must_use]
-    pub fn build_specify_message(specname: &str, _feature: &str) -> String {
+    pub fn build_specify_message(specname: &str) -> String {
         format!(
             "From: /spec specify\n📝 **Generating specification…**\n\n\
        Creating spec directory `specs/{specname}` with:\n\
@@ -1067,21 +1070,8 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
         md.push_str("|---|---|---|---|---|---|---|\n");
 
         for task in &tasks {
-            let deps = if task.dependencies.is_empty() {
-                "—".to_string()
-            } else {
-                task.dependencies.join(", ")
-            };
-            md.push_str(&format!(
-                "| {} | {} | {} | {} | {} | {} | {} |\n",
-                task.id,
-                task.title,
-                task.requirement,
-                task.effort,
-                task.priority,
-                task.status.as_str(),
-                deps,
-            ));
+            md.push_str(&task.table_row());
+            md.push('\n');
         }
 
         md.push_str("\n---\n\n");
@@ -1430,9 +1420,12 @@ Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan a
     /// Build the log entry for a feedback append operation.
     #[must_use]
     pub fn build_feedback_log(spec_id: &str, note: &str) -> String {
-        // Truncate very long notes in the log for readability.
-        let preview = if note.len() > 80 {
-            format!("{}…", &note[..80])
+        // Truncate very long notes in the log for readability, stopping at a
+        // character boundary (a raw byte slice panics when byte 80 falls
+        // inside a multi-byte character such as an em-dash).
+        let preview: String = if note.len() > 80 {
+            let cut = note.char_indices().nth(80).map_or(note.len(), |(i, _)| i);
+            format!("{}\u{2026}", &note[..cut])
         } else {
             note.to_string()
         };
@@ -1446,8 +1439,9 @@ Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan a
     #[must_use]
     pub fn format_feedback_row(note: &str) -> String {
         let date = current_utc_date_string();
-        // Escape pipe characters in the note so they don't break the table.
-        let escaped = note.replace('|', "\\|");
+        // Escape pipes so they don't break the table, and flatten newlines so
+        // a multi-line note stays inside its row.
+        let escaped = note.replace('|', "\\|").replace('\n', "<br>");
         format!("| {date} | user | {escaped} |")
     }
 

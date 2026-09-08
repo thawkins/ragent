@@ -226,6 +226,7 @@ impl LlmClient for RouterClient {
 
         let result = self.classify_prompt(&prompt, Some(&history_text), &attachments);
         let tier_config = self.config.tier_config(result.tier);
+        let needs_tools = !request.tools.is_empty();
 
         // For image/video requests, make sure the registry knows about each
         // candidate model's capabilities before selecting. Dynamic providers
@@ -236,7 +237,7 @@ impl LlmClient for RouterClient {
         // Warm *every* configured tier entry, not just the resolved tier, so
         // that vision-capable fallback models can be found when the resolved
         // tier has no usable entries.
-        if result.requires_vision
+        if (result.requires_vision || needs_tools)
             && let Some(registry) = self.registry.as_deref()
         {
             let mut seen = HashSet::new();
@@ -251,11 +252,16 @@ impl LlmClient for RouterClient {
             }
         }
 
+        // F7: tool-bearing requests prefer tool-capable models so tool
+        // definitions are not sent to a model that can only narrate the
+        // invocation as text (`needs_tools` is computed above, before the
+        // warm-up, so capability resolution also runs for this case).
         // Pick the first suitable model from the tier. Vision requests require
         // a model whose registry entry advertises `capabilities.vision == true`.
         let (entry, selected_tier) = match select_tier_entry(
             &tier_config,
             result.requires_vision,
+            needs_tools,
             self.registry.as_deref(),
         ) {
             Some(e) => (e.clone(), result.tier),
@@ -267,6 +273,7 @@ impl LlmClient for RouterClient {
                     &self.config,
                     result.tier,
                     result.requires_vision,
+                    needs_tools,
                     self.registry.as_deref(),
                 )
                 .ok_or_else(|| {
@@ -608,26 +615,56 @@ fn resolve_env_base_url(provider_id: &str) -> Option<String> {
 /// is returned. For dynamically-discovered providers, the caller must warm the
 /// registry's model cache (via [`ProviderRegistry::resolve_model_async`]) so
 /// that vision capability is known.
+///
+/// F7: when the request carries tools (`needs_tools`), a model known to lack
+/// tool-use capability is skipped so the tool definitions are not sent to a
+/// model that can only narrate the invocation as text. Unknown-capability
+/// models (not in the registry) remain eligible — the first entry is used
+/// rather than rejecting the tier outright.
 fn select_tier_entry<'a>(
     tier_config: &'a TierConfig,
     requires_vision: bool,
+    needs_tools: bool,
     registry: Option<&'a ProviderRegistry>,
 ) -> Option<&'a super::router_config::TierEntry> {
-    if !requires_vision {
+    if !requires_vision && !needs_tools {
         return tier_config.models.first();
     }
 
-    // Vision requests require per-model capability metadata. The caller
-    // (`RouterClient::chat`) warms every configured tier entry via the async
-    // registry before selection, so the synchronous lookup here already sees
-    // the discovered metadata for dynamic providers such as Ollama Cloud.
-    let registry = registry?;
-    tier_config.models.iter().find(|entry| {
-        registry
-            .resolve_model(&entry.provider, &entry.model)
-            .map(|m| m.capabilities.vision)
-            .unwrap_or(false)
-    })
+    // Unknown-capability handling: a missing registry means capabilities are
+    // unknown, which per the F7 contract keeps models eligible. Vision is the
+    // exception — it was a hard requirement before F7 and stays one.
+    let Some(registry) = registry else {
+        if requires_vision {
+            return None;
+        }
+        return tier_config.models.first();
+    };
+    tier_config
+        .models
+        .iter()
+        .find(|entry| {
+            let capabilities = registry
+                .resolve_model(&entry.provider, &entry.model)
+                .map(|m| m.capabilities);
+            let vision_ok = !requires_vision || capabilities.as_ref().is_some_and(|c| c.vision);
+            let tools_ok = !needs_tools || capabilities.as_ref().is_none_or(|c| c.tool_use);
+            vision_ok && tools_ok
+        })
+        .or_else(|| {
+            if requires_vision {
+                return None;
+            }
+            // F7: when every known model lacks tool capability, fall back to
+            // the first entry rather than failing the request entirely — the
+            // downstream provider's own gating plus the agent loop's text
+            // recovery pass handle the mismatch.
+            tracing::warn!(
+                "router: no tool-capable model found in tier; \
+                 falling back to the first configured entry"
+            );
+            tier_config.models.first()
+        })
 }
 
 /// Select the first usable entry from the resolved tier, with fallback to higher
@@ -642,6 +679,7 @@ fn select_tier_entry_with_fallback(
     config: &super::router_config::RouterConfig,
     tier: super::router_config::Tier,
     requires_vision: bool,
+    needs_tools: bool,
     registry: Option<&ProviderRegistry>,
 ) -> Option<(super::router_config::TierEntry, super::router_config::Tier)> {
     let tiers = super::router_config::Tier::all();
@@ -661,7 +699,7 @@ fn select_tier_entry_with_fallback(
 
     candidates.into_iter().find_map(|fallback_tier| {
         let tier_config = config.tier_config(fallback_tier);
-        select_tier_entry(&tier_config, requires_vision, registry)
+        select_tier_entry(&tier_config, requires_vision, needs_tools, registry)
             .cloned()
             .map(|entry| (entry, fallback_tier))
     })

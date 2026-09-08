@@ -288,7 +288,13 @@ pub fn find_flexible_replacement_range(
             } else {
                 byte_offsets[hi]
             };
-            Ok((start, end, new_str.to_string()))
+            // CRLF restoration: the whitespace-folding lane can match a needle
+            // "\n" against file text "\r\n" (the CR is folded into the
+            // whitespace run), so the matched span may contain "\r\n" even
+            // though the needle did not. Convert new_str's "\n" to "\r\n"
+            // before splicing so the edited region keeps its CRLF endings.
+            let effective = restore_crlf_in_new_str(&content[start..end], new_str);
+            Ok((start, end, effective))
         }
         _ => Err(FindError::MultipleMatches(matches.len())),
     }
@@ -504,7 +510,8 @@ fn indent_reapply(
         return None;
     }
     let mut out = String::new();
-    for (cl, nl) in block.iter().zip(new_lines.iter()) {
+    for (li, (cl, nl)) in block.iter().zip(new_lines.iter()).enumerate() {
+        let is_final_line = li + 1 == block.len();
         if nl.trim().is_empty() {
             let cl_body = cl.strip_suffix('\n').unwrap_or(cl);
             let cl_trimmed = cl_body.trim();
@@ -524,19 +531,40 @@ fn indent_reapply(
             out.push_str(indent);
             out.push_str(nl.trim_start());
         }
-        if cl.ends_with('\n') {
-            out.push('\n');
-        }
+        // CRLF preservation: re-emit only the terminator bytes the matched
+        // span consumed. The span includes every matched line's own
+        // terminator EXCEPT the final line's '\n' (for a CRLF file only its
+        // '\r' is inside the span, because the caller strips the trailing
+        // '\n' from the span end). Emitting LF unconditionally would silently
+        // convert the edited region to LF-only line endings.
+        let terminator: &str = if cl.ends_with("\r\n") {
+            if is_final_line { "\r" } else { "\r\n" }
+        } else if cl.ends_with('\n') {
+            if is_final_line { "" } else { "\n" }
+        } else {
+            ""
+        };
+        out.push_str(terminator);
     }
     // Preserve the caller's new_str trailing-newline shape. If the caller
     // supplied a trailing newline we keep one; otherwise trim it. This mirrors
     // the old `.lines()`-based behaviour for files ending in a newline while
     // avoiding spurious newline insertion when the matched block is at EOF
     // without one.
-    if new_str.ends_with('\n') && !out.ends_with('\n') {
+    //
+    // The comparison is CRLF-aware: a CRLF final line leaves a lone '\r' as
+    // the last byte of `out`, which the plain ends_with('\n') checks cannot
+    // see — strip it before comparing and truncate the "\r\n" pair when the
+    // caller's `new_str` carries no trailing newline.
+    let ends_with_newline = out.ends_with("\r\n") || out.ends_with('\n');
+    if new_str.ends_with('\n') && !ends_with_newline {
         out.push('\n');
-    } else if !new_str.ends_with('\n') && out.ends_with('\n') {
-        out.pop();
+    } else if !new_str.ends_with('\n') && ends_with_newline {
+        if out.ends_with("\r\n") {
+            out.truncate(out.len() - 2);
+        } else {
+            out.pop();
+        }
     }
     Some(out)
 }
@@ -573,14 +601,17 @@ pub fn find_replacement_cascade(content: &str, needle: &str, new_str: &str) -> C
 
     // ── Lane 2: flexible (whitespace-collapsed) ───────────────────────────
     // Run with an empty replacement so the returned byte range is the raw
-    // matched span; substitute the caller's `new_str` on success.
+    // matched span; substitute the caller's `new_str` on success. The CRLF
+    // restoration must be applied here too — the call above routes through
+    // the flexible matcher with an empty replacement, so its internal
+    // restoration is a no-op for the caller's `new_str`.
     match find_flexible_replacement_range(content, needle, "") {
         Ok((start, end, _)) => {
             return CascadeMatch::Found {
                 lane: MatchLane::Flexible,
                 start,
                 end,
-                new_str: new_str.to_string(),
+                new_str: restore_crlf_in_new_str(&content[start..end], new_str),
             };
         }
         Err(FindError::NotFound) => {}
@@ -739,9 +770,37 @@ pub fn length_note(old_str: &str) -> Option<&'static str> {
     }
 }
 
+/// Restore CRLF line endings in `new_str` when the matched file span uses
+/// CRLF.
+///
+/// The whitespace-folding matcher folds `\r\n` in the file into the same
+/// whitespace run as the needle's `\n`, so the matched span ends up
+/// containing `\r\n` even when the needle carried plain `\n`. Splicing
+/// `new_str` (LF-only) over that span would silently convert the edited
+/// region to LF-only line endings.
+///
+/// Rule: when the matched file span contains `\r\n` **and** `new_str`
+/// contains no `\r`, every `\n` in `new_str` is converted to `\r\n` before
+/// the splice so the file's CRLF line endings are preserved. Files that are
+/// LF-only are unaffected (`new_str` is returned unchanged), as is any
+/// `new_str` that already carries explicit `\r` characters.
+#[must_use]
+pub fn restore_crlf_in_new_str(matched_span: &str, new_str: &str) -> String {
+    if !matched_span.contains("\r\n") || new_str.contains('\r') {
+        return new_str.to_string();
+    }
+    new_str.replace('\n', "\r\n")
+}
+
 /// Return the 1-based line number of the byte `offset` inside `content`.
+///
+/// The offset is only debug-asserted to be a char boundary (callers obtain it
+/// from match/candidate offsets which satisfy this in practice); the line
+/// count itself never slices `content`, so a bad offset cannot panic in
+/// release builds.
 fn byte_offset_to_line(content: &str, offset: usize) -> usize {
-    content[..offset].bytes().filter(|b| *b == b'\n').count() + 1
+    debug_assert!(content.is_char_boundary(offset));
+    content.bytes().take(offset).filter(|b| *b == b'\n').count() + 1
 }
 
 /// Build a disambiguation hint listing the byte offsets and surrounding

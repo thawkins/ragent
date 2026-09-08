@@ -1,5 +1,204 @@
 # Changelog
 
+## Version: 1.0.85
+
+Tool-calling audit remediation pass (arg parsing, dispatch, providers, edit
+tools). Fixes every HIGH/MED finding from the tool-calling + UTF-8 audit:
+`crates/ragent-agent` (processor dispatch), `crates/ragent-llm` (provider
+stream parsers), `crates/ragent-tools-core` (edit family + central validator),
+25 files plus 4 new test files. Highlights:
+
+### Fixed — tool calls executed reliably
+
+- **OpenAI Responses API tool calls were silently dropped** — the
+  `openai_responses` provider emitted `ToolCallDelta`/`ToolCallEnd` for
+  `response.function_call_arguments.*` events but never a `ToolCallStart`, so
+  the agent loop (which creates a pending call only on `ToolCallStart`) lost
+  every tool call and only the surrounding text was rendered. The provider now
+  handles `response.output_item.added` (type `function_call`) and emits the
+  `ToolCallStart` with the item's `call_id` and `name`.
+- **Gemini final-chunk `functionCall` lost** — within a candidate frame the
+  finish reason was processed BEFORE the content parts; a final frame carrying
+  both `finishReason` and a `functionCall` part pushed the call into the
+  pending buffer *after* the flush-and-clear, so it was never emitted. Parts
+  are now parsed first, an end-of-stream flush emits any remaining buffered
+  calls exactly once (tracked by an emitted-id set), and the never-implemented
+  "ensure we emit a finish event" comment is now backed by real behaviour.
+- **Malformed tool arguments silently became `{}`** — `args_json` was re-parsed
+  at 7 sites in the tool dispatch flow and 6 of them coerced parse failures to
+  an empty object, so the tool executed with empty arguments and the model only
+  saw a misleading "missing parameter X" error. Arguments are now parsed ONCE
+  per call; a parse failure short-circuits execution with a corrective,
+  LLM-visible error ("Invalid arguments JSON for tool '<name>': <serde error>…
+  resend the complete tool call with corrected JSON") so the model can recover
+  in one shot instead of looping on missing-parameter messages.
+- **Loop restriction guard now fails closed** — `deny_reason` used to evaluate
+  against `{}` when the arguments JSON was malformed, letting path-based scope
+  checks pass vacuously in restricted `/loop` runs; unparseable args now deny
+  the call with an explicit reason.
+- **Tool schema is finally enforced** — a new `ragent_tools_core::schema`
+  validator checks required-parameter presence and primitive types against
+  each tool's `parameters_schema()` before permissions and execution, with a
+  corrective error naming the offending field. Unknown fields and optional
+  fields are deliberately not enforced.
+- **Panicked tool tasks no longer orphan tool_use records** — a tool task that
+  panicked (or failed to join) was silently dropped, leaving an assistant
+  `tool_use` without a matching tool result in the conversation history. The
+  dispatch now synthesises an error result (published through the normal
+  handler) and closes the UI call with `ToolCallEnd`.
+- **Watchdog abort no longer drops sibling results** — in the parallel tool
+  path the first watchdog-stalled call broke the result drain, discarding
+  already-completed sibling results and publishing a placeholder
+  `watchdog-parallel` call id. The drain now continues past stalled calls and
+  publishes the REAL call id; the sequential path gained the same synthetic
+  error-result treatment for join failures.
+- **Permit-acquisition failure closed the TUI spinner** — the early return
+  never published `ToolCallEnd`; it now does.
+- **Interrupt during the tool phase stops dispatch** — not-yet-started calls
+  are skipped (no orphaned tool_use) and the turn ends gracefully.
+- **Unknown tool names get a recovery hint** — "Unknown tool: 'x'. Did you
+  mean 'y'?" via cheap similarity (case, prefix, containment, small edit
+  distance) against the registry; a duplicate-`function.name` guard also
+  prevents duplicate `ToolCallStart` events in OpenAI-family parsers.
+- **Tool-call arguments from object-form providers** — llama.cpp / vLLM style
+  servers emit `arguments` as a JSON object; the OpenAI-family parsers
+  (`openai`, `ollama`, `copilot`, `huggingface`, `openrouter`) previously read
+  only the string form and executed with empty args. Both forms are accepted
+  everywhere now.
+- **Anthropic-family parallel tool_use blocks no longer mis-associate args** —
+  `input_json_delta` and `content_block_stop` were attributed to "the last
+  HashMap entry" (arbitrary order) in `anthropic` and `azure_resource` (where
+  the index was captured then ignored, and args were never even accumulated);
+  both parsers now key open blocks by the SSE content-block index.
+- **Ollama narration suppression is stream-scoped** — narration was only
+  suppressed when the SAME delta carried the tool call; once any tool call is
+  seen, later content deltas are suppressed as duplicate narration (pre-call
+  narration cannot be retracted retroactively).
+- **Capability gating for tool-incapable models** — HuggingFace models declared
+  `tool_use: false` (e.g. DeepSeek-R1) no longer receive the tools array; the
+  Model Router skips models known to lack tool capability when the request
+  carries tools (falling back to the first entry with a warning rather than
+  failing the request). Ollama's `/api/tags` catalog cannot report tool
+  capability, so it stays ungated by design (documented).
+- **MCP non-object arguments normalised consistently** — the rmcp/stdio and
+  HTTP transports used different fallback shapes for a non-object payload; a
+  shared `normalize_mcp_arguments` now serves both (object passthrough, null →
+  empty map, other values wrapped in a documented `"value"` envelope key).
+- **Unbounded args accumulation bounded** — `args_json` deltas past 1 MiB are
+  dropped so a runaway provider fails the parse (with the corrective error)
+  instead of growing the buffer without limit.
+
+### Fixed — edit tools (UTF-8 / line endings)
+
+- **CRLF files no longer silently converted to LF at every edit point** — the
+  whitespace-folding flexible lane matched a needle `\n` against file text
+  `\r\n` (the CR folded into the run) and the splice consumed it; the indent
+  lane re-emitted LF only, and the cascade's lane-2 substitution site bypassed
+  restoration entirely. The matched span's original line-ending style is now
+  re-emitted onto the replacement in both lanes (terminator-aware per line in
+  the indent lane), so edited regions keep CRLF endings and `git diff` shows
+  only real changes.
+- **BOM (U+FEFF) survives edits** — a leading BOM sat outside any needle
+  composed from a BOM-less read, so first-line edits could never match and the
+  model looped on "not found"; the BOM is now stripped for matching and
+  re-prefixed on write in both `edit` and `multi_edit`.
+- **Non-UTF-8 files get a precise error** — the blanket "file may not exist or
+  is not accessible" buried the encoding failure; the tools now read bytes and
+  validate UTF-8 explicitly, reporting "the file is not valid UTF-8; edit tools
+  require UTF-8 text files". Still hard-rejected, never lossy-converted.
+- **Latent char-boundary panics hardened** — `byte_offset_to_line` no longer
+  slices (`bytes().take(offset)` + debug assert), and every splice site in
+  `edit`/`multi_edit` carries a `debug_assert!(is_char_boundary)` so a future
+  lane regression panics in debug builds instead of slicing mid-char.
+
+### Added
+
+- **Text-format tool-call recovery** — when a step produces no native tool
+  calls, the processor runs a conservative extractor over the assistant text
+  (`session/text_toolcalls.rs`) recognising the common markup dialects models
+  narrate instead of calling: the Qwen-style `tool_call` JSON blocks,
+  `function=name` XML-parameter blocks, and a whole-response bare tool-call
+  JSON object/array. Ordinary prose never matches (markup tags must be
+  literally present); recovered calls go through the full dispatch pipeline
+  (loop restrictions, hooks, permissions) and the model is notified.
+- `ragent_tools_core::schema::validate_required_args` — central required-args
+  validator (see above), with unit tests.
+- New regression tests: `test_gemini_tool_calls.rs` (3 tests), Ollama
+  object-args + narration-suppression tests, `test_edit_utf8_fixes.rs`
+  (CRLF preservation, BOM round-trip, non-UTF-8 message), and text-fallback
+  extraction tests (11 cases including multibyte payloads).
+
+## Version: 1.0.85 — /spec simplify pass
+
+/simplify pass over the /spec system (ragent-specs + its TUI/agent consumers):
+17 files, +580/-455. Highlights:
+
+### Fixed
+
+- **Auto task-completion no longer corrupts PLAN.md** — the agent loop marked
+  every `in_progress` spec task `completed` whenever ANY file-write tool was
+  called; writes are now required to resolve inside the active spec's own
+  directory (`writes_in_spec_dir` guard on the tool-call path arguments).
+- **UTF-8 panic in feedback logging** — `build_feedback_log` sliced `&note[..80]`
+  by byte offset; multi-byte notes (em-dash) panicked on a char boundary. Now
+  truncates at a real character boundary via `char_indices().nth(80)`.
+- **Frontmatter key loss on write** — `update_frontmatter` rebuilt the
+  frontmatter from scratch, silently dropping unmodelled keys (notably
+  `research:` written by `/spec create --from-research`) on every status
+  transition. Unmodelled keys are now preserved; audit/reviewer values are
+  YAML-escaped so embedded quotes cannot corrupt the frontmatter.
+- **Stale REVIEW.md/FEEDBACK.md after in-memory clear** — `write_spec` skipped
+  empty content, so a cleared field round-tripped as a no-op and the stale file
+  repopulated it on the next read; the file is now deleted when its content is
+  cleared (empty files are still never created).
+- **Atomic-write temp collision + durability** — temp names are unique per
+  write (monotonic sequence) so concurrent writers no longer race on the same
+  `.tmp` path, and the temp file is synced before rename.
+- **create_spec_dir TOCTOU** — the `exists()` pre-check raced past concurrent
+  creation; `create_dir` + `AlreadyExists` mapping is used instead.
+- **Lying completion timestamp** — `parse_tasks` fabricated
+  `completed_at: Some(1)` for completed rows on read-back; tests updated to the
+  honest `None` (PLAN.md tables carry no timestamp column).
+- **Non-deterministic validation report** — `Report::format` iterated a
+  `HashMap` of template counts; output is now sorted by template name.
+- **Amendment rows containing `|`** — `parse_amendment_row` shifted cells when
+  the rationale contained a pipe; middle cells are rejoined instead of
+  mis-parsed; an unreachable duplicate `section_end` assignment was removed.
+
+### Added
+
+- `Spec::coverage_report()` — single requirement-coverage renderer shared by
+  the TUI `/spec coverage` arm and the `spec_coverage` agent tool (previously
+  two drifting implementations, one ASCII one emoji).
+- `TaskStatus::symbol()` — ASCII status symbols as one source of truth.
+- `Task::table_row()` / `PlanTask::table_row()` — shared task-table row
+  formatting (manager PLAN rewrite + `/spec tasks` builder).
+- `SpecIo::extract_research` + `Spec.research` is now actually populated from
+  frontmatter (the field was documented but never populated).
+- `SpecIo::frontmatter()` — single frontmatter slicing helper for
+  status/reviewers/research extraction.
+
+### Changed
+
+- `/spec` arms consolidate 15 `SpecManager::new` constructions into one
+  `spec_manager()` helper and 11 `SpecId::new` match blocks into
+  `parse_spec_id()`.
+- `discover_specs`/`read_spec` share one `load_spec_from_dir` hydration path
+  (was ~50 duplicated lines); requirements are built before the `spec_md` move,
+  removing a full-text clone per spec.
+- Search snippet extraction reuses the already-lowercased text (one
+  lowercasing per document instead of two); empty search queries short-circuit.
+- `find_dependents` drops a dead O(n) ID-to-index map; `build_file_order_warning`
+  replaces an `unwrap()` with a let-else; `milestone_groups` borrows milestone
+  names instead of cloning per task; `Effort`/`Priority` parse without
+  allocation; unrecognised task Status values warn (parity with effort/priority).
+- `Report` filter helpers deduplicated to `any_in`/`count_in`;
+  `is_usage_error` shares a `USAGE_SUBCOMMANDS` const with parse;
+  `build_create_message`/`build_specify_message` drop unused `_feature`
+  parameters; `extract_from_research` is token-based (prose containing the flag
+  no longer splits) and strips dangling `--from-research` tokens.
+- lib.rs re-exports `EarsTemplate`.
+
 ## Version: 1.0.84
 
 The /simplify all pass fixes (post 1.0.83) reviewed by parallel sub-agents over the diff since 1.0.83, plus slash-command help coverage.

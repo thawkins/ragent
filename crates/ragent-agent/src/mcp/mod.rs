@@ -111,12 +111,13 @@ pub fn validate_mcp_config(id: &str, config: &McpServerConfig) -> anyhow::Result
             let url = config.url.as_deref().ok_or_else(|| {
                 anyhow::anyhow!("[{id}] HTTP/SSE transport requires a 'url' field")
             })?;
-
             let trimmed = url.trim();
             if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+                // Char-boundary-safe preview: byte slicing can panic on multibyte URLs.
+                let preview: String = trimmed.chars().take(60).collect();
                 anyhow::bail!(
                     "[{id}] HTTP/SSE url must start with http:// or https://, got: '{}'",
-                    &trimmed[..trimmed.len().min(60)]
+                    preview
                 );
             }
 
@@ -221,6 +222,24 @@ enum McpConnection {
     Rmcp(Arc<RunningService<RoleClient, ()>>),
     /// Custom HTTP JSON-RPC connection (FR-013).
     Http(Arc<http::HttpMcpClient>),
+}
+
+/// Normalises model-supplied tool arguments into an MCP `arguments` map.
+///
+/// Shared by both transports (rmcp/stdio and HTTP) so a non-object payload is
+/// normalised identically regardless of transport: objects pass through, null
+/// becomes an empty map, and any other value is wrapped in an invented
+/// `"value"` envelope key (documented so servers can detect it).
+pub(crate) fn normalize_mcp_arguments(input: Value) -> serde_json::Map<String, Value> {
+    match input {
+        Value::Object(map) => map,
+        Value::Null => serde_json::Map::new(),
+        other => {
+            let mut map = serde_json::Map::new();
+            map.insert("value".to_string(), other);
+            map
+        }
+    }
 }
 
 /// MCP client managing connections to one or more MCP servers.
@@ -682,18 +701,10 @@ impl McpClient {
 
         match conn {
             McpConnection::Rmcp(service) => {
-                let arguments = match input {
-                    Value::Object(map) => Some(map),
-                    Value::Null => None,
-                    other => {
-                        let mut map = serde_json::Map::new();
-                        map.insert("value".to_string(), other);
-                        Some(map)
-                    }
-                };
+                let arguments = normalize_mcp_arguments(input);
 
-                let params = CallToolRequestParams::new(tool_name.to_string())
-                    .with_arguments(arguments.unwrap_or_default());
+                let params =
+                    CallToolRequestParams::new(tool_name.to_string()).with_arguments(arguments);
 
                 let result = tokio::time::timeout(
                     std::time::Duration::from_secs(Self::TOOL_CALL_TIMEOUT_SECS),

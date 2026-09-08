@@ -25,11 +25,17 @@ impl Effort {
     /// Parse from a single character: "S", "M", "L" (case-insensitive).
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
-        match s.trim().to_uppercase().as_str() {
-            "S" => Some(Self::S),
-            "M" => Some(Self::M),
-            "L" => Some(Self::L),
-            _ => None,
+        // Compare case-insensitively without allocating (the old version
+        // uppercased into a String per parsed row).
+        let t = s.trim();
+        if t.eq_ignore_ascii_case("S") {
+            Some(Self::S)
+        } else if t.eq_ignore_ascii_case("M") {
+            Some(Self::M)
+        } else if t.eq_ignore_ascii_case("L") {
+            Some(Self::L)
+        } else {
+            None
         }
     }
 
@@ -69,12 +75,17 @@ impl Priority {
     /// Parse from a human-readable string (case-insensitive).
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
-        match s.trim().to_lowercase().as_str() {
-            "low" => Some(Self::Low),
-            "medium" => Some(Self::Medium),
-            "high" => Some(Self::High),
-            "critical" => Some(Self::Critical),
-            _ => None,
+        let t = s.trim();
+        if t.eq_ignore_ascii_case("low") {
+            Some(Self::Low)
+        } else if t.eq_ignore_ascii_case("medium") {
+            Some(Self::Medium)
+        } else if t.eq_ignore_ascii_case("high") {
+            Some(Self::High)
+        } else if t.eq_ignore_ascii_case("critical") {
+            Some(Self::Critical)
+        } else {
+            None
         }
     }
 
@@ -121,6 +132,33 @@ pub struct PlanTask {
     /// Milestone this task belongs to, parsed from the `## Milestones`
     /// section by matching the bullet text to the task title.
     pub milestone: Option<String>,
+}
+
+impl PlanTask {
+    /// Render this task as a PLAN.md task-table row
+    /// (`| ID | Title | Requirement | Effort | Priority | Status | Dependencies |`).
+    ///
+    /// Same layout as [`crate::spec::Task::table_row`] (em-dash placeholder
+    /// for empty dependency lists) so both task representations format
+    /// identically.
+    #[must_use]
+    pub fn table_row(&self) -> String {
+        let deps = if self.dependencies.is_empty() {
+            "\u{2014}".to_string()
+        } else {
+            self.dependencies.join(", ")
+        };
+        format!(
+            "| {} | {} | {} | {} | {} | {} | {} |",
+            self.id,
+            self.title,
+            self.requirement,
+            self.effort.as_str(),
+            self.priority.as_str(),
+            self.status.as_str(),
+            deps
+        )
+    }
 }
 
 // ── Milestone ─────────────────────────────────────────────────────────────
@@ -457,7 +495,16 @@ impl PlanParser {
             let (status, dependencies) = if has_status_column && cells.len() >= 7 {
                 // 7-column: ID | Title | Req | Effort | Priority | Status | Dependencies
                 let status_str = cells.get(5).copied().unwrap_or("");
-                let status = TaskStatus::parse(status_str).unwrap_or(TaskStatus::Pending);
+                let status = match TaskStatus::parse(status_str) {
+                    Some(s) => s,
+                    None => {
+                        tracing::warn!(
+                            "Task {id}: unrecognized status '{}', defaulting to Pending",
+                            status_str
+                        );
+                        TaskStatus::Pending
+                    }
+                };
                 let deps_str = cells.get(6).copied().unwrap_or("");
                 let deps = Self::parse_dependencies(deps_str);
                 (status, deps)

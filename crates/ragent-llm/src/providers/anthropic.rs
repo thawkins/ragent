@@ -6,7 +6,7 @@
 use anyhow::{Context, Result, bail};
 use futures::StreamExt;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 
 use super::thinking::{
@@ -421,7 +421,12 @@ impl LlmClient for AnthropicClient {
         let event_stream = async_stream::stream! {
             let mut buffer = String::new();
             let mut current_event_type = String::new();
-            let mut tool_call_args: HashMap<String, String> = HashMap::new();
+            // F5: open tool_use blocks keyed by the SSE content-block index.
+            // A HashMap iterated with `.last()` attributed `input_json_delta`
+            // args to an arbitrary open block when more than one tool_use
+            // block streamed in parallel; the index keys the deltas to the
+            // correct call.
+            let mut tool_call_blocks: BTreeMap<u64, String> = BTreeMap::new();
 
             if let Some(ev) = rate_limit_event {
                 yield ev;
@@ -483,6 +488,7 @@ impl LlmClient for AnthropicClient {
                         match current_event_type.as_str() {
                             "content_block_start" => {
                                 let content_block = &parsed["content_block"];
+                                let block_index = parsed["index"].as_u64().unwrap_or(0);
                                 match content_block["type"].as_str() {
                                     Some("text") => {}
                                     Some("thinking") => {
@@ -491,7 +497,7 @@ impl LlmClient for AnthropicClient {
                                     Some("tool_use") => {
                                         let id = content_block["id"].as_str().unwrap_or("").to_string();
                                         let name = content_block["name"].as_str().unwrap_or("").to_string();
-                                        tool_call_args.insert(id.clone(), String::new());
+                                        tool_call_blocks.insert(block_index, id.clone());
                                         yield StreamEvent::ToolCallStart { id, name };
                                     }
                                     _ => {}
@@ -499,6 +505,7 @@ impl LlmClient for AnthropicClient {
                             }
                             "content_block_delta" => {
                                 let delta = &parsed["delta"];
+                                let block_index = parsed["index"].as_u64().unwrap_or(0);
                                 match delta["type"].as_str() {
                                     Some("text_delta") => {
                                         if let Some(text) = delta["text"].as_str() {
@@ -512,9 +519,9 @@ impl LlmClient for AnthropicClient {
                                     }
                                     Some("input_json_delta") => {
                                         if let Some(json_str) = delta["partial_json"].as_str() {
-                                            // We track by last started tool call
-                                            if let Some((id, args)) = tool_call_args.iter_mut().last() {
-                                                args.push_str(json_str);
+                                            // F5: route the delta to the block
+                                            // named by this event's index.
+                                            if let Some(id) = tool_call_blocks.get(&block_index) {
                                                 yield StreamEvent::ToolCallDelta {
                                                     id: id.clone(),
                                                     args_json: json_str.to_string(),
@@ -526,15 +533,14 @@ impl LlmClient for AnthropicClient {
                                 }
                             }
                             "content_block_stop" => {
-                                // Check if this is a tool_use block ending
-                                // We emit ToolCallEnd for the last known tool
-                                if let Some((id, _)) = tool_call_args.iter().last() {
-                                    // We check if we have pending tool args
-                                    let id = id.clone();
-                                    if !id.is_empty() {
-                                        yield StreamEvent::ToolCallEnd { id: id.clone() };
-                                        tool_call_args.remove(&id);
-                                    }
+                                // F5: close the block named by this event's
+                                // index (previously "the last known tool" in
+                                // arbitrary HashMap order).
+                                let block_index = parsed["index"].as_u64().unwrap_or(0);
+                                if let Some(id) = tool_call_blocks.remove(&block_index)
+                                    && !id.is_empty()
+                                {
+                                    yield StreamEvent::ToolCallEnd { id };
                                 }
                             }
                             "message_delta" => {

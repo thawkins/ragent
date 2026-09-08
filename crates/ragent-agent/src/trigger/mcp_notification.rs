@@ -454,8 +454,13 @@ fn normalize_notification(notification: &McpNotification) -> Result<(String, Str
             // Generic fallback: use the method name and a truncated JSON.
             let params_str =
                 serde_json::to_string(params).unwrap_or_else(|_| "<unserializable>".to_string());
-            let truncated = if params_str.len() > 200 {
-                format!("{}…", &params_str[..200])
+            // Char-boundary-safe truncation: byte slicing can panic on multibyte
+            // JSON. Collect the 201-char head once, then branch on whether the
+            // 201st char exists (equivalent to a chars-count > 200 check
+            // without a second pass over the string).
+            let head: String = params_str.chars().take(201).collect();
+            let truncated = if head.chars().count() > 200 {
+                format!("{}…", head.chars().take(200).collect::<String>())
             } else {
                 params_str
             };

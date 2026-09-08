@@ -30,7 +30,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::llm::LlmClient;
@@ -409,7 +409,6 @@ impl LlmClient for AzureAnthropicClient {
         use futures::StreamExt;
         use ragent_types::event::FinishReason;
         use serde_json::Value;
-        use std::collections::HashMap;
 
         let rate_limit_event =
             crate::provider::anthropic::parse_anthropic_rate_limit_headers(response.headers());
@@ -418,7 +417,11 @@ impl LlmClient for AzureAnthropicClient {
         let event_stream = async_stream::stream! {
             let mut buffer = String::new();
             let mut current_event_type = String::new();
-            let mut tool_call_args: HashMap<String, String> = HashMap::new();
+            // F5: open tool_use blocks keyed by the SSE content-block index;
+            // `.last()` on a HashMap attributed deltas to an arbitrary open
+            // block, and the index field was captured then ignored, so args
+            // were never even accumulated. The index now keys the buffers.
+            let mut tool_call_blocks: BTreeMap<u64, String> = BTreeMap::new();
 
             if let Some(ev) = rate_limit_event {
                 yield ev;
@@ -480,6 +483,7 @@ impl LlmClient for AzureAnthropicClient {
                         match current_event_type.as_str() {
                             "content_block_start" => {
                                 let content_block = &parsed["content_block"];
+                                let block_index = parsed["index"].as_u64().unwrap_or(0);
                                 match content_block["type"].as_str() {
                                     Some("text") => {}
                                     Some("thinking") => {
@@ -488,7 +492,7 @@ impl LlmClient for AzureAnthropicClient {
                                     Some("tool_use") => {
                                         let id = content_block["id"].as_str().unwrap_or("").to_string();
                                         let name = content_block["name"].as_str().unwrap_or("").to_string();
-                                        tool_call_args.insert(id.clone(), String::new());
+                                        tool_call_blocks.insert(block_index, id.clone());
                                         yield StreamEvent::ToolCallStart { id, name };
                                     }
                                     _ => {}
@@ -496,6 +500,7 @@ impl LlmClient for AzureAnthropicClient {
                             }
                             "content_block_delta" => {
                                 let delta = &parsed["delta"];
+                                let block_index = parsed["index"].as_u64().unwrap_or(0);
                                 match delta["type"].as_str() {
                                     Some("text_delta") => {
                                         if let Some(text) = delta["text"].as_str() {
@@ -509,8 +514,9 @@ impl LlmClient for AzureAnthropicClient {
                                     }
                                     Some("input_json_delta") => {
                                         if let Some(json_str) = delta["partial_json"].as_str() {
-                                            let _idx = parsed["index"].as_u64().unwrap_or(0);
-                                            if let Some((id, _args)) = tool_call_args.iter_mut().last() {
+                                            // F5: the delta belongs to the block
+                                            // named by this event's index.
+                                            if let Some(id) = tool_call_blocks.get(&block_index) {
                                                 yield StreamEvent::ToolCallDelta {
                                                     id: id.clone(),
                                                     args_json: json_str.to_string(),
@@ -522,13 +528,12 @@ impl LlmClient for AzureAnthropicClient {
                                 }
                             }
                             "content_block_stop" => {
-                                let _idx = parsed["index"].as_u64().unwrap_or(0);
-                                if let Some((id, _)) = tool_call_args.iter().last() {
-                                    let id = id.clone();
-                                    if !id.is_empty() {
-                                        yield StreamEvent::ToolCallEnd { id: id.clone() };
-                                        tool_call_args.remove(&id);
-                                    }
+                                // F5: close the block named by this event's index.
+                                let block_index = parsed["index"].as_u64().unwrap_or(0);
+                                if let Some(id) = tool_call_blocks.remove(&block_index)
+                                    && !id.is_empty()
+                                {
+                                    yield StreamEvent::ToolCallEnd { id };
                                 }
                             }
                             "message_delta" => {

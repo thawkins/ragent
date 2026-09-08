@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+/// Current Unix epoch seconds (0 when the clock is before the epoch).
+pub(crate) fn now_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 /// Unique, URL-safe identifier for a spec.
 ///
 /// Used as the directory name under `specs/`.
@@ -214,6 +222,20 @@ impl TaskStatus {
             _ => None,
         }
     }
+
+    /// Short ASCII status symbol for table and coverage renderers.
+    ///
+    /// Single source of truth shared by the TUI `/spec coverage` arm and the
+    /// `spec_coverage` agent tool so both always agree.
+    #[must_use]
+    pub const fn symbol(&self) -> &'static str {
+        match self {
+            Self::Pending => "[wait]",
+            Self::InProgress => "[sync]",
+            Self::Completed => "[ok]",
+            Self::Blocked => "[stop]",
+        }
+    }
 }
 
 /// A single implementation task in a plan.
@@ -237,6 +259,37 @@ pub struct Task {
     pub dependencies: Vec<String>,
     /// Completion timestamp (Unix epoch seconds).
     pub completed_at: Option<u64>,
+}
+
+impl Task {
+    /// Render this task as a PLAN.md task-table row
+    /// (`| ID | Title | Requirement | Effort | Priority | Status | Dependencies |`).
+    ///
+    /// Single formatter shared by the manager's PLAN rewrite and message
+    /// builders so both always agree on placeholder and column layout.
+    #[must_use]
+    pub fn table_row(&self) -> String {
+        let deps = if self.dependencies.is_empty() {
+            "\u{2014}".to_string()
+        } else {
+            self.dependencies.join(", ")
+        };
+        let req = if self.linked_requirements.is_empty() {
+            "\u{2014}".to_string()
+        } else {
+            self.linked_requirements.join(", ")
+        };
+        format!(
+            "| {} | {} | {} | {} | {} | {} | {} |",
+            self.id,
+            self.title,
+            req,
+            self.effort,
+            self.priority,
+            self.status.as_str(),
+            deps
+        )
+    }
 }
 
 /// A spec, encompassing both the specification and its plan.
@@ -280,10 +333,7 @@ pub struct Spec {
 impl Spec {
     /// Create a new empty spec with the given id and title.
     pub fn new(id: SpecId, title: impl Into<String>) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = now_epoch_secs();
         Self {
             id,
             status: SpecStatus::Draft,
@@ -310,7 +360,7 @@ impl Spec {
     /// Get the path to the spec directory.
     #[must_use]
     pub fn dir_path(&self, specs_root: &Path) -> PathBuf {
-        specs_root.join(self.id.dir_name())
+        spec_dir_path(specs_root, &self.id)
     }
 
     /// Get the path to SPEC.md.
@@ -322,7 +372,7 @@ impl Spec {
     /// Get the path to PLAN.md.
     #[must_use]
     pub fn plan_md_path(&self, specs_root: &Path) -> PathBuf {
-        self.dir_path(specs_root).join("PLAN.md")
+        plan_md_path(specs_root, &self.id)
     }
 
     /// Get the path to FEEDBACK.md.
@@ -341,12 +391,74 @@ impl Spec {
         (implemented as f64 / self.requirements.len() as f64) * 100.0
     }
 
+    /// Render the requirement-coverage report shared by the TUI `/spec
+    /// coverage` command and the `spec_coverage` agent tool so both
+    /// consumers always agree on format and status symbols.
+    #[must_use]
+    pub fn coverage_report(&self) -> String {
+        // Map requirement ID -> linked task IDs (total and completed).
+        let mut req_to_completed: std::collections::HashMap<&str, Vec<&str>> =
+            std::collections::HashMap::new();
+        let mut req_to_total: std::collections::HashMap<&str, Vec<&str>> =
+            std::collections::HashMap::new();
+        for task in &self.tasks {
+            for req_id in &task.linked_requirements {
+                req_to_total
+                    .entry(req_id.as_str())
+                    .or_default()
+                    .push(task.id.as_str());
+                if task.status == TaskStatus::Completed {
+                    req_to_completed
+                        .entry(req_id.as_str())
+                        .or_default()
+                        .push(task.id.as_str());
+                }
+            }
+        }
+
+        let mut lines = vec![
+            format!("## Coverage Report: {}", self.id),
+            String::new(),
+            format!("**Overall Coverage:** {:.1}%", self.coverage_pct()),
+            String::new(),
+        ];
+        lines.push("### Requirements".to_string());
+        for req in &self.requirements {
+            let completed = req_to_completed.get(req.id.as_str()).map_or(0, Vec::len);
+            let total = req_to_total.get(req.id.as_str()).map_or(0, Vec::len);
+            let covered = completed > 0 && completed == total;
+            let symbol = if covered { "[ok]" } else { "[  ]" };
+            let detail = if total > 0 {
+                format!(" ({} of {} linked tasks completed)", completed, total)
+            } else {
+                " (no linked tasks)".to_string()
+            };
+            lines.push(format!("{} `{}` — {}{}", symbol, req.id, req.text, detail));
+        }
+
+        lines.push(String::new());
+        lines.push("### Tasks".to_string());
+        for task in &self.tasks {
+            let reqs = if task.linked_requirements.is_empty() {
+                "(unlinked)".to_string()
+            } else {
+                format!("[{}]", task.linked_requirements.join(", "))
+            };
+            lines.push(format!(
+                "{} `{}` — {} ({}) {}",
+                task.status.symbol(),
+                task.id,
+                task.title,
+                task.status.as_str(),
+                reqs
+            ));
+        }
+        lines.join("\n")
+    }
+
     /// Transition the spec to a new status, recording an audit entry.
     pub fn transition(&mut self, new_status: SpecStatus, actor: impl Into<String>) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = now_epoch_secs();
         let old = self.status.as_str().to_string();
         self.audit_trail
             .push((now, old, new_status.as_str().to_string(), actor.into()));
@@ -373,10 +485,7 @@ pub struct Plan {
 impl Plan {
     /// Create a new empty plan for the given spec.
     pub fn new(spec_id: SpecId, title: impl Into<String>) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = now_epoch_secs();
         Self {
             spec_id,
             title: title.into(),
@@ -387,8 +496,21 @@ impl Plan {
     }
 
     /// Get the path to PLAN.md.
+    ///
+    /// Shares the directory layout with [`Spec::plan_md_path`] via a
+    /// crate-private helper so the path scheme lives in one place.
     #[must_use]
     pub fn path(&self, specs_root: &Path) -> PathBuf {
-        specs_root.join(self.spec_id.dir_name()).join("PLAN.md")
+        plan_md_path(specs_root, &self.spec_id)
     }
+}
+
+/// Path helpers shared by [`Spec`] and [`Plan`] so the on-disk layout is
+/// defined exactly once.
+fn spec_dir_path(specs_root: &Path, spec_id: &SpecId) -> PathBuf {
+    specs_root.join(spec_id.dir_name())
+}
+
+fn plan_md_path(specs_root: &Path, spec_id: &SpecId) -> PathBuf {
+    spec_dir_path(specs_root, spec_id).join("PLAN.md")
 }

@@ -16,6 +16,7 @@ pub mod processor;
 pub mod profiler;
 pub mod prompt_builders;
 pub mod stream_buffer;
+pub(crate) mod text_toolcalls;
 pub mod verification;
 
 use crate::event::FinishReason;

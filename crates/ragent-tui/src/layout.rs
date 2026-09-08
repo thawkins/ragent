@@ -5018,6 +5018,10 @@ fn messages_to_lines(
                     };
                     for (i, line) in text.lines().enumerate() {
                         if i == 0 {
+                            // Blank line before the "You:" prompt for visual separation.
+                            if msg.role == Role::User {
+                                lines.push(Line::from(String::new()));
+                            }
                             lines.push(Line::from(vec![
                                 Span::styled(dot, dot_style),
                                 Span::raw(line.to_owned()),
@@ -6501,6 +6505,12 @@ mod tests {
                 );
             }
         }
+
+        // A trailing blank line separates the notice bubble from following content.
+        assert!(
+            lines.last().is_some_and(|line| line.spans.is_empty()
+                || line.spans.iter().all(|span| span.content.is_empty()))
+        );
     }
 
     #[test]

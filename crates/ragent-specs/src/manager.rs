@@ -250,26 +250,7 @@ impl SpecManager {
             "|----|-------|-------------|--------|----------|--------|--------------|".to_string(),
         );
         for task in tasks {
-            let deps = if task.dependencies.is_empty() {
-                "—".to_string()
-            } else {
-                task.dependencies.join(", ")
-            };
-            let req = if task.linked_requirements.is_empty() {
-                "—".to_string()
-            } else {
-                task.linked_requirements.join(", ")
-            };
-            new_lines.push(format!(
-                "| {} | {} | {} | {} | {} | {} | {} |",
-                task.id,
-                task.title,
-                req,
-                task.effort,
-                task.priority,
-                task.status.as_str(),
-                deps
-            ));
+            new_lines.push(task.table_row());
         }
         new_lines.extend(
             lines[table_end..]
@@ -358,6 +339,11 @@ impl SpecManager {
         query: &str,
         include_archived: bool,
     ) -> Result<Vec<SpecSearchResult>, SpecError> {
+        // An empty query matches every byte offset and yields junk snippets;
+        // treat it as no results.
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
         let mut specs = self.discover_specs().await?;
         let query_lower = query.to_lowercase();
 
@@ -373,6 +359,8 @@ impl SpecManager {
             let spec_lower = spec.spec_md.to_lowercase();
             let plan_lower = spec.plan_md.to_lowercase();
             let review_lower = spec.review_md.to_lowercase();
+            // (The lowered copies are reused by snippet extraction below,
+            // avoiding a second full-text lowercasing per matched document.)
 
             let title_match = title_lower.contains(&query_lower);
             let spec_match = spec_lower.contains(&query_lower);
@@ -382,13 +370,28 @@ impl SpecManager {
             if title_match || spec_match || plan_match || review_match {
                 let mut snippets = Vec::new();
                 if spec_match {
-                    snippets.extend(extract_snippets(&spec.spec_md, &query_lower, 3));
+                    snippets.extend(extract_snippets_lowered(
+                        &spec.spec_md,
+                        &spec_lower,
+                        &query_lower,
+                        3,
+                    ));
                 }
                 if plan_match {
-                    snippets.extend(extract_snippets(&spec.plan_md, &query_lower, 3));
+                    snippets.extend(extract_snippets_lowered(
+                        &spec.plan_md,
+                        &plan_lower,
+                        &query_lower,
+                        3,
+                    ));
                 }
                 if review_match {
-                    snippets.extend(extract_snippets(&spec.review_md, &query_lower, 3));
+                    snippets.extend(extract_snippets_lowered(
+                        &spec.review_md,
+                        &review_lower,
+                        &query_lower,
+                        3,
+                    ));
                 }
 
                 let score = if title_match { 3 } else { 0 }
@@ -456,8 +459,16 @@ fn update_frontmatter(
 // ── Search helpers ──────────────────────────────────────────────���─────────
 
 /// Extract context snippets around query matches.
-fn extract_snippets(text: &str, query: &str, max_snippets: usize) -> Vec<String> {
-    let text_lower = text.to_lowercase();
+///
+/// Takes both the original and an already-lowercased copy of the text so
+/// callers that have already lowercased (search) do not pay for a second
+/// full-text lowercasing per snippet batch.
+fn extract_snippets_lowered(
+    text: &str,
+    text_lower: &str,
+    query: &str,
+    max_snippets: usize,
+) -> Vec<String> {
     let mut snippets = Vec::new();
     let window = 40usize;
 
@@ -669,7 +680,7 @@ mod tests {
     #[test]
     fn test_extract_snippets_multibyte_boundary() {
         let text = "Before — the quick brown fox jumps — after";
-        let snippets = extract_snippets(text, "fox", 1);
+        let snippets = extract_snippets_lowered(text, &text.to_lowercase(), "fox", 1);
         assert_eq!(snippets.len(), 1);
         assert!(snippets[0].contains("fox"));
     }

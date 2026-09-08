@@ -484,6 +484,27 @@ impl ResponsesApiClient {
                             "response.reasoning_summary_text.done" => {
                                 yield StreamEvent::ReasoningEnd;
                             }
+                            "response.output_item.added" => {
+                                // F1: the function-call item announces the call
+                                // id and name BEFORE the argument deltas
+                                // arrive. Without emitting `ToolCallStart`
+                                // here, the agent loop never creates a pending
+                                // call and every delta for the unknown id is
+                                // dropped — the tool call was lost entirely.
+                                if let Some(item) = event.get("item")
+                                    && item.get("type").and_then(|v| v.as_str())
+                                        == Some("function_call")
+                                    && let (Some(call_id), Some(name)) = (
+                                        item.get("call_id").and_then(|v| v.as_str()),
+                                        item.get("name").and_then(|v| v.as_str()),
+                                    )
+                                {
+                                    yield StreamEvent::ToolCallStart {
+                                        id: call_id.to_string(),
+                                        name: name.to_string(),
+                                    };
+                                }
+                            }
                             "response.function_call_arguments.delta" => {
                                 if let (Some(call_id), Some(delta)) = (
                                     event.get("call_id").and_then(|v| v.as_str()),

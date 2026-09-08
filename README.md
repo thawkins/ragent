@@ -398,21 +398,26 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.84** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.85** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
-- **/simplify quality pass (shipped in v1.0.84)** — ~40 fixes across
-  48 files reviewed by parallel sub-agents: a real lowercase-slicing panic in
-  research comparison output, a dead TUI event-lag reconcile (double-Arc), the
-  fragile codeindex `"\n\nSTATUS:"` magic marker replaced with a typed result
-  slot, a rollback-status poll slot for the /loop flow, glob-matcher hoisting
-  in loop permission checks, a config deep-clone removal that keeps line/col
-  caret diagnostics, TUI `current_working_dir()` helper killing 63 silent
-  root-relative path resolutions, telemetry shutdown/flush rework, and a
-  30-test slash-command help coverage file (`test_slash_help.rs`).
+- **Tool-calling audit remediation (shipped in v1.0.85)** — fixes every
+  HIGH/MED finding from the tool-calling + UTF-8 audit across provider stream
+  parsers, tool dispatch, and the edit-tool family: OpenAI Responses API tool
+  calls no longer silently dropped (missing `ToolCallStart`), Gemini
+  final-chunk `functionCall` parsed before the finishReason flush, malformed
+  tool arguments fail fast with a corrective LLM-visible error instead of
+  silently executing with `{}`, loop restrictions fail closed, schema
+  validation of required args before execution, panicked tool tasks synthesise
+  error results (no orphaned `tool_use`), object-form `arguments` accepted from
+  llama.cpp/vLLM-style servers, Anthropic/Azure parallel `tool_use` blocks keyed
+  by SSE block index, HuggingFace tool-incapable models no longer receive a
+  tools array, CRLF files keep their line endings through edits, BOM round-trip
+  fixed, and a conservative text-format tool-call recovery extractor for models
+  that narrate tool calls as prose.
 
 - **Goal-driven loop programming (`/loop`)** — a goal-driven agentic loop that
   runs a `LoopSpec` to a stop condition (goal achieved, verification passed,

@@ -4,6 +4,26 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.85)
+
+- **Reliable tool calling** — the tool-calling audit remediation pass fixed
+  every HIGH/MED finding from the audit: OpenAI Responses API tool calls no
+  longer dropped (missing `ToolCallStart`), Gemini final-chunk `functionCall`
+  parsed before the finishReason flush, malformed tool arguments fail fast
+  with a corrective LLM-visible error instead of silently executing with
+  empty args, loop restrictions fail closed, required-args schema validation
+  runs before permissions/execution, and panicked tool tasks synthesise an
+  error result so the conversation never keeps an orphaned `tool_use`.
+- **Edit tools preserve line endings and BOMs** — CRLF files keep CRLF
+  endings through `edit`/`multi_edit` (no more silent CRLF-to-LF conversion),
+  a leading BOM no longer blocks first-line edits, and non-UTF-8 files get a
+  precise encoding error.
+- **Text-format tool-call recovery** — when a model narrates tool calls as
+  text (Qwen-style `tool_call` JSON blocks, XML-parameter blocks, or a bare
+  tool-call JSON object) and produces no native calls, the processor extracts
+  and dispatches them through the full permission pipeline, then notifies the
+  model.
+
 ## Highlights (v1.0.84)
 
 - **Goal-driven loop programming (`/loop`)** — a new slash-command family that
@@ -28,7 +48,7 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 - **`/clip`** — copies the rendered message-window transcript to the system clipboard in one step.
 - **`/research list` renders a human-readable table again** — the fixed-width `NAME/TITLE/STATUS/CREATED/MODIFIED` table is the default output, with JSON behind the `--json` flag.
 
-## Highlights (v1.0.84)
+## Highlights (1.0.84)
 
 - **/simplify quality pass** — ~40 fixes across 48 files: research comparison
   lowercase-slicing panic fix, single shared `tui_event_lag` Arc so the TUI

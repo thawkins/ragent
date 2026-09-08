@@ -453,3 +453,27 @@ mod tests {
         assert!(Arc::ptr_eq(&a, &b));
     }
 }
+
+/// Extract tool-call arguments from an OpenAI-style `function` object,
+/// accepting both wire forms:
+/// - the streaming string form (`"arguments": "{\"a\":1}"`, built up across
+///   delta frames), and
+/// - the whole-object form (`"arguments": {"a":1}`) emitted by llama.cpp /
+///   vLLM-class servers that echo the full function object per frame.
+///
+/// Returns `None` when the field is absent. Serialisation failure of the
+/// object form is logged and mapped to `None` rather than silently dropping
+/// the call's arguments with no diagnostic.
+pub(crate) fn tool_arguments_json(function: &serde_json::Value) -> Option<String> {
+    match function.get("arguments") {
+        Some(serde_json::Value::String(s)) => Some(s.clone()),
+        Some(obj @ serde_json::Value::Object(_)) => match serde_json::to_string(obj) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::debug!("tool-call arguments serialisation failed: {e}");
+                None
+            }
+        },
+        _ => None,
+    }
+}

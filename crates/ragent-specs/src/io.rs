@@ -6,7 +6,12 @@ use crate::error::SpecError;
 use crate::spec::{Requirement, Spec, SpecId, SpecStatus};
 use crate::validate::{detect_ears_template, parse_requirements};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::fs;
+
+/// Monotonic counter making concurrent atomic-write temp paths unique
+/// (two writers racing on the same target file get distinct temp names).
+static WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// I/O helper for spec management.
 pub struct SpecIo;
@@ -22,10 +27,16 @@ impl SpecIo {
         plan_md: &str,
     ) -> Result<PathBuf, SpecError> {
         let dir = specs_root.join(id.dir_name());
-        if dir.exists() {
-            return Err(SpecError::AlreadyExists(id.to_string()));
+        // create_dir (not create_dir_all) avoids the TOCTOU race of an
+        // exists() check followed by a recursive create: an existing dir is
+        // reported by the AlreadyExists error instead.
+        match fs::create_dir(&dir).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(SpecError::AlreadyExists(id.to_string()));
+            }
+            Err(e) => return Err(e.into()),
         }
-        fs::create_dir_all(&dir).await?;
         Self::atomic_write(dir.join("SPEC.md"), spec_md).await?;
         Self::atomic_write(dir.join("PLAN.md"), plan_md).await?;
         Ok(dir)
@@ -36,8 +47,20 @@ impl SpecIo {
     /// This ensures readers never see a partially-written file.
     pub async fn atomic_write(path: impl AsRef<Path>, content: &str) -> Result<(), SpecError> {
         let path = path.as_ref();
-        let temp_path = path.with_extension("tmp");
+        // Unique temp name so concurrent writers to the same target never
+        // race on the same temp path (a deterministic `.tmp` suffix made two
+        // writers rename over each other's temp file).
+        let seq = WRITE_SEQ.fetch_add(1, Ordering::Relaxed);
+        let file_name = path
+            .file_name()
+            .map_or_else(|| "tmp".to_string(), |n| n.to_string_lossy().into_owned());
+        let temp_path = path.with_file_name(format!(".{file_name}.{seq}.tmp"));
         fs::write(&temp_path, content).await?;
+        // Sync the temp file before the rename so a crash cannot leave a
+        // renamed-but-unflushed file behind.
+        if let Ok(file) = fs::File::open(&temp_path).await {
+            let _ = file.sync_all().await;
+        }
         fs::rename(&temp_path, path).await?;
         Ok(())
     }
@@ -77,39 +100,7 @@ impl SpecIo {
             let Some(id) = SpecId::new(dir_name) else {
                 continue;
             };
-            let spec_md = Self::read_file(&spec_md_path).await?;
-            let plan_md = Self::read_file(&plan_md_path).await?;
-            let review_md_path = path.join("REVIEW.md");
-            let review_md = if review_md_path.is_file() {
-                Self::read_file(&review_md_path).await.unwrap_or_default()
-            } else {
-                String::new()
-            };
-            let feedback_md_path = path.join("FEEDBACK.md");
-            let feedback_md = if feedback_md_path.is_file() {
-                Self::read_file(&feedback_md_path).await.unwrap_or_default()
-            } else {
-                String::new()
-            };
-            let modified_at = Self::modified_time(&spec_md_path).await?;
-            // Parse title from first H1 in SPEC.md
-            let title = Self::extract_title(&spec_md);
-            // Parse status from frontmatter or default to Draft
-            let status = Self::extract_status(&spec_md).unwrap_or(SpecStatus::Draft);
-            // Parse reviewers from frontmatter
-            let reviewers = Self::extract_reviewers(&spec_md);
-            let mut spec = Spec::new(id, title);
-            spec.status = status;
-            spec.spec_md = spec_md.clone();
-            spec.tasks = Self::parse_tasks(&plan_md);
-            spec.requirements = Self::build_requirements(&spec_md, &spec.tasks);
-            spec.plan_md = plan_md;
-            spec.review_md = review_md;
-            spec.feedback_md = feedback_md;
-            spec.reviewers = reviewers;
-            spec.modified_at = modified_at;
-            spec.path = Some(path);
-            specs.push(spec);
+            specs.push(Self::load_spec_from_dir(&path, id).await?);
         }
         Ok(specs)
     }
@@ -125,36 +116,49 @@ impl SpecIo {
         if !plan_md_path.is_file() {
             return Err(SpecError::NotFound(plan_md_path.display().to_string()));
         }
+        Self::load_spec_from_dir(&dir, id.clone()).await
+    }
+
+    /// Hydrate a [`Spec`] from an existing spec directory.
+    ///
+    /// Single implementation shared by [`discover_specs`] and [`read_spec`]
+    /// so every `Spec` field is populated in exactly one place.
+    async fn load_spec_from_dir(dir: &Path, id: SpecId) -> Result<Spec, SpecError> {
+        let spec_md_path = dir.join("SPEC.md");
+        let plan_md_path = dir.join("PLAN.md");
         let spec_md = Self::read_file(&spec_md_path).await?;
         let plan_md = Self::read_file(&plan_md_path).await?;
-        let review_md_path = dir.join("REVIEW.md");
-        let review_md = if review_md_path.is_file() {
-            Self::read_file(&review_md_path).await.unwrap_or_default()
-        } else {
-            String::new()
-        };
-        let feedback_md_path = dir.join("FEEDBACK.md");
-        let feedback_md = if feedback_md_path.is_file() {
-            Self::read_file(&feedback_md_path).await.unwrap_or_default()
-        } else {
-            String::new()
-        };
+        let review_md = Self::read_optional(&dir.join("REVIEW.md")).await;
+        let feedback_md = Self::read_optional(&dir.join("FEEDBACK.md")).await;
         let modified_at = Self::modified_time(&spec_md_path).await?;
         let title = Self::extract_title(&spec_md);
         let status = Self::extract_status(&spec_md).unwrap_or(SpecStatus::Draft);
         let reviewers = Self::extract_reviewers(&spec_md);
-        let mut spec = Spec::new(id.clone(), title);
+        let research = Self::extract_research(&spec_md);
+        let mut spec = Spec::new(id, title);
         spec.status = status;
-        spec.spec_md = spec_md.clone();
         spec.tasks = Self::parse_tasks(&plan_md);
+        // Build requirements before moving `spec_md` into the struct so no
+        // clone of the full text is needed.
         spec.requirements = Self::build_requirements(&spec_md, &spec.tasks);
+        spec.spec_md = spec_md;
         spec.plan_md = plan_md;
         spec.review_md = review_md;
         spec.feedback_md = feedback_md;
         spec.reviewers = reviewers;
+        spec.research = research;
         spec.modified_at = modified_at;
-        spec.path = Some(dir);
+        spec.path = Some(dir.to_path_buf());
         Ok(spec)
+    }
+
+    /// Read a file, returning an empty string when it does not exist or
+    /// cannot be decoded.
+    async fn read_optional(path: &Path) -> String {
+        match fs::read_to_string(path).await {
+            Ok(s) => s,
+            Err(_) => String::new(),
+        }
     }
 
     /// Write a `Spec` back to disk (SPEC.md, PLAN.md, and optionally
@@ -166,13 +170,23 @@ impl SpecIo {
         }
         Self::atomic_write(dir.join("SPEC.md"), &spec.spec_md).await?;
         Self::atomic_write(dir.join("PLAN.md"), &spec.plan_md).await?;
-        if !spec.review_md.is_empty() {
-            Self::atomic_write(dir.join("REVIEW.md"), &spec.review_md).await?;
-        }
-        if !spec.feedback_md.is_empty() {
-            Self::atomic_write(dir.join("FEEDBACK.md"), &spec.feedback_md).await?;
-        }
+        Self::write_or_clear(dir.join("REVIEW.md"), &spec.review_md).await?;
+        Self::write_or_clear(dir.join("FEEDBACK.md"), &spec.feedback_md).await?;
         Ok(())
+    }
+
+    /// Write auxiliary spec files (REVIEW.md / FEEDBACK.md) with clear-on-empty
+    /// semantics: never creates an empty file, but DOES delete an existing file
+    /// when the in-memory content has been cleared, so a stale file cannot
+    /// re-populate the field on the next read.
+    async fn write_or_clear(path: PathBuf, content: &str) -> Result<(), SpecError> {
+        if content.is_empty() {
+            if path.exists() {
+                fs::remove_file(&path).await?;
+            }
+            return Ok(());
+        }
+        Self::atomic_write(path, content).await
     }
 
     /// Write spec files to disk using individual field values, avoiding the
@@ -194,12 +208,8 @@ impl SpecIo {
         }
         Self::atomic_write(dir.join("SPEC.md"), spec_md).await?;
         Self::atomic_write(dir.join("PLAN.md"), plan_md).await?;
-        if !review_md.is_empty() {
-            Self::atomic_write(dir.join("REVIEW.md"), review_md).await?;
-        }
-        if !feedback_md.is_empty() {
-            Self::atomic_write(dir.join("FEEDBACK.md"), feedback_md).await?;
-        }
+        Self::write_or_clear(dir.join("REVIEW.md"), review_md).await?;
+        Self::write_or_clear(dir.join("FEEDBACK.md"), feedback_md).await?;
         Ok(())
     }
 
@@ -227,11 +237,7 @@ impl SpecIo {
     /// Extract the status from YAML frontmatter if present.
     /// Looks for a line like `status: draft` in the frontmatter block.
     pub fn extract_status(content: &str) -> Option<SpecStatus> {
-        if !content.starts_with("---") {
-            return None;
-        }
-        let end = content[3..].find("---")?;
-        let frontmatter = &content[3..3 + end];
+        let frontmatter = Self::frontmatter(content)?;
         for line in frontmatter.lines() {
             let trimmed = line.trim();
             if let Some(val) = trimmed.strip_prefix("status:") {
@@ -241,16 +247,44 @@ impl SpecIo {
         None
     }
 
+    /// Slice the YAML frontmatter block (content between the opening `---`
+    /// line and the closing `---`), excluding both markers.
+    fn frontmatter(content: &str) -> Option<&str> {
+        let rest = content.strip_prefix("---")?;
+        let end = rest.find("---")?;
+        Some(&rest[..end])
+    }
+
+    /// Extract research artifact names from YAML frontmatter.
+    ///
+    /// Supports `research: [a, b]` inline lists and the multi-line
+    /// `research:\n  - name` form, matching [`extract_reviewers`].
+    fn extract_research(content: &str) -> Vec<String> {
+        let Some(frontmatter) = Self::frontmatter(content) else {
+            return vec![];
+        };
+        for line in frontmatter.lines() {
+            let trimmed = line.trim();
+            if let Some(val) = trimmed.strip_prefix("research:") {
+                let val = val.trim();
+                if let Some(rest) = val.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                    return rest
+                        .split(',')
+                        .map(|r| r.trim().trim_matches(&['"', '\''][..]).to_string())
+                        .filter(|r| !r.is_empty())
+                        .collect();
+                }
+            }
+        }
+        vec![]
+    }
+
     /// Extract reviewers from YAML frontmatter.
     /// Looks for `reviewers: [list]` or `reviewers:\n  - name` format.
     fn extract_reviewers(content: &str) -> Vec<String> {
-        if !content.starts_with("---") {
-            return vec![];
-        }
-        let Some(end) = content[3..].find("---") else {
+        let Some(frontmatter) = Self::frontmatter(content) else {
             return vec![];
         };
-        let frontmatter = &content[3..3 + end];
         let mut in_reviewers = false;
         let mut reviewers = Vec::new();
         for line in frontmatter.lines() {
@@ -327,8 +361,16 @@ impl SpecIo {
                     // Status is column 5 if 7+ columns, otherwise fallback to Pending
                     let status_str = cells.get(5).copied().unwrap_or("");
                     let status = if cells.len() >= 7 {
-                        crate::spec::TaskStatus::parse(status_str)
-                            .unwrap_or(crate::spec::TaskStatus::Pending)
+                        match crate::spec::TaskStatus::parse(status_str) {
+                            Some(s) => s,
+                            None => {
+                                tracing::warn!(
+                                    "Task {id}: unrecognized status '{}', defaulting to Pending",
+                                    status_str
+                                );
+                                crate::spec::TaskStatus::Pending
+                            }
+                        }
                     } else {
                         crate::spec::TaskStatus::Pending
                     };
@@ -355,11 +397,7 @@ impl SpecIo {
                         effort,
                         priority,
                         dependencies: deps,
-                        completed_at: if status == crate::spec::TaskStatus::Completed {
-                            Some(1) // Round-tripped from file; actual timestamp not preserved
-                        } else {
-                            None
-                        },
+                        completed_at: None, // Round-tripped from file; actual timestamp not preserved
                     });
                 }
             }
