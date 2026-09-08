@@ -139,6 +139,17 @@ pub const MIN_SCHOLARLY_CONTENT_CHARS: usize = 80;
 /// extract at all.
 pub const MIN_ENCYCLOPEDIA_CONTENT_CHARS: usize = 80;
 
+/// Returns `true` when `engine` is the *sole* contributing search engine for
+/// the hit. Both special-cased capture paths (scholarly abstracts, encyclopedia
+/// summaries) require the engine to be the only contributor: when a general
+/// web engine (LangSearch, Tavily) also returned the URL, a fetchable HTML
+/// page exists and the normal fetch path is preferred so the richer page body
+/// is captured instead of the concise engine-provided snippet.
+fn is_sole_engine_hit(hit: &WebSearchHit, engine: &str) -> bool {
+    let engines: Vec<&str> = hit.search_engine.split(',').map(str::trim).collect();
+    !engines.is_empty() && engines.iter().all(|e| *e == engine)
+}
+
 /// Returns `true` for scholarly search-engine hits that carry a reconstructed
 /// abstract in their snippet and should be captured as self-contained sources
 /// without a URL fetch.
@@ -149,15 +160,8 @@ pub const MIN_ENCYCLOPEDIA_CONTENT_CHARS: usize = 80;
 /// titles because they do not lexically overlap with the (often rephrased)
 /// research sub-query. Scholarly hits are therefore exempt from the lexical
 /// filter and from the URL fetch — their snippet is the evidence.
-///
-/// A hit is scholarly only when OpenAlex is the *sole* contributing engine.
-/// When the same URL is also returned by a general web engine (LangSearch,
-/// Tavily), the page is a fetchable HTML page and the normal fetch path is
-/// preferred so the richer page body is captured instead of the concise
-/// abstract.
 fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
-    let engines: Vec<&str> = hit.search_engine.split(',').map(str::trim).collect();
-    !engines.is_empty() && engines.iter().all(|e| *e == "openalex")
+    is_sole_engine_hit(hit, "openalex")
 }
 
 /// Returns `true` for encyclopedia search-engine hits that carry a page
@@ -172,15 +176,32 @@ fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
 /// sub-query. Encyclopedia hits are therefore exempt from the lexical filter
 /// and from the URL fetch — their snippet (the REST API page summary) is the
 /// evidence.
-///
-/// A hit is encyclopedia only when Wikipedia is the *sole* contributing
-/// engine. When the same URL is also returned by a general web engine
-/// (LangSearch, Tavily), the page is a fetchable HTML page and the normal fetch
-/// path is preferred so the richer page body is captured instead of the
-/// concise summary.
 fn is_encyclopedia_hit(hit: &WebSearchHit) -> bool {
-    let engines: Vec<&str> = hit.search_engine.split(',').map(str::trim).collect();
-    !engines.is_empty() && engines.iter().all(|e| *e == "wikipedia")
+    is_sole_engine_hit(hit, "wikipedia")
+}
+
+/// Collect the sorted, de-duplicated set of contributing search engines from
+/// the comma-separated `search_engine` fields of the given strings.
+///
+/// Used by both gather paths (`gather_from_vault` and `gather_with_observer`)
+/// so `GatherResult.engines` has one deterministic ordering regardless of the
+/// origin path (previously the vault path left HashSet iteration order while
+/// the observer path sorted).
+fn collect_engines<'a, I>(fields: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut engines: Vec<String> = fields
+        .into_iter()
+        .flat_map(|f| f.split(','))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    engines.sort();
+    engines
 }
 
 /// Build a self-contained [`WebFetchedPage`] for a search hit without fetching
@@ -222,13 +243,6 @@ fn detectable_body(body: &str) -> Option<&str> {
         }
     }
     Some(body)
-}
-
-/// Cap a captured web body at the same byte budget used by the supporting
-/// file renderer so the body stored on the `Source` matches what ends up on
-/// disk. Keeps runaway pages from blowing up the synthesis prompt.
-fn fence_captured_body(body: &str) -> String {
-    fence_source_body(body)
 }
 
 /// Build a short preview of `body` for progress display: strip fenced-code
@@ -1021,7 +1035,7 @@ impl WebGatherer {
     ///
     /// Used by `--from-url` to capture a user-supplied page as the primary
     /// research subject *before* the normal web-search phase runs. The body is
-    /// fenced via [`fence_captured_body`] so it stays within the same byte
+    /// fenced via [`fence_source_body`] so it stays within the same byte
     /// budget as pages captured during gathering. The `body_path` is set to
     /// `web-01.md` (index 0); the manager renumbers supporting files by
     /// position at write time, so this is purely a metadata hint.
@@ -1042,7 +1056,7 @@ impl WebGatherer {
         .await
         .map_err(|_| anyhow::anyhow!("fetch timed out after {}s", self.fetch_timeout.as_secs()))?
         .map_err(|e| anyhow::anyhow!("failed to fetch seed URL {url}: {e}"))?;
-        let body = fence_captured_body(&page.body);
+        let body = fence_source_body(&page.body);
         let title = clean_web_source_title(&page.title, url);
         let media_type = classify_web_source(url, page.content_type.as_deref())
             .as_str()
@@ -1264,15 +1278,7 @@ impl WebGatherer {
             return Ok(None);
         }
 
-        let engines: Vec<String> = sources
-            .iter()
-            .flat_map(|s| s.search_engine().split(','))
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
+        let engines = collect_engines(sources.iter().map(|s| s.search_engine()));
         let considered_count = sources.len();
         Ok(Some(GatherResult {
             queries: Vec::new(),
@@ -1587,7 +1593,7 @@ impl WebGatherer {
                     if let Some(cache) = &cache
                         && let Some(hits) = cache.get(&q)
                     {
-                        return SearchCallOutcome::Ok { hits, retries: 0 };
+                        return SearchCallOutcome::Ok { hits };
                     }
                     // Retry loop with exponential backoff.
                     let mut attempt: u32 = 0;
@@ -1605,10 +1611,7 @@ impl WebGatherer {
                                 if let Some(cache) = &cache {
                                     cache.insert(&q, hits.clone());
                                 }
-                                return SearchCallOutcome::Ok {
-                                    hits,
-                                    retries: attempt,
-                                };
+                                return SearchCallOutcome::Ok { hits };
                             }
                             Err(e) => {
                                 last_error = e.to_string();
@@ -1706,7 +1709,7 @@ impl WebGatherer {
                 .cloned()
                 .unwrap_or_else(|| topic.to_string());
             match outcome {
-                SearchCallOutcome::Ok { hits, retries: _ } => {
+                SearchCallOutcome::Ok { hits } => {
                     for mut hit in hits {
                         let url_key = hit.url.to_lowercase();
                         if !seen_urls.insert(url_key) {
@@ -1964,16 +1967,11 @@ impl WebGatherer {
         // Renumber retained hits densely so the supporting-file names have no
         // gaps, while preserving the original search-ranking order.
         // Collect the set of contributing engines before consuming hits_by_url.
-        let mut engines: Vec<String> = hits_by_url
-            .iter()
-            .flat_map(|(_, hit)| hit.search_engine.split(','))
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
-        engines.sort();
+        let engines = collect_engines(
+            hits_by_url
+                .iter()
+                .map(|(_, hit)| hit.search_engine.as_str()),
+        );
         let fetch_futures = hits_by_url
             .into_iter()
             .take(max_results)
@@ -2043,7 +2041,13 @@ impl WebGatherer {
                     let encyclopedia = page.page_type.as_deref() == Some("encyclopedia");
                     let mut title = clean_web_source_title(&page.title, &hit.title);
                     let body_path = web_body_path(index);
-                    let body = fence_captured_body(&page.body);
+                    let body = fence_source_body(&page.body);
+                    // Classify the media type once per page; three render
+                    // sites below (SourceCaptured event, vault store, final
+                    // Source::Web) previously re-classified independently.
+                    let media_type = classify_web_source(&page.url, page.content_type.as_deref())
+                        .as_str()
+                        .to_string();
                     // Use the fetcher's language when available; otherwise run
                     // an aggressive best-guess detector on the body so that
                     // stored `Source::Web.language` is rarely `None`.
@@ -2253,12 +2257,7 @@ impl WebGatherer {
                                 .map(str::to_uppercase)
                                 .unwrap_or_else(|| "UNKNOWN".to_string()),
                             oa_recovery: oa_recovery.clone(),
-                            media_type: classify_web_source(
-                                &page.url,
-                                page.content_type.as_deref(),
-                            )
-                            .as_str()
-                            .to_string(),
+                            media_type: media_type.clone(),
                         });
                     }
                     log_captured(
@@ -2304,12 +2303,7 @@ impl WebGatherer {
                             fetch_timestamp: Some(captured_at),
                             search_tool: hit.search_tool.clone(),
                             search_engine: hit.search_engine.clone(),
-                            media_type: classify_web_source(
-                                &page.url,
-                                page.content_type.as_deref(),
-                            )
-                            .as_str()
-                            .to_string(),
+                            media_type: media_type.clone(),
                             content_type: page.content_type.clone(),
                             body_text: body.clone(),
                             summary_text: summary_text.clone(),
@@ -2336,12 +2330,7 @@ impl WebGatherer {
                             search_engine: hit.search_engine,
                             content_type: page.content_type.clone(),
                             page_type: page.page_type.clone(),
-                            media_type: classify_web_source(
-                                &page.url,
-                                page.content_type.as_deref(),
-                            )
-                            .as_str()
-                            .to_string(),
+                            media_type: media_type.clone(),
                             language: detected_language.clone(),
                             author: page.author.clone(),
                             oa_recovery,
@@ -2479,14 +2468,11 @@ impl WebGatherer {
 /// Outcome of a single sub-query search call, including retry/circuit-breaker
 /// state (Milestone H-002/H-003).
 enum SearchCallOutcome {
-    /// The search succeeded. `retries` records how many retries were needed
-    /// (0 = succeeded on the first attempt).
-    #[allow(dead_code)]
+    /// The search succeeded (retry counts are only tracked on the `Err`
+    /// variant, where they drive `SearchRetrying` events).
     Ok {
         /// Search hits returned by the tool.
         hits: Vec<WebSearchHit>,
-        /// Number of retries before success.
-        retries: u32,
     },
     /// The search failed after all retries were exhausted.
     Err {

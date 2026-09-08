@@ -398,11 +398,20 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.87** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.88** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **Research-crate simplify pass (v1.0.88)** — a `/simplify` audit over
+  all `ragent-research` sources fixed a `parse_subject_summary` slice panic
+  (`}`-before-`{` responses no longer panic the analysis merge path), made
+  `AnalysisEngine::with_brief` a required trait method, cached hot regexes
+  behind `OnceLock` statics, deduplicated the two `RESEARCH.md` layout
+  assemblers into a shared section-emitter module, unified search-engine
+  ordering across gather paths, and consolidated per-page media-type
+  classification and pdf/youtube tallies into single passes.
 
 - **UI polish and tool-calling fixes (v1.0.87)** — the status bar's top line
   now renders the last submitted prompt as a centred bracketed tag (first 32

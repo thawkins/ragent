@@ -685,15 +685,15 @@ impl ResearchManager {
     /// Resume an in-progress research item (T-012, T-014).
     ///
     /// Loads the saved state, applies an optional follow-up message by adding
-    /// a new sub-question, marks the item `InProgress`, and persists the updated
-    /// state.
+    /// a new sub-question, and persists the updated state. The saved state is
+    /// written back unchanged when there is no follow-up (the item's status
+    /// lives in the RESEARCH.md frontmatter, not the state file).
     pub async fn continue_item(
         &self,
         name: &str,
         follow_up: Option<&str>,
     ) -> Result<ResearchState> {
         let mut state = self.load_state(name).await?;
-        mark_in_progress_for_state(&mut state);
 
         if let Some(msg) = follow_up {
             state.plan.topic.push_str(&format!("\n\nFollow-up: {msg}"));
@@ -960,12 +960,6 @@ fn extract_snippet(body: &str, byte_idx: usize, q_len: usize, window_chars: usiz
     }
     snippet.replace('\n', " ")
 }
-
-/// Helper for [`ResearchManager::continue_item`]: ensures the underlying item
-/// is marked `InProgress` by bumping the state to a non-terminal status. Unlike
-/// the RESEARCH.md frontmatter helper, this operates purely on the in-memory
-/// state.
-const fn mark_in_progress_for_state(_state: &mut ResearchState) {}
 
 /// Compute the on-disk `RESEARCH.md` text for a research item without
 /// performing any I/O. Useful for tests and dry-run previews (T-007).

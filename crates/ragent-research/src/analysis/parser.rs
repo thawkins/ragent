@@ -8,6 +8,32 @@ use super::{AnalysisOutcome, AnalysisResult, SourceBody};
 use crate::document::CrossReference;
 use crate::item::strip_control_chars;
 use regex::Regex;
+use std::sync::OnceLock;
+
+/// Cached citation-marker pattern (`[#12]`) shared by the citation validators.
+fn citation_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"))
+}
+
+/// Cached bare citation-marker pattern (`[#12]`, no capture group) used by the
+/// completeness check.
+fn citation_bare_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\[#\d+\]").expect("valid citation regex"))
+}
+
+/// Cached ISO date pattern (`YYYY-MM-DD`) used by the date validator.
+fn date_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(\d{4}-\d{2}-\d{2})").expect("valid date regex"))
+}
+
+/// Cached `finding N` dependency pattern used by the reordering pass.
+fn finding_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)\bfinding\s+(\d+)\b").expect("valid regex"))
+}
 
 // reason: only consumed inside this crate - `pub` here never escapes the crate.
 #[allow(unreachable_pub)]
@@ -143,12 +169,12 @@ pub fn validate_citations_and_dates(
     sources: &[SourceBody],
 ) -> Vec<String> {
     let mut warnings = Vec::new();
-    let citation_re = Regex::new(r"\[#(\d+)\]").expect("valid citation regex");
+    let citation_re = citation_re();
     // Match `published YYYY-MM-DD` or a bare `YYYY-MM-DD` inside a
     // **Sources Cited / Date Spread** paragraph. We keep this conservative
     // so we don't rewrite dates that appear in the Observation/Analysis
     // prose (which may legitimately reference unrelated dates).
-    let date_re = Regex::new(r"(\d{4}-\d{2}-\d{2})").expect("valid date regex");
+    let date_re = date_re();
     let valid_dates: Vec<String> = sources
         .iter()
         .filter_map(|s| s.published_at.map(|dt| dt.format("%Y-%m-%d").to_string()))
@@ -220,7 +246,7 @@ pub fn is_malformed_analysis_result(result: &AnalysisResult) -> bool {
         "**Cross-reference / Dependencies:**",
         "**Implication:**",
     ];
-    let citation_re = Regex::new(r"\[#\d+\]").expect("valid citation regex");
+    let citation_re = citation_bare_re();
     for finding in &result.findings {
         if !required.iter().all(|label| finding.contains(label)) {
             return true;
@@ -444,7 +470,7 @@ pub fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String> {
     // Build an adjacency list: edge i -> j means finding i depends on finding j,
     // so j must come before i.
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); findings.len()];
-    let finding_re = Regex::new(r"(?i)\bfinding\s+(\d+)\b").expect("valid regex");
+    let finding_re = finding_re();
     for (idx, finding) in findings.iter().enumerate() {
         for cap in finding_re.captures_iter(finding) {
             let dep_num: usize = cap[1].parse().unwrap_or(0);

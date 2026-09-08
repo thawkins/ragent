@@ -1,5 +1,85 @@
 # Changelog
 
+## Version: 1.0.88
+
+Research-crate simplify pass: a `/simplify` code-quality audit over the
+`ragent-research` crate (all 56 source files reviewed by five parallel audit
+agents; no behaviour change intended). Correctness fixes, regex caching, and
+duplication removal across seven files (+419/-400), shipped together with the
+v1.0.88 documentation refresh (CHANGELOG/README/STATS/SPEC/QUICKSTART/
+TUI-QUICKSTART, research how-to, regenerated spec + research how-to PDFs).
+
+### Fixed
+
+- `parse_subject_summary` slice panic: an LLM response containing `}` before
+  `{` inverted the `trimmed[start..=end]` slice index and panicked the
+  analysis merge path; the span is now extracted with
+  `trimmed.get(start..=end)?` so a malformed span yields `None` (mechanical
+  fallback) instead of a panic (`analysis.rs`).
+- `AnalysisEngine::with_brief` promoted from a panicking
+  `unimplemented!()` default to a required trait method. The previous no-op
+  default silently broke mock-engine tests that expected the brief to reach
+  `analyze_with_outcome`; requiring the method makes the compiler enforce
+  what the runtime panic enforced (`analysis.rs`).
+- `SearchCallOutcome::Ok` no longer carries an unread `retries` field (the
+  `Err` variant still carries retries for `SearchRetrying` events); the
+  stale `#[allow(dead_code)]` on the enum was removed (`web_gatherer.rs`).
+- `ResearchManager::continue_item` no longer calls the no-op
+  `mark_in_progress_for_state` helper (deleted); the doc comment now states
+  that item status lives in the `RESEARCH.md` frontmatter, not the state
+  file, and the state is written back unchanged when there is no follow-up
+  (`manager.rs`).
+- `document.rs` doc comment corrected: `REQUIRED_SECTIONS` describes 9
+  sections, not 10.
+- `document.rs` `cited_date_span` computes the earliest/latest cited years
+  with running min/max variables instead of collecting a
+  `Vec<i32>` + two passes.
+- `web_gatherer.rs` `--from-url`/observer paths classify each page's media
+  type once and reuse the result at all three render sites (SourceCaptured
+  event, vault store, final `Source::Web`), instead of re-running
+  `classify_web_source` independently three times per page.
+
+### Changed
+
+- Regex caching: `analysis/parser.rs` (citation marker, bare citation, ISO
+  date, finding-dependency) and `session/fallback.rs` (`**Implication:**`)
+  compile their patterns once via `OnceLock` statics instead of rebuilding
+  the `Regex` on every call; `document.rs` `url_regex`/`fence_re` already
+  shared the same pattern.
+- `document.rs`: a new `layout` module shares eight section-push helpers
+  (`push_queries`, `push_search_engine_summary`, `push_provider_requests`,
+  `push_open_questions`, `push_findings`, `push_cross_references`, ...) between
+  `assemble_report_body` and `assemble_imrad_body`, removing ~150 duplicated
+  lines. Note: the report layout's `Search Engine Summary` and `Search
+  Provider Requests` blocks remain level-2 (`###`) sub-headings (pre-existing
+  behaviour, covered by `assemble_document_renders_search_engine_summary_after_queries`).
+- `web_gatherer.rs`: an `is_sole_engine_hit(hit, engine)` helper replaces the
+  duplicated engine-set logic in `is_scholarly_hit`/`is_encyclopedia_hit`;
+  a `collect_engines()` helper produces the sorted, de-duplicated engine list
+  for both gather paths, fixing an ordering inconsistency (the vault path
+  previously emitted unsorted `HashSet` iteration order while the observer
+  path sorted); the pass-through `fence_captured_body` wrapper was deleted in
+  favour of calling `fence_source_body` directly.
+- `session.rs`: a `MediaCounts::of(&sources)` single-pass tally replaces four
+  separate `matches!` filter scans over the source list (pdf/youtube counts
+  computed at gather-complete, finalize, and document-assembly sites);
+  `planner_or_default()`/`critic_or_default()` helpers replace five repeated
+  `unwrap_or_else(Arc::new(HeuristicPlanner/SimpleCritic))` chains; the now-
+  unused `SimpleCritic`/`HeuristicPlanner` imports were dropped.
+- `analysis.rs` `merge_chunk_results`: cross-reference/implication/question
+  dedup sets are `HashSet<&str>` borrowed from the parts instead of cloning
+  every string into the seen-set, and findings concatenate with a single
+  `iter().cloned()` per part instead of a double clone.
+
+### Verification
+
+- `cargo check --workspace` clean; workspace clippy with `-D warnings` clean
+  (a `search_budget_for(Option<usize>)` helper was rejected by
+  `redundant_closure_for_method_calls`-style lint review and inlined back at
+  its three call sites); `cargo fmt --all -- --check` clean; dead-code lint
+  (`-D unreachable_pub -D dead_code -D unused_imports`) clean;
+  `cargo test -p ragent-research` 41 test binaries all green (662 lib tests).
+
 ## Version: 1.0.87
 
 UI polish and tool-calling fixes on top of the v1.0.86 spec-system

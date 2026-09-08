@@ -106,16 +106,13 @@ pub trait AnalysisEngine: Send + Sync {
 
     /// Return an engine instance configured with the supplied research brief.
     ///
-    /// The default implementation returns the same engine unchanged. LLM-backed
-    /// engines can override this to inject the brief into the synthesis prompt.
-    fn with_brief(&self, _brief: Option<String>) -> Arc<dyn AnalysisEngine> {
-        // By default no brief support; return a new Arc wrapping a fresh clone
-        // of `self`. Since the trait object does not expose a `Clone` bound,
-        // concrete implementations that need brief injection must override this
-        // method. Returning a no-op engine here silently broke mock-engine tests
-        // that expected their `analyze_with_outcome` to be called after with_brief.
-        unimplemented!("with_brief should be overridden by concrete AnalysisEngine implementations")
-    }
+    /// Implementations must override this; the trait provides no default
+    /// because a silently-ignored brief (the previous no-op default) broke
+    /// mock-engine tests that expected the brief to reach
+    /// [`analyze_with_outcome`][Self::analyze_with_outcome]. Requiring the
+    /// method makes the compiler enforce what the old `unimplemented!()`
+    /// panic enforced at runtime.
+    fn with_brief(&self, brief: Option<String>) -> Arc<dyn AnalysisEngine>;
 
     /// Analyze the provided sources and topic, returning structured content
     /// plus an [`AnalysisOutcome`] that tells the caller whether the result
@@ -659,7 +656,9 @@ fn parse_subject_summary(text: &str) -> Option<(String, String)> {
     let parsed = parsed.or_else(|| {
         let start = trimmed.find('{')?;
         let end = trimmed.rfind('}')?;
-        serde_json::from_str::<SubjectSummary>(&trimmed[start..=end]).ok()
+        // `get` returns None when the span is invalid (e.g. `}` appears
+        // before `{`), instead of panicking on an inverted slice index.
+        serde_json::from_str::<SubjectSummary>(trimmed.get(start..=end)?).ok()
     })?;
 
     let topic = parsed.topic.trim().to_string();
@@ -847,41 +846,44 @@ pub fn merge_chunk_results(parts: &[AnalysisResult]) -> AnalysisResult {
         summaries.join("\n\n---\n\n")
     };
 
-    // Merge findings: concatenate, then renumber.
+    // Merge findings: concatenate, then renumber. `parts` is consumed by
+    // reference only, but the findings are moved out via `clone()` on the
+    // per-part vectors — the previous double clone (`clone()` + `extend`)
+    // collapsed into a single clone per part.
     let mut all_findings: Vec<String> = Vec::new();
     for part in parts {
-        all_findings.extend(part.findings.clone());
+        all_findings.extend(part.findings.iter().cloned());
     }
     let findings = renumber_findings(&all_findings);
 
     // Merge cross-references: dedup by path.
-    let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_paths: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut cross_references = Vec::new();
     for part in parts {
         for cr in &part.cross_references {
-            if seen_paths.insert(cr.path.clone()) {
+            if seen_paths.insert(cr.path.as_str()) {
                 cross_references.push(cr.clone());
             }
         }
     }
 
     // Merge top implications: concatenate, dedup exact matches, preserve rank.
-    let mut seen_implications: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_implications: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut top_implications = Vec::new();
     for part in parts {
         for imp in &part.top_implications {
-            if seen_implications.insert(imp.clone()) {
+            if seen_implications.insert(imp.as_str()) {
                 top_implications.push(imp.clone());
             }
         }
     }
 
     // Merge open questions: concatenate, dedup exact matches.
-    let mut seen_questions: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_questions: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut open_questions = Vec::new();
     for part in parts {
         for q in &part.open_questions {
-            if seen_questions.insert(q.clone()) {
+            if seen_questions.insert(q.as_str()) {
                 open_questions.push(q.clone());
             }
         }

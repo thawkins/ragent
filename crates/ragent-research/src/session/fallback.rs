@@ -10,6 +10,16 @@
 use crate::document::CrossReference;
 use crate::source::{LocalSourceKind, Source};
 use regex::Regex;
+use std::sync::OnceLock;
+
+/// Cached `**Implication:**` paragraph pattern used by
+/// [`default_top_implications`].
+fn implication_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)\*\*Implication:\*\*\s*([^\n]+)").expect("valid implication regex")
+    })
+}
 
 /// Append a `\n\n<header> <top-3 items joined by '; '> (and N more).` block
 /// to `out`. Items after the third are summarised as a count. Does nothing
@@ -356,7 +366,7 @@ pub fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
 #[allow(unreachable_pub)]
 pub fn default_top_implications(findings: &[String], topic: &str) -> Vec<String> {
     // Try to extract the first sentence from each finding's **Implication:** paragraph.
-    let re = Regex::new(r"(?i)\*\*Implication:\*\*\s*([^\n]+)").expect("valid implication regex");
+    let re = implication_re();
     let mut extracted: Vec<String> = findings
         .iter()
         .filter_map(|f| {

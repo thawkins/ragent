@@ -4,7 +4,7 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.87)
+## Highlights (v1.0.88)
 
 - **Status bar last-prompt tag** — the top status line now renders the most
   recent prompt (chat message, slash command, bang command, or `/loop` goal)
@@ -15,6 +15,11 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 - **Cleaner transcript start** — the message window no longer emits a blank
   line before the very first `You:` prompt, so the transcript does not start
   with a stray blank row.
+- **Research runs unchanged for users** — an uncommitted internal simplify
+  pass over `ragent-research` fixed a malformed-response panic, cached hot
+  regexes, and deduplicated the report/IMRaD layout code; `/research create`
+  output and progress display are unchanged (search-engine summary ordering
+  in the progress log is now deterministic/sorted).
 
 ## Highlights (v1.0.86)
 

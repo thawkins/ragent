@@ -50,7 +50,7 @@ use std::sync::OnceLock;
 /// (NFR-006 + the size-cap risk in the PLAN.md Risks table).
 pub const MAX_SOURCE_BODY_BYTES: usize = 256 * 1024;
 
-/// The 10 sections that appear in every `RESEARCH.md`, in order (FR-010 + FR-012).
+/// The 9 sections that appear in every `RESEARCH.md`, in order (FR-010 + FR-012).
 pub const REQUIRED_SECTIONS: &[&str] = &[
     "Topic",
     "Search Queries",
@@ -1334,7 +1334,8 @@ fn average_web_relevance(sources: &[Source]) -> f64 {
 /// sources without one. `None` when no cited source exposes a date.
 fn cited_date_span(doc: &ResearchDocument, cited: &[usize]) -> Option<(i32, i32, usize)> {
     let sources = &doc.item.sources;
-    let mut dated_years: Vec<i32> = Vec::new();
+    let mut earliest: Option<i32> = None;
+    let mut latest: Option<i32> = None;
     let mut undated = 0usize;
     for index in cited {
         let Some(source) = sources.get(index - 1) else {
@@ -1344,16 +1345,199 @@ fn cited_date_span(doc: &ResearchDocument, cited: &[usize]) -> Option<(i32, i32,
             continue;
         };
         match published_at {
-            Some(date) => dated_years.push(date.year()),
+            Some(date) => {
+                let year = date.year();
+                earliest = Some(earliest.map_or(year, |e: i32| e.min(year)));
+                latest = Some(latest.map_or(year, |l: i32| l.max(year)));
+            }
             None => undated += 1,
         }
     }
-    if dated_years.is_empty() {
-        return None;
-    }
-    dated_years.sort_unstable();
-    Some((dated_years[0], dated_years[dated_years.len() - 1], undated))
+    Some((earliest?, latest?, undated))
 }
+
+/// Shared section emitters used by both report layouts.
+///
+/// The legacy report layout (`assemble_report_body`) and the IMRaD layout
+/// (`assemble_imrad_body`) render the same document data; the only structural
+/// difference is the heading level (`##` top-level sections vs `###`
+/// sub-sections) and the surrounding section order. These helpers carry the
+/// shared rendering so each layout stays a thin, ordering-only function.
+mod layout {
+    use super::{
+        ResearchDocument, ResearchIo, Utc, escape_pipe, extract_headline, normalize_finding_labels,
+        render_finding_sources, render_search_engine_summary, strip_control_chars,
+    };
+
+    /// Heading prefix for a section at the given nesting level (`1` = `##`).
+    fn heading(level: u8) -> &'static str {
+        if level == 1 { "## " } else { "### " }
+    }
+
+    /// `## Search Queries` block (shared verbatim between layouts).
+    pub(crate) fn push_search_queries(body: &mut String, doc: &ResearchDocument, level: u8) {
+        body.push_str(heading(level));
+        body.push_str("Search Queries\n\n");
+        if doc.decomposed_queries.is_empty() {
+            body.push_str(
+                "_(no query decomposition was used — the original topic was searched as a single query)_\n\n",
+            );
+        } else {
+            for q in &doc.decomposed_queries {
+                body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
+            }
+            body.push('\n');
+        }
+    }
+
+    /// `Search Engine Summary` block — per-engine breakdown of acquired web
+    /// sources by media type, emitted only when at least one web source
+    /// carries a non-empty `search_engine` field (absent for skeletons and
+    /// pre-gathering documents).
+    pub(crate) fn push_search_engine_summary(body: &mut String, doc: &ResearchDocument, level: u8) {
+        let engine_summary = render_search_engine_summary(&doc.item.sources);
+        if !engine_summary.is_empty() {
+            body.push_str(heading(level));
+            body.push_str("Search Engine Summary\n\n");
+            body.push_str(&engine_summary);
+            body.push('\n');
+        }
+    }
+
+    /// `Search Provider Requests` block — per-provider search-request totals
+    /// for the run, rendered only when the session recorded at least one
+    /// provider call.
+    pub(crate) fn push_provider_requests(body: &mut String, doc: &ResearchDocument, level: u8) {
+        if let Some(provider_stats) = &doc.provider_stats
+            && !provider_stats.trim().is_empty()
+        {
+            body.push_str(heading(level));
+            body.push_str("Search Provider Requests\n\n");
+            body.push_str(provider_stats.trim_end());
+            body.push_str("\n\n");
+        }
+    }
+
+    /// `Open Questions` block (shared verbatim between layouts).
+    pub(crate) fn push_open_questions(body: &mut String, doc: &ResearchDocument, level: u8) {
+        body.push_str(heading(level));
+        body.push_str("Open Questions\n\n");
+        if doc.open_questions.is_empty() {
+            body.push_str("_(none)_\n\n");
+        } else {
+            for q in &doc.open_questions {
+                body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
+            }
+            body.push('\n');
+        }
+    }
+
+    /// `Findings` section body with per-finding headline extraction and
+    /// source attribution. The caller emits the section heading itself (the
+    /// two layouts differ: `## Findings` vs `## Results` + `### Findings`).
+    pub(crate) fn push_findings(body: &mut String, doc: &ResearchDocument) {
+        if doc.findings.is_empty() {
+            body.push_str(
+                "_(no findings yet — the gathering pass will populate this section)_\n\n",
+            );
+            return;
+        }
+        for (idx, finding) in doc.findings.iter().enumerate() {
+            let n = idx + 1;
+            let normalized = normalize_finding_labels(strip_control_chars(finding).trim());
+            let (headline, mut remainder) = extract_headline(&normalized, n);
+            if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
+                remainder.push_str("\n\n");
+                remainder.push_str(&sources_list);
+            }
+            body.push_str(&format!(
+                "\n### **Finding {n}** — {headline}\n\n{remainder}\n\n"
+            ));
+        }
+    }
+
+    /// `In-Project Cross-References` block (shared verbatim between layouts).
+    pub(crate) fn push_cross_references(body: &mut String, doc: &ResearchDocument, level: u8) {
+        body.push_str(heading(level));
+        body.push_str("In-Project Cross-References\n\n");
+        if doc.cross_references.is_empty() {
+            body.push_str(
+                "_(no relevant in-project files were identified during the gathering pass)_\n\n",
+            );
+        } else {
+            body.push_str("| Path | Relevance |\n|------|-----------|\n");
+            for cr in &doc.cross_references {
+                body.push_str(&format!(
+                    "| `{}` | {} |\n",
+                    escape_pipe(&strip_control_chars(&cr.path)),
+                    escape_pipe(&strip_control_chars(&cr.relevance)),
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    /// QA artifact sub-sections rendered identically in both layouts:
+    /// Evidence Digest, Triple Draft, Gap-Fill Fetch, Surgical Patch,
+    /// Citation Check, Polish, and Readability Audit. Each is omitted
+    /// entirely when its artifact is absent.
+    pub(crate) fn push_qa_sections(body: &mut String, doc: &ResearchDocument, level: u8) {
+        if let Some(digest) = &doc.evidence_digest {
+            body.push_str(heading(level));
+            body.push_str("Evidence Digest\n\n");
+            body.push_str(&super::render_evidence_digest(digest));
+        }
+
+        if let Some(draft) = &doc.triple_draft {
+            body.push_str(heading(level));
+            body.push_str("Triple Draft\n\n");
+            body.push_str(&super::render_triple_draft(draft));
+        }
+
+        if let Some(result) = &doc.gap_fetch {
+            body.push_str(heading(level));
+            body.push_str("Gap-Fill Fetch\n\n");
+            body.push_str(&super::render_gap_fetch(result));
+        }
+
+        if let Some(result) = &doc.surgical_patch {
+            body.push_str(heading(level));
+            body.push_str("Surgical Patch\n\n");
+            body.push_str(&super::render_surgical_patch(result));
+        }
+
+        if let Some(result) = &doc.cite_check {
+            body.push_str(heading(level));
+            body.push_str("Citation Check\n\n");
+            body.push_str(&super::render_citation_check(result));
+        }
+
+        if let Some(result) = &doc.polish {
+            body.push_str(heading(level));
+            body.push_str("Polish\n\n");
+            body.push_str(&super::render_polish(result));
+        }
+
+        if let Some(audit) = &doc.readability_audit {
+            body.push_str(heading(level));
+            body.push_str("Readability Audit\n\n");
+            body.push_str(&super::render_readability_audit(audit));
+        }
+    }
+
+    /// `References Index` block (shared verbatim; date captured at call time).
+    pub(crate) fn push_references_index(body: &mut String, doc: &ResearchDocument) {
+        body.push_str(&ResearchIo::render_references_index(
+            &doc.item.sources,
+            Utc::now(),
+        ));
+    }
+}
+
+use layout::{
+    push_cross_references, push_findings, push_open_questions, push_provider_requests,
+    push_qa_sections, push_references_index, push_search_engine_summary, push_search_queries,
+};
 
 /// Build the body of a legacy multi-section `RESEARCH.md` report.
 ///
@@ -1382,42 +1566,21 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push_str("\n\n");
     }
 
-    // ── Search Queries ──────────────────────────────────────────────────
-    body.push_str("## Search Queries\n\n");
-    if doc.decomposed_queries.is_empty() {
-        body.push_str(
-            "_(no query decomposition was used — the original topic was searched as a single query)_\n\n",
-        );
-    } else {
-        for q in &doc.decomposed_queries {
-            body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
-        }
-        body.push('\n');
-    }
+    // ── Search Queries ──────────���───────────────────────────────────────
+    push_search_queries(&mut body, doc, 1);
 
     // ── Search Engine Summary ──────────────────────────────────────────
     // Per-engine breakdown of acquired web sources by media type (pages,
-    // PDFs, videos). Emitted only when at least one web source carries a
-    // non-empty search_engine field, so the section is absent for skeletons
-    // and pre-gathering documents.
-    let engine_summary = render_search_engine_summary(&doc.item.sources);
-    if !engine_summary.is_empty() {
-        body.push_str("### Search Engine Summary\n\n");
-        body.push_str(&engine_summary);
-        body.push('\n');
-    }
+    // PDFs, videos). Rendered as a `###` sub-section under Search Queries
+    // even in the legacy layout (pre-existing behaviour).
+    push_search_engine_summary(&mut body, doc, 2);
 
     // ── Search Provider Requests ────────────────────────────────────────
     // Per-provider search-request totals for the run (how many requests were
-    // sent to each search tool/engine), rendered only when the session
-    // recorded at least one provider call.
-    if let Some(provider_stats) = &doc.provider_stats
-        && !provider_stats.trim().is_empty()
-    {
-        body.push_str("### Search Provider Requests\n\n");
-        body.push_str(provider_stats.trim_end());
-        body.push_str("\n\n");
-    }
+    // sent to each search tool/engine), rendered as a `###` sub-section
+    // (pre-existing behaviour) only when the session recorded at least one
+    // provider call.
+    push_provider_requests(&mut body, doc, 2);
 
     // ── Executive Summary ─────────────────────────────────────────────────
     body.push_str("## Executive Summary\n\n");
@@ -1444,16 +1607,8 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push('\n');
     }
 
-    // ── Open Questions ───────────────────────────────────────────────────
-    body.push_str("## Open Questions\n\n");
-    if doc.open_questions.is_empty() {
-        body.push_str("_(none)_\n\n");
-    } else {
-        for q in &doc.open_questions {
-            body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
-        }
-        body.push('\n');
-    }
+    // ── Open Questions ─────────────��─────────────────────────────────────
+    push_open_questions(&mut body, doc, 1);
 
     // ── Data Quality & Consistency ──────────────────────────────────────
     // Synthesized overview of the QA artifacts, placed between the Top 10
@@ -1479,22 +1634,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
 
     // -- Findings ---------------------------------------------------------
     body.push_str("## Findings\n\n");
-    if doc.findings.is_empty() {
-        body.push_str("_(no findings yet — the gathering pass will populate this section)_\n\n");
-    } else {
-        for (idx, finding) in doc.findings.iter().enumerate() {
-            let n = idx + 1;
-            let normalized = normalize_finding_labels(strip_control_chars(finding).trim());
-            let (headline, mut remainder) = extract_headline(&normalized, n);
-            if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
-                remainder.push_str("\n\n");
-                remainder.push_str(&sources_list);
-            }
-            body.push_str(&format!(
-                "\n### **Finding {n}** — {headline}\n\n{remainder}\n\n"
-            ));
-        }
-    }
+    push_findings(&mut body, doc);
     // ── Findings Relationship Diagram (FR-001 / FR-002 / FR-012) ────────────
     body.push_str(&crate::diagram::render_findings_diagram(&doc.findings));
     // NOTE: the QA render sections (Contradiction Graph, Loci Analysis,
@@ -1502,73 +1642,17 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     // Synthesis Audit, Corpus Critic) moved to the per-research CORPA.md
     // companion file -- see `assemble_corpa_body`.
 
-    // ── Evidence Digest (FR-005, T-011) ───────────────────────────────────
-    if let Some(digest) = &doc.evidence_digest {
-        body.push_str("## Evidence Digest\n\n");
-        body.push_str(&render_evidence_digest(digest));
-    }
-
-    // ── Triple Draft (FR-005, T-011) ────────────────────────────────────
-    if let Some(draft) = &doc.triple_draft {
-        body.push_str("## Triple Draft\n\n");
-        body.push_str(&render_triple_draft(draft));
-    }
+    // QA artifact sub-sections (Digest → Readability Audit) share one
+    // renderer with the IMRaD layout.
+    push_qa_sections(&mut body, doc, 1);
     // NOTE: Cross-Locus Reconcile, Source Tensions, Synthesis Audit, and
     // Corpus Critic also moved to CORPA.md (`assemble_corpa_body`).
 
-    // ── Gap-Fill Fetch (FR-005, T-010) ───────────────────────────────────
-    if let Some(result) = &doc.gap_fetch {
-        body.push_str("## Gap-Fill Fetch\n\n");
-        body.push_str(&render_gap_fetch(result));
-    }
-
-    // ── Surgical Patch (FR-005, T-013) ─────────────────────────────────
-    if let Some(result) = &doc.surgical_patch {
-        body.push_str("## Surgical Patch\n\n");
-        body.push_str(&render_surgical_patch(result));
-    }
-
-    // ── Citation Check (FR-005, T-014) ──────────────────────────���───────
-    if let Some(result) = &doc.cite_check {
-        body.push_str("## Citation Check\n\n");
-        body.push_str(&render_citation_check(result));
-    }
-
-    // ── Polish (FR-005, T-015) ───────────────────────────────────────────
-    if let Some(result) = &doc.polish {
-        body.push_str("## Polish\n\n");
-        body.push_str(&render_polish(result));
-    }
-
-    // ── Readability Audit (FR-005, T-015) ─────────────────────────────
-    if let Some(audit) = &doc.readability_audit {
-        body.push_str("## Readability Audit\n\n");
-        body.push_str(&render_readability_audit(audit));
-    }
-
     // ── In-Project Cross-References ─────────────────────────────────────
-    body.push_str("## In-Project Cross-References\n\n");
-    if doc.cross_references.is_empty() {
-        body.push_str(
-            "_(no relevant in-project files were identified during the gathering pass)_\n\n",
-        );
-    } else {
-        body.push_str("| Path | Relevance |\n|------|-----------|\n");
-        for cr in &doc.cross_references {
-            body.push_str(&format!(
-                "| `{}` | {} |\n",
-                escape_pipe(&strip_control_chars(&cr.path)),
-                escape_pipe(&strip_control_chars(&cr.relevance)),
-            ));
-        }
-        body.push('\n');
-    }
+    push_cross_references(&mut body, doc, 1);
 
     // ── References Index (FR-011) ────────────────────────────────────────
-    body.push_str(&ResearchIo::render_references_index(
-        &doc.item.sources,
-        Utc::now(),
-    ));
+    push_references_index(&mut body, doc);
 
     body
 }
@@ -1620,40 +1704,19 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         );
     }
 
-    // ── Methods (FR-007) ──────────────────────────────────────────────────
+    // ── Methods (FR-007) ���─────────────────────────────────────────────────
     body.push_str("## Methods\n\n");
-    body.push_str("### Search Queries\n\n");
-    if doc.decomposed_queries.is_empty() {
-        body.push_str(
-            "_(no query decomposition was used — the original topic was searched as a single query)_\n\n",
-        );
-    } else {
-        for q in &doc.decomposed_queries {
-            body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
-        }
-        body.push('\n');
-    }
+    push_search_queries(&mut body, doc, 2);
 
     // ── Search Engine Summary (IMRaD Methods sub-section) ─────────────
     // Per-engine breakdown of acquired web sources by media type. Only
     // emitted when at least one web source has a non-empty search_engine.
-    let engine_summary = render_search_engine_summary(&doc.item.sources);
-    if !engine_summary.is_empty() {
-        body.push_str("### Search Engine Summary\n\n");
-        body.push_str(&engine_summary);
-        body.push('\n');
-    }
+    push_search_engine_summary(&mut body, doc, 2);
 
     // ── Search Provider Requests (IMRaD Methods sub-section) ───────────
     // Per-provider search-request totals for the run, rendered only when
     // the session recorded at least one provider call.
-    if let Some(provider_stats) = &doc.provider_stats
-        && !provider_stats.trim().is_empty()
-    {
-        body.push_str("### Search Provider Requests\n\n");
-        body.push_str(provider_stats.trim_end());
-        body.push_str("\n\n");
-    }
+    push_provider_requests(&mut body, doc, 2);
 
     body.push_str("### Research Configuration\n\n");
     body.push_str(
@@ -1663,7 +1726,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
                  produced by the gathering pass.\n\n",
     );
 
-    // ── Concepts (spec researchcluster) ────────────────────────────────
+    // ── Concepts (spec researchcluster) ─────────────���──────────────────
     // In the IMRaD layout the concept list is a Results sub-section rendered
     // directly above the Findings subsection.
     if let Some(concepts) = &doc.concepts {
@@ -1675,22 +1738,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     // -- Results (FR-008) -----------------------------------------------
     body.push_str("## Results\n\n");
     body.push_str("### Findings\n\n");
-    if doc.findings.is_empty() {
-        body.push_str("_(no findings yet — the gathering pass will populate this section)_\n\n");
-    } else {
-        for (idx, finding) in doc.findings.iter().enumerate() {
-            let n = idx + 1;
-            let normalized = normalize_finding_labels(strip_control_chars(finding).trim());
-            let (headline, mut remainder) = extract_headline(&normalized, n);
-            if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
-                remainder.push_str("\n\n");
-                remainder.push_str(&sources_list);
-            }
-            body.push_str(&format!(
-                "\n### **Finding {n}** — {headline}\n\n{remainder}\n\n"
-            ));
-        }
-    }
+    push_findings(&mut body, doc);
     // ── Findings Relationship Diagram (FR-001 / FR-002 / FR-012). In the
     // IMRaD layout it is a sub-section of Results, so we use a `###` heading
     // and ask the diagram renderer to return only the body.
@@ -1714,81 +1762,17 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     // Investigation) moved to the per-research CORPA.md companion file --
     // see `assemble_corpa_body`.
 
-    // ── Evidence Digest (FR-005, T-011) ────��──────────────────────────────
-    if let Some(digest) = &doc.evidence_digest {
-        body.push_str("### Evidence Digest\n\n");
-        body.push_str(&render_evidence_digest(digest));
-    }
-
-    // ── Triple Draft (FR-005, T-011) ────────────────────────────────────
-    if let Some(draft) = &doc.triple_draft {
-        body.push_str("### Triple Draft\n\n");
-        body.push_str(&render_triple_draft(draft));
-    }
+    // QA artifact sub-sections share one renderer with the legacy report
+    // layout; in IMRaD they are Discussion sub-sections.
+    push_qa_sections(&mut body, doc, 2);
     // NOTE: Cross-Locus Reconcile, Source Tensions, Synthesis Audit, and
     // Corpus Critic also moved to CORPA.md (`assemble_corpa_body`).
 
-    // Gap-Fill Fetch (FR-005, T-010)
-    if let Some(result) = &doc.gap_fetch {
-        body.push_str("### Gap-Fill Fetch\n\n");
-        body.push_str(&render_gap_fetch(result));
-    }
-
-    // Surgical Patch (FR-005, T-013)
-    if let Some(result) = &doc.surgical_patch {
-        body.push_str("### Surgical Patch\n\n");
-        body.push_str(&render_surgical_patch(result));
-    }
-
-    // Citation Check (FR-005, T-014)
-    if let Some(result) = &doc.cite_check {
-        body.push_str("### Citation Check\n\n");
-        body.push_str(&render_citation_check(result));
-    }
-
-    // Polish (FR-005, T-015)
-    if let Some(result) = &doc.polish {
-        body.push_str("### Polish\n\n");
-        body.push_str(&render_polish(result));
-    }
-
-    // Readability Audit (FR-005, T-015)
-    if let Some(audit) = &doc.readability_audit {
-        body.push_str("### Readability Audit\n\n");
-        body.push_str(&render_readability_audit(audit));
-    }
-
-    body.push_str("### In-Project Cross-References\n\n");
-    if doc.cross_references.is_empty() {
-        body.push_str(
-            "_(no relevant in-project files were identified during the gathering pass)_\n\n",
-        );
-    } else {
-        body.push_str("| Path | Relevance |\n|------|-----------|\n");
-        for cr in &doc.cross_references {
-            body.push_str(&format!(
-                "| `{}` | {} |\n",
-                escape_pipe(&strip_control_chars(&cr.path)),
-                escape_pipe(&strip_control_chars(&cr.relevance)),
-            ));
-        }
-        body.push('\n');
-    }
-    body.push_str("### Open Questions\n\n");
-    if doc.open_questions.is_empty() {
-        body.push_str("_(none)_\n\n");
-    } else {
-        for q in &doc.open_questions {
-            body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
-        }
-        body.push('\n');
-    }
+    push_cross_references(&mut body, doc, 2);
+    push_open_questions(&mut body, doc, 2);
 
     // ── References Index (FR-010) ─────────────────────────────────────────
-    body.push_str(&ResearchIo::render_references_index(
-        &doc.item.sources,
-        Utc::now(),
-    ));
+    push_references_index(&mut body, doc);
 
     body
 }
@@ -2096,7 +2080,7 @@ fn escape_pipe(s: &str) -> String {
 /// existing Markdown links (`[text](url)`) are left untouched so the output
 /// stays valid Markdown.
 pub(crate) fn linkify_urls(text: &str) -> String {
-    let fence_re = Regex::new(r"(?m)^```.*$").expect("valid fence regex");
+    let fence_re = fence_re();
 
     let mut out = String::with_capacity(text.len() * 2);
     let mut in_fence = false;
@@ -2125,8 +2109,17 @@ pub(crate) fn linkify_urls(text: &str) -> String {
 /// the unreserved/sub-delimiters plus the common path/query characters that
 /// appear in real URLs, while stopping at whitespace and Markdown delimiter
 /// characters.
-fn url_regex() -> Regex {
-    Regex::new(r"(?i)\bhttps?://[a-zA-Z0-9_~:/.?#@!$&'()*+,;=%-]+").expect("valid url regex")
+fn url_regex() -> &'static Regex {
+    static URL_RE: OnceLock<Regex> = OnceLock::new();
+    URL_RE.get_or_init(|| {
+        Regex::new(r"(?i)\bhttps?://[a-zA-Z0-9_~:/.?#@!$&'()*+,;=%-]+").expect("valid url regex")
+    })
+}
+
+/// Cached fenced-code-block line pattern used by [`linkify_urls`].
+fn fence_re() -> &'static Regex {
+    static FENCE_RE: OnceLock<Regex> = OnceLock::new();
+    FENCE_RE.get_or_init(|| Regex::new(r"(?m)^```.*$").expect("valid fence regex"))
 }
 
 /// Convert bare URLs in a segment that is known to be outside fenced code

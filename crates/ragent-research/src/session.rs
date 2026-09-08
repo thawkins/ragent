@@ -19,14 +19,14 @@ use crate::contradiction::{
 use crate::corpus_critic::{GapFetchResult, build_corpus_critic, derive_gap_queries};
 use crate::digest::{build_evidence_digest, build_triple_draft};
 use crate::document::{ResearchDocument, mark_in_progress};
-use crate::engine::{Critic, EngineConfig, IterativeEngine, SimpleCritic};
+use crate::engine::{Critic, EngineConfig, IterativeEngine};
 use crate::io::ResearchIo;
 use crate::item::ResearchItem;
 use crate::local_gatherer::{LocalGatherConfig, LocalGatherer, LocalTool};
 use crate::locus::{analyze_loci, investigate_depth};
 use crate::manager::{ResearchError, ResearchManager, Result};
 use crate::patcher::{PatchResult, build_surgical_patches};
-use crate::planner::{HeuristicPlanner, Planner};
+use crate::planner::Planner;
 use crate::readability::{PolishResult, ReadabilityAudit, audit_readability, polish_analysis};
 use crate::reconcile::{build_cross_locus_reconcile, build_source_tensions};
 use crate::research_name::ResearchName;
@@ -1242,10 +1242,27 @@ impl ResearchSession {
         self.planner.clone()
     }
 
+    /// Access the configured planner, falling back to the heuristic default
+    /// when none was wired. Five call sites previously repeated this
+    /// `unwrap_or_else` chain inline.
+    fn planner_or_default(&self) -> Arc<dyn Planner> {
+        self.planner
+            .clone()
+            .unwrap_or_else(|| Arc::new(crate::planner::HeuristicPlanner::new()))
+    }
+
     /// Access the optional critic.
     #[must_use]
     pub fn critic(&self) -> Option<Arc<dyn Critic>> {
         self.critic.clone()
+    }
+
+    /// Access the configured critic, falling back to the simple default when
+    /// none was wired.
+    fn critic_or_default(&self) -> Arc<dyn Critic> {
+        self.critic
+            .clone()
+            .unwrap_or_else(|| Arc::new(crate::engine::SimpleCritic))
     }
 
     /// Access the research manager.
@@ -1334,11 +1351,7 @@ impl ResearchSession {
                 let topics = if competitive_topics.is_empty() {
                     // Fall back to generic supervisor planning if no entities were
                     // identified so the run still produces something useful.
-                    let planner = self
-                        .planner
-                        .clone()
-                        .unwrap_or_else(|| Arc::new(crate::planner::HeuristicPlanner::new()));
-                    let supervisor = SupervisorNode::new(planner)
+                    let supervisor = SupervisorNode::new(self.planner_or_default())
                         .with_max_sub_topics(supervisor_cfg.max_concurrent_research_units);
                     supervisor.plan(topic).await.map_err(|e| {
                         ResearchError::EngineRunFailed(format!("supervisor planning failed: {e}"))
@@ -1351,11 +1364,7 @@ impl ResearchSession {
                 };
                 (topics, Some(extraction))
             } else {
-                let planner = self
-                    .planner
-                    .clone()
-                    .unwrap_or_else(|| Arc::new(crate::planner::HeuristicPlanner::new()));
-                let supervisor = SupervisorNode::new(planner)
+                let supervisor = SupervisorNode::new(self.planner_or_default())
                     .with_max_sub_topics(supervisor_cfg.max_concurrent_research_units);
                 let topics = supervisor.plan(topic).await.map_err(|e| {
                     ResearchError::EngineRunFailed(format!("supervisor planning failed: {e}"))
@@ -1420,16 +1429,8 @@ impl ResearchSession {
         });
 
         let node = IterativeResearcherNode::new(researcher_web, self.analysis.clone())
-            .with_planner(
-                self.planner
-                    .clone()
-                    .unwrap_or_else(|| Arc::new(crate::planner::HeuristicPlanner::new())),
-            )
-            .with_critic(
-                self.critic
-                    .clone()
-                    .unwrap_or_else(|| Arc::new(crate::engine::SimpleCritic)),
-            )
+            .with_planner(self.planner_or_default())
+            .with_critic(self.critic_or_default())
             .with_engine_config(config.engine_config())
             .with_brief(brief.map(|b| b.to_string()))
             .with_research_model(config.models.research_model.clone())
@@ -1711,19 +1712,12 @@ impl ResearchSession {
         let assembled = self.manager.write_document(&doc).await?;
         self.manager.complete_gathering(name_str).await?;
 
-        let pdf_count = sources
-            .iter()
-            .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "pdf"))
-            .count();
-        let youtube_count = sources
-            .iter()
-            .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "youtube"))
-            .count();
+        let counts = MediaCounts::of(&sources);
 
         observer.on_event(SessionEvent::Done {
             total_sources: sources.len(),
-            pdf_count,
-            youtube_count,
+            pdf_count: counts.pdf,
+            youtube_count: counts.youtube,
             excluded_count: 0,
         });
 
@@ -1732,8 +1726,8 @@ impl ResearchSession {
             sources,
             document: assembled,
             web_queries: doc.decomposed_queries.clone(),
-            pdf_count,
-            youtube_count,
+            pdf_count: counts.pdf,
+            youtube_count: counts.youtube,
             excluded_count: 0,
             provider_tool_calls,
         })
@@ -2722,18 +2716,9 @@ impl ResearchSession {
         router_observer.on_done(completed, skipped, failed);
         self.manager.complete_gathering(name_str).await?;
         let total_sources = synthesis_sources.len();
-        let pdf_count = pdf_count.max(
-            synthesis_sources
-                .iter()
-                .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "pdf"))
-                .count(),
-        );
-        let youtube_count = youtube_count.max(
-            synthesis_sources
-                .iter()
-                .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "youtube"))
-                .count(),
-        );
+        let finalize_counts = MediaCounts::of(&synthesis_sources);
+        let pdf_count = pdf_count.max(finalize_counts.pdf);
+        let youtube_count = youtube_count.max(finalize_counts.youtube);
         observer.on_event(SessionEvent::Done {
             total_sources,
             pdf_count,
@@ -3270,14 +3255,8 @@ impl ResearchSession {
         config: &SessionConfig,
         observer: Arc<dyn SessionObserver>,
     ) -> Result<(Vec<Source>, Vec<String>, u32, usize)> {
-        let planner = self
-            .planner
-            .clone()
-            .unwrap_or_else(|| Arc::new(HeuristicPlanner::new()));
-        let critic = self
-            .critic
-            .clone()
-            .unwrap_or_else(|| Arc::new(SimpleCritic));
+        let planner = self.planner_or_default();
+        let critic = self.critic_or_default();
         // Run-scoped search budget (`--max-search-calls`): every engine
         // iteration draws from the same per-run pool.
         let engine_web = self.web.clone().map(|w| {
@@ -3539,6 +3518,35 @@ pub(crate) fn read_source_body(
             }
         }
         Source::Spec { relevance, .. } => Some(relevance.clone()),
+    }
+}
+
+/// Single-pass media-type tallies over a source list.
+///
+/// The run pipeline previously re-scanned `sources` with two separate
+/// `matches!` filters (pdf, youtube) at three different sites (gather-complete
+/// logging, finalize, document assembly); this struct computes all counts in
+/// one pass and is shared by those sites.
+#[derive(Debug, Default, Clone, Copy)]
+struct MediaCounts {
+    pdf: usize,
+    youtube: usize,
+}
+
+impl MediaCounts {
+    /// Count the web media types in `sources` in a single pass.
+    fn of(sources: &[Source]) -> Self {
+        let mut counts = Self::default();
+        for source in sources {
+            if let Source::Web { media_type, .. } = source {
+                match media_type.as_str() {
+                    "pdf" => counts.pdf += 1,
+                    "youtube" => counts.youtube += 1,
+                    _ => {}
+                }
+            }
+        }
+        counts
     }
 }
 

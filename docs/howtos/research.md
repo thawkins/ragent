@@ -427,6 +427,9 @@ output but kept on disk. Use `/research list --all` to see archived items.
 
 Resume an in-progress item. Loads state and appends a follow-up sub-question
 to the plan. The optional message is added to the plan as a new sub-question.
+The saved state file is written back unchanged when there is no follow-up —
+an item's `InProgress`/`Complete` status lives in the `RESEARCH.md`
+frontmatter, not the state file.
 
 ```text
 /research continue rust-async "Also cover tokio vs async-std comparison"

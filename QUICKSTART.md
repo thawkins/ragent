@@ -1632,7 +1632,7 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
-## Version 1.0.87
+## Version 1.0.88
 
 Changes in and on top of v1.0.87 (UI polish and tool-calling fixes on top of
 the v1.0.86 spec-system documentation pass), summarised for quickstart
@@ -1650,6 +1650,12 @@ relevance:
 - **Slash-command help** — every slash command has a `help` subcommand or
   `--help`/`-h` alias; type `/config help`, `/mcp help`, `/autopilot help`,
   `/yolo help`, etc. to see usage without triggering side effects.
+- **Research-crate simplify pass (v1.0.88)** — internal-only
+  quality work in `ragent-research`: a malformed-LLM-response slice panic in
+  subject-summary parsing is fixed, hot regexes are compiled once
+  (`OnceLock`), the report and IMRaD `RESEARCH.md` assemblers share one
+  section-emitter module, and pdf/youtube source tallies are computed in a
+  single pass. No command syntax or configuration changes.
 
 ## Version 1.0.86
 
