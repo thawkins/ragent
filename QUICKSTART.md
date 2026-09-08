@@ -1632,10 +1632,19 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
-## Version 1.0.85
+## Version 1.0.86
 
-Working-tree changes on top of v1.0.84, summarised for quickstart relevance:
+Changes in and on top of v1.0.86 (the v1.0.85 tool-calling + spec-semantics release, plus the 1.0.86 spec-system simplify pass), summarised for quickstart relevance:
 
+- **Spec-system semantics documentation** — `docs/howtos/spec.md` now
+  documents the spec file write semantics (atomic temp-file + rename writes,
+  clear-on-empty `REVIEW.md`/`FEEDBACK.md`), the `/spec coverage` report
+  format with task-status symbols (`[ok]`, `[wait]`, `[sync]`, `[stop]`),
+  and the automatic task-completion heuristic: when an agent turn writes
+  files inside the active spec's own `specs/<id>/` directory, `in_progress`
+  tasks are auto-completed; writes elsewhere in the workspace never complete
+  spec tasks. Use `/spec task <spec-id> <task-id> completed` for explicit
+  control. No configuration or command syntax changes.
 - **Tool-calling audit remediation** — provider stream parsers, tool dispatch,
   and the edit-tool family hardened: OpenAI Responses API and Gemini final-chunk
   tool calls are no longer silently dropped, malformed tool arguments fail fast

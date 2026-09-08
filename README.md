@@ -398,11 +398,20 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.85** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.86** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **Spec-system documentation and semantics polish (v1.0.86)** — the
+  `/spec` how-to manual now documents the spec file write semantics (atomic
+  temp-file + rename writes, clear-on-empty `REVIEW.md`/`FEEDBACK.md`), the
+  `/spec coverage` report format (shared `Spec::coverage_report()` renderer
+  with `[ok]`/`[wait]`/`[sync]`/`[stop]` task-status symbols), and the
+  automatic task-completion heuristic guarded by `writes_in_spec_dir`
+  (writes outside the active spec directory never complete spec tasks). The
+  master spec gained sections 10.10a–10.10c covering the same semantics.
 
 - **Tool-calling audit remediation (shipped in v1.0.85)** — fixes every
   HIGH/MED finding from the tool-calling + UTF-8 audit across provider stream

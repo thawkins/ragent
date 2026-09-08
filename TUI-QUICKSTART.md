@@ -4,8 +4,15 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.85)
+## Highlights (v1.0.86)
 
+- **Spec-system semantics documentation** — `docs/howtos/spec.md` now covers
+  the spec file write semantics (atomic writes, clear-on-empty
+  `REVIEW.md`/`FEEDBACK.md`), the `/spec coverage` report format with
+  task-status symbols (`[ok]`, `[wait]`, `[sync]`, `[stop]`), and the
+  automatic task-completion heuristic guarded by `writes_in_spec_dir`
+  (writes inside the active spec's directory auto-complete `in_progress`
+  tasks; writes elsewhere never do).
 - **Reliable tool calling** — the tool-calling audit remediation pass fixed
   every HIGH/MED finding from the audit: OpenAI Responses API tool calls no
   longer dropped (missing `ToolCallStart`), Gemini final-chunk `functionCall`

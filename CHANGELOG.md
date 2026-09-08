@@ -1,5 +1,76 @@
 # Changelog
 
+## Version: 1.0.86
+
+Spec-system simplify and documentation pass on top of the v1.0.85 tool-calling
+audit remediation. `/spec` semantics and coverage rendering were consolidated,
+the spec how-to manual was expanded, and the docs set (SPEC.md appendix,
+QUICKSTART, TUI-QUICKSTART, README, STATS) was refreshed to the 1.0.86 state.
+
+### Changed
+
+- `Spec::coverage_report()` is now the single requirement-coverage renderer
+  shared by the TUI `/spec coverage` arm and the `spec_coverage` agent tool,
+  with ASCII `[ok]`/`[wait]`/`[sync]`/`[stop]` status symbols from
+  `TaskStatus::symbol()` as one source of truth (the two former drifting
+  implementations are gone).
+- Spec file write semantics tightened: atomic temp-file + rename writes with
+  unique temp names (monotonic sequence) and sync-before-rename;
+  clear-on-empty `REVIEW.md`/`FEEDBACK.md` (a cleared field deletes the file
+  instead of leaving stale content that repopulated on the next read);
+  `update_frontmatter` preserves unmodelled frontmatter keys (e.g. `research:`
+  linkage) and YAML-escapes audit/reviewer values.
+- Automatic task completion after writes is now guarded by
+  `writes_in_spec_dir`: only file-writing tools (`write`, `edit`, `multiedit`,
+  `patch`, `apply_patch`, `create`, `append_to_file`) whose resolved target
+  sits inside the active spec's `specs/<id>/` directory advance `in_progress`
+  tasks to `completed`; writes elsewhere in the workspace never complete spec
+  tasks (prevents unrelated edits silently corrupting `PLAN.md`).
+- `/spec` arms consolidate 15 `SpecManager::new` constructions into one
+  `spec_manager()` helper and 11 `SpecId::new` match blocks into
+  `parse_spec_id()`; `discover_specs`/`read_spec` share one
+  `load_spec_from_dir` hydration path; search snippet extraction reuses the
+  already-lowercased text; `extract_from_research` is token-based and strips
+  dangling `--from-research` tokens.
+- Spec internals simplification: `find_dependents` drops a dead O(n) map,
+  `build_file_order_warning` replaces an `unwrap()` with let-else,
+  `Effort`/`Priority` parse without allocation, validation report template
+  counts are sorted for deterministic output, and amendment rows containing
+  `|` are parsed correctly (rationale cells rejoined instead of mis-split).
+
+### Fixed
+
+- UTF-8 panic in feedback logging: `build_feedback_log` sliced `&note[..80]`
+  by byte offset and panicked on multi-byte notes; truncation now lands on a
+  real character boundary via `char_indices().nth(80)`.
+- Atomic-write temp collision + durability: concurrent writers no longer race
+  on the same `.tmp` path; the temp file is synced before rename.
+- `create_spec_dir` TOCTOU: `create_dir` + `AlreadyExists` mapping replaces
+  the racing `exists()` pre-check.
+- `parse_tasks` no longer fabricates `completed_at: Some(1)` on read-back.
+
+### Added
+
+- `Task::table_row()` / `PlanTask::table_row()` shared task-table row
+  formatting; `SpecIo::extract_research` populates the documented-but-unused
+  `Spec.research` field; `SpecIo::frontmatter()` single frontmatter slicing
+  helper; `EarsTemplate` re-exported from the crate root.
+
+### Documentation
+
+- `docs/howtos/spec.md` gained a "Spec file write semantics" subsection (atomic
+  writes, clear-on-empty `REVIEW.md`/`FEEDBACK.md`), a `/spec coverage` report
+  format description, a task-status symbol table, an "Automatic task completion
+  after writes" subsection documenting the `writes_in_spec_dir` guard, and a
+  note that `/spec update` preserves unmodelled frontmatter keys; the PDF was
+  regenerated. SPEC.md gained sections 10.10a-10.10c covering the same
+  semantics. How-to PDFs regenerated (pandoc xelatex A4).
+
+### Verification
+
+- `cargo check` passes; `cargo audit` reports no actionable security failures
+  (only the pre-existing allowed warnings).
+
 ## Version: 1.0.85
 
 Tool-calling audit remediation pass (arg parsing, dispatch, providers, edit
@@ -7,6 +78,11 @@ tools). Fixes every HIGH/MED finding from the tool-calling + UTF-8 audit:
 `crates/ragent-agent` (processor dispatch), `crates/ragent-llm` (provider
 stream parsers), `crates/ragent-tools-core` (edit family + central validator),
 25 files plus 4 new test files. Highlights:
+
+### Verification
+
+- `cargo check` passes (only the pre-existing future-incompat notice for the external `attribute-derive-macro` crate).
+- `cargo audit` reports only the 10 allowed warnings (unmaintained `ttf-parser`, unsound `lru` 0.12.5 + 0.16.4, yanked `chacha20` transitive dependencies); no actionable security failures.
 
 ### Fixed — tool calls executed reliably
 
@@ -128,7 +204,7 @@ stream parsers), `crates/ragent-tools-core` (edit family + central validator),
   (CRLF preservation, BOM round-trip, non-UTF-8 message), and text-fallback
   extraction tests (11 cases including multibyte payloads).
 
-## Version: 1.0.85 — /spec simplify pass
+## Version: 1.0.86 — /spec simplify pass (superseded section, retained for detail)
 
 /simplify pass over the /spec system (ragent-specs + its TUI/agent consumers):
 17 files, +580/-455. Highlights:
@@ -198,6 +274,17 @@ stream parsers), `crates/ragent-tools-core` (edit family + central validator),
   parameters; `extract_from_research` is token-based (prose containing the flag
   no longer splits) and strips dangling `--from-research` tokens.
 - lib.rs re-exports `EarsTemplate`.
+
+### Documentation
+
+- `docs/howtos/spec.md` — new "Spec file write semantics" subsection (atomic
+  writes, clear-on-empty `REVIEW.md`/`FEEDBACK.md`), a `/spec coverage` report
+  format description (shared `Spec::coverage_report()` renderer, `[ok]`/
+  `[  ]` requirement symbols), a task-status symbol table (`[wait]`/`[sync]`/
+  `[ok]`/`[stop]`), an "Automatic task completion after writes" subsection
+  documenting the `writes_in_spec_dir` guard, and a note that `/spec update`
+  preserves unmodelled frontmatter keys (e.g. `research:` linkage).
+- `docs/howtos/pdf/spec.md.pdf` regenerated (A4 xelatex).
 
 ## Version: 1.0.84
 
@@ -656,16 +743,34 @@ marker for this documentation pass.
 
 ## Version: 1.0.78
 
-### Changed
+### Added
 
-- Version bump to 1.0.78.
-- add compartatice research
+- **Comparative (supervisor/competitive) research mode** — the largest
+  research-system expansion to date (306 files, +10,325/-2,114):
+  - `crates/ragent-research/src/supervisor.rs` — the multi-agent
+    Plan -> Delegate -> Collect -> Synthesize -> Finalize state machine behind
+    `--mode supervisor` and `--mode competitive`, with parallel
+    `IterativeResearcherNode` workers (default cap 5) running iterative
+    gather-analyse loops per sub-question/entity.
+  - `crates/ragent-research/src/comparison.rs` — deterministic,
+    LLM-agnostic `comparison-table` synthesis: per-entity `CompetitiveProfile`
+    profiles plus a cross-entity Markdown comparison table with explicit
+    criteria (FR-006/FR-014/FR-016 of specs/opendeepresearch), so the artifact
+    ships even when the synthesis model returns only compressed notes.
+  - New supporting modules: `brief.rs` (research brief), `clarify.rs`
+    (clarification round), `entities.rs` (competitive entity extraction),
+    `evaluation.rs` (run evaluation), `page_summarizer.rs` (per-page
+    summarisation), plus the CLI restructure (`cli.rs` -2,185 lines
+    reorganised) and TUI research-progress surface (`research_progress.rs`).
 
 ## Version: 1.0.77
 
 ### Changed
 
-- Version bump to 1.0.77.
+- Version bump to 1.0.77 (documentation refresh; the 1.0.77 commit itself
+  touched only `CHANGELOG.md`, `Cargo.lock` and `Cargo.toml` — the feature
+  work merged into this release snapshot landed across the 1.0.76-era
+  commits).
 - Updated project documentation for v1.0.77 (`README.md`, `SPEC.md`, `STATS.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, `CHANGELOG.md`, `docs/howtos/config.md`, `docs/howtos/research.md`).
 - Merged the latest feature work from `1.0.76` and `1.0.75` into the v1.0.77 release snapshot.
 
@@ -6367,4 +6472,3 @@ removed dead code, migrated inline tests, and cleaned up repository hygiene.
 
 ### Added
 - **Initial commit** — Project created.
-

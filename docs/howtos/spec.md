@@ -12,9 +12,9 @@ The commands are exposed via the `/spec` slash command family (TUI) and the
 crate.
 
 > **Scope:** `/spec` slash commands, EARS requirements notation, the SDD
-> (Spec-Driven Development) workflow, lifecycle status transitions, task
-> management, implementation orchestration, JTBD analysis, production feedback,
-> and configuration. For research system commands, see `docs/howtos/research.md`.
+(Spec-Driven Development) workflow, lifecycle status transitions, task
+management, implementation orchestration, JTBD analysis, production feedback,
+and configuration. For research system commands, see `docs/howtos/research.md`.
 
 ---
 
@@ -287,7 +287,11 @@ Regenerate `PLAN.md` and `TESTPLAN.md` from an edited `SPEC.md`. This command
 re-reads the current `SPEC.md` (which you may have manually edited) and
 regenerates the plan and test plan to match. It does NOT modify `SPEC.md`.
 
-Task statuses for unchanged task IDs are preserved.
+Task statuses for unchanged task IDs are preserved, and frontmatter keys that
+the lifecycle manager does not model itself (for example a `research:` linkage
+added by `--from-research`) survive regeneration — `update_frontmatter`
+rewrites only the status and audit fields and keeps every other key, with
+values that can contain YAML-special characters properly quoted.
 
 ```text
 /spec update websocket
@@ -418,6 +422,20 @@ Show a requirement coverage report. This displays which requirements have
 linked tasks and which do not, helping identify gaps in the implementation
 plan.
 
+The report (rendered by a shared `Spec::coverage_report()` implementation used
+by both the TUI command and the `spec_coverage` agent tool, so both consumers
+always agree on format) contains:
+
+- **Overall Coverage** — the percentage of linked requirements whose tasks are
+  all completed.
+- **Requirements section** — one line per requirement with a `[ok]` /
+  `[  ]` status symbol, the requirement ID and text, and either
+  "(N of M linked tasks completed)" or "(no linked tasks)".
+- **Tasks section** — one line per task with its status symbol (`[ok]`,
+  `[..]`, `[  ]`, `[!!]` for completed, in-progress, pending, blocked), the
+  task ID and title, its status word, and its linked requirement IDs (or
+  `(unlinked)`).
+
 ```text
 /spec coverage websocket
 ```
@@ -505,6 +523,16 @@ confirmation prompt.
 /spec delete old-feature --yes
 ```
 
+### Spec file write semantics
+
+All spec files are written atomically: content is written to a uniquely named
+temporary file, flushed and synced, then renamed over the target — so a crash
+mid-write can never leave a truncated `PLAN.md` or `SPEC.md`. Auxiliary review
+files follow a clear-on-empty rule: if `REVIEW.md` or `FEEDBACK.md` content is
+empty, the file is DELETED rather than replaced with an empty file, so the
+"file exists but says nothing" state (which would surface meaningless review
+notes in plan prompts) cannot occur.
+
 ---
 
 ## 6. Lifecycle status and transitions
@@ -565,12 +593,16 @@ Tasks within a `PLAN.md` have their own status tracking.
 
 ### Task status values
 
-| Status | Description |
-|--------|-------------|
-| `pending` | Task not yet started |
-| `in_progress` | Task actively being worked on |
-| `completed` | Task completed |
-| `blocked` | Task blocked or deferred |
+| Status | Description | Symbol (coverage report / task list) |
+|--------|-------------|--------------------------------------|
+| `pending` | Task not yet started | `[wait]` |
+| `in_progress` | Task actively being worked on | `[sync]` |
+| `completed` | Task completed | `[ok]` |
+| `blocked` | Task blocked or deferred | `[stop]` |
+
+The symbols come from `TaskStatus::symbol()` and are shared by the
+`/spec coverage` report, the `spec_coverage` agent tool, and the TUI task
+listing, so status rendering is consistent everywhere.
 
 ### Task table structure
 
@@ -591,6 +623,19 @@ The `PLAN.md` task table uses these columns:
 The implementation runner (`/spec impl`) resolves dependencies topologically
 and executes tasks in order. Tasks with no dependencies run first; tasks
 blocked by incomplete dependencies are deferred.
+
+### Automatic task completion after writes
+
+When an agent turn writes files into the active spec's own directory
+(`specs/<id>/`) and the session has an active spec, any task currently marked
+`in_progress` is automatically advanced to `completed` (with its completion
+timestamp recorded). This heuristic is deliberately guarded by
+`writes_in_spec_dir`: file-writing tools (`write`, `edit`, `multiedit`,
+`patch`, `apply_patch`, `create`, `append_to_file`) whose target path resolves
+OUTSIDE the spec directory (docs, scratch files, snapshots) never complete
+spec tasks, so editing unrelated files cannot silently corrupt `PLAN.md`. To
+mark tasks complete explicitly — or to mark a task done whose file lives
+outside the spec directory — use `/spec task <spec-id> <task-id> completed`.
 
 ---
 
