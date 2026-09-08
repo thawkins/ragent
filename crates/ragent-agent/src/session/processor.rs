@@ -120,7 +120,13 @@ fn writes_in_spec_dir(
     tool_calls.iter().any(|tc| {
         if !matches!(
             tc.name.as_str(),
-            "write" | "edit" | "multiedit" | "multi_edit" | "patch" | "apply_patch" | "create"
+            "write"
+                | "edit"
+                | "multiedit"
+                | "multi_edit"
+                | "patch"
+                | "apply_patch"
+                | "create"
                 | "append_to_file"
         ) {
             return false;
@@ -143,15 +149,14 @@ fn writes_in_spec_dir(
                     .flatten()
                     .flat_map(|e| ["path", "file_path"].iter().filter_map(|k| e[k].as_str())),
             );
-        args_paths
-            .any(|p| {
-                let resolved = if std::path::Path::new(p).is_absolute() {
-                    std::path::PathBuf::from(p)
-                } else {
-                    working_dir.join(p)
-                };
-                resolved.starts_with(&spec_dir)
-            })
+        args_paths.any(|p| {
+            let resolved = if std::path::Path::new(p).is_absolute() {
+                std::path::PathBuf::from(p)
+            } else {
+                working_dir.join(p)
+            };
+            resolved.starts_with(&spec_dir)
+        })
     })
 }
 
@@ -2595,11 +2600,8 @@ impl SessionProcessor {
                             // B3: even a parse failure is validated against
                             // the schema so a non-object payload gets the
                             // same corrective treatment.
-                            let schema_error = schema_violation(
-                                &self.tool_registry,
-                                &tc.name,
-                                &Value::Null,
-                            );
+                            let schema_error =
+                                schema_violation(&self.tool_registry, &tc.name, &Value::Null);
                             let err_msg = format!(
                                 "Invalid arguments JSON for tool '{}': {e}. \
                                  Arguments must be a single valid JSON object; \
@@ -2898,11 +2900,9 @@ impl SessionProcessor {
                                 // primitive types are now checked before
                                 // permissions so the model gets a corrective
                                 // error naming the offending parameter.
-                                if let Err(schema_err) = schema_violation(
-                                    &registry,
-                                    &tc_clone.name,
-                                    &tool_input,
-                                ) {
+                                if let Err(schema_err) =
+                                    schema_violation(&registry, &tc_clone.name, &tool_input)
+                                {
                                     Err(anyhow::anyhow!("Invalid tool arguments: {schema_err}"))
                                 } else {
                                     dispatch_tool_with_permissions(
@@ -3116,8 +3116,7 @@ impl SessionProcessor {
                         let parallel_call_id = tc.id.clone();
                         let parallel_tool_name = tc.name.clone();
                         let parallel_args_json = tc.args_json.clone();
-                        let watchdog_identity: WatchdogIdentity =
-                            (tc.id.clone(), tc.name.clone());
+                        let watchdog_identity: WatchdogIdentity = (tc.id.clone(), tc.name.clone());
                         let abort_handle = fut.abort_handle();
                         futures.push(async move {
                             match tokio::time::timeout(TOOL_WATCHDOG_TIMEOUT, fut).await {

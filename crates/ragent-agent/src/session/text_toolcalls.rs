@@ -48,7 +48,7 @@ const FUNCTION_CALLS_CLOSE: &str = "</function_calls>";
 /// as the tool_use part). Only markup blocks carry spans — the bare-JSON
 /// dialect consumes the whole response, which callers replace wholesale if
 /// they care.
-pub fn extract_text_tool_calls_with_spans(
+pub(crate) fn extract_text_tool_calls_with_spans(
     text: &str,
 ) -> (Vec<PendingToolCall>, Vec<(usize, usize)>) {
     for (open_tag, close_tag) in [
@@ -66,7 +66,7 @@ pub fn extract_text_tool_calls_with_spans(
 
 /// Blanks the recovered byte spans in `buffer` with spaces, preserving every
 /// byte offset and newline so downstream rendering and offsets stay valid.
-pub fn blank_spans(buffer: &mut String, spans: &[(usize, usize)]) {
+pub(crate) fn blank_spans(buffer: &mut String, spans: &[(usize, usize)]) {
     if spans.is_empty() {
         return;
     }
@@ -132,11 +132,13 @@ fn parse_xml_tool_call(body: &str) -> Option<PendingToolCall> {
         .lines()
         .map(str::trim)
         .find(|line| line.starts_with("<function="))?;
-    let name = function_line
-        .strip_prefix("<function=")?
-        .strip_suffix('>')?
-        .trim()
-        .to_string();
+    // Name ends at the FIRST '>' after the prefix — a zero-parameter block
+    // (`<function=list_files></function>`) has the close tag on the same
+    // line, so `strip_suffix('>')` would swallow it and corrupt the name
+    // into "list_files></function".
+    let after_prefix = function_line.strip_prefix("<function=")?;
+    let name_end = after_prefix.find('>')?;
+    let name = after_prefix[..name_end].trim().to_string();
     if name.is_empty() {
         return None;
     }

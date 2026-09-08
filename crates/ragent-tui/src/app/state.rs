@@ -1466,6 +1466,10 @@ pub struct App {
     pub project_files_cache_count: usize,
     /// Previously submitted input lines (oldest first).
     pub input_history: Vec<String>,
+    /// The most recent prompt submitted by the user (chat message, slash
+    /// command, bang command, or loop goal). Shown truncated in the status
+    /// bar's top line.
+    pub last_prompt: String,
     /// Current position when navigating history (`None` = new input).
     pub history_index: Option<usize>,
     /// Saved in-progress input while browsing history.

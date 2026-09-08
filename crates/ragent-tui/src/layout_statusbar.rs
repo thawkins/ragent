@@ -4,7 +4,8 @@
 //! color coding and adaptive behavior across different terminal sizes.
 //!
 //! The status bar consists of two lines:
-//! - Line 1: Working directory (left), git branch (center), session status (right)
+//! - Line 1: Working directory (left), git branch + centred last-prompt tag,
+//!   session status (right)
 //! - Line 2: Provider info + context window + thinking level (left), token usage (center), service status (right)
 
 use ratatui::{
@@ -212,6 +213,23 @@ pub fn render_status_bar_v2(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(ratatui::widgets::Paragraph::new(line2), line2_area);
 }
 
+/// Build the display text for the last-prompt tag shown on the top status
+/// line: the first `max_chars` characters of the prompt, followed by `....`
+/// when the prompt is longer, wrapped in square brackets.
+///
+/// Returns an empty string when the prompt is empty.
+#[must_use]
+pub fn prompt_display_text(prompt: &str, max_chars: usize) -> String {
+    if prompt.is_empty() {
+        return String::new();
+    }
+    let mut text: String = prompt.chars().take(max_chars).collect();
+    if prompt.chars().count() > max_chars {
+        text.push_str("....");
+    }
+    format!("[{text}]")
+}
+
 /// Build Line 1: Context & Status
 fn build_line1(
     app: &App,
@@ -236,9 +254,15 @@ fn build_line1(
 
     // Left section: Working directory
     let left = build_line1_left(app, config, mode);
-    spans.extend(left);
 
-    // Center section: Git branch
+    // Centered last-prompt tag: renders the first 32 characters of the most
+    // recent user prompt (plus `....` when truncated) in square brackets,
+    // positioned so the tag is centred around the horizontal midpoint of the
+    // line, immediately after the git-branch section. The branch is pulled
+    // right so it sits just before the tag, and the working-directory
+    // section is shortened when it would overlap the branch. Skipped when
+    // there is no prompt or the terminal is too narrow to fit the cwd,
+    // branch, tag, and status sections without clipping.
     let center = build_line1_center(app, config, mode);
     let center_width: u16 = center.iter().map(|s| s.width() as u16).sum();
 
@@ -246,20 +270,72 @@ fn build_line1(
     let right = build_line1_right(app, config, mode);
     let right_width: u16 = right.iter().map(|s| s.width() as u16).sum();
 
-    let left_width: u16 = spans.iter().map(|s| s.width() as u16).sum();
+    let prefix_width: u16 = spans.iter().map(|s| s.width() as u16).sum();
+    let left_width: u16 = left.iter().map(|s| s.width() as u16).sum();
 
-    // Calculate gap between sections
-    let total_used = left_width
-        .saturating_add(center_width)
-        .saturating_add(right_width);
-    let gap_size = width.saturating_sub(total_used);
+    let prompt_tag = prompt_display_text(&app.last_prompt, 32);
+    let mut rendered_tag = false;
+    if !prompt_tag.is_empty() {
+        use unicode_width::UnicodeWidthStr;
+        let tag_width = prompt_tag.width() as u16;
+        // Column where the tag must start so its midpoint lands on width/2.
+        let tag_start = (width / 2).saturating_sub(tag_width / 2);
+        // The branch section sits immediately before the tag, separated by
+        // one space, and the cwd must keep a readable span between the
+        // prefix and the branch.
+        let branch_start = tag_start.saturating_sub(1).saturating_sub(center_width);
+        // Minimum readable span width for the shortened cwd section.
+        const MIN_CWD_SPAN: u16 = 12;
+        let cwd_span_budget = branch_start.saturating_sub(prefix_width);
+        let tag_fits = tag_start
+            .saturating_add(tag_width)
+            .saturating_add(right_width)
+            <= width
+            && cwd_span_budget >= MIN_CWD_SPAN;
+        if tag_fits {
+            // Shorten the working directory so it ends where the branch
+            // begins, keeping the tag centred.
+            let text_budget = (cwd_span_budget - 2) as usize;
+            let cwd_text = shorten_path(&app.cwd, text_budget);
+            spans.push(Span::styled(
+                format!(" {:<width$} ", cwd_text, width = text_budget),
+                Style::default().fg(colors::TEXT),
+            ));
+            // Branch section, then the centred tag right after it.
+            spans.extend(center.clone());
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                prompt_tag,
+                Style::default()
+                    .fg(colors::IN_PROGRESS)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            // Pad between the tag end and the right-hand status section.
+            let gap = width
+                .saturating_sub(tag_start.saturating_add(tag_width))
+                .saturating_sub(right_width);
+            if gap > 0 {
+                spans.push(Span::raw(" ".repeat(gap as usize)));
+            }
+            rendered_tag = true;
+        }
+    }
+    if !rendered_tag {
+        spans.extend(left);
 
-    // Add center section
-    spans.extend(center);
+        // Calculate gap between sections
+        let total_used = left_width
+            .saturating_add(center_width)
+            .saturating_add(right_width);
+        let gap_size = width.saturating_sub(prefix_width + total_used);
 
-    // Add gap
-    if gap_size > 0 {
-        spans.push(Span::raw(" ".repeat(gap_size as usize)));
+        // Add center section
+        spans.extend(center);
+
+        // Add gap
+        if gap_size > 0 {
+            spans.push(Span::raw(" ".repeat(gap_size as usize)));
+        }
     }
 
     // Add right section
@@ -367,7 +443,8 @@ fn build_line1_left(
     spans
 }
 
-/// Build Line 1 center section: Git branch + status
+/// Build Line 1 git-branch section: rendered immediately before the centred
+/// last-prompt tag.
 fn build_line1_center(
     app: &App,
     _config: &StatusBarConfig,

@@ -4,6 +4,18 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.87)
+
+- **Status bar last-prompt tag** — the top status line now renders the most
+  recent prompt (chat message, slash command, bang command, or `/loop` goal)
+  as a centred bracketed tag — `[first 32 chars....]` when truncated —
+  between the git branch and the session status. The working directory
+  shortens to keep the tag centred, and the layout falls back to the previous
+  cwd/branch/status arrangement on narrow terminals.
+- **Cleaner transcript start** — the message window no longer emits a blank
+  line before the very first `You:` prompt, so the transcript does not start
+  with a stray blank row.
+
 ## Highlights (v1.0.86)
 
 - **Spec-system semantics documentation** — `docs/howtos/spec.md` now covers

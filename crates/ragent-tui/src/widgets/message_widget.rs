@@ -3306,8 +3306,11 @@ impl<'a> MessageWidget<'a> {
                     };
                     for (i, line) in text.lines().enumerate() {
                         if i == 0 {
-                            // Blank line before the "You:" prompt for visual separation.
-                            if self.message.role == Role::User {
+                            // Blank line before the "You:" prompt for visual
+                            // separation — but not when this is the very
+                            // first rendered line of the transcript (a
+                            // leading blank row would push everything down).
+                            if self.message.role == Role::User && !lines.is_empty() {
                                 lines.push(Line::from(String::new()));
                             }
                             lines.push(Line::from(vec![

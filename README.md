@@ -398,11 +398,20 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.86** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.87** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **UI polish and tool-calling fixes (v1.0.87)** — the status bar's top line
+  now renders the last submitted prompt as a centred bracketed tag (first 32
+  characters, `....` when truncated) between the git branch and the session
+  status, with the working directory shortened to fit and a graceful fallback
+  to the previous layout when the terminal is too narrow; the message window
+  no longer pushes the transcript down with a leading blank line before the
+  first "You:" prompt; and the `text_toolcalls` recovery helpers were tightened
+  to `pub(crate)` visibility.
 
 - **Spec-system documentation and semantics polish (v1.0.86)** — the
   `/spec` how-to manual now documents the spec file write semantics (atomic

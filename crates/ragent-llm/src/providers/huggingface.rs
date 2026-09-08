@@ -435,8 +435,7 @@ impl HuggingFaceClient {
             // (e.g. DeepSeek-R1) cannot return native tool calls — sending
             // the tools array only invites the model to narrate the
             // invocation as text. Skip attaching the tools entirely.
-            let model_supports_tools = huggingface_model_tool_use(&request.model)
-                .unwrap_or(true);
+            let model_supports_tools = huggingface_model_tool_use(&request.model).unwrap_or(true);
             if model_supports_tools {
                 // H2: reuse the cached serialised tool list (with the `t_`
                 // name prefix) instead of building a fresh `Vec<Value>` on

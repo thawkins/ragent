@@ -1632,6 +1632,25 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.87
+
+Changes in and on top of v1.0.87 (UI polish and tool-calling fixes on top of
+the v1.0.86 spec-system documentation pass), summarised for quickstart
+relevance:
+
+- **Status bar last-prompt tag** — the top status line now shows the most
+  recently submitted prompt as a centred bracketed tag (first 32 characters,
+  with `....` appended when truncated) between the git branch and the session
+  status. The tag covers chat messages, slash commands, bang commands, and
+  `/loop` goals. When the terminal is too narrow to fit the working
+  directory, branch, tag, and status sections, the layout falls back to the
+  previous arrangement. No configuration changes.
+- **Message window first-line fix** — the transcript no longer starts with a
+  blank line before the first `You:` prompt.
+- **Slash-command help** — every slash command has a `help` subcommand or
+  `--help`/`-h` alias; type `/config help`, `/mcp help`, `/autopilot help`,
+  `/yolo help`, etc. to see usage without triggering side effects.
+
 ## Version 1.0.86
 
 Changes in and on top of v1.0.86 (the v1.0.85 tool-calling + spec-semantics release, plus the 1.0.86 spec-system simplify pass), summarised for quickstart relevance:

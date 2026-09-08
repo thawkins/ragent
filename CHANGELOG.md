@@ -1,5 +1,41 @@
 # Changelog
 
+## Version: 1.0.87
+
+UI polish and tool-calling fixes on top of the v1.0.86 spec-system
+documentation pass. The status bar gained a centred last-prompt tag, the
+message window no longer pushes the transcript down with a leading blank
+line, and slash-command internals were consolidated.
+
+### Changed
+
+- Status bar top line: the most recently submitted prompt is rendered as a
+  centred bracketed tag (`[first 32 chars....]` when truncated) between the
+  git branch and the session status. `App.last_prompt` tracks the latest
+  prompt across chat messages, slash commands, bang commands, and `/loop`
+  goals; the working-directory section is shortened so the tag stays centred,
+  and the layout falls back to the previous cwd/branch/status arrangement
+  when the terminal is too narrow to fit all sections without clipping.
+- Message window: the blank-line separator before a `You:` prompt is no
+  longer emitted for the very first rendered line of the transcript, so the
+  transcript no longer starts (or restarts after scrollback) with a stray
+  blank row pushing content down.
+- Slash-command internals: a `websearch_diag_ctx()` helper replaces the
+  duplicated nine-field `ToolContext` literal in the `/websearch test` and
+  `/websearch show` diagnostic arms; an `is_help_args()` helper replaces
+  repeated `args.trim() == "help"` checks across slash arms; `/spec` arms
+  reuse the shared `spec_manager()` helper.
+- Tool-calling recovery: `session::text_toolcalls::extract_text_tool_calls_with_spans`
+  and `blank_spans` are now `pub(crate)` (crate-internal helpers were
+  publicly exported).
+
+### Added
+
+- New tests: `test_statusbar_last_prompt.rs` (tag truncation semantics,
+  centring, and no-prompt fallback) and `test_schema_validation.rs`
+  (required-args schema validation, relocated from the inline `#[cfg(test)]`
+  module per the workspace test-organization rule).
+
 ## Version: 1.0.86
 
 Spec-system simplify and documentation pass on top of the v1.0.85 tool-calling

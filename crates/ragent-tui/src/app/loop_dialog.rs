@@ -588,6 +588,7 @@ impl App {
         let display_text = format!("[loop {}] {}", spec.agent, goal_text);
         let msg = ragent_agent::message::Message::user_text(&sid, display_text.clone());
         self.messages.push(msg);
+        self.last_prompt = goal_text.clone();
         self.schedule_context_snapshot_refresh();
         self.add_to_history(goal_text.clone());
         self.input.clear();

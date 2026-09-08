@@ -221,6 +221,7 @@ impl App {
             project_files_cache_refreshed_at: None,
             project_files_cache_count: 0,
             input_history: Vec::new(),
+            last_prompt: String::new(),
             history_index: None,
             history_draft: String::new(),
             show_log,

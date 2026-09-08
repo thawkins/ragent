@@ -1274,8 +1274,7 @@ impl SessionProcessor {
                                 // corrective error. The drop is logged (once
                                 // per call) so legitimate large-args calls
                                 // are visible instead of failing silently.
-                                if tc.args_json.len() + args_json.len()
-                                    > MAX_TOOL_CALL_ARGS_BYTES
+                                if tc.args_json.len() + args_json.len() > MAX_TOOL_CALL_ARGS_BYTES
                                     && !tc.args_json.ends_with(TRUNCATED_ARGS_SENTINEL)
                                 {
                                     tracing::warn!(

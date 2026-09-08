@@ -2,6 +2,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use futures::FutureExt;
 use ragent_agent::session::loop_state::LoopSpec;
 use ragent_agent::{event::Event, mcp::McpClient, message::Message, tool::TeamManagerInterface};
 use ragent_team::team::{
@@ -15,23 +16,6 @@ use crate::app::blueprints::{self};
 use ragent_config::OtelConfig;
 use ragent_specs::SpecManager;
 use ragent_telemetry::counters::{TelemetryCountersContent, current_values};
-
-/// Convert a `(name, kind, description, value)` metric tuple row into owned
-/// strings for the `TelemetryCountersContent` payload (shared by all four
-/// metric tables).
-fn tuples_to_strings<'a>(
-    rows: impl Iterator<Item = &'a (&'static str, &'static str, &'static str, String)>,
-) -> Vec<(String, String, String, String)> {
-    rows.map(|(n, k, d, v)| {
-        (
-            (*n).to_string(),
-            (*k).to_string(),
-            (*d).to_string(),
-            v.clone(),
-        )
-    })
-    .collect()
-}
 
 use crate::research_adapter::RagentCompleter;
 
@@ -51,8 +35,89 @@ use crate::app::helpers::{
     short_run_id, short_session_id,
 };
 
+/// Build a detached `ToolContext` for the `/websearch` diagnostic arms.
+///
+/// The `test` and `show` arms previously constructed the same nine-field
+/// literal in two places (~60 lines apart); this is the single source.
+fn websearch_diag_ctx() -> ragent_tools_extended::ToolContext {
+    let config = ragent_config::Config::load().unwrap_or_default();
+    ragent_tools_extended::ToolContext {
+        session_id: String::new(),
+        working_dir: crate::app::helpers::current_working_dir(),
+        event_bus: Arc::new(ragent_agent::event::EventBus::new(16)),
+        storage: None,
+        code_index: None,
+        config: Some(Arc::new(config)),
+        read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+    }
+}
+
+/// Run the live engine diagnostic and render the `/websearch test` table.
+///
+/// Split out of the spawned task body so the panic guard around it stays
+/// readable; a panic inside the probe is converted into an error table by
+/// the caller.
+async fn websearch_diag_and_render() -> String {
+    let ctx = websearch_diag_ctx();
+    use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
+    let results = MfSearchTool::engine_test(&ctx).await;
+    let mut output = String::from(
+        "From: /websearch test\n\n\
+         | Engine | Returned | Count |\n\
+         |--------|:--------:|------:|\n",
+    );
+    let mut total = 0usize;
+    for r in &results {
+        let returned = if r.returned_results {
+            "[ok] yes"
+        } else {
+            "[err] no"
+        };
+        output.push_str(&format!(
+            "| {:<10} | {} | {:>5} |\n",
+            r.name, returned, r.result_count
+        ));
+        total += r.result_count;
+    }
+    output.push_str(&format!("\nTotal raw results: {total}"));
+    let failed: Vec<_> = results.iter().filter(|r| !r.error.is_empty()).collect();
+    if !failed.is_empty() {
+        output.push_str("\n\nErrors:");
+        for r in failed {
+            output.push_str(&format!("\n• {} — {}", r.name, r.error));
+        }
+    }
+    output
+}
+
 // Redaction patterns for bug reports
 use regex::Regex;
+
+/// Convert a `(name, kind, description, value)` metric tuple row into owned
+/// strings for the `TelemetryCountersContent` payload (shared by all four
+/// metric tables).
+fn tuples_to_strings<'a>(
+    rows: impl Iterator<Item = &'a (&'static str, &'static str, &'static str, String)>,
+) -> Vec<(String, String, String, String)> {
+    rows.map(|(n, k, d, v)| {
+        (
+            (*n).to_string(),
+            (*k).to_string(),
+            (*d).to_string(),
+            v.clone(),
+        )
+    })
+    .collect()
+}
+
+/// Whether a slash-command argument string is one of the help forms
+/// (`help`, `--help`, `-h`).
+///
+/// Single source for the arm-level help-alias tests so every command accepts
+/// the same three spellings (some arms previously accepted only `help`).
+fn is_help_args(args: &str) -> bool {
+    matches!(args.trim(), "help" | "--help" | "-h")
+}
 
 // Re-export status types from theme
 
@@ -692,8 +757,8 @@ impl App {
             ),
         ];
 
+        use std::fmt::Write;
         let write_group = |out: &mut String, title: &str, group: &[(&str, &str, &str, String)]| {
-            use std::fmt::Write;
             let _ = writeln!(out, "### {title}");
             for (name, kind, desc, value) in group {
                 let _ = writeln!(out, "- `{name}` — **{value}** — *{kind}* — {desc}");
@@ -1372,9 +1437,10 @@ Usage: `/telemetry help|on|off|setup|counters`",
             },
             "status" => {
                 let enabled = is_edit_log_enabled();
-                let dir = std::env::current_dir()
-                    .map(|p| p.join("log").display().to_string())
-                    .unwrap_or_else(|_| "(unknown)".to_string());
+                let dir = crate::app::helpers::current_working_dir()
+                    .join("log")
+                    .display()
+                    .to_string();
                 self.append_assistant_text(&format!(
                     "From: /editlog status\n\nEdit logging: {}\nLog directory: {}",
                     if enabled { "enabled" } else { "disabled" },
@@ -1563,6 +1629,10 @@ Usage: `/telemetry help|on|off|setup|counters`",
         // Top-level wrapper: single entry and single exit. Log invocation and
         // call the inner implementation which may return early. On return,
         // log completion and number of assistant output lines added.
+        // Record the submitted command as the last prompt so the status bar's
+        // top-line tag reflects slash-command submissions too, not just chat
+        // messages, bang commands, and loop goals.
+        self.last_prompt = raw.trim().to_string();
         let stripped = raw.strip_prefix('/').unwrap_or(raw).trim();
         let (cmd, args) = stripped
             .split_once(char::is_whitespace)
@@ -1646,7 +1716,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 self.status = "about".to_string();
             }
             "agent" => {
-                if args.trim() == "help" {
+                if is_help_args(args) {
                     self.append_assistant_text(
                         "From: /agent help\n\n## /agent \u{2014} Agent selection\n\n| Subcommand | Description |\n|---|---|\n| `/agent` | Open the interactive agent picker |\n| `/agent <name>` | Switch directly to a named agent (e.g. `coder`, `general`, `architect`) |\n| `/agent help` | Show this help |\n\nUse `/agents` to list every available agent with descriptions.",
                     );
@@ -3134,7 +3204,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 self.status = "llm stats".to_string();
             }
             "history" => {
-                if args.trim() == "help" {
+                if is_help_args(args) {
                     self.append_assistant_text(
                         "From: /history help\n\n## /history — Input history\n\n| Subcommand | Description |\n|---|---|\n| `/history` | Open the history picker (newest first; ↑/↓ to select, Enter to insert) |\n| `/history <filter>` | Restrict the picker to entries containing `<filter>` |\n| `/history help` | Show this help |",
                     );
@@ -3359,7 +3429,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 self.is_running = false;
             }
             "reload" => {
-                if args.trim() == "help" {
+                if is_help_args(args) {
                     self.append_assistant_text(
                         "From: /reload help\n\n## /reload \u{2014} Reload customizations\n\n| Subcommand | Description |\n|---|---|\n| `/reload` or `/reload all` | Reload agents, config, MCP servers, and skills |\n| `/reload agents` | Re-scan custom agent definitions (`.ragent/agents/`, `~/.ragent/agents/`) |\n| `/reload config` | Re-read `ragent.json` from disk |\n| `/reload mcp` | Re-read the `mcp` section of the config |\n| `/reload skills` | Re-scan skill directories |\n| `/reload help` | Show this help |",
                     );
@@ -3548,7 +3618,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 ragent_agent::dir_lists::load_from_config();
             }
             "resume" => {
-                if args.trim() == "help" {
+                if is_help_args(args) {
                     self.append_assistant_text(
                         "From: /resume help\n\n## /resume — Resume a halted agent\n\n| Subcommand | Description |\n|---|---|\n| `/resume` | Continue a halted agent from where it was interrupted by the user |\n| `/resume help` | Show this help |",
                     );
@@ -3592,7 +3662,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 });
             }
             "system" => {
-                if args.trim() == "help" {
+                if is_help_args(args) {
                     self.append_assistant_text(
                         "From: /system help\n\n## /system \u{2014} System prompt override\n\n| Subcommand | Description |\n|---|---|\n| `/system` | Show the current agent system prompt |\n| `/system <prompt>` | Override the active agent’s system prompt for this session |\n| `/system help` | Show this help |",
                     );
@@ -3708,7 +3778,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             }
 
             "skills" => {
-                if args.trim() == "help" {
+                if is_help_args(args) {
                     self.append_assistant_text(
                         "From: /skills help\n\n## /skills \u{2014} Registered skill packs\n\n| Subcommand | Description |\n|---|---|\n| `/skills` | List every registered skill with scope, access, and description |\n| `/skills help` | Show this help |\n\nSkills are discovered from `~/.ragent/skills/<name>/SKILL.md` (personal) and `.ragent/skills/<name>/SKILL.md` (project). Reload with `/reload skills`.",
                     );
@@ -6547,7 +6617,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let sid = sid_opt.unwrap();
 
                         // Check spec exists on disk and read its status
-                        let mgr = SpecManager::new(&specs_root);
+                        let mgr = spec_manager();
                         let rt = tokio::runtime::Handle::current();
                         let (spec_exists, spec_status): (
                             bool,
@@ -6896,9 +6966,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Update { spec_id } => {
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-
                         // FR-006: validate spec ID format
                         let sid = match ragent_specs::spec::SpecId::new(&spec_id) {
                             Some(id) => id,
@@ -6914,7 +6981,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         };
 
-                        let mgr = SpecManager::new(&specs_root);
+                        let mgr = spec_manager();
                         let rt = tokio::runtime::Handle::current();
 
                         // FR-005/FR-010: read spec, guard archived, read PLAN.md
@@ -7072,9 +7139,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         spec_id,
                         tech_context,
                     } => {
-                        let working_dir = crate::app::helpers::current_working_dir();
-                        let specs_root = working_dir.join("specs");
-
                         // FR-006: validate spec ID format
                         let sid = match ragent_specs::spec::SpecId::new(&spec_id) {
                             Some(id) => id,
@@ -7090,7 +7154,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         };
 
-                        let mgr = SpecManager::new(&specs_root);
+                        let mgr = spec_manager();
                         let rt = tokio::runtime::Handle::current();
 
                         // Read SPEC.md (and existing PLAN.md for status preservation)
@@ -7229,7 +7293,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         };
 
-                        let mgr = SpecManager::new(&specs_root);
+                        let mgr = spec_manager();
                         let rt = tokio::runtime::Handle::current();
 
                         // Read spec to get plan_md and title
@@ -7398,7 +7462,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         };
 
-                        let mgr = SpecManager::new(&specs_root);
+                        let mgr = spec_manager();
                         let rt = tokio::runtime::Handle::current();
 
                         // Read spec to validate it exists and get title + existing FEEDBACK.md
@@ -7632,7 +7696,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
 
             "github" => match args.trim() {
-                "help" => {
+                "help" | "--help" | "-h" => {
                     self.append_assistant_text(
                         "From: /github help\n\n## /github \u{2014} GitHub authentication\n\n| Subcommand | Description |\n|---|---|\n| `/github login` | Authenticate via the OAuth device flow (opens the pending dialog) |\n| `/github logout` | Remove the stored GitHub token |\n| `/github status` | Show whether a GitHub token is configured (env `GITHUB_TOKEN` or `~/.ragent/github_token`) |\n| `/github help` | Show this help |",
                     );
@@ -7768,7 +7832,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 }
             },
             "gitlab" => match args.trim() {
-                "help" => {
+                "help" | "--help" | "-h" => {
                     self.append_assistant_text(
                         "From: /gitlab help\n\n## /gitlab \u{2014} GitLab authentication\n\n| Subcommand | Description |\n|---|---|\n| `/gitlab setup` | Open the setup dialog for instance URL, username, and personal access token |\n| `/gitlab logout` | Remove the stored token and config |\n| `/gitlab status` | Show the current GitLab configuration state |\n| `/gitlab help` | Show this help |",
                     );
@@ -7850,7 +7914,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             },
 
             "update" => match args.trim() {
-                "help" => {
+                "help" | "--help" | "-h" => {
                     self.append_assistant_text(
                         "From: /update help\n\n## /update \u{2014} Self-update check and install\n\n| Subcommand | Description |\n|---|---|\n| `/update` | Check the latest GitHub release and report whether an update is available |\n| `/update install` | Download and replace the running binary, then restart ragent |\n| `/update help` | Show this help |",
                     );
@@ -7945,7 +8009,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             },
 
             "doctor" => {
-                if args.trim() == "help" {
+                if is_help_args(args) {
                     self.append_assistant_text(
                         "From: /doctor help\n\n## /doctor — System diagnostics\n\n| Subcommand | Description |\n|---|---|\n| `/doctor` | Check git, ripgrep, GitHub token, config, and other environment prerequisites, then print a diagnostic report |\n| `/doctor help` | Show this help |",
                     );
@@ -8364,7 +8428,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                     "test" => {
                         self.status = "websearch: testing engines...".to_string();
-                        self.append_assistant_text("Starting Websearch test....\n");
+                        self.append_assistant_text("Starting Websearch test...\n");
                         // Run the live engine probe off the UI thread: the
                         // acknowledgement above must render before the network
                         // round-trips complete, so the rendered table is
@@ -8372,49 +8436,21 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         // `poll_websearch_test_result` on a later frame.
                         let websearch_result = Arc::clone(&self.websearch_test_result);
                         tokio::spawn(async move {
-                            let config = ragent_config::Config::load().unwrap_or_default();
-                            let ctx = ragent_tools_extended::ToolContext {
-                                session_id: String::new(),
-                                working_dir: crate::app::helpers::current_working_dir(),
-                                event_bus: Arc::new(ragent_agent::event::EventBus::new(16)),
-                                storage: None,
-                                code_index: None,
-                                config: Some(Arc::new(config)),
-                                read_timestamps: Arc::new(std::sync::RwLock::new(
-                                    std::collections::HashMap::new(),
-                                )),
+                            // Deposit even on panic: a task that dies before
+                            // the normal Ok/Err paths would leave the slot
+                            // unwritten and the status line stuck at
+                            // "testing engines..." forever.
+                            let outcome = std::panic::AssertUnwindSafe(websearch_diag_and_render())
+                                .catch_unwind()
+                                .await;
+                            let rendered = match outcome {
+                                Ok(rendered) => rendered,
+                                Err(_) => "From: /websearch test\n\n\
+                                           [err] engine test task panicked — see the application log"
+                                    .to_string(),
                             };
-                            use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
-                            let results = MfSearchTool::engine_test(&ctx).await;
-                            let mut output = String::from(
-                                "From: /websearch test\n\n\
-                                 | Engine | Returned | Count |\n\
-                                 |--------|:--------:|------:|\n",
-                            );
-                            let mut total = 0usize;
-                            for r in &results {
-                                let returned = if r.returned_results {
-                                    "[ok] yes"
-                                } else {
-                                    "[err] no"
-                                };
-                                output.push_str(&format!(
-                                    "| {:<10} | {} | {:>5} |\n",
-                                    r.name, returned, r.result_count
-                                ));
-                                total += r.result_count;
-                            }
-                            output.push_str(&format!("\nTotal raw results: {total}"));
-                            let failed: Vec<_> =
-                                results.iter().filter(|r| !r.error.is_empty()).collect();
-                            if !failed.is_empty() {
-                                output.push_str("\n\nErrors:");
-                                for r in failed {
-                                    output.push_str(&format!("\n• {} — {}", r.name, r.error));
-                                }
-                            }
                             if let Ok(mut guard) = websearch_result.lock() {
-                                *guard = Some(output);
+                                *guard = Some(rendered);
                             } else {
                                 tracing::error!(
                                     "websearch_test_result mutex poisoned, result dropped"
@@ -8423,18 +8459,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         });
                     }
                     "show" | "" => {
-                        let config = ragent_config::Config::load().unwrap_or_default();
-                        let ctx = ragent_tools_extended::ToolContext {
-                            session_id: String::new(),
-                            working_dir: crate::app::helpers::current_working_dir(),
-                            event_bus: Arc::new(ragent_agent::event::EventBus::new(16)),
-                            storage: None,
-                            code_index: None,
-                            config: Some(Arc::new(config)),
-                            read_timestamps: Arc::new(std::sync::RwLock::new(
-                                std::collections::HashMap::new(),
-                            )),
-                        };
+                        let ctx = websearch_diag_ctx();
                         use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
                         let engines = MfSearchTool::engine_status(&ctx);
                         let mut output = String::from(
@@ -8476,7 +8501,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "mouse" => {
                 let sub = args.split_whitespace().next().unwrap_or("");
                 match sub {
-                    "help" => {
+                    "help" | "--help" | "-h" => {
                         self.append_assistant_text(
                             "From: /mouse help\n\n## /mouse \u{2014} Mouse support\n\n| Subcommand | Description |\n|---|---|\n| `/mouse on` | Enable mouse support (scrolling, clicking, selection) |\n| `/mouse off` | Disable mouse support and switch to keyboard-only mode |\n| `/mouse help` | Show this help |\n\nRunning `/mouse` with no subcommand shows the current state.",
                         );
@@ -11317,11 +11342,15 @@ fn handle_blueprints_command(app: &mut App, args: &str) {
     let blueprint_dirs = blueprints::list_installed_blueprints(&working_dir);
     let sub = args.split_whitespace().next().unwrap_or("").trim();
 
+    // Help-form parity with the other slash arms: `help`, `--help`, and
+    // `-h` all render the list with the "help" status (the previous
+    // sub == "help" check left `/blueprints --help` reporting "list").
+    let is_help = matches!(sub, "help" | "--help" | "-h");
     match sub {
         "" | "list" | "help" | "--help" | "-h" => {
             let output = blueprints::render_blueprint_list(&blueprint_dirs, "/blueprints");
             app.append_assistant_text(&output);
-            app.status = if sub == "help" {
+            app.status = if is_help {
                 "blueprints: help".to_string()
             } else {
                 "blueprints: list".to_string()
@@ -11358,7 +11387,7 @@ fn handle_template_command(app: &mut App, args: &str) {
         return;
     }
 
-    let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let working_dir = crate::app::helpers::current_working_dir();
     let templates = discover_templates(&working_dir);
 
     if args.is_empty() {

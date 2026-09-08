@@ -39,9 +39,8 @@ fn extract_text_tool_calls(text: &str) -> Vec<history::PendingToolCall> {
 
 #[test]
 fn test_extract_json_object_dialect() {
-    let text = format!(
-        "{OPEN}\n{{\"name\": \"read\", \"arguments\": {{\"path\": \"a.rs\"}}}}\n{CLOSE}"
-    );
+    let text =
+        format!("{OPEN}\n{{\"name\": \"read\", \"arguments\": {{\"path\": \"a.rs\"}}}}\n{CLOSE}");
     let calls = extract_text_tool_calls(&text);
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].name, "read");
@@ -136,7 +135,10 @@ fn test_multibyte_content_survives_extraction() {
     let calls = extract_text_tool_calls(&text);
     assert_eq!(calls.len(), 1);
     let args: Value = serde_json::from_str(&calls[0].args_json).unwrap();
-    assert_eq!(args["new_str"], "caf\u{e9} \u{2615} \u{2014} \u{e9}migr\u{e9}");
+    assert_eq!(
+        args["new_str"],
+        "caf\u{e9} \u{2615} \u{2014} \u{e9}migr\u{e9}"
+    );
 }
 
 #[test]
