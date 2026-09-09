@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.89"
+version = "1.0.91"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -256,6 +256,7 @@ hex = "0.4"
 ragent-specs = { path = "crates/ragent-specs" }
 ragent-research = { path = "crates/ragent-research" }
 ragent-types = { path = "crates/ragent-types" }
+ragent-tools-extended = { path = "crates/ragent-tools-extended" }
 
 # ── Benchmarking ─────────────────────────────────────────────────────────
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -307,6 +308,7 @@ ragent-tui = { workspace = true }
 ragent-specs = { workspace = true }
 ragent-research = { workspace = true }
 ragent-types = { workspace = true }
+ragent-tools-extended = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
@@ -318,6 +320,9 @@ uuid = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
 chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.14"
 
 [lints]
 workspace = true

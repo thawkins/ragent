@@ -140,6 +140,54 @@ enum Commands {
         #[command(subcommand)]
         command: Box<cli::ResearchCommands>,
     },
+    /// Scaffold a new project in the current directory (the `/new` command)
+    New {
+        #[command(flatten)]
+        scaffold: cli::ScaffoldArgs,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, value_name = "MODEL", hide = true)]
+        model: Option<String>,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, value_name = "AGENT", hide = true)]
+        agent: Option<String>,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, value_name = "LEVEL", hide = true)]
+        log_level: Option<String>,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, hide = true)]
+        no_tui: bool,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, hide = true)]
+        yes: bool,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, hide = true)]
+        log: bool,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, value_name = "CONFIG", hide = true)]
+        config: Option<String>,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, value_name = "MAXSTEPS", hide = true)]
+        maxsteps: Option<u32>,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, hide = true)]
+        dry_run: bool,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, hide = true)]
+        json: bool,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, hide = true)]
+        no_git_context: bool,
+        /// Accepted for parity with the global flags; ignored by `new`
+        #[arg(long, hide = true)]
+        no_readme_context: bool,
+    },
+}
+
+/// CLI dispatcher for the flattened `ragent new …` form: rebuilds the
+/// `/new` token list from the parsed [`cli::ScaffoldArgs`] and reuses the
+/// `ragent new scaffold …` handler, keeping both spellings on one path.
+fn dispatch_new_command(scaffold: cli::ScaffoldArgs) -> Result<()> {
+    cli::handle_new_command(cli::NewCommands::Scaffold(scaffold))
 }
 
 /// Sub-commands for the `config` namespace.
@@ -782,6 +830,14 @@ async fn async_main() -> Result<()> {
             }
         }
         Some(Commands::Run { prompt }) => {
+            // FR-013 CLI parity: a `/new` prompt is executed by the same
+            // scaffold engine as `ragent new`, not sent to the LLM. The
+            // scaffolder is a deterministic local operation; there is no
+            // agent turn to run.
+            let trimmed = prompt.trim();
+            if trimmed == "/new" || trimmed.starts_with("/new ") {
+                return cli::handle_new_prompt(trimmed.trim_start_matches("/new"));
+            }
             tracing::info!("Starting headless run mode");
             let mut resolved_agent = resolved_agent.clone();
             let config_guard = config.read().await;
@@ -1183,6 +1239,9 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
                 Some(storage.clone()),
             )
             .await?;
+        }
+        Some(Commands::New { scaffold, .. }) => {
+            dispatch_new_command(scaffold)?;
         }
     }
     Ok(())

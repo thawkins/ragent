@@ -982,6 +982,224 @@ pub async fn handle_research_command(
     Ok(())
 }
 
+/// Flag set for the `/new` scaffold surface (spec `newproj` T-012, FR-013).
+///
+/// Shared between the flattened `ragent new …` invocation and the
+/// `ragent new scaffold …` subcommand spelling; the values are validated by
+/// the same `project_scaffold::parse_flags` engine the TUI uses, so accepted
+/// values and error messages cannot drift between the modes.
+#[derive(clap::Args, Debug)]
+pub struct ScaffoldArgs {
+    /// Computer language to scaffold (required; e.g. rust, python, go, ts)
+    #[arg(long, value_name = "LANG")]
+    pub language: Option<String>,
+    /// Type of application to scaffold (required; e.g. library, cmdline, tui, gui)
+    #[arg(long = "type", value_name = "TYPE")]
+    pub app_type: Option<String>,
+    /// Optional framework stack to layer on the base layout (e.g. axum)
+    #[arg(long, value_name = "STACK")]
+    pub stack: Option<String>,
+    /// Create a GitHub repository and push the initial commit
+    #[arg(long, conflicts_with = "gitlab")]
+    pub github: bool,
+    /// Create a GitLab repository and push the initial commit
+    #[arg(long)]
+    pub gitlab: bool,
+    /// Positional `help` word: `ragent new help` prints the scaffold usage
+    /// page (slash parity, FR-012) instead of scaffolding
+    #[arg(value_name = "HELP_WORD", num_args = 0..=1, hide = true)]
+    pub help_word: Option<String>,
+}
+
+impl ScaffoldArgs {
+    /// Convert the clap flag set into the token list `/new` would see after
+    /// the verb (the engine parser's single source of truth).
+    pub fn to_tokens(&self) -> Vec<String> {
+        let mut argv: Vec<String> = Vec::new();
+        if self.help_word.is_some() {
+            argv.push("help".to_owned());
+        }
+        if let Some(lang) = &self.language {
+            argv.push("--language".to_owned());
+            argv.push(lang.clone());
+        }
+        if let Some(app_type) = &self.app_type {
+            argv.push("--type".to_owned());
+            argv.push(app_type.clone());
+        }
+        if let Some(stack) = &self.stack {
+            argv.push("--stack".to_owned());
+            argv.push(stack.clone());
+        }
+        if self.github {
+            argv.push("--github".to_owned());
+        }
+        if self.gitlab {
+            argv.push("--gitlab".to_owned());
+        }
+        argv
+    }
+}
+
+/// Sub-commands for the `new` namespace: the redundant subcommand spelling
+/// kept so `ragent new scaffold …` also parses (the flattened form
+/// `ragent new --language …` is the documented surface).
+#[derive(clap::Subcommand, Debug)]
+pub enum NewCommands {
+    /// Scaffold a new project in the current directory
+    Scaffold(#[command(flatten)] ScaffoldArgs),
+}
+
+/// CLI parity handler for `/new` (spec `newproj` T-012, FR-013).
+///
+/// Reuses the same `ragent-tools-extended::project_scaffold` engine as the
+/// TUI `/new` command: FR-002 empty-directory guard, FR-003 validation, the
+/// FR-016 no-silent-overwrite emission, the FR-008 git + remote half, and the
+/// FR-011 summary — printed to stdout instead of the TUI message window.
+///
+/// # Errors
+///
+/// Returns an error when the current directory cannot be read; flag
+/// validation, guard, and emission failures are printed as diagnostics with
+/// process exits instead (matching the `ragent-research` CLI precedent).
+pub fn handle_new_command(command: NewCommands) -> Result<()> {
+    let NewCommands::Scaffold(scaffold) = command;
+    let argv = scaffold.to_tokens();
+    let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
+    handle_new_tokens(&argv)
+}
+
+/// Execute an already-tokenised `/new` argument list.
+///
+/// Shared tail of [`handle_new_command`] and [`handle_new_prompt`]:
+/// validation, guard, emission, git, remote, and the FR-011 summary.
+fn handle_new_tokens(tokens: &[&str]) -> Result<()> {
+    use ragent_tools_extended::project_scaffold::parse_flags;
+
+    let parsed = match parse_flags(tokens) {
+        Ok(request) => request,
+        Err(err) => {
+            eprintln!("ragent new: {err}");
+            eprintln!();
+            eprint!("{}", new_usage_message());
+            std::process::exit(2);
+        }
+    };
+    if parsed.is_help() {
+        print!("{}", new_usage_message());
+        return Ok(());
+    }
+    run_new_scaffold(&parsed)
+}
+
+/// Run the scaffold pipeline for a validated [`ScaffoldRequest`].
+///
+/// Mirrors the TUI `newproj::run_scaffold` flow: FR-002 guard, the shared
+/// [`plan_and_emit`](ragent_tools_extended::project_scaffold::plan_and_emit)
+/// engine pipeline (FR-004/FR-005/FR-006/FR-007/FR-016/FR-019), the FR-008
+/// local git + remote half, and the FR-011 summary on stdout.
+fn run_new_scaffold(
+    request: &ragent_tools_extended::project_scaffold::ScaffoldRequest,
+) -> Result<()> {
+    use ragent_tools_extended::project_scaffold::{
+        HostingTarget, RemoteStatus, enforce_empty_directory_guard, init_and_commit,
+        init_github_remote, init_gitlab_remote, plan_and_emit, recipe_for,
+    };
+
+    let cwd = std::env::current_dir().map_err(|e| anyhow::anyhow!("cannot read cwd: {e}"))?;
+
+    // FR-002: refuse non-empty targets before any filesystem writes.
+    if let Err(err) = enforce_empty_directory_guard(&cwd) {
+        eprintln!("ragent new: {err}");
+        std::process::exit(1);
+    }
+
+    let slug = cwd
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "new-project".to_owned());
+
+    let Some(recipe) = recipe_for(request.language()) else {
+        eprintln!("ragent new: internal: no scaffold recipe for the selected language");
+        std::process::exit(2);
+    };
+
+    // FR-004 + FR-005 + FR-006 + FR-007 + FR-016 + FR-019 planning and
+    // emission through the shared engine pipeline.
+    let generated_at_utc = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let (mut summary, stack_note) =
+        match plan_and_emit(&cwd, request, &slug, recipe, &generated_at_utc) {
+            Ok(result) => result,
+            Err(err) => {
+                eprintln!("ragent new: {err}");
+                std::process::exit(1);
+            }
+        };
+
+    // FR-008 local half: git init + initial commit, then the remote half
+    // when a hosting flag was supplied. Failures are contained (FR-010):
+    // the summary reports the failed step while the local scaffold stays
+    // intact.
+    let git_outcome = init_and_commit(&cwd, "Initial scaffold");
+    let remote_status = match request.hosting() {
+        None => RemoteStatus::None,
+        Some(HostingTarget::GitHub) => match init_github_remote(&cwd, &slug, true) {
+            Ok(report) => RemoteStatus::Created { url: report.url },
+            Err(failure) => RemoteStatus::Failed {
+                step: failure.step.as_str().to_owned(),
+                message: failure.message,
+            },
+        },
+        Some(HostingTarget::GitLab) => match init_gitlab_remote(&cwd, &slug, true) {
+            Ok(report) => RemoteStatus::Created { url: report.url },
+            Err(failure) => RemoteStatus::Failed {
+                step: failure.step.as_str().to_owned(),
+                message: failure.message,
+            },
+        },
+    };
+    summary.git = Some(git_outcome);
+    summary.remote = remote_status;
+
+    print!("ragent new: {}", summary.render());
+    print!("{stack_note}");
+    Ok(())
+}
+
+/// Dispatch a `ragent run "/new …"` prompt (spec `newproj` T-012, FR-013).
+///
+/// `args` is everything after the `/new` verb (leading whitespace already
+/// trimmed; may be empty for bare `/new`). Parsing and execution are
+/// delegated to [`handle_new_tokens`] so both CLI surfaces behave
+/// identically.
+///
+/// # Errors
+///
+/// See [`handle_new_command`].
+pub fn handle_new_prompt(args: &str) -> Result<()> {
+    let tokens: Vec<&str> = args.split_whitespace().collect();
+    handle_new_tokens(&tokens)
+}
+
+/// Build the FR-012/FR-018 usage/help message for the CLI surface.
+///
+/// The body (purpose, per-argument docs, registry-derived accepted values,
+/// worked examples) comes from the shared engine renderer
+/// (`render_detailed_help`, NFR-001); the usage lines and example
+/// invocations are the `ragent new` binary surface spellings.
+fn new_usage_message() -> String {
+    use ragent_tools_extended::project_scaffold::render_detailed_help;
+
+    render_detailed_help(
+        "\x20 ragent new --language <lang> --type <type> [--stack <name>] [--github | --gitlab]\n\
+         \x20 ragent run \"/new <same flags>\"\n\
+         \n\
+         Equivalent slash command: /new <same flags>",
+        "\x20 ragent new --language rust --type cmdline",
+        "\x20 ragent new --language python --type library --gitlab",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;

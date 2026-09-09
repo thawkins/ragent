@@ -4,8 +4,24 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.90)
+
+- **Internal simplify pass** — no UI change: the `/new` command and the
+  `ragent new` CLI now share one scaffolding pipeline (`plan_and_emit`),
+  the GitHub/GitLab hosting flows share a `register_origin_and_push`
+  helper, and the status-bar last-prompt renderer is single-pass. All
+  commands, key bindings, and visuals behave exactly as in v1.0.89.
+
 ## Highlights (v1.0.89)
 
+- **`/new` project scaffolding** — scaffold a brand-new project in an empty
+  directory from the TUI (`/new --language rust --type cmdline`) or the CLI
+  (`ragent new ...`): ragent workspace, runnable hello-world artifacts for
+  26 application languages (rust/python/go/typescript/shell/...) plus
+  sample stubs for data and build formats (library/cmdline/tui/gui), starter
+  docs, git init,
+  and optional `--github`/`--gitlab` hosting + push; steps stream live into
+  the message window.
 - **Stable toolchain** — the pinned `rust-toolchain.toml` moved from
   `nightly-2026-09-04` to the current stable channel; builds, CI, and user
   shells now compile with stable Rust (1.98.1 at time of release).
@@ -24,10 +40,12 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 - **Status bar last-prompt tag** — the top status line now renders the most
   recent prompt (chat message, slash command, bang command, or `/loop` goal)
-  as a centred bracketed tag — `[first 32 chars....]` when truncated —
-  between the git branch and the session status. The working directory
-  shortens to keep the tag centred, and the layout falls back to the previous
-  cwd/branch/status arrangement on narrow terminals.
+  as a bracketed tag — `[first 32 chars....]` when truncated — directly after
+  the `Branch: `-labelled git branch, as one group immediately after the
+  `Project:`-labelled working directory. The working directory shortens when
+  the group plus the session status would not otherwise fit, and the layout
+  falls back to the previous cwd/branch/status arrangement on narrow
+  terminals.
 - **Cleaner transcript start** — the message window no longer emits a blank
   line before the very first `You:` prompt, so the transcript does not start
   with a stray blank row.
@@ -724,6 +742,54 @@ As you implement tasks, ragent can update the spec status automatically:
 Specs are stored in the `specs/` directory by default. They are intended to be
 user-managed working documents, not part of the main git tree unless you choose
 to commit them.
+
+---
+
+## 7a. Scaffolding a new project with `/new`
+
+The **`/new`** slash command scaffolds a brand-new project in the current
+directory (it must be empty apart from ragent artifacts). The same surface is
+available as the `ragent new` CLI subcommand.
+
+### Scaffold a minimal project
+
+```text
+/new --language rust --type cmdline
+```
+
+The command streams each step into the message window as it completes
+(guard, file emission, git init, remote status), then prints a summary with
+the created files. Generated content:
+
+- the ragent workspace: `.ragent/`, `specs/`, `log/`, `.gitignore`, `AGENTS.md`
+- a runnable hello-world artifact set for any of the 26 supported application
+  languages (`rust`, `python`, `go`, `typescript`, `shell`, ...) in a
+  `library`, `cmdline`, `tui`, or `gui` layout, or sample-document stubs for
+  data and build formats (`json`, `yaml`, `sql`, `cmake`, `maven`, ...);
+  `/new help` lists every accepted value
+- starter docs: `README.md`, `QUICKSTART.md`, `STATS.md`, `docs/`
+- a git repository with an initial commit
+
+### Add hosting and stacks
+
+```text
+/new --language rust --type cmdline --stack axum --github
+```
+
+`--stack axum` layers an axum server starter over the base Rust layout
+(`warp`, `raylib`, `gtk4`, and `ratatui` are also known stacks); `--github` creates a private
+GitHub repository, sets it as `origin`, and pushes. Use `--gitlab` instead
+for GitLab. The two hosting flags are mutually exclusive, and a failed
+remote step never undoes the local scaffold.
+
+### Help
+
+```text
+/new help
+```
+
+Prints the usage page with the flag table and the supported language/type
+values (derived from the scaffolder's registries, so they cannot drift).
 
 ---
 

@@ -4,7 +4,8 @@
 //! - `prompt_display_text` truncation semantics (first 32 chars, `....`
 //!   suffix when longer, empty string for an empty prompt).
 //! - The tag renders in square brackets on the first status-bar line.
-//! - The tag is centred around the horizontal midpoint of the line.
+//! - The tag renders immediately after the `Branch: `-labelled git branch
+//!   section, as one group placed right after the cwd display.
 //! - No tag renders when no prompt has been submitted yet.
 
 use ragent_tui::layout_statusbar::prompt_display_text;
@@ -158,35 +159,67 @@ fn test_statusbar_renders_last_prompt_tag() {
     );
 }
 
+/// Deterministic cwd for layout tests: longer than the Full-mode 25-column
+/// pad so no filler padding is inserted between the path and the branch.
+const TEST_CWD: &str = "~/demo/a/very/long/project/path";
+
 #[test]
-fn test_statusbar_last_prompt_tag_is_centered() {
+fn test_statusbar_tag_group_follows_branch_after_cwd() {
     let mut app = support::make_app();
-    // 40-char prompt -> tag is "[<32 chars>....]" = 32 + 4 + 2 = 38 columns.
-    app.last_prompt = "x".repeat(40);
+    app.cwd = TEST_CWD.to_string();
+    app.last_prompt = "hello world".to_string();
+    app.git_branch = Some("main".to_string());
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
-    let tag = format!("[{}....]", "x".repeat(32));
-    let tag_width = tag.chars().count() as u16; // ASCII tag: chars == columns
-    let expected_start = (120u16 / 2).saturating_sub(tag_width / 2) as usize;
-    let found = char_col_of(line1, &tag);
+    let cwd_col = char_col_of(line1, TEST_CWD);
+    let branch_col = char_col_of(line1, "Branch: main");
+    let icon_end = char_col_of(line1, "Branch: main ●") + "Branch: main ●".chars().count();
+    let tag_col = char_col_of(line1, "[hello world]");
+    assert!(
+        cwd_col < branch_col,
+        "cwd (col {cwd_col}) must render before the branch label (col {branch_col}); \
+         line was: {line1}"
+    );
+    // Branch label sits immediately after the cwd path: one separator space.
     assert_eq!(
-        found, expected_start,
-        "tag must start at column {expected_start} so its midpoint sits on \
-         the line's centre (col 60); line was: {line1}"
+        branch_col,
+        cwd_col + TEST_CWD.len() + 1,
+        "branch label must render immediately after the cwd path; line was: {line1}"
+    );
+    assert!(
+        branch_col < tag_col,
+        "branch label (col {branch_col}) must render before the prompt tag \
+         (col {tag_col}); line was: {line1}"
+    );
+    // Tag sits immediately after the branch status icon: one separator space.
+    assert_eq!(
+        tag_col,
+        icon_end + 1,
+        "tag must render immediately after the branch section; line was: {line1}"
     );
 }
 
 #[test]
-fn test_statusbar_short_prompt_tag_is_centered() {
+fn test_statusbar_tag_group_shortens_cwd_to_fit() {
     let mut app = support::make_app();
-    // Short prompt: tag "[hello]" is 7 columns; centre start = 60 - 3 = 57.
-    app.last_prompt = "hello".to_string();
+    app.cwd = format!("~/{}/{}", "d".repeat(60), "e".repeat(40));
+    app.last_prompt = "x".repeat(40); // 38-column tag
+    app.git_branch = Some("main".to_string());
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
-    let found = char_col_of(line1, "[hello]");
-    assert_eq!(
-        found, 57,
-        "short tag must be centred around column 60; line was: {line1}"
+    let expected = format!("[{}....]", "x".repeat(32));
+    assert!(
+        line1.contains(&expected),
+        "tag must still render when the cwd is shortened; line was: {line1}"
+    );
+    assert!(
+        line1.contains("Branch: main"),
+        "branch label must render when the cwd is shortened; line was: {line1}"
+    );
+    let full_cwd = format!("~/{}/{}", "d".repeat(60), "e".repeat(40));
+    assert!(
+        !line1.contains(&full_cwd),
+        "over-long cwd must be shortened; line was: {line1}"
     );
 }
 
@@ -210,7 +243,7 @@ fn test_statusbar_branch_before_tag_and_cwd_before_branch() {
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
     let cwd_col = char_col_of(line1, "~/");
-    let branch_col = char_col_of(line1, "main");
+    let branch_col = char_col_of(line1, "Branch: main");
     let tag_col = char_col_of(line1, "[hello world]");
     assert!(
         cwd_col < branch_col,
@@ -222,13 +255,12 @@ fn test_statusbar_branch_before_tag_and_cwd_before_branch() {
         "git branch (col {branch_col}) must render before the prompt tag \
          (col {tag_col}); line was: {line1}"
     );
-    // Branch ends right before the tag: branch + status icon + gap of 1.
-    assert!(
-        tag_col - (branch_col + "main".len()) <= 4,
-        "tag must sit immediately after the branch section (gap {} cols); \
-         line was: {line1}",
-        tag_col - (branch_col + "main".len())
+    // Branch label sits immediately after the cwd path; the tag follows the
+    // branch section with a single separator space (no centring gap).
+    let icon_end = char_col_of(line1, "Branch: main ●") + "Branch: main ●".chars().count();
+    assert_eq!(
+        tag_col,
+        icon_end + 1,
+        "tag must sit immediately after the branch section; line was: {line1}"
     );
-    // Tag stays centred: midpoint = 60, tag width 13 -> start col 54.
-    assert_eq!(tag_col, 54, "tag must remain centred; line was: {line1}");
 }

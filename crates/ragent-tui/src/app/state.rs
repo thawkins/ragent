@@ -883,6 +883,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Reverse-engineer a GitHub repo: /reverse <owner/repo | URL> [--tech <stack>] [--create <name>]",
     },
     SlashCommandDef {
+        trigger: "new",
+        description: "Scaffold a new project: /new --language <lang> --type <type> [--stack <name>] [--github | --gitlab] | /new help",
+    },
+    SlashCommandDef {
         trigger: "autopilot",
         description: "Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] | off | status | help",
     },
@@ -1864,6 +1868,27 @@ pub struct App {
     pub bench_mock_outputs: Option<Vec<String>>,
     /// Pending result from an async `/opt` LLM call.
     pub opt_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// Shared progress lines from the foreground `/new` scaffold worker
+    /// (T-013/FR-014). The worker appends one line per scaffold step while
+    /// the UI thread drains them into the in-place-updated progress message;
+    /// the shared buffer is what keeps streamed steps visible without
+    /// blocking the event loop on the file-emission / git / remote work.
+    pub newproj_progress: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Rendered progress-panel text for the active scaffold run (T-013).
+    /// Updated on the UI thread; the message identified by
+    /// [`App::newproj_progress_slug`](Self::newproj_progress_slug) is
+    /// replaced in place so steps stream instead of stacking messages.
+    pub newproj_progress_text: Option<String>,
+    /// First-line tag (`Scaffolding `slug`…`) of the active scaffold
+    /// progress message (T-013). Used for the in-place message lookup.
+    pub newproj_progress_slug: Option<String>,
+    /// Pending `/new` scaffold outcome (T-013/FR-014): `Ok((FR-011 summary
+    /// text, stack warning note))` on completion, `Err(message)` on an
+    /// emission failure. Deposited by the worker thread, drained by
+    /// `poll_newproj_result` on the UI thread.
+    pub newproj_result: Arc<std::sync::Mutex<Option<Result<(String, String), String>>>>,
+    /// True while the `/new` scaffold worker thread is running (T-013).
+    pub newproj_running: bool,
     /// Pending result from an async compaction call: the replacement history
     /// (`[compaction, ...recent]`) on success, or the error message.
     pub compact_result: Arc<std::sync::Mutex<Option<Result<Vec<Message>, String>>>>,

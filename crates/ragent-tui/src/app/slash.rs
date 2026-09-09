@@ -241,6 +241,16 @@ impl App {
                     "--create".to_string(),
                 ]
             }
+            "new" => {
+                vec![
+                    "help".to_string(),
+                    "--language".to_string(),
+                    "--type".to_string(),
+                    "--stack".to_string(),
+                    "--github".to_string(),
+                    "--gitlab".to_string(),
+                ]
+            }
             "router" => {
                 vec![
                     "help".to_string(),
@@ -5866,6 +5876,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             // ── /reverse ────────────────────────────────────────────────
             "reverse" => {
                 self.handle_reverse_command(args);
+            }
+
+            // ── /new ────────────────────────────────────────────────────
+            "new" => {
+                self.handle_new_command(args);
             }
 
             // ── /spec ────────────────────────────────────────────────────────

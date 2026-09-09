@@ -1,5 +1,134 @@
 # Changelog
 
+## Version: 1.0.91
+
+Documentation update pass: full project docs refresh (`CHANGELOG.md`,
+`README.md`, `STATS.md`, `SPEC.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`)
+covering the scaffolding simplify work, regenerated crate statistics
+(436,219 Rust lines across 1,064 files, ~8,162 tests), the `/new`
+`plan_and_emit`/`register_origin_and_push` architecture captured in SPEC
+section 11A, and all 19 `docs/howtos/` manuals re-rendered to PDF
+(xelatex, A4, including the new `newproj.md.pdf`). No code behaviour change.
+
+Code-simplification pass (mode `all`) over the project-scaffolding feature and
+the status bar: the TUI `/new` command and the `ragent new` CLI subcommand now
+share a single `plan_and_emit()` engine function in
+`crates/ragent-tools-extended/src/project_scaffold/mod.rs` (returning the
+scaffold summary plus the stack note; each surface attaches its own
+git/hosting outcome lines), removing roughly 95 duplicated pipeline lines.
+The GitHub and GitLab remote flows in `project_scaffold/remote.rs` share a
+`register_origin_and_push(root, url)` helper, and the status-bar
+`prompt_display_text` renderer in `crates/ragent-tui/src/layout_statusbar.rs`
+is now single-pass (one `chars().take()` walk plus a one-character lookahead
+decides the `....` marker) instead of building the truncated string twice.
+The `run_scaffold_steps` helper in the TUI command dropped a redundant
+parameter (and its `too_many_arguments` allowance) as part of the
+`plan_and_emit` move. Verified with `cargo fmt --check`, `cargo check
+--workspace`, clippy on the touched crates, and the full scaffold engine,
+TUI `/new`, status-bar, and CLI `new` test suites.
+
+## Version: 1.0.90
+
+The status bar's top line now prefixes the git branch with a `Branch: ` label
+(e.g. `Branch: main`) and renders the branch + last-prompt tag as one group
+immediately after the `Project: `-labelled working directory — the tag is no
+longer independently centred, it follows the branch section with a single
+separator space. The working directory is shortened only when the group plus
+the right-hand session status would not otherwise fit (keeping a 12-column
+`MIN_CWD_SPAN` readable minimum); otherwise the natural cwd width is kept.
+The no-prompt fallback layout (cwd, gap, branch, status) is unchanged.
+
+The status bar's top line now prefixes the working directory with a
+`Project: ` label (e.g. `Project: ~/Projects/ragent`) so the cwd section is
+identifiable at a glance next to the git branch and centred last-prompt tag.
+The label participates in the existing width budgeting: when the tag is
+rendered, the path is shortened to make room for the label so the tag stays
+centred, and the Compact/Minimal responsive modes keep their shortened-path
+budgets with the label prepended.
+
+`/new` gained the `ratatui` stack (spec `newproj` FR-007): `--stack ratatui` on a
+Rust project appends `ratatui = "0.29"` and `crossterm = "0.28"` to `Cargo.toml`
+and layers a terminal-UI starter over the hello-world entry point — a ratatui
+`Terminal` on the crossterm backend that draws a `Hello, world!` `Paragraph`
+each frame and exits on the first key-press event. The stack registers in the
+same `STACK_RECIPES` registry as `axum`/`warp`/`raylib`/`gtk4`, so `/new help`
+stack examples, case-insensitive matching, and the warn-and-continue behaviour
+for unknown stacks are all derived automatically (NFR-001). Covered by a new
+overlay snippet test plus the registry-driven help and CLI/TUI assertions.
+
+Fixed the stack dependency append producing an unparseable `Cargo.toml`
+(applies to every Rust stack): the generated base manifest has no
+`[dependencies]` section, so appending `axum = "0.7"` etc. put the dependency
+lines under `[package]`. `apply_stack_overlay` now inserts a
+`[dependencies]` header before the first dependency line when the manifest
+does not already declare one; all five Rust stacks (axum, warp, raylib,
+gtk4, ratatui) emit a manifest that `cargo check` accepts, verified by
+smoke-testing generated projects.
+
+`/new` gained the `gtk4` stack (spec `newproj` FR-007): `--stack gtk4` on a
+Rust project appends `gtk4 = "0.9"` to `Cargo.toml` and layers a GTK 4
+starter over the hello-world entry point — a `gtk4::Application` builder
+with an application id, an `activate` handler that presents a titled
+`Hello, world!` window, and `app.run()`. The stack registers in the same
+`STACK_RECIPES` registry as `axum`/`warp`/`raylib`, so `/new help` stack
+examples, case-insensitive matching, and the warn-and-continue behaviour for
+unknown stacks are all derived automatically (NFR-001). Covered by a new
+overlay snippet test plus the registry-driven help and CLI/TUI assertions.
+
+`/new` language registry extended to the full codeindex scanner set
+(spec `newproj` FR-017): the scaffolder now accepts 46 canonical languages —
+the original 23 application languages plus 23 new recipes for `shell`, `zsh`,
+`fish` (full four-app-type hello-world sets: `sh`/`bash main.sh`, `zsh`,
+`fish` scripts), and 20 data/markup/build formats (`toml`, `yaml`, `json`,
+`xml`, `html`, `css`, `scss`, `sql`, `markdown`, `protobuf`, `verilog`,
+`vhdl`, `terraform`, `openscad`, `cmake`, `gradle`, `gradle_kts`, `maven`,
+`nix`, `hcl`) that scaffold a manifest plus `cmdline`/`library`
+`Hello, world!` sample documents, with `--type tui`/`--type gui` degrading to
+manifest-only layouts. Every id in the codeindex scanner's
+`SUPPORTED_LANGUAGES` list now resolves: scanner dialect ids `tsx`, `jsx`,
+`c_header`, and `cpp_header` map to their parent languages, with additional
+aliases (`sh`/`bash`, `yml`, `sv`, `vhd`, `tf`, `scad`, `kts`). Real build
+systems get canonical manifests (`pom.xml`, `build.gradle`,
+`build.gradle.kts`, `CMakeLists.txt`, `main.tf`, `index.html`, `NOTES.md` —
+never `README.md`, which the docs layer owns). The `/new help` page
+documents the stub vs. hello-world split and the full alias list; help
+value lists remain registry-derived so they cannot drift (NFR-001). New
+tests: registry-vs-codeindex parity, dialect-alias parsing, stub
+cmdline/library sampling, and registry-wide gitignore coverage.
+
+`/new help` detailed help renderer (spec `newproj` T-016, FR-018, NFR-001):
+bare `/new` and `/new help` now print a full help page — command purpose,
+per-argument documentation (`--language`, `--type`, `--stack`, `--github`,
+`--gitlab` each documented with name, one-line description, required/optional
+status, accepted values, and the default behaviour when omitted), and two
+worked example invocations (one minimal without hosting, one with a hosting
+flag). The accepted-value lists are derived from the scaffolder's language
+and app-type registries plus the `STACK_RECIPES` table, so help text cannot
+drift from what the command accepts (NFR-001). The page is rendered by a
+shared `project_scaffold::render_detailed_help` engine function used by both
+the TUI slash surface and the `ragent new` CLI surface (surface-specific
+usage lines and example spellings only); validation errors still append the
+same detailed page.
+
+Project scaffolding documentation (spec `newproj` T-015, FR-012): new how-to
+manual `docs/howtos/newproj.md` covering the `/new` slash command and the
+`ragent new` CLI surface — purpose and scope, quick start, command syntax with
+the flag table (`--language`, `--type`, `--stack`, `--github`/`--gitlab`),
+generated-content reference (workspace artifacts, per-language/type artifact
+matrix, stack layers, documentation scaffold), the empty-directory guard,
+GitHub/GitLab hosting flows with failure containment, progress streaming and
+the summary report, CLI equivalents, five end-to-end examples, and a
+troubleshooting table. README gains a Project Scaffolding section, the `new`
+entry in the CLI command list, and a feature bullet; SPEC.md gains section
+11A (Part III cross-reference in the table of contents) describing the
+scaffold pipeline and generated content plus a `10.12` pointer subsection,
+three long-standing unpaired/merged code fences were repaired (the
+beta-changelog JSON stanza and the two `specs/` tree blocks in SPEC.md, and a
+merged fence line in the QUICKSTART provider-setup block); QUICKSTART.md
+gains a "Scaffold a New Project" common workflow and `/new` rows in the
+slash-command table; TUI-QUICKSTART.md gains section 7a (scaffolding with
+`/new`) and a v1.0.89 highlight bullet.
+
 ## Version: 1.0.89
 
 Toolchain and sub-agent lifecycle polish on top of the v1.0.88 research-crate

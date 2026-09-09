@@ -4,8 +4,8 @@
 //! color coding and adaptive behavior across different terminal sizes.
 //!
 //! The status bar consists of two lines:
-//! - Line 1: Working directory (left), git branch + centred last-prompt tag,
-//!   session status (right)
+//! - Line 1: `Project:`-labelled working directory (left), `Branch:`-labelled
+//!   git branch + last-prompt tag immediately after it, session status (right)
 //! - Line 2: Provider info + context window + thinking level (left), token usage (center), service status (right)
 
 use ratatui::{
@@ -17,6 +17,14 @@ use ratatui::{
 
 use crate::app::App;
 use crate::utils::shorten_middle;
+
+/// Label rendered before the working-directory path on the top status-bar
+/// line (e.g. `Project: ~/Projects/ragent`).
+const PROJECT_LABEL: &str = "Project: ";
+
+/// Label rendered before the git branch name on the top status-bar line
+/// (e.g. `Branch: main`).
+const BRANCH_LABEL: &str = "Branch: ";
 
 /// Configuration for status bar rendering.
 #[derive(Debug, Clone, Default)]
@@ -223,8 +231,11 @@ pub fn prompt_display_text(prompt: &str, max_chars: usize) -> String {
     if prompt.is_empty() {
         return String::new();
     }
-    let mut text: String = prompt.chars().take(max_chars).collect();
-    if prompt.chars().count() > max_chars {
+    // Single pass: take up to `max_chars`, then a remaining-char probe on the
+    // same iterator decides the `....` marker (no second full-string scan).
+    let mut chars = prompt.chars();
+    let mut text: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
         text.push_str("....");
     }
     format!("[{text}]")
@@ -255,14 +266,14 @@ fn build_line1(
     // Left section: Working directory
     let left = build_line1_left(app, config, mode);
 
-    // Centered last-prompt tag: renders the first 32 characters of the most
-    // recent user prompt (plus `....` when truncated) in square brackets,
-    // positioned so the tag is centred around the horizontal midpoint of the
-    // line, immediately after the git-branch section. The branch is pulled
-    // right so it sits just before the tag, and the working-directory
-    // section is shortened when it would overlap the branch. Skipped when
-    // there is no prompt or the terminal is too narrow to fit the cwd,
-    // branch, tag, and status sections without clipping.
+    // Branch + last-prompt tag group: the `Branch: `-labelled git branch
+    // section followed by the last-prompt tag (first 32 characters of the
+    // most recent prompt, plus `....` when truncated, in square brackets),
+    // rendered as one group immediately after the working-directory section.
+    // The working-directory section is shortened when the group plus the
+    // right-hand status would not otherwise fit. Skipped when there is no
+    // prompt or the terminal is too narrow to fit the cwd, branch, tag, and
+    // status sections without clipping.
     let center = build_line1_center(app, config, mode);
     let center_width: u16 = center.iter().map(|s| s.width() as u16).sum();
 
@@ -278,42 +289,60 @@ fn build_line1(
     if !prompt_tag.is_empty() {
         use unicode_width::UnicodeWidthStr;
         let tag_width = prompt_tag.width() as u16;
-        // Column where the tag must start so its midpoint lands on width/2.
-        let tag_start = (width / 2).saturating_sub(tag_width / 2);
-        // The branch section sits immediately before the tag, separated by
-        // one space, and the cwd must keep a readable span between the
-        // prefix and the branch.
-        let branch_start = tag_start.saturating_sub(1).saturating_sub(center_width);
+        // The branch section and the tag render adjacently, separated by
+        // one space, as a single group placed immediately after the cwd
+        // section.
+        let group_width = center_width.saturating_add(1).saturating_add(tag_width);
+        // Widest the cwd section may render while keeping the group and the
+        // right-hand status inside the terminal width.
+        let max_cwd_span = width
+            .saturating_sub(prefix_width)
+            .saturating_sub(group_width)
+            .saturating_sub(right_width);
+        let natural_total = prefix_width
+            .saturating_add(left_width)
+            .saturating_add(group_width)
+            .saturating_add(right_width);
+        let cwd_fits_natural = natural_total <= width;
         // Minimum readable span width for the shortened cwd section.
         const MIN_CWD_SPAN: u16 = 12;
-        let cwd_span_budget = branch_start.saturating_sub(prefix_width);
-        let tag_fits = tag_start
-            .saturating_add(tag_width)
-            .saturating_add(right_width)
-            <= width
-            && cwd_span_budget >= MIN_CWD_SPAN;
-        if tag_fits {
-            // Shorten the working directory so it ends where the branch
-            // begins, keeping the tag centred.
-            let text_budget = (cwd_span_budget - 2) as usize;
-            let cwd_text = shorten_path(&app.cwd, text_budget);
-            spans.push(Span::styled(
-                format!(" {:<width$} ", cwd_text, width = text_budget),
-                Style::default().fg(colors::TEXT),
-            ));
-            // Branch section, then the centred tag right after it.
+        if cwd_fits_natural || max_cwd_span >= MIN_CWD_SPAN {
+            let cwd_span = if cwd_fits_natural {
+                left_width
+            } else {
+                max_cwd_span
+            };
+            if cwd_fits_natural {
+                spans.extend(left.clone());
+            } else {
+                // Shorten the working directory (including the `Project: `
+                // label) so the branch + tag group and the status fit.
+                let text_budget = (cwd_span - 2) as usize;
+                let label_budget = text_budget.saturating_sub(PROJECT_LABEL.len());
+                let cwd_text = shorten_path(&app.cwd, label_budget);
+                spans.push(Span::styled(
+                    format!(
+                        " {:<width$} ",
+                        format!("{PROJECT_LABEL}{cwd_text}"),
+                        width = text_budget
+                    ),
+                    Style::default().fg(colors::TEXT),
+                ));
+            }
+            // Branch + tag group, immediately after the cwd section.
             spans.extend(center.clone());
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
-                prompt_tag,
+                prompt_tag.clone(),
                 Style::default()
                     .fg(colors::IN_PROGRESS)
                     .add_modifier(Modifier::BOLD),
             ));
-            // Pad between the tag end and the right-hand status section.
-            let gap = width
-                .saturating_sub(tag_start.saturating_add(tag_width))
-                .saturating_sub(right_width);
+            // Pad between the group end and the right-hand status section.
+            let used = prefix_width
+                .saturating_add(cwd_span)
+                .saturating_add(group_width);
+            let gap = width.saturating_sub(used).saturating_sub(right_width);
             if gap > 0 {
                 spans.push(Span::raw(" ".repeat(gap as usize)));
             }
@@ -436,15 +465,20 @@ fn build_line1_left(
     };
 
     spans.push(Span::styled(
-        format!(" {:<width$} ", path, width = pad_width),
+        format!(
+            " {:<width$} ",
+            format!("{PROJECT_LABEL}{path}"),
+            width = pad_width
+        ),
         Style::default().fg(colors::TEXT),
     ));
 
     spans
 }
 
-/// Build Line 1 git-branch section: rendered immediately before the centred
-/// last-prompt tag.
+/// Build Line 1 git-branch section: the `Branch: `-labelled branch name and
+/// status icon, rendered immediately after the working-directory section and
+/// directly before the last-prompt tag.
 fn build_line1_center(
     app: &App,
     _config: &StatusBarConfig,
@@ -456,7 +490,7 @@ fn build_line1_center(
         let (status_icon, status_color) = get_git_status_indicator();
 
         spans.push(Span::styled(
-            format!("{} ", branch),
+            format!("{BRANCH_LABEL}{} ", branch),
             Style::default().fg(colors::TEXT),
         ));
         spans.push(Span::styled(

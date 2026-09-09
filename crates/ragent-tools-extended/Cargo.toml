@@ -45,7 +45,7 @@ ratatui-plt = { version = "0.0.2", default-features = false }
 ratatui = "0.30"
 base64 = { workspace = true }
 
-reqwest = { workspace = true, features = ["cookies", "gzip", "deflate"] }
+reqwest = { workspace = true, features = ["cookies", "gzip", "deflate", "blocking"] }
 tokio-tungstenite = { workspace = true }
 regex = { workspace = true }
 docx-rust = { workspace = true }
@@ -65,6 +65,7 @@ lingua = { workspace = true }
 [dev-dependencies]
 tempfile = "3.14"
 axum = { workspace = true }
+wiremock = "0.6"
 
 [dependencies.ort]
 workspace = true

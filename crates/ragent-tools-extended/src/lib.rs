@@ -38,6 +38,7 @@ pub mod office_write;
 pub mod pdf_read;
 pub mod pdf_write;
 pub mod plot;
+pub mod project_scaffold;
 pub mod task;
 pub mod webfetch;
 pub mod websearch;

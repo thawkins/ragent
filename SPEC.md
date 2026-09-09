@@ -1,7 +1,7 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.89</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.91</p>
         <p style="font-size: 1.1em;">
           <strong>Date:</strong> 2026-09-08
       </p>
@@ -200,6 +200,7 @@ current state of all subsystems.
 9. [Memory System](#memory-system)
 10. [Spec Management](#spec-management)
 11. [Research System](#research-system)
+11A. [Project Scaffolding (`/new`)](#11a-project-scaffolding-new)
 
 ### Part IV: Agent Customization & Extension
 
@@ -1491,7 +1492,7 @@ requirements, and implementation tasks.
 
 Specs live in `specs/<SpecId>/`:
 
-```
+```text
 specs/
 └── testspec/
     ├── SPEC.md          # EARS requirements and status
@@ -1640,6 +1641,16 @@ When a spec directory contains a `CONSTITUTION.md`, amendments require
 explicit rationale documentation, a backwards-compatibility assessment, and
 a dated changelog entry within the file. The constitution parser validates
 the nine-article structure and the amendment process.
+
+### 10.12 Project Scaffolding (`/new`)
+
+The `/new` slash command scaffolds a new project in the current working
+directory (spec `newproj`); see section 11A for the full behaviour. The
+pipeline is flag validation -> empty-directory guard -> no-silent-overwrite
+file emission -> git init + initial commit -> optional GitHub/GitLab remote
+create + push with failure containment -> summary report. In the TUI the
+blocking emit/git/remote steps run on a worker thread while streamed
+progress lines update a single in-place progress message.
 
 ---
 
@@ -1929,6 +1940,50 @@ sources per the depth preset) instead of defaulting to the 500-source
 ceiling; `--depth` therefore bounds web volume by default.
 
 ---
+
+## 11A. Project Scaffolding (`/new`)
+
+The `/new` slash command (and the `ragent new` CLI subcommand / `ragent run
+"/new ..."` surface) scaffolds a new project in the current working
+directory (spec `newproj`). The pipeline is: flag validation (`--language`
+rust/python/go/typescript, `--type` library/cmdline/tui/gui, optional
+`--stack`, mutually exclusive `--github`/`--gitlab`) -> empty-directory
+guard (refuses non-empty targets; ragent artifacts `.ragent/`, `log/`,
+`target/` are allowlisted) -> file emission with no silent overwrite
+(existing files are reported and left untouched) -> local git init + initial
+commit -> optional GitHub/GitLab remote create + push with failure
+containment (a failed remote step never undoes the local scaffold; an
+existing remote repository is reused instead of failing) -> summary report
+(created layout, generated files, language/type/stack, git outcome, remote
+status).
+
+Generated content: the ragent workspace (`.ragent/config.json`,
+`.ragent/agents/README.md`, `specs/README.md`, `log/`, language-specific
+`.gitignore`, `AGENTS.md` stub), a runnable hello-world artifact set from
+per-language recipes (`Cargo.toml`/`src/main.rs`, `pyproject.toml`/`main.py`,
+`go.mod`/`main.go`, `package.json`/`src/main.ts`; `library` types swap the
+binary entry for `src/lib.rs` / `src/<name>/__init__.py` / `<name>.go` /
+`src/index.ts`), optional stack overlays (Rust: `axum`, `warp`, `raylib`;
+unknown stacks warn and fall back to the base layout), and the documentation
+scaffold (`README.md`, `QUICKSTART.md`, `STATS.md`, `docs/`) rendered from
+the same recipe data as the code artifacts. In the TUI the command runs as a
+foreground operation with streamed progress lines in the message window (a
+worker thread performs the blocking emit/git/remote steps; no sub-agent and
+no LLM turn is involved). `/new help` (and bare `/new`) prints a usage page
+whose language/type value lists are derived from the scaffolder's own
+registries. See `docs/howtos/newproj.md` for the user manual.
+
+The TUI and CLI surfaces share one pipeline engine:
+`project_scaffold::plan_and_emit()` in
+`crates/ragent-tools-extended/src/project_scaffold/mod.rs` performs flag
+validation, the empty-directory guard, file emission, stack overlay, and
+git init, returning the scaffold summary plus the stack note; each surface
+then attaches only its own git/hosting outcome lines to the streamed
+progress. The GitHub and GitLab flows share a
+`register_origin_and_push(root, url)` helper in `project_scaffold/remote.rs`.
+
+---
+
 # Part IV: Agent Customization & Extension
 
 ---
@@ -3063,6 +3118,7 @@ still override per run with the corresponding flags.
 - Doctest build breakages in `session::permissions` and `tool::ToolRegistry`
 - TUI read-tool header now uses pending args when `ToolCallStart` is dropped, and shows `📄 missing path` for malformed calls
 - `RUSTSEC-2025-0052` (`async-std` discontinued) advisory ignored in `cargo-deny` configuration (beta.26)
+```jsonc
     "tool_visibility": {
       "office": true,
       "github": true,
@@ -3524,7 +3580,7 @@ requirements, and implementation tasks.
 
 Specs live in `specs/<SpecId>/`:
 
-```
+```text
 specs/
 └── testspec/
     ├── SPEC.md          # EARS requirements and status

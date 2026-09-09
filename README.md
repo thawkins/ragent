@@ -114,6 +114,17 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   prompt; optional `--tech <stack>` constrains the technology stack and
   `--create <name>` chains into `/spec create` to auto-generate a spec from
   the reverse-engineered prompt
+- **Project scaffolding** — `/new --language <lang> --type <type>` scaffolds a
+  new project in an empty directory: the ragent workspace (`.ragent/`, `specs/`,
+  `log/`, `.gitignore`, `AGENTS.md`), a runnable hello-world artifact set for
+  26 application languages (rust, python, go, typescript, shell, ...) with
+  library/cmdline/tui/gui layouts plus sample-document stubs for 20 data,
+  markup, and build formats (json, yaml, sql, cmake, maven, ...) covering every
+  codeindex scanner language, optional
+  stack layers (`--stack axum`), starter docs (`README.md`, `QUICKSTART.md`,
+  `STATS.md`, `docs/`), git init + initial commit, and optional GitHub/GitLab
+  remote creation + push (`--github`/`--gitlab`); progress streams live in the
+  message window; also available as the `ragent new` CLI subcommand
 - **Research system** — `/research` slash command family and `ragent research` CLI for
   structured information gathering (web search + local file cross-referencing) with
   self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints
@@ -195,6 +206,7 @@ Commands:
   auth     Configure provider authentication
   models   List available models
   config   Show resolved configuration
+  new      Scaffold a new project in the current directory
 
 Options:
       --model <MODEL>          Override model (provider/model format)
@@ -305,6 +317,37 @@ curl -s -X POST http://localhost:9100/opt \
   -d '{"method":"co_star","prompt":"Explain Rust lifetimes"}'
 ```
 
+## Project Scaffolding
+
+Scaffold a brand-new, agent-friendly project in an empty directory with one
+command:
+
+```bash
+# TUI
+/new --language rust --type cmdline
+
+# CLI
+ragent new --language rust --type cmdline
+```
+
+The command validates the directory is empty, generates the ragent workspace
+(`.ragent/`, `specs/`, `log/`, `.gitignore`, `AGENTS.md`), a runnable
+hello-world artifact set for `rust`/`python`/`go`/`typescript` in
+`library`/`cmdline`/`tui`/`gui` layouts, starter documentation (`README.md`,
+`QUICKSTART.md`, `STATS.md`, `docs/`), initialises git with an initial
+commit, and — with `--github` or `--gitlab` — creates a private hosting
+repository, sets it as `origin`, and pushes.
+
+```bash
+# Add a framework stack (Rust: axum, warp, raylib, gtk4, ratatui)
+ragent new --language rust --type cmdline --stack axum
+
+# Create the project on GitHub or GitLab (mutually exclusive)
+ragent new --language python --type library --gitlab
+```
+
+See [`docs/howtos/newproj.md`](docs/howtos/newproj.md) for the full manual.
+
 ## Teams
 
 Teams let one lead session coordinate multiple teammates with shared tasks and
@@ -398,11 +441,19 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.89** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.91** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **Scaffold + status-bar simplify pass (v1.0.90)** — the `/new` TUI command
+  and the `ragent new` CLI subcommand now share one `plan_and_emit()`
+  pipeline in the `project_scaffold` engine module (each surface attaches
+  only its own git/hosting outcome lines), the GitHub/GitLab remote flows
+  share a `register_origin_and_push` helper, and the status-bar last-prompt
+  renderer is single-pass. No behaviour change; ~135 duplicated lines
+  removed across the scaffolder and status bar.
 
 - **Research-crate simplify pass (v1.0.88)** — a `/simplify` audit over
   all `ragent-research` sources fixed a `parse_subject_summary` slice panic

@@ -33,7 +33,8 @@ Ragent needs at least one LLM provider. The easiest way is via the **interactive
 
 ```bash
 ragent        # launch ragent
-                               # press 'p' to open the provider setup dialog```
+# press 'p' to open the provider setup dialog
+```
 
 The dialog walks you through:
 1. **Selecting a provider** (Anthropic, OpenAI, Google Gemini, Hugging Face, GitHub Copilot, Amazon Bedrock, OpenRouter, or Ollama)
@@ -1095,6 +1096,40 @@ EOF
 ragent run "Add input validation to the create_user endpoint"
 ```
 
+### Scaffold a New Project
+
+The `/new` command (TUI) and `ragent new` (CLI) scaffold a brand-new,
+agent-friendly project in an **empty** directory:
+
+```bash
+mkdir my-project && cd my-project
+
+# TUI
+/new --language rust --type cmdline
+
+# or CLI
+ragent new --language rust --type cmdline
+```
+
+The scaffold generates the ragent workspace (`.ragent/`, `specs/`, `log/`,
+`.gitignore`, `AGENTS.md`), a runnable hello-world artifact set for 26
+application languages (`rust`, `python`, `go`, `typescript`, `shell`, ...) in
+`library`/`cmdline`/`tui`/`gui` layouts plus sample-document stubs for data,
+markup, and build formats (`json`, `yaml`, `sql`, `cmake`, `maven`, ...) —
+run `/new help` for the full list —
+starter documentation (`README.md`, `QUICKSTART.md`, `STATS.md`, `docs/`),
+and a git repository with an initial commit. Add `--github` or `--gitlab`
+(mutually exclusive) to also create a private hosting repository and push;
+add `--stack axum`/`--stack gtk4`/`--stack ratatui` (Rust) to layer a framework starter on top. In the TUI the
+scaffold steps stream into the message window as they complete.
+
+```bash
+# Rust web service starter, pushed to GitHub
+ragent new --language rust --type cmdline --stack axum --github
+```
+
+See [`docs/howtos/newproj.md`](docs/howtos/newproj.md) for the full manual.
+
 ### Research → Spec → Implement
 
 The `ragent research` workflow lets you gather information on a topic
@@ -1290,6 +1325,8 @@ Type `/` in the input to open an autocomplete menu:
 | `/spec feedback <name> <note>` | Append a production feedback note to FEEDBACK.md |
 | `/spec jtbd <name> [--force] [--agent <name>]` | Perform JTBD analysis on an existing spec |
 | `/spec list \|search \|show \|validate \|status \|task` | Spec lifecycle commands |
+| `/new --language <lang> --type <type> [--stack <name>] [--github\|--gitlab]` | Scaffold a new project in the current directory (46 canonical languages spanning the codeindex scanner set, from rust/python to json/sql/cmake; library/cmdline/tui/gui; optional GitHub/GitLab hosting + push) |
+| `/new help` | Show `/new` usage, flag table, and supported values |
 
 ### New in v1.0.79
 
@@ -1632,6 +1669,16 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.90
+
+Internal code-simplification release; no user-visible behaviour change. The
+`/new` scaffolding pipeline (TUI and CLI) and the status-bar renderer were
+refactored onto shared engine functions (`plan_and_emit`,
+`register_origin_and_push`, single-pass `prompt_display_text`), removing
+roughly 135 duplicated lines. All command syntax, configuration keys, and
+outputs are unchanged — see the v1.0.89 highlights below for the most recent
+behaviour changes.
+
 ## Version 1.0.89
 
 Changes in and on top of v1.0.88 (the research-crate simplify pass), summarised
@@ -1654,9 +1701,10 @@ the v1.0.86 spec-system documentation pass), summarised for quickstart
 relevance:
 
 - **Status bar last-prompt tag** — the top status line now shows the most
-  recently submitted prompt as a centred bracketed tag (first 32 characters,
-  with `....` appended when truncated) between the git branch and the session
-  status. The tag covers chat messages, slash commands, bang commands, and
+  recently submitted prompt as a bracketed tag (first 32 characters,
+  with `....` appended when truncated) immediately after the `Branch: `
+  -labelled git branch, as one group placed right after the working
+  directory. The tag covers chat messages, slash commands, bang commands, and
   `/loop` goals. When the terminal is too narrow to fit the working
   directory, branch, tag, and status sections, the layout falls back to the
   previous arrangement. No configuration changes.

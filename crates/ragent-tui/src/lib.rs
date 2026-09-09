@@ -764,6 +764,9 @@ pub async fn run_tui(
         // Check for completed /opt LLM results.
         app.poll_pending_opt();
 
+        // Stream /new scaffold progress and surface the finished summary.
+        app.poll_newproj_result();
+
         // Check for completed off-thread codeindex graph builds / reindexes.
         app.poll_codeindex_bg_result();
 
