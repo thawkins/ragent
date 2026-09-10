@@ -248,7 +248,14 @@ with OpenCode's `opencode.json`.
         "auto": true,
         "threshold": 0.7,
         "buffer": 0.10,
-        "keep": { "tokens": 0.20 }
+        "keep": { "tokens": 0.20 },
+        // Optional: route compaction to a fast/cheap model instead of the
+        // session's primary model. Default: session model.
+        // "model": { "provider_id": "ollama", "model_id": "qwen2.5:1.5b" },
+        // Optional: cap summary output tokens (default 1500) and per-tool-output
+        // truncation in the compaction prompt (default 2000).
+        // "summary_tokens": 1500,
+        // "tool_output_max_chars": 2000
       },
       "tool_visibility": {    "office": true,
     "github": true,
@@ -441,7 +448,7 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.91** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.93** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 

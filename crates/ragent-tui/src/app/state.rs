@@ -997,6 +997,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Activity log: /alog help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes",
     },
     SlashCommandDef {
+        trigger: "toolchain",
+        description: "Language toolchain report: /toolchain list [lang] [--json] | /toolchain help",
+    },
+    SlashCommandDef {
         trigger: "blueprints",
         description: "List installed team blueprints: /blueprints help|list",
     },
@@ -2195,12 +2199,6 @@ pub struct SpecImplState {
     /// sequential driver can advance through the original execution order
     /// without rebuilding the runner after every task.
     pub runner: ragent_specs::SpecImplRunner,
-    /// Mapping from milestone name to the parent session task ID created for it.
-    pub milestone_parent_tasks: std::collections::HashMap<String, String>,
-    /// Mapping from spec task ID to the session subtask ID created for it.
-    pub spec_task_to_session_task: std::collections::HashMap<String, String>,
-    /// Mapping from session subtask ID back to milestone name.
-    pub session_task_to_milestone: std::collections::HashMap<String, String>,
 }
 
 /// Specialised agent behaviour modes (M2 Task 2.3).

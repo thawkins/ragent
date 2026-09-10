@@ -37,11 +37,6 @@
 //! When a previous compaction summary exists, the prompt asks the model to
 //! update it rather than recreate it from scratch.
 
-/// Default maximum tokens to request for a compaction summary.
-///
-/// Matches OpenCode's `SUMMARY_OUTPUT_TOKENS`.
-pub const SUMMARY_OUTPUT_TOKENS: usize = 4_096;
-
 /// The Markdown template the LLM must fill in. Keep the section order unchanged.
 const SUMMARY_TEMPLATE: &str = r#"Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 <template>

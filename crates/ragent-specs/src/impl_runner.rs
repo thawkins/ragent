@@ -289,9 +289,10 @@ impl SpecImplRunner {
             task.id, task.title, task.requirement,
         ));
         prompt.push_str(&format!(
-            "Implement this task now. After completing it, you MUST use the \
-             `spec_task_update` tool with spec_id=\"{spec}\", \
-             task_id=\"{id}\", status=\"completed\". \
+            "Implement this task now. BEFORE starting work, you MUST use the \
+             `spec_task_update` tool with spec_id=\"{spec}\", task_id=\"{id}\", \
+             status=\"in_progress\". After completing it, you MUST use the \
+             same tool with status=\"completed\". \
              If the task cannot be completed, mark it as `blocked` with the \
              same tool.\n",
             spec = spec_name,
@@ -416,9 +417,11 @@ impl SpecImplRunner {
         );
 
         prompt.push_str(&format!(
-            "After completing this task, use `spec_task_update` \
+            "At the start of this task, use `spec_task_update` \
+             with spec_id=\"{}\", task_id=\"{}\", status=\"in_progress\". \
+             After completing this task, use `spec_task_update` \
              with spec_id=\"{}\", task_id=\"{}\", status=\"completed\".\n",
-            spec_name, task.id
+            spec_name, task.id, spec_name, task.id
         ));
 
         prompt

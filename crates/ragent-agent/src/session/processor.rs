@@ -63,12 +63,14 @@ const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(2000); // ≈ 33m 20
 /// ("Now let me check …") as a text-only message without a tool call, causing
 /// the loop to treat it as the final answer — even though no findings report
 /// was ever produced. This nudge asks the model to emit its complete findings
-/// immediately so the deliverable is not lost.
+/// immediately and then end the run with `agent_complete` (the mandatory
+/// sub-agent completion signal) so the deliverable is not lost.
 const SUBAGENT_SUMMARY_NUDGE: &str = "System note: you stopped calling tools \
      and produced a short narrative message instead of your findings report. \
-     Do NOT call any more tools. Produce your complete written findings report \
-     NOW — all issues, ranked by impact, with file, line numbers, and \
-     concrete fixes. This is the deliverable.";
+     Do NOT call any other tools. Produce your complete written findings \
+     report NOW — all issues, ranked by impact, with file, line numbers, and \
+     concrete fixes. This is the deliverable. Then end your run with \
+     agent_complete(summary: \"<the findings>\") as your final action.";
 
 /// Sub-agent responses shorter than this many bytes after tool-use steps
 /// are treated as narration, not findings, and trigger a summary nudge.
@@ -2008,6 +2010,13 @@ impl SessionProcessor {
                         .find(|m| m.role == Role::Compaction)
                         .map(|m| m.text_content());
                     compaction_attempted_this_turn = true;
+                    if turn.session_config.compaction.model.is_some() {
+                        self.event_bus.publish(Event::AgentNotice {
+                            session_id: session_id.to_string(),
+                            message: "compact.model override currently applies only to /compact and                                       loop-steps compaction; the pre-send path uses the session model"
+                                .to_string(),
+                        });
+                    }
                     let compact_result = crate::compaction::compact(
                         session_id,
                         messages,
@@ -2020,6 +2029,11 @@ impl SessionProcessor {
                         &self.event_bus,
                         "auto",
                         &self.stream_config,
+                        // In-loop compaction runs mid-turn with no caller
+                        // supplied cancel flag; a fresh never-set flag keeps
+                        // the cooperative-cancel API uniform without breaking
+                        // the turn-level cancellation semantics.
+                        &std::sync::atomic::AtomicBool::new(false),
                     )
                     .await;
                     match compact_result {

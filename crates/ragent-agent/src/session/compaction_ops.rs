@@ -19,6 +19,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, bail};
 use tracing::{info, warn};
 
+use std::sync::Arc;
+
 use crate::agent::{AgentInfo, AgentMode, ModelRef};
 use crate::compaction::CompactionOutcome;
 use crate::message::Role;
@@ -67,29 +69,6 @@ impl SessionProcessor {
             bail!("compaction cancelled");
         }
 
-        // Resolve the LLM client exactly as an agent turn would — reusing the
-        // warm per-(provider, model) client cache — but with a synthetic
-        // subagent agent that carries no prompt, no thinking config, and a
-        // one-step bound. `prepare_client` publishes `AgentError` +
-        // `MessageEnd` itself on failure, so TUI/server error surfacing keeps
-        // working.
-        let profiler = crate::session::profiler::agent_loop_profiler();
-        let mut compaction_agent = AgentInfo::new(
-            "compaction",
-            "One-shot context compaction summariser (not user-selectable)",
-        );
-        compaction_agent.mode = AgentMode::Subagent;
-        compaction_agent.max_steps = Some(1);
-        compaction_agent.temperature = Some(0.2);
-        compaction_agent.model = Some(model_ref.clone());
-        let turn = self
-            .prepare_client(session_id, "compaction", &compaction_agent, &profiler)
-            .await?;
-
-        if cancel.load(Ordering::Relaxed) {
-            bail!("compaction cancelled");
-        }
-
         // Load the persisted history the compaction runner operates on.
         let messages: Vec<crate::message::Message> = {
             let sid = session_id.to_string();
@@ -104,33 +83,97 @@ impl SessionProcessor {
             .find(|m| m.role == Role::Compaction)
             .map(|m| m.text_content());
 
+        let cfg = self.load_config_cached();
+
+        // Resolve the model used for the summarisation call: the explicit
+        // `compaction.model` override wins over the session's primary model so
+        // users can point compaction at a fast/cheap model.
+        let effective_model_ref: ModelRef = match cfg.compaction.model.as_ref() {
+            Some(override_ref) => ModelRef {
+                provider_id: override_ref.provider_id.clone(),
+                model_id: override_ref.model_id.clone(),
+            },
+            None => model_ref.clone(),
+        };
+
         // Resolve the context window the same way `build_turn_chat_messages`
         // does (128k fallback for virtual/unknown windows).
         let context_window = self
             .provider_registry
-            .get(&model_ref.provider_id)
+            .get(&effective_model_ref.provider_id)
             .and_then(|p| {
                 p.default_models()
                     .into_iter()
-                    .find(|m| m.id == model_ref.model_id)
+                    .find(|m| m.id == effective_model_ref.model_id)
             })
             .map(|m| m.context_window)
             .filter(|w| *w > 0)
             .unwrap_or(128_000);
 
-        let cfg = self.load_config_cached();
+        let compaction_client: Arc<dyn crate::llm::LlmClient> = if cfg.compaction.model.is_some() {
+            // Build a fresh client for the override model (the provider may
+            // differ from the session's client). The API key resolution is
+            // identical to the main agent path.
+            let provider = self
+                .provider_registry
+                .get(&effective_model_ref.provider_id)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "compaction model provider '{}' is not registered",
+                        effective_model_ref.provider_id
+                    )
+                })?;
+            let api_key = self
+                .resolve_api_key(&effective_model_ref.provider_id)
+                .await?;
+            Arc::from(
+                provider
+                    .create_client(&api_key, None, &std::collections::HashMap::new())
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "failed to create compaction client for '{}': {e}",
+                            effective_model_ref.model_id
+                        )
+                    })?,
+            )
+        } else {
+            // Reuse the warm per-(provider, model) client cache via a synthetic
+            // subagent agent that carries no prompt, no thinking config, and a
+            // one-step bound. `prepare_client` publishes `AgentError` +
+            // `MessageEnd` itself on failure, so TUI/server error surfacing
+            // keeps working.
+            let profiler = crate::session::profiler::agent_loop_profiler();
+            let mut compaction_agent = AgentInfo::new(
+                "compaction",
+                "One-shot context compaction summariser (not user-selectable)",
+            );
+            compaction_agent.mode = AgentMode::Subagent;
+            compaction_agent.max_steps = Some(1);
+            compaction_agent.temperature = Some(0.2);
+            compaction_agent.model = Some(model_ref.clone());
+            self.prepare_client(session_id, "compaction", &compaction_agent, &profiler)
+                .await?
+                .client
+        };
+
+        if cancel.load(Ordering::Relaxed) {
+            bail!("compaction cancelled");
+        }
+
         let outcome = crate::compaction::compact(
             session_id,
             messages,
-            &model_ref.model_id,
+            &effective_model_ref.model_id,
             context_window,
             0,
             &cfg.compaction,
             previous_summary.as_deref(),
-            &turn.client,
+            &compaction_client,
             &self.event_bus,
             reason,
             &self.stream_config,
+            cancel,
         )
         .await?;
 

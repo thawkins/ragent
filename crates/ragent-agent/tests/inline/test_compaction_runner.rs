@@ -15,7 +15,8 @@ use ragent_types::message::{Message, Role};
 
 use crate::compaction::runner::{
     MAX_COMPACTION_PROMPT_CHARS, build_compaction_message, build_summary_request,
-    cap_head_transcript, compact, floor_char_boundary, select, summarize_via_client,
+    cap_head_transcript, compact, compaction_prompt_cap, floor_char_boundary,
+    resolve_compaction_model, select, summarize_via_client,
 };
 
 fn user_msg(text: &str) -> Message {
@@ -122,7 +123,7 @@ fn test_build_compaction_message_has_compaction_role() {
 
 #[test]
 fn test_build_summary_request_is_single_user_message_no_tools() {
-    let req = build_summary_request("claude-sonnet", "summarise this", 4096, Some(120));
+    let req = build_summary_request("claude-sonnet", "summarise this", 4096, Some(120), None);
     assert_eq!(req.model, "claude-sonnet");
     assert_eq!(req.messages.len(), 1);
     assert_eq!(req.messages[0].role, "user");
@@ -136,13 +137,14 @@ fn test_build_summary_request_is_single_user_message_no_tools() {
 async fn test_summarize_via_client_collects_text_deltas() {
     let client: Arc<dyn LlmClient> =
         Arc::new(MockLlmClient::with_scenario(MockScenario::SimpleTextReply));
-    let request = build_summary_request("mock-model", "summarise", 4096, None);
+    let request = build_summary_request("mock-model", "summarise", 4096, None, None);
     let summary = summarize_via_client(
         &client,
         request,
         &StreamConfig::default(),
         &EventBus::new(8),
         "sess",
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .await
     .unwrap();
@@ -168,13 +170,14 @@ impl LlmClient for ErrorClient {
 #[tokio::test]
 async fn test_summarize_via_client_propagates_error_event() {
     let client: Arc<dyn LlmClient> = Arc::new(ErrorClient);
-    let request = build_summary_request("mock", "x", 4096, Some(60));
+    let request = build_summary_request("mock", "x", 4096, Some(60), None);
     let result = summarize_via_client(
         &client,
         request,
         &StreamConfig::default(),
         &EventBus::new(8),
         "sess",
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .await;
     assert!(result.is_err());
@@ -218,6 +221,7 @@ async fn test_compact_replaces_history_with_summary_and_recent() {
         &bus,
         "auto",
         &StreamConfig::default(),
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .await
     .expect("compact should succeed");
@@ -273,6 +277,7 @@ async fn test_compact_bails_when_nothing_to_summarise() {
         &bus,
         "auto",
         &StreamConfig::default(),
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .await;
     assert!(result.is_err());
@@ -310,6 +315,7 @@ async fn test_compact_bails_on_empty_summary() {
         &bus,
         "auto",
         &StreamConfig::default(),
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .await;
     assert!(result.is_err());
@@ -344,6 +350,7 @@ async fn test_compact_publishes_started_and_finished_events() {
         &bus,
         "auto",
         &StreamConfig::default(),
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .await
     .unwrap();
@@ -366,7 +373,7 @@ async fn test_compact_publishes_started_and_finished_events() {
 #[test]
 fn test_cap_head_transcript_short_input_returned_unchanged() {
     let text = "short transcript".to_string();
-    assert_eq!(cap_head_transcript(&text), text);
+    assert_eq!(cap_head_transcript(&text, 100_000), text);
 }
 
 #[test]
@@ -374,7 +381,7 @@ fn test_cap_head_transcript_truncates_long_ascii_with_marker() {
     // 2x the cap of ASCII content must be truncated with a marker prefix and
     // still end at the newest content.
     let text = "x".repeat(2 * MAX_COMPACTION_PROMPT_CHARS);
-    let out = cap_head_transcript(&text);
+    let out = cap_head_transcript(&text, 100_000);
     assert!(out.starts_with("[Earlier conversation omitted due to length]\n\n"));
     assert!(out.len() <= MAX_COMPACTION_PROMPT_CHARS);
 }
@@ -387,7 +394,7 @@ fn test_cap_head_transcript_does_not_panic_on_multibyte_boundary() {
     let unit = format!("{}\n", "\u{2500}".repeat(100)); // 100 x '─' + '\n'
     let text = unit.repeat(MAX_COMPACTION_PROMPT_CHARS / unit.len() + 4);
     assert!(text.len() > MAX_COMPACTION_PROMPT_CHARS);
-    let out = cap_head_transcript(&text);
+    let out = cap_head_transcript(&text, 100_000);
     assert!(out.starts_with("[Earlier conversation omitted due to length]\n\n"));
     // Result must still be valid UTF-8 (it is a String by construction) and
     // must not lose the trailing content.
@@ -406,4 +413,133 @@ fn test_floor_char_boundary_snaps_back_to_char_start() {
     assert_eq!(floor_char_boundary(s, 6), 6);
     // Past-the-end indexes clamp to len.
     assert_eq!(floor_char_boundary(s, 100), 6);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Performance-oriented additions (compaction speed-up pass)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_resolve_compaction_model_returns_session_model_without_override() {
+    assert_eq!(resolve_compaction_model(None, "sess-model"), "sess-model");
+}
+
+#[test]
+fn test_resolve_compaction_model_prefers_override() {
+    let override_ref = ragent_config::CompactionModelRef {
+        provider_id: "ollama".to_string(),
+        model_id: "qwen2.5:1.5b".to_string(),
+    };
+    assert_eq!(
+        resolve_compaction_model(Some(&override_ref), "sess-model"),
+        "qwen2.5:1.5b"
+    );
+}
+
+#[test]
+fn test_compaction_prompt_cap_scales_with_context_window() {
+    // Large window keeps the full 60k-char cap.
+    assert_eq!(compaction_prompt_cap(200_000), MAX_COMPACTION_PROMPT_CHARS);
+    // 16k-token local model gets half the window in chars.
+    assert_eq!(compaction_prompt_cap(16_000), 32_000);
+    // Tiny window saturates near zero.
+    assert_eq!(compaction_prompt_cap(100), 200);
+}
+
+#[test]
+fn test_cap_head_transcript_uses_adaptive_cap() {
+    // With a tiny window the transcript must be cut even though it is far
+    // below the 60k absolute cap.
+    let text = "x".repeat(50_000);
+    let out = cap_head_transcript(&text, 10_000);
+    assert!(out.len() <= compaction_prompt_cap(10_000));
+    assert!(out.starts_with("[Earlier conversation omitted due to length]"));
+}
+
+#[test]
+fn test_build_summary_request_propagates_temperature() {
+    let req = build_summary_request("m", "p", 128, None, Some(0.2));
+    assert_eq!(req.temperature, Some(0.2));
+}
+
+#[tokio::test]
+async fn test_summarize_via_client_cancel_flag_aborts_before_first_chunk() {
+    let client: Arc<dyn LlmClient> =
+        Arc::new(MockLlmClient::with_scenario(MockScenario::SimpleTextReply));
+    let request = build_summary_request("mock-model", "summarise", 256, None, None);
+    let cancel = std::sync::atomic::AtomicBool::new(true);
+    let result = summarize_via_client(
+        &client,
+        request,
+        &StreamConfig::default(),
+        &EventBus::new(8),
+        "sess",
+        &cancel,
+    )
+    .await;
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("compaction cancelled")
+    );
+}
+
+#[tokio::test]
+async fn test_summarize_via_client_stall_timeout_fires() {
+    // A client that yields one delta then goes silent past the stall budget
+    // must fail fast rather than hang to the overall timeout.
+    struct StallClient;
+    #[async_trait::async_trait]
+    impl LlmClient for StallClient {
+        async fn chat(
+            &self,
+            _request: ChatRequest,
+        ) -> anyhow::Result<std::pin::Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>>
+        {
+            // First delta immediately, then a 90s sleep (far beyond a 5s
+            // stall cap), then Finish.
+            use futures::StreamExt as _;
+            let first = futures::stream::once(async {
+                StreamEvent::TextDelta {
+                    text: "hi".to_string(),
+                }
+            });
+            let rest = futures::stream::once(async {
+                tokio::time::sleep(std::time::Duration::from_secs(90)).await;
+                StreamEvent::Finish {
+                    reason: ragent_types::llm::LlmFinishReason::Stop,
+                }
+            });
+            Ok(Box::pin(first.chain(rest)))
+        }
+    }
+    let client: Arc<dyn LlmClient> = Arc::new(StallClient);
+    let request = build_summary_request("mock-model", "summarise", 256, None, None);
+    let stream_config = StreamConfig {
+        timeout_secs: 5,
+        initial_response_timeout_secs: 5,
+        max_retries: 0,
+        retry_backoff_secs: 1,
+    };
+    let started = std::time::Instant::now();
+    let result = summarize_via_client(
+        &client,
+        request,
+        &stream_config,
+        &EventBus::new(8),
+        "sess",
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .await;
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().to_string().contains("stalled"),
+        "expected a stall error"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "stall detection must fail fast, not wait for the overall timeout"
+    );
 }

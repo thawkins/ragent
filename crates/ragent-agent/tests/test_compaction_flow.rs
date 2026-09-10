@@ -25,9 +25,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use ragent_agent::compaction::{
-    SUMMARY_OUTPUT_TOKENS, build_prompt, compact, emergency_compact, select,
-};
+use ragent_agent::compaction::{build_prompt, compact, emergency_compact, select};
 use ragent_agent::event::EventBus;
 use ragent_agent::llm::{ChatContent, ChatMessage, LlmClient, StreamEvent};
 use ragent_agent::message::{Message, Role};
@@ -89,12 +87,9 @@ async fn test_compact_bails_when_summary_prompt_would_overflow_context() {
         &bus,
         "auto",
         &StreamConfig::default(),
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .await;
-
-    // Keep the constant referenced so it is not flagged as unused; it also
-    // documents the budget arithmetic the guard uses.
-    let _ = SUMMARY_OUTPUT_TOKENS;
 
     let err = result.expect_err("expected overflow-guard error");
     assert!(
@@ -181,6 +176,7 @@ async fn test_emergency_compact_replaces_chat_messages_in_place() {
         &client,
         &bus,
         &StreamConfig::default(),
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .await
     .expect("emergency_compact should succeed");
@@ -238,6 +234,7 @@ async fn test_emergency_compact_leaves_chat_messages_unchanged_on_error() {
         &client,
         &bus,
         &StreamConfig::default(),
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .await;
     assert!(result.is_err(), "expected nothing-to-summarise error");
@@ -354,6 +351,7 @@ async fn test_compact_passes_previous_summary_into_prompt() {
         &bus,
         "auto",
         &StreamConfig::default(),
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .await
     .expect("compact should succeed");

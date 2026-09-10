@@ -35,6 +35,7 @@ mod session_ops;
 pub mod skillgen;
 mod slash;
 mod swarm;
+pub mod toolchain;
 
 pub use self::loop_dialog::{
     LoopOverrides, LoopSetupField, LoopSetupState, apply_loop_overrides, build_spec_from_state,

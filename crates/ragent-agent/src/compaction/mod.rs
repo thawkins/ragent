@@ -26,9 +26,10 @@ pub use estimator::{
     estimate_message_tokens, estimate_request_tokens, estimate_text_tokens, estimate_tool_tokens,
     evaluate_trigger, publish_compaction_started,
 };
-pub use prompt::{SUMMARY_OUTPUT_TOKENS, build_prompt};
+pub use prompt::build_prompt;
 pub use runner::{
     CompactionOutcome, SelectedSplit, build_compaction_message, build_summary_request, compact,
-    emergency_compact, select, summarize_via_client,
+    compaction_prompt_cap, emergency_compact, resolve_compaction_model, select,
+    summarize_via_client,
 };
 pub use serializer::{TOOL_OUTPUT_MAX_CHARS, serialize_message, serialize_messages, truncate};

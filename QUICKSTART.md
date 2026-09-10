@@ -388,7 +388,12 @@ Ragent loads configuration from multiple sources (last wins):
     "auto": true,          // auto-summarise before send (FR-008)
     "threshold": 0.7,    // trigger at 70% of the model's context window
     "buffer": 0.10,       // fallback response/safety buffer as a fraction of the window when threshold is null (FR-011)
-    "keep": { "tokens": 0.20 }  // fraction of the window kept as recent turns verbatim (FR-011)
+    "keep": { "tokens": 0.20 },  // fraction of the window kept as recent turns verbatim (FR-011)
+    // Optional fast/cheap model for the summarisation call (/compact only):
+    // "model": { "provider_id": "ollama", "model_id": "qwen2.5:1.5b" },
+    // Optional summary budget (default 1500) and tool-output truncation (default 2000):
+    // "summary_tokens": 1500,
+    // "tool_output_max_chars": 2000
   },
 
   // OpenTelemetry metrics export (optional)

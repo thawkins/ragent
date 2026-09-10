@@ -1238,7 +1238,12 @@ impl App {
                 self.push_log_no_agent(LogLevel::Tool, log_line);
                 // Mark the Tasks side-panel cache stale when task data
                 // mutates, so the next panel render reflects the change.
-                if matches!(tool.as_str(), "task_create" | "task_update") {
+                // spec_task_update mirrors its change into the session
+                // task tracker, so it must invalidate the cache too.
+                if matches!(
+                    tool.as_str(),
+                    "task_create" | "task_update" | "spec_task_update"
+                ) {
                     self.tasks_cache_dirty = true;
                 }
                 // T-010/FR-013: the tool result changed the conversation

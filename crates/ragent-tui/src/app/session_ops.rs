@@ -1013,6 +1013,7 @@ impl App {
             "mouse" => Some("[on|off|help]".to_string()),
             "status" => Some("[clear]".to_string()),
             "alog" => Some("[help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes]".to_string()),
+            "toolchain" => Some("[help|list [lang] [--json]]".to_string()),
             "log" => Some("[clear subagents|panics|research|editlog|help]".to_string()),
             "loop" => Some("[help | <agent> <goal text...>]".to_string()),
             "blueprints" => Some("[help|list|<name>]".to_string()),

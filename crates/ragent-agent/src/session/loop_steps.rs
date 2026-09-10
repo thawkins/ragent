@@ -1089,6 +1089,11 @@ impl SessionProcessor {
                                     &turn.client,
                                     &self.event_bus,
                                     &self.stream_config,
+                                    // Emergency compaction runs after the LLM call
+                                    // already failed with a context-overflow; the
+                                    // loop-level cancel flag is unrelated to this
+                                    // sub-call.
+                                    &std::sync::atomic::AtomicBool::new(false),
                                 )
                                 .await;
                                 match compact_result {
@@ -1388,6 +1393,11 @@ impl SessionProcessor {
                                     &turn.client,
                                     &self.event_bus,
                                     &self.stream_config,
+                                    // Emergency compaction runs after the LLM call
+                                    // already failed with a context-overflow; the
+                                    // loop-level cancel flag is unrelated to this
+                                    // sub-call.
+                                    &std::sync::atomic::AtomicBool::new(false),
                                 )
                                 .await;
                                 match compact_result {

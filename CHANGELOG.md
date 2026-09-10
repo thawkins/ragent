@@ -1,5 +1,74 @@
 # Changelog
 
+## Version: 1.0.93
+
+### `/spec impl` no longer pre-creates session tracker tasks
+
+- The TUI `/spec impl` runner no longer calls
+  `create_spec_impl_session_tasks` to pre-populate the session task list
+  with one tracker task per spec task before the run starts; that helper
+  (and its tests) is removed from `crates/ragent-tui/src/app/slash.rs`.
+- `SpecImplState` now carries only the runner snapshot, the spec id, and
+  the execution order plus rank/total progress fields; the session task
+  list stays clean until the spec runner itself reports progress.
+- `spec_task_update` now creates-or-updates the session tracker task
+  itself: it matches on `spec_id`/`spec_task_id` metadata, maps the spec
+  status onto the tracker status, and seeds new tracker tasks from the
+  spec's PLAN.md entry so `/spec impl` progress stays visible without
+  pre-created rows.
+- The `/spec impl` dispatch prompts now instruct the agent to mark the
+  tracker task `in_progress` BEFORE starting work on each spec task.
+
+### Sub-agent completion protocol is now a hard requirement
+
+- The "Sub-Agent Completion Protocol" section in the sub-agent system
+  prompt is retitled "MANDATORY - HARD REQUIREMENT" and now demands
+  `agent_complete(summary: "...")` as the FINAL action of EVERY run —
+  without exception, including failed, empty, cancelled, or
+  "nothing to report" runs, which must report an honest failure summary
+  instead of going silent.
+- The `agent_complete` tool description now opens with a
+  "SUB-AGENTS: calling this tool as your final action is MANDATORY"
+  paragraph so the requirement is also visible in the per-turn tool
+  reference.
+- The mid-run summary nudge (`SUBAGENT_SUMMARY_NUDGE`) ends with "Then
+  end your run with agent_complete(summary) as your final action".
+- SPEC.md section 16.4.1 upgrades "should finish" to "MUST finish ...
+  without exception".
+- Two new guard tests in `test_builtin_agents.rs`:
+  `test_subagent_completion_protocol_is_mandatory_in_system_prompt` and
+  `test_primary_agent_prompt_has_no_subagent_completion_protocol`.
+
+### Compaction performance pass
+
+- Compaction now supports a dedicated fast/cheap model via
+  `compaction.model` (`{ "provider_id": ..., "model_id": ... }`) in
+  `ragent.json`; `/compact` (and `SessionProcessor::compact_session`)
+  resolve and build a separate LLM client for the override instead of
+  reusing the session's primary model.
+- The summary output budget is configurable via `compaction.summary_tokens`
+  (default 1,500 tokens, down from 4,096), roughly halving worst-case
+  summary-generation latency on slow models.
+- `compaction.tool_output_max_chars` is now configurable (default 2,000).
+- The summarisation prompt cap adapts to the model's context window:
+  `min(60,000 chars, context_window * 4 / 2)`, so small local models get a
+  proportionally smaller prompt instead of a fixed ~15k-token request.
+- The compaction stream now has a hard 180-second overall cap plus a
+  60-second per-chunk stall timeout, so a drip-feeding or hung provider
+  fails fast instead of heartbeating until a 300-second timeout.
+- Progress feedback every 10 seconds now reports elapsed time and the
+  number of summary characters received so far, replacing the static
+  "still running after Ns..." heartbeat every 30 seconds.
+- The compaction agent's configured temperature (0.2) is now honoured by
+  the summarisation request — it was previously dropped because
+  `build_summary_request` hardcoded `temperature: None`.
+- Cancellation is now checked between stream chunks: `/compact` honours
+  the session cancel flag during the LLM call, not just before it.
+- Token estimation no longer re-serialises tool JSON schemas on the
+  compaction path: `estimate_tool_tokens` and tool-use input sizing use an
+  allocation-free `json_serialized_len` byte counter instead of
+  `parameters.to_string()`.
+
 ## Version: 1.0.92
 
 Subagent reliability fix: sub-agent runs (background `new_agent`, cron agent

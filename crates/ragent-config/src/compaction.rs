@@ -8,6 +8,19 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Reference to a model in `provider/model` format used for the compaction
+/// summarisation call.
+///
+/// Config-only mirror of the runtime `ModelRef` type (kept separate so
+/// `ragent-config` does not depend on the agent crate).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactionModelRef {
+    /// Provider identifier (e.g. `"anthropic"`, `"ollama"`).
+    pub provider_id: String,
+    /// Model identifier within the provider (e.g. `"claude-haiku-4-5"`).
+    pub model_id: String,
+}
+
 /// Top-level compaction configuration.
 ///
 /// Corresponds to the `compaction` key in `ragent.json`. When `auto` is
@@ -25,7 +38,10 @@ use serde::{Deserialize, Serialize};
 ///     "buffer": 0.10,
 ///     "keep": {
 ///       "tokens": 0.20
-///     }
+///     },
+///     "model": { "provider_id": "ollama", "model_id": "qwen2.5:1.5b" },
+///     "summary_tokens": 1500,
+///     "tool_output_max_chars": 1200
 ///   }
 /// }
 /// ```
@@ -59,6 +75,26 @@ pub struct CompactionConfig {
     pub buffer: f64,
     /// Recent conversation turns to keep verbatim after compaction.
     pub keep: KeepConfig,
+    /// Optional model override for the compaction summarisation call.
+    ///
+    /// When set, compaction routes to this model instead of the session's
+    /// primary model. Pointing compaction at a fast/cheap model (e.g. a small
+    /// local Ollama model or a low-cost cloud tier) is the single biggest
+    /// lever for reducing compaction wall-clock time. When `None`, the
+    /// session's primary model is used. Default: `None`.
+    pub model: Option<CompactionModelRef>,
+    /// Maximum tokens to request for the compaction summary output.
+    ///
+    /// Default: `1500`. Generation time is the dominant compaction cost —
+    /// halving this budget roughly halves worst-case latency. The structured
+    /// summary template (Objective / Details / Work State / Next Move /
+    /// Relevant Files) fits comfortably in ~1500 tokens.
+    pub summary_tokens: Option<usize>,
+    /// Truncation limit in characters for individual tool outputs that are
+    /// serialised into the compaction prompt.
+    ///
+    /// Default: `2000` (matches OpenCode's `TOOL_OUTPUT_MAX_CHARS`).
+    pub tool_output_max_chars: Option<usize>,
 }
 
 impl Default for CompactionConfig {
@@ -68,11 +104,22 @@ impl Default for CompactionConfig {
             threshold: Some(0.7),
             buffer: 0.10,
             keep: KeepConfig::default(),
+            model: None,
+            summary_tokens: None,
+            tool_output_max_chars: None,
         }
     }
 }
 
 impl CompactionConfig {
+    /// Default maximum tokens to request for a compaction summary when the
+    /// user has not configured `summary_tokens`.
+    pub const DEFAULT_SUMMARY_OUTPUT_TOKENS: usize = 1_500;
+    /// Default tool-output truncation limit in characters when the user has
+    /// not configured `tool_output_max_chars`. Matches OpenCode's
+    /// `TOOL_OUTPUT_MAX_CHARS`.
+    pub const DEFAULT_TOOL_OUTPUT_MAX_CHARS: usize = 2_000;
+
     /// Return the maximum fraction of the context window to preserve verbatim.
     ///
     /// The compaction runner multiplies this by the model's context window to
@@ -84,31 +131,31 @@ impl CompactionConfig {
 
     /// Return the maximum number of tokens to request for a compaction summary.
     ///
-    /// Fixed at `4_096` to match `OpenCode`'s `SUMMARY_OUTPUT_TOKENS` default.
+    /// Defaults to [`Self::DEFAULT_SUMMARY_OUTPUT_TOKENS`] when
+    /// `summary_tokens` is not configured.
     #[must_use]
-    pub const fn summary_output_tokens(&self) -> usize {
-        4_096
+    pub fn summary_output_tokens(&self) -> usize {
+        self.summary_tokens
+            .unwrap_or(Self::DEFAULT_SUMMARY_OUTPUT_TOKENS)
     }
 
     /// Return the tool-output truncation limit in characters.
     ///
-    /// Long tool outputs are truncated before being serialised into the
-    /// compaction prompt. Fixed at `2_000` characters to match `OpenCode`.
+    /// Defaults to [`Self::DEFAULT_TOOL_OUTPUT_MAX_CHARS`] when
+    /// `tool_output_max_chars` is not configured.
     #[must_use]
-    pub const fn tool_output_max_chars(&self) -> usize {
-        2_000
+    pub fn tool_output_max_chars(&self) -> usize {
+        self.tool_output_max_chars
+            .unwrap_or(Self::DEFAULT_TOOL_OUTPUT_MAX_CHARS)
     }
 }
 
-/// Configuration for the verbatim "tail" kept after compaction.
+/// Recent-turn retention configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KeepConfig {
-    /// Maximum number of tokens from recent turns to preserve verbatim.
-    ///
-    /// Expressed as a fraction of the model's context window (0.0–1.0). The
-    /// runner computes the absolute token budget as
-    /// `context_window * keep.tokens`. Default: `0.20` (20 %).
+    /// Fraction of the context window reserved verbatim for recent turns
+    /// (0.0–1.0). Default: `0.20` (20 %).
     pub tokens: Option<f64>,
 }
 

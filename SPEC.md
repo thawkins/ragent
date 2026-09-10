@@ -1,7 +1,7 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.91</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.93</p>
         <p style="font-size: 1.1em;">
           <strong>Date:</strong> 2026-09-08
       </p>
@@ -1102,7 +1102,16 @@ and summary output-token values).
       // Fraction of the context window reserved for recent user/assistant/tool turns to preserve.
       // Default: 0.20 (20 %, FR-011).
       "tokens": 0.20
-    }
+    },
+    // Optional dedicated fast/cheap model for the summarisation call
+    // (avoids paying the session model's latency for compaction).
+    "model": { "provider_id": "ollama", "model_id": "qwen2.5:1.5b" },
+    // Maximum tokens requested for the compaction summary output.
+    // Default: 1500 (was 4096; smaller budget = proportionally lower latency).
+    "summary_tokens": 1500,
+    // Truncation limit per tool output serialised into the summarisation prompt.
+    // Default: 2000 characters.
+    "tool_output_max_chars": 2000
   }
 }
 ```
@@ -1113,15 +1122,27 @@ and summary output-token values).
 | `threshold` | f64 | `0.7` | Fraction of context window that triggers compaction; model-independent |
 | `buffer` | f64 | `0.10` | Fallback response/safety buffer as a fraction of the context window when `threshold` is null (FR-011) |
 | `keep.tokens` | f64 | `0.20` | Fraction of context window reserved for recent turns preserved verbatim (FR-011) |
+| `model` | object | none | Optional fast/cheap model override for the summarisation call (`/compact` and `compact_session` only); the session's primary model is used when unset. The pre-send auto-compaction path always uses the session's primary model and publishes an `AgentNotice` when an override is configured |
+| `summary_tokens` | usize | `1500` | Maximum tokens requested for the compaction summary output (FR-011) |
+| `tool_output_max_chars` | usize | `2000` | Truncation limit for each tool output serialised into the summarisation prompt |
 
 The compaction trigger threshold is always raised to at least 70 % of the
 model's context window, so automatic pre-send compaction never fires on routine
 prompts that fill less than 70 % of the available context. Emergency overflow
 compaction is not subject to this floor.
 
-The compaction summary output length is fixed at `4096` tokens and tool outputs
-are truncated to `2000` characters before being serialised into the summarisation
-prompt, matching OpenCode's defaults.
+The compaction summary output length defaults to `1500` tokens (configurable
+via `compaction.summary_tokens`) and tool outputs are truncated to `2000`
+characters (`compaction.tool_output_max_chars`) before being serialised into
+the summarisation prompt. The prompt itself is capped adaptively at
+`min(60,000 chars, context_window * 4 / 2)` so small local models are not
+swamped. The summarisation stream has a hard 180-second overall cap plus a
+60-second per-chunk stall timeout, and progress is reported every 10 seconds
+with the elapsed time and character count received so far. When
+`compaction.model` is set, the `/compact` path builds a dedicated client for
+the override model instead of reusing the session's primary model. The
+pre-send auto-compaction path always uses the session's primary model and
+publishes an `AgentNotice` when an override is configured.
 
 The legacy `compression` block (`compression.enabled`, `compression.mode`,
 `compression.auto_threshold`) is still parsed for one-release migration:
@@ -1528,7 +1549,7 @@ graph LR
 | `spec_read` | Read a spec by ID |
 | `spec_search` | Search specs by keyword |
 | `spec_coverage` | Generate requirement coverage report |
-| `spec_task_update` | Update a plan task status |
+| `spec_task_update` | Update a plan task status; mirrors the status into the session task tracker (creates the tracker task if none exists, updates it if it does) |
 
 ### 10.5 Slash Commands
 
@@ -1634,6 +1655,15 @@ The heuristic is guarded by `writes_in_spec_dir`: only file-writing tools
 count. Writes elsewhere in the workspace (docs, scratch files, snapshots)
 never complete spec tasks, preventing unrelated edits from silently corrupting
 `PLAN.md`.
+
+### 10.10d Session Task Tracker Sync
+
+`spec_task_update` calls are mirrored into the session task tracker: a
+tracker task tagged with the same `spec_id`/`spec_task_id` metadata is
+updated when it exists, or created (seeded from the PLAN.md task row,
+status mapped from the spec task status) when it does not. The
+`/spec impl` driver no longer pre-creates milestone tracker rows; the
+tracker is populated lazily by the agent's `spec_task_update` calls.
 
 ### 10.11 Constitutional Amendment Process
 
@@ -2315,8 +2345,16 @@ Autopilot ends when:
 
 ### 16.4.1 `new_agent` parameter contract
 
-`new_agent` spawns a sub-agent with a bounded task. The sub-agent should finish
-with `agent_complete`.
+`new_agent` spawns a sub-agent with a bounded task. The sub-agent MUST finish
+with `agent_complete(summary)` as its final action — every sub-agent run,
+without exception (including failed or empty runs, where the summary describes
+what was attempted). The sub-agent system prompt carries a mandatory
+"Sub-Agent Completion Protocol" section enforcing this; a run that ends
+without the call leaves the task entry running and stalls `wait_agents`.
+The mandatory section title itself is "Sub-Agent Completion Protocol
+(MANDATORY - HARD REQUIREMENT)" and the per-turn `agent_complete` tool
+description repeats the requirement so it is visible in the tool
+reference as well.
 
 ### 16.5 Status Display
 
@@ -3190,7 +3228,16 @@ and summary output-token values).
       // Fraction of the context window reserved for recent user/assistant/tool turns to preserve.
       // Default: 0.20 (20 %, FR-011).
       "tokens": 0.20
-    }
+    },
+    // Optional dedicated fast/cheap model for the summarisation call
+    // (avoids paying the session model's latency for compaction).
+    "model": { "provider_id": "ollama", "model_id": "qwen2.5:1.5b" },
+    // Maximum tokens requested for the compaction summary output.
+    // Default: 1500 (was 4096; smaller budget = proportionally lower latency).
+    "summary_tokens": 1500,
+    // Truncation limit per tool output serialised into the summarisation prompt.
+    // Default: 2000 characters.
+    "tool_output_max_chars": 2000
   }
 }
 ```
@@ -3201,15 +3248,27 @@ and summary output-token values).
 | `threshold` | f64 | `0.7` | Fraction of context window that triggers compaction; model-independent |
 | `buffer` | f64 | `0.10` | Fallback response/safety buffer as a fraction of the context window when `threshold` is null (FR-011) |
 | `keep.tokens` | f64 | `0.20` | Fraction of context window reserved for recent turns preserved verbatim (FR-011) |
+| `model` | object | none | Optional fast/cheap model override for the summarisation call (`/compact` and `compact_session` only); the session's primary model is used when unset. The pre-send auto-compaction path always uses the session's primary model and publishes an `AgentNotice` when an override is configured |
+| `summary_tokens` | usize | `1500` | Maximum tokens requested for the compaction summary output (FR-011) |
+| `tool_output_max_chars` | usize | `2000` | Truncation limit for each tool output serialised into the summarisation prompt |
 
 The compaction trigger threshold is always raised to at least 70 % of the
 model's context window, so automatic pre-send compaction never fires on routine
 prompts that fill less than 70 % of the available context. Emergency overflow
 compaction is not subject to this floor.
 
-The compaction summary output length is fixed at `4096` tokens and tool outputs
-are truncated to `2000` characters before being serialised into the summarisation
-prompt, matching OpenCode's defaults.
+The compaction summary output length defaults to `1500` tokens (configurable
+via `compaction.summary_tokens`) and tool outputs are truncated to `2000`
+characters (`compaction.tool_output_max_chars`) before being serialised into
+the summarisation prompt. The prompt itself is capped adaptively at
+`min(60,000 chars, context_window * 4 / 2)` so small local models are not
+swamped. The summarisation stream has a hard 180-second overall cap plus a
+60-second per-chunk stall timeout, and progress is reported every 10 seconds
+with the elapsed time and character count received so far. When
+`compaction.model` is set, the `/compact` path builds a dedicated client for
+the override model instead of reusing the session's primary model. The
+pre-send auto-compaction path always uses the session's primary model and
+publishes an `AgentNotice` when an override is configured.
 
 The legacy `compression` block (`compression.enabled`, `compression.mode`,
 `compression.auto_threshold`) is still parsed for one-release migration:
@@ -3616,7 +3675,7 @@ graph LR
 | `spec_read` | Read a spec by ID |
 | `spec_search` | Search specs by keyword |
 | `spec_coverage` | Generate requirement coverage report |
-| `spec_task_update` | Update a plan task status |
+| `spec_task_update` | Update a plan task status; mirrors the status into the session task tracker (creates the tracker task if none exists, updates it if it does) |
 
 ### 10.5 Slash Commands
 
@@ -3722,6 +3781,15 @@ The heuristic is guarded by `writes_in_spec_dir`: only file-writing tools
 count. Writes elsewhere in the workspace (docs, scratch files, snapshots)
 never complete spec tasks, preventing unrelated edits from silently corrupting
 `PLAN.md`.
+
+### 10.10d Session Task Tracker Sync
+
+`spec_task_update` calls are mirrored into the session task tracker: a
+tracker task tagged with the same `spec_id`/`spec_task_id` metadata is
+updated when it exists, or created (seeded from the PLAN.md task row,
+status mapped from the spec task status) when it does not. The
+`/spec impl` driver no longer pre-creates milestone tracker rows; the
+tracker is populated lazily by the agent's `spec_task_update` calls.
 
 ### 10.11 Constitutional Amendment Process
 

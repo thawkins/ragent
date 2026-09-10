@@ -64,6 +64,73 @@ fn test_task_tool_family_guidance_is_injected_into_system_prompt() {
 }
 
 #[test]
+fn test_subagent_completion_protocol_is_mandatory_in_system_prompt() {
+    // Sub-agent-mode prompts must carry the strengthened, mandatory
+    // "Sub-Agent Completion Protocol" section so spawned runs always end
+    // with `agent_complete`.
+    let mut agent = AgentInfo::new("explore", "explore agent");
+    agent.mode = AgentMode::Subagent;
+    agent.prompt = Some(Arc::from("You are an exploration agent."));
+    agent.max_steps = Some(10);
+
+    let prompt = build_system_prompt_with_storage(
+        &agent,
+        Path::new("/tmp"),
+        "",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+
+    assert!(
+        prompt.contains("## Sub-Agent Completion Protocol (MANDATORY"),
+        "subagent prompt must include the mandatory completion protocol section"
+    );
+    assert!(
+        prompt.contains("MUST call `agent_complete"),
+        "subagent prompt must state that agent_complete is a MUST, got tail: {}",
+        &prompt[prompt.len().saturating_sub(3000)..]
+    );
+    assert!(
+        prompt.contains("WITHOUT exception"),
+        "subagent prompt must demand agent_complete without exceptions"
+    );
+    assert!(
+        prompt.contains("HARD REQUIREMENT"),
+        "subagent prompt must label the requirement as a hard requirement"
+    );
+}
+
+#[test]
+fn test_primary_agent_prompt_has_no_subagent_completion_protocol() {
+    // The mandatory completion-protocol section is subagent-only; primary
+    // agents keep their normal text-final-answer loop behaviour.
+    let mut agent = AgentInfo::new("general", "general agent");
+    agent.prompt = Some(Arc::from("You are a helpful assistant."));
+    agent.max_steps = Some(10);
+
+    let prompt = build_system_prompt_with_storage(
+        &agent,
+        Path::new("/tmp"),
+        "",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+
+    assert!(
+        !prompt.contains("## Sub-Agent Completion Protocol"),
+        "primary prompt must not include the subagent completion protocol"
+    );
+}
+
+#[test]
 fn test_domain_agents_exist() {
     let agents = create_builtin_agents();
     let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();

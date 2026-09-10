@@ -210,7 +210,9 @@ async fn test_process_message_publishes_run_cost_summary() {
     assert_eq!(mid, "gpt-4o");
     assert_eq!(in_tok, 100);
     assert_eq!(out_tok, 50);
-    assert!(dur > 0, "duration_ms should be positive");
+    // A mocked run can complete in under 1ms, so an exact `> 0` check on the
+    // millisecond measure is invalid; consistency with the persisted row is
+    // asserted below instead.
 
     let expected = builtin_prices()
         .get("gpt-4o")
@@ -241,6 +243,10 @@ async fn test_process_message_publishes_run_cost_summary() {
     assert_eq!(persisted[0].model_id, "gpt-4o");
     assert_eq!(persisted[0].input_tokens, 100);
     assert_eq!(persisted[0].output_tokens, 50);
+    assert_eq!(
+        persisted[0].duration_ms, dur,
+        "persisted and event durations should match"
+    );
     assert!(
         (persisted[0].total_cost_usd - expected).abs() < 1e-9,
         "persisted cost should match: got {}, expected {expected}",

@@ -49,7 +49,6 @@ async-trait = { workspace = true }
 fs2 = { workspace = true }
 lru = { workspace = true }
 regex = { workspace = true }
-uuid = { workspace = true }
 # Width/grapheme handling for the message/log line caches (must match
 # ratatui's WordWrapper so pre-wrapped cache rows are stable).
 unicode-segmentation = "1.12"

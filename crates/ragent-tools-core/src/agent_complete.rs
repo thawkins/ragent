@@ -51,16 +51,23 @@ impl Tool for AgentCompleteTool {
     }
 
     fn description(&self) -> &'static str {
-        "TERMINAL SIGNAL — call ONLY when the current autonomous task is fully done. \
+        "TERMINAL SIGNAL - call ONLY when the current autonomous task is fully done. \
          This ends the agent loop and returns control to the user. \
          Takes exactly ONE required parameter: `summary` (string). \
          \n\n\
-         ⚠️ DO NOT confuse with `team_task_complete` (a different tool used inside teams, \
+         SUB-AGENTS: calling this tool as your final action is MANDATORY. \
+         If you are running as a sub-agent (spawned via `new_agent`, a cron \
+         run, a teammate, or a skill), EVERY run MUST end with \
+         `agent_complete` - without exception, even if the work failed or \
+         produced nothing. A run that ends without it looks hung to the \
+         parent. \
+         \n\n\
+         DO NOT confuse with `team_task_complete` (a different tool used inside teams, \
          which takes `team_name` + `task_id`, NOT `summary`). \
          \n\n\
          Common mistakes to avoid:\n\
-         - Do NOT pass `task_id`, `team_name`, `result`, or `output` — the only valid key is `summary`.\n\
-         - Do NOT call this to 'submit' a result mid-task — calling it ENDS the loop.\n\
+         - Do NOT pass `task_id`, `team_name`, `result`, or `output` - the only valid key is `summary`.\n\
+         - Do NOT call this to 'submit' a result mid-task - calling it ENDS the loop.\n\
          - Do NOT call this before all requested files/outputs have been produced.\n\
          \n\n\
          Example: agent_complete(summary: \"Implemented feature X, wrote 3 tests, updated docs\")"

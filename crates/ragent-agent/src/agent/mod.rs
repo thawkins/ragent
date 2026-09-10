@@ -2815,22 +2815,41 @@ fn build_system_prompt_with_storage_inner(
     // that called it completed the moment the tool executed).
     if agent.mode == AgentMode::Subagent {
         prompt.push_str(
-            "## Sub-Agent Completion Protocol\n\n\
-             You are running as a sub-agent. The parent session waits on your \
-             completion, so end your run deterministically:\n\n\
-             - **ALWAYS call `agent_complete(summary: \"...\")` as your FINAL \
-               action**, immediately after your work is done and your findings \
-               are written. The tool result ends your session loop \
-               immediately — this is the ONLY prompt way to stop.\n\
-             - Put the complete findings in the `summary` argument (this is \
-               what the parent reads). Do not rely on plain text after the \
-               tool call.\n\
-             - Do NOT produce further text or tool calls after \
-               `agent_complete` — the loop breaks when its result is \
-               processed.\n\
-             - Note: a `[compaction]`-labelled summary may appear in your \
-               transcript mid-run; that is internal context bookkeeping, NOT \
-               your completion signal, and it does not end your run.\n\n",
+            "## Sub-Agent Completion Protocol (MANDATORY - HARD REQUIREMENT)\n\n\
+               You are running as a sub-agent. The parent session is BLOCKED \
+               waiting on your completion. You have exactly ONE way to end \
+               your run: the `agent_complete` tool. Ending with a plain text \
+               message does NOT reliably terminate your run - the task stays \
+               marked Running, `wait_agents` keeps the parent stalled, and \
+               the work you produced may be discarded when the watchdog kills \
+               the run.\n\n\
+               - **You MUST call `agent_complete(summary: \"...\")` as the \
+                 FINAL action of EVERY run - WITHOUT exception.** This is a \
+                 hard requirement, not a suggestion. No exceptions for short \
+                 answers, failed work, empty results, cancelled work, or \
+                 \"nothing to report\" runs.\n\
+               - If the work failed or produced nothing, you MUST still call \
+                 `agent_complete` - the `summary` must state what you \
+                 attempted and why nothing was produced. An honest failure \
+                 summary is far better than a run that never terminates.\n\
+               - The ONLY parameter is `summary` (string); it is REQUIRED. \
+                 Put your complete findings/deliverable INTO the `summary` - \
+                 it is what the parent reads. Do not rely on plain text after \
+                 the tool call.\n\
+               - Do NOT produce further text or tool calls after \
+                 `agent_complete` - the loop breaks when its result is \
+                 processed.\n\
+               - Note: a `[compaction]`-labelled summary may appear in your \
+                 transcript mid-run; that is internal context bookkeeping, NOT \
+                 your completion signal, and it does not end your run.\n\
+               - If you are a team teammate with a shared task, mark that task \
+                 with `team_task_complete(team_name, task_id)` BEFORE calling \
+                 `agent_complete`; `agent_complete` still ends your run.\n\n\
+               A run that ends without `agent_complete` looks hung to the \
+               parent: the task entry stays Running, `wait_agents` blocks, \
+               telemetry records a timeout, and your report may never be \
+               read. Treat `agent_complete` as the last mandatory step of the \
+               task - like a final commit - not an optional nicety.\n\n",
         );
     }
 

@@ -34,6 +34,7 @@ use crate::app::helpers::{
     activity_log_db_path, open_verified_alog, parse_alog_run_id_yes, parse_swarm_args,
     short_run_id, short_session_id,
 };
+use crate::app::toolchain;
 
 /// Build a detached `ToolContext` for the `/websearch` diagnostic arms.
 ///
@@ -207,6 +208,7 @@ impl App {
                 vec!["show".to_string(), "test".to_string(), "help".to_string()]
             }
             "loop" => vec!["help".to_string(), "--help".to_string(), "-h".to_string()],
+            "toolchain" => vec!["list".to_string(), "help".to_string()],
             "status" => {
                 vec!["clear".to_string()]
             }
@@ -1179,6 +1181,122 @@ Usage: `/telemetry help|on|off|setup|counters`",
         );
         self.append_assistant_text(&output);
         self.status = "alog: config".to_string();
+    }
+
+    /// Handle the `/toolchain` slash command (language toolchain report).
+    ///
+    /// Dispatcher (FR-002) — routes `/toolchain <subcommand>` by the
+    /// first whitespace-separated token (lowercased). `""`, `help`,
+    /// `--help`, and `-h` render the help page (FR-003); `list` renders
+    /// the toolchain report (FR-004–FR-009, with the FR-011 language filter
+    /// and FR-015 `--json` flag parsed from its trailing words); any other
+    /// token renders the unknown-subcommand correction message (FR-014).
+    fn handle_toolchain_command(&mut self, args: &str) {
+        // Whitespace-delimited sub-word parse: the subcommand word routes the
+        // dispatch (FR-002); `list` forwards its remaining words for the
+        // FR-011 language filter and the FR-015 --json flag.
+        let mut words = args.split_whitespace();
+        let sub = words.next().unwrap_or("").to_lowercase();
+        match sub.as_str() {
+            "" | "help" | "--help" | "-h" => self.handle_toolchain_help(),
+            "list" => self.handle_toolchain_list(words.collect::<Vec<_>>().as_slice()),
+            _ => self.handle_toolchain_unknown(&sub),
+        }
+    }
+
+    /// Render the `/toolchain help` page (FR-003).
+    ///
+    /// Documents every subcommand (`help`, `list`), the `list` argument
+    /// forms (`[language]`, `--json`), states the report is read-only
+    /// (FR-013), and shows a worked example. Prefixed
+    /// `From: /toolchain help`; status bar reads `toolchain: help`.
+    fn handle_toolchain_help(&mut self) {
+        self.append_assistant_text(
+            "From: /toolchain help\n\n\
+             ## /toolchain — Runtime Toolchain Presence Report\n\n\
+             Reports which language toolchains are installed on this machine,\n\
+             walking the code-index supported-language list. The report is\n\
+             **read-only** — it never installs, upgrades, or configures any\n\
+             runtime, and it never touches ragent state.\n\n\
+             | Subcommand | Description |\n\
+             |---|---|\n\
+             | `/toolchain help` | Show this help page |\n\
+             | `/toolchain list` | Full report: every supported language, its runtime(s), presence, and version |\n\
+             | `/toolchain list <language>` | Report filtered to one language id (matched case-insensitively) |\n\
+             | `/toolchain list --json` | Machine-readable JSON rendering of the report |\n\n\
+             Example: `/toolchain list rust` shows the rust row (probes `cargo` and `rustc`).",
+        );
+        self.status = "toolchain: help".to_string();
+    }
+
+    /// Render the `/toolchain list` report (FR-004-FR-009).
+    ///
+    /// Walks `SUPPORTED_LANGUAGES` via [`toolchain::build_report_rows`] on a
+    /// blocking thread (FR-016) with a `[wait] toolchain` status-bar
+    /// indicator, then renders the markdown report (FR-009). Read-only
+    /// throughout (FR-013); absent runtimes never abort the walk (FR-010).
+    ///
+    /// Argument words after `list` split into the FR-015 `--json` flag
+    /// (render the report as a bare JSON document instead of the markdown
+    /// table) and the FR-011 language filter (the remaining bare word,
+    /// matched case-insensitively against the `SUPPORTED_LANGUAGES` ids);
+    /// an unknown id renders a warning plus the valid id list and produces
+    /// no report.
+    fn handle_toolchain_list(&mut self, words: &[&str]) {
+        // FR-015 --json flag is position-independent; the sole remaining
+        // bare word (if any) is the FR-011 language filter.
+        let json = words.contains(&"--json");
+        let filter = words.iter().find(|w| !w.starts_with("--")).copied();
+        self.status = "[wait] toolchain".to_string();
+        let rows = tokio::task::block_in_place(toolchain::build_report_rows);
+        let select = |rows: &[toolchain::ReportRow]| -> Option<Vec<toolchain::ReportRow>> {
+            match filter {
+                // The pipeline clones the probed rows so the filtered render
+                // is independent of the full walk.
+                None => Some(rows.to_vec()),
+                Some(filter) => {
+                    let filter_lc = filter.to_lowercase();
+                    rows.iter()
+                        .find(|row| row.id.to_lowercase() == filter_lc)
+                        .map(|row| vec![row.clone()])
+                }
+            }
+        };
+        let Some(selected) = select(&rows) else {
+            let filter = filter.unwrap_or_default();
+            let valid = rows
+                .iter()
+                .map(|row| format!("`{}`", row.id))
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.append_assistant_text(&format!(
+                "From: /toolchain list\n\nUnknown language id `{filter}`. \
+                 Valid ids: {valid}"
+            ));
+            self.status = "toolchain: list".to_string();
+            return;
+        };
+        let report = if json {
+            toolchain::render_json_report(&selected)
+        } else {
+            toolchain::render_markdown_report(&selected)
+        };
+        self.append_assistant_text(&report);
+        self.status = "toolchain: list".to_string();
+    }
+
+    /// Render the `/toolchain <unknown>` correction message (FR-014).
+    ///
+    /// Renders a usage correction (`From: /toolchain`, usage line, pointer
+    /// to `/toolchain help`), sets the status bar to `toolchain: usage`,
+    /// and never dispatches a probe.
+    fn handle_toolchain_unknown(&mut self, sub: &str) {
+        self.append_assistant_text(&format!(
+            "From: /toolchain\n\nUnknown subcommand `{sub}`. \
+             Usage: `/toolchain [list [language] [--json] | help]`. \
+             Run `/toolchain help` for details."
+        ));
+        self.status = "toolchain: usage".to_string();
     }
 
     /// Render the `/alog list` subcommand (FR-005).
@@ -5626,6 +5744,8 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
             }
             "alog" => self.handle_alog_command(args),
+            // ── /toolchain ──────────────────────────────────────────────────
+            "toolchain" => self.handle_toolchain_command(args),
             // ── /swarm ──────────────────────────────────────────────────────
             "swarm" => {
                 let (sub, _rest) = args
@@ -6752,23 +6872,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                 .collect();
                                             let total = task_ids.len();
 
-                                            // Create milestone parent tasks and subtasks in
-                                            // the session task tracker so the implementation
-                                            // run is visible alongside regular tasks.
-                                            let session_id =
-                                                self.session_id.clone().unwrap_or_default();
-                                            let (
-                                                milestone_parents,
-                                                spec_task_to_session,
-                                                session_task_to_milestone,
-                                            ) = create_spec_impl_session_tasks(
-                                                self,
-                                                &session_id,
-                                                &spec_id,
-                                                &runner,
-                                                &impl_result.milestone_groups,
-                                            );
-
+                                            // The session task tracker is populated
+                                            // lazily by `spec_task_update` calls from
+                                            // the agent (creates-or-updates), not by
+                                            // pre-created milestone rows here.
                                             self.spec_impl_state =
                                                 Some(crate::app::state::SpecImplState {
                                                     spec_id: spec_id.clone(),
@@ -6777,9 +6884,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                     current_rank: 1,
                                                     total,
                                                     runner: runner.clone(),
-                                                    milestone_parent_tasks: milestone_parents,
-                                                    spec_task_to_session_task: spec_task_to_session,
-                                                    session_task_to_milestone,
                                                 });
 
                                             // Dispatch the first task's prompt.
@@ -11194,156 +11298,6 @@ fn redact_secrets(input: &str) -> String {
         .to_string();
 
     result
-}
-
-/// Create session tasks for a `/spec impl` run.
-///
-/// For each milestone group, creates a parent `task_create` row, then
-/// creates a subtask for every spec task inside that milestone. Subtasks
-/// are linked to their milestone parent via `metadata.parent_task_id` and
-/// to their spec task via `metadata.spec_task_id`. Spec-task dependencies
-/// are mirrored as `blocked_by` between the corresponding session
-/// subtasks where both exist.
-///
-/// Returns three maps:
-/// - milestone name → parent session task ID
-/// - spec task ID → session subtask ID
-/// - session subtask ID → milestone name
-#[allow(clippy::type_complexity)]
-fn create_spec_impl_session_tasks(
-    app: &mut App,
-    session_id: &str,
-    spec_id: &str,
-    runner: &ragent_specs::SpecImplRunner,
-    milestone_groups: &[ragent_specs::MilestoneGroup],
-) -> (
-    std::collections::HashMap<String, String>,
-    std::collections::HashMap<String, String>,
-    std::collections::HashMap<String, String>,
-) {
-    use uuid::Uuid;
-
-    let mut milestone_parents = std::collections::HashMap::new();
-    let mut spec_task_to_session = std::collections::HashMap::new();
-    let mut session_task_to_milestone = std::collections::HashMap::new();
-
-    if session_id.is_empty() {
-        app.push_log_no_agent(
-            crate::app::LogLevel::Warn,
-            "spec impl: no active session; skipping milestone task creation".to_string(),
-        );
-        return (
-            milestone_parents,
-            spec_task_to_session,
-            session_task_to_milestone,
-        );
-    }
-
-    // Phase 1: create milestone parent tasks.
-    for group in milestone_groups {
-        let parent_id = format!("task-{}", Uuid::new_v4().simple());
-        let description = if group.deliverable.is_empty() {
-            format!("Milestone for spec {spec_id}")
-        } else {
-            group.deliverable.clone()
-        };
-        let metadata = serde_json::json!({
-            "spec_id": spec_id,
-            "milestone": group.name,
-            "kind": "milestone",
-        })
-        .to_string();
-        let active_form = format!("Implementing {}", group.name);
-
-        if let Err(e) = app.storage.create_task(
-            &parent_id,
-            session_id,
-            &group.name,
-            &description,
-            "pending",
-            Some(&active_form),
-            None,
-            &metadata,
-            &[],
-        ) {
-            app.push_log_no_agent(
-                crate::app::LogLevel::Warn,
-                format!(
-                    "spec impl: failed to create milestone task for '{}': {e}",
-                    group.name
-                ),
-            );
-            continue;
-        }
-        milestone_parents.insert(group.name.clone(), parent_id);
-    }
-
-    // Phase 2: create subtasks in execution order.
-    for &idx in runner.execution_order() {
-        let task = &runner.tasks()[idx];
-        let milestone_name = task
-            .milestone
-            .clone()
-            .unwrap_or_else(|| "Unmapped Tasks".to_string());
-        let Some(parent_id) = milestone_parents.get(&milestone_name) else {
-            continue;
-        };
-
-        let blocked_by: Vec<String> = task
-            .dependencies
-            .iter()
-            .filter_map(|dep_id| spec_task_to_session.get(dep_id).cloned())
-            .collect();
-
-        let subtask_id = format!("task-{}", Uuid::new_v4().simple());
-        let metadata = serde_json::json!({
-            "spec_id": spec_id,
-            "milestone": milestone_name,
-            "parent_task_id": parent_id,
-            "spec_task_id": task.id,
-            "kind": "milestone-subtask",
-        })
-        .to_string();
-        let active_form = format!("Implementing task {}", task.id);
-
-        if let Err(e) = app.storage.create_task(
-            &subtask_id,
-            session_id,
-            &task.title,
-            &task.requirement,
-            "pending",
-            Some(&active_form),
-            None,
-            &metadata,
-            &blocked_by,
-        ) {
-            app.push_log_no_agent(
-                crate::app::LogLevel::Warn,
-                format!("spec impl: failed to create subtask for {}: {e}", task.id),
-            );
-            continue;
-        }
-
-        spec_task_to_session.insert(task.id.clone(), subtask_id.clone());
-        session_task_to_milestone.insert(subtask_id, milestone_name);
-    }
-
-    if !milestone_parents.is_empty() || !spec_task_to_session.is_empty() {
-        app.push_log_no_agent(
-            crate::app::LogLevel::Info,
-            format!(
-                "spec impl: created {} milestone task(s) and {} subtask(s)",
-                milestone_parents.len(),
-                spec_task_to_session.len()
-            ),
-        );
-    }
-
-    (
-        milestone_parents,
-        spec_task_to_session,
-        session_task_to_milestone,
-    )
 }
 
 /// Handle the `/blueprints` slash command for listing installed team blueprints.

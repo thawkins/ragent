@@ -10,8 +10,12 @@ fn test_compaction_config_default() {
     assert!((config.buffer - 0.10).abs() < f64::EPSILON);
     assert_eq!(config.keep.tokens, Some(0.20));
     assert!((config.keep_fraction() - 0.20).abs() < f64::EPSILON);
-    assert_eq!(config.summary_output_tokens(), 4_096);
+    // New defaults: a smaller summary budget and no model override.
+    assert_eq!(config.summary_output_tokens(), 1_500);
     assert_eq!(config.tool_output_max_chars(), 2_000);
+    assert!(config.model.is_none());
+    assert_eq!(config.summary_tokens, None);
+    assert_eq!(config.tool_output_max_chars, None);
 }
 
 #[test]
@@ -48,4 +52,30 @@ fn test_compaction_config_keep_override() {
     let config: CompactionConfig = serde_json::from_str(json).unwrap();
     assert_eq!(config.keep.tokens, Some(0.10));
     assert!((config.keep_fraction() - 0.10).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_compaction_config_model_override_deserialize() {
+    let json = r#"{"model": {"provider_id": "ollama", "model_id": "qwen2.5:1.5b"}}"#;
+    let config: CompactionConfig = serde_json::from_str(json).unwrap();
+    let m = config
+        .model
+        .as_ref()
+        .expect("model override must be present");
+    assert_eq!(m.provider_id, "ollama");
+    assert_eq!(m.model_id, "qwen2.5:1.5b");
+}
+
+#[test]
+fn test_compaction_config_summary_tokens_override() {
+    let json = r#"{"summary_tokens": 800}"#;
+    let config: CompactionConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.summary_output_tokens(), 800);
+}
+
+#[test]
+fn test_compaction_config_tool_output_max_chars_override() {
+    let json = r#"{"tool_output_max_chars": 500}"#;
+    let config: CompactionConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.tool_output_max_chars(), 500);
 }

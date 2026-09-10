@@ -82,6 +82,41 @@ pub fn estimate_text_tokens(text: &str) -> usize {
     (chars + CHARS_PER_TOKEN / 2) / CHARS_PER_TOKEN
 }
 
+/// Estimate the serialised byte length of a JSON value without allocating the
+/// full document.
+///
+/// `value.to_string()` materialises the entire JSON document just to count its
+/// length; the compaction estimator only needs the byte count. This visitor
+/// walks the value recursively and computes the exact number of bytes the
+/// serde_json compact serializer would produce (no whitespace, standard
+/// escapes). The cost is O(nodes) instead of O(bytes + one large String).
+fn json_serialized_len(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Null => 4,        // "null"
+        serde_json::Value::Bool(true) => 4,  // "true"
+        serde_json::Value::Bool(false) => 5, // "false"
+        serde_json::Value::Number(n) => n.to_string().len(),
+        serde_json::Value::String(s) => s.len() + 2, // open/close quotes
+        serde_json::Value::Array(items) => {
+            // '[' + ']' + item bytes + (n-1) commas
+            let inner: usize = items.iter().map(json_serialized_len).sum();
+            let commas = items.len().saturating_sub(1);
+            2 + inner + commas
+        }
+        serde_json::Value::Object(map) => {
+            // '{' + '}' + per-entry ("key":value) + (n-1) separators between
+            // entries; each entry contributes its key length + 2 quotes + 1
+            // colon.
+            let pairs: usize = map
+                .iter()
+                .map(|(k, v)| k.len() + 3 + json_serialized_len(v))
+                .sum();
+            let commas = map.len().saturating_sub(1);
+            2 + pairs + commas
+        }
+    }
+}
+
 /// Estimate the token count of a single [`ChatMessage`].
 ///
 /// Sums the byte length of the role string and every content part (text, tool
@@ -97,7 +132,7 @@ pub fn estimate_message_tokens(message: &ChatMessage) -> usize {
                 match part {
                     ContentPart::Text { text } => bytes += text.len(),
                     ContentPart::ToolUse { id, name, input } => {
-                        bytes += id.len() + name.len() + input.to_string().len();
+                        bytes += id.len() + name.len() + json_serialized_len(input);
                     }
                     ContentPart::ToolResult {
                         tool_use_id,
@@ -121,7 +156,7 @@ pub fn estimate_message_tokens(message: &ChatMessage) -> usize {
 pub fn estimate_tool_tokens(tools: &[ToolDefinition]) -> usize {
     let bytes: usize = tools
         .iter()
-        .map(|t| t.name.len() + t.description.len() + t.parameters.to_string().len() + 60)
+        .map(|t| t.name.len() + t.description.len() + json_serialized_len(&t.parameters) + 60)
         .sum();
     estimate_text_tokens_from_bytes(bytes)
 }

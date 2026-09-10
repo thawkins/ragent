@@ -283,6 +283,8 @@ fn test_build_single_task_prompt_contains_required_fields() {
     assert!(prompt.contains("spec_task_update"));
     assert!(prompt.contains("spec_id=\"myspec\""));
     assert!(prompt.contains("task_id=\"T-003\""));
+    // The start-of-task in-progress kick (session tracker sync).
+    assert!(prompt.contains("status=\"in_progress\""));
     assert!(prompt.contains("status=\"completed\""));
     assert!(
         prompt.contains("blocked"),

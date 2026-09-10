@@ -27,6 +27,7 @@
 //! provides the runner itself.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::{Result, bail};
@@ -35,15 +36,15 @@ use tokio::time::timeout;
 use tracing::{info, warn};
 
 use ragent_config::StreamConfig;
-use ragent_config::compaction::CompactionConfig;
+use ragent_config::compaction::{CompactionConfig, CompactionModelRef};
 use ragent_types::event::{Event, EventBus};
 use ragent_types::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
 use ragent_types::message::{Message, MessagePart, Role};
 
 use crate::compaction::{
-    SUMMARY_OUTPUT_TOKENS, build_prompt, estimate_text_tokens, publish_compaction_started,
-    serialize_message,
+    build_prompt, estimate_text_tokens, publish_compaction_started, serialize_message,
 };
+use crate::llm::LlmClient;
 
 /// Maximum characters for the compaction summarisation prompt.
 ///
@@ -55,8 +56,52 @@ use crate::compaction::{
 /// tail (`keep_tokens`) is preserved regardless of this cap.
 const MAX_COMPACTION_PROMPT_CHARS: usize = 60_000;
 
+/// Denominator used to derive the prompt-size budget from the context window.
+///
+/// The adaptive cap is `min(60k chars, context_window * CHARS_PER_TOKEN / 2)`,
+/// so a 128k-token window still yields the full 60k-char prompt while a 20k
+/// local model gets a 40k-char prompt instead of the fixed 60k one.
+const PROMPT_CAP_DIVISOR: usize = 2;
+
+/// Hard cap on the total wall time for one compaction summarisation call.
+///
+/// Applies even when the stream config would allow more time; compaction is a
+/// background housekeeping call and must not wedge the session for minutes on
+/// an overloaded provider.
+const COMPACTION_OVERALL_TIMEOUT_SECS: u64 = 180;
+
+/// Per-chunk stall cap for the summarisation stream (seconds).
+///
+/// A provider that drip-feeds one token every 25s would previously heartbeat
+/// forever until the overall cap; now any single gap longer than this fails
+/// fast.
+const COMPACTION_STALL_TIMEOUT_SECS: u64 = 60;
+
 /// Heartbeat interval for long-running compaction summarisation.
-const SUMMARY_HEARTBEAT_SECS: u64 = 30;
+const SUMMARY_HEARTBEAT_SECS: u64 = 10;
+
+/// Resolve the model to use for the compaction summarisation call.
+///
+/// Prefers the explicit `compaction.model` config over the session's primary
+/// model. Returns the session model id unchanged when no override is set.
+#[must_use]
+pub fn resolve_compaction_model<'a>(
+    override_model: Option<&'a CompactionModelRef>,
+    session_model: &'a str,
+) -> &'a str {
+    override_model.map_or(session_model, |m| m.model_id.as_str())
+}
+
+/// Return the prompt-size budget (in characters) for a given context window.
+///
+/// Adaptive: `min(60k chars, context_window * CHARS_PER_TOKEN / 2)`. A small
+/// local model with a 16k-token window gets a 32k-char prompt cap; a 128k cloud
+/// model keeps the full 60k-char budget.
+#[must_use]
+pub fn compaction_prompt_cap(context_window: usize) -> usize {
+    let window_chars = context_window.saturating_mul(crate::compaction::CHARS_PER_TOKEN);
+    (window_chars / PROMPT_CAP_DIVISOR).min(MAX_COMPACTION_PROMPT_CHARS)
+}
 
 /// The verbatim-tail selection produced by [`select`].
 ///
@@ -205,48 +250,88 @@ pub fn select(
 /// Drive an LLM streaming request to completion, collecting every
 /// [`StreamEvent::TextDelta`] into a single summary string.
 ///
-/// Returns `Err` if the provider emits an [`StreamEvent::Error`] or the stream
-/// ends abnormally. A successful stream that produces no text yields an empty
-/// string (the caller treats an empty summary as failure).
+/// Returns `Err` if the provider emits an [`StreamEvent::Error`], the stream
+/// stalls for longer than [`COMPACTION_STALL_TIMEOUT_SECS`] between chunks, the
+/// cooperative cancel flag fires between chunks, or the overall
+/// [`COMPACTION_OVERALL_TIMEOUT_SECS`] cap is hit.
+///
+/// Publishes an incremental progress heartbeat every [`SUMMARY_HEARTBEAT_SECS`]
+/// seconds carrying the elapsed time and accumulated character count so the UI
+/// shows real progress instead of a static spinner message.
 ///
 /// # Arguments
 ///
 /// * `client` — the LLM client to call.
 /// * `request` — the summarisation request (a single user message).
+/// * `stream_config` — stream timeout configuration (the per-chunk stall cap
+///   is derived from `timeout_secs`, clamped to the 60 s built-in cap).
+/// * `event_bus` — event bus for compaction progress notices.
+/// * `session_id` — session identifier used in log lines.
+/// * `cancel` — cooperative cancellation flag checked between chunks.
+///
+/// # Errors
+///
+/// Returns `Err` if the provider stream fails, stalls, is cancelled, or the
+/// overall timeout elapses.
 pub async fn summarize_via_client(
-    client: &Arc<dyn crate::llm::LlmClient>,
+    client: &Arc<dyn LlmClient>,
     request: ChatRequest,
     stream_config: &StreamConfig,
     event_bus: &EventBus,
     session_id: &str,
+    cancel: &AtomicBool,
 ) -> Result<String> {
     // Bound the total wall time for a summarisation call. Local models in
     // particular can stall on huge prompts; this prevents the UI from freezing
-    // indefinitely. Defaults: 300s initial + 120s stall budget -> 420s cap.
-    let overall_timeout_secs =
-        (stream_config.initial_response_timeout_secs + stream_config.timeout_secs).min(300);
-    let overall_timeout = std::time::Duration::from_secs(overall_timeout_secs);
+    // indefinitely. Hard cap of COMPACTION_OVERALL_TIMEOUT_SECS regardless of
+    // stream-config values.
+    let overall_timeout = std::time::Duration::from_secs(COMPACTION_OVERALL_TIMEOUT_SECS);
+    // Per-chunk stall timeout: the smaller of the stream config value and the
+    // built-in 60 s cap, floored at 5 s so a pathological config cannot
+    // busy-loop the stream.
+    let stall_timeout = std::time::Duration::from_secs(
+        stream_config
+            .timeout_secs
+            .min(COMPACTION_STALL_TIMEOUT_SECS)
+            .max(5),
+    );
 
     let summary_fut = async {
         let started = Instant::now();
         let mut next_heartbeat = SUMMARY_HEARTBEAT_SECS;
         let mut stream = client.chat(request).await?;
-        let mut chunks: Vec<String> = Vec::new();
-        while let Some(event) = stream.next().await {
+        let mut summary = String::new();
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                bail!("compaction cancelled");
+            }
+            let event = match timeout(stall_timeout, stream.next()).await {
+                Ok(Some(ev)) => ev,
+                Ok(None) => break,
+                Err(_) => bail!(
+                    "compaction summarisation stalled: no token received in {}s",
+                    stall_timeout.as_secs()
+                ),
+            };
             let elapsed_secs = started.elapsed().as_secs();
             if elapsed_secs >= next_heartbeat {
                 info!(
                     session_id,
-                    elapsed_secs, "compaction summarisation still in progress"
+                    elapsed_secs,
+                    summary_chars = summary.len(),
+                    "compaction summarisation still in progress"
                 );
                 event_bus.publish(Event::AgentNotice {
                     session_id: session_id.to_string(),
-                    message: format!("Context compression still running after {elapsed_secs}s..."),
+                    message: format!(
+                        "Context compression running: {elapsed_secs}s elapsed, {} chars received",
+                        summary.len()
+                    ),
                 });
                 next_heartbeat = elapsed_secs + SUMMARY_HEARTBEAT_SECS;
             }
             match event {
-                StreamEvent::TextDelta { text } => chunks.push(text),
+                StreamEvent::TextDelta { text } => summary.push_str(&text),
                 StreamEvent::Error { message } => {
                     bail!("compaction summarisation failed: {message}")
                 }
@@ -257,14 +342,15 @@ pub async fn summarize_via_client(
                 _ => {}
             }
         }
-        Ok(chunks.join(""))
+        Ok(summary)
     };
 
     match timeout(overall_timeout, summary_fut).await {
         Ok(result) => result,
         Err(_) => bail!(
-            "compaction summarisation timed out after {overall_timeout_secs}s; \
-             the model may be overloaded or the compaction prompt is too large"
+            "compaction summarisation timed out after {}s; \
+             the model may be overloaded or the compaction prompt is too large",
+            COMPACTION_OVERALL_TIMEOUT_SECS
         ),
     }
 }
@@ -272,13 +358,16 @@ pub async fn summarize_via_client(
 /// Build the summarisation [`ChatRequest`] for a given prompt.
 ///
 /// The request carries a single user message (the summary prompt), no tools,
-/// and a `max_tokens` cap of `summary_output`.
+/// a `max_tokens` cap of `summary_output`, and the caller-supplied sampling
+/// temperature (the compaction agent sets 0.2; `None` uses the provider
+/// default).
 #[must_use]
 pub fn build_summary_request(
     model: &str,
     prompt: &str,
     summary_output: u32,
     stream_timeout_secs: Option<u64>,
+    temperature: Option<f32>,
 ) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
@@ -287,7 +376,7 @@ pub fn build_summary_request(
             content: ChatContent::Text(prompt.to_string()),
         }]),
         tools: Arc::new(Vec::new()),
-        temperature: None,
+        temperature,
         top_p: None,
         max_tokens: Some(summary_output),
         system: None,
@@ -347,11 +436,12 @@ pub fn build_compaction_message(session_id: &str, summary: &str) -> Message {
 /// * `event_bus` — event bus for compaction-lifecycle events.
 /// * `reason` — compaction reason (`"auto"` for pre-send triggers, `"overflow"`
 ///   for emergency triggers).
+/// * `cancel` — cooperative cancellation flag checked between stream chunks.
 ///
 /// # Errors
 ///
 /// Returns `Err` when there is nothing to summarise, the summary prompt would
-/// overflow, the LLM call fails, or the summary comes back empty.
+/// overflow, the LLM call fails or is cancelled, or the summary comes back empty.
 pub async fn compact(
     session_id: &str,
     messages: Vec<Message>,
@@ -364,6 +454,7 @@ pub async fn compact(
     event_bus: &EventBus,
     reason: &str,
     stream_config: &StreamConfig,
+    cancel: &AtomicBool,
 ) -> Result<CompactionOutcome> {
     let original_message_count = messages.len();
     let tool_max = config.tool_output_max_chars();
@@ -394,18 +485,22 @@ pub async fn compact(
     }
 
     // 3. Build the summarisation prompt. The head transcript was already
-    //    serialised by `select` — reuse it to avoid duplicate work.
-    let head_transcript = cap_head_transcript(&split.head_transcript);
+    //    serialised by `select` — reuse it to avoid duplicate work. The cap
+    //    adapts to the context window so small local models get a
+    //    proportionally smaller prompt instead of a fixed 60k-char one.
+    let head_transcript = cap_head_transcript(&split.head_transcript, context_window);
 
     let prompt = build_prompt(previous_summary, &[head_transcript.as_str()]);
 
     // 4. Overflow guard: bail if the prompt alone would not leave room for the
-    //    summary output. The summary output cap mirrors OpenCode's
-    //    `Math.min(output || SUMMARY_OUTPUT_TOKENS, SUMMARY_OUTPUT_TOKENS)`.
+    //    summary output. The summary budget defaults to
+    //    `CompactionConfig::summary_output_tokens` and honours any explicit
+    //    `output_tokens` the caller passes as a tighter upper bound.
+    let configured_summary = config.summary_output_tokens();
     let summary_output_cap = if output_tokens == 0 {
-        SUMMARY_OUTPUT_TOKENS
+        configured_summary
     } else {
-        output_tokens.min(SUMMARY_OUTPUT_TOKENS)
+        output_tokens.min(configured_summary)
     };
     let prompt_tokens = estimate_text_tokens(&prompt);
     let prompt_budget = context_window.saturating_sub(summary_output_cap);
@@ -431,20 +526,29 @@ pub async fn compact(
         &prompt,
         summary_output_cap as u32,
         Some(stream_config.initial_response_timeout_secs),
+        Some(0.2),
     );
-    let summary =
-        match summarize_via_client(client, request, stream_config, event_bus, session_id).await {
-            Ok(s) => s,
-            Err(e) => {
-                let msg = format!("LLM summarisation call failed: {e}");
-                warn!(session_id, reason, "compaction bail: {msg}");
-                event_bus.publish(Event::AgentNotice {
-                    session_id: session_id.to_string(),
-                    message: format!("Context compression failed: {msg}"),
-                });
-                return Err(e);
-            }
-        };
+    let summary = match summarize_via_client(
+        client,
+        request,
+        stream_config,
+        event_bus,
+        session_id,
+        cancel,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = format!("LLM summarisation call failed: {e}");
+            warn!(session_id, reason, "compaction bail: {msg}");
+            event_bus.publish(Event::AgentNotice {
+                session_id: session_id.to_string(),
+                message: format!("Context compression failed: {msg}"),
+            });
+            return Err(e);
+        }
+    };
     let summary = summary.trim();
     if summary.is_empty() {
         let msg = "compaction summarisation produced an empty summary";
@@ -533,13 +637,14 @@ pub async fn compact(
 /// * `context_window`, `output_tokens`, `config` — forwarded to [`compact`].
 /// * `client` — the LLM client used for the summarisation call.
 /// * `event_bus` — event bus for compaction-lifecycle events.
+/// * `cancel` — cooperative cancellation flag forwarded to [`compact`].
 ///
 /// # Errors
 ///
 /// Returns `Err` when there is nothing to summarise, the summary prompt would
-/// overflow, the LLM call fails, or the summary comes back empty. On error the
-/// `chat_messages` slice is left unchanged so the caller can surface the
-/// original overflow error.
+/// overflow, the LLM call fails or is cancelled, or the summary comes back
+/// empty. On error the `chat_messages` slice is left unchanged so the caller
+/// can surface the original overflow error.
 pub async fn emergency_compact(
     session_id: &str,
     chat_messages: &mut Vec<ChatMessage>,
@@ -550,6 +655,7 @@ pub async fn emergency_compact(
     client: &Arc<dyn crate::llm::LlmClient>,
     event_bus: &EventBus,
     stream_config: &StreamConfig,
+    cancel: &AtomicBool,
 ) -> Result<CompactionOutcome> {
     // Convert the provider-facing chat messages into the internal `Message`
     // form the compaction runner expects.
@@ -571,6 +677,7 @@ pub async fn emergency_compact(
         event_bus,
         "overflow",
         stream_config,
+        cancel,
     )
     .await?;
     // Replace the in-memory history in place so the caller's retry attempt
@@ -581,17 +688,19 @@ pub async fn emergency_compact(
 }
 
 /// Truncate the serialised head transcript so the final compaction prompt does
-/// not exceed [`MAX_COMPACTION_PROMPT_CHARS`].
+/// not exceed the budget for the given `context_window` (see
+/// [`compaction_prompt_cap`]).
 ///
 /// Keeps the most recent conversation content (the end of the string) and
 /// prepends a truncation marker when content is dropped.
 #[must_use]
-fn cap_head_transcript(head_transcript: &str) -> String {
-    if head_transcript.len() <= MAX_COMPACTION_PROMPT_CHARS {
+fn cap_head_transcript(head_transcript: &str, context_window: usize) -> String {
+    let cap_chars = compaction_prompt_cap(context_window);
+    if head_transcript.len() <= cap_chars {
         return head_transcript.to_string();
     }
     let marker = "[Earlier conversation omitted due to length]\n\n";
-    let keep_len = MAX_COMPACTION_PROMPT_CHARS.saturating_sub(marker.len());
+    let keep_len = cap_chars.saturating_sub(marker.len());
     // Byte indexes must be snapped to UTF-8 char boundaries: the byte offset
     // `len - keep_len` can land inside a multi-byte character (e.g. box-drawing
     // glyphs in tool output), which would panic on slice.

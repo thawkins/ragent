@@ -21,7 +21,7 @@ pub mod trigger;
 pub mod yolo;
 
 // Re-export commonly used types
-pub use compaction::{CompactionConfig, KeepConfig};
+pub use compaction::{CompactionConfig, CompactionModelRef, KeepConfig};
 pub use config::{
     AgentConfig, AgentPerfConfig, AutoExtractConfig, BrowserConfig, Capabilities, ChannelsConfig,
     Config, Cost, CrossProjectConfig, DEFAULT_ERROR_RETRY_ALLOWANCE, DEFAULT_LOOP_MAX_STEPS,
