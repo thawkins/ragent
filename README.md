@@ -454,6 +454,23 @@ research system, and multi-layered security are functional and under active deve
 
 Recent highlights:
 
+- **Spec-impl tracker semantics + sub-agent completion hard requirement +
+  compaction performance pass (v1.0.93)** — `/spec impl` no longer
+  pre-creates session tracker tasks (`spec_task_update` now
+  creates-or-updates them, seeded from the spec's `PLAN.md`), the
+  sub-agent completion protocol is a mandatory hard requirement enforced in
+  the system prompt, the `agent_complete` tool description, and the
+  mid-run summary nudge, and compaction gained a `compaction.model`
+  fast/cheap summariser override for `/compact`, configurable
+  `summary_tokens` (1500) / `tool_output_max_chars` (2000), an adaptive
+  prompt cap, 180 s / 60 s stream caps with chunk-level cancellation, and an
+  allocation-free token estimator.
+
+- **Subagent interactive-tool blocking (v1.0.92)** — sub-agent runs now deny
+  `ask_user` with a corrective observation instead of stalling the run on an
+  unbounded user-answer wait; a shared `denied_tool_call` helper covers all
+  tool-call denial paths.
+
 - **Scaffold + status-bar simplify pass (v1.0.90)** — the `/new` TUI command
   and the `ragent new` CLI subcommand now share one `plan_and_emit()`
   pipeline in the `project_scaffold` engine module (each surface attaches

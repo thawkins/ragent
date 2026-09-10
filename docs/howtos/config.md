@@ -974,7 +974,10 @@ Context-window compaction configuration (OpenCode-derived summarisation).
     "auto": true,
     "threshold": 0.7,
     "buffer": 0.10,
-    "keep": { "tokens": 0.20 }
+    "keep": { "tokens": 0.20 },
+    "model": { "provider_id": "ollama", "model_id": "qwen2.5:1.5b" },
+    "summary_tokens": 1500,
+    "tool_output_max_chars": 2000
   }
 }
 ```
@@ -987,14 +990,26 @@ Context-window compaction configuration (OpenCode-derived summarisation).
 | `threshold` | `Option<f64>` | `Some(0.7)` | Fraction of context window at which to trigger compaction (0.0-1.0). `None` falls back to buffer-based trigger. Clamped to minimum 0.7 so routine prompts under 70% never trigger compaction. |
 | `buffer` | `f64` | `0.10` | Token buffer as a fraction of context window. When `threshold` is `None`, triggers when tokens exceed `context_window - max(output_tokens, context_window * buffer)`. |
 | `keep` | `KeepConfig` | `{ tokens: Some(0.20) }` | Recent turns kept verbatim after compaction. |
+| `model` | `Option<CompactionModelRef>` | `None` | Optional fast/cheap model override (`provider_id` + `model_id`) for the `/compact` summarisation call. The session's primary model is used when unset, and the pre-send auto-compaction path always uses the session's primary model (an `AgentNotice` is published when an override is configured). |
+| `summary_tokens` | `usize` | `1500` | Maximum tokens requested for the compaction summary output. |
+| `tool_output_max_chars` | `usize` | `2000` | Truncation limit for each tool output serialised into the summarisation prompt. |
 
 **`KeepConfig`**: `tokens: Option<f64>` (default `Some(0.20)`) — max fraction
 of context window preserved as the verbatim tail.
 
-Fixed constants:
-- `summary_output_tokens()`: 4096 tokens requested for a compaction summary.
-- `tool_output_max_chars()`: 2000 chars — long tool outputs are truncated
-  before being serialised into the compaction prompt.
+Runtime behaviour:
+- The summarisation prompt is capped adaptively at
+  `min(60,000 chars, context_window * 4 / 2)` so small local models get a
+  proportionally smaller prompt.
+- The compaction stream has a hard 180-second overall cap plus a 60-second
+  per-chunk stall timeout; progress is reported every 10 seconds with the
+  elapsed time and the summary character count received so far.
+- The compaction agent's configured temperature is honoured by the
+  summarisation request.
+- Cancellation is checked between stream chunks, so `/compact` honours the
+  session cancel flag during the LLM call.
+- Token estimation uses an allocation-free byte counter instead of
+  re-serialising tool JSON schemas.
 
 ---
 

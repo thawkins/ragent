@@ -1684,6 +1684,26 @@ roughly 135 duplicated lines. All command syntax, configuration keys, and
 outputs are unchanged — see the v1.0.89 highlights below for the most recent
 behaviour changes.
 
+## Version 1.0.93
+
+Changes in and on top of v1.0.92 (the subagent interactive-tool blocking
+pass), summarised for quickstart relevance:
+
+- **`/spec impl` tracker tasks** — `/spec impl` no longer pre-creates session
+  tracker tasks; the `spec_task_update` tool creates-or-updates the tracker
+  task itself, seeded from the spec's `PLAN.md` entry, and the dispatch
+  prompts instruct the agent to mark each task `in_progress` before starting.
+- **Mandatory sub-agent completion** — the sub-agent system prompt, the
+  `agent_complete` tool description, and the mid-run summary nudge all now
+  demand `agent_complete(summary)` as the final action of every sub-agent
+  run, without exception.
+- **Faster compaction** — new `compaction.model`, `summary_tokens` (1500),
+  and `tool_output_max_chars` (2000) configuration keys, an adaptive prompt
+  cap, hard 180 s / 60 s stream caps with chunk-level cancellation, and an
+  allocation-free token estimator. The pre-send auto-compaction path always
+  uses the session's primary model and publishes an `AgentNotice` when a
+  `compaction.model` override is configured.
+
 ## Version 1.0.89
 
 Changes in and on top of v1.0.88 (the research-crate simplify pass), summarised

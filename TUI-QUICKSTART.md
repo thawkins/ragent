@@ -29,6 +29,20 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   section instructs spawned sub-agents to always finish with a single
   `agent_complete` call, so background tasks report completion promptly
   instead of lingering in a running state.
+- **Mandatory sub-agent completion (v1.0.93)** — the completion protocol is
+  now a hard requirement: the sub-agent system prompt demands
+  `agent_complete(summary)` as the FINAL action of EVERY run (including
+  failed or empty runs), the `agent_complete` tool description repeats the
+  requirement, and the mid-run summary nudge ends with the same instruction.
+- **`/spec impl` tracker tasks (v1.0.93)** — `/spec impl` no longer
+  pre-creates session tracker tasks; `spec_task_update` creates-or-updates
+  the tracker task as each spec task progresses, seeded from the spec's
+  `PLAN.md` entry.
+- **Faster compaction (v1.0.93)** — `/compact` supports a
+  `compaction.model` fast/cheap summariser override, the summary budget is
+  configurable (`summary_tokens`, default 1500) and halved from 4,096, the
+  summarisation stream has 180 s / 60 s caps with chunk-level cancellation,
+  and the prompt cap adapts to the model's context window.
 - **Compaction label disambiguation** — mid-run auto-compaction summaries
   render with a dim `[compaction]` prefix rather than the assistant marker,
   so they are no longer mistaken for a sub-agent's completion report.

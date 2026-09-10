@@ -461,6 +461,10 @@ Alias: `/spec implement`
 /spec implement auth-v2                    # alias
 ```
 
+Progress is reported through the `spec_task_update` tool, which
+creates-or-updates the session tracker task for each spec task (seeded from
+the spec's `PLAN.md` entry) as the runner works through the plan.
+
 ### 5.16 `/spec tasks <spec-id>`
 
 Generate `TASKS.md` containing an ordered task list derived from the existing
@@ -623,6 +627,17 @@ The `PLAN.md` task table uses these columns:
 The implementation runner (`/spec impl`) resolves dependencies topologically
 and executes tasks in order. Tasks with no dependencies run first; tasks
 blocked by incomplete dependencies are deferred.
+
+### Session tracker tasks (`spec_task_update`)
+
+`/spec impl` does not pre-create session tracker tasks. The
+`spec_task_update` tool creates-or-updates the session tracker task itself
+when progress is reported: it matches existing tracker tasks on
+`spec_id`/`spec_task_id` metadata, maps the spec task status onto the tracker
+status, and seeds new tracker tasks from the spec's `PLAN.md` entry (with an
+`in_progress` instruction) so `/spec impl` progress stays visible without
+pre-populated rows. The `/spec impl` dispatch prompts instruct the agent to
+mark each tracker task `in_progress` BEFORE starting work on it.
 
 ### Automatic task completion after writes
 
