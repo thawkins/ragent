@@ -896,7 +896,14 @@ impl App {
                 // Agent notices are displayed in the message window only.
                 // They are intentionally not mirrored to the status bar so
                 // multi-line summaries do not overflow or duplicate there.
+                // Each notice gets its own chat bubble: force a new message
+                // before appending so consecutive notices never run onto each
+                // other, and again afterwards so streamed text does not merge
+                // into the notice bubble (the renderer adds a trailing blank
+                // line after every notice for separation).
+                self.force_new_message = true;
                 self.append_assistant_text(&format!("📋 Agent Notice\n{}", message));
+                self.force_new_message = true;
             }
             Event::AgentError {
                 ref session_id,

@@ -1,5 +1,33 @@
 # Changelog
 
+## Uncommitted (post 1.0.93)
+
+### Agent Notice chat-bubble separation fixed
+
+- Consecutive `Event::AgentNotice` notices no longer run onto each other in
+  the message window: the TUI event handler now forces a new assistant
+  message before and after appending a notice, so every notice renders as
+  its own yellow bubble with the renderer's trailing blank line separating
+  it from the next bubble and from subsequent streamed text.
+- New regression tests in
+  `crates/ragent-tui/tests/test_agent_notice_separation.rs` cover
+  consecutive notices, streamed text after a notice, and a notice arriving
+  mid-stream.
+
+## Version: 1.0.94
+
+### Agent Notice chat-bubble separation fixed
+
+- Consecutive `Event::AgentNotice` notices no longer run onto each other in
+  the message window: the TUI event handler now forces a new assistant
+  message before and after appending a notice, so every notice renders as
+  its own yellow bubble with the renderer's trailing blank line separating
+  it from the next bubble and from subsequent streamed text.
+- New regression tests in
+  `crates/ragent-tui/tests/test_agent_notice_separation.rs` cover
+  consecutive notices, streamed text after a notice, and a notice arriving
+  mid-stream.
+
 ## Version: 1.0.93
 
 ### `/spec impl` no longer pre-creates session tracker tasks
