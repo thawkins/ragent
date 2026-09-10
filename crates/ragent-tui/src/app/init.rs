@@ -106,10 +106,13 @@ impl App {
 
         let agent_name = agent_info.name.clone();
 
-        let cwd_path = std::env::current_dir().unwrap_or_default();
         let log_window_path = {
             let log_dir = cwd_path.join("log").join("logwindow");
-            let _ = std::fs::create_dir_all(&log_dir);
+            // Best-effort directory creation; failure only disables the
+            // per-session log window file.
+            if let Err(e) = std::fs::create_dir_all(&log_dir) {
+                tracing::debug!(error = %e, "log window directory creation failed");
+            }
             let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
             Some(log_dir.join(format!("logwindow-{ts}.log")))
         };
@@ -152,9 +155,22 @@ impl App {
             .position(|a| a.name == agent_info.name)
             .unwrap_or(0);
 
+        // Pre-format the custom-agent warning log entries so
+        // `all_diagnostics` can be moved (not cloned) into the struct below.
+        let agent_diag_logs: Vec<String> = all_diagnostics
+            .iter()
+            .map(|diag| format!("[custom agents] {}", diag))
+            .collect();
+
         // Load persisted model selection
         let t0 = Instant::now();
-        let app_config = ragent_agent::Config::load().unwrap_or_default();
+        let app_config = match ragent_agent::Config::load() {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                tracing::warn!(error = %e, "config load failed, using defaults");
+                Default::default()
+            }
+        };
         sub.record("App: config reload", t0.elapsed());
 
         let t0 = Instant::now();
@@ -339,7 +355,7 @@ impl App {
             selected_agent_session_id: None,
             selected_agent_index: None,
             custom_agent_defs: custom_defs,
-            custom_agent_diagnostics: all_diagnostics.clone(),
+            custom_agent_diagnostics: all_diagnostics,
             active_team: None,
             team_members: Vec::new(),
             team_message_counts: HashMap::new(),
@@ -380,7 +396,7 @@ impl App {
             db_path,
             history_dirty: false,
             history_save_deadline: None,
-            md_render_cache: LruCache::new(NonZeroUsize::new(256).unwrap()),
+            md_render_cache: LruCache::new(NonZeroUsize::new(256).expect("256 > 0")),
             md_worker: crate::app::MdWorker::new(),
             status_bar_cache: None,
             model_picker_rows_cache: None,
@@ -448,8 +464,8 @@ impl App {
             st.record("App: struct init", t0.elapsed());
         }
         // Log any warnings from custom agent loading into the log panel
-        for diag in &all_diagnostics {
-            app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
+        for msg in agent_diag_logs {
+            app.push_log_no_agent(LogLevel::Warn, msg);
         }
 
         let t0 = Instant::now();

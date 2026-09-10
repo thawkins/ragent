@@ -508,6 +508,20 @@ impl SessionProcessor {
                         .collect(),
                 )
             };
+        // Interactive-tool block (subagent): interactive tools are removed
+        // from the advertised tool reference so a sub-agent is never told to
+        // ask a user it does not have.
+        let effective_defs: Arc<Vec<ToolDefinition>> = if is_subagent {
+            Arc::new(
+                effective_defs
+                    .iter()
+                    .filter(|d| !crate::session::permissions::is_interactive_tool(&d.name))
+                    .cloned()
+                    .collect(),
+            )
+        } else {
+            effective_defs
+        };
         let tool_reference = if is_subagent {
             build_detailed_tool_reference_from_defs(&effective_defs)
         } else {
@@ -518,21 +532,25 @@ impl SessionProcessor {
         }
         system_prompt.push_str(&tool_reference);
 
-        system_prompt.push_str(
-            "\n## Question Tool Usage\n\
-             When you need to ask the user a question, use the `question` tool. \
-             If the answer should be one of a fixed set of choices, provide the `options` \
-             parameter as an array of strings. The user will see a multiple-choice dialog \
-             instead of a free-text input, which is faster and less error-prone.\n\n\
-             Example — multiple choice:\n\
-             ```\n\
-             question(question: \"Which build profile?\", options: [\"Debug\", \"Release\", \"Check only\"])\n\
-             ```\n\n\
-             Example — free-text input (no options):\n\
-             ```\n\
-             question(question: \"What is your name?\")\n\
-             ```\n\n",
-        );
+        // Interactive-tool block (subagent): do not advertise the question
+        // flow to runs that have no user attached.
+        if !is_subagent {
+            system_prompt.push_str(
+                "\n## Question Tool Usage\n\
+                 When you need to ask the user a question, use the `question` tool. \
+                 If the answer should be one of a fixed set of choices, provide the `options` \
+                 parameter as an array of strings. The user will see a multiple-choice dialog \
+                 instead of a free-text input, which is faster and less error-prone.\n\n\
+                 Example — multiple choice:\n\
+                 ```\n\
+                 question(question: \"Which build profile?\", options: [\"Debug\", \"Release\", \"Check only\"])\n\
+                 ```\n\n\
+                 Example — free-text input (no options):\n\
+                 ```\n\
+                 question(question: \"What is your name?\")\n\
+                 ```\n\n",
+            );
+        }
 
         let code_index_active = self.code_index.get().is_some();
         let codeindex_section = {

@@ -1,5 +1,28 @@
 # Changelog
 
+## Version: 1.0.92
+
+Subagent reliability fix: sub-agent runs (background `new_agent`, cron agent
+runs, team teammates, skill invocations) no longer block forever when the
+model calls an interactive tool. Sub-agent runs have no attached user, so an
+unanswered `ask_user` dialog previously stalled the run until the watchdog
+(production symptom: sub-agents that never terminate). Interactive tools are
+now removed from the wire tool surface advertised to a Subagent-mode run
+(`SessionProcessor` tool-definitions filter and the system-prompt tool
+reference), the "Question Tool Usage" system-prompt section is no longer
+injected for sub-agent runs, and a hallucinated interactive call is denied at
+dispatch with a corrective observation ("interactive tool 'ask_user' is not
+available in subagent runs - no user is attached; decide autonomously and
+continue") so the loop continues instead of blocking. Primary (interactive)
+runs are unchanged — `ask_user` still executes and returns the user's reply.
+New integration suite `test_subagent_interactive_block.rs` covers denial in
+subagent runs, continued loop completion after denial, absence of interactive
+tools from the subagent tool surface, and the intact primary-run ask_user
+round-trip (responder task subscribed before the run so the single-threaded
+test runtime delivers `QuestionAnswered`; the scripted ask_user call now
+carries a valid JSON question payload and a bounded 5 s responder wait guards
+against suite hangs).
+
 ## Version: 1.0.91
 
 Documentation update pass: full project docs refresh (`CHANGELOG.md`,

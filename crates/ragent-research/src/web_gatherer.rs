@@ -146,8 +146,10 @@ pub const MIN_ENCYCLOPEDIA_CONTENT_CHARS: usize = 80;
 /// page exists and the normal fetch path is preferred so the richer page body
 /// is captured instead of the concise engine-provided snippet.
 fn is_sole_engine_hit(hit: &WebSearchHit, engine: &str) -> bool {
-    let engines: Vec<&str> = hit.search_engine.split(',').map(str::trim).collect();
-    !engines.is_empty() && engines.iter().all(|e| *e == engine)
+    hit.search_engine
+        .split(',')
+        .map(str::trim)
+        .all(|e| e == engine)
 }
 
 /// Returns `true` for scholarly search-engine hits that carry a reconstructed

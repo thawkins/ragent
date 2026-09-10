@@ -95,9 +95,11 @@ where
     tmp.persist(config_path)
         .map_err(|e| format!("rename temp → {}: {e}", config_path.display()))?;
 
-    lock_file
-        .unlock()
-        .map_err(|e| format!("unlock {}: {e}", lock_path.display()))?;
+    // The config is already persisted; the advisory lock releases on drop
+    // anyway, so an unlock failure must not fail the (successful) update.
+    if let Err(e) = lock_file.unlock() {
+        tracing::warn!(error = %e, "config lock unlock failed (lock released on drop)");
+    }
 
     Ok(())
 }

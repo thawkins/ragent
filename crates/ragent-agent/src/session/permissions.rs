@@ -184,6 +184,19 @@ const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
     "agent_complete",
 ];
 
+/// Interactive tools (subagent reliability fix): tools whose execution waits
+/// on a live user attached to the session. Sub-agent runs (background, cron,
+/// server, forked skill) have no attached user, so these are filtered from
+/// the tool surface and denied at dispatch - an unanswered interactive
+/// dialog would otherwise block the sub-agent run until the watchdog.
+pub(crate) const INTERACTIVE_TOOLS: &[&str] = &["ask_user"];
+
+/// Return `true` when `tool_name` waits on live user interaction and must
+/// be denied in sub-agent runs ([`INTERACTIVE_TOOLS`]).
+pub(crate) fn is_interactive_tool(tool_name: &str) -> bool {
+    INTERACTIVE_TOOLS.contains(&tool_name)
+}
+
 /// Destructive tool names (FR-015, T-010): tool calls that irreversibly
 /// mutate the workspace or protected state and therefore require a
 /// destructive-action checkpoint before they execute. Deletion, config

@@ -23,9 +23,12 @@ pub fn format_elapsed(created_at: DateTime<Utc>) -> String {
 }
 
 /// Shorten a session/task id to the last 8 chars (the unique suffix).
+///
+/// Falls back to the whole id when the cut would land mid-UTF-8-codepoint
+/// (non-ASCII ids), so this never panics.
 pub fn short_id(id: &str) -> String {
     let start = id.len().saturating_sub(8);
-    id[start..].to_string()
+    id.get(start..).unwrap_or(id).to_string()
 }
 
 /// Shorten a string by keeping the start and end, inserting an ellipsis in the middle.
@@ -122,21 +125,25 @@ pub fn is_below_minimum_size(area: Rect) -> bool {
 /// Returns a Rect centered in the provided area with the specified
 /// percentage width and height.
 pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    // Clamp to [0, 100] so `(100 - percent) / 2` cannot underflow for
+    // out-of-range percentages.
+    let px = percent_x.min(100);
+    let py = percent_y.min(100);
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage((100 - py) / 2),
+            Constraint::Percentage(py),
+            Constraint::Percentage((100 - py) / 2),
         ])
         .split(area);
 
     Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage((100 - px) / 2),
+            Constraint::Percentage(px),
+            Constraint::Percentage((100 - px) / 2),
         ])
         .split(popup_layout[1])[1]
 }

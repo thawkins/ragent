@@ -97,8 +97,8 @@ fn test_git_init_respects_gitignore_from_scaffold() {
 #[test]
 fn test_git_init_reuses_existing_repo_without_reinit() {
     let root = temp_root("git-init-existing");
-    pin_identity(root.path());
     git(root.path(), &["init"]);
+    pin_identity(root.path());
     fs::write(root.path().join("seed.txt"), b"seed\n").expect("write");
     git(root.path(), &["add", "-A"]);
     git(root.path(), &["commit", "-m", "seed commit"]);
@@ -134,8 +134,8 @@ fn test_git_init_retries_cleanly_on_partial_state() {
 fn test_git_init_clean_tree_reports_committed_false() {
     // FR-015 retry on a fully-committed tree: not an error.
     let root = temp_root("git-init-clean");
-    pin_identity(root.path());
     git(root.path(), &["init"]);
+    pin_identity(root.path());
     fs::write(root.path().join("a.txt"), b"a\n").expect("write");
     git(root.path(), &["add", "-A"]);
     git(root.path(), &["commit", "-m", "first"]);

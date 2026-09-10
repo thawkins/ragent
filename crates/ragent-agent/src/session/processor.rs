@@ -1688,6 +1688,10 @@ impl SessionProcessor {
 
         // 6. Agent loop setup
         let max_steps = agent.max_steps.unwrap_or(1024) as usize;
+        // Interactive-tool block (subagent): sub-agent runs have no attached
+        // user, so interactive tools are filtered from the wire surface and
+        // denied at dispatch (fail closed).
+        let agent_is_subagent = agent.mode == crate::agent::AgentMode::Subagent;
         self.event_bus.set_step(session_id, 0);
         // T-009 (FR-008): when a goal-driven loop with a configured tool set
         // is active, the loop's tool surface is exactly that set plus the
@@ -1710,7 +1714,7 @@ impl SessionProcessor {
                     allowed
                 })
         };
-        let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> = if max_steps <= 1 {
+        let mut tool_definitions: std::sync::Arc<Vec<ToolDefinition>> = if max_steps <= 1 {
             std::sync::Arc::new(Vec::new())
         } else if let Some(allowed) = loop_tool_set {
             let all = self.get_cached_tool_definitions();
@@ -1723,6 +1727,19 @@ impl SessionProcessor {
         } else {
             self.get_cached_tool_definitions()
         };
+        // Interactive-tool block (subagent): remove interactive tools from
+        // the wire surface so a sub-agent is never offered a tool it cannot
+        // use. The dispatch gate below still denies a hallucinated call
+        // (fail closed).
+        if agent_is_subagent {
+            tool_definitions = std::sync::Arc::new(
+                tool_definitions
+                    .iter()
+                    .filter(|def| !crate::session::permissions::is_interactive_tool(&def.name))
+                    .cloned()
+                    .collect(),
+            );
+        }
         // P-7: prime the tool-definition byte cache alongside the definitions
         // cache so the per-step request-size estimator can reuse the sum.
         let _ = self.get_cached_tool_definition_bytes();
@@ -2764,9 +2781,10 @@ impl SessionProcessor {
                         // mode too (FR-024 — the permission layer is always
                         // in the path).
                         if let Some(spec) = &loop_spec {
-                            // B2: unparseable args fail closed — a denied call
-                            // is returned to the model instead of silently
-                            // evaluating the restriction against `{}`.
+                            // B2: unparseable args fail closed — a denied
+                            // call is returned to the model instead of
+                            // silently evaluating the restriction against
+                            // `{}`.
                             let early_input = loop_restriction_input.clone();
                             if let Some(reason) = spec.deny_reason(&tc_clone.name, &early_input) {
                                 tracing::info!(
@@ -2774,24 +2792,43 @@ impl SessionProcessor {
                                     reason = %reason,
                                     "loop restriction denied tool execution"
                                 );
-                                event_bus.publish(Event::ToolCallEnd {
-                                    session_id: session_id_str.clone(),
-                                    call_id: tc_clone.id.clone(),
-                                    tool: tc_clone.name.clone(),
-                                    error: Some(reason.clone()),
-                                    duration_ms: 0,
-                                });
-                                return (
-                                    tc_clone.clone(),
+                                return denied_tool_call(
+                                    &tc_clone,
+                                    &event_bus,
+                                    &session_id_str,
                                     early_input,
-                                    ToolCallStatus::Error,
-                                    None,
-                                    Some(reason),
-                                    0u64,
-                                    String::new(),
-                                    None,
+                                    reason,
                                 );
                             }
+                        }
+                        // Interactive-tool block (subagent): a sub-agent run
+                        // has no attached user (background, cron, server,
+                        // forked skill). An interactive tool would block the
+                        // run forever waiting for a reply that can never
+                        // arrive, so deny with a corrective observation
+                        // instead of executing (fail closed, same shape as
+                        // the T-009 loop-restriction denial above).
+                        if agent_is_subagent
+                            && crate::session::permissions::is_interactive_tool(&tc_clone.name)
+                        {
+                            let reason = format!(
+                                "interactive tool '{}' is not available in \
+                                 subagent runs - no user is attached; decide \
+                                 autonomously from the task context and \
+                                 continue",
+                                tc_clone.name
+                            );
+                            tracing::info!(
+                                tool = %tc_clone.name,
+                                "interactive tool denied in subagent run"
+                            );
+                            return denied_tool_call(
+                                &tc_clone,
+                                &event_bus,
+                                &session_id_str,
+                                loop_restriction_input.clone(),
+                                reason,
+                            );
                         }
                         let pre_hook_result = {
                             crate::hooks::run_pre_tool_use_hooks(
@@ -2812,45 +2849,23 @@ impl SessionProcessor {
                             crate::hooks::PreToolUseResult::Deny { reason } => {
                                 tracing::info!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook denied tool execution");
                                 let err_msg = format!("Permission denied by hook: {}", reason);
-                                event_bus.publish(Event::ToolCallEnd {
-                                    session_id: session_id_str.clone(),
-                                    call_id: tc_clone.id.clone(),
-                                    tool: tc_clone.name.clone(),
-                                    error: Some(err_msg.clone()),
-                                    duration_ms: 0,
-                                });
-                                let input_val = parsed_input.unwrap_or(Value::Null);
-                                return (
-                                    tc_clone.clone(),
-                                    input_val,
-                                    ToolCallStatus::Error,
-                                    None,
-                                    Some(err_msg),
-                                    0u64,
-                                    String::new(),
-                                    None,
+                                return denied_tool_call(
+                                    &tc_clone,
+                                    &event_bus,
+                                    &session_id_str,
+                                    parsed_input.unwrap_or(Value::Null),
+                                    err_msg,
                                 );
                             }
                             crate::hooks::PreToolUseResult::Blocked { reason } => {
                                 tracing::info!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook blocked tool execution");
                                 let err_msg = format!("Blocked by hook: {}", reason);
-                                event_bus.publish(Event::ToolCallEnd {
-                                    session_id: session_id_str.clone(),
-                                    call_id: tc_clone.id.clone(),
-                                    tool: tc_clone.name.clone(),
-                                    error: Some(err_msg.clone()),
-                                    duration_ms: 0,
-                                });
-                                let input_val = parsed_input.unwrap_or(Value::Null);
-                                return (
-                                    tc_clone.clone(),
-                                    input_val,
-                                    ToolCallStatus::Error,
-                                    None,
-                                    Some(err_msg),
-                                    0u64,
-                                    String::new(),
-                                    None,
+                                return denied_tool_call(
+                                    &tc_clone,
+                                    &event_bus,
+                                    &session_id_str,
+                                    parsed_input.unwrap_or(Value::Null),
+                                    err_msg,
                                 );
                             }
                             crate::hooks::PreToolUseResult::ModifiedInput { input } => input,
@@ -4081,4 +4096,47 @@ fn truncate_preview(s: &str, max_chars: usize) -> String {
     let mut out: String = trimmed.chars().take(max_chars).collect();
     out.push('…');
     out
+}
+
+/// Publish `ToolCallEnd` for a denied tool call and return the standard
+/// 8-tuple error result.
+///
+/// Shared by the three in-task denial paths in the tool-call gate:
+/// the T-009 loop-restriction check, the subagent interactive-tool block,
+/// and the PreToolUse hook `Deny`/`Blocked` arms. Each previously
+/// duplicated the event publish + tuple assembly inline; they now funnel
+/// through this helper so a new denial path cannot forget the UI close-out.
+fn denied_tool_call(
+    tc: &crate::session::history::PendingToolCall,
+    event_bus: &crate::event::EventBus,
+    session_id_str: &str,
+    input: Value,
+    reason: String,
+) -> (
+    crate::session::history::PendingToolCall,
+    Value,
+    ToolCallStatus,
+    Option<Value>,
+    Option<String>,
+    u64,
+    String,
+    Option<Value>,
+) {
+    event_bus.publish(Event::ToolCallEnd {
+        session_id: session_id_str.to_string(),
+        call_id: tc.id.clone(),
+        tool: tc.name.clone(),
+        error: Some(reason.clone()),
+        duration_ms: 0,
+    });
+    (
+        tc.clone(),
+        input,
+        ToolCallStatus::Error,
+        None,
+        Some(reason),
+        0u64,
+        String::new(),
+        None,
+    )
 }
