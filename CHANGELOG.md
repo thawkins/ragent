@@ -1,6 +1,21 @@
 # Changelog
 
-## Uncommitted (post 1.0.93)
+## Version: 1.0.95
+
+### /toolchain list table switched to fixed 10/10/10/50 column widths
+
+- The `/toolchain list` ASCII table no longer widens the Language, Runtime,
+  and Status columns by 5 characters over their widest content; the four
+  columns are now fixed at 10 (Language), 10 (Runtime), 10 (Status), and 50
+  (Version) characters (FR-017 updated), keeping the table at a constant 93
+  columns wide. Language and Runtime cells wider than their column are
+  clipped to the column width; Status and Version cells word-wrap onto
+  continuation grid lines instead of clipping, so no status or version text
+  is lost (multi-runtime status strings and the data-format marker now wrap).
+- `COLUMN_WIDEN_CHARS` is replaced by the `TABLE_COLUMN_WIDTHS` constant;
+  the FR-017 spec text, renderer tests, `/toolchain list` TUI regression
+  tests, and the `docs/howtos/toolchain.md` example table were updated to
+  the fixed-width layout.
 
 ### Agent Notice chat-bubble separation fixed
 
@@ -15,20 +30,6 @@
   mid-stream.
 
 ## Version: 1.0.94
-
-### Agent Notice chat-bubble separation fixed
-
-- Consecutive `Event::AgentNotice` notices no longer run onto each other in
-  the message window: the TUI event handler now forces a new assistant
-  message before and after appending a notice, so every notice renders as
-  its own yellow bubble with the renderer's trailing blank line separating
-  it from the next bubble and from subsequent streamed text.
-- New regression tests in
-  `crates/ragent-tui/tests/test_agent_notice_separation.rs` cover
-  consecutive notices, streamed text after a notice, and a notice arriving
-  mid-stream.
-
-## Version: 1.0.93
 
 ### `/spec impl` no longer pre-creates session tracker tasks
 

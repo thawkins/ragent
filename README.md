@@ -448,11 +448,19 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.93** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.95** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **AgentNotice chat-bubble separation + /toolchain fixed-width table
+  (v1.0.94)** — consecutive `AgentNotice` notices now render as their own
+  yellow bubbles (the TUI event handler forces a new assistant message
+  before and after each notice), and the `/toolchain list` table switched
+  to fixed 10/10/10/50 character columns (Language/Runtime clip, Status
+  and Version word-wrap onto continuation grid lines) at a constant
+  93-column width. Released in v1.0.95 with the docupdate pass.
 
 - **Spec-impl tracker semantics + sub-agent completion hard requirement +
   compaction performance pass (v1.0.93)** — `/spec impl` no longer

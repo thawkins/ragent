@@ -1674,15 +1674,17 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
-## Version 1.0.90
+## Version 1.0.95
 
-Internal code-simplification release; no user-visible behaviour change. The
-`/new` scaffolding pipeline (TUI and CLI) and the status-bar renderer were
-refactored onto shared engine functions (`plan_and_emit`,
-`register_origin_and_push`, single-pass `prompt_display_text`), removing
-roughly 135 duplicated lines. All command syntax, configuration keys, and
-outputs are unchanged — see the v1.0.89 highlights below for the most recent
-behaviour changes.
+- **AgentNotice chat-bubble separation** — consecutive `AgentNotice`
+  notices (auto-compaction labels, model-override warnings, etc.) now
+  render as their own yellow bubbles in the TUI message window instead of
+  running onto each other or into subsequent streamed text.
+- **`/toolchain list` fixed-width table** — the runtime-toolchain report
+  table's Language, Runtime, Status, and Version columns are fixed at 10,
+  10, 10, and 50 characters (a constant 93-column grid). Language and
+  Runtime cells clip to the column width; Status and Version cells
+  word-wrap onto continuation grid lines so no text is lost.
 
 ## Version 1.0.93
 
@@ -1703,6 +1705,16 @@ pass), summarised for quickstart relevance:
   allocation-free token estimator. The pre-send auto-compaction path always
   uses the session's primary model and publishes an `AgentNotice` when a
   `compaction.model` override is configured.
+
+## Version 1.0.90
+
+Internal code-simplification release; no user-visible behaviour change. The
+`/new` scaffolding pipeline (TUI and CLI) and the status-bar renderer were
+refactored onto shared engine functions (`plan_and_emit`,
+`register_origin_and_push`, single-pass `prompt_display_text`), removing
+roughly 135 duplicated lines. All command syntax, configuration keys, and
+outputs are unchanged — see the v1.0.89 highlights below for the most recent
+behaviour changes.
 
 ## Version 1.0.89
 

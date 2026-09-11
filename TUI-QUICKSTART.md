@@ -4,15 +4,23 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.90)
+## Highlights (v1.0.95)
 
-- **Internal simplify pass** — no UI change: the `/new` command and the
-  `ragent new` CLI now share one scaffolding pipeline (`plan_and_emit`),
-  the GitHub/GitLab hosting flows share a `register_origin_and_push`
-  helper, and the status-bar last-prompt renderer is single-pass. All
-  commands, key bindings, and visuals behave exactly as in v1.0.89.
+- **AgentNotice chat-bubble separation (v1.0.95)** — consecutive
+  `Event::AgentNotice` notices now render as their own yellow bubbles: the
+  TUI event handler forces a new assistant message before and after
+  appending a notice, with the renderer's trailing blank line separating it
+  from the next bubble and subsequent streamed text.
+- **`/toolchain list` fixed-width table (v1.0.95)** — the report table's
+  Language, Runtime, Status, and Version columns are fixed at 10, 10, 10,
+  and 50 characters (a constant 93-column grid). Language and Runtime cells
+  clip to the column width; Status and Version cells word-wrap onto
+  continuation grid lines so no text is lost.
+- **Stable toolchain** — the pinned `rust-toolchain.toml` moved from
+  `nightly-2026-09-04` to the current stable channel; builds, CI, and user
+  shells now compile with stable Rust (1.98.1 at time of release).
 
-## Highlights (v1.0.89)
+## Highlights (v1.0.90-1.0.93)
 
 - **`/new` project scaffolding** — scaffold a brand-new project in an empty
   directory from the TUI (`/new --language rust --type cmdline`) or the CLI
@@ -22,9 +30,6 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   docs, git init,
   and optional `--github`/`--gitlab` hosting + push; steps stream live into
   the message window.
-- **Stable toolchain** — the pinned `rust-toolchain.toml` moved from
-  `nightly-2026-09-04` to the current stable channel; builds, CI, and user
-  shells now compile with stable Rust (1.98.1 at time of release).
 - **Sub-agent termination protocol** — a new sub-agent-mode system-prompt
   section instructs spawned sub-agents to always finish with a single
   `agent_complete` call, so background tasks report completion promptly

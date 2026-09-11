@@ -49,7 +49,7 @@ There was no way, from inside ragent, to see which of those runtimes are
 actually installed locally and at what version. `/toolchain` fills that gap:
 it walks `SUPPORTED_LANGUAGES`, classifies every entry, probes the local
 system for each application language's runtime, and reports presence and
-version in a markdown table or a JSON document.
+version in a fixed-width ASCII table or a JSON document.
 
 Key properties:
 
@@ -227,28 +227,52 @@ never interpolated into a spawned command line.
 
 ## 6. Report Output
 
-`/toolchain list` renders a markdown table prefixed `From: /toolchain list`
-with columns **Language**, **Runtime**, **Status**, **Version**, followed by
-a summary line:
+`/toolchain list` renders a fixed-width ASCII table prefixed
+`From: /toolchain list` with columns **Language**, **Runtime**, **Status**,
+**Version** fixed at 10, 10, 10, and 50 characters respectively (FR-017;
+Language and Runtime cells clip to the column width, the Status and Version
+columns word-wrap onto continuation grid lines) — followed by a summary line:
 
 ```
 From: /toolchain list
 
-| Language | Runtime | Status | Version |
-|---|---|---|---|
-| rust | cargo, rustc | cargo: installed; rustc: installed | cargo: rustc 1.98.1; rustc: rustc 1.98.1 |
-| python | python3 | installed | Python 3.12.5 |
-| go | go | installed | go version go1.24.5 linux/amd64 |
-| toml | - | (data format — runtime n/a) | - |
-| erlang | erl | not installed | - |
++------------+------------+------------+----------------------------------------------------+
+| Language   | Runtime    | Status     | Version                                            |
++------------+------------+------------+----------------------------------------------------+
+| rust       | cargo, rus | cargo:     | cargo: rustc 1.98.1; rustc: rustc 1.98.1           |
++------------+------------+------------+----------------------------------------------------+
+|            |            | installed; |                                                    |
++------------+------------+------------+----------------------------------------------------+
+|            |            | rustc:     |                                                    |
++------------+------------+------------+----------------------------------------------------+
+|            |            | installed  |                                                    |
++------------+------------+------------+----------------------------------------------------+
+| python     | python3    | installed  | Python 3.12.5                                      |
++------------+------------+------------+----------------------------------------------------+
+| go         | go         | installed  | go version go1.24.5 linux/amd64                    |
++------------+------------+------------+----------------------------------------------------+
+| toml       | -          | (data      | -                                                  |
++------------+------------+------------+----------------------------------------------------+
+|            |            | format —   |                                                    |
++------------+------------+------------+----------------------------------------------------+
+|            |            | runtime    |                                                    |
++------------+------------+------------+----------------------------------------------------+
+|            |            | n/a)       |                                                    |
++------------+------------+------------+----------------------------------------------------+
+| erlang     | erl        | not        | -                                                  |
++------------+------------+------------+----------------------------------------------------+
+|            |            | installed  |                                                    |
++------------+------------+------------+----------------------------------------------------+
 ...
-
 12/30 application runtimes installed.
 ```
 
 - Rows follow `SUPPORTED_LANGUAGES` order; repeated invocations in the same
   environment produce identical columns (barring concurrent `PATH` changes).
-- Multi-runtime rows join per-command status/version with `; `.
+- Multi-runtime rows join per-command status with `; ` and per-command version
+  with `; ` (the Status and Version columns word-wrap onto continuation lines
+  when longer, with blank Language/Runtime cells — and a blank Status cell on
+  Version-only continuation lines).
 - Absent runtimes render `not installed` with a `-` version placeholder.
 - The summary line counts application rows with at least one installed
   runtime over the number of application rows.

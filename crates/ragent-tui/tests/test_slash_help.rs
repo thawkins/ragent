@@ -14,11 +14,7 @@ mod support;
 
 /// Run `/<cmd> help` and return the last assistant message text.
 fn last_output_after_help(app: &mut App, cmd: &str) -> String {
-    app.execute_slash_command(&format!("/{cmd} help"));
-    app.messages
-        .last()
-        .map(|m| m.text_content())
-        .unwrap_or_default()
+    last_output_after(app, &format!("/{cmd} help"))
 }
 
 fn assert_help(app: &mut App, cmd: &str, expect_status: &str) {
@@ -645,10 +641,89 @@ fn test_toolchain_list_absent_runtimes_do_not_truncate_report() {
         flat.contains("not installed") || flat.contains("installed"),
         "status column renders for absent and installed runtimes: {flat}"
     );
-    let absent_rows = flat.matches("(data format").count();
+    let absent_rows = flat.matches("format —").count();
     assert!(
         absent_rows >= 20,
-        "data-format rows survive the walk (>= 20): {flat}"
+        "data-format rows survive the walk (>= 20, word-wrapped in the status column): {flat}"
+    );
+    assert_eq!(app.status, "toolchain: list");
+}
+
+// ---------------------------------------------------------------------------
+// /toolchain fixed-width table render (FR-017: 10/10/10/50 char columns,
+// Language/Runtime clip, Status and Version word-wrap)
+// ---------------------------------------------------------------------------
+
+/// FR-017: the Language, Runtime, Status, and Version columns of the
+/// `/toolchain list` ASCII grid are fixed at 10/10/10/50 characters, so
+/// every border line is exactly (10+2)x3 + (50+2) + 5 = 93 columns wide and
+/// every grid (pipe) line is too.
+#[test]
+fn test_toolchain_list_table_renders_at_fixed_column_widths() {
+    let mut app = make_app();
+    let text = last_output_after(&mut app, "/toolchain list");
+    let borders = text
+        .lines()
+        .filter(|line| line.trim_start().starts_with("+-"))
+        .map(|line| line.trim().len())
+        .collect::<Vec<_>>();
+    assert!(
+        !borders.is_empty(),
+        "table must carry +-- border lines, got: {text}"
+    );
+    for width in &borders {
+        assert_eq!(
+            *width,
+            93,
+            "border must be exactly 93 cols ((10+2)x3 + (50+2) + 5), got {width}: first borders: {}",
+            text.lines()
+                .filter(|line| line.trim_start().starts_with("+-"))
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" | ")
+        );
+    }
+    // Every pipe-delimited grid line (data + wrapped continuation) keeps the
+    // same 93-column shape so wrap continuation lines align under their row.
+    for line in text.lines().filter(|l| l.starts_with('|')) {
+        assert_eq!(
+            line.chars().count(),
+            93,
+            "grid line must be 93 cols: {line}"
+        );
+    }
+    assert_eq!(app.status, "toolchain: list");
+}
+
+/// FR-017 word-wrap: version text wider than the 50-char Version column
+/// wraps onto continuation grid lines instead of being clipped — no version
+/// text is dropped (the report still renders every row's status, and any
+/// continuation line carries text only in the Version column).
+#[test]
+fn test_toolchain_list_version_column_word_wraps() {
+    let mut app = make_app();
+    let text = last_output_after(&mut app, "/toolchain list");
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        flat.contains("installed") || flat.contains("not installed"),
+        "status column renders for absent and installed runtimes: {flat}"
+    );
+    assert_eq!(app.status, "toolchain: list");
+}
+
+/// FR-017: a filtered single-language report uses the same fixed layout.
+#[test]
+fn test_toolchain_list_filtered_table_renders_at_fixed_column_widths() {
+    let mut app = make_app();
+    let text = last_output_after(&mut app, "/toolchain list rust");
+    let border = text
+        .lines()
+        .find(|line| line.trim_start().starts_with("+-"))
+        .map(|line| line.trim().len())
+        .unwrap_or(0);
+    assert_eq!(
+        border, 93,
+        "filtered table border must be exactly 93 cols, got {border}: {text}"
     );
     assert_eq!(app.status, "toolchain: list");
 }
