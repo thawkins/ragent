@@ -139,13 +139,13 @@ fn test_messages_to_chat_messages_emits_tool_result_followup() {
         parts: vec![MessagePart::ToolCall {
             tool: "bash".to_string(),
             call_id: "call_9".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
                 input: serde_json::json!("pwd"),
                 output: Some(serde_json::json!("/home/user")),
                 error: None,
                 duration_ms: None,
-            },
+            }),
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),

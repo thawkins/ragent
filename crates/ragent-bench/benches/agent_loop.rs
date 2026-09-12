@@ -50,13 +50,13 @@ fn synthetic_history(n: usize) -> Vec<Message> {
                 MessagePart::ToolCall {
                     tool: "bash".to_string(),
                     call_id: format!("call-{i}"),
-                    state: ragent_agent::message::ToolCallState {
+                    state: Box::new(ragent_agent::message::ToolCallState {
                         status: ragent_agent::message::ToolCallStatus::Completed,
                         input: json!({"command": "echo hi"}),
                         output: Some(json!({"content": "hi\n"})),
                         error: None,
                         duration_ms: Some(5),
-                    },
+                    }),
                 },
             ],
         );
@@ -215,13 +215,13 @@ fn bench_interim_save_hash(c: &mut Criterion) {
             .map(|i| MessagePart::ToolCall {
                 tool: "bash".to_string(),
                 call_id: format!("call-{i}"),
-                state: ragent_agent::message::ToolCallState {
+                state: Box::new(ragent_agent::message::ToolCallState {
                     status: ragent_agent::message::ToolCallStatus::Completed,
                     input: json!({"command": "ls", "args": ["-la"]}),
                     output: Some(json!({"content": "file1\nfile2\n"})),
                     error: None,
                     duration_ms: Some(5),
-                },
+                }),
             })
             .collect();
         group.throughput(Throughput::Elements(n as u64));

@@ -45,6 +45,21 @@ const EXEMPT_TOOL_INLINE_LIMIT: usize = 32_000;
 /// For multi-byte UTF-8 we may truncate slightly earlier — conservative and safe.
 const MAX_TOOL_RESULT_BYTES_FOR_LLM: usize = MAX_TOOL_RESULT_CHARS_FOR_LLM;
 
+/// Minimum raw-JSON size (in characters) a tool result must reach before the
+/// GCF encoding hook attempts to encode it (spec `gcf` FR-004). Smaller
+/// payloads save too little to justify a labelled block.
+const GCF_MIN_JSON_CHARS: usize = 200;
+
+/// Minimum savings (percent) the labelled GCF block must achieve over the raw
+/// JSON to be emitted (spec `gcf` FR-004 — no negative-savings encodes).
+const GCF_MIN_SAVINGS_PERCENT: u64 = 10;
+
+/// Labelled GCF block markers wrapping the encoded payload (spec `gcf`
+/// FR-004.3). The system-prompt primer (FR-006) teaches the LLM these
+/// markers and the generic-profile grammar.
+const GCF_BLOCK_BEGIN: &str = "[BEGIN GCF generic]";
+const GCF_BLOCK_END: &str = "[END GCF]";
+
 /// A pending tool call extracted from the LLM stream, awaiting execution.
 #[derive(Clone)]
 pub(crate) struct PendingToolCall {
@@ -318,6 +333,18 @@ pub fn tool_result_content_for_llm(
         return exempt_tool_result_for_llm(tool, content, metadata);
     }
 
+    // GCF encoding (spec `gcf` FR-004/FR-005/FR-007): when the feature is
+    // enabled, eligible JSON-dense observations are emitted as a labelled,
+    // lossless GCF block instead of raw JSON. Non-JSON observations, error
+    // text, payloads below the size threshold, encodes that would not save
+    // space, and blocks that would not fit the LLM budget all fall back to
+    // the raw observation; encode failures never break a tool result.
+    if ragent_config::gcf::is_enabled()
+        && let Some(encoded) = gcf_encode_tool_result(content)
+    {
+        return Arc::from(encoded);
+    }
+
     // Fast-path: use byte length for the threshold check (safe because we
     // truncate anyway — a few bytes off is fine). Only decode UTF-8 once
     // when we actually need to truncate.  We allocate a single `Arc<str>`
@@ -354,6 +381,50 @@ pub fn tool_result_content_for_llm(
          {head}\n\n[... {omitted_chars} chars omitted ...]\n\n{tail}"
     );
     Arc::from(s)
+}
+
+/// Attempt to GCF-encode a tool-result observation (spec `gcf` FR-004).
+///
+/// Returns the labelled block text when the observation:
+///
+/// - is at least [`GCF_MIN_JSON_CHARS`] characters,
+/// - parses as a JSON object or array (error text and plain prose never
+///   encode), and
+/// - encodes with the `gcf` generic profile to a labelled block at least
+///   [`GCF_MIN_SAVINGS_PERCENT`]% smaller than the raw JSON (no
+///   negative-savings encodes) that still fits inside the LLM tool-result
+///   budget, so the block is never truncated mid-payload (the lossless
+///   guarantee, FR-007).
+///
+/// Any other case returns `None` and the caller falls back to the raw
+/// observation unchanged.
+fn gcf_encode_tool_result(content: &str) -> Option<String> {
+    let raw_chars = content.chars().count();
+    if raw_chars < GCF_MIN_JSON_CHARS {
+        return None;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(content) else {
+        return None;
+    };
+    if !matches!(value, Value::Object(_) | Value::Array(_)) {
+        return None;
+    }
+    let encoded = gcf::encode_generic(&value).ok()?;
+    let encoded_chars = encoded.chars().count();
+    // Wrapper markers plus the two newline separators around the payload.
+    let total_chars = encoded_chars + GCF_BLOCK_BEGIN.len() + GCF_BLOCK_END.len() + 2;
+    if u64::try_from(total_chars).unwrap_or(u64::MAX) * 100
+        >= u64::try_from(raw_chars).unwrap_or(u64::MAX) * (100 - GCF_MIN_SAVINGS_PERCENT)
+    {
+        return None;
+    }
+    if total_chars > MAX_TOOL_RESULT_BYTES_FOR_LLM {
+        // A block that would be truncated mid-payload is not lossless
+        // (FR-007); leave the raw JSON to the existing head+tail truncation
+        // path instead.
+        return None;
+    }
+    Some(format!("{GCF_BLOCK_BEGIN}\n{encoded}\n{GCF_BLOCK_END}"))
 }
 
 /// Exempt-tool variant of [`tool_result_content_for_llm`] used for

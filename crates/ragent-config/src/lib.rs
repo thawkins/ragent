@@ -14,6 +14,7 @@ pub mod config;
 pub mod dir_lists;
 pub mod edit_log;
 pub mod finance;
+pub mod gcf;
 pub mod permission;
 pub mod runtime_flag;
 pub mod telemetry;
@@ -30,6 +31,7 @@ pub use config::{
     ResearchConfig, ResearchEvaluateConfig, ResearchModelsConfig, ResearchSupervisorConfig,
     SddConfig, StreamConfig, TelegramChannelConfig, ToolVisibilityConfig, tool_family_names,
 };
+pub use gcf::GcfConfig;
 pub use permission::{
     Permission, PermissionAction, PermissionChecker, PermissionDecision, PermissionRequest,
     PermissionRule,

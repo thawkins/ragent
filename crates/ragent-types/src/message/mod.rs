@@ -135,13 +135,17 @@ pub enum MessagePart {
         text: String,
     },
     /// A tool invocation with its execution state.
+    ///
+    /// `state` is `Box`ed because [`ToolCallState`] is large (it embeds JSON
+    /// values) and this variant is common, keeping the overall `MessagePart`
+    /// footprint small.
     ToolCall {
         /// Name of the tool being called.
         tool: String,
         /// Unique identifier for this tool call.
         call_id: String,
         /// Execution state of the tool call.
-        state: ToolCallState,
+        state: Box<ToolCallState>,
     },
     /// Internal model reasoning or chain-of-thought.
     Reasoning {

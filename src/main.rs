@@ -25,7 +25,7 @@ use ragent_agent::{
     telemetry::{ShutdownGuard, TelemetrySubsystem},
     tool,
 };
-use ragent_config::{activity_log, edit_log, yolo};
+use ragent_config::{activity_log, edit_log, gcf, yolo};
 
 mod cli;
 mod panic_hook;
@@ -418,6 +418,7 @@ async fn async_main() -> Result<()> {
     yolo::sync_from_config_value(config.yolo);
     edit_log::sync_from_config_value(config.edit_log);
     activity_log::sync_from_config_value(config.activity_log);
+    gcf::sync_from_config_value(config.gcf.enabled);
     tracing::info!("Configuration loaded successfully");
 
     let auto_extract_config = config.memory.auto_extract.clone();

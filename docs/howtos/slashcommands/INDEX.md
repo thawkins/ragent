@@ -38,6 +38,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/system` | [system](system.md) | Override the agent system prompt (/system <prompt> \| /system help) |
 | `/template` | [template](template.md) | List and apply reusable prompt templates: /template [name] [args] |
 | `/goal` | [goal](goal.md) | Goal-based autonomous stop: /goal set\|clear\|show\|test |
+| `/gcf` | [gcf](gcf.md) | Toggle GCF encoding of tool results: /gcf on\|off\|show\|help |
 | `/tools` | [tools](tools.md) | List all available tools (built-in and MCP) |
 | `/skills` | [skills](skills.md) | List all registered skills and their descriptions (/skills help) |
 | `/mcp` | [mcp](mcp.md) | MCP servers: /mcp [status] \| /mcp discover \| /mcp connect <id> \| /mcp disconnect <id> \| /mcp help |

@@ -288,7 +288,7 @@ async fn test_history_to_chat_messages_uses_tool_output_content_field() {
         vec![MessagePart::ToolCall {
             tool: "read".to_string(),
             call_id: "call-1".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
                 input: json!({"path": "src/lib.rs"}),
                 output: Some(json!({
@@ -297,7 +297,7 @@ async fn test_history_to_chat_messages_uses_tool_output_content_field() {
                 })),
                 error: None,
                 duration_ms: Some(3),
-            },
+            }),
         }],
     );
 

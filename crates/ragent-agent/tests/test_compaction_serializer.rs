@@ -74,13 +74,13 @@ fn test_serialize_assistant_tool_call_completed() {
         parts: vec![MessagePart::ToolCall {
             tool: "bash".to_string(),
             call_id: "call_1".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
                 input: serde_json::json!("ls -la"),
                 output: Some(serde_json::json!("file1.txt\nfile2.txt")),
                 error: None,
                 duration_ms: Some(123),
-            },
+            }),
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
@@ -100,13 +100,13 @@ fn test_serialize_assistant_tool_call_error() {
         parts: vec![MessagePart::ToolCall {
             tool: "bash".to_string(),
             call_id: "call_2".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Error,
                 input: serde_json::json!("bad"),
                 output: None,
                 error: Some("command not found".to_string()),
                 duration_ms: None,
-            },
+            }),
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),

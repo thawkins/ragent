@@ -1917,6 +1917,35 @@ fn test_slash_unknown_command_shows_error() {
     );
 }
 
+#[test]
+fn test_slash_unknown_command_visible_in_message_window() {
+    // The status line auto-expires back to "ready", so a typo'd slash command
+    // must ALSO render a visible rejection in the message window (a silently
+    // swallowed prompt once looked like a broken agent loop).
+    let mut app = make_app();
+    let before = app.messages.len();
+    app.execute_slash_command("/simpify all");
+
+    assert_eq!(
+        app.messages.len(),
+        before + 1,
+        "unknown command should append one assistant message"
+    );
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("From: /simpify"),
+        "message window notice should carry the From header, got: {text}"
+    );
+    assert!(
+        text.contains("Unknown command: `/simpify`"),
+        "message window notice should name the unknown command, got: {text}"
+    );
+    assert!(
+        text.contains("/help"),
+        "message window notice should point at /help, got: {text}"
+    );
+}
+
 // ── /blueprints command ─────────────────────────────────────────────
 
 fn write_temp_blueprint(dir: &std::path::Path, name: &str, readme: &str, teammates: usize) {

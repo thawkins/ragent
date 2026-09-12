@@ -83,6 +83,7 @@ impl RuntimeFlag {
         match self.name {
             "activity_log" => config.activity_log,
             "edit_log" => config.edit_log,
+            "gcf" => config.gcf.enabled,
             "yolo" => config.yolo,
             other => {
                 debug_assert!(false, "unhandled runtime flag name: {other}");
@@ -95,6 +96,7 @@ impl RuntimeFlag {
         match self.name {
             "activity_log" => config.activity_log = enabled,
             "edit_log" => config.edit_log = enabled,
+            "gcf" => config.gcf.enabled = enabled,
             "yolo" => config.yolo = enabled,
             other => {
                 debug_assert!(false, "unhandled runtime flag name: {other}");

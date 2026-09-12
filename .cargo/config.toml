@@ -7,3 +7,6 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
 
+[build]
+jobs = 4
+ 

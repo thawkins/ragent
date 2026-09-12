@@ -16,13 +16,13 @@ fn test_toolcall_duration_displayed_when_completed() {
         vec![MessagePart::ToolCall {
             tool: "read".to_string(),
             call_id: "call-001".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
                 input: json!({"path": "/tmp/test.txt"}),
                 output: Some(json!({"content": "Hello"})),
                 error: None,
                 duration_ms: Some(1234),
-            },
+            }),
         }],
     );
 
@@ -54,13 +54,13 @@ fn test_toolcall_duration_not_displayed_when_running() {
         vec![MessagePart::ToolCall {
             tool: "read".to_string(),
             call_id: "call-002".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Running,
                 input: json!({"path": "/tmp/test.txt"}),
                 output: None,
                 error: None,
                 duration_ms: None,
-            },
+            }),
         }],
     );
 
@@ -93,13 +93,13 @@ fn test_toolcall_duration_not_displayed_when_none() {
         vec![MessagePart::ToolCall {
             tool: "read".to_string(),
             call_id: "call-003".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
                 input: json!({"path": "/tmp/test.txt"}),
                 output: Some(json!({"content": "Hello"})),
                 error: None,
                 duration_ms: None,
-            },
+            }),
         }],
     );
 
@@ -134,13 +134,13 @@ fn test_toolcall_duration_shows_ms_for_short_duration() {
         vec![MessagePart::ToolCall {
             tool: "read".to_string(),
             call_id: "call-004".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
                 input: json!({"path": "/tmp/test.txt"}),
                 output: Some(json!({"content": "Hello"})),
                 error: None,
                 duration_ms: Some(456),
-            },
+            }),
         }],
     );
 
@@ -171,7 +171,7 @@ fn test_toolcall_duration_with_inline_diff() {
         vec![MessagePart::ToolCall {
             tool: "edit".to_string(),
             call_id: "call-005".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
                 input: json!({"path": "/tmp/test.txt", "old": "old", "new": "new"}),
                 output: Some(json!({
@@ -181,7 +181,7 @@ fn test_toolcall_duration_with_inline_diff() {
                 })),
                 error: None,
                 duration_ms: Some(1500),
-            },
+            }),
         }],
     );
 

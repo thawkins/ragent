@@ -1,0 +1,5 @@
+2026-09-10T15:22:29.093765845+00:00 WRN permission requested: file:write — create: crates/ragent-tui/tests/test_permission_countdown.rs
+2026-09-10T15:22:29.256588885+00:00 WRN question requested: Type your answer
+2026-09-10T15:22:29.256588887+00:00 WRN question requested: Pick
+2026-09-10T15:22:29.256588995+00:00 WRN question requested: Which provider?
+2026-09-10T15:22:29.256588904+00:00 WRN question requested: Pick one

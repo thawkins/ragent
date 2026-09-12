@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.97"
+version = "1.0.98"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -252,6 +252,10 @@ rustc-hash = "2.0"
 
 # ── Encoding ───────────────────────────────────────────────────────────
 hex = "0.4"
+# GCF (Graph Compact Format) — AI-native token-efficient encoding of JSON tool
+# results for the LLM view. Zero runtime deps beyond serde/serde_json. See
+# spec `gcf`; the encoding hook lives in ragent-agent (session/history.rs).
+gcf = "3.0.1"
 
 ragent-specs = { path = "crates/ragent-specs" }
 ragent-research = { path = "crates/ragent-research" }

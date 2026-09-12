@@ -1,5 +1,36 @@
 # Changelog
 
+## Version: 1.0.98
+
+- **GCF tool-result encoding (spec `gcf`, FR-001..FR-009)** - new opt-in
+  `gcf.enabled` config flag (default off, omitted from the saved file while
+  disabled) backed by the `gcf` crate (v3.0.1, MIT, zero deps). When
+  enabled, the LLM-facing copy of JSON tool results of at least 200
+  characters is re-encoded losslessly inside a `[BEGIN GCF generic]` ...
+  `[END GCF]` labelled block, but only when the GCF output is at least 10 %
+  smaller than the raw JSON; any encode failure falls back to raw. Only the
+  LLM view is re-encoded (`tool_result_content_for_llm`, live dispatch and
+  replay paths); TUI rendering, activity log, memory extraction, hooks, and
+  compaction always see the raw JSON. While GCF is on the system prompt gains
+  a short `[BEGIN GCF generic]` reading primer. New `/gcf on|off|show|help`
+  slash command persists the flag to the loaded config source, invalidates
+  the config cache, and reports effective state/source; unknown subcommands
+  are rejected without state changes. Test suites: `test_gcf_config.rs`
+  (ragent-config), `test_gcf_encode_hook.rs` / `test_gcf_primer.rs` /
+  `test_gcf_raw_consumers.rs` (ragent-agent), `test_gcf_slash_registration.rs`
+  / `test_gcf_command.rs` (ragent-tui).
+- **Alt+G GCF toggle + status-bar indicator** - `Alt+G` now toggles GCF
+  encoding with the same persist semantics as `/gcf on|off` (the `g`
+  keystroke is never inserted into the input buffer), and a new line-2
+  status-bar service indicator (compression-clamp icon, light magenta,
+  leftmost in the icon row — left of the codeindex icon) shows the
+  enabled (`✓`) / disabled (`✗`) state in verbose modes. Keybinding
+  documented in the `?` help panel. Test suite: `test_gcf_indicator.rs`.
+- Docs: `gcf` section in the SPEC.md config schema (new section 5.6), `/gcf`
+  in the slash-command tables, config example + feature blurb in
+  QUICKSTART.md, and the `/gcf` how-to manual
+  (`docs/howtos/slashcommands/gcf.md`) with its INDEX.md row.
+
 ## Version: 1.0.97
 
 - **`/toolchain list` hang fix (FR-012)** - `run_probe_raw` in

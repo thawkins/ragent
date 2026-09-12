@@ -193,13 +193,13 @@ fn test_pending_args_drained_by_next_lifecycle_event() {
         vec![MessagePart::ToolCall {
             tool: "bash".to_string(),
             call_id: "c9".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Running,
                 input: serde_json::Value::Null,
                 output: None,
                 error: None,
                 duration_ms: None,
-            },
+            }),
         }],
     ));
 

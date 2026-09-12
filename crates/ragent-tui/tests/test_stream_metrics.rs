@@ -25,7 +25,7 @@ fn test_usage_display_shows_pct_then_context_window_size() {
 }
 
 #[test]
-fn test_request_started_resets_inbound_and_sets_outbound_bytes() {
+fn test_request_started_accumulates_outbound_bytes_across_turn() {
     let mut app = support::make_app();
     app.session_id = Some("session-1".to_string());
     app.stream_in_bytes = 321;
@@ -38,9 +38,24 @@ fn test_request_started_resets_inbound_and_sets_outbound_bytes() {
         session_id: "session-1".to_string(),
         text: "hello".to_string(),
     });
+    // A second request in the same turn (after a tool call) must
+    // accumulate, not reset the running totals.
+    app.handle_event(Event::RequestStarted {
+        session_id: "session-1".to_string(),
+        outbound_bytes: 1024,
+    });
+    app.handle_event(Event::TextDelta {
+        session_id: "session-1".to_string(),
+        text: "world".to_string(),
+    });
 
-    assert_eq!(app.stream_out_bytes, 4096);
-    assert_eq!(app.stream_in_bytes, 5);
+    // 4096 + 1024: per-request payloads accumulate across the turn.
+    assert_eq!(app.stream_out_bytes, 4096 + 1024);
+    // Inbound bytes are never reset mid-turn: seeded 321 + both deltas.
+    assert_eq!(
+        app.stream_in_bytes,
+        321 + "hello".len() as u64 + "world".len() as u64
+    );
 }
 
 #[test]

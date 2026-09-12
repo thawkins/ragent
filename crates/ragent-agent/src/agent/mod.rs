@@ -2630,6 +2630,44 @@ fn build_system_prompt_with_storage_inner(
          action.\n\n",
     );
 
+    // GCF encoding primer (spec `gcf` FR-006) — shown only while the GCF
+    // feature flag is enabled so the prompt stays byte-identical to
+    // pre-feature prompts when the setting is at its default-off state.
+    // The primer is short (~15 lines): the block markers, the generic
+    // profile grammar (flat scalars, `## section` headers, `path` nesting,
+    // `tags[2]: a,b` lists, `-` for null), the lossless guarantee, and how
+    // to read a block. It teaches exactly what the `tool_result_content_for_llm`
+    // encoding hook in `session/history.rs` may emit.
+    if ragent_config::gcf::is_enabled() {
+        prompt.push_str(
+            "## GCF Encoding Primer\n\n\
+             Some tool results below may be wrapped in GCF (Graph Compact Format) \
+             blocks:\n\
+             \x20\x20[BEGIN GCF generic]\n\
+             \x20\x20...encoded payload...\n\
+             \x20\x20[END GCF]\n\n\
+             A GCF block is a lossless, token-efficient encoding of the original \
+             JSON -\n\
+             every value is recoverable, nothing is omitted or summarised. \
+             Read the content between the markers as structured data.\n\n\
+             Generic-profile grammar (the payload starts with a header line \
+             `GCF profile=generic`):\n\
+             - Flat scalars: `key=value` rows (e.g. `count=3`).\n\
+             - `-` means JSON null; booleans are `true` / `false`.\n\
+             - `## name` opens a nested object section; deeper nesting repeats \
+               the header with indentation, e.g. `## data` then `## nested`.\n\
+             - Nested keys use leading-path columns like `path.sub=value` when \
+               flattening is in effect.\n\
+             - Lists: `tags[2]: a,b` for scalar lists; `## rows [2]{id}` is a \
+               table header (row count + column names) followed by row values \
+               (one per line).\n\
+             - Empty list/map: `## empty_list [0]` / `## empty_map`.\n\n\
+             When you need the original JSON (e.g. to echo an exact payload), \
+             read the GCF block as data and reason over it directly - do not \
+             attempt to re-encode or quote the block back verbatim.\n\n",
+        );
+    }
+
     // Sub-agent spawning guidance (new_agent tool) — shown for primary agents only.
     // Agent list is generated dynamically from builtins + custom agents so it stays in sync.
     if agent.mode == AgentMode::Primary {

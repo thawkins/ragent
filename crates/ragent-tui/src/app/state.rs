@@ -741,6 +741,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Summarise and compact the conversation history",
     },
     SlashCommandDef {
+        trigger: "gcf",
+        description: "Toggle GCF encoding of tool results: /gcf on|off|show|help",
+    },
+    SlashCommandDef {
         trigger: "inbox",
         description: "Triage inbox: /inbox list|claim <id>|dismiss <id>|clear|help",
     },

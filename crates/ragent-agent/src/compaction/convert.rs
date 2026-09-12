@@ -39,13 +39,13 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
                             parts.push(MessagePart::ToolCall {
                                 tool: name.clone(),
                                 call_id: id.clone(),
-                                state: ToolCallState {
+                                state: Box::new(ToolCallState {
                                     status: ToolCallStatus::Completed,
                                     input: input.clone(),
                                     output: None,
                                     error: None,
                                     duration_ms: None,
-                                },
+                                }),
                             });
                         }
                         ContentPart::ToolResult {

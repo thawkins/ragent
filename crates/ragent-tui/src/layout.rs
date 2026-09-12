@@ -5655,6 +5655,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+O", "Toggle telemetry panel visibility"),
     ("Alt+C", "Toggle context panel visibility"),
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),
+    ("Alt+G", "Toggle GCF tool-result encoding"),
     ("Alt+X", "Stop the running agent (asks Are you sure?)"),
     // ── Sending ─────────────────────────────────────────────────────────
     ("Enter", "Send message / confirm"),
@@ -6569,13 +6570,13 @@ mod tests {
             vec![MessagePart::ToolCall {
                 tool: "think".to_string(),
                 call_id: "call-1".to_string(),
-                state: ToolCallState {
+                state: Box::new(ToolCallState {
                     status: ToolCallStatus::Completed,
                     input: json!({"thought": "First line.\nSecond line."}),
                     output: Some(json!({"thought": "First line.\nSecond line."})),
                     error: None,
                     duration_ms: Some(42),
-                },
+                }),
             }],
         );
 
@@ -6611,7 +6612,7 @@ mod tests {
             vec![MessagePart::ToolCall {
                 tool: "agent_complete".to_string(),
                 call_id: "call-1".to_string(),
-                state: ToolCallState {
+                state: Box::new(ToolCallState {
                     status: ToolCallStatus::Completed,
                     input: json!({"summary": "First line.\nSecond line."}),
                     output: Some(json!({
@@ -6620,7 +6621,7 @@ mod tests {
                     })),
                     error: None,
                     duration_ms: Some(42),
-                },
+                }),
             }],
         );
 

@@ -134,6 +134,9 @@ pub mod service_icons {
 
     /// YOLO — warning triangle (bold, changes command-validation behaviour).
     pub const YOLO: (&str, Color) = ("⚠️", Color::LightRed);
+
+    /// GCF encoding — compression clamp (token-efficient tool-result encoding).
+    pub const GCF: (&str, Color) = ("🗜", Color::LightMagenta);
 }
 
 /// Label abbreviations for compact and minimal modes.
@@ -710,6 +713,16 @@ fn build_line2_right(
     if !config.verbose {
         return spans; // Defer to `/status` in minimal/compact
     }
+
+    // GCF encoding status (leftmost — user-requested position, left of the
+    // codeindex icon). Reads the runtime GCF flag directly so `/gcf on|off`
+    // and the Alt+G toggle are reflected immediately.
+    push_indicator(
+        &mut spans,
+        service_icons::GCF,
+        ragent_config::gcf::is_enabled(),
+        false,
+    );
 
     // Code Index status
     push_indicator(

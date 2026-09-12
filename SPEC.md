@@ -1024,6 +1024,11 @@ The format is compatible with OpenCode's `opencode.json`.
     "buffer": 0.10,
     "keep": { "tokens": 0.20 }
   },
+  // Token-efficient GCF encoding of JSON tool results (default off; the
+  // section is omitted entirely while disabled).
+  "gcf": {
+    "enabled": false
+  },
   // Deprecated legacy Headroom compression block. Still parsed for
   // one-release migration: `compression.enabled` maps to
   // `compaction.auto` when `compaction.auto` is not set explicitly.
@@ -1205,6 +1210,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/tools` | Toggle tool visibility |
 | `/codeindex on\|off` | Enable/disable code index |
 | `/codeindex lang <language>` | Filter code index by language |
+| `/gcf on\|off\|show\|help` | Toggle GCF token-efficient tool-result encoding; `show` reports state and source |
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Memory management commands |
 | `/yolo` | Toggle YOLO mode |
@@ -3245,6 +3251,41 @@ not set explicitly. New configurations should use `compaction`.
 Trigger the one-shot compaction manually with the `/compact` slash command
 (`/compress` is a deprecated alias — FR-009).
 
+### 5.6 GCF Encoding Configuration
+
+The `gcf` block controls GCF (Graph Compact Format) encoding of eligible JSON
+tool results in the LLM view. GCF is a token-efficient, lossless
+key=value text format: when enabled, tool results of at least 200 characters
+that parse as a JSON object or array are re-encoded inside a
+`[BEGIN GCF generic]` ... `[END GCF]` labelled block, but only when the GCF
+output is at least 10 % smaller than the raw JSON (results that save nothing
+stay raw). Any encode failure falls back to the raw JSON, so the model always
+receives the full information content (FR-007). TUI rendering, the activity
+log, memory extraction, hooks, and compaction keep seeing the raw JSON; only
+the model-facing copy is re-encoded (FR-005). While GCF is enabled the system
+prompt also gains a short reading primer so the model can decode the block
+format (FR-006).
+
+```jsonc
+{
+  // Default off; the whole section is omitted from the saved file while
+  // disabled (skip_serializing_if default rule, FR-001).
+  "gcf": {
+    "enabled": false
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable GCF encoding of eligible JSON tool results in the LLM view (FR-004) |
+
+Toggle at runtime with `/gcf on` / `/gcf off` (persists to the loaded config
+source), inspect with `/gcf show`, and view usage with `/gcf help` (FR-002,
+FR-003). `Alt+G` toggles GCF with the same persist semantics, and a status-bar
+indicator on line 2 (compression-clamp icon, left of the codeindex icon) shows
+the enabled/disabled state.
+
 ### 5.5 Thinking Configuration
 
 Thinking/reasoning is configured per model:
@@ -3298,6 +3339,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/tools` | Toggle tool visibility |
 | `/codeindex on\|off` | Enable/disable code index |
 | `/codeindex lang <language>` | Filter code index by language |
+| `/gcf on\|off\|show\|help` | Toggle GCF token-efficient tool-result encoding; `show` reports state and source |
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Memory management commands |
 | `/yolo` | Toggle YOLO mode |

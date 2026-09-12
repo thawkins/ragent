@@ -257,8 +257,11 @@ impl App {
                 ref session_id,
                 outbound_bytes,
             } if self.is_current_session(session_id) => {
-                self.stream_in_bytes = 0;
-                self.stream_out_bytes = outbound_bytes;
+                // Accumulate across the whole turn (reset happens at turn
+                // start in dispatch_user_message / dispatch_bang_command /
+                // start_goal_loop), not per LLM request — each tool-call
+                // round-trip within a turn also fires RequestStarted.
+                self.stream_out_bytes += outbound_bytes;
                 telemetry_counters::increment_llm_requests(1);
             }
             Event::ToolCallStart {
@@ -2558,13 +2561,13 @@ impl App {
             last.parts.push(MessagePart::ToolCall {
                 tool: tool.to_string(),
                 call_id: call_id.to_string(),
-                state: ToolCallState {
+                state: Box::new(ToolCallState {
                     status: ToolCallStatus::Running,
                     input: serde_json::Value::Null,
                     output: None,
                     error: None,
                     duration_ms: None,
-                },
+                }),
             });
             last.touch();
             return;
@@ -2576,13 +2579,13 @@ impl App {
                 vec![MessagePart::ToolCall {
                     tool: tool.to_string(),
                     call_id: call_id.to_string(),
-                    state: ToolCallState {
+                    state: Box::new(ToolCallState {
                         status: ToolCallStatus::Running,
                         input: serde_json::Value::Null,
                         output: None,
                         error: None,
                         duration_ms: None,
-                    },
+                    }),
                 }],
             );
             self.messages.push(msg);

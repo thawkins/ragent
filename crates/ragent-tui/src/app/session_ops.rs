@@ -996,6 +996,7 @@ impl App {
             "memory" => Some("<subcommand> [<arg>]".to_string()),
             "agent" => Some("[<name>]".to_string()),
             "codeindex" => Some("[on|off|show|sync|reindex|help]".to_string()),
+            "gcf" => Some("[on|off|show|help]".to_string()),
             "tools" => Some(
                 "[show|help|office|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
             ),

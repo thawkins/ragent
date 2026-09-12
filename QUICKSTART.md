@@ -396,6 +396,12 @@ Ragent loads configuration from multiple sources (last wins):
     // "tool_output_max_chars": 2000
   },
 
+  // Token-efficient GCF encoding of JSON tool results (default off;
+  // omitted from the file while disabled). Toggle with /gcf on|off.
+  "gcf": {
+    "enabled": false
+  },
+
   // OpenTelemetry metrics export (optional)
   "telemetry": {
     "otel": {
@@ -738,6 +744,16 @@ The one-shot form `/loop <agent> [flags] <goal>` accepts `--max-steps N`,
 `--cost_limit N`, and `--timeout N` overrides in any position; the default
 step budget is 512 (`loop.max_steps` in `ragent.json`).
 See [`docs/howtos/loopprogramming.md`](docs/howtos/loopprogramming.md).
+
+GCF (Graph Compact Format) token-efficient tool-result encoding is off by
+default. Toggle it with the `/gcf on|off` slash command (persists
+`gcf.enabled` to your config file), inspect the effective state and source
+with `/gcf show`, and read usage with `/gcf help`. While on, eligible JSON
+tool results (>= 200 chars) are re-encoded losslessly inside a
+`[BEGIN GCF generic]` ... `[END GCF]` block in the model-facing copy only,
+and the system prompt gains a short reading primer. TUI rendering, the
+activity log, memory extraction, hooks, and compaction always keep seeing the
+raw JSON. See SPEC.md section 5.6 for details.
 
 MCP servers can provide additional tools that are automatically discovered and
 made available to the agent (see [SPEC.md §3.11](SPEC.md#311-mcp-client)). MCP

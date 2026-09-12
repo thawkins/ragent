@@ -442,13 +442,13 @@ fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
         vec![MessagePart::ToolCall {
             tool: "bash".to_string(),
             call_id: "c1".to_string(),
-            state: ToolCallState {
+            state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
                 input: serde_json::json!({"command":"echo hi"}),
                 output: Some(serde_json::json!({"line_count": 2})),
                 error: None,
                 duration_ms: Some(12),
-            },
+            }),
         }],
     );
     app.storage

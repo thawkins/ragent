@@ -184,6 +184,14 @@ impl App {
                     "help".to_string(),
                 ]
             }
+            "gcf" => {
+                vec![
+                    "on".to_string(),
+                    "off".to_string(),
+                    "show".to_string(),
+                    "help".to_string(),
+                ]
+            }
             "tools" => vec![
                 "show".to_string(),
                 "office".to_string(),
@@ -949,6 +957,103 @@ Usage: `/telemetry help|on|off|setup|counters`",
                      Usage: `/alog help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes`",
                 );
                 self.status = "alog: usage".to_string();
+            }
+        }
+    }
+
+    /// Handle the `/gcf` slash command (spec `gcf` FR-002, FR-003).
+    ///
+    /// Subcommands: `on` / `off` persist the GCF runtime flag to the loaded
+    /// config source (via `ragent_config::gcf::persist_gcf`) and invalidate
+    /// the P-2 config cache so the next turn re-reads the file; `show`
+    /// reports the effective state and its source; `help` (also `--help`,
+    /// `-h`, bare `/gcf`) renders usage without changing state; any other
+    /// subcommand is rejected without touching the state or the config
+    /// file (FR-003 unwanted path).
+    fn handle_gcf_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+        match sub.as_str() {
+            "" | "help" | "--help" | "-h" => {
+                self.append_assistant_text(
+                    "From: /gcf help\n\n\
+                     ## /gcf - GCF tool-result encoding\n\n\
+                     GCF (Graph Compact Format) is a token-efficient, lossless \
+                     encoding applied to eligible JSON tool results in the LLM \
+                     view when enabled. TUI rendering, the activity log, memory \
+                     extraction, hooks, and compaction keep seeing the raw JSON; \
+                     only the model-facing copy is re-encoded inside a \
+                     `[BEGIN GCF generic]` ... `[END GCF]` block, and the system \
+                     prompt gains a short reading primer while GCF is on.\n\n\
+                     | Subcommand | Description |\n\
+                     |---|---|\n\
+                     | `/gcf on` | Enable GCF encoding, persist `gcf.enabled: true` |\n\
+                     | `/gcf off` | Disable GCF encoding, persist `gcf.enabled: false` |\n\
+                     | `/gcf show` | Show the effective state and its source |\n\
+                     | `/gcf help` | Show this help (bare `/gcf` does the same) |\n\n\
+                     The state persists in the config file across restarts.",
+                );
+                self.status = "gcf: help".to_string();
+            }
+            "on" | "off" => {
+                let enable = sub == "on";
+                match ragent_config::gcf::persist_gcf(enable) {
+                    Ok(()) => {
+                        // FR-002: invalidate the cached config so the next
+                        // turn picks up the newly-saved file.
+                        self.session_processor.invalidate_config_cache();
+                        self.append_assistant_text(&format!(
+                            "From: /gcf {sub}\n\n\u{2705} GCF encoding of tool \
+                             results {} (persisted to the config file).",
+                            if enable { "enabled" } else { "disabled" }
+                        ));
+                        self.status = format!("gcf: {sub}");
+                    }
+                    Err(e) => {
+                        // FR-002: the in-memory toggle state still applies to
+                        // the live session when saving fails; the UI indicates
+                        // the value is unsaved.
+                        ragent_config::gcf::set_enabled(enable);
+                        self.append_assistant_text(&format!(
+                            "From: /gcf {sub}\n\n\u{26a0} GCF encoding {} for \
+                             this session, but saving the config failed: {e} \
+                             (unsaved).",
+                            if enable { "enabled" } else { "disabled" }
+                        ));
+                        self.status = format!("gcf: {sub} (unsaved)");
+                    }
+                }
+            }
+            "show" => {
+                let loaded = ragent_config::Config::load().ok();
+                let persisted = loaded.as_ref().is_some_and(|c| c.gcf.enabled);
+                let effective = ragent_config::gcf::is_enabled();
+                let section_in_file = loaded
+                    .as_ref()
+                    .and_then(|c| c.config_paths.first().cloned())
+                    .and_then(|p| std::fs::read_to_string(p).ok())
+                    .is_some_and(|text| text.contains("\"gcf\""));
+                let source = if effective != persisted {
+                    "in-session change (unsaved)".to_string()
+                } else if persisted {
+                    "persisted config (gcf.enabled = true)".to_string()
+                } else if section_in_file {
+                    "persisted config (gcf.enabled = false)".to_string()
+                } else {
+                    "default-off (no `gcf` section in the config file)".to_string()
+                };
+                self.append_assistant_text(&format!(
+                    "From: /gcf show\n\nGCF encoding of tool results: **{}**\n\
+                     Source: {source}",
+                    if effective { "on" } else { "off" }
+                ));
+                self.status = "gcf: show".to_string();
+            }
+            _ => {
+                self.append_assistant_text(
+                    "From: /gcf\n\nUnknown subcommand. \
+                     Usage: `/gcf on|off|show|help`",
+                );
+                self.status = "gcf: usage".to_string();
             }
         }
     }
@@ -5898,6 +6003,8 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
             }
             "alog" => self.handle_alog_command(args),
+            // ── /gcf ──────────────────────────────────────────────────────
+            "gcf" => self.handle_gcf_command(args),
             // ── /prompt ────────────────────────────────────────────────────
             "prompt" => self.handle_prompt_command(args),
             // /toolchain: language toolchain presence report (FR-002)
@@ -10088,7 +10195,15 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     });
                 } else {
+                    // Unknown command: the status line alone is easily missed
+                    // (it auto-expires back to "ready"), which made a typo'd
+                    // slash command look like a silently swallowed prompt.
+                    // Surface the rejection in the message window too.
                     self.status = format!("Unknown command: /{}", cmd);
+                    self.append_assistant_text(&format!(
+                        "From: /{cmd}\n\n\u{26a0} Unknown command: `/{cmd}`. \
+                         Type `/help` for the command list.",
+                    ));
                     self.push_log_no_agent(LogLevel::Warn, format!("Unknown command: /{}", cmd));
                 }
             }

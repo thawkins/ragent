@@ -6,6 +6,7 @@
 //! settings are all configured here.
 
 use crate::compaction::CompactionConfig;
+use crate::gcf::GcfConfig;
 use anyhow::bail;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
@@ -141,6 +142,14 @@ pub struct Config {
     /// buffer.
     #[serde(default)]
     pub compaction: CompactionConfig,
+    /// GCF (Graph Compact Format) encoding of JSON tool results for the LLM
+    /// view (spec `gcf`, FR-001).
+    ///
+    /// Default: disabled — a config file with no `gcf` section means tool
+    /// results are never encoded; the `gcf` key is omitted from serialisation
+    /// while `enabled` is `false`.
+    #[serde(default, skip_serializing_if = "GcfConfig::is_default")]
+    pub gcf: GcfConfig,
     /// GitLab integration configuration.
     #[serde(default)]
     pub gitlab: GitLabIntegrationConfig,
@@ -2192,6 +2201,11 @@ impl Config {
 
         // Compaction: overlay takes precedence.
         base.compaction = overlay.compaction;
+
+        // GCF: overlay takes precedence (last-wins, same semantics as
+        // `compaction` above) so `/gcf off` in a higher-precedence config is
+        // respected rather than OR-merged back to on.
+        base.gcf = overlay.gcf;
 
         if overlay.yolo {
             base.yolo = overlay.yolo;

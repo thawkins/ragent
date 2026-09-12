@@ -62,13 +62,13 @@ fn test_conversation_history_counts_tool_call_payloads() {
         vec![MessagePart::ToolCall {
             tool: "bash".into(),
             call_id: "call-123".into(),
-            state: ragent_agent::message::ToolCallState {
+            state: Box::new(ragent_agent::message::ToolCallState {
                 status: ragent_agent::message::ToolCallStatus::Completed,
                 input: json_input,
                 output: Some(json_output),
                 error: None,
                 duration_ms: None,
-            },
+            }),
         }],
     ));
     let count = app.conversation_history_token_count();

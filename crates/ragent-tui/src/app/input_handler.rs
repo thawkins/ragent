@@ -1351,6 +1351,36 @@ impl App {
                     }
                     self.needs_redraw = true;
                 }
+                InputAction::ToggleGcf => {
+                    // Alt+G: toggle GCF tool-result encoding and persist the
+                    // new state (same semantics as Alt+Y / Alt+E and `/gcf
+                    // on|off`). The status-bar indicator reads the runtime
+                    // flag directly, so it reflects the toggle immediately.
+                    match ragent_config::gcf::toggle_persist() {
+                        Ok(enabled) => {
+                            self.status = if enabled {
+                                "GCF encoding enabled".to_string()
+                            } else {
+                                "GCF encoding disabled".to_string()
+                            };
+                            self.push_log_no_agent(
+                                LogLevel::Info,
+                                format!(
+                                    "GCF encoding {}",
+                                    if enabled { "enabled" } else { "disabled" }
+                                ),
+                            );
+                        }
+                        Err(e) => {
+                            self.status = format!("⚠ failed to persist GCF state: {e}");
+                            self.push_log_no_agent(
+                                LogLevel::Error,
+                                format!("GCF persist failed: {e}"),
+                            );
+                        }
+                    }
+                    self.needs_redraw = true;
+                }
                 InputAction::OutputViewPageUp => {
                     self.scroll_output_view_by(5);
                 }

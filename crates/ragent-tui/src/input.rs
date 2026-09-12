@@ -171,6 +171,8 @@ pub enum InputAction {
     ToggleYolo,
     /// Toggle edit-operation logging (Alt+E).
     ToggleEditLog,
+    /// Toggle GCF tool-result encoding (Alt+G).
+    ToggleGcf,
     /// Scroll the research markdown viewer up.
     ResearchViewPageUp,
     /// Scroll the research markdown viewer down.
@@ -848,6 +850,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         // Alt+E toggles edit-operation logging.
         KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleEditLog)
+        }
+        // Alt+G toggles GCF tool-result encoding (placed before generic
+        // char-insert handling so the `g` is never inserted into the input
+        // buffer — NFR-002).
+        KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleGcf)
         }
         // Alt+X opens the stop-agent confirmation dialog (only while a turn
         // is running — placed before generic char-insert handling so the `x`

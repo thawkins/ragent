@@ -2537,13 +2537,13 @@ impl SessionProcessor {
                                 MessagePart::ToolCall {
                                     tool: tc.name.clone(),
                                     call_id: tc.id.clone(),
-                                    state: ToolCallState {
+                                    state: Box::new(ToolCallState {
                                         status,
                                         input,
                                         output: output_value,
                                         error: error.clone(),
                                         duration_ms: Some(duration_ms),
-                                    },
+                                    }),
                                 },
                             );
                             tool_result_parts.push(ContentPart::ToolResult {
