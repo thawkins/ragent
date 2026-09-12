@@ -197,7 +197,12 @@ impl App {
                 "office".to_string(),
                 "github".to_string(),
                 "gitlab".to_string(),
+                "teams".to_string(),
+                "agents".to_string(),
+                "plan".to_string(),
                 "codeindex".to_string(),
+                "masterfetch".to_string(),
+                "browser".to_string(),
                 "help".to_string(),
             ],
             "mouse" => {

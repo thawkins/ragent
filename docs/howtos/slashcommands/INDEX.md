@@ -39,7 +39,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/template` | [template](template.md) | List and apply reusable prompt templates: /template [name] [args] |
 | `/goal` | [goal](goal.md) | Goal-based autonomous stop: /goal set\|clear\|show\|test |
 | `/gcf` | [gcf](gcf.md) | Toggle GCF encoding of tool results: /gcf on\|off\|show\|help |
-| `/tools` | [tools](tools.md) | List all available tools (built-in and MCP) |
+| `/tools` | [tools](tools.md) | Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools show|help |
 | `/skills` | [skills](skills.md) | List all registered skills and their descriptions (/skills help) |
 | `/mcp` | [mcp](mcp.md) | MCP servers: /mcp [status] \| /mcp discover \| /mcp connect <id> \| /mcp disconnect <id> \| /mcp help |
 | `/task` | [task](task.md) | Toggle the TASKS side panel, or list/help tasks: /task [list\|help] |

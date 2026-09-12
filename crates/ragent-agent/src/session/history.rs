@@ -413,9 +413,7 @@ fn gcf_encode_tool_result(content: &str) -> Option<String> {
     let encoded_chars = encoded.chars().count();
     // Wrapper markers plus the two newline separators around the payload.
     let total_chars = encoded_chars + GCF_BLOCK_BEGIN.len() + GCF_BLOCK_END.len() + 2;
-    if u64::try_from(total_chars).unwrap_or(u64::MAX) * 100
-        >= u64::try_from(raw_chars).unwrap_or(u64::MAX) * (100 - GCF_MIN_SAVINGS_PERCENT)
-    {
+    if (total_chars as u64) * 100 >= (raw_chars as u64) * (100 - GCF_MIN_SAVINGS_PERCENT) {
         return None;
     }
     if total_chars > MAX_TOOL_RESULT_BYTES_FOR_LLM {

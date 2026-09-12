@@ -829,10 +829,6 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Goal-based autonomous stop: /goal set|clear|show|test",
     },
     SlashCommandDef {
-        trigger: "tools",
-        description: "List all available tools (built-in and MCP)",
-    },
-    SlashCommandDef {
         trigger: "skills",
         description: "List all registered skills and their descriptions (/skills help)",
     },
@@ -950,7 +946,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "tools",
-        description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex] [on|off] | /tools help",
+        description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
     },
     SlashCommandDef {
         trigger: "router",

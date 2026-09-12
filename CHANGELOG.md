@@ -1,5 +1,25 @@
 # Changelog
 
+## Version: 1.0.99
+
+- **`/tools` registry dedupe + autocomplete fix** - removed the stale
+  duplicate `SlashCommandDef { trigger: "tools" }` ("List all available
+  tools") from `SLASH_COMMANDS` - the command has always been the
+  tool-visibility toggle, so the phantom entry leaked a bogus row into
+  `/help`. The real entry's description now lists all nine switches
+  (`office, github, gitlab, teams, agents, plan, codeindex, masterfetch,
+  browser`), the `/tools` autocomplete suggestions cover all nine plus
+  `show|help`, and `docs/howtos/slashcommands/INDEX.md` row matches the
+  implementation.
+- **GCF encode hook simplification** - `gcf_encode_tool_result` in
+  `crates/ragent-agent/src/session/history.rs` replaces the
+  `u64::try_from(..).unwrap_or(u64::MAX)` pairs with lossless `usize -> u64`
+  casts (char counts are always positive).
+- Verification: `cargo check` clean; `cargo audit` pass (10 pre-existing
+  allowed warnings); `test_slash_commands` 183/183, `test_gcf_command` 7/7,
+  `test_gcf_indicator` 3/3, `test_slash_help` 50/50, `test_gcf_encode_hook`
+  10/10, `test_gcf_raw_consumers` 6/6.
+
 ## Version: 1.0.98
 
 - **GCF tool-result encoding (spec `gcf`, FR-001..FR-009)** - new opt-in
