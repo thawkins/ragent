@@ -174,6 +174,67 @@ fn test_flexible_matcher_matches_blank_line_collapse() {
     assert_eq!(&content[s..e], "fn a() {\n\n\n    bar\n}\n");
 }
 
+// FR-045: the flexible lane must never fold a whitespace run across a line
+// boundary when the needle run and the content run disagree on newline
+// membership. Folding a needle-space run against a file newline (or vice
+// versa) splices new_str with a different line structure and corrupts the
+// file (joined or split lines).
+#[test]
+fn test_flexible_matcher_rejects_space_run_folded_over_newline() {
+    // File has two lines; the needle claims they are one line with a wide gap.
+    let content = "  tokio-stream = { workspace = true }\n  futures = { workspace = true }\n";
+    let needle = "  tokio-stream = { workspace = true }  futures = { workspace = true }\n";
+    let err = find_flexible_replacement_range(content, needle, "joined\n").unwrap_err();
+    assert!(
+        matches!(err, FindError::NotFound),
+        "needle-space vs file-newline must NOT match: {err:?}"
+    );
+}
+
+#[test]
+fn test_flexible_matcher_rejects_newline_run_folded_over_spaces() {
+    // Needle has a newline where the file has a same-line gap: must not match,
+    // otherwise the splice would split the line in two.
+    let content = "a = { x }   b = { y }\n";
+    let needle = "a = { x }\nb = { y }\n";
+    let err = find_flexible_replacement_range(content, needle, "split\n").unwrap_err();
+    assert!(
+        matches!(err, FindError::NotFound),
+        "needle-newline vs file-spaces must NOT match: {err:?}"
+    );
+}
+
+#[test]
+fn test_flexible_matcher_same_line_whitespace_rescue_still_works() {
+    // FR-045 must not over-restrict: indent/alignment mismatches on the same
+    // line still resolve through the flexible lane.
+    let content = "  futures = { workspace = true }\n";
+    let needle = "    futures = { workspace = true }\n";
+    let (s, e, _) = find_flexible_replacement_range(content, needle, "X\n").unwrap();
+    assert_eq!(&content[s..e], "  futures = { workspace = true }\n");
+}
+
+#[test]
+fn test_cascade_rejects_joined_line_needle_falls_to_indent_lane_or_fails() {
+    // The real-world corruption chain: a model holding a stale copy edits a
+    // TOML dep block; its needle claims two deps sit on one line. The exact
+    // lane fails, the flexible lane must now refuse to fold across the
+    // newline, and the indent-normalised lane must also refuse (its joined
+    // line cannot match two file lines). Result: a clean NotFound instead of
+    // a corrupting splice.
+    let content = "[dependencies]\ntokio-stream = { workspace = true }\nfutures = { workspace = true }\nuuid = { workspace = true }\n";
+    let needle = "tokio-stream = { workspace = true }  futures = { workspace = true }\nuuid = { workspace = true }\n";
+    match find_replacement_cascade(content, needle, "replacement\n") {
+        CascadeMatch::Failed(fail) => {
+            assert!(
+                matches!(fail, CascadeFail::NotFound),
+                "joined-line needle must fail cleanly, got {fail:?}"
+            );
+        }
+        other => panic!("joined-line needle must not splice, got {other:?}"),
+    }
+}
+
 #[test]
 fn test_flexible_matcher_exact_hit_still_requires_uniqueness() {
     // Needle occurs twice byte-for-byte: must stay ambiguous even in flexible mode.

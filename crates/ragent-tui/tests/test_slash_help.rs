@@ -214,13 +214,6 @@ fn test_slash_history_help() {
 }
 
 #[test]
-fn test_slash_tasks_help() {
-    let mut app = make_app();
-    app.session_id = Some("s".to_string());
-    assert_help(&mut app, "tasks", "tasks: help");
-}
-
-#[test]
 fn test_slash_template_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
@@ -240,9 +233,6 @@ fn test_slash_help_dash_h_aliases() {
     // that historically only accepted the bare token.
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-
-    app.execute_slash_command("/opt --help");
-    assert_eq!(app.status, "opt help");
 
     app.execute_slash_command("/loop -h");
     assert_eq!(app.status, "loop: help");

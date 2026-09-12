@@ -94,12 +94,14 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
         "edit applies new_string verbatim"
     );
 
-    // (b) Whitespace-mismatched old_string — the P2.4 fallback cascade now
-    // rescues a unique whitespace-only difference by consuming the trailing
-    // newline into the flexible match. The edit succeeds and the caller's
-    // `new_string` is inserted verbatim.
+    // (b) Whitespace-mismatched old_string — FR-045 line-structure guard: a
+    // needle ending in a trailing space (no further content) previously
+    // folded the file's trailing newline into the whitespace run and spliced
+    // new_str with a JOINED line ("nopegamma"). The guard now rejects the
+    // fold, so the edit fails cleanly with a not-found error instead of
+    // corrupting the file's line structure.
     record_read(&c, &path);
-    let out = EditTool
+    let err = EditTool
         .execute(
             json!({
                 "file_path": "smoke.txt",
@@ -109,16 +111,15 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
             &c,
         )
         .await
-        .expect("flexible fallback lane should resolve a trailing-space mismatch");
-    assert_eq!(
-        out.metadata.as_ref().unwrap()["match_lane"],
-        "flexible",
-        "fallback lane should be recorded"
+        .expect_err("needle-space vs file-newline fold must be rejected (FR-045)");
+    assert!(
+        format!("{err}").contains("old_string not found"),
+        "rejection should be a not-found error: {err}"
     );
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
-        "alpha\nnopegamma\n",
-        "new_string is inserted verbatim, consuming the trailing newline"
+        "alpha\nBETA_REPLACED\ngamma\n",
+        "the failed edit must not touch the file"
     );
 
     // (c) Stale-file rejection (FR-003) still fires after an external touch.
@@ -142,7 +143,7 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
         .execute(
             json!({
                 "file_path": "smoke.txt",
-                "old_string": "nopegamma",
+                "old_string": "BETA_REPLACED",
                 "new_string": "GAMMA",
             }),
             &c,
@@ -160,7 +161,7 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
         .execute(
             json!({
                 "file_path": "smoke.txt",
-                "old_string": "nopegamma",
+                "old_string": "BETA_REPLACED",
                 "new_string": "GAMMA",
             }),
             &c,
@@ -169,7 +170,7 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
         .expect("retry after stale rejection should succeed (timestamp refreshed)");
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
-        "alpha\nGAMMA\n",
+        "alpha\nGAMMA\ngamma\n",
         "retry applies the replacement"
     );
 }

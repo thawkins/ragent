@@ -14,7 +14,6 @@ and server-sent events so any frontend can drive the agent.
 - ragent-tools-core
 - ragent-tools-extended
 - ragent-tools-vcs
-- ragent-prompt_opt
 - ragent-telemetry
 
 ## External Dependencies
@@ -57,7 +56,6 @@ REST endpoint handlers organized by resource:
 - **Tool routes** — `GET /tools`, `POST /tools/:name`.
 - **Research routes** — `POST /research`, `GET /research`, `GET /research/:id`, `DELETE /research/:id`.
 - **Spec routes** — `GET /specs`, `GET /specs/:id`.
-- **Opt routes** — `POST /opt` — Prompt optimization.
 - **Health routes** — `GET /health`.
 
 ### Module: sse

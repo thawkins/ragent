@@ -181,6 +181,9 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         auto_approve: false,
@@ -321,6 +324,9 @@ async fn test_pre_send_compaction_skipped_when_auto_disabled() {
         })),
         llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
             std::collections::HashMap::new(),
         )),
         extraction_engine: std::sync::OnceLock::new(),
@@ -555,6 +561,9 @@ async fn test_emergency_overflow_compaction_retries_once() {
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         auto_approve: false,
@@ -698,6 +707,9 @@ async fn test_emergency_overflow_compaction_skipped_with_partial_output() {
         })),
         llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
             std::collections::HashMap::new(),
         )),
         extraction_engine: std::sync::OnceLock::new(),
@@ -896,6 +908,9 @@ async fn test_pre_send_compaction_skipped_notice_emitted_once_per_turn() {
             env_overrides_present: false,
         })),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
             std::collections::HashMap::new(),
         )),
         extraction_engine: std::sync::OnceLock::new(),

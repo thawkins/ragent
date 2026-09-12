@@ -2893,33 +2893,78 @@ fn build_system_prompt_with_storage_inner(
     // in the tool schema for callers that need an absolute last line.
     prompt.push_str(
                                       "## File Reading Best Practices\n\n                                       When reading files with the `read` tool:\n                                       - **PREFERRED**: use `start_line` + `num_lines`.  `start_line` is the 1-based\n                                         absolute line number where reading begins, and `num_lines` is the COUNT of\n                                         lines to read from that start.  Example: `start_line=201, num_lines=100`\n                                         reads lines 201–300 (inclusive).  This pair expresses the same intent as\n                                         `start_line` + `end_line` but is much harder to get wrong.\n                                       - `end_line` is the absolute last line number to include (NOT a count).\n                                         It is still supported, but only use it when you specifically need an\n                                         absolute last-line boundary.  If you do, remember: `end_line` must be\n                                         ≥ `start_line` and is the ACTUAL last line number — e.g.\n                                         `start_line=200, end_line=300` reads lines 200–300 (101 lines total).\n                                       - Common mistake: writing `end_line=100` to mean \"100 lines\".  That is\n                                         wrong; `end_line` is absolute.  If you meant \"100 lines starting at 200\"\n                                         use `start_line=200, num_lines=100` (preferred) or `end_line=299`.\n                                       - The tool rejects `end_line < start_line` with a diagnostic that points\n                                         at the right fix; read the error message and retry with `num_lines`.\n                                       - For files > 100 lines, do not read the whole file in one call — read\n                                         in focused sections.  First call without a range returns the first 100\n                                         lines plus a section map; the response metadata always includes `total_lines`.\n                                       - Strategy:\n                                         1. Read the file without `start_line`/`num_lines` first — for large files\n                                            this returns the first 100 lines plus a section map with the total\n                                            line count.\n                                         2. Use `total_lines` from the response metadata to plan subsequent reads.\n                                         3. Then read specific sections with `start_line` + `num_lines`.\n                                         4. Never read an entire file > 100 lines in a single call.\n\n",
-                                  ); // Guidance on using edit / multiedit tools
+                                      ); // Guidance on using edit / multiedit tools
     prompt.push_str(
-                        "\n## Editing Files\n\n\
-                         Use the `edit` tool for single surgical text replacements in one file.\n\
-                         Use the `multi_edit` tool when applying multiple edits across one or more files atomically.\n\
-                         \n\
-                         When using the `edit` tool:\n\
-                         - Prefer the canonical parameter names `file_path`, `old_string`, `new_string`.\n\
-                         - The legacy names `path`/`old_str`/`new_str` are still accepted but emit a deprecation warning.\n\
-                         - You MUST always provide `old_string` containing the exact text to find.\n\
-                         - You MUST always provide `new_string` containing the replacement text.\n\
-                         - `old_string` must match exactly once, byte-for-byte (including whitespace and indentation).\n\
-                         - Read the relevant section of the file first to get the exact text for `old_string`.\n\
-                         - Include 3–5 lines of context around the change point so the match is unique.\n\
-                         - Use an empty `old_string` with a non-existent `file_path` to create a new file.\n\
-                         - Use an empty `new_string` to delete the matched text.\n\
-                         - If the file was modified after you read it, the edit is rejected with a stale-file error; re-read first.\n\
-                         \n\
-                         When using the `multi_edit` tool:\n\
-                         - Provide an `edits` array, where each entry has `file_path`, `old_string`, and `new_string`.\n\
-                         - The legacy `multiedit` tool name is deprecated; prefer `multi_edit`.\n\
-                         - All edits are validated before any files are written.\n\
-                         - If any `old_string` match fails, no files are modified (atomic rollback).\n\
-                         - Edits to the same file are overlap-checked; overlapping edits are rejected.\n\
-                         - Each edit enforces strict exact-match: `old_string` must occur exactly once.\n\
-                                         ",
-                                        );
+        "\n## Editing Files\n\
+         \n\
+         Choose the right tool for the change:\n\
+         - `edit` — one surgical replacement in one file (default choice).\n\
+         - `multi_edit` — several replacements across one or more files, applied\n\
+            atomically (all-or-nothing).\n\
+         - `patch`/`apply_patch` — changes that add, remove, or rearrange whole\n\
+            lines, or multi-file diff-style edits.\n\
+         - `write`/`create` — new files, or full-file rewrites when the file is\n\
+            small and the change is extensive.\n\
+         \n\
+         Workflow (do this every time):\n\
+         1. Read the target section first (`read` with `start_line`/`num_lines` on\n\
+            large files) and copy `old_string` verbatim from what you just read,\n\
+            including exact indentation, whitespace, and line endings.\n\
+         2. Include 3-5 lines of unique surrounding context so the needle matches\n\
+            exactly once; keep `old_string` under 20 lines where possible.\n\
+         3. After ANY successful edit (or any other write to that file), your\n\
+            in-context copy is stale: re-read before composing the next\n\
+            `old_string` for that file.\n\
+         \n\
+         Failure recovery (the error output tells you what to do — follow it):\n\
+         - **Not found**: the error shows a numbered file snippet with the closest\n\
+            match (\"almost matches a block starting at line N ... Rebuild\n\
+            old_string from the snippet\"). Rebuild the needle from that snippet;\n\
+            do not guess or hand-merge from memory.\n\
+         - **Multiple matches**: the error lists numbered candidate blocks. Extend\n\
+            `old_string` with unique context from the one you want until it\n\
+            matches exactly once.\n\
+         - **Retry cap**: at most 2 failed retries with the same needle. If it\n\
+            still fails, re-read the file fresh, rebuild from the current text, or\n\
+            switch to `write` (full rewrite) / `patch`. Never loop on a failing\n\
+            needle.\n\
+         - **Stale file**: if the file changed since you read it, the edit is\n\
+            rejected — re-read first, then retry. This protects concurrent edits.\n\
+         \n\
+         When using the `edit` tool:\n\
+         - Required parameters: `file_path`, `old_string`, `new_string`. Prefer the\n\
+            canonical names; legacy `path`/`old_str`/`new_str` still work but are\n\
+            deprecated.\n\
+         - `old_string` must match exactly once, byte-for-byte by default.\n\
+         - Needles that would join or split lines are rejected (line-structure\n\
+            rule). Whitespace-only indentation/alignment differences are tolerated\n\
+            by a flexible fallback lane that can never merge or split lines.\n\
+         - `collapse_whitespace: true` additionally folds all whitespace runs (and\n\
+            decodes `\\t`/`\\n`/`\\r` escapes in `old_string`) — use it when the\n\
+            file's indentation may differ from what you copied but the content is\n\
+            the same.\n\
+         - `dry_run: true` resolves the match and previews the result without\n\
+            writing — use it when the needle is long, the match is uncertain, or\n\
+            you want to verify before committing.\n\
+         - Empty `old_string` + non-existent `file_path` creates the file; for a\n\
+            new file prefer `create`/`write`. Empty `new_string` deletes the\n\
+            matched text.\n\
+         - The file's line endings are matched and preserved (a CRLF span stays\n\
+            CRLF after replacement).\n\
+         \n\
+         When using the `multi_edit` tool:\n\
+         - Required parameter: `edits` (array); each entry needs `file_path`,\n\
+            `old_string`, `new_string`, and may set `collapse_whitespace`.\n\
+         - The legacy `multiedit` tool name is deprecated; use `multi_edit`.\n\
+         - If ANY edit fails validation, no files are modified (atomic rollback).\n\
+            Split uncertain batches into separate calls so one bad needle does not\n\
+            block good ones.\n\
+         - Same-file edits are overlap-checked (overlapping spans are rejected)\n\
+            and applied highest-offset-first, so input order does not matter.\n\
+         - Each edit is exact-match-once with the same failure recovery as `edit`\n\
+            above; a failing edit index is named in the error.\n\
+         ",
+    );
     // -------------------------------------------------------------------
     // Task tool family — the difference between `agent_complete` and
     // `team_task_complete` trips up many models, leading to the wrong
@@ -2938,8 +2983,8 @@ fn build_system_prompt_with_storage_inner(
          |------|----------|-----------------|-------|\n\
          | `read` | none | `start_line`, `num_lines` (preferred), `end_line` (absolute) | For files >100 lines read in sections. |\n\
          | `write`/`create` | `path`, `content` | — | `create` is preferred for new files. |\n\
-         | `edit` | `file_path`, `old_string`, `new_string` | — | `old_string` must match exactly once. |\n\
-         | `multi_edit` | `edits[]` with `file_path`, `old_string`, `new_string` | — | Atomic rollback if any edit fails. |\n\
+         | `edit` | `file_path`, `old_string`, `new_string` | `dry_run`, `collapse_whitespace` | Read first; verbatim needle; 3-5 unique context lines; match exactly once; on failure rebuild from the error's near-miss snippet. |\n\
+         | `multi_edit` | `edits[]` with `file_path`, `old_string`, `new_string` | per-edit `collapse_whitespace` | Atomic rollback if any edit fails; failing index named in the error. |\n\
          | `patch` | `patch` (unified diff text) | `path` | For multi-file unified diff patches. |\n\
          | `apply_patch` | `patch` (Codex-style) | `path` | Supports `*** Add File:` / `*** Update File:` / `*** Delete File:`. |\n\
          | `diff_files` | `path_a`, `path_b` (or `text_a`/`text_b`) | `context_lines` | Compare two files or inline strings. |\n\

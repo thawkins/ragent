@@ -42,6 +42,9 @@ fn test_processor() -> Arc<SessionProcessor> {
         llm_client_cache: RwLock::new(std::collections::HashMap::new()),
         cached_config: parking_lot::Mutex::new(None),
         team_context_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
+        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         auto_approve: false,

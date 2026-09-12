@@ -1,7 +1,7 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.95</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.96</p>
         <p style="font-size: 1.1em;">
           <strong>Date:</strong> 2026-09-08
       </p>
@@ -206,7 +206,6 @@ current state of all subsystems.
 
 11. [Custom Agents](#custom-agents)
 12. [Skills System](#skills-system)
-13. [Prompt Optimization](#prompt-optimization)
 
 ### Part V: Multi-Agent Coordination
 
@@ -311,7 +310,6 @@ graph TB
         C[ragent-codeindex]
         D[ragent-config]
         E[ragent-llm]
-        F[ragent-prompt_opt]
         G[ragent-server]
         H[ragent-specs]
         I[ragent-storage]
@@ -348,7 +346,6 @@ graph TB
     I --> O
     E --> O
     D --> O
-    F --> O
     B --> O
     H --> O
     P --> O
@@ -374,7 +371,6 @@ graph TB
 | `ragent-tui` | Ratatui terminal interface | ~8,900 |
 | `ragent-bench` | Criterion benchmarks shared between TUI and CLI | ~900 |
 | `ragent-specs` | Spec lifecycle management, SDD artifact generation, consistency validation, constitution parsing | ~3,200 |
-| `ragent-prompt_opt` | Prompt optimization templates | ~1,200 |
 | `ragent-research` | Research types, gatherers, and plan-dep parser | ~1,600 |
 
 ### 2.2 Crate Dependency Graph
@@ -394,7 +390,6 @@ graph TD
     SV[ragent-server]
     TU[ragent-tui]
     SP[ragent-specs]
-    PR[ragent-prompt_opt]
     RS[ragent-research]
     B[ragent-bench]
 
@@ -424,8 +419,6 @@ graph TD
     TM --> A
     CI --> A
     SP --> A
-    PR --> TU
-    PR --> A
     RS --> A
     B --> TU
     B --> SV
@@ -912,6 +905,13 @@ Permission requests include:
 
 ### 4.4 Permission Rules Evaluation
 
+Beyond the rule evaluation below, a **tool-repeat guard** (FR-044) sits on
+every dispatched call: five consecutive identical calls (same tool + same
+argument hash) pass through untouched; the sixth raises a `tool:repeat`
+permission prompt in interactive runs and is auto-denied with a corrective
+observation in unattended runs (subagent, `--yes`, YOLO). A different call
+or a user "allow" resets the consecutive counter.
+
 ```mermaid
 graph LR
     Rules[Rules List] --> Iterate[Evaluate in order]
@@ -1208,7 +1208,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Memory management commands |
 | `/yolo` | Toggle YOLO mode |
-| `/todo` `/task` `/tasks` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
+| `/todo` `/task` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
 | `/team create <name>` | Create a team |
 | `/team open <name>` | Re-open existing team |
 | `/team close` | Close current team |
@@ -1227,12 +1227,12 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/config list` | Interactive picker to restore a saved backup |
 | `/init config` | Create a default `ragent.json` in the global config directory |
 | `/startup` | Show per-stage startup timing instrumentation |
+| `/prompt help\|primary [agent]\|subagent [agent]\|list\|<agent>` | Read-only agent system-prompt inspector (no LLM call) |
 | `/telemetry help\|on\|off\|setup\|counters` | Manage OpenTelemetry metrics export |
 | `/dirs` | Show configured writable directories |
-| `/profile` / `/theme` / `/status` / `/mouse` | UI preferences |
+| `/profile` / `/status` / `/mouse` | UI preferences |
 | `/skill` / `/skills` | Load or inspect skill packs |
 | `/mcp discover\|list\|call` | MCP server commands |
-| `/opt <method> <prompt>` | Optimize a prompt |
 | `/update` / `/update install` | Auto-update (reserved; not implemented) |
 
 ### 6.3 TUI Component Architecture
@@ -1282,7 +1282,6 @@ ragent serve --port 9100 --host 127.0.0.1
 | GET | `/models` | List available models |
 | GET | `/providers` | List providers |
 | GET | `/agents` | List agents |
-| POST | `/opt` | Prompt optimization |
 | GET | `/research` | List research items |
 | POST | `/research` | Create + run a research gathering session (returns `202 Accepted` with `Location` header) |
 | GET | `/research/{name}` | Show one research item (supports `?full=true` for extended metadata) |
@@ -2103,42 +2102,6 @@ Skills can be loaded via slash command or the `/skills` picker.
 
 ---
 
-## 13. Prompt Optimization
-
-### 13.1 Overview
-
-The `/opt` slash command (and `POST /opt` endpoint) transforms a plain prompt
-into one of 12 structured frameworks without an LLM call.
-
-### 13.2 Methods
-
-| Method | Description |
-|--------|-------------|
-| `co_star` | Context, Objective, Scope, Task, Action, Result |
-| `crispe` | Context, Role, Intent, Steps, Persona, Examples |
-| `cot` | Chain-of-Thought step-by-step reasoning |
-| `draw` | Image prompt structure |
-| `rise` | Role, Intent, Scope, Examples |
-| `o1_style` | Stylized creative tokens and constraints |
-| `meta` | Meta Prompting — generate the internal prompt |
-| `variational` | Multiple prompt candidates + selection criteria |
-| `q_star` | Iterative query refinement |
-| `openai` | OpenAI/GPT system+user adapter |
-| `claude` | Anthropic Claude adapter |
-| `microsoft` | Microsoft Azure AI adapter |
-
-### 13.3 Example
-
-```
-/opt co_star Explain Rust lifetimes
-```
-
----
-
-# Part V: Multi-Agent Coordination
-
----
-
 ## 14. Teams
 
 ### 14.1 Core Concepts
@@ -2826,6 +2789,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.96 | 2026-09-12 | `/prompt` system-prompt inspector (read-only TUI slash command rendering the assembled system prompt an agent would receive in primary or subagent mode with the effective tool surface; report cap, tool-free agents render `(no tools)`; five test files), tool-repeat guard FR-044 (after five consecutive identical tool calls the sixth raises a `tool:repeat` permission prompt in interactive runs and auto-denies with a corrective observation in unattended runs), edit-tool line-structure guard FR-045 (the whitespace-flexible fallback lane can no longer join or split lines; regression tests), edit-guidance prompt rewrite with failure-recovery instructions matching the actual error machinery, redundant slash commands removed (`/opt` with its `ragent-prompt_opt` crate and `POST /opt` endpoint, `/tasks` alias of `/task list`, `/theme` registered but never dispatched), and the slashcommands how-to doc set (75 command docs + INDEX.md + PDFs). |
 | v1.0.95 | 2026-09-11 | AgentNotice chat-bubble separation (TUI event handler forces a new assistant message before and after appending a notice so consecutive notices render as their own yellow bubbles; regression tests in `test_agent_notice_separation.rs`) and `/toolchain list` fixed-width table (columns fixed at 10/10/10/50 characters — FR-017, constant 93-column grid; Language/Runtime cells clip, Status and Version cells word-wrap onto continuation grid lines; `COLUMN_WIDEN_CHARS` replaced by `TABLE_COLUMN_WIDTHS`; renderer tests, TUI regression tests, and the toolchain howto updated). |
 | v1.0.94 | 2026-09-11 | Documentation and statistics refresh: regenerated STATS.md from the live tree, updated CHANGELOG/README/QUICKSTART/TUI-QUICKSTART and all 20 howto PDFs for the v1.0.94 release. |
 | v1.0.88 | 2026-09-08 | `/simplify` pass over the `ragent-research` crate (five parallel audit agents across all 56 source files; +419/-400 in 7 files, no behaviour change intended). Correctness: `parse_subject_summary` no longer panics when an LLM response places `}` before `{` (inverted `trimmed[start..=end]` slice replaced with `trimmed.get(start..=end)?`, mechanical fallback); `AnalysisEngine::with_brief` promoted from a panicking `unimplemented!()` default to a required trait method; `SearchCallOutcome::Ok` dropped its unread `retries` field and stale `#[allow(dead_code)]`; no-op `mark_in_progress_for_state` deleted from `continue_item` (item status lives in RESEARCH.md frontmatter); `REQUIRED_SECTIONS` doc comment corrected 10 -> 9 sections; `cited_date_span` computes min/max cited years with running vars; web pages classify `media_type` once and reuse it at all three render sites. Performance/hygiene: `OnceLock`-cached regexes in `analysis/parser.rs` (citation, bare citation, ISO date, finding-dependency) and `session/fallback.rs` (implication); `merge_chunk_results` dedup sets now borrow `&str` instead of cloning into `HashSet<String>`; `document.rs` gains a shared `layout` module of eight section-push emitters used by both `assemble_report_body` and `assemble_imrad_body` (~150 dup lines removed; report-layout Search Engine Summary + Search Provider Requests remain level-2 `###` sub-headings by design); `web_gatherer.rs` gains `is_sole_engine_hit`/`collect_engines` helpers (engine ordering now sorted/deterministic on both vault and observer gather paths) and deletes the `fence_captured_body` pass-through; `session.rs` gains `MediaCounts::of` (single-pass pdf/youtube tallies replacing 4x `matches!` scans at three sites) and `planner_or_default`/`critic_or_default` helpers (5 sites). Verified: cargo check/clippy (`-D warnings`)/fmt/dead-code lint clean; `cargo test -p ragent-research` 41 test binaries green (662 lib tests). |
@@ -3034,7 +2998,8 @@ All documentation markdown files are located in `docs/` except for these root fi
 - Skills system for loadable skill packs
 - Custom agent profiles via OASF format
 - Autopilot mode for autonomous operation
-- Prompt optimization (`/opt` command with 12 methods)
+- `/prompt` read-only agent system-prompt inspector (primary/subagent modes, roster, per-agent override, no LLM call)
+- Tool-repeat guard (FR-044) blocking agent loops that replay identical tool calls
 - Memory system with three tiers (file blocks, SQLite store, semantic search)
 - Journal system for insights and decisions
 - Background agent spawning and management
@@ -3336,7 +3301,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Memory management commands |
 | `/yolo` | Toggle YOLO mode |
-| `/todo` `/task` `/tasks` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
+| `/todo` `/task` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
 | `/team create <name>` | Create a team |
 | `/team open <name>` | Re-open existing team |
 | `/team close` | Close current team |
@@ -3355,12 +3320,12 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/config list` | Interactive picker to restore a saved backup |
 | `/init config` | Create a default `ragent.json` in the global config directory |
 | `/startup` | Show per-stage startup timing instrumentation |
+| `/prompt help\|primary [agent]\|subagent [agent]\|list\|<agent>` | Read-only agent system-prompt inspector (no LLM call) |
 | `/telemetry help\|on\|off\|setup\|counters` | Manage OpenTelemetry metrics export |
 | `/dirs` | Show configured writable directories |
-| `/profile` / `/theme` / `/status` / `/mouse` | UI preferences |
+| `/profile` / `/status` / `/mouse` | UI preferences |
 | `/skill` / `/skills` | Load or inspect skill packs |
 | `/mcp discover\|list\|call` | MCP server commands |
-| `/opt <method> <prompt>` | Optimize a prompt |
 | `/update` / `/update install` | Auto-update (reserved; not implemented) |
 
 ### 6.3 TUI Component Architecture
@@ -3410,7 +3375,6 @@ ragent serve --port 9100 --host 127.0.0.1
 | GET | `/models` | List available models |
 | GET | `/providers` | List providers |
 | GET | `/agents` | List agents |
-| POST | `/opt` | Prompt optimization |
 | GET | `/research` | List research items |
 | POST | `/research` | Create + run a research gathering session (returns `202 Accepted` with `Location` header) |
 | GET | `/research/{name}` | Show one research item (supports `?full=true` for extended metadata) |

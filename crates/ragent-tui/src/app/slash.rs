@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::FutureExt;
+use ragent_agent::agent::AgentMode;
 use ragent_agent::session::loop_state::LoopSpec;
 use ragent_agent::{event::Event, mcp::McpClient, message::Message, tool::TeamManagerInterface};
 use ragent_team::team::{
@@ -18,9 +19,6 @@ use ragent_specs::SpecManager;
 use ragent_telemetry::counters::{TelemetryCountersContent, current_values};
 
 use crate::research_adapter::RagentCompleter;
-
-// Prompt optimization templates
-use ragent_prompt_opt::{Completer, OptMethod, optimize};
 
 // State types from app/state.rs
 use crate::app::state::{
@@ -194,13 +192,6 @@ impl App {
                 "codeindex".to_string(),
                 "help".to_string(),
             ],
-            "theme" => {
-                vec![
-                    "toggle".to_string(),
-                    "light".to_string(),
-                    "dark".to_string(),
-                ]
-            }
             "mouse" => {
                 vec!["on".to_string(), "off".to_string(), "help".to_string()]
             }
@@ -209,6 +200,12 @@ impl App {
             }
             "loop" => vec!["help".to_string(), "--help".to_string(), "-h".to_string()],
             "toolchain" => vec!["list".to_string(), "help".to_string()],
+            "prompt" => vec![
+                "help".to_string(),
+                "primary".to_string(),
+                "subagent".to_string(),
+                "list".to_string(),
+            ],
             "status" => {
                 vec!["clear".to_string()]
             }
@@ -1183,6 +1180,244 @@ Usage: `/telemetry help|on|off|setup|counters`",
         self.status = "alog: config".to_string();
     }
 
+    /// Handle the `/prompt` slash command (agent system-prompt inspector).
+    ///
+    /// Dispatcher (FR-002) — routes `/prompt <subcommand>` by the first
+    /// whitespace-separated token (lowercased):
+    /// - `""`/`help`/`--help`/`-h` -> help page (FR-003)
+    /// - `list` -> agent roster (FR-007)
+    /// - `primary`/`subagent` -> prompt report with forced mode (FR-004/FR-005)
+    /// - anything else -> agent-name resolution: a match renders the
+    ///   primary-mode report (FR-006); a miss renders the FR-011 warning
+    ///
+    /// Read-only throughout (FR-012). Report handlers live with the other
+    /// `/prompt` handlers below.
+    fn handle_prompt_command(&mut self, args: &str) {
+        let mut words = args.split_whitespace();
+        let sub = words.next().unwrap_or("").to_lowercase();
+        match sub.as_str() {
+            "" | "help" | "--help" | "-h" => self.handle_prompt_help(),
+            "list" => self.handle_prompt_list(),
+            "primary" | "subagent" => {
+                let mode = if sub == "subagent" {
+                    AgentMode::Subagent
+                } else {
+                    AgentMode::Primary
+                };
+                self.handle_prompt_report(mode, words.collect::<Vec<_>>().as_slice());
+            }
+            _ => self.handle_prompt_agent(&sub),
+        }
+    }
+
+    /// Render the `/prompt help` page (FR-003). Also covers a bare `/prompt`.
+    fn handle_prompt_help(&mut self) {
+        self.append_assistant_text(&format!(
+            "From: /prompt help\n\n{}",
+            crate::app::prompt::render_help()
+        ));
+        self.status = "prompt: help".to_string();
+    }
+
+    /// Render the `/prompt list` roster (FR-007): non-hidden built-ins plus
+    /// custom agents with mode + source badges. Read-only (FR-012).
+    fn handle_prompt_list(&mut self) {
+        let customs = self.custom_agent_defs.clone();
+        let entries =
+            crate::app::prompt::roster_entries(ragent_agent::agent::builtin_agents(), &customs);
+        self.append_assistant_text(&format!(
+            "From: /prompt list\n\n{}",
+            crate::app::prompt::render_roster(&entries)
+        ));
+        self.status = format!("prompt: list ({} agents)", entries.len());
+    }
+
+    /// Render the `/prompt primary|subagent [agent]` report (FR-004/FR-005).
+    ///
+    /// `words` holds the argument words after the mode token; the first bare
+    /// word (if any) is the FR-006 agent-name filter, resolved
+    /// case-insensitively. A miss renders the FR-011 warning and no report.
+    fn handle_prompt_report(&mut self, mode: AgentMode, words: &[&str]) {
+        let name_arg = words.iter().find(|w| !w.starts_with("--")).copied();
+        self.handle_prompt_render(mode, name_arg);
+    }
+
+    /// Handle `/prompt <agent-name>` (FR-006): agent-name resolution against
+    /// the built-in roster plus custom agents. A match renders the
+    /// primary-mode report (FR-004); a miss means the first argument matched
+    /// no subcommand, help alias, or resolvable agent name, so the FR-010
+    /// usage correction is rendered instead (no prompt content).
+    fn handle_prompt_agent(&mut self, name: &str) {
+        let builtins: Vec<_> = ragent_agent::agent::builtin_agents().to_vec();
+        let customs = self.custom_agent_defs.clone();
+        match crate::app::prompt::resolve_agent(name, &builtins, &customs) {
+            crate::app::prompt::AgentResolution::Found(_) => {
+                self.handle_prompt_render(AgentMode::Primary, Some(name));
+            }
+            crate::app::prompt::AgentResolution::Miss {
+                requested,
+                available,
+            } => {
+                let text = crate::app::prompt::render_usage_correction(&requested, &available);
+                self.append_assistant_text(&text);
+                self.status = format!("prompt: unknown subcommand `{requested}`");
+            }
+        }
+    }
+
+    /// Shared prompt-report renderer (FR-004/FR-005).
+    ///
+    /// Re-runs the canonical assembler with the same live context inputs the
+    /// session loop uses (`collect_prompt_context`, skill registry, storage,
+    /// memory config + section, resolved config), applies the FR-008 filter
+    /// chain to the session tool registry, renders the report header plus
+    /// prompt body plus tool reference, and applies the FR-013 size cap.
+    /// Read-only throughout (FR-012): no LLM call, no writes, no session
+    /// mutation.
+    fn handle_prompt_render(&mut self, mode: AgentMode, name_arg: Option<&str>) {
+        use ragent_agent::agent::{build_memory_prompt_section, collect_prompt_context};
+        use ragent_agent::session::prompt_builders::{
+            build_detailed_tool_reference_from_defs, build_tool_reference_from_defs,
+        };
+
+        // FR-006 agent resolution: requested name (case-insensitive) or the
+        // currently selected agent when omitted.
+        let builtins: Vec<_> = ragent_agent::agent::builtin_agents().to_vec();
+        let customs = self.custom_agent_defs.clone();
+        let agent = match name_arg {
+            Some(name) => match crate::app::prompt::resolve_agent(name, &builtins, &customs) {
+                crate::app::prompt::AgentResolution::Found(agent) => agent,
+                crate::app::prompt::AgentResolution::Miss { .. } => {
+                    if let Some(text) = crate::app::prompt::render_miss_warning(
+                        &crate::app::prompt::resolve_agent(name, &builtins, &customs),
+                    ) {
+                        self.append_assistant_text(&text);
+                    }
+                    self.status = format!("prompt: unknown agent `{name}`");
+                    return;
+                }
+            },
+            None => Arc::new(self.agent_info.clone()),
+        };
+        let source = if customs.iter().any(|c| c.agent_info.name == agent.name) {
+            crate::app::prompt::PromptSource::Custom
+        } else {
+            crate::app::prompt::PromptSource::Builtin
+        };
+
+        // FR-005 forced mode: primary vs subagent (subagent gates the
+        // completion-protocol section and excludes interactive tools).
+        let subagent_mode = mode == AgentMode::Subagent;
+        let assembled_mode = match (&agent.mode, mode) {
+            (_, AgentMode::Subagent) => AgentMode::Subagent,
+            (AgentMode::Subagent, _) => AgentMode::Subagent,
+            _ => AgentMode::Primary,
+        };
+        // Force the assembled mode onto the agent definition before assembly
+        // (mirrors the production subagent entry points in
+        // `ragent-agent/src/task/mod.rs:532,956`, which set
+        // `agent_info.mode = AgentMode::Subagent` before running). The
+        // assembler gates its `## Sub-Agent Spawning` (primary only) and
+        // `## Sub-Agent Completion Protocol` (subagent only) sections on
+        // `agent.mode`, so the forced value must be on the agent itself.
+        let agent: Arc<ragent_agent::agent::AgentInfo> = if agent.mode == assembled_mode {
+            agent
+        } else {
+            let mut forced = (*agent).clone();
+            forced.mode = assembled_mode.clone();
+            Arc::new(forced)
+        };
+
+        self.status = "[wait] prompt".to_string();
+        // FR-014 non-blocking execution: the context reads and assembly run on
+        // a blocking thread (tokio::task::block_in_place, the /toolchain
+        // pattern); collect_prompt_context is async (cached), so the blocking
+        // section drives it via Handle::block_on. The TUI event loop keeps
+        // polling while this work runs.
+        let working_dir = crate::app::helpers::current_working_dir();
+        let (git_status, readme, agents_md, file_tree) = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { collect_prompt_context(&working_dir).await })
+        });
+        let config = ragent_config::Config::load().unwrap_or_default();
+        let skill_dirs = config.skill_dirs.clone();
+        let memory_cfg = config.memory.clone();
+        let storage = Arc::clone(self.session_processor.session_manager.storage());
+        let skill_registry = ragent_agent::skill::SkillRegistry::load(&working_dir, &skill_dirs);
+        let memory_section = tokio::task::block_in_place(|| {
+            build_memory_prompt_section(&working_dir, Some(&storage), Some(&memory_cfg))
+        });
+
+        // FR-008 effective tool surface from the live session registry. A
+        // tool-free agent (max_steps <= 1, e.g. a single-shot summariser)
+        // takes the FR-009 `(no tools)` path: zero effective tools, so no
+        // `## Available Tools` section is rendered and the header states
+        // `(no tools)` instead of a count — matching the assembler's own gate
+        // (`agent/mod.rs:2533-2536`) and the zero-tool wire surface the
+        // session processor sends for such agents (`processor.rs:1719`).
+        let registry = Arc::clone(&self.session_processor.tool_registry);
+        let tool_free = crate::app::prompt::is_tool_free_agent(&agent);
+        let tool_defs = crate::app::prompt::effective_tool_defs(&registry, &agent, subagent_mode);
+        let tool_count = tool_defs.len();
+        let tool_reference = if tool_free {
+            String::new()
+        } else if subagent_mode {
+            build_detailed_tool_reference_from_defs(&tool_defs)
+        } else {
+            build_tool_reference_from_defs(&tool_defs)
+        };
+
+        let body = ragent_agent::agent::build_system_prompt_with_storage_and_memory_and_config(
+            &agent,
+            &working_dir,
+            &file_tree,
+            Some(&skill_registry),
+            Some(&git_status),
+            Some(&readme),
+            Some(&agents_md),
+            Some(&storage),
+            Some(&memory_cfg),
+            Some(&memory_section),
+            Some(&config),
+        );
+
+        let header = crate::app::prompt::PromptHeader {
+            agent_name: agent.name.clone(),
+            source,
+            mode: assembled_mode,
+            // FR-009: `None` renders `(no tools)` — both for tool-free agents
+            // (max_steps <= 1) and for the degenerate empty-filter case.
+            tool_count: (!tool_free && tool_count > 0).then_some(tool_count),
+            body_chars: body.chars().count(),
+        };
+        let tools_section = if tool_defs.is_empty() {
+            String::new()
+        } else {
+            format!("\n{tool_reference}")
+        };
+        let report = crate::app::prompt::apply_size_cap(&format!(
+            "From: /prompt\n\n{}{body}{tools_section}",
+            header.render(),
+        ));
+        self.append_assistant_text(&report);
+        // FR-009: the status line names the tool-free case explicitly instead
+        // of reporting a zero count.
+        self.status = if tool_free {
+            format!(
+                "prompt: {} ({}, no tools)",
+                agent.name,
+                if subagent_mode { "subagent" } else { "primary" },
+            )
+        } else {
+            format!(
+                "prompt: {} ({}, {} tools)",
+                agent.name,
+                if subagent_mode { "subagent" } else { "primary" },
+                tool_count
+            )
+        };
+    }
+
     /// Handle the `/toolchain` slash command (language toolchain report).
     ///
     /// Dispatcher (FR-002) — routes `/toolchain <subcommand>` by the
@@ -1775,7 +2010,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         self.execute_slash_command_inner(raw);
 
         // If the command spawned an async task (status begins with [wait]), defer
-        // the "Finished" log entry — poll_pending_opt will emit it once the
+        // the "Finished" log entry — poll_*_result will emit it once the
         // background work completes.
         if self.status.starts_with("[wait]") {
             return;
@@ -2915,80 +3150,6 @@ Be concise but comprehensive. This will be injected into future agent sessions a
 
                 self.status = "help".to_string();
             }
-            "opt" => {
-                // /opt help => show markdown table of available optimization methods
-                if args.is_empty() || matches!(args.trim(), "help" | "--help" | "-h") {
-                    let table = OptMethod::help_table();
-                    self.append_assistant_text(&format!("From: /opt help\n\n{}", table));
-
-                    self.status = "opt help".to_string();
-                    return;
-                }
-
-                // /opt <method> <prompt>
-                let (method_str, rest) = args
-                    .split_once(char::is_whitespace)
-                    .map_or((args, ""), |(m, r)| (m, r.trim()));
-
-                if rest.is_empty() {
-                    self.status =
-                        "[warn] Please provide a prompt: /opt <method> <prompt>".to_string();
-                    return;
-                }
-
-                let method = match method_str.parse::<OptMethod>() {
-                    Ok(m) => m,
-                    Err(_) => {
-                        self.status = format!("[warn] Unknown optimization method: {}", method_str);
-                        self.push_log_no_agent(
-                            LogLevel::Warn,
-                            format!("opt: unknown method '{}'", method_str),
-                        );
-                        return;
-                    }
-                };
-
-                // Resolve provider / model from session config
-                let (provider_id, model_id) = match self
-                    .selected_model
-                    .as_deref()
-                    .and_then(|s| s.split_once('/'))
-                    .map(|(p, m)| (p.to_string(), m.to_string()))
-                {
-                    Some(pair) => pair,
-                    None => {
-                        self.status =
-                            "[warn] /opt requires a configured model (use /provider)".to_string();
-                        return;
-                    }
-                };
-
-                let registry = Arc::clone(&self.provider_registry);
-                let storage = Arc::clone(&self.storage);
-                let opt_result = Arc::clone(&self.opt_result);
-                let user_prompt = rest.to_string();
-                let method_name = method.name().to_string();
-
-                self.status = format!("[wait] opt/{}: optimizing…", method_name);
-
-                tokio::spawn(async move {
-                    let completer = RagentCompleter {
-                        registry,
-                        storage,
-                        provider_id,
-                        model_id,
-                    };
-                    let outcome = optimize(method, &user_prompt, &completer)
-                        .await
-                        .map(|text| format!("[opt: {}]\n\n{}", method_name, text))
-                        .map_err(|e| e.to_string());
-                    if let Ok(mut guard) = opt_result.lock() {
-                        *guard = Some(outcome);
-                    } else {
-                        tracing::error!("opt_result mutex poisoned, result dropped");
-                    }
-                });
-            }
             "inputdiag" => {
                 let selection = self
                     .text_selection
@@ -4000,24 +4161,6 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 self.append_assistant_text(&output);
 
                 self.status = "skills".to_string();
-            }
-            "tasks" => {
-                if args.trim() == "help" {
-                    self.append_assistant_text(
-                        "From: /tasks help\n\n## /tasks \u{2014} Session task list (alias of /task list)\n\n| Subcommand | Description |\n|---|---|\n| `/tasks` | List task items for the current session |\n| `/tasks <status>` | Restrict the list to a status (e.g. `pending`, `in_progress`, `completed`) |\n| `/tasks help` | Show this help |\n\nSee `/task help` for the full task-management command family.",
-                    );
-                    self.status = "tasks: help".to_string();
-                    return;
-                }
-                if !self.ensure_session() {
-                    return;
-                }
-                let status_filter = if args.is_empty() { None } else { Some(args) };
-                self.render_task_list(status_filter, "tasks");
-                // /tasks reads task data; refresh the side-panel cache if it
-                // is visible so the two views stay in sync.
-                self.tasks_cache_dirty = true;
-                self.needs_redraw = true;
             }
             "blueprints" => {
                 handle_blueprints_command(self, args);
@@ -5744,7 +5887,9 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
             }
             "alog" => self.handle_alog_command(args),
-            // ── /toolchain ──────────────────────────────────────────────────
+            // ── /prompt ────────────────────────────────────────────────────
+            "prompt" => self.handle_prompt_command(args),
+            // /toolchain: language toolchain presence report (FR-002)
             "toolchain" => self.handle_toolchain_command(args),
             // ── /swarm ──────────────────────────────────────────────────────
             "swarm" => {
@@ -8503,7 +8648,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             | `GET` | [{base}/sessions/{{id}}/tasks/{{tid}}]({base}/sessions) | Get task status |\n\
                             | `DELETE` | [{base}/sessions/{{id}}/tasks/{{tid}}]({base}/sessions) | Cancel a task |\n\
                             | `GET` | [{base}/events]({base}/events) | SSE stream for real-time events |\n\
-                            | `POST` | [{base}/opt]({base}/opt) | Optimise a prompt |\n\
                             | `GET` | [{base}/orchestrator/metrics]({base}/orchestrator/metrics) | Orchestration metrics |\n\
                             | `POST` | [{base}/orchestrator/start]({base}/orchestrator/start) | Start orchestration job |\n\
                             | `GET` | [{base}/orchestrator/jobs/{{id}}]({base}/orchestrator/jobs) | Get job status |\n\n\
@@ -9943,9 +10087,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
     /// Render a list of session tasks into the chat transcript.
     ///
-    /// `from_cmd` is used for the "From: /..." header (e.g. "task list" or
-    /// "tasks"). `status_filter` is an optional status string passed by the
-    /// user. This is shared by `/task list` and `/tasks`.
+    /// `from_cmd` is used for the "From: /..." header (e.g. "task list").
+    /// `status_filter` is an optional status string passed by the user.
     fn render_task_list(&mut self, status_filter: Option<&str>, from_cmd: &str) {
         let Some(session_id) = self.session_id.clone() else {
             self.status = "No active session".to_string();

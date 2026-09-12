@@ -1154,7 +1154,7 @@ fn register_extracted_vcs_tools(registry: &ToolRegistry) {
 
 /// Return a `HashSet` of allowed tool names from a skill's `allowed_tools`
 /// list, including the small set of always-allowed control tools.
-pub(crate) fn build_allowed_tool_set(allowed: Option<&[impl AsRef<str>]>) -> HashSet<String> {
+pub fn build_allowed_tool_set(allowed: Option<&[impl AsRef<str>]>) -> HashSet<String> {
     let mut set = HashSet::new();
     if let Some(names) = allowed {
         for name in names {
@@ -1186,7 +1186,10 @@ pub(crate) fn build_allowed_tool_set(allowed: Option<&[impl AsRef<str>]>) -> Has
 /// Return `true` if a tool name is allowed by the given allowed set.
 /// The set already includes always-allowed tools from
 /// [`build_allowed_tool_set`].
-pub(crate) fn is_allowed_tool(tool_name: &str, allowed: &HashSet<String>) -> bool {
+pub fn is_allowed_tool<S: ::std::hash::BuildHasher>(
+    tool_name: &str,
+    allowed: &HashSet<String, S>,
+) -> bool {
     allowed.contains(tool_name)
 }
 

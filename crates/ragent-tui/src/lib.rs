@@ -761,9 +761,6 @@ pub async fn run_tui(
             app.needs_redraw = true;
         }
 
-        // Check for completed /opt LLM results.
-        app.poll_pending_opt();
-
         // Stream /new scaffold progress and surface the finished summary.
         app.poll_newproj_result();
 

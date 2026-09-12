@@ -29,6 +29,7 @@ pub use self::status_bar_cache::StatusBarCache;
 mod model_picker_cache;
 pub use self::model_picker_cache::ModelPickerRowsCache;
 
+pub mod prompt;
 mod research;
 mod reverse;
 mod session_ops;

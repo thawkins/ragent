@@ -36,11 +36,9 @@ impl ragent_research::SessionObserver for TuiResearchObserver {
     }
 }
 
-/// Connects the `ragent-prompt_opt` crate to the session's active LLM provider.
-///
-/// `RagentCompleter` implements [`Completer`] by building an [`LlmClient`] from
-/// the configured provider, sending the system+user message pair, and collecting
-/// the streaming `TextDelta` events into a single `String`.
+/// One-shot LLM helper for the `/swarm` decomposition call: builds a client
+/// from the session's active provider, sends the system+user message pair, and
+/// collects the streaming `TextDelta` events into a single `String`.
 pub(crate) struct RagentCompleter {
     pub(crate) registry: Arc<ragent_agent::provider::ProviderRegistry>,
     pub(crate) storage: Arc<ragent_agent::storage::Storage>,
@@ -48,9 +46,8 @@ pub(crate) struct RagentCompleter {
     pub(crate) model_id: String,
 }
 
-#[async_trait::async_trait]
-impl ragent_prompt_opt::Completer for RagentCompleter {
-    async fn complete(&self, system: &str, user: &str) -> anyhow::Result<String> {
+impl RagentCompleter {
+    pub(crate) async fn complete(&self, system: &str, user: &str) -> anyhow::Result<String> {
         use anyhow::Context as _;
         use futures::StreamExt as _;
         use ragent_agent::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};

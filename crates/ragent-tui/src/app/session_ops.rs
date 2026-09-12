@@ -1009,11 +1009,11 @@ impl App {
             "websearch" => Some("[show|help]".to_string()),
             "init" => Some("[config|help]".to_string()),
             "thinking" => Some("[auto|off|low|medium|high]".to_string()),
-            "theme" => Some("[toggle|light|dark]".to_string()),
             "mouse" => Some("[on|off|help]".to_string()),
             "status" => Some("[clear]".to_string()),
             "alog" => Some("[help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes]".to_string()),
             "toolchain" => Some("[help|list [lang] [--json]]".to_string()),
+            "prompt" => Some("[help|primary [agent]|subagent [agent]|list|<agent>]".to_string()),
             "log" => Some("[clear subagents|panics|research|editlog|help]".to_string()),
             "loop" => Some("[help | <agent> <goal text...>]".to_string()),
             "blueprints" => Some("[help|list|<name>]".to_string()),
@@ -1585,7 +1585,7 @@ impl App {
 
     /// Drain the completion result from an off-thread codeindex graph build
     /// or full reindex and surface it in the message window. Mirrors
-    /// `poll_pending_opt`; the success payload carries the message and the
+    /// `poll_compaction_result`; the success payload carries the message and the
     /// status-bar text as a tuple.
     pub fn poll_codeindex_bg_result(&mut self) {
         let outcome = {

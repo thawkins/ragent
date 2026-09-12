@@ -39,7 +39,6 @@ use ragent_agent::{
 };
 
 use crate::sse::event_to_sse;
-use ragent_prompt_opt::{Completer, OptMethod, optimize};
 use ragent_research::SessionEvent;
 
 /// Shared application state passed to every Axum handler.
@@ -120,7 +119,6 @@ pub fn router(state: AppState) -> Router {
             get(get_task).delete(cancel_agent),
         )
         .route("/events", get(events_stream))
-        .route("/opt", post(prompt_opt_handler))
         // Memory API (Milestone 8)
         .nest("/memory", memory::memory_routes())
         // Research API (research system)
@@ -754,153 +752,6 @@ async fn cancel_agent(
             StatusCode::INTERNAL_SERVER_ERROR,
             e.to_string(),
         )),
-    }
-}
-
-/// `POST /opt` — apply a prompt optimization method via the configured LLM.
-///
-/// Request body: `{ "method": "<name>", "prompt": "<text>", "provider": "<id>", "model": "<id>" }`
-///
-/// `provider` and `model` are optional; when absent the handler returns an
-/// error asking the caller to supply them.  The canonical method names are
-/// the lower-snake-case variants returned by [`OptMethod::all`]; common aliases
-/// (e.g. `costar`, `co-star`, `q*`) are also accepted.
-///
-/// Returns: `{ "method": "<name>", "result": "<optimized prompt>" }`
-#[derive(Deserialize)]
-struct PromptOptRequest {
-    method: String,
-    prompt: String,
-    /// Provider id (e.g. `"anthropic"`).  Required when the server has no default.
-    provider: Option<String>,
-    /// Model id (e.g. `"claude-sonnet-4-20250514"`).  Required when no default.
-    model: Option<String>,
-}
-
-#[derive(Serialize)]
-struct PromptOptResponse {
-    method: String,
-    result: String,
-}
-
-/// Implements [`Completer`] for the HTTP server by constructing an LLM client
-/// from the [`AppState`]'s storage (for the API key) and a fresh
-/// [`ragent_agent::provider::ProviderRegistry`].
-struct ServerCompleter {
-    storage: Arc<Storage>,
-    provider_id: String,
-    model_id: String,
-}
-
-#[async_trait::async_trait]
-impl Completer for ServerCompleter {
-    async fn complete(&self, system: &str, user: &str) -> anyhow::Result<String> {
-        use anyhow::Context as _;
-        use futures::StreamExt as _;
-        use ragent_agent::{
-            llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent},
-            provider::ProviderRegistry,
-        };
-        let api_key = self
-            .storage
-            .get_provider_auth(&self.provider_id)
-            .context("reading API key")?
-            .ok_or_else(|| {
-                anyhow::anyhow!("no API key configured for provider '{}'", self.provider_id)
-            })?;
-
-        let registry = ProviderRegistry::new();
-        let provider = registry
-            .get(&self.provider_id)
-            .with_context(|| format!("provider '{}' not found", self.provider_id))?;
-
-        let client = provider
-            .create_client(&api_key, None, &Default::default())
-            .await
-            .context("creating LLM client")?;
-
-        let request = ChatRequest {
-            model: self.model_id.clone(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text(user.to_string()),
-            }]),
-            tools: Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            system: Some(std::sync::Arc::from(system)),
-            options: Default::default(),
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: None,
-        };
-
-        let mut stream = client.chat(request).await.context("starting LLM stream")?;
-        let mut result = String::new();
-        while let Some(event) = stream.next().await {
-            if let StreamEvent::TextDelta { text } = event {
-                result.push_str(&text);
-            }
-        }
-        Ok(result)
-    }
-}
-
-async fn prompt_opt_handler(
-    State(state): State<AppState>,
-    Json(body): Json<PromptOptRequest>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    let input = body.prompt.trim();
-    if input.is_empty() {
-        return error_response(StatusCode::BAD_REQUEST, "prompt must not be empty");
-    }
-
-    let method = match body.method.parse::<OptMethod>() {
-        Ok(m) => m,
-        Err(()) => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                format!("unknown optimization method: {}", body.method),
-            );
-        }
-    };
-
-    let provider_id = match body.provider {
-        Some(p) => p,
-        None => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "provider field is required (e.g. \"anthropic\")",
-            );
-        }
-    };
-    let model_id = match body.model {
-        Some(m) => m,
-        None => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "model field is required (e.g. \"claude-sonnet-4-20250514\")",
-            );
-        }
-    };
-
-    let completer = ServerCompleter {
-        storage: Arc::clone(&state.storage),
-        provider_id,
-        model_id,
-    };
-
-    match optimize(method, input, &completer).await {
-        Ok(result) => serialize_response(
-            PromptOptResponse {
-                method: body.method,
-                result,
-            },
-            "prompt_opt",
-        ),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 

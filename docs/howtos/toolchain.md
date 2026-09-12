@@ -318,7 +318,7 @@ probe pass on a blocking thread (`tokio::task::block_in_place` over
 `build_report_rows`) with the status bar set to `[wait] toolchain` until the
 report is ready. The same `[wait]` status prefix is the hook the TUI uses to
 defer event handling while an async slash command runs (shared with
-`/bench`, `/opt`, and `/swarm`).
+`/bench` and `/swarm`).
 
 On a typical Linux workstation a full report completes within 10 seconds —
 absent runtimes cost one `PATH` walk each, and present runtimes are bounded

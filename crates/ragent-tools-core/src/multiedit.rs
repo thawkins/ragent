@@ -140,24 +140,45 @@ impl Tool for MultiEditTool {
     /// # Errors
     ///
     /// Returns an error if the `edits` array is missing, malformed, or empty.
+    ///
+    /// Workflow and failure-recovery rules come FIRST: tool references truncate
+    /// descriptions, so the read-first / uniqueness / stale-retry guidance and
+    /// the follow-the-hint recovery advice must lead.
     fn description(&self) -> &'static str {
         "Apply multiple surgical text edits to one or more files atomically. \
-         Required parameter: `edits` (array of edit objects). Each edit object \
-         must provide `file_path` (string), `old_string` (string), and \
-         `new_string` (string). By default every edit must match exactly once in \
-         its file, byte-for-byte; if any single edit fails validation, no files \
-         are modified. When exact matching fails, a fallback cascade retries \
-         with whitespace-flexible and indent-normalised matching before \
-         erroring. If your previous edit on this file succeeded, treat your \
-         in-context copy as stale and re-read before composing the next \
-         `old_string`. Keep each `old_string` under 20 lines where possible. \
-         Each edit also accepts `collapse_whitespace` (boolean, \
-         default false) to relax matching for that edit: backslash escapes \
-         (\\t, \\n, \\r, \\\\) in old_string are decoded and every whitespace \
-         run matches a non-empty whitespace run in the file. Edits to the same \
-         file are overlap-checked and applied highest-offset-first, so input \
-         order does not matter. Legacy aliases `path`/`old_str`/`new_str` are \
-         accepted inside each edit object but deprecated."
+         WORKFLOW: read each target section before editing and copy every \
+         `old_string` verbatim from what you read, including exact \
+         indentation and whitespace; include 3-5 lines of context around each \
+         change point so every match is unique, and keep each `old_string` \
+         under 20 lines where possible. After any successful edit, your \
+         in-context copy of that file is stale: re-read before composing the \
+         next `old_string` for it. Each edit must match exactly once in its \
+         file; if any single edit fails validation, no files are modified \
+         (atomic rollback), so split uncertain batches into separate \
+         `multi_edit` calls or single `edit` calls. On failure the error names \
+         the failing edit index and tells you what to do - follow it: \
+         not-found errors include a numbered near-miss snippet (\"almost \
+         matches a block starting at line N - rebuild old_string from the \
+         snippet\"), so rebuild that edit's needle from the snippet instead of \
+         guessing; multiple-match errors list numbered candidate blocks, so \
+         extend old_string with unique context from the one you want. Retry a \
+         failing needle at most twice, then re-read the file fresh and \
+         rebuild. When exact matching fails, a fallback cascade retries with \
+         whitespace-flexible and indent-normalised matching before erroring; \
+         a whitespace run may only fold across a line boundary when both the \
+         needle run and the matched file run contain a newline, so matching \
+         can never join or split lines (use `patch` or `apply_patch` for \
+         line-structure changes). Each edit also accepts `collapse_whitespace` \
+         (boolean, default false) to relax matching for that edit: backslash \
+         escapes (\\t, \\n, \\r, \\\\) in old_string are decoded and every \
+         whitespace run matches a non-empty whitespace run in the file (same \
+         line-boundary rule). Line endings are matched and preserved. Required \
+         parameter: `edits` (array of edit objects); each edit object must \
+         provide `file_path` (string), `old_string` (string), and `new_string` \
+         (string). Edits to the same file are overlap-checked and applied \
+         highest-offset-first, so input order does not matter. Legacy aliases \
+         `path`/`old_str`/`new_str` are accepted inside each edit object but \
+         deprecated."
     }
 
     fn parameters_schema(&self) -> Value {

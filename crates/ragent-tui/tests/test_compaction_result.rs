@@ -1,5 +1,5 @@
 //! UI-side tests for compaction result handling (`poll_compaction_result`)
-//! and Mutex poisoning recovery, mirroring `test_opt_result.rs`.
+//! and Mutex poisoning recovery.
 
 use std::sync::Arc;
 

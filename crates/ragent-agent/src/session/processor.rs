@@ -389,6 +389,13 @@ pub struct SessionProcessor {
             std::collections::HashMap<String, (crate::tool::TeamContext, std::time::Instant)>,
         >,
     >,
+    /// Tool-repeat guard (FR-044): per-session trackers for consecutive
+    /// identical tool calls. After [`TOOL_REPEAT_LIMIT`] identical calls the
+    /// guard prompts the user (primary runs) or denies the call with a
+    /// corrective observation (subagent / auto-approve runs).
+    pub tool_repeat_guard: std::sync::Arc<
+        parking_lot::Mutex<HashMap<String, crate::session::permissions::RepeatTracker>>,
+    >,
     /// Optional MCP client for dynamic MCP tool registration.
     /// Set once after startup via [`SessionProcessor::set_mcp_client`].
     pub mcp_client: std::sync::OnceLock<Arc<tokio::sync::RwLock<crate::mcp::McpClient>>>,
@@ -2702,6 +2709,7 @@ impl SessionProcessor {
                     let storage_clone = self.session_manager.storage().clone();
                     let profiler_clone = profiler.clone();
                     let team_context_cache = self.team_context_cache.clone();
+                    let tool_repeat_guard = self.tool_repeat_guard.clone();
                     let telemetry_clone = Arc::clone(&self.telemetry);
                     // T-009 (FR-008/FR-009/FR-021/FR-022): the loop
                     // restriction guard runs inside the task, before hooks
@@ -2887,6 +2895,36 @@ impl SessionProcessor {
                                 parsed_input.unwrap_or(Value::Null)
                             }
                         };
+                        // Tool-repeat guard (FR-044): after the hooks, on
+                        // the canonical `tool_input` value. Five identical
+                        // consecutive calls pass; the sixth prompts the
+                        // user (primary runs) or is denied with a
+                        // corrective observation (subagent / auto-approve
+                        // runs). A denial returns the standard tuple so
+                        // the TUI spinner closes out and the model sees
+                        // the reason.
+                        let repeat_guard_input = tool_input.clone();
+                        if let Some(guard_reason) =
+                            crate::session::permissions::check_tool_repeat_guard(
+                                &tool_repeat_guard,
+                                &event_bus,
+                                &session_id_str,
+                                &tc_clone.name,
+                                &repeat_guard_input,
+                                agent_is_subagent,
+                                auto_approve == Some(true),
+                                checkpoint_timeout_secs,
+                            )
+                            .await
+                        {
+                            return denied_tool_call(
+                                &tc_clone,
+                                &event_bus,
+                                &session_id_str,
+                                repeat_guard_input,
+                                guard_reason,
+                            );
+                        }
                         let _permit = match crate::resource::acquire_tool_permit().await {
                             Ok(permit) => permit,
                             Err(e) => {

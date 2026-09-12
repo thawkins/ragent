@@ -196,6 +196,9 @@ fn make_processor(
         llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
         cached_config: parking_lot::Mutex::new(None),
         team_context_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         // Auto-approve so the `think` tool call in step 1 executes without a

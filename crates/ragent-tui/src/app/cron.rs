@@ -1580,6 +1580,9 @@ mod tests {
             team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             mcp_client: std::sync::OnceLock::new(),
             code_index: std::sync::OnceLock::new(),
             bg_service: std::sync::OnceLock::new(),

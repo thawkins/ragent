@@ -25,6 +25,15 @@
 //! in the content, so collapsed whitespace differences (indentation depth,
 //! alignment spaces, blank lines) do not cause spurious match failures.
 //!
+//! Line-structure guard (FR-045): a whitespace run may only fold across a
+//! line boundary when **both** the needle run and the matched content run
+//! contain a newline. A needle run without a newline matches only runs of
+//! spaces/tabs, and a needle run with a newline matches only runs containing
+//! at least one newline. Folding across the boundary would splice the
+//! caller's `new_str` with a different line structure from the file (joined
+//! or split lines), which is exactly the "edit tool corrupted my file"
+//! corruption class; the guard makes that structurally impossible.
+//!
 //! # Match cascade (editplan P2)
 //!
 //! [`find_replacement_cascade`] runs the matchers as a progressive fallback
@@ -183,17 +192,20 @@ pub fn find_flexible_replacement_range(
 
     // Fold consecutive whitespace runs in the pattern down to a single space
     // marker. Every space in the folded pattern represents a whitespace run.
-    let mut pat_folded: Vec<(char, bool)> = Vec::with_capacity(pat.len());
+    // The second boolean records whether the run contains a newline so the
+    // matcher can enforce the FR-045 line-structure guard: a run with a
+    // newline must match a content run with a newline, and vice versa.
+    let mut pat_folded: Vec<(char, bool, bool)> = Vec::with_capacity(pat.len());
     {
         let mut idx = 0;
         while idx < pat.len() {
             if pat[idx].is_whitespace() {
-                pat_folded.push((' ', true));
-                while idx < pat.len() && pat[idx].is_whitespace() {
-                    idx += 1;
-                }
+                let run_end = idx + pat[idx..].iter().take_while(|c| c.is_whitespace()).count();
+                let run_has_newline = pat[idx..run_end].contains(&'\n');
+                pat_folded.push((' ', true, run_has_newline));
+                idx = run_end;
             } else {
-                pat_folded.push((pat[idx], false));
+                pat_folded.push((pat[idx], false, false));
                 idx += 1;
             }
         }
@@ -228,7 +240,7 @@ pub fn find_flexible_replacement_range(
             let mut p = 0;
             let mut ok = true;
             while p < pat_folded.len() {
-                let (pc, is_run) = pat_folded[p];
+                let (pc, is_run, pat_run_newline) = pat_folded[p];
                 if is_run {
                     // A folded whitespace run must consume ≥1 whitespace chars.
                     let start_h = h;
@@ -236,6 +248,15 @@ pub fn find_flexible_replacement_range(
                         h += 1;
                     }
                     if h == start_h {
+                        ok = false;
+                        break;
+                    }
+                    // FR-045 line-structure guard: the needle's run and the
+                    // matched content run must agree on crossing a line
+                    // boundary. Otherwise the splice would join or split
+                    // lines, corrupting the file's line structure.
+                    let hay_run_newline = hay[start_h..h].contains(&'\n');
+                    if hay_run_newline != pat_run_newline {
                         ok = false;
                         break;
                     }

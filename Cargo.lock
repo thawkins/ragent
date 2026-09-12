@@ -6105,7 +6105,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "1.0.95"
+version = "1.0.96"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6132,7 +6132,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.95"
+version = "1.0.96"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6184,7 +6184,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.95"
+version = "1.0.96"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6208,7 +6208,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.95"
+version = "1.0.96"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6285,17 +6285,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "ragent-prompt_opt"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "tokio",
-]
-
-[[package]]
 name = "ragent-research"
-version = "1.0.95"
+version = "1.0.96"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6324,17 +6315,15 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.95"
+version = "1.0.96"
 dependencies = [
  "anyhow",
- "async-trait",
  "axum 0.8.9",
  "criterion",
  "futures",
  "http-body-util",
  "parking_lot",
  "ragent-agent",
- "ragent-prompt_opt",
  "ragent-research",
  "serde",
  "serde_json",
@@ -6383,7 +6372,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "1.0.95"
+version = "1.0.96"
 dependencies = [
  "anyhow",
  "parking_lot",
@@ -6512,7 +6501,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.95"
+version = "1.0.96"
 dependencies = [
  "anyhow",
  "arboard",
@@ -6534,7 +6523,6 @@ dependencies = [
  "ragent-codeindex",
  "ragent-config",
  "ragent-llm",
- "ragent-prompt_opt",
  "ragent-research",
  "ragent-server",
  "ragent-specs",

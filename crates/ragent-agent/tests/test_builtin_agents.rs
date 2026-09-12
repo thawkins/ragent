@@ -131,6 +131,66 @@ fn test_primary_agent_prompt_has_no_subagent_completion_protocol() {
 }
 
 #[test]
+fn test_edit_guidance_section_is_injected_into_system_prompt() {
+    // The "## Editing Files" section must cover the full edit workflow:
+    // tool choice, read-first workflow, failure recovery driven by the
+    // error hints (near-miss snippet, multi-match candidates, retry cap),
+    // and the multi_edit atomicity/overlap semantics.
+    let mut agent = AgentInfo::new("general", "general agent");
+    agent.prompt = Some(Arc::from("You are a helpful assistant."));
+    agent.max_steps = Some(10);
+
+    let prompt = build_system_prompt_with_storage(
+        &agent,
+        Path::new("/tmp"),
+        "",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+
+    assert!(
+        prompt.contains("## Editing Files"),
+        "system prompt must include the '## Editing Files' section"
+    );
+    assert!(
+        prompt.contains("copy `old_string` verbatim from what you just read"),
+        "edit guidance must demand verbatim needles from a fresh read"
+    );
+    assert!(
+        prompt.contains("Failure recovery"),
+        "edit guidance must include a failure-recovery subsection"
+    );
+    assert!(
+        prompt.contains("almost matches a block starting at line"),
+        "edit guidance must reference the near-miss hint the error actually emits"
+    );
+    assert!(
+        prompt.contains("numbered candidate blocks"),
+        "edit guidance must reference the multi-match candidate hint"
+    );
+    assert!(
+        prompt.contains("Retry cap"),
+        "edit guidance must cap retries on a failing needle"
+    );
+    assert!(
+        prompt.contains("line-structure"),
+        "edit guidance must explain the line-structure rejection rule"
+    );
+    assert!(
+        prompt.contains("highest-offset-first"),
+        "multi_edit guidance must state the order-independent apply rule"
+    );
+    assert!(
+        prompt.contains("atomic rollback"),
+        "multi_edit guidance must state the atomic-rollback guarantee"
+    );
+}
+
+#[test]
 fn test_domain_agents_exist() {
     let agents = create_builtin_agents();
     let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();

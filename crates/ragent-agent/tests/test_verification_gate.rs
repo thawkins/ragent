@@ -197,6 +197,9 @@ fn make_processor(
             env_overrides_present: false,
         })),
         team_context_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         auto_approve: false,

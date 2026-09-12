@@ -169,7 +169,7 @@ pub(crate) fn build_tool_reference_section(registry: &crate::tool::ToolRegistry)
 
 /// Build a concise system-prompt tool reference from a pre-filtered list of
 /// definitions. Used when an agent's `allowed_tools` restricts the visible set.
-pub(crate) fn build_tool_reference_from_defs(defs: &[ToolDefinition]) -> String {
+pub fn build_tool_reference_from_defs(defs: &[ToolDefinition]) -> String {
     if defs.is_empty() {
         return String::new();
     }

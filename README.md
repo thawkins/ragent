@@ -87,9 +87,12 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Event bus** — internal tokio pub/sub for real-time UI updates across all components
 - **Background agents** — spawn and run multiple sub-agents concurrently for parallel
   task execution, with REST API and TUI monitoring
-- **Prompt optimization** — `/opt <method> <prompt>` transforms any prompt into structured
-  frameworks (CO-STAR, CRISPE, CoT, DRAW, RISE, VARI, Q*, O1-STYLE, Meta Prompting) and
-  platform adapters (OpenAI, Claude, Microsoft/Azure); also available via `POST /opt`
+- **Prompt inspector** — `/prompt` renders the assembled system prompt an agent
+  would receive (primary or subagent mode, per-agent override, roster) with the
+  effective tool surface — read-only, no LLM call
+- **Tool-repeat guard** — after five consecutive identical tool calls the sixth is
+  held for confirmation in interactive runs and auto-denied in unattended runs, so
+  agent loops cannot hang replaying the same call (FR-044)
 - **Code index** — automatic codebase indexing with tree-sitter parsing (15+ languages),
     full-text search via Tantivy, incremental updates via file watcher, and LLM-accessible
     tools; supports Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD,
@@ -288,42 +291,6 @@ reference, template variables (`{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{AGENTS_MD}
 `{{DATE}}`), permission rules, and worked examples. Ready-to-use example files
 are in [`examples/agents/`](examples/agents/).
 
-## Prompt Optimization
-
-The `/opt` slash command (and `POST /opt` HTTP endpoint) transforms a plain prompt into
-one of 12 structured frameworks — no LLM call needed, instant results.
-
-```
-/opt help                           # show method table
-/opt co_star Explain Rust lifetimes
-/opt cot     Solve the two-sum problem
-/opt draw    A futuristic city at sunset
-```
-
-| Method          | Description                                             |
-| --------------- | ------------------------------------------------------- |
-| `co_star`     | Context, Objective, Scope, Task, Action, Result         |
-| `crispe`      | Context, Role, Intent, Steps, Persona, Examples         |
-| `cot`         | Chain-of-Thought step-by-step reasoning                 |
-| `draw`        | Image prompt: subject, style, details, negatives        |
-| `rise`        | Role, Intent, Scope, Examples                           |
-| `o1_style`    | Stylized creative tokens and constraints                |
-| `meta`        | Meta Prompting — generate the internal prompt          |
-| `variational` | VARI — multiple prompt candidates + selection criteria |
-| `q_star`      | Q* — iterative query refinement                        |
-| `openai`      | OpenAI/GPT system+user adapter                          |
-| `claude`      | Anthropic Claude adapter                                |
-| `microsoft`   | Microsoft Azure AI adapter                              |
-
-HTTP endpoint (requires Bearer token):
-
-```bash
-curl -s -X POST http://localhost:9100/opt \
-  -H "Authorization: Bearer $RAGENT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"method":"co_star","prompt":"Explain Rust lifetimes"}'
-```
-
 ## Project Scaffolding
 
 Scaffold a brand-new, agent-friendly project in an empty directory with one
@@ -379,7 +346,7 @@ Docs and examples:
 
 ## Architecture
 
-The project is a Cargo workspace built from 17 focused crates:
+The project is a Cargo workspace built from 16 focused crates:
 
 | Crate                     | Purpose                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -388,7 +355,6 @@ The project is a Cargo workspace built from 17 focused crates:
 | `ragent-codeindex`      | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher                                                                                                                   |
 | `ragent-config`         | Configuration types, defaults, and parsing                                                                                                                                                        |
 | `ragent-llm`            | Provider clients and model/provider registry (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock, Microsoft Foundry Local) |
-| `ragent-prompt_opt`     | Prompt optimization templates and completer abstraction                                                                                                                                           |
 | `ragent-research`       | Research system: web/local gathering, synthesis, RESEARCH.md output                                                                                                                               |
 | `ragent-server`         | Axum HTTP routes and SSE streaming                                                                                                                                                                |
 | `ragent-specs`          | Spec lifecycle management: discovery, validation, status transitions, review, archival, JTBD analysis                                                                                          |
@@ -448,11 +414,21 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.95** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.96** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **`/prompt` inspector, tool-repeat guard, redundant command removal
+  (v1.0.96)** — the new read-only `/prompt` slash command
+  renders the assembled system prompt an agent would receive (primary or
+  subagent mode, roster, per-agent override) with its effective tool surface;
+  a tool-repeat guard (FR-044) blocks agent loops stuck replaying the same
+  tool call (sixth identical call prompts in interactive runs, auto-denies in
+  unattended runs); and the redundant `/opt` (plus its `ragent-prompt_opt`
+  crate and `POST /opt` endpoint), `/tasks`, and `/theme` slash commands were
+  removed, returning the workspace to 16 crates.
 
 - **AgentNotice chat-bubble separation + /toolchain fixed-width table
   (v1.0.94)** — consecutive `AgentNotice` notices now render as their own

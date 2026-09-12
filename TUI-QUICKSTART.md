@@ -4,6 +4,21 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.96)
+
+- **`/prompt` system-prompt inspector** — a new read-only slash command renders
+  exactly what the LLM receives as its system prompt: `/prompt primary [agent]`,
+  `/prompt subagent [agent]` (interactive tools excluded), `/prompt list`, and
+  `/prompt <agent-name>`. No LLM call, no writes, no session mutation.
+- **Tool-repeat guard (FR-044)** — five consecutive identical tool calls pass
+  through; the sixth raises a `tool:repeat` confirmation in interactive runs
+  and is auto-denied in subagent/`--yes`/YOLO runs with a corrective
+  observation, so unattended loops cannot hang on the same call.
+- **Redundant slash commands removed** — `/opt` (prompt optimization, with its
+  `ragent-prompt_opt` crate and `POST /opt` endpoint), `/tasks` (alias of
+  `/task list`), and `/theme` (registered but never dispatched) are gone;
+  the workspace is back to 16 crates.
+
 ## Highlights (v1.0.95)
 
 - **AgentNotice chat-bubble separation (v1.0.95)** — consecutive
@@ -1108,6 +1123,7 @@ shortcut again to close the panel.
 ## Next steps
 
 - Read the full `QUICKSTART.md` for CLI, server, and configuration options.
+- Browse the per-command howtos in `docs/howtos/slashcommands/` (INDEX.md lists all 74 commands).
 - See `docs/custom-agents.md` to create your own agent profiles.
 - See `docs/howtos/teams.md` to coordinate multi-agent teams.
 - Run `ragent --help` for a complete list of command-line options.

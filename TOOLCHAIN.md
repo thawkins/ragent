@@ -2,19 +2,52 @@
 
 Review date: 2026-09-06
 Scope: dev/debug rebuild times for the ragent workspace (963 crates in `Cargo.lock`,
-18 workspace crates, target dir currently 482 GB).
+16 workspace crates, target dir currently 482 GB).
 
 ## Current Setup (what is in place)
 
 | Item              | Value                                                        | Source                                                     |
 | ----------------- | ------------------------------------------------------------ | ---------------------------------------------------------- |
-| Active toolchain  | nightly 1.100.0-nightly (0ed41eb41, 2026-09-04), LLVM 23.1.1 | `RUSTUP_TOOLCHAIN=nightly` env var                       |
-| Other toolchains  | stable, 1.97.0                                               | rustup                                                     |
+| Active toolchain  | stable, `rust-toolchain.toml` pins `channel = "stable"`      | `rust-toolchain.toml`                                       |
+| Other toolchains  | 1.97.0                                                       | rustup                                                     |
 | Linker            | `clang` + `mold` (via `-C link-arg=-fuse-ld=mold`)     | `~/.cargo/config.toml`                                   |
-| Parallel frontend | `-Z threads=8`                                             | `~/.cargo/config.toml` (nightly-only)                    |
 | Debug info        | `debug = "line-tables-only"`                               | `~/.cargo/config.toml` (verified applied to real builds) |
 | Compile cache     | sccache 0.17.0,`RUSTC_WRAPPER=sccache`, 11 GB cache dir    | env var                                                    |
 | Machine           | 8 cores, 46 GiB RAM, swap 6.4G/8G in use                     | --                                                         |
+
+## Required cargo plugins
+
+The ragent build, test, doc and release flows depend on these cargo plugins
+(installed with `cargo install <name> --locked`). Clippy, fmt, add, toolchain
+ship inside the rustup toolchain and are listed for completeness.
+
+| Plugin | Purpose in ragent |
+| --- | --- |
+| `cargo-llvm-cov` | Coverage measurement (`/rust-hygiene` and the STATS.md coverage table) |
+| `cargo-nextest` | Faster parallel test runner used by CI flows |
+| `cargo-audit` | Security advisory audit (part of the standard hygiene check) |
+| `cargo-deny` | License / advisory / duplicate-crate gate (`deny.toml`) |
+| `cargo-outdated` | Dependency freshness checks |
+| `cargo-udeps` | Detect unused dependencies |
+| `cargo-machete` | Faster unused-dependency check |
+| `cargo-semver-checks` | Public-API semver diff for release flow |
+| `cargo-bloat` | Binary size breakdown |
+| `cargo-cache` | Inspect / clean the cargo caches |
+| `cargo-sweep` | Reap stale target-dir artifacts (target-dir housekeeping, item 4) |
+| `cargo-deb` | Build Debian packages for ragent releases |
+| `cargo-rpm` | Build RPM packages for ragent releases |
+| `cargo-release` | Release/version flow automation |
+| `cargo-set-version` | Bump workspace versions in lockstep |
+| `cargo-install-update` | Keep installed plugins up to date |
+
+One-shot install:
+
+```bash
+for p in llvm-cov nextest audit deny outdated udeps machete semver-checks \
+         bloat cache sweep deb rpm release set-version install-update; do
+  cargo install "cargo-$p" --locked
+done
+```
 
 ### Already good -- do not change
 
@@ -29,24 +62,19 @@ Scope: dev/debug rebuild times for the ragent workspace (963 crates in `Cargo.lo
 
 ## Recommendations (in priority order)
 
-### 1. Pin the nightly and stop using `RUSTUP_TOOLCHAIN=nightly`
+### 1. Pin the toolchain and stop using `RUSTUP_TOOLCHAIN` (DONE)
 
 Every nightly update changes the compiler hash, which invalidates the **entire
 sccache cache** and forces a full rebuild of all 963 dependency crates. With
 nightly updating daily, that is potentially a full rebuild storm every day.
 
-- Create `rust-toolchain.toml` in the project root:
-
-  ```toml
-  [toolchain]
-  channel = "nightly-2026-09-04"   # bump deliberately, e.g. weekly
-  ```
-- **Important**: `RUSTUP_TOOLCHAIN` (currently set in the shell environment,
-  not found in `.bashrc`/`.profile`/`/etc/environment` -- worth locating and
-  removing) **overrides** `rust-toolchain.toml`. The pin only takes effect
-  once the env var is gone.
-- Bonus: `rust-toolchain.toml` makes the build reproducible for CI and other
-  machines, and documents *why* nightly is needed (see item 6).
+- `rust-toolchain.toml` exists in the project root and now pins
+  `channel = "stable"` (previously a pinned nightly). This makes the build
+  reproducible for CI and other machines.
+- **Important**: `RUSTUP_TOOLCHAIN` (if still exported in the shell
+  environment) **overrides** `rust-toolchain.toml`. Remove the env var for the
+  pin to take effect.
+- Note: 18 workspace crates became 16 after the `ragent-prompt_opt` removal.
 
 ### 2. Move `[profile.dev]` from `~/.cargo/config.toml` into the workspace `Cargo.toml`
 
@@ -120,19 +148,21 @@ lever that shrinks the dependency floor.
 
 ### 6. Decide deliberately: nightly vs stable
 
-Nightly is currently needed only for `-Z threads=8` (parallel rustc frontend).
+Nightly was previously needed only for `-Z threads=8` (parallel rustc frontend).
 Costs: daily cache invalidation (item 1), occasional nightly breakage,
 extra memory from the parallel frontend. Gains: typically 5-15% on large
 single crates; modest on a build dominated by many small crates.
 
-- **Option A (current)**: stay on pinned nightly, keep `-Z threads=8`.
-- **Option B**: move to stable, drop `-Z threads=8`, keep mold + sccache.
-  The sccache cache then stays valid across stable point releases, and
-  full rebuilds after toolchain updates become rare.
-
-Measure before choosing: `time cargo build` on a clean target with each setup.
-If the nightly win is under ~10% on your typical workload, Option B is the
-lower-maintenance choice.
+- **Resolution (2026-09-12)**: the workspace moved to **stable** via
+  `rust-toolchain.toml` (`channel = "stable"`). `-Z threads=8` was removed
+  from `~/.cargo/config.toml` (nightly-only). The sccache cache now stays
+  valid across stable point releases, and full rebuilds after toolchain
+  updates become rare.
+- Keep this section as the record of the decision. If a future feature
+  requires nightly, pin `channel = "nightly-YYYY-MM-DD"` in
+  `rust-toolchain.toml` and re-add `-Z threads=8` to `~/.cargo/config.toml`.
+  Measure before re-switching: `time cargo build` on a clean target with each
+  setup; only nightly-worthy if the win exceeds ~10%.
 
 ### 7. Release profile (context only)
 
@@ -153,10 +183,9 @@ release profile.
 
 ### 8. Minor: memory pressure
 
-Swap is 6.4G/8G used with 34G in page cache -- mostly harmless, but
-`-Z threads=8` multiplies peak rustc memory. If you see OOM-ish stalls during
-big dependency builds, cap jobs with `CARGO_BUILD_JOBS=6` rather than
-swapping.
+Swap is 6.4G/8G used with 34G in page cache -- mostly harmless. If you see
+OOM-ish stalls during big dependency builds, cap jobs with
+`CARGO_BUILD_JOBS=6` rather than swapping.
 
 ## Verification performed
 
@@ -164,16 +193,22 @@ swapping.
   this workspace (verbose build probe).
 - `[profile.dev]` in a workspace-root manifest confirmed to apply
   (`debuginfo=line-tables-only`) with no cargo warnings.
-- Stable toolchain confirmed to reject `-Z threads` (nightly-only) -- stable
-  builds need that flag removed if Option B is taken.
+- Stable toolchain confirmed to reject `-Z threads` (nightly-only) -- flag
+  removed from `~/.cargo/config.toml` when the stable move landed.
 - sccache stats read via `sccache --show-stats`; cache dir measured at 11 GB.
 - `target/` measured at 482 GB, incremental cache at 70 GB.
+- Stable move verified: `rust-toolchain.toml` pins `channel = "stable"`,
+  `rustup component list --installed` shows `llvm-tools` (needed by
+  `cargo-llvm-cov`), and all required cargo plugins are present in
+  `~/.cargo/bin` (see table above).
 
 ## Suggested order of operations
 
 1. Locate and remove `RUSTUP_TOOLCHAIN=nightly` from wherever it is exported.
-2. Add `rust-toolchain.toml` (pinned nightly or `stable` per item 6).
+2. Add `rust-toolchain.toml` with `channel = "stable"` (done 2026-09-12).
 3. Add `[profile.dev] debug = "line-tables-only"` to the root `Cargo.toml`.
 4. `export SCCACHE_CACHE_SIZE=50G`.
-5. `cargo clean`, then one full build to repopulate sccache, and measure with
+5. Install the required cargo plugins (table above) and `rustup component add
+   llvm-tools-preview`.
+6. `cargo clean`, then one full build to repopulate sccache, and measure with
    `cargo build --timings` from there.

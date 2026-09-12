@@ -57,6 +57,9 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
         skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(

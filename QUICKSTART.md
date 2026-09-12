@@ -1298,8 +1298,7 @@ Type `/` in the input to open an autocomplete menu:
 | `/provider_reset` | Reset provider credentials |
 | `/quit` | Exit ragent |
 | `/system <prompt>` | Override system prompt |
-| `/opt help` | Show prompt optimization method table |
-| `/opt <method> <prompt>` | Optimize prompt with named method |
+| `/prompt help\|primary [agent]\|subagent [agent]\|list\|<agent>` | Inspect the assembled agent system prompt (read-only, no LLM call) |
 | `/bench list` | List available benchmark suites and profiles |
 | `/bench init <suite-or-all-or-full>` | Create benchmark data roots in sample mode or full-download mode |
 | `/bench run <suite-or-profile-or-all>` | Start a background benchmark run and write workbook output |
@@ -1673,6 +1672,18 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.96
+
+- **`/prompt` system-prompt inspector** — a read-only slash command renders
+  exactly what the LLM receives as its system prompt: `/prompt primary
+  [agent]`, `/prompt subagent [agent]`, `/prompt list`, and
+  `/prompt <agent-name>`. No LLM call, no writes.
+- **Tool-repeat guard (FR-044)** — five consecutive identical tool calls
+  pass through; the sixth raises a `tool:repeat` confirmation in interactive
+  runs and is auto-denied in subagent/`--yes`/YOLO runs.
+- **Redundant slash commands removed** — `/opt`, `/tasks`, and `/theme` are
+  gone; the workspace is back to 16 crates.
 
 ## Version 1.0.95
 

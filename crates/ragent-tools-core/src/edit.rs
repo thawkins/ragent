@@ -29,7 +29,10 @@
 //! 1. **Exact** — `old_string` must match exactly once, byte-for-byte.
 //! 2. **Flexible** — when exact matching fails with not-found, every run of
 //!    whitespace in the needle is matched against any non-empty run of
-//!    whitespace in the file. A unique match wins.
+//!    whitespace in the file. A unique match wins. Runs may only fold across
+//!    a line boundary when both the needle run and the matched file run
+//!    contain a newline (FR-045), so the flexible lane can never join or
+//!    split lines.
 //! 3. **Indent-normalised** — when both lanes above fail, per-line comparison
 //!    with leading whitespace stripped; the replacement re-applies the file's
 //!    own indentation.
@@ -103,27 +106,50 @@ impl Tool for EditTool {
     }
 
     /// Returns a human-readable description of what the tool does.
+    ///
+    /// Workflow and failure-recovery rules come FIRST: the primary-agent tool
+    /// reference truncates descriptions (~120 bytes, FR-005), so the most
+    /// model-visible text must carry the read-first / uniqueness / stale-retry
+    /// guidance and the follow-the-hint recovery advice, not parameter
+    /// boilerplate.
     fn description(&self) -> &'static str {
-        "Replace exactly one occurrence of `old_string` with `new_string` in a \
-         single file. Required parameters: `file_path` (string), `old_string` \
-         (string), and `new_string` (string). By default `old_string` must \
-         match exactly once, byte-for-byte (indentation, whitespace, and line \
-         endings must match precisely). If exact matching fails, a fallback \
+        "Edit a file by replacing exactly one occurrence of `old_string` with \
+         `new_string`. WORKFLOW: read the target section before editing (use \
+         `start_line`/`num_lines` on large files) and copy `old_string` \
+         verbatim from what you read, including exact indentation, whitespace, \
+         and line endings; include 3-5 lines of context around the change point \
+         so the match is unique, and keep `old_string` under 20 lines where \
+         possible. After any successful edit (or any other tool write to the \
+         file), your in-context copy is stale: re-read before composing the \
+         next `old_string`. On failure, NOTHING is written and the error tells \
+         you what to do - follow it: not-found errors include a numbered \
+         near-miss snippet (\"almost matches a block starting at line N - \
+         rebuild old_string from the snippet\"), so rebuild the needle from \
+         that snippet instead of guessing; multiple-match errors list numbered \
+         candidate blocks, so extend old_string with unique context from the \
+         one you want. Retry a failing needle at most twice, then re-read the \
+         file fresh and rebuild, or switch to `write`/`patch`. Matching is \
+         byte-for-byte exact by default (indentation, whitespace, and line \
+         endings must match precisely); if exact matching fails, a fallback \
          cascade retries with whitespace-flexible and indent-normalised \
-         matching before erroring. Optional `collapse_whitespace` \
-         (boolean, default false) relaxes matching: backslash escapes \
-         (\\t, \\n, \\r, \\\\) in old_string are decoded and every run of \
-         whitespace matches a non-empty run of whitespace in the file, so \
-         collapsed indentation or alignment whitespace does not cause spurious \
-         failures. Include 3–5 lines of context around \
-         the change point so the match is unique; keep `old_string` under 20 \
-         lines where possible. If your previous edit on this file succeeded, \
-         treat your in-context copy as stale and re-read before composing the \
-         next `old_string`. Use an empty `old_string` on \
-         a non-existent file to create it; use an empty `new_string` to delete \
-         the matched text. Optional: `dry_run` (boolean) previews the change \
-         without writing. Legacy aliases `path`/`old_str`/`new_str` are accepted \
-         but deprecated."
+         matching before erroring - a whitespace run may only fold across a \
+         line boundary when both the needle run and the matched file run \
+         contain a newline, so the flexible lane can never join or split \
+         lines, and needles that would restructure lines are rejected (use \
+         `patch` or `apply_patch` for line-structure changes). Optional \
+         `collapse_whitespace` (boolean, default false) relaxes matching: \
+         backslash escapes (\\t, \\n, \\r, \\\\) in old_string are decoded and \
+         every run of whitespace matches a non-empty run of whitespace in the \
+         file (same line-boundary rule), so collapsed indentation or alignment \
+         whitespace does not cause spurious failures. The file's line endings \
+         are matched and preserved (a CRLF span stays CRLF after replacement). \
+         Required parameters: `file_path` (string), `old_string` (string), and \
+         `new_string` (string). Use an empty `old_string` on a non-existent \
+         file to create it (prefer `create`/`write` for new files); use an \
+         empty `new_string` to delete the matched text. Optional: `dry_run` \
+         (boolean) resolves the match and previews the result without writing \
+         - use it when the needle is long or the match is uncertain. Legacy \
+         aliases `path`/`old_str`/`new_str` are accepted but deprecated."
     }
 
     fn parameters_schema(&self) -> Value {

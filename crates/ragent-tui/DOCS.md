@@ -18,7 +18,6 @@ markdown rendering, tool-call display, permission dialogs, and status bar.
 - ragent-tools-vcs
 - ragent-server
 - ragent-telemetry
-- ragent-prompt_opt
 - ragent-specs
 - ragent-research
 - ragent-llm

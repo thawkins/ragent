@@ -15,8 +15,6 @@ use ragent_types::{ThinkingConfig, ThinkingLevel};
 
 use ragent_llm::providers::thinking::full_reasoning_levels;
 
-// Prompt optimization templates
-
 // State types from app/state.rs
 use crate::app::state::{
     App, ConfiguredProvider, FileMenuEntry, FileMenuState, LogLevel, ModelPickerEntry,
@@ -151,7 +149,15 @@ impl App {
 
     /// Return pre-rendered research text (code block or progress log) if the
     /// input should bypass the markdown pipeline, otherwise `None`.
+    ///
+    /// `/prompt` reports are excluded: they embed whole project documents
+    /// (AGENTS.md, README, git status) containing many bare ``` fences, and
+    /// the research extractor would truncate the report at the first fence
+    /// close instead of rendering the full markdown document.
     fn bypass_research_text(text: &str) -> Option<String> {
+        if text.starts_with("From: /prompt") {
+            return None;
+        }
         if let Some(research) = try_extract_research_code_block(text) {
             return Some(research);
         }

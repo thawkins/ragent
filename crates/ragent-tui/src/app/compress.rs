@@ -29,36 +29,6 @@ use crate::app::state::{App, LogLevel};
 use crate::app::session_ops::recover_poisoned;
 
 impl App {
-    /// Poll the pending prompt-optimization result and, if ready, push it
-    /// onto the input buffer (or surface an error in the status line).
-    pub fn poll_pending_opt(&mut self) {
-        let outcome = {
-            let mut guard = recover_poisoned(self.opt_result.lock(), "opt_result");
-            guard.take()
-        };
-        if let Some(outcome) = outcome {
-            match outcome {
-                Ok(text) => {
-                    let lines = text.lines().count();
-                    self.append_assistant_text(&text);
-                    self.status = "opt: done".to_string();
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("Finished /opt — {} lines output", lines),
-                    );
-                    // Arm the status auto-expiry timer so "opt: done" transitions
-                    // to "ready" after the grace period.
-                    self.arm_status_expiry();
-                }
-                Err(msg) => {
-                    self.status = format!("[warn] opt failed: {}", msg);
-                    self.push_log_no_agent(LogLevel::Warn, format!("opt error: {}", msg));
-                }
-            }
-            self.needs_redraw = true;
-        }
-    }
-
     /// Poll the pending compaction result and, if ready, apply the compacted
     /// history to the in-memory session (or surface the failure), then dispatch
     /// any user message queued behind an auto-compaction-before-send.

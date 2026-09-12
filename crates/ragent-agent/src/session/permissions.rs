@@ -12,6 +12,7 @@
 //!   task, `ask_user`), and
 //! - driving the interactive permission prompt via the event bus.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -193,7 +194,7 @@ pub(crate) const INTERACTIVE_TOOLS: &[&str] = &["ask_user"];
 
 /// Return `true` when `tool_name` waits on live user interaction and must
 /// be denied in sub-agent runs ([`INTERACTIVE_TOOLS`]).
-pub(crate) fn is_interactive_tool(tool_name: &str) -> bool {
+pub fn is_interactive_tool(tool_name: &str) -> bool {
     INTERACTIVE_TOOLS.contains(&tool_name)
 }
 
@@ -608,6 +609,192 @@ pub async fn check_permission_with_prompt(
                 },
             )
             .await;
+        }
+    }
+}
+// ---------------------------------------------------------------------------
+// Tool-repeat guard (FR-044)
+// ---------------------------------------------------------------------------
+
+/// Consecutive identical tool calls allowed before the guard intervenes.
+///
+/// Five identical calls pass through untouched; the **sixth** call with the
+/// same `(tool, args)` key prompts the user (primary runs) or is denied with
+/// a corrective observation (subagent / auto-approve runs).
+pub const TOOL_REPEAT_LIMIT: u32 = 5;
+
+/// Per-session tracker for consecutive identical tool calls.
+///
+/// A call whose `(tool_name, hash(args))` key matches the previous recorded
+/// call bumps `repeat_count`; any different call resets the tracker. State is
+/// shared per session id behind a lock on [`SessionProcessor`].
+#[derive(Debug, Default)]
+pub struct RepeatTracker {
+    /// Hash of the last call's `(tool_name, canonical args)` pair.
+    last_key: Option<u64>,
+    /// How many consecutive calls have carried that key.
+    repeat_count: u32,
+}
+
+/// Return the guard key hash for a tool call: a stable hash of the tool name
+/// plus the canonical serialised arguments. Serialisation (rather than the
+/// raw `args_json` text) is hashed so provider-side key reordering or
+/// whitespace differences do not split one logical repetition in two.
+fn tool_call_key(tool_name: &str, tool_input: &Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let canonical = serde_json::to_string(tool_input).unwrap_or_else(|_| tool_input.to_string());
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    tool_name.hash(&mut hasher);
+    canonical.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Record a tool call against the per-session tracker.
+///
+/// Returns the number of consecutive identical calls ending with this one
+/// (1 for a first/different call).
+fn record_tool_call(tracker: &mut RepeatTracker, key: u64) -> u32 {
+    match tracker.last_key {
+        Some(prev) if prev == key => {
+            tracker.repeat_count = tracker.repeat_count.saturating_add(1);
+        }
+        _ => {
+            tracker.last_key = Some(key);
+            tracker.repeat_count = 1;
+        }
+    }
+    tracker.repeat_count
+}
+
+/// Guard against an agent loop stuck replaying the same tool call with the
+/// same arguments.
+///
+/// Every call is recorded on the session tracker. Once the same
+/// `(tool, args)` key is seen more than [`TOOL_REPEAT_LIMIT`] times
+/// **consecutively**:
+///
+/// - subagent / auto-approve (`--yes`) / YOLO runs **fail closed**: the call
+///   is denied with a corrective observation instead of prompting (an
+///   unattended prompt would stall the run — the v1.0.91 lesson);
+/// - interactive primary runs raise a `PermissionRequested` prompt and wait
+///   for the user's `PermissionReplied` up to `timeout_secs`; timeout counts
+///   as denial (FR-015 semantics).
+///
+/// A denial lets the model see the reason and change approach; an allowance
+/// resets the consecutive counter so the next burst can prompt again.
+#[allow(clippy::implicit_hasher)]
+pub async fn check_tool_repeat_guard(
+    trackers: &Arc<parking_lot::Mutex<HashMap<String, RepeatTracker>>>,
+    event_bus: &Arc<EventBus>,
+    session_id: &str,
+    tool_name: &str,
+    tool_input: &Value,
+    is_subagent: bool,
+    auto_approve: bool,
+    timeout_secs: u64,
+) -> Option<String> {
+    let key = tool_call_key(tool_name, tool_input);
+    let count = {
+        let mut trackers = trackers.lock();
+        let tracker = trackers.entry(session_id.to_string()).or_default();
+        record_tool_call(tracker, key)
+    };
+    if count <= TOOL_REPEAT_LIMIT {
+        return None;
+    }
+
+    let reason = format!(
+        "tool '{tool_name}' has been called with identical arguments \
+         {count} times in a row"
+    );
+
+    // Unattended runs must not wait on a user: deny with a corrective
+    // observation the model can act on (fail closed).
+    if is_subagent || auto_approve || ragent_config::yolo::is_enabled() {
+        tracing::info!(
+            session_id = %session_id,
+            tool = %tool_name,
+            repeats = count,
+            "tool-repeat guard denied a repeated identical call in an unattended run"
+        );
+        return Some(format!(
+            "{reason} - repeated calls were auto-denied to break a \
+             possible loop; change the approach or arguments"
+        ));
+    }
+
+    // Interactive primary run: ask the user whether to continue.
+    let request_id = Uuid::new_v4().to_string();
+    let mut rx = event_bus.subscribe();
+
+    event_bus.publish(Event::PermissionRequested {
+        session_id: session_id.to_string(),
+        request_id: request_id.clone(),
+        permission: "tool:repeat".to_string(),
+        description: format!("{tool_name}: {reason}. Continue?"),
+        options: vec![],
+    });
+
+    let timeout = tokio::time::Duration::from_secs(timeout_secs);
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    loop {
+        let recv_timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(recv_timeout, rx.recv()).await {
+            Ok(Ok(Event::PermissionReplied {
+                request_id: rid,
+                allowed,
+                ..
+            })) if rid == request_id => {
+                if allowed {
+                    // Reset so a further run of identical calls can prompt
+                    // again rather than deny forever.
+                    let mut trackers = trackers.lock();
+                    if let Some(tracker) = trackers.get_mut(session_id) {
+                        tracker.repeat_count = 0;
+                    }
+                    tracing::info!(
+                        session_id = %session_id,
+                        tool = %tool_name,
+                        "tool-repeat guard: user allowed the repeated call"
+                    );
+                    return None;
+                }
+                tracing::info!(
+                    session_id = %session_id,
+                    tool = %tool_name,
+                    "tool-repeat guard: user declined the repeated call"
+                );
+                return Some(format!(
+                    "{reason} - user declined to continue with this \
+                     repeated call; change the approach or arguments"
+                ));
+            }
+            Ok(Err(RecvError::Lagged(_))) => {
+                // Idle-CPU fix: yield briefly so a lagged subscriber resyncs
+                // (same pattern as `prompt_for_permission`).
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            Ok(Err(_)) => {
+                return Some(format!(
+                    "{reason} - event bus closed while waiting for the \
+                     user; the repeated call was not executed"
+                ));
+            }
+            Err(_) => {
+                // Timeout counts as denial (FR-015: the safe default).
+                tracing::info!(
+                    session_id = %session_id,
+                    tool = %tool_name,
+                    "tool-repeat guard prompt timed out; treating as denial"
+                );
+                return Some(format!(
+                    "{reason} - no user reply arrived in time; the \
+                     repeated call was not executed"
+                ));
+            }
+            _ => continue,
         }
     }
 }

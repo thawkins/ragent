@@ -79,6 +79,12 @@ Switches default `off` for `github`, `gitlab`, `teams`, `agents`, `plan`,
 `old_string` must match exactly once. Use `multi_edit` for changes across
 multiple files."
 
+**Fallback matching:** when byte-for-byte matching fails, a fallback cascade
+retries with whitespace-flexible and indent-normalised matching. A whitespace
+run may only fold across a line boundary when both the needle run and the
+matched file run contain a newline, so the flexible lane can never join or
+split lines.
+
 **Example:**
 ```text
 edit file_path="src/main.rs" old_string="fn main() {" new_string="fn main() -> Result<()> {"

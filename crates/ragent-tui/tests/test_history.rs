@@ -250,7 +250,7 @@ fn test_history_round_trip() {
     app.set_history_file(file);
     app.input_history = vec![
         "first command".into(),
-        "/opt cot".into(),
+        "/bench list".into(),
         "multi word input".into(),
     ];
 
@@ -262,7 +262,7 @@ fn test_history_round_trip() {
 
     assert_eq!(
         app.input_history,
-        vec!["first command", "/opt cot", "multi word input"]
+        vec!["first command", "/bench list", "multi word input"]
     );
 }
 

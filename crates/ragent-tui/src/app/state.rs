@@ -833,14 +833,6 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "List all registered skills and their descriptions (/skills help)",
     },
     SlashCommandDef {
-        trigger: "opt",
-        description: "Prompt optimization helpers: /opt help or /opt <method> <prompt>",
-    },
-    SlashCommandDef {
-        trigger: "tasks",
-        description: "List task items for the current session (alias: /task list)",
-    },
-    SlashCommandDef {
         trigger: "mcp",
         description: "MCP servers: /mcp [status] | /mcp discover | /mcp connect <id> | /mcp disconnect <id> | /mcp help",
     },
@@ -937,10 +929,6 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Manage codebase index: /codeindex on|off|show|lang|reindex|rebuild|graph <build|export|lang>|explain <symbol>|path <A> <B>|communities|godnodes|help",
     },
     SlashCommandDef {
-        trigger: "theme",
-        description: "Switch theme: /theme default|high-contrast",
-    },
-    SlashCommandDef {
         trigger: "status",
         description: "Show status message history: /status [clear]",
     },
@@ -999,6 +987,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "toolchain",
         description: "Language toolchain report: /toolchain list [lang] [--json] | /toolchain help",
+    },
+    SlashCommandDef {
+        trigger: "prompt",
+        description: "Agent system-prompt inspector: /prompt help|primary [agent]|subagent [agent]|list|<agent>",
     },
     SlashCommandDef {
         trigger: "blueprints",
@@ -1872,8 +1864,6 @@ pub struct App {
     pub bench_last_finished_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Mock benchmark outputs used by tests to avoid live provider calls.
     pub bench_mock_outputs: Option<Vec<String>>,
-    /// Pending result from an async `/opt` LLM call.
-    pub opt_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
     /// Shared progress lines from the foreground `/new` scaffold worker
     /// (T-013/FR-014). The worker appends one line per scaffold step while
     /// the UI thread drains them into the in-place-updated progress message;

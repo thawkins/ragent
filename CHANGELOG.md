@@ -1,5 +1,92 @@
 # Changelog
 
+## Version: 1.0.96
+
+- **Edit-tool line-structure guard (FR-045)** - the `edit`/`multi_edit`
+  whitespace-flexible fallback lane could previously fold a needle's
+  same-line whitespace run against the file's newline (or vice versa),
+  splicing `new_string` with a joined or split line and corrupting the
+  file (observed as "the edit tool collapsed lines" on
+  `crates/ragent-server/Cargo.toml`). The flexible matcher now requires a
+  needle run and its matched content run to agree on newline membership,
+  so line structure can never change; same-line indent/alignment rescue
+  and blank-line collapse still work. Logged the corruption chain from
+  the edit-log `match_lane=flexible` entries as evidence; new regression
+  tests in `test_multiedit_helpers.rs` and an updated
+  `test_edit_smoke.rs` scenario that previously codified the corrupting
+  join.
+- **`/prompt` agent system-prompt inspector** - new read-only TUI slash
+  command (spec `specs/prompts/`, 15 FRs) that re-runs the canonical
+  system-prompt assembler for an agent and renders what the LLM actually
+  receives: `/prompt primary [agent]` (primary-mode report + compact tool
+  reference), `/prompt subagent [agent]` (Subagent mode forced, interactive
+  tools excluded from the effective surface), `/prompt list` (agent roster
+  with mode/source badges), and `/prompt <agent-name>` (case-insensitive
+  alias). No LLM call, no writes, no session mutation; 100k-char report cap
+  (FR-013); tool-free agents render `(no tools)`. Renderers live in the new
+  `crates/ragent-tui/src/app/prompt.rs`; dispatch glue in `slash.rs`
+  (`handle_prompt_command`). Five test files: `test_prompt_readonly.rs`,
+  `test_prompt_size_cap.rs`, `test_prompt_subagent_render.rs`,
+  `test_prompt_tool_free.rs`, `test_prompt_units.rs`. `/prompt` reports
+  bypass the research code-block extractor (embedded AGENTS.md/README
+  documents contain bare ``` fences). How-to: `docs/howtos/slashcommands/prompt.md`.
+- **`/theme` slash command removed** - the command was redundant: it was
+  registered in `SLASH_COMMANDS` with autocomplete suggestions
+  (`toggle|light|dark`) but had no dispatch arm in
+  `execute_slash_command_inner`, and its advertised modes did not even match
+  `ThemeMode` (`default|high-contrast`). Removed the registry entry, the
+  autocomplete suggestions, the usage hint, the slashcommands doc
+  (`docs/howtos/slashcommands/theme.md`), its INDEX.md row, and the two SPEC.md
+  UI-preferences table references. The `ThemeMode` enum and `theme_mode` field
+  remain (unused by any command) for future use.
+
+### /tasks slash command removed
+
+- Dropped the redundant `/tasks` TUI slash command (session task list, alias of
+  `/task list`): registry entry removed from `SLASH_COMMANDS`, the dispatcher
+  arm deleted, `test_slash_tasks_help` removed. `/task` remains the single
+  surface (bare form toggles the TASKS panel, `/task list` renders the task
+  table). Docs updated: `tasks.md` howto and its INDEX.md row deleted
+  (pre-existing gap), `/tasks` cross-references dropped from `task.md`,
+  `log.md`, and `cron.md`.
+
+### Tool-repeat guard (FR-044)
+
+- New protection against agent loops stuck replaying the same tool call: after
+  five consecutive identical calls (same tool + same argument hash), the
+  sixth call raises a `tool:repeat` permission prompt in interactive primary
+  runs ("Continue?"), and is auto-denied with a corrective observation in
+  unattended runs (subagent, `--yes` auto-approve, YOLO) so no run can hang
+  on a prompt nobody can answer. Timeout counts as denial (FR-015 semantics).
+- `check_tool_repeat_guard` lives in `ragent-agent/src/session/permissions.rs`
+  alongside `prompt_for_permission`; it keys on the canonical serialised
+  `tool_input` (not the raw `args_json` text) so provider-side key reordering
+  or whitespace differences count as one logical repetition. A different-args
+  call resets the consecutive counter; a user "allow" also resets it.
+- Wired into the dispatch task in `session/processor.rs` immediately after the
+  PreToolUse hooks (before the resource permit), covering permission-exempt
+  and hardwired-allowed tools too; denials funnel through `denied_tool_call`
+  so the TUI spinner always closes out. The tracker state sits on a new
+  `SessionProcessor.tool_repeat_guard` field.
+- Seven integration tests in `crates/ragent-agent/tests/test_tool_repeat_guard.rs`
+  cover the five-call pass, the sixth-call prompt + allow/deny/timeout paths,
+  the counter reset, and the subagent / auto-approve fail-closed paths.
+
+### /opt prompt optimization feature removed
+
+- Deleted the `ragent-prompt_opt` crate (12-framework prompt optimization
+  templates, `Completer` trait, `OptMethod` enum, `optimize()`), the `/opt`
+  TUI slash command (`/opt help`, `/opt <method> <prompt>`, the async
+  `opt_result` pipeline and `poll_pending_opt` drain), and the `POST /opt`
+  HTTP endpoint (`prompt_opt_handler` + `ServerCompleter`). The `/swarm`
+  decomposition call keeps its one-shot LLM helper, now a plain
+  `RagentCompleter::complete` method in `ragent-tui` (no longer tied to the
+  removed `Completer` trait).
+- `ragent-tui` and `ragent-server` no longer depend on `ragent-prompt_opt`;
+  the workspace is now 16 crates. `test_opt_result.rs` and the `/opt` slash-command test
+  block were removed; `/opt` rows dropped from README/SPEC/QUICKSTART and
+  the `/webapi` endpoint table.
+
 ## Version: 1.0.95
 
 ### /toolchain list table switched to fixed 10/10/10/50 column widths
