@@ -384,7 +384,6 @@ impl App {
             bench_last_workbooks: Vec::new(),
             bench_last_finished_at: None,
             bench_mock_outputs: None,
-
             newproj_progress: Arc::new(std::sync::Mutex::new(Vec::new())),
             newproj_progress_text: None,
             newproj_progress_slug: None,

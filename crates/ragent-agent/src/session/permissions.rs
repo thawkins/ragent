@@ -697,8 +697,13 @@ pub async fn check_tool_repeat_guard(
     let key = tool_call_key(tool_name, tool_input);
     let count = {
         let mut trackers = trackers.lock();
-        let tracker = trackers.entry(session_id.to_string()).or_default();
-        record_tool_call(tracker, key)
+        // Fast path: most calls hit an existing tracker, so skip the
+        // `entry().or_default()` key allocation entirely.
+        if let Some(tracker) = trackers.get_mut(session_id) {
+            record_tool_call(tracker, key)
+        } else {
+            record_tool_call(trackers.entry(session_id.to_string()).or_default(), key)
+        }
     };
     if count <= TOOL_REPEAT_LIMIT {
         return None;
@@ -748,11 +753,11 @@ pub async fn check_tool_repeat_guard(
                 ..
             })) if rid == request_id => {
                 if allowed {
-                    // Reset so a further run of identical calls can prompt
-                    // again rather than deny forever.
+                    // Full reset so a further run of identical calls can
+                    // prompt again rather than deny forever.
                     let mut trackers = trackers.lock();
                     if let Some(tracker) = trackers.get_mut(session_id) {
-                        tracker.repeat_count = 0;
+                        *tracker = RepeatTracker::default();
                     }
                     tracing::info!(
                         session_id = %session_id,

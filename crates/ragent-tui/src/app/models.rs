@@ -155,7 +155,7 @@ impl App {
     /// the research extractor would truncate the report at the first fence
     /// close instead of rendering the full markdown document.
     fn bypass_research_text(text: &str) -> Option<String> {
-        if text.starts_with("From: /prompt") {
+        if text.starts_with(crate::app::prompt::REPORT_PREFIX) {
             return None;
         }
         if let Some(research) = try_extract_research_code_block(text) {

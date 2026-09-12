@@ -1193,8 +1193,12 @@ Usage: `/telemetry help|on|off|setup|counters`",
     /// Read-only throughout (FR-012). Report handlers live with the other
     /// `/prompt` handlers below.
     fn handle_prompt_command(&mut self, args: &str) {
-        let mut words = args.split_whitespace();
-        let sub = words.next().unwrap_or("").to_lowercase();
+        // Sub-report forms rescan `args` after the mode token; passing the
+        // remainder directly avoids materialising a token vec.
+        let rest = args
+            .split_once(char::is_whitespace)
+            .map_or("", |(_, rest)| rest);
+        let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
         match sub.as_str() {
             "" | "help" | "--help" | "-h" => self.handle_prompt_help(),
             "list" => self.handle_prompt_list(),
@@ -1204,7 +1208,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 } else {
                     AgentMode::Primary
                 };
-                self.handle_prompt_report(mode, words.collect::<Vec<_>>().as_slice());
+                self.handle_prompt_report(mode, rest);
             }
             _ => self.handle_prompt_agent(&sub),
         }
@@ -1213,7 +1217,8 @@ Usage: `/telemetry help|on|off|setup|counters`",
     /// Render the `/prompt help` page (FR-003). Also covers a bare `/prompt`.
     fn handle_prompt_help(&mut self) {
         self.append_assistant_text(&format!(
-            "From: /prompt help\n\n{}",
+            "{} help\n\n{}",
+            crate::app::prompt::REPORT_PREFIX,
             crate::app::prompt::render_help()
         ));
         self.status = "prompt: help".to_string();
@@ -1222,11 +1227,13 @@ Usage: `/telemetry help|on|off|setup|counters`",
     /// Render the `/prompt list` roster (FR-007): non-hidden built-ins plus
     /// custom agents with mode + source badges. Read-only (FR-012).
     fn handle_prompt_list(&mut self) {
-        let customs = self.custom_agent_defs.clone();
-        let entries =
-            crate::app::prompt::roster_entries(ragent_agent::agent::builtin_agents(), &customs);
+        let entries = crate::app::prompt::roster_entries(
+            ragent_agent::agent::builtin_agents(),
+            &self.custom_agent_defs,
+        );
         self.append_assistant_text(&format!(
-            "From: /prompt list\n\n{}",
+            "{} list\n\n{}",
+            crate::app::prompt::REPORT_PREFIX,
             crate::app::prompt::render_roster(&entries)
         ));
         self.status = format!("prompt: list ({} agents)", entries.len());
@@ -1234,11 +1241,11 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
     /// Render the `/prompt primary|subagent [agent]` report (FR-004/FR-005).
     ///
-    /// `words` holds the argument words after the mode token; the first bare
+    /// `args` holds the argument text after the mode token; the first bare
     /// word (if any) is the FR-006 agent-name filter, resolved
     /// case-insensitively. A miss renders the FR-011 warning and no report.
-    fn handle_prompt_report(&mut self, mode: AgentMode, words: &[&str]) {
-        let name_arg = words.iter().find(|w| !w.starts_with("--")).copied();
+    fn handle_prompt_report(&mut self, mode: AgentMode, args: &str) {
+        let name_arg = args.split_whitespace().find(|w| !w.starts_with("--"));
         self.handle_prompt_render(mode, name_arg);
     }
 
@@ -1254,6 +1261,9 @@ Usage: `/telemetry help|on|off|setup|counters`",
             crate::app::prompt::AgentResolution::Found(_) => {
                 self.handle_prompt_render(AgentMode::Primary, Some(name));
             }
+            // FR-010 (not FR-011): a bare token that matched no subcommand or
+            // agent name gets the full usage correction, listing subcommands
+            // as well as agents.
             crate::app::prompt::AgentResolution::Miss {
                 requested,
                 available,
@@ -1287,10 +1297,11 @@ Usage: `/telemetry help|on|off|setup|counters`",
         let agent = match name_arg {
             Some(name) => match crate::app::prompt::resolve_agent(name, &builtins, &customs) {
                 crate::app::prompt::AgentResolution::Found(agent) => agent,
-                crate::app::prompt::AgentResolution::Miss { .. } => {
-                    if let Some(text) = crate::app::prompt::render_miss_warning(
-                        &crate::app::prompt::resolve_agent(name, &builtins, &customs),
-                    ) {
+                // FR-011 (not FR-010): the agent name was an explicit
+                // `primary|subagent` argument, so the agents-only miss
+                // warning is rendered instead of the usage correction.
+                miss @ crate::app::prompt::AgentResolution::Miss { .. } => {
+                    if let Some(text) = crate::app::prompt::render_miss_warning(&miss) {
                         self.append_assistant_text(&text);
                     }
                     self.status = format!("prompt: unknown agent `{name}`");
@@ -1335,15 +1346,22 @@ Usage: `/telemetry help|on|off|setup|counters`",
         // section drives it via Handle::block_on. The TUI event loop keeps
         // polling while this work runs.
         let working_dir = crate::app::helpers::current_working_dir();
-        let (git_status, readme, agents_md, file_tree) = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { collect_prompt_context(&working_dir).await })
-        });
-        let config = ragent_config::Config::load().unwrap_or_default();
+        let (config, git_status, readme, agents_md, file_tree) =
+            tokio::task::block_in_place(|| {
+                // The P-2 mtime cache keeps this a no-op disk read in the
+                // common case; the wrapped section also covers SkillRegistry's
+                // directory walk below.
+                let config = self.session_processor.load_config_cached();
+                let (git_status, readme, agents_md, file_tree) = tokio::runtime::Handle::current()
+                    .block_on(async { collect_prompt_context(&working_dir).await });
+                (config, git_status, readme, agents_md, file_tree)
+            });
         let skill_dirs = config.skill_dirs.clone();
         let memory_cfg = config.memory.clone();
         let storage = Arc::clone(self.session_processor.session_manager.storage());
-        let skill_registry = ragent_agent::skill::SkillRegistry::load(&working_dir, &skill_dirs);
+        let skill_registry = tokio::task::block_in_place(|| {
+            ragent_agent::skill::SkillRegistry::load(&working_dir, &skill_dirs)
+        });
         let memory_section = tokio::task::block_in_place(|| {
             build_memory_prompt_section(&working_dir, Some(&storage), Some(&memory_cfg))
         });
@@ -1396,25 +1414,18 @@ Usage: `/telemetry help|on|off|setup|counters`",
             format!("\n{tool_reference}")
         };
         let report = crate::app::prompt::apply_size_cap(&format!(
-            "From: /prompt\n\n{}{body}{tools_section}",
+            "{}\n\n{}{body}{tools_section}",
+            crate::app::prompt::REPORT_PREFIX,
             header.render(),
         ));
         self.append_assistant_text(&report);
         // FR-009: the status line names the tool-free case explicitly instead
         // of reporting a zero count.
+        let mode_label = if subagent_mode { "subagent" } else { "primary" };
         self.status = if tool_free {
-            format!(
-                "prompt: {} ({}, no tools)",
-                agent.name,
-                if subagent_mode { "subagent" } else { "primary" },
-            )
+            format!("prompt: {} ({mode_label}, no tools)", agent.name)
         } else {
-            format!(
-                "prompt: {} ({}, {} tools)",
-                agent.name,
-                if subagent_mode { "subagent" } else { "primary" },
-                tool_count
-            )
+            format!("prompt: {} ({mode_label}, {tool_count} tools)", agent.name)
         };
     }
 

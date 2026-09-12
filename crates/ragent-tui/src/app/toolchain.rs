@@ -494,56 +494,48 @@ impl VersionResult {
     }
 }
 
-/// First non-empty, trimmed line of a byte stream, if any.
-fn first_non_empty_line(bytes: &[u8]) -> Option<String> {
-    String::from_utf8_lossy(bytes)
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-}
-
-/// Capture the version of an installed runtime command (FR-008).
+/// Run one bounded version probe and return the raw spawn/timeout outcome.
 ///
-/// Executes `<command> <version-flag>` — the per-tool flag from
-/// [`version_flag_for`], default `--version` — and returns the first
-/// non-empty line from stdout or stderr, trimmed. The probe is bounded by
-/// [`VERSION_PROBE_TIMEOUT`]; an overrunning child is killed and reported as
-/// [`VersionResult::Timeout`] (FR-012). Spawn failures and textless exits
-/// yield [`VersionResult::Unknown`]; no failure propagates a panic or blocks
-/// the caller.
-#[must_use]
-pub fn probe_version(command: &str) -> VersionResult {
-    probe_version_args(command, &[version_flag_for(command)])
-}
-
-/// Capture the version of an installed runtime command with explicit
-/// arguments.
+/// Shared engine behind [`probe_version_args`] and
+/// [`probe_version_args_all_lines`]: spawns `program args`, polls with
+/// `try_wait` on a worker thread so a hung child is killed at the deadline
+/// instead of blocking the caller forever (FR-012), and hands the result to
+/// the caller over a channel. The outcome is one of:
 ///
-/// `program` may be a bare command name or the path returned by
-/// [`probe_installed`]; the walk layer (T-011) passes the resolved path so no
-/// second `PATH` lookup is needed. The version flag must be supplied
-/// explicitly here (the name-keyed per-tool overrides of
-/// [`version_flag_for`] do not match full paths, so callers apply
-/// `version_flag_for(command_name)` themselves).
+/// - `Ok(Some(Ok(output)))` — a completed probe carrying the pipes' content;
+/// - `Ok(Some(Err(io)))` — spawn failure reported by the worker;
+/// - `Ok(None)` — the worker's timed-out send (output discarded);
+/// - `Err(RecvTimeoutError)` — the worker never reported within the bounded
+///   receive window.
+///
+/// The receive is bounded by [`VERSION_PROBE_TIMEOUT`] plus a slack margin;
+/// on a receive timeout the worker thread is **detached, not joined** — the
+/// non-timeout path reads the pipes to EOF via `wait_with_output()`, and a
+/// grandchild inheriting them (shell wrappers fork) can block that read
+/// indefinitely. Joining would hang `/toolchain list` past its own bound;
+/// a detached leak of one short-lived thread per timed-out receive is the
+/// safe containment.
 #[must_use]
-pub fn probe_version_args(program: &str, args: &[&str]) -> VersionResult {
+fn run_probe_raw(
+    program: &str,
+    args: &[&str],
+) -> Result<Option<Result<std::process::Output, std::io::Error>>, std::sync::mpsc::RecvTimeoutError>
+{
     let mut cmd = std::process::Command::new(program);
     cmd.args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
+    // A spawn failure never reaches the worker: report it via the same
+    // channel shape so callers keep distinguishing Unknown from Timeout.
     let mut child = match cmd.spawn() {
         Ok(child) => child,
-        Err(_) => return VersionResult::Unknown,
+        Err(err) => return Ok(Some(Err(err))),
     };
 
-    // Poll with try_wait on a worker thread so a hung child is killed at the
-    // deadline instead of blocking the caller forever (FR-012); the caller
-    // receives the (timed_out, output) pair over a channel.
     let (tx, rx) = std::sync::mpsc::channel();
-    let waiter = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + VERSION_PROBE_TIMEOUT;
         let mut timed_out = false;
         loop {
@@ -566,31 +558,58 @@ pub fn probe_version_args(program: &str, args: &[&str]) -> VersionResult {
             // stdout/stderr pipes (shell wrappers fork); reading to EOF could
             // block until those exit. Timeout discards the output, so send
             // without draining the pipes (FR-012 containment).
-            let _ = tx.send((true, None));
+            let _ = tx.send(None);
             return;
         }
         let output = child.wait_with_output();
-        let _ = tx.send((false, Some(output)));
+        let _ = tx.send(Some(output));
     });
 
-    // The worker always terminates within the timeout window (it kills the
-    // child at the deadline), so this receive only guards against scheduler
-    // pathology; a slack margin keeps the bound.
-    let received = rx.recv_timeout(VERSION_PROBE_TIMEOUT + std::time::Duration::from_secs(2));
-    let _ = waiter.join();
+    rx.recv_timeout(VERSION_PROBE_TIMEOUT + std::time::Duration::from_secs(2))
+}
 
-    match received {
-        Ok((true, _)) => VersionResult::Timeout,
-        Ok((false, Some(Ok(output)))) => {
-            let text = first_non_empty_line(&output.stdout)
-                .or_else(|| first_non_empty_line(&output.stderr));
+/// Capture the version of an installed runtime command with explicit
+/// arguments.
+///
+/// `program` may be a bare command name or the path returned by
+/// [`probe_installed`]; the walk layer (T-011) passes the resolved path so no
+/// second `PATH` lookup is needed. The version flag must be supplied
+/// explicitly here (the name-keyed per-tool overrides of
+/// [`version_flag_for`] do not match full paths, so callers apply
+/// `version_flag_for(command_name)` themselves).
+#[must_use]
+pub fn probe_version_args(program: &str, args: &[&str]) -> VersionResult {
+    match run_probe_raw(program, args) {
+        // `None` is the worker's explicit "timed out, output discarded" send.
+        Ok(None) => VersionResult::Timeout,
+        Ok(Some(Ok(output))) => {
+            let text = all_non_empty_lines(&output.stdout)
+                .into_iter()
+                .next()
+                .or_else(|| all_non_empty_lines(&output.stderr).into_iter().next());
             match text {
                 Some(line) => VersionResult::Text(line),
                 None => VersionResult::Unknown,
             }
         }
-        _ => VersionResult::Unknown,
+        Ok(Some(Err(_))) => VersionResult::Unknown,
+        // Receive timeout: the worker never reported; scheduler pathology.
+        Err(_) => VersionResult::Timeout,
     }
+}
+
+/// Capture the version of an installed runtime command (FR-008).
+///
+/// Executes `<command> <version-flag>` — the per-tool flag from
+/// [`version_flag_for`], default `--version` — and returns the first
+/// non-empty line from stdout or stderr, trimmed. The probe is bounded by
+/// [`VERSION_PROBE_TIMEOUT`]; an overrunning child is killed and reported as
+/// [`VersionResult::Timeout`] (FR-012). Spawn failures and textless exits
+/// yield [`VersionResult::Unknown`]; no failure propagates a panic or blocks
+/// the caller.
+#[must_use]
+pub fn probe_version(command: &str) -> VersionResult {
+    probe_version_args(command, &[version_flag_for(command)])
 }
 
 // ---------------------------------------------------------------------------
@@ -651,11 +670,8 @@ fn probe_command(command: &'static str) -> CommandProbe {
             version: None,
         };
     };
-    let version = match probe_command_version(command, path.to_string_lossy().as_ref()) {
-        VersionResult::Text(text) => Some(text),
-        VersionResult::Unknown => Some("unknown".to_string()),
-        VersionResult::Timeout => Some("timeout".to_string()),
-    };
+    let version =
+        probe_command_version(command, path.to_string_lossy().as_ref()).placeholder_or_text();
     CommandProbe {
         command,
         installed: true,
@@ -685,77 +701,23 @@ fn all_non_empty_lines(bytes: &[u8]) -> Vec<String> {
 /// line. Needed for probes such as `dotnet --list-sdks` where every line is
 /// a distinct installed version.
 fn probe_version_args_all_lines(program: &str, args: &[&str]) -> VersionResult {
-    match probe_version_args_raw(program, args) {
-        VersionResult::Text(text) if text.is_empty() => VersionResult::Unknown,
-        other => other,
-    }
-}
-
-/// Raw multi-line variant of [`probe_version_args`]: same spawn/timeout
-/// behaviour, but returns all non-empty lines joined with `, ` (empty text
-/// when the child produced no usable output).
-fn probe_version_args_raw(program: &str, args: &[&str]) -> VersionResult {
-    let mut cmd = std::process::Command::new(program);
-    cmd.args(args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(_) => return VersionResult::Unknown,
-    };
-
-    // Poll with try_wait on a worker thread so a hung child is killed at the
-    // deadline instead of blocking the caller forever (FR-012); the caller
-    // receives the (timed_out, output) pair over a channel.
-    let (tx, rx) = std::sync::mpsc::channel();
-    let waiter = std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + VERSION_PROBE_TIMEOUT;
-        let mut timed_out = false;
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) => {
-                    if std::time::Instant::now() >= deadline {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        timed_out = true;
-                        break;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(_) => break,
-            }
-        }
-        if timed_out {
-            // A killed direct child may leave grandchildren holding the
-            // stdout/stderr pipes (shell wrappers fork); reading to EOF could
-            // block until those exit. Timeout discards the output, so send
-            // without draining the pipes (FR-012 containment).
-            let _ = tx.send((true, None));
-            return;
-        }
-        let output = child.wait_with_output();
-        let _ = tx.send((false, Some(output)));
-    });
-
-    // The worker always terminates within the timeout window (it kills the
-    // child at the deadline), so this receive only guards against scheduler
-    // pathology; a slack margin keeps the bound.
-    let received = rx.recv_timeout(VERSION_PROBE_TIMEOUT + std::time::Duration::from_secs(2));
-    let _ = waiter.join();
-
-    match received {
-        Ok((true, _)) => VersionResult::Timeout,
-        Ok((false, Some(Ok(output)))) => {
+    match run_probe_raw(program, args) {
+        // `None` is the worker's explicit "timed out, output discarded" send.
+        Ok(None) => VersionResult::Timeout,
+        Ok(Some(Ok(output))) => {
             let mut lines = all_non_empty_lines(&output.stdout);
             if lines.is_empty() {
                 lines = all_non_empty_lines(&output.stderr);
             }
-            VersionResult::Text(lines.join(", "))
+            if lines.is_empty() {
+                VersionResult::Unknown
+            } else {
+                VersionResult::Text(lines.join(", "))
+            }
         }
-        _ => VersionResult::Unknown,
+        Ok(Some(Err(_))) => VersionResult::Unknown,
+        // Receive timeout: the worker never reported; scheduler pathology.
+        Err(_) => VersionResult::Timeout,
     }
 }
 
@@ -1037,7 +999,7 @@ pub fn render_markdown_report(rows: &[ReportRow]) -> String {
     grid.push('\n');
     for row_fields in &fields {
         // One border after the LAST line of each (possibly multi-line) row
-        // keeps the grid well-formed and borders = data rows + 3.
+        // keeps the grid well-formed and borders = data rows + 2.
         for line in render_row(row_fields) {
             grid.push_str(&line);
             grid.push('\n');
@@ -1045,10 +1007,6 @@ pub fn render_markdown_report(rows: &[ReportRow]) -> String {
         grid.push_str(&border);
         grid.push('\n');
     }
-    // Duplicated trailing bottom border — mirrors the html2text grid shape
-    // the border-counting tests rely on (borders = data rows + 3).
-    grid.push_str(&border);
-    grid.push('\n');
     let (installed, application) = installed_summary(rows);
     // Fenced-block form: the `From: /` + bare-fence shape triggers the TUI
     // markdown pipeline's code-block bypass, which deposits the block verbatim
@@ -1556,12 +1514,13 @@ mod tests {
             "continuation line blanks the first three columns: {}",
             grid_lines[2]
         );
-        // Borders = data rows + 3 (2 borders above/below header + row borders).
+        // Borders = data rows + 2 (2 borders above/below header + one row
+        // border after each row group).
         let borders = report
             .lines()
             .filter(|l| l.trim_start().starts_with("+-"))
             .count();
-        assert_eq!(borders, 4, "one border per row group plus 3: {report}");
+        assert_eq!(borders, 3, "one border per row group plus 2: {report}");
     }
 
     /// Long unbroken version tokens hard-split across wrap lines so every
@@ -1771,12 +1730,13 @@ mod tests {
             "continuation line carries the wrap remainder: {}",
             grid_lines[2]
         );
-        // Borders = data rows + 3 (2 borders above/below header + row borders).
+        // Borders = data rows + 2 (2 borders above/below header + one row
+        // border after each row group).
         let borders = report
             .lines()
             .filter(|l| l.trim_start().starts_with("+-"))
             .count();
-        assert_eq!(borders, 4, "one border per row group plus 3: {report}");
+        assert_eq!(borders, 3, "one border per row group plus 2: {report}");
     }
 
     /// JSON report contains the FR-015 schema: `languages` array with

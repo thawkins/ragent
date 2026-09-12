@@ -22,6 +22,14 @@ use ragent_agent::llm::ToolDefinition;
 /// Maximum rendered report length before truncation (FR-013).
 pub const PROMPT_REPORT_MAX_CHARS: usize = 100_000;
 
+/// Message-window prefix shared by every `/prompt` report.
+///
+/// `models.rs` bypasses the research code-block extractor for messages with
+/// this prefix (their embedded AGENTS.md/README bodies carry bare ``` fences),
+/// so emitters must build their `From:` lines from this constant — a rename
+/// in one place must not silently desynchronise the two.
+pub const REPORT_PREFIX: &str = "From: /prompt";
+
 /// Render the `/prompt help` page (FR-003), also shown for a bare `/prompt`.
 ///
 /// Lists every subcommand with its arguments and a one-line description so
@@ -114,7 +122,7 @@ pub struct RosterEntry {
 /// available agent (non-hidden built-ins plus customs) with its mode badge
 /// (`primary`/`subagent`/`all`), source badge (`built-in`/`custom`), and a
 /// truncated one-line description. Hidden built-ins are excluded because
-/// FR-006 resolution excludes them too.
+/// FR-006 resolution only accepts their exact-case names.
 pub fn render_roster(entries: &[RosterEntry]) -> String {
     let mut out = String::from("## Agent roster\n\n");
     for e in entries {
@@ -132,8 +140,9 @@ pub fn render_roster(entries: &[RosterEntry]) -> String {
 
 /// Build [`RosterEntry`] rows from the built-in roster plus custom agents.
 ///
-/// Hidden built-ins are excluded (FR-007 / FR-006 consistency: names listed
-/// here are exactly the names FR-006 resolution accepts).
+/// Hidden built-ins are excluded (FR-007): names listed here are the names
+/// FR-006 resolution accepts, with the documented exception that a hidden
+/// built-in still resolves by its exact-case name.
 pub fn roster_entries(
     builtins: &[Arc<AgentInfo>],
     customs: &[ragent_agent::agent::CustomAgentDef],
@@ -175,17 +184,22 @@ fn truncate_one_line(s: &str, max: usize) -> String {
 
 /// Apply the FR-013 output size cap, appending an explicit truncation marker.
 pub fn apply_size_cap(report: &str) -> String {
-    if report.chars().count() <= PROMPT_REPORT_MAX_CHARS {
+    let len = report.chars().count();
+    if len <= PROMPT_REPORT_MAX_CHARS {
         return report.to_string();
     }
     let shown: String = report.chars().take(PROMPT_REPORT_MAX_CHARS).collect();
     format!(
-        "{shown}\n\n... [truncated: showing {} of {} characters - use a lighter agent for the full text]\n",
-        PROMPT_REPORT_MAX_CHARS,
-        report.chars().count()
+        "{shown}\n\n... [truncated: showing {} of {len} characters - use a lighter agent for the full text]\n",
+        PROMPT_REPORT_MAX_CHARS
     )
 }
 /// Result of resolving an agent name for `/prompt` (FR-006 / FR-011).
+///
+/// NOTE: the exact-case arm deliberately precedes the hidden filter — a
+/// hidden built-in resolves by its exact name only (never case-insensitively,
+/// never offered in rosters or warnings). `roster_entries` docs therefore
+/// over-say "exactly": hidden exact-case names are also accepted.
 pub enum AgentResolution {
     /// Agent found.
     Found(Arc<AgentInfo>),
@@ -260,7 +274,8 @@ pub fn render_miss_warning(res: &AgentResolution) -> Option<String> {
         return None;
     };
     let mut out = format!(
-        "From: /prompt\n\n**Unknown agent `{requested}`** — no built-in or custom agent matches that name.\n\nAvailable agents:\n"
+        "{}\n\n**Unknown agent `{requested}`** — no built-in or custom agent matches that name.\n\nAvailable agents:\n",
+        REPORT_PREFIX
     );
     for n in available {
         out.push_str(&format!("- `{n}`\n"));
@@ -274,7 +289,8 @@ pub fn render_miss_warning(res: &AgentResolution) -> Option<String> {
 /// No prompt content is ever included.
 pub fn render_usage_correction(token: &str, available: &[String]) -> String {
     let mut out = format!(
-        "From: /prompt\n\n**Unknown subcommand or agent `{token}`** - not a known subcommand, help alias, or agent name.\n\nValid subcommands:\n"
+        "{}\n\n**Unknown subcommand or agent `{token}`** - not a known subcommand, help alias, or agent name.\n\nValid subcommands:\n",
+        REPORT_PREFIX
     );
     out.push_str("- `/prompt help` - show the help page\n");
     out.push_str("- `/prompt primary [agent]` - primary-mode prompt report\n");

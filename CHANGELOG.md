@@ -1,5 +1,25 @@
 # Changelog
 
+## Version: 1.0.97
+
+- **`/toolchain list` hang fix (FR-012)** - `run_probe_raw` in
+  `crates/ragent-tui/src/app/toolchain.rs` now detaches (never joins) the
+  probe worker thread after a receive timeout; a grandchild process
+  inheriting the pipes (shell wrappers fork) could block
+  `wait_with_output()` indefinitely and hang the command. The shared
+  engine replaces five duplicated probe paths (~60 lines removed);
+  spawn failures return `Ok(Some(Err(err)))` so callers keep
+  distinguishing `Unknown` from `Timeout`; the table renderer no longer
+  emits a doubled bottom border.
+- **`/prompt` and repeat-guard simplification pass** - deduplicated the
+  `/prompt` dispatch arm in `slash.rs` (bound `miss @` arm, one
+  `resolve_agent`), routed TUI config reads through `load_config_cached`
+  + `block_in_place`, shared a `REPORT_PREFIX` const across the report
+  emitters and the `models.rs` report filter, made `apply_size_cap`
+  single-pass, added a `get_mut` fast path to the tool-repeat-guard hot
+  loop in `session/permissions.rs`, and reset the full `RepeatTracker`
+  on approval. Comment/doc corrections across the touched modules.
+
 ## Version: 1.0.96
 
 - **Edit-tool line-structure guard (FR-045)** - the `edit`/`multi_edit`

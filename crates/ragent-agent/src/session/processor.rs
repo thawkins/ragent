@@ -1298,7 +1298,7 @@ impl SessionProcessor {
     ///
     /// Returns the config wrapped in `Arc` so it can be cloned cheaply into
     /// the per-turn [`TurnClient`] and per-tool-call [`ToolContext`]s.
-    pub(crate) fn load_config_cached(&self) -> Arc<ragent_config::Config> {
+    pub fn load_config_cached(&self) -> Arc<ragent_config::Config> {
         use std::time::SystemTime;
         let env_overrides_present = std::env::var_os("RAGENT_CONFIG").is_some()
             || std::env::var_os("RAGENT_CONFIG_CONTENT").is_some();

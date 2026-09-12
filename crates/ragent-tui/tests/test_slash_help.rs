@@ -395,14 +395,14 @@ fn test_toolchain_unknown_subcommand_correction() {
 // ---------------------------------------------------------------------------
 
 fn data_row_count(table: &str) -> usize {
-    // The TUI markdown pipeline renders tables as ASCII grids: one top
-    // border, one header separator, one close border per data row, plus a
-    // duplicated trailing bottom border. Data rows = border lines - 3.
+    // The rendered grid carries one top border, one header separator, and one
+    // close border after each data row's last grid line. Data rows = border
+    // lines - 2.
     let borders = table
         .lines()
         .filter(|line| line.trim_start().starts_with("+-"))
         .count();
-    borders.saturating_sub(3)
+    borders.saturating_sub(2)
 }
 
 #[test]
@@ -576,7 +576,7 @@ fn test_toolchain_list_runs_probes_off_the_event_loop_with_wait_status() {
         .lines()
         .filter(|line| line.trim_start().starts_with("+-"))
         .count()
-        .saturating_sub(3);
+        .saturating_sub(2);
     assert_eq!(data_rows, 50, "all language rows present: {text}");
 }
 
@@ -618,7 +618,7 @@ fn test_toolchain_list_absent_runtimes_do_not_truncate_report() {
         .lines()
         .filter(|line| line.trim_start().starts_with("+-"))
         .count()
-        .saturating_sub(3);
+        .saturating_sub(2);
     assert_eq!(
         data_rows, 50,
         "walk must emit one row per language even with absent runtimes: {text}"
