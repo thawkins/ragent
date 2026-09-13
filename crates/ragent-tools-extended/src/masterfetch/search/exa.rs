@@ -39,7 +39,10 @@
 //! I/O. The HTTP client is injectable via [`ExaEngine::with_client`] for
 //! integration tests with a mock server.
 
-use super::engine::{EngineReport, RawResult, SearchEngine, SearchOptions, dedup_results_by_url};
+use super::engine::{
+    EngineReport, RawResult, SearchEngine, SearchOptions, dedup_results_by_url,
+    strip_disallowed_quotes,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -285,7 +288,7 @@ impl SearchEngine for ExaEngine {
 pub fn build_request_body(query: &str, opts: &SearchOptions) -> serde_json::Value {
     use serde_json::json;
 
-    let truncated = truncate_query(query);
+    let truncated = truncate_query(&strip_disallowed_quotes(query));
     let num_results = opts.per_engine_results.clamp(MIN_COUNT, MAX_COUNT);
 
     let mut body = json!({

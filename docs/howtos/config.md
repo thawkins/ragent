@@ -50,7 +50,7 @@ the project root `README.md` and the **Tutorial** in
    - 7.27 [`telemetry`](#727-telemetry)
    - 7.28 [`agent_perf`](#728-agent_perf)
    - 7.29 [`finance`](#729-finance)
-   - 7.30 [`tavily_api_key` / `langsearch_api_key` / `perplexity_api_key` / `exa_api_key` / `openalex_email`](#730-search-api-keys)
+   - 7.30 [`tavily_api_key` / `langsearch_api_key` / `perplexity_api_key` / `exa_api_key` / `serper_api_key` / `openalex_email`](#730-search-api-keys)
    - 7.31 [`sdd`](#731-sdd)
    - 7.32 [`trigger`](#732-trigger)
    - 7.33 [`piegap`](#733-piegap)
@@ -214,6 +214,7 @@ file path, line, column, the problematic source line, and a caret marker.
 | `TAVILY_API_KEY` | Overrides `tavily_api_key`. |
 | `OPENALEX_EMAIL` | Overrides `openalex_email`. |
 | `EXA_API_KEY` | Overrides `exa_api_key`. |
+| `SERPER_API_KEY` | Overrides `serper_api_key`. |
 | `GITLAB_TOKEN`, `GITLAB_URL`, `GITLAB_USERNAME` | Override `gitlab` fields (highest priority). |
 
 ### Other CLI flags that affect config
@@ -1330,11 +1331,11 @@ config file. Environment variables always take precedence.
 | `langsearch_api_key` | `Option<String>` | `None` | — | LangSearch API key for `mf_search`. Masked in diagnostics. |
 | `perplexity_api_key` | `Option<String>` | `None` | — | Perplexity Sonar API key for `mf_search`. Masked in diagnostics. |
 | `exa_api_key` | `Option<String>` | `None` | `EXA_API_KEY` | Exa Search API key for `mf_search`. Masked in diagnostics. |
+| `serper_api_key` | `Option<String>` | `None` | `SERPER_API_KEY` | Serper (Google Search) API key for `mf_search`. Masked in diagnostics. |
 | `openalex_email` | `Option<String>` | `None` | `OPENALEX_EMAIL` | OpenAlex polite-pool email for `mf_search`. Masked in diagnostics. |
 
 When present, `mf_search` queries the corresponding backend as an additional
-search engine alongside the keyless backends (DuckDuckGo, Brave, OpenAlex,
-Wikipedia).
+search engine alongside the keyless backends (OpenAlex, Wikipedia).
 
 ---
 
@@ -1484,7 +1485,7 @@ Research subsystem configuration.
 As of v1.0.77, `evaluate` can be configured in `ragent.json` and is omitted from
 serialized output when at its default value (`enabled: false`).
 
-As of v1.0.76, the default web-phase timeout is 60 seconds and can be overridden
+As of v1.0.100, the default web-phase timeout is 180 seconds and can be overridden
 per run with `--web-time N` (or `--web-phase-timeout-secs N`); `0` disables the
 deadline. When the deadline elapses, the run continues with the sources gathered
 so far. See [`docs/howtos/research.md`](research.md) for the full research workflow.
@@ -1780,6 +1781,7 @@ need all of these — every section has defaults, so an empty `{}` is valid.
   "langsearch_api_key": null,
   "perplexity_api_key": null,
   "exa_api_key": null,
+  "serper_api_key": null,
   "openalex_email": null,
 
   "sdd": {

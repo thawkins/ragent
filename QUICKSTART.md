@@ -1361,7 +1361,7 @@ Type `/` in the input to open an autocomplete menu:
 
 - **`/research create` execution modes** — `--mode tiered|supervisor|competitive` selects the high-level research strategy. `supervisor` spawns parallel sub-topic researchers; `competitive` compares entities and defaults to `--format comparison-table` (an explicit `--format` still wins).
 - **`/research create` per-phase models** — `--research-model`, `--compression-model`, `--final-report-model`, and `--summarization-model` override the model used for each research phase.
-- **`/research create --brief` and `--clarify`** — supply an explicit mission statement or let the pipeline ask a single clarifying question for ambiguous topics.
+- **`/research create --brief` and `--clarify`** — supply an explicit mission statement or opt in to a single clarifying question for ambiguous topics (clarification is off by default).
 - **`dirs.allowed_roots`** — configure multiple project directories the agent can read/write via `ragent.json`.
 
 ### New in v1.0.77
@@ -1374,7 +1374,7 @@ Type `/` in the input to open an autocomplete menu:
 ### New in v1.0.76
 
 - **`--web-time N`** for `/research create` sets the web-phase deadline
-  (default 60 s; `0` disables the deadline).
+  (default 180 s; `0` disables the deadline).
 - **Concepts section** in `/research create` reports — a `## Concepts` block
   appears directly above `## Findings` when an LLM is configured.
 - Research slash commands now show a live `web:M:SS` countdown in the TUI
@@ -1688,6 +1688,25 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.100
+
+- **Serper engine for `mf_search`** — a fifth optional API-backed search
+  engine (Serper / Google) joins LangSearch, Tavily, Perplexity, and Exa;
+  configure `serper_api_key` in `ragent.json`.
+- **Engine-level resilience** — transient engine failures (Wikipedia 429,
+  HTTP 5xx, transport timeouts) retry with exponential backoff inside the
+  engine call path; account-level quota blocks surface in
+  `blocked_engines` with reasons; engine starts stagger by 120 ms and
+  Wikipedia deep sweeps are bounded to 8 concurrent fetches — fixes the
+  "only LangSearch results" symptom in `/websearch search`.
+- **Research webgather cleanups** — in-flight fetches are no longer
+  cancelled when the `--web-time` phase deadline expires (the deadline
+  bounds the search stage only), and the consecutive-failure search
+  circuit breaker (`--search-circuit-breaker-threshold`) was removed in
+  favour of the H-002 retry policy.
+- **`/research` clarification gate** — the TUI research flow now asks a
+  single clarifying question for ambiguous topics before web searching.
 
 ## Version 1.0.96
 

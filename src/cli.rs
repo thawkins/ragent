@@ -150,23 +150,18 @@ pub enum ResearchCommands {
         /// (Milestone H-002). Defaults to 200 ms.
         #[arg(long, value_name = "N")]
         search_retry_base_delay_ms: Option<u64>,
-        /// Number of consecutive search-tool failures after which the
-        /// circuit-breaker opens (Milestone H-003). `0` disables it.
-        /// Defaults to 3.
-        #[arg(long, value_name = "N")]
-        search_circuit_breaker_threshold: Option<u32>,
         /// Hard cap on the total number of web-search calls the run may issue,
         /// shared across all supervisor/competitive researchers and retries.
         /// When the cap is reached the run proceeds with the sources gathered
         /// so far instead of failing. Omit for no cap.
         #[arg(long, value_name = "N")]
         max_search_calls: Option<usize>,
-        /// Ask a single clarifying question before web searches when the
-        /// topic is ambiguous. Defaults to enabled; --no-clarify disables it.
+        /// Deprecated no-op: clarification is off by default. Use --clarify
+        /// to ask a single clarifying question for ambiguous topics.
         #[arg(long, overrides_with = "clarify")]
         no_clarify: bool,
         /// Ask a single clarifying question before web searches when the
-        /// topic is ambiguous (paired with --no-clarify). Defaults to true.
+        /// topic is ambiguous. Defaults to disabled; --clarify enables it.
         #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
         clarify: Option<bool>,
     },
@@ -333,13 +328,13 @@ pub async fn handle_research_command(
             local_phase_timeout_secs,
             search_max_retries,
             search_retry_base_delay_ms,
-            search_circuit_breaker_threshold,
             max_search_calls,
-            no_clarify,
-            clarify: _,
+            no_clarify: _,
+            clarify,
         } => {
             let topic = topic.join(" ");
-            let clarify = !no_clarify;
+            // Clarification defaults to off; --clarify opts in.
+            let clarify = clarify.unwrap_or(false);
             if topic.is_empty() && from_urls.is_empty() && from_files.is_empty() {
                 eprintln!(
                     "ragent-research: usage: ragent research create <name> <topic...> [--from-url <URL>] [--from-file <PATH>]"
@@ -375,7 +370,6 @@ pub async fn handle_research_command(
                 web_phase_timeout_secs,
                 local_phase_timeout_secs,
                 search_max_retries,
-                search_circuit_breaker_threshold,
                 search_retry_base_delay_ms,
                 max_search_calls,
                 max_web_results: None,
@@ -529,7 +523,6 @@ pub async fn handle_research_command(
             local_phase_timeout_secs,
             search_max_retries,
             search_retry_base_delay_ms,
-            search_circuit_breaker_threshold,
             max_web_results,
             max_search_calls,
             max_local_sources,
@@ -574,7 +567,6 @@ pub async fn handle_research_command(
                 local_phase_timeout_secs,
                 search_max_retries,
                 search_retry_base_delay_ms,
-                search_circuit_breaker_threshold,
                 max_web_results,
                 max_search_calls,
                 max_local_sources,

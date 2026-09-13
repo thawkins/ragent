@@ -219,10 +219,6 @@ struct CreateResearchRequest {
     /// `None` the engine default (200 ms) is used.
     #[serde(default)]
     search_retry_base_delay_ms: Option<u64>,
-    /// Number of consecutive search-tool failures after which the circuit
-    /// breaker opens. When `None` the engine default (3) is used.
-    #[serde(default)]
-    search_circuit_breaker_threshold: Option<u32>,
     /// Maximum web sources to capture.
     #[serde(default)]
     max_web_results: Option<usize>,
@@ -329,9 +325,6 @@ impl CreateResearchRequest {
         if let Some(v) = self.search_retry_base_delay_ms {
             parts.push(format!("--search-retry-base-delay-ms {v}"));
         }
-        if let Some(v) = self.search_circuit_breaker_threshold {
-            parts.push(format!("--search-circuit-breaker-threshold {v}"));
-        }
         if let Some(v) = self.max_web_results {
             parts.push(format!("--max-web-results {v}"));
         }
@@ -396,7 +389,6 @@ impl CreateResearchRequest {
             local_phase_timeout_secs: self.local_phase_timeout_secs,
             search_max_retries: self.search_max_retries,
             search_retry_base_delay_ms: self.search_retry_base_delay_ms,
-            search_circuit_breaker_threshold: self.search_circuit_breaker_threshold,
             max_web_results: self.max_web_results,
             max_search_calls: self.max_search_calls,
             max_local_sources: self.max_local_sources,
@@ -924,7 +916,6 @@ mod tests {
             local_phase_timeout_secs: None,
             search_max_retries: None,
             search_retry_base_delay_ms: None,
-            search_circuit_breaker_threshold: None,
             max_web_results: None,
             max_search_calls: None,
             max_local_sources: None,
@@ -975,7 +966,6 @@ mod tests {
             local_phase_timeout_secs: None,
             search_max_retries: None,
             search_retry_base_delay_ms: None,
-            search_circuit_breaker_threshold: None,
             max_web_results: None,
             max_search_calls: None,
             max_local_sources: None,

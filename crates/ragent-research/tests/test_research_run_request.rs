@@ -62,11 +62,13 @@ fn build_session_config_applies_defaults_with_no_overrides() {
     // Resilience
     assert!(cfg.resilience.search_max_retries > 0);
     assert!(cfg.resilience.search_retry_base_delay_ms > 0);
-    assert!(cfg.resilience.search_circuit_breaker_threshold > 0);
     assert!(!cfg.resilience.open_access_recovery);
 
     // Engine
     assert_eq!(cfg.engine.tier, Tier::Full);
+
+    // Clarification defaults to off (`--no-clarify` is the default).
+    assert!(!cfg.clarify);
 }
 
 // ── Explicit overrides ─────────────────────────────────────────────────
@@ -99,7 +101,6 @@ fn build_session_config_maps_all_explicit_fields() {
         local_phase_timeout_secs: Some(90),
         search_max_retries: Some(4),
         search_retry_base_delay_ms: Some(500),
-        search_circuit_breaker_threshold: Some(5),
         max_web_results: Some(50),
         max_search_calls: Some(40),
         max_local_sources: Some(30),
@@ -156,7 +157,6 @@ fn build_session_config_maps_all_explicit_fields() {
     // Resilience
     assert_eq!(cfg.resilience.search_max_retries, 4);
     assert_eq!(cfg.resilience.search_retry_base_delay_ms, 500);
-    assert_eq!(cfg.resilience.search_circuit_breaker_threshold, 5);
 
     // Engine
     assert_eq!(cfg.engine.tier, Tier::Dissertation);
@@ -180,6 +180,9 @@ fn build_session_config_maps_all_explicit_fields() {
         cfg.invocation.as_deref(),
         Some("ragent research create --name full-test \"deep topic\"")
     );
+
+    // Explicit clarification opt-in
+    assert!(cfg.clarify);
 }
 
 #[test]

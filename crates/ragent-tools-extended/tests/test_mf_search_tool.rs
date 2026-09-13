@@ -143,6 +143,11 @@ fn test_description_mentions_key_features() {
         desc.contains("exa_api_key"),
         "description should mention the optional Exa API key"
     );
+    assert!(desc.contains("Serper"), "description should mention Serper");
+    assert!(
+        desc.contains("serper_api_key"),
+        "description should mention the optional Serper API key"
+    );
     assert!(
         desc.contains("relevance_score"),
         "description should mention relevance_score"
@@ -278,6 +283,56 @@ fn test_orchestrator_with_empty_exa_key_omits_exa_engine() {
     assert!(!names.contains(&"exa"));
 }
 
+/// Build a `ToolContext` with the given Serper API key in its config.
+fn ctx_with_serper_key(key: &str) -> ToolContext {
+    let mut config = Config::default();
+    config.serper_api_key = Some(key.to_string());
+    ToolContext {
+        session_id: "test".to_string(),
+        working_dir: std::env::temp_dir(),
+        event_bus: std::sync::Arc::new(ragent_types::event::EventBus::new(64)),
+        storage: None,
+        code_index: None,
+        config: Some(std::sync::Arc::new(config)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+    }
+}
+
+#[test]
+fn test_orchestrator_with_serper_key_adds_serper_engine() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_serper_key("serp-test-key"));
+    assert_eq!(orchestrator.engine_count(), 3);
+    let names = orchestrator.engine_names();
+    assert!(names.contains(&"serper"));
+}
+
+#[test]
+fn test_orchestrator_with_empty_serper_key_omits_serper_engine() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_serper_key(""));
+    assert_eq!(orchestrator.engine_count(), 2);
+    let names = orchestrator.engine_names();
+    assert!(!names.contains(&"serper"));
+}
+
+#[test]
+fn test_orchestrator_select_engine_serper() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_serper_key("serp-test-key"));
+    let selected = orchestrator
+        .select_engine("serper")
+        .expect("select_engine should find 'serper' when key is present");
+    assert_eq!(selected.engine_count(), 1);
+    let names = selected.engine_names();
+    assert_eq!(names, vec!["serper"]);
+}
+
+#[test]
+fn test_orchestrator_select_engine_serper_returns_none_when_no_key() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx());
+    assert!(orchestrator.select_engine("serper").is_none());
+}
+
 #[test]
 fn test_orchestrator_with_all_four_keys_adds_all_optional_engines() {
     let mut config = Config::default();
@@ -370,6 +425,7 @@ fn test_parameters_schema_includes_engine_enum() {
     assert!(engine_enum.contains(&"tavily".to_string()));
     assert!(engine_enum.contains(&"perplexity".to_string()));
     assert!(engine_enum.contains(&"exa".to_string()));
+    assert!(engine_enum.contains(&"serper".to_string()));
 }
 
 #[test]
@@ -463,7 +519,7 @@ fn test_build_search_metadata_populates_search_tool_and_engine() {
 #[test]
 fn test_engine_status_without_keys_shows_keyless_engines_enabled() {
     let status = MfSearchTool::engine_status(&ctx());
-    assert_eq!(status.len(), 6);
+    assert_eq!(status.len(), 7);
     let by_name: std::collections::HashMap<&str, &EngineStatus> =
         status.iter().map(|e| (e.name, e)).collect();
 
@@ -484,6 +540,9 @@ fn test_engine_status_without_keys_shows_keyless_engines_enabled() {
 
     let exa = by_name["Exa"];
     assert!(!exa.enabled && !exa.in_use && exa.failed);
+
+    let serp = by_name["Serper"];
+    assert!(!serp.enabled && !serp.in_use && serp.failed);
 }
 
 #[test]

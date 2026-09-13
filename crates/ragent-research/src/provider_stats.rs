@@ -9,7 +9,7 @@
 //!
 //! The counter is incremented once per logical search (retries included,
 //! mirroring [`crate::search_budget::SearchBudget`] semantics) and never for
-//! cache hits, budget-skips, or circuit-breaker skips, because those paths
+//! cache hits or budget-skips, because those paths
 //! issue no provider request.
 
 use std::collections::BTreeMap;
@@ -33,7 +33,7 @@ impl ProviderCallStats {
     }
 
     /// Record one logical search call for `tool` (retries included; cache
-    /// hits and budget/circuit skips are never recorded by the gatherer).
+    /// hits and budget skips are never recorded by the gatherer).
     pub fn record(&self, tool: &str) {
         self.total.fetch_add(1, Ordering::Relaxed);
         let mut by_tool = self.by_tool.lock().unwrap_or_else(|p| p.into_inner());

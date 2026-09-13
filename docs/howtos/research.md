@@ -33,8 +33,8 @@ adversarial quality review.
 
 - **Topic decomposition** — breaks a research topic into focused sub-queries
   using either a deterministic heuristic planner or an LLM-backed planner.
-- **Multi-engine web search** — queries DuckDuckGo, Brave, OpenAlex (scholarly
-  works), and Wikipedia in parallel, plus optional API-backed engines
+- **Multi-engine web search** — queries OpenAlex (scholarly
+  works) and Wikipedia in parallel, plus optional API-backed engines
   (LangSearch, Tavily, Perplexity, Exa) when configured.
 - **Local project cross-referencing** — scans your codebase and project files
   for relevant content, scoring matches by keyword overlap with the topic.
@@ -78,8 +78,8 @@ Open ragent and run:
 The TUI will:
 
 1. Create a new research item under `research/rust-async/`.
-2. Decompose the topic into sub-queries, search the web (DuckDuckGo, Brave,
-   OpenAlex, Wikipedia, plus any configured API engines), optionally scan
+2. Decompose the topic into sub-queries, search the web (OpenAlex, Wikipedia,
+   plus any configured API engines), optionally scan
    local project files and specs, and synthesize a structured report.
 3. Stream progress into the message window and status bar.
 4. Write the final document to `research/rust-async/RESEARCH.md`.
@@ -176,7 +176,6 @@ Run a research session and write `RESEARCH.md`. This is the primary command.
   [--fetch-timeout-secs N]
   [--web-time N] [--web-phase-timeout-secs N] [--local-phase-timeout-secs N]
   [--search-max-retries N] [--search-retry-base-delay-ms N]
-  [--search-circuit-breaker-threshold N]
   [--max-web-results N] [--max-search-calls N]
   [--use-local] [--use-specs] [--use-low-relevance] [--no-papers] [--use-pdf]
 ```
@@ -439,15 +438,16 @@ frontmatter, not the state file.
 
 ## 4A. Web-phase deadline
 
-As of v1.0.76, `/research create` caps the web-gathering phase at 60 seconds
+As of v1.0.100, `/research create` caps the web-gathering phase at 180 seconds
 by default. Use `--web-time N` (or `--web-phase-timeout-secs N`) to change the
 deadline; set `--web-time 0` to disable it.
 
 When the deadline elapses, the run ingests everything gathered so far and
-continues to analysis/synthesis with the partial source set. No new search or
-fetch is started after the deadline, so the phase cannot run unbounded — the
-worst-case overshoot is the completion of fetches already in flight, each capped
-by `--fetch-timeout-secs` (default 30 s).
+continues to analysis/synthesis with the partial source set. The deadline
+bounds the *search stage* only: no new search is started after the deadline.
+The fetch stage is never gated on or cancelled by the deadline — every
+candidate found by a truncated search stage is fetched to completion, and each
+fetch is individually capped by `--fetch-timeout-secs` (default 30 s).
 
 The TUI status bar shows a live `web:M:SS` countdown while the web phase is
 active, and a single quantified notice is added to the research progress message
@@ -682,14 +682,13 @@ These flags control the performance and resilience of the gathering phases.
 | `--fetch-concurrently N` | 10 | Number of candidate pages fetched in parallel during web gathering. `0` is clamped to `1`. |
 | `--local-concurrently N` | 8 | Parallel local-file scoring tasks. `0` is clamped to `1`. |
 | `--fetch-timeout-secs N` | 30 | Per-page fetch timeout. Pages exceeding this are treated as fetch failures. |
-| `--web-time N` | 60 | Wall-clock timeout for the entire web phase (alias of `--web-phase-timeout-secs`). When the deadline passes, everything gathered so far is ingested and the run continues to analysis/synthesis with the partial source set. `0` disables the deadline. No new search or fetch is started after the deadline; the worst-case overshoot is bounded by the in-flight fetches' own `--fetch-timeout-secs`. |
+| `--web-time N` | 180 | Wall-clock timeout for the web *search stage* (alias of `--web-phase-timeout-secs`). When the deadline passes, everything gathered so far is ingested and the run continues to analysis/synthesis with the partial source set. `0` disables the deadline. No new search is started after the deadline; fetches are never gated on or cancelled by it — each fetch is individually capped by `--fetch-timeout-secs`. |
 | `--local-phase-timeout-secs N` | none | Wall-clock timeout for the entire local phase. Aborts if exceeded. |
 | `--search-max-retries N` | 2 | Retries per failed sub-query. `0` disables retries. |
 | `--search-retry-base-delay-ms N` | 200 | First retry delay in ms, doubled each retry (200, 400, 800...). |
-| `--search-circuit-breaker-threshold N` | 3 | Consecutive search failures before circuit breaker opens. `0` disables. |
 | `--max-search-calls N` | derived from `--depth` | Hard, run-scoped cap on total web-search calls, shared via `Arc` across every supervisor/competitive researcher and gather pass. A run-scoped query cache memoises identical sub-queries so parallel researchers reuse cached hits instead of re-issuing paid calls. |
 | `--max-web-results N` | derived from `--depth` (shallow 6 / standard 9 / deep 15) | Cap on the web-source budget. |
-| `--use-low-relevance` | off | Keep sources that would normally be filtered out as low-relevance. |
+| `--use-low-relevance` | off | Keep sources that would normally be filtered out as low-relevance. The pre-fetch filter matches query terms morphologically (plurals, gerunds, and derived forms such as "agentic" matching "agent" or "loops" matching "loop") and retains hits scoring Medium (35%+ term overlap) or better. |
 | `--no-papers` | off | Disable scholarly backends (OpenAlex) so only general web results are captured. |
 | `--use-pdf` | off | Allow PDF documents from web search or `--from-url` to be captured as sources. |
 
@@ -701,7 +700,7 @@ gathering with a readability error.
 ### Performance tuning examples
 
 For a slow network, reduce concurrency and increase timeouts (including the
-60-second web phase deadline):
+180-second web phase deadline):
 
 ```text
 /research create slow-net "Distributed systems" --fetch-concurrently 4 --fetch-timeout-secs 60 --web-time 600
@@ -724,13 +723,6 @@ To make search more resilient against transient failures:
 
 ```text
 /research create resilient "Edge computing platforms" --search-max-retries 5 --search-retry-base-delay-ms 500
-```
-
-To disable the circuit breaker entirely (keep searching regardless of
-failures):
-
-```text
-/research create no-breaker "Niche topic with sparse results" --search-circuit-breaker-threshold 0
 ```
 
 ---
@@ -883,8 +875,8 @@ The session emits structured events that the TUI renders:
 
 ## 13. Web search engines
 
-By default, research uses `mf_search`, which queries DuckDuckGo, Brave,
-OpenAlex, and Wikipedia in parallel. Optional API-backed engines can be
+By default, research uses `mf_search`, which queries OpenAlex and
+Wikipedia in parallel. Optional API-backed engines can be
 added in `ragent.json`:
 
 ```json
@@ -893,6 +885,7 @@ added in `ragent.json`:
     "tavily_api_key": "...",
     "perplexity_api_key": "...",
     "exa_api_key": "...",
+    "serper_api_key": "...",
     "openalex_email": "you@example.com"
 }
 ```
@@ -908,12 +901,43 @@ The `--no-papers` flag disables OpenAlex for runs where scholarly results
 are not wanted. This is useful when researching non-academic topics where
 scholarly papers would add noise.
 
+### Merge diversity
+
+When two or more engines return results, the consensus merge caps any
+single engine at half of the merged slots per sub-query. An engine that
+returns a large scored block (e.g. OpenAlex) cannot crowd the other
+engines out of the gathered source list; slots the other engines cannot
+fill are handed back to the dominant engine's next-best results. With only
+one contributing engine the merge keeps its full budget.
+
+### Fetch budget
+
+By default the width sweep runs **uncapped**: every unique candidate URL
+that passes the relevance pre-filter is fetched, and every sub-query
+search asks the engines for their maximum result page (e.g. OpenAlex
+returns up to 75 results per query). Volume is bounded by the per-fetch
+timeout (`--fetch-timeout-secs`) and the fetch concurrency
+(`--fetch-concurrently`), not by a hard cap — a separate cap would only
+discard candidates the search already paid for. `capped` in the
+width-sweep summary is therefore 0 on normal runs.
+
+Competitive (comparison) runs (`--mode competitive`) cap the volume:
+each sub-query search asks for at most the web budget
+(`--max-web-results`, or the depth-derived budget when unset) hits, and
+the fetch budget is that cap multiplied by the number of sub-queries;
+anything beyond it is reported as `capped` in the width-sweep summary.
+This keeps one comparison from issuing engine-max searches per entity.
+
+The relevance pre-filter also rescues on-topic results whose titles match
+two or more query terms even when the overall term ratio falls below the
+Medium floor — verbose decomposed sub-queries ("how to write goals and
+configure AI agent loops") otherwise reject good hits like "Designing
+agentic loops" purely because the query has many terms.
+
 ### Keyless backends
 
 These backends require no API keys and run by default:
 
-- **DuckDuckGo** — general web search
-- **Brave** — general web search
 - **OpenAlex** — scholarly works catalog (set `openalex_email` for the
   polite pool)
 - **Wikipedia** — English Wikipedia encyclopedia summaries
@@ -926,6 +950,8 @@ These require API keys configured in `ragent.json`:
 - **Tavily** — `tavily_api_key`
 - **Perplexity** — `perplexity_api_key`
 - **Exa** — `exa_api_key`
+- **Serper** — `serper_api_key` (or the `SERPER_API_KEY` environment
+  variable)
 
 ---
 
@@ -1277,6 +1303,7 @@ Web search engine keys are top-level in `ragent.json`:
     "tavily_api_key": "...",
     "perplexity_api_key": "...",
     "exa_api_key": "...",
+    "serper_api_key": "...",
     "openalex_email": "you@example.com"
 }
 ```
@@ -1309,12 +1336,12 @@ Web search engine keys are top-level in `ragent.json`:
 - **Use `--use-low-relevance`** when researching niche topics where even
   low-relevance sources may contain useful information.
 - **Use `--web-time`** to raise (or lower) the web phase deadline — by
-  default the web phase is capped at 60 seconds, after which everything
+  default the web phase is capped at 180 seconds, after which everything
   gathered so far is ingested and the run continues to analysis/synthesis.
   Set `--web-time 0` to remove the cap on slow networks. Once the deadline
-  elapses, no new search or fetch is started; the only overshoot is the
-  completion of fetches already in flight, each capped by
-  `--fetch-timeout-secs` (default 30 s), so the phase always returns.
+  elapses, no new search is started; every candidate found is still fetched
+  to completion (each capped by `--fetch-timeout-secs`, default 30 s), so
+  the phase always returns.
 - **Re-run with the same name** to leverage the source vault — if enough
   sources are already cached, web search is skipped and the run is nearly
   instant.
@@ -1334,7 +1361,7 @@ Web search engine keys are top-level in `ragent.json`:
 | `0 sources` or very few | Search backends blocked / rate-limited | Run `/websearch test`; wait or add an API-backed engine |
 | `LLM synthesis failed — using mechanical fallback` | No API key, model down, or output malformed | Check provider setup; the report still contains deterministic summaries |
 | `CITATION_VERIFICATION_FAILED` | A citation marker `[#N]` points to a missing source | Run again with `--tier full`; the gate blocks shipment |
-| `web phase deadline reached` | The 60-second web phase deadline passed (slow network or many candidate pages) | The run continues with the sources gathered so far; raise `--web-time N` or lower `--fetch-concurrently` for fuller coverage. The deadline stops new searches and fetches from being started, so the phase cannot run unbounded — at most the fetches already in flight finish (each capped by `--fetch-timeout-secs`) |
+| `web phase deadline reached` | The 180-second web phase deadline passed (slow network or many candidate pages) | The run continues with the sources gathered so far; raise `--web-time N` or lower `--fetch-concurrently` for fuller coverage. The deadline stops new searches from being started (search stage only); fetches already queued always finish, each capped by `--fetch-timeout-secs`. |
 | `local phase timed out` | Large project with many files | Raise `--local-phase-timeout-secs` or lower `--local-concurrently` |
 | Name rejected | Invalid research name | Use 3–64 lowercase ASCII letters/digits/hyphens starting with a letter |
 | `research/<name>` already exists | Duplicate create | Use `/research open <name>` or pick a new name |

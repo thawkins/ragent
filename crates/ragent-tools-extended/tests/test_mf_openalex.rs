@@ -350,7 +350,7 @@ fn test_parse_response_score_normalised() {
     let results = parse_response(&value);
     assert_eq!(results.len(), 1);
     let score = results[0].score.expect("score present");
-    assert_eq!(score, 1.0); // 60/30 = 2.0, clamped to 1.0
+    assert_eq!(score, 0.6); // 60/100 = 0.6 (scale keeps headroom below 1.0)
 }
 
 #[test]

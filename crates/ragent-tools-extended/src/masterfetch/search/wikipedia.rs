@@ -7,7 +7,7 @@
 //! [`SearchEngine`] trait by calling the [Wikipedia REST API](https://en.wikipedia.org/api/rest_v1/)
 //! page/summary endpoint. Wikipedia is a free, open encyclopedia and the REST
 //! API is **unauthenticated** — no API key is required. The backend is
-//! therefore keyless, like `DuckDuckGo`, Brave, and `OpenAlex`.
+//! therefore keyless, like `OpenAlex`.
 //!
 //! # Two-step query flow
 //!
@@ -52,7 +52,12 @@
 
 use std::time::Instant;
 
-use super::engine::{EngineReport, RawResult, SearchEngine, SearchOptions, dedup_results_by_url};
+use futures::stream::{self, StreamExt};
+
+use super::engine::{
+    EngineReport, RawResult, SearchEngine, SearchOptions, dedup_results_by_url,
+    strip_disallowed_quotes,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -71,6 +76,19 @@ pub const ENGINE_NAME: &str = "wikipedia";
 /// Maximum number of candidate titles to request from the Action API
 /// `list=search` (the `srlimit` parameter is capped at 500 by MediaWiki).
 pub const MAX_SEARCH_LIMIT: usize = 500;
+
+/// Maximum number of concurrent `page/summary` requests.
+///
+/// Without a bound, a `per_engine_results=25` sweep would fire 25 summary
+/// requests in one burst; Wikimedia's per-IP rate limiter answers that with
+/// HTTP 429 and every summary silently dropped (T-016).
+pub const SUMMARY_FETCH_CONCURRENCY: usize = 8;
+
+/// Start-up stagger between consecutive `page/summary` requests.
+///
+/// Even with bounded concurrency, 8 requests fired at the same instant trip
+/// Wikimedia's burst limiter; a short per-request delay spreads the burst.
+pub const SUMMARY_FETCH_STAGGER: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// Minimum number of candidate titles to request.
 pub const MIN_SEARCH_LIMIT: usize = 1;
@@ -245,20 +263,38 @@ impl SearchEngine for WikipediaEngine {
             return report;
         }
 
-        // Step 2: fetch a page/summary for each resolved title concurrently.
+        // Step 2: fetch a page/summary for each resolved title, bounded to
+        // `SUMMARY_FETCH_CONCURRENCY` parallel requests with a short start-up
+        // stagger so a deep hit-list doesn't burst past Wikimedia's per-IP
+        // rate limiter (T-016). `titles` stays in engine-rank order so the
+        // merge sees the best hits first.
         let limit = opts.max_results.min(titles.len());
         let titles_to_fetch = &titles[..limit];
 
         tracing::debug!(
             count = titles_to_fetch.len(),
+            concurrency = SUMMARY_FETCH_CONCURRENCY,
             "wikipedia: fetching page summaries"
         );
 
-        let summary_futures: Vec<_> = titles_to_fetch
+        let summary_futs = titles_to_fetch
             .iter()
-            .map(|title| fetch_summary(&client, title))
-            .collect();
-        let summary_results = futures::future::join_all(summary_futures).await;
+            .enumerate()
+            .map(|(idx, title)| {
+                let client = client.clone();
+                let title = title.clone();
+                async move {
+                    if idx > 0 {
+                        tokio::time::sleep(SUMMARY_FETCH_STAGGER * idx as u32).await;
+                    }
+                    fetch_summary(client, title).await
+                }
+            })
+            .collect::<Vec<_>>();
+        let summary_results: Vec<Option<RawResult>> = stream::iter(summary_futs)
+            .buffer_unordered(SUMMARY_FETCH_CONCURRENCY)
+            .collect()
+            .await;
 
         let mut results: Vec<RawResult> = summary_results.into_iter().flatten().collect();
 
@@ -312,7 +348,7 @@ impl SearchEngine for WikipediaEngine {
 #[must_use]
 pub fn build_search_request(query: &str, opts: &SearchOptions) -> (String, Vec<(String, String)>) {
     let limit = opts.max_results.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
-    let search = truncate_query(query);
+    let search = truncate_query(&strip_disallowed_quotes(query));
 
     let params: Vec<(String, String)> = vec![
         ("action".to_string(), "query".to_string()),
@@ -600,8 +636,8 @@ fn url_encode_path(input: &str) -> String {
 ///
 /// Returns `None` on any error (network, non-2xx, parse failure) so one
 /// failed summary does not discard the others.
-async fn fetch_summary(client: &reqwest::Client, title: &str) -> Option<RawResult> {
-    let url = build_summary_url(title);
+async fn fetch_summary(client: reqwest::Client, title: String) -> Option<RawResult> {
+    let url = build_summary_url(&title);
 
     tracing::trace!(url = %url, "wikipedia: fetching summary");
 

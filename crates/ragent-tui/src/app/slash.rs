@@ -89,6 +89,86 @@ async fn websearch_diag_and_render() -> String {
     output
 }
 
+/// Run the user-supplied `query` through the MasterFetch search stack and
+/// render the `/websearch search` report.
+async fn websearch_search_query(query: &str) -> String {
+    let ctx = websearch_diag_ctx();
+    use ragent_tools_extended::masterfetch::search::SearchOptions;
+    use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx);
+    // Show all returned results: the tool surface caps merged hits, which
+    // would hide the per-engine spread this command exists to show. Use a
+    // wide merge budget (100) with a moderate per-engine allowance (25) so
+    // every active engine contributes and no single engine crowds the list:
+    // some backends (e.g. LangSearch) hard-cap at ~10 results per request
+    // regardless of the requested allowance, so a huge per-engine allowance
+    // cannot lift their contribution and only widens the head start of the
+    // deep keyless engines before the share-limited merge runs.
+    let opts = SearchOptions::new(100).with_per_engine_results(25);
+    let t0 = std::time::Instant::now();
+    let output = orchestrator.search(query, &opts).await;
+    let merge = &output.merge;
+    let mut out = String::new();
+    out.push_str(&format!("From: /websearch search \"{query}\"\n\n"));
+    if merge.results.is_empty() {
+        out.push_str("[warn] no results returned by any engine\n");
+    } else {
+        for r in &merge.results {
+            out.push_str(&format!(
+                "{}. [{}] {} ({:.2})\n   {}\n",
+                r.position,
+                r.source,
+                truncate_bytes(&r.title, 80),
+                r.relevance_score,
+                r.url
+            ));
+        }
+    }
+
+    // Per-engine summary: count only rows where the CSV lists the engine
+    // alone so a consensus hit is credited once, under its combined CSV.
+    out.push_str("\nResults per engine:\n");
+    let mut singles: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    let mut combos: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for r in &merge.results {
+        if r.source.contains(',') {
+            *combos.entry(r.source.as_str()).or_insert(0) += 1;
+        } else {
+            *singles.entry(r.source.as_str()).or_insert(0) += 1;
+        }
+    }
+    let mut engine_rows: Vec<(String, usize)> = output
+        .engines_used
+        .iter()
+        .map(|name| {
+            (
+                name.clone(),
+                singles.get(name.as_str()).copied().unwrap_or(0),
+            )
+        })
+        .collect();
+    for (csv, n) in combos {
+        engine_rows.push((csv.to_string(), n));
+    }
+    engine_rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    for (name, count) in &engine_rows {
+        out.push_str(&format!("  {name}: {count}\n"));
+    }
+    out.push_str(&format!(
+        "\nTotal: {} result(s) | {} raw | {:.1}s",
+        merge.total_merged_results,
+        merge.total_raw_results,
+        t0.elapsed().as_secs_f64()
+    ));
+    if !merge.blocked_engines.is_empty() {
+        out.push_str(&format!(
+            "\nBlocked engines: {}",
+            merge.blocked_engines.join(", ")
+        ));
+    }
+    out
+}
+
 // Redaction patterns for bug reports
 use regex::Regex;
 
@@ -209,7 +289,12 @@ impl App {
                 vec!["on".to_string(), "off".to_string(), "help".to_string()]
             }
             "websearch" => {
-                vec!["show".to_string(), "test".to_string(), "help".to_string()]
+                vec![
+                    "show".to_string(),
+                    "test".to_string(),
+                    "search".to_string(),
+                    "help".to_string(),
+                ]
             }
             "loop" => vec!["help".to_string(), "--help".to_string(), "-h".to_string()],
             "toolchain" => vec!["list".to_string(), "help".to_string()],
@@ -8807,6 +8892,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                       — list all engines with enabled / in-use / failed status\n\n\
                                                     • `/websearch test`\n\
                                                       — run a live diagnostic query on each configured engine and report counts\n\n\
+                                                    • `/websearch search <query>`\n\
+                                                      — query all engines with your text and list each result\n\
+                                                        with its engine source, title/URL, and relevancy,\n\
+                                                        followed by a per-engine summary\n\n\
                                                     • `/websearch help`\n\
                                                       — show this help",
                                                 );
@@ -8844,6 +8933,46 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         });
                     }
+                    "search" => {
+                        let query = args.split_once(char::is_whitespace).map(|(_, q)| q.trim());
+                        let Some(query) = query.filter(|q| !q.is_empty()) else {
+                            self.append_assistant_text(
+                                "From: /websearch search\n\
+                                 [warn] missing query — usage: `/websearch search <query>`",
+                            );
+                            self.status = "websearch: search needs a query".to_string();
+                            return;
+                        };
+                        self.status = "websearch: searching...".to_string();
+                        self.append_assistant_text(&format!(
+                            "Starting web search for \"{query}\"...\n"
+                        ));
+                        // Same off-UI-thread pattern as the `test` arm above:
+                        // deposit the rendered report into
+                        // `websearch_test_result` for `poll_websearch_test_result`.
+                        let websearch_result = Arc::clone(&self.websearch_test_result);
+                        let query_owned = query.to_string();
+                        tokio::spawn(async move {
+                            let outcome = std::panic::AssertUnwindSafe(async {
+                                websearch_search_query(&query_owned).await
+                            })
+                            .catch_unwind()
+                            .await;
+                            let rendered = match outcome {
+                                Ok(rendered) => rendered,
+                                Err(_) => "From: /websearch search\n\n\
+                                           [err] search task panicked — see the application log"
+                                    .to_string(),
+                            };
+                            if let Ok(mut guard) = websearch_result.lock() {
+                                *guard = Some(rendered);
+                            } else {
+                                tracing::error!(
+                                    "websearch_test_result mutex poisoned, result dropped"
+                                );
+                            }
+                        });
+                    }
                     "show" | "" => {
                         let ctx = websearch_diag_ctx();
                         use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
@@ -8863,13 +8992,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             ));
                         }
                         output.push_str(
-                                          "\nKeyless engines (DuckDuckGo, Brave, Google) are always enabled. \
-                                           Google scrapes results via a headless Chrome browser. \
+                                          "\nKeyless engines (OpenAlex, Wikipedia) are always enabled. \
                                            LangSearch requires `langsearch_api_key` in `ragent.json`. \
                                            Tavily requires `tavily_api_key` in `ragent.json` or the \
                                            `TAVILY_API_KEY` environment variable. \
                                            Perplexity requires `perplexity_api_key` in `ragent.json` \
-                                           or the `PERPLEXITY_API_KEY` environment variable.",
+                                           or the `PERPLEXITY_API_KEY` environment variable. \
+                                           Serper requires `serper_api_key` in `ragent.json` \
+                                           or the `SERPER_API_KEY` environment variable.",
                                       );
                         self.append_assistant_text(&output);
                         self.status = "websearch: status shown".to_string();

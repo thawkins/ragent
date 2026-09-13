@@ -1767,9 +1767,10 @@ per-page webpage summaries. When omitted, the active default model is
 used with a short-output limit. This is independent of the per-phase
 overrides `--research-model`, `--compression-model`, and `--final-report-model` (FR-013).
 
-`--clarify` (default) and `--no-clarify` control whether the pipeline
+`--no-clarify` (default) and `--clarify` control whether the pipeline
 asks a single clarifying question when the topic looks ambiguous (FR-005,
-FR-017). `--brief <TEXT>` supplies an explicit research brief used as
+FR-017). Clarification is disabled by default; `--clarify` opts in.
+`--brief <TEXT>` supplies an explicit research brief used as
 the mission statement for synthesis (FR-004).
 
 `--evaluate` appends a deterministic self-evaluation scorecard
@@ -1857,7 +1858,7 @@ Every `RESEARCH.md` contains:
 | `/research create ... --max-concurrent-research-units N` | Limit parallel researchers in supervisor/competitive modes |
 | `/research create ... --evaluate` | Append a deterministic quality scorecard to `RESEARCH.md` |
 | `/research create ... --brief <TEXT>` | Provide an explicit research brief |
-| `/research create ... --no-clarify` | Skip the single clarifying question |
+| `/research create ... --clarify` | Ask the single clarifying question (disabled by default) |
 | `/research create <name> <topic>` | Gather sources and write `RESEARCH.md` |
 | `/research create <name> <topic> --iterations N --depth shallow|standard|deep --format ...` | Iterative research with controls |
 | `/research create <name> --from-url <URL>` | Fetch the URL, use it as the research subject and capture it as the primary source |
@@ -1937,19 +1938,20 @@ The `POST /research` request body mirrors `ResearchRunRequest`:
 `brief`, `clarify`, `fetch_concurrency`, `local_concurrency`,
 `fetch_timeout_secs`, `web_phase_timeout_secs`,
 `local_phase_timeout_secs`, `search_max_retries`, `search_retry_base_delay_ms`,
-`search_circuit_breaker_threshold`, `max_web_results`, `max_search_calls`,
+`max_web_results`, `max_search_calls`,
 `max_local_sources`,
 `max_synthesis_sources`. `web_phase_timeout_secs` (CLI `--web-time`) defaults
-to 60 seconds (`DEFAULT_WEB_PHASE_TIMEOUT_SECS`); a value of `0` disables the
+to 180 seconds (`DEFAULT_WEB_PHASE_TIMEOUT_SECS`); a value of `0` disables the
 deadline and allows the web phase to run to natural completion (FR-007). When
 the web-gathering phase exceeds the deadline the run ingests everything gathered
 so far and proceeds to analysis/synthesis with the partial source set, emitting
 a single `web_deadline` `RunStep` diagnostic that carries the effective deadline
-and the number of sources captured (FR-004). No new search or fetch is started
-after the deadline: the decomposer call, each sub-query search-result wait, and
-each in-flight fetch-completion wait are all deadline-bounded, so the worst-case
-overshoot beyond the deadline is the completion of the fetches already in flight
-at truncation, each further capped by `fetch_timeout_secs` (FR-008). At the
+and the number of sources captured (FR-004). No new search is started
+after the deadline: the decomposer call and each sub-query search-result wait
+are deadline-bounded (FR-008). The fetch stage is never gated on or cancelled by
+the deadline: every candidate produced by the search stage is fetched to
+completion and in-flight fetches always run to completion (or their own
+`fetch_timeout_secs` cap). At the
 start of a web-gathering phase the system emits a `web_phase_start` `RunStep`
 carrying the remaining effective deadline in seconds; the TUI renders this as a
 live `web:M:SS` countdown in the status-bar wait segment, computed from a stored
@@ -3886,9 +3888,10 @@ per-page webpage summaries. When omitted, the active default model is
 used with a short-output limit. This is independent of the per-phase
 overrides `--research-model`, `--compression-model`, and `--final-report-model` (FR-013).
 
-`--clarify` (default) and `--no-clarify` control whether the pipeline
+`--no-clarify` (default) and `--clarify` control whether the pipeline
 asks a single clarifying question when the topic looks ambiguous (FR-005,
-FR-017). `--brief <TEXT>` supplies an explicit research brief used as
+FR-017). Clarification is disabled by default; `--clarify` opts in.
+`--brief <TEXT>` supplies an explicit research brief used as
 the mission statement for synthesis (FR-004).
 
 `--evaluate` appends a deterministic self-evaluation scorecard

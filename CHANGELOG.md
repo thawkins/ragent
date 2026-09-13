@@ -1,6 +1,128 @@
 # Changelog
 
+## Version: 1.0.100
+
+- **mf_search engine-level resilience (T-016)** - transient engine failures
+  are now retried inside the engine call path (`search_with_retry` in
+  `masterfetch::search::engine`) instead of being patched per surface:
+  Wikipedia 429/`rate-limited`, HTTP 5xx, and transport timeout/connect
+  errors get up to 2 retries with 1s/2s exponential backoff, and the
+  orchestrator staggers engine starts by 120 ms so keyless backends are not
+  all hit at t=0. Account-level quota blocks (Serper 403, Exa 402, Tavily
+  432, OpenAlex daily "Insufficient budget" 429) are deliberately NOT
+  retried. Wikipedia's `page/summary` step is additionally bounded to 8
+  concurrent fetches with a 150 ms start-up stagger so deep per-engine
+  sweeps no longer burst past Wikimedia's per-IP limiter and zero the whole
+  engine (this was the root cause of "only LangSearch results" in
+  `/websearch search`). `MergeOutput.blocked_engines` entries now carry
+  `name: reason` so quota blocks are distinguishable from transient
+  rate-limits without enabling tracing. 15 new integration tests in
+  `tests/test_mf_engine_resilience.rs` pin the classification, retry, and
+  stagger behaviour.
+- **Fetch-stage deadline cancellation removed (research webgather)** - the
+  web-gathering fetch stage is no longer gated on or cancelled by the
+  `--web-time` phase deadline. Previously, when the deadline expired
+  mid-fetch, the fetch loop stopped starting new fetches and in-flight
+  requests were cancelled on drop. Now every candidate produced by the
+  search stage is fetched to completion and in-flight fetches always run
+  to completion (each still individually capped by `--fetch-timeout-secs`).
+  The deadline continues to bound the *search stage* (decomposer call and
+  sub-query search-result waits, FR-008) so no new *searches* are issued
+  after it fires; the `web_deadline` diagnostic still fires exactly once
+  per gather pass when the deadline elapsed during the pass (a
+  `deadline_fired` flag + final elapsed check distinguishes true expiry
+  from zero-timeout scheduling artefacts). `WidthSweepSummary.cancelled`
+  is now structurally 0 and kept only to preserve the balance invariant.
+  New test `test_fetches_run_to_completion_past_deadline`; the session,
+  tiered, and deadline test fixtures updated accordingly (slow fetches are
+  now 1.5-2 s, not 120 s).
+- **Search circuit breaker removed** - the per-gather-pass
+  consecutive-failure circuit breaker (`--search-circuit-breaker-threshold`,
+  `DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD`, `SearchCircuitOpen` event,
+  `SearchCallOutcome::CircuitOpen`, `ResilienceConfig.search_circuit_breaker_threshold`,
+  and all TUI/CLI/HTTP plumbing) is deleted. Search failures are still
+  retried with exponential backoff (Milestone H-002) and bounded by the
+  per-fetch timeout and `--max-search-calls` budget; the breaker was an
+  early-abort optimization that discarded subsequent sub-queries after 3
+  failures.
+
 ## Version: 1.0.99
+
+- **Width-sweep volume cap removed except in competitive mode** - the fetch
+  budget is a leftover from the T-006 era and is redundant now that the
+  60 s web phase deadline and `--fetch-concurrently` bound
+  parallelism: it discarded candidates the search had already paid for.
+  The gatherer now runs **uncapped by default** — every retained
+  candidate is fetched and every sub-query search asks the engines for
+  their maximum result page (OpenAlex up to 75/query) — in tiered,
+  supervisor, and agent-tool modes; the width-sweep summary `capped`
+  counter stays 0 (the balance
+  `considered == captured + excluded + capped + cancelled` is preserved
+  and the field is kept). Capping is now opt-in via
+  `WebGatherer::with_volume_cap(Some(n))`, wired only for competitive
+  (`--mode competitive`) runs, where `n = effective_web_budget()` caps
+  both the per-query search allowance and the per-query fetch budget.
+  Tests rewritten for the new policy plus 3 new cap-semantics tests;
+  docs/howtos/research.md "Fetch budget" section updated.
+- **Width-sweep fetch budget now scales with sub-query count** - the
+  gatherer applied the caller's `max_results` web allowance as a *global*
+  fetch cap, but the same number is also the per-engine result size per
+  sub-query. On a 7-query width sweep (standard depth budget = 7) this
+  capped the pass at 7 fetches: 57 candidates were considered, 42 passed
+  the relevance filter, 35 were reported `capped` without ever being
+  fetched, and only 7 were captured. The fetch budget is now
+  `max_results` x sub-query count (49 on that run), so every retained
+  candidate is fetched and `capped` only fires when a sweep genuinely
+  exceeds the per-query allowance. A new `fetch_budget_scales_with_sub_query_count`
+  integration test pins the semantics; the existing single-query T-006 cap
+  test is unchanged.
+- **Title-signal relevance rescue for verbose sub-queries** - decomposed
+  sub-queries are often long ("how to write goals and configure AI agent
+  loops", 6 terms), so an on-topic title like "Designing agentic loops"
+  matched only 2 terms (ratio 0.33) and fell below the 35% Medium floor.
+  `compute_relevance_label` now retains a hit when the title matches two
+  or more distinct query terms even at ratio >= 0.25 (label "Medium —
+  multiple title terms match query"), rescuing roughly half of the 13
+  remaining relevance rejections in the 2026-09-13 gather log while
+  single-title-term noise (e.g. off-topic arXiv surveys) stays rejected.
+  4 new tests in `test_web_gatherer_helpers.rs`; docs/howtos/research.md
+  documents the new "Fetch budget" semantics.
+- **Research web-gather relevance filter no longer rejects morphological
+  variants** - the pre-fetch title/snippet relevance filter
+  (`compute_relevance_label`) previously required exact substring matches
+  of query terms, so an on-topic result like "What is an agentic loop?"
+  was rejected for the sub-query "how to configure and operate agentic AI
+  loops" ("agentic" appears but "loop" vs "loops" did not). Query terms now
+  also match morphological variants: inflectional suffixes (`-ies`, `-es`,
+  `-s`), derivational suffixes (`-ing`, `-ics`, `-ic`, `-ly`, `-ment`,
+  `-ness`, `-ation`, `-tion`, `-sion`, `-ity`), gerund consonant doubling
+  ("running" matches "run"), and one chained agentive strip
+  ("engineering" matches "engine" via "engineer"). The Medium retention
+  threshold was also relaxed from 45% to 35% term overlap. Verified against
+  the two 2026-09-13 `research-loops` gather logs: 22 of 57 exclusions
+  (39%) are now retained, including previously rejected top-ranked hits
+  such as "The Agent Loop Architecture - Inngest Blog" and "How to write
+  AI agent loops in Claude Code and Codex". Tests: 5 new
+  `term_matches_*` unit tests in `test_web_gatherer_helpers.rs`;
+  `docs/howtos/research.md` `--use-low-relevance` row updated to document
+  the matching behaviour.
+- **`/research create` clarification now off by default** - `--no-clarify`
+  is the default across all front ends (TUI `/research create`, CLI
+  `ragent research create`, HTTP `POST /research`, and `/research update`
+  replay): the shared `build_session_config` builder and
+  `SessionConfig::default()` resolve `clarify` to `false` when no explicit
+  `--clarify`/`--no-clarify` flag is given, so ambiguous topics no longer
+  pause the run with a clarifying question. `--clarify` opts back in;
+  `--brief` still skips clarification. Root-CLI `--no-clarify` is now a
+  documented no-op (kept for recorded-invocation compatibility).
+- **`/research help` lists all create flags** - `build_help_message` now
+  documents every `create` flag (seed URLs/files, iterations, depth, tier,
+  mode, format, sources-dir, template, per-phase models, concurrency and
+  timeout budgets, retry/backoff/circuit-breaker knobs, source caps, brief,
+  clarify, use-local/use-specs/use-low-relevance/no-papers/use-pdf,
+  evaluate) instead of the previous eight-row subset. SPEC.md (both config
+  schema copies), QUICKSTART.md, and the `/research` how-to updated to the
+  new default.
 
 - **`/tools` registry dedupe + autocomplete fix** - removed the stale
   duplicate `SlashCommandDef { trigger: "tools" }` ("List all available

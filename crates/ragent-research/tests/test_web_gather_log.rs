@@ -139,7 +139,7 @@ async fn gather_logs_search_failure_and_zero_hits_summary() {
     #[async_trait]
     impl WebSearchTool for FailSearch {
         async fn search(&self, _q: &str, _m: usize) -> anyhow::Result<Vec<WebSearchHit>> {
-            Ok(vec![]) // circuit breaker disabled path: no hits
+            Ok(vec![]) // no hits
         }
     }
 

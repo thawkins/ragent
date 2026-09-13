@@ -25,8 +25,9 @@
 //! scholarly-works API (no API key required) and the Wikipedia REST API. An
 //! optional `openalex_email` config field or `OPENALEX_EMAIL` environment
 //! variable participates in the OpenAlex polite pool. If a `langsearch_api_key`,
-//! `tavily_api_key`, `perplexity_api_key`, or `exa_api_key` is configured in
-//! `ragent.json` (or the corresponding environment variable is set), an optional
+//! `tavily_api_key`, `perplexity_api_key`, `exa_api_key`, or `serper_api_key` is
+//! configured in `ragent.json` (or the corresponding environment variable is
+//! set), an optional
 //! API-backed engine is added for higher-quality results; the keys are masked in
 //! diagnostics and never logged.
 
@@ -42,6 +43,7 @@ use super::super::search::exa::ExaEngine;
 use super::super::search::langsearch::LangSearchEngine;
 use super::super::search::openalex::OpenAlexEngine;
 use super::super::search::perplexity::PerplexityEngine;
+use super::super::search::serper::SerperEngine;
 use super::super::search::tavily::TavilyEngine;
 use super::super::search::wikipedia::WikipediaEngine;
 use super::super::search::{Freshness, SearchEngine, SearchOptions, SearchOrchestrator};
@@ -111,13 +113,19 @@ impl MfSearchTool {
     /// variable), a [`TavilyEngine`] is added as an additional backend. If
     /// `ctx.config` contains a non-empty `perplexity_api_key` (or
     /// `PERPLEXITY_API_KEY` environment variable), a [`PerplexityEngine`] is
-    /// added as an additional backend.
+    /// added as an additional backend. If `ctx.config` contains a non-empty
+    /// `exa_api_key` (or `EXA_API_KEY` environment variable), an
+    /// [`ExaEngine`] is added as an additional backend. If `ctx.config`
+    /// contains a non-empty `serper_api_key` (or `SERPER_API_KEY`
+    /// environment variable), a [`SerperEngine`] is added as an additional
+    /// backend.
     ///
     /// This helper is public so integration tests can verify backend wiring
     /// without making network requests.
     #[must_use]
     pub fn build_orchestrator(ctx: &ToolContext) -> SearchOrchestrator {
-        let (langsearch_key, tavily_key, perplexity_key, exa_key) = Self::resolve_search_keys(ctx);
+        let (langsearch_key, tavily_key, perplexity_key, exa_key, serper_key) =
+            Self::resolve_search_keys(ctx);
         let mailto = Self::resolve_openalex_mailto(ctx);
         let mut engines: Vec<Arc<dyn SearchEngine>> = vec![
             Arc::new(OpenAlexEngine::with_mailto(mailto)),
@@ -137,21 +145,32 @@ impl MfSearchTool {
         if let Some(key) = exa_key {
             engines.push(Arc::new(ExaEngine::new(&key)));
         }
+        if let Some(key) = serper_key {
+            engines.push(Arc::new(SerperEngine::new(key)));
+        }
         SearchOrchestrator::with_engines(engines)
     }
 
     /// Resolve configured API keys for optional search backends.
     ///
-    /// Returns `(langsearch_key, tavily_key, perplexity_key, exa_key)` where
-    /// `langsearch_key` is taken from `ctx.config.langsearch_api_key`,
-    /// `tavily_key` is taken from the `TAVILY_API_KEY` environment variable or
-    /// `ctx.config.tavily_api_key`, `perplexity_key` is taken from the
-    /// `PERPLEXITY_API_KEY` environment variable or
-    /// `ctx.config.perplexity_api_key`, and `exa_key` is taken from the
-    /// `EXA_API_KEY` environment variable or `ctx.config.exa_api_key`.
+    /// Returns `(langsearch_key, tavily_key, perplexity_key, exa_key,
+    /// serper_key)` where `langsearch_key` is taken from
+    /// `ctx.config.langsearch_api_key`, `tavily_key` is taken from the
+    /// `TAVILY_API_KEY` environment variable or `ctx.config.tavily_api_key`,
+    /// `perplexity_key` is taken from the `PERPLEXITY_API_KEY` environment
+    /// variable or `ctx.config.perplexity_api_key`, `exa_key` is taken from
+    /// the `EXA_API_KEY` environment variable or `ctx.config.exa_api_key`,
+    /// and `serper_key` is taken from the `SERPER_API_KEY` environment
+    /// variable or `ctx.config.serper_api_key`.
     fn resolve_search_keys(
         ctx: &ToolContext,
-    ) -> (Option<&str>, Option<String>, Option<String>, Option<String>) {
+    ) -> (
+        Option<&str>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
         let langsearch_key = ctx
             .config
             .as_ref()
@@ -176,7 +195,21 @@ impl MfSearchTool {
             .ok()
             .or_else(|| ctx.config.as_ref().and_then(|cfg| cfg.exa_api_key.clone()))
             .filter(|k| !k.is_empty());
-        (langsearch_key, tavily_key, perplexity_key, exa_key)
+        let serper_key = std::env::var("SERPER_API_KEY")
+            .ok()
+            .or_else(|| {
+                ctx.config
+                    .as_ref()
+                    .and_then(|cfg| cfg.serper_api_key.clone())
+            })
+            .filter(|k| !k.is_empty());
+        (
+            langsearch_key,
+            tavily_key,
+            perplexity_key,
+            exa_key,
+            serper_key,
+        )
     }
 
     /// Resolve the optional OpenAlex polite-pool email.
@@ -199,13 +232,14 @@ impl MfSearchTool {
     /// Return availability status for all possible search backends.
     ///
     /// OpenAlex and Wikipedia are always considered available (keyless).
-    /// LangSearch, Tavily, Perplexity, and Exa require an API key and are marked
-    /// as `failed` when the key is missing. `in_use` reflects the engines that
-    /// are actually wired into the orchestrator built from the supplied
-    /// [`ToolContext`].
+    /// LangSearch, Tavily, Perplexity, Exa, and Serper require an API key and
+    /// are marked as `failed` when the key is missing. `in_use` reflects the
+    /// engines that are actually wired into the orchestrator built from the
+    /// supplied [`ToolContext`].
     #[must_use]
     pub fn engine_status(ctx: &ToolContext) -> Vec<EngineStatus> {
-        let (langsearch_key, tavily_key, perplexity_key, exa_key) = Self::resolve_search_keys(ctx);
+        let (langsearch_key, tavily_key, perplexity_key, exa_key, serper_key) =
+            Self::resolve_search_keys(ctx);
         let orchestrator = Self::build_orchestrator(ctx);
         let in_use: HashSet<&str> = orchestrator.engine_names().into_iter().collect();
         vec![
@@ -244,6 +278,12 @@ impl MfSearchTool {
                 enabled: exa_key.is_some(),
                 in_use: in_use.contains("exa"),
                 failed: exa_key.is_none(),
+            },
+            EngineStatus {
+                name: "Serper",
+                enabled: serper_key.is_some(),
+                in_use: in_use.contains("serper"),
+                failed: serper_key.is_none(),
             },
         ]
     }
@@ -293,8 +333,8 @@ impl Tool for MfSearchTool {
     fn description(&self) -> &'static str {
         "Local keyless web search. Required parameter: 'query'. Multiple backends \
                  run in parallel (OpenAlex, Wikipedia, optional LangSearch / \
-                 Tavily / Perplexity / Exa when configured via 'langsearch_api_key', \
-                 'tavily_api_key', 'perplexity_api_key', or 'exa_api_key'). Keyless backends do \
+                 Tavily / Perplexity / Exa / Serper when configured via 'langsearch_api_key', \
+                 'tavily_api_key', 'perplexity_api_key', 'exa_api_key', or 'serper_api_key'). Keyless backends do \
                  not require API keys. OpenAlex queries the scholarly-works catalog; set \
                  'openalex_email' in ragent.json or the OPENALEX_EMAIL env var to join the polite \
                  pool. Wikipedia queries the English Wikipedia REST API for encyclopedia \
@@ -303,7 +343,7 @@ impl Tool for MfSearchTool {
                  Optional 'per_engine_results' (1-200, default 75) caps how many results each \
                  individual engine returns before merge/dedup. Optional 'engine' restricts the \
                  search to a single backend (openalex, wikipedia, langsearch, \
-                 tavily, perplexity, exa); when omitted all configured engines run in parallel. \
+                 tavily, perplexity, exa, serper); when omitted all configured engines run in parallel. \
                  Each result carries relevance_score, fetch_relevance, and engines_consensus. \
                  Engines that provide their own relevance score (e.g. OpenAlex) use it directly \
                  in ranking."
@@ -343,7 +383,7 @@ impl Tool for MfSearchTool {
                     "description": "Result page (0-10, default: 0)"
                 },
                 "engine": {
-                    "type": "string",                      "enum": ["openalex", "wikipedia", "langsearch", "tavily", "perplexity", "exa"],
+                    "type": "string",                      "enum": ["openalex", "wikipedia", "langsearch", "tavily", "perplexity", "exa", "serper"],
                     "description": "Restrict the search to a single backend. When omitted, all configured engines run in parallel"
                 }
             },

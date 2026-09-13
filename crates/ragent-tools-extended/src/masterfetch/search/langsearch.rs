@@ -39,6 +39,7 @@ use serde_json::json;
 
 use super::engine::{
     EngineReport, Freshness, RawResult, SearchEngine, SearchOptions, dedup_results_by_url,
+    strip_disallowed_quotes,
 };
 
 // ---------------------------------------------------------------------------
@@ -256,7 +257,7 @@ impl SearchEngine for LangSearchEngine {
 pub fn build_request_body(query: &str, opts: &SearchOptions) -> serde_json::Value {
     let count = opts.max_results.clamp(MIN_COUNT, MAX_COUNT);
     json!({
-        "query": query.trim(),
+        "query": strip_disallowed_quotes(query).trim(),
         "count": count,
         "freshness": freshness_to_langsearch(opts.freshness),
         "summary": true,

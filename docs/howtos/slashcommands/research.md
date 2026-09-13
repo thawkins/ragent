@@ -80,7 +80,6 @@ topic can be quoted as one argument.
 | `--local-phase-timeout-secs N` | Local phase budget. |
 | `--search-max-retries N` | Search retry count (default 2). |
 | `--search-retry-base-delay-ms N` | Retry backoff base (default 200). |
-| `--search-circuit-breaker-threshold N` | Consecutive failures before the breaker opens (default 3). |
 | `--max-web-results N` | Web result cap. |
 | `--max-search-calls N` | Search-call cap. |
 | `--max-local-sources N` | Local source cap. |
@@ -91,7 +90,7 @@ topic can be quoted as one argument.
 | `--use-low-relevance` | Keep low-relevance hits. |
 | `--no-papers` | Exclude scholarly-paper engines. |
 | `--use-pdf` | Enable PDF extraction. |
-| `--clarify` / `--no-clarify` | Force on or off the clarification stage. |
+| `--clarify` / `--no-clarify` | Force on or off the clarification stage. Off by default. |
 | `--evaluate` | Enable evaluation scoring of findings. |
 
 ## Examples
@@ -117,7 +116,7 @@ Competitive mode forces `--format comparison-table` output.
 Cross-references local crates and spec documents.
 
 ```
-/research create fast "tokio broadcast channels" --tier light --fetch-concurrently 20 --web-phase-timeout-secs 60
+/research create fast "tokio broadcast channels" --tier light --fetch-concurrently 20 --web-phase-timeout-secs 240
 ```
 A light run with a raised fetch concurrency and web budget.
 

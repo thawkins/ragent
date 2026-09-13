@@ -62,7 +62,7 @@ pub enum ResearchCliCommand {
         max_concurrent_research_units: Option<usize>,
         /// `--clarify` / `--no-clarify` — ask a single clarifying question
         /// before web searches when the topic is ambiguous (FR-005, FR-017).
-        /// Defaults to enabled; use `--no-clarify` to disable.
+        /// Defaults to disabled; use `--clarify` to enable.
         clarify: Option<bool>,
         /// Optional FR-012 `--format <artifact>`.
         format: Option<String>,
@@ -128,11 +128,6 @@ pub enum ResearchCliCommand {
         /// the first search-retry backoff (Milestone H-002). Subsequent
         /// retries double this value. Defaults to 200 ms.
         search_retry_base_delay_ms: Option<u64>,
-        /// `--search-circuit-breaker-threshold N` — number of consecutive
-        /// failed sub-query searches before the circuit breaker opens and
-        /// further searches for the current run are skipped (Milestone H-003).
-        /// Defaults to 3. `0` disables the breaker.
-        search_circuit_breaker_threshold: Option<u32>,
         /// `--max-web-results N` — override the maximum number of web sources
         /// to capture.
         max_web_results: Option<usize>,
@@ -295,7 +290,6 @@ impl ResearchCliCommand {
         let mut local_phase_timeout_secs: Option<u64> = None;
         let mut search_max_retries: Option<u32> = None;
         let mut search_retry_base_delay_ms: Option<u64> = None;
-        let mut search_circuit_breaker_threshold: Option<u32> = None;
         let mut use_local = false;
         let mut use_specs = false;
         let mut use_low_relevance = false;
@@ -335,7 +329,6 @@ impl ResearchCliCommand {
                 | "--local-phase-timeout-secs"
                 | "--search-max-retries"
                 | "--search-retry-base-delay-ms"
-                | "--search-circuit-breaker-threshold"
                 | "--max-web-results"
                 | "--max-search-calls"
                 | "--max-local-sources"
@@ -378,9 +371,6 @@ impl ResearchCliCommand {
                             "--search-max-retries" => search_max_retries = v.parse().ok(),
                             "--search-retry-base-delay-ms" => {
                                 search_retry_base_delay_ms = v.parse().ok();
-                            }
-                            "--search-circuit-breaker-threshold" => {
-                                search_circuit_breaker_threshold = v.parse().ok();
                             }
                             "--max-web-results" => max_web_results = v.parse().ok(),
                             "--max-search-calls" => max_search_calls = v.parse().ok(),
@@ -443,7 +433,6 @@ impl ResearchCliCommand {
             local_phase_timeout_secs,
             search_max_retries,
             search_retry_base_delay_ms,
-            search_circuit_breaker_threshold,
             max_web_results,
             max_search_calls,
             max_local_sources,
@@ -606,14 +595,39 @@ impl ResearchCliCommand {
   help                           Show this help message
 
 Common create flags:
-  --mode tiered|supervisor|competitive (competitive implies --format comparison-table)
-  --tier light|full|dissertation
+  --from-url <URL> (repeatable)                      Seed the run from URL(s)
+  --from-file <PATH> (repeatable)                    Seed the run from file(s)
+  --iterations N                                     Gather-loop iteration budget
   --depth shallow|standard|deep
+  --tier light|full|dissertation
+  --mode tiered|supervisor|competitive (competitive implies --format comparison-table)
   --format report|executive-summary|comparison-table|source-bibliography|imrad
-  --research-model, --compression-model, --final-report-model <provider:model>
-  --max-concurrent-research-units N
-  --summarization-model <provider:model>
-  --use-local, --use-specs, --use-low-relevance, --no-papers, --use-pdf
+  --sources-dir <dir>                                Extra local sources directory
+  --template <name>                                  Output template override
+  --summarization-model <provider:model>             Per-page webpage summariser
+  --research-model <provider:model>                  Sub-topic researcher model
+  --compression-model <provider:model>               Intermediate-compression model
+  --final-report-model <provider:model>              Final-report writer model
+  --max-concurrent-research-units N                  Parallel researcher cap (default 5)
+  --fetch-concurrently N                             Parallel page fetch cap (default 10)
+  --local-concurrently N                             Parallel local reads (default 8)
+  --fetch-timeout-secs N                             Per-fetch timeout (default 30)
+  --web-phase-timeout-secs | --web-time N            Web phase wall-clock budget
+  --local-phase-timeout-secs N                       Local phase wall-clock budget
+  --search-max-retries N                             Search retries (default 2)
+  --search-retry-base-delay-ms N                     Retry backoff base (default 200)
+  --max-web-results N                                Web result cap
+  --max-search-calls N                               Total web-search call cap
+  --max-local-sources N                              Local source cap
+  --max-synthesis-sources N                          Sources admitted into synthesis
+  --brief <TEXT>                                     Explicit research brief (skips clarification)
+  --clarify | --no-clarify                           Clarification stage; --no-clarify is the default
+  --use-local                                        Include local file sources
+  --use-specs                                        Include spec documents as sources
+  --use-low-relevance                                Keep low-relevance web hits
+  --no-papers                                        Exclude scholarly-paper engines
+  --use-pdf                                          Enable PDF extraction
+  --evaluate                                         Append the self-evaluation scorecard
 "
         .to_string()
     }

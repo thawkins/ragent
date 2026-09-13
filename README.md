@@ -414,11 +414,28 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.96** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.100** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **Serper search engine, mf_search resilience, and research webgather
+  cleanups (v1.0.100)** — `mf_search` gained a fifth optional API-backed
+  engine (Serper, Google search) alongside LangSearch / Tavily /
+  Perplexity / Exa, configurable via `serper_api_key` in `ragent.json`;
+  transient engine failures (Wikipedia 429, HTTP 5xx, transport timeouts)
+  are now retried inside the engine call path with exponential backoff
+  (2 retries, 1 s/2 s), account-level quota blocks are reported as
+  `blocked_engines` with reasons instead of retried, and the orchestrator
+  staggers engine starts by 120 ms so keyless backends no longer burst at
+  t=0 (this fixes the "only LangSearch results" `/websearch search`
+  symptom). The research web-gatherer no longer cancels in-flight fetches
+  at the `--web-time` phase deadline (every candidate is fetched to
+  completion; the deadline bounds only the search stage) and the
+  consecutive-failure search circuit breaker was removed in favour of the
+  H-002 retry policy. `/research` gained an interactive clarification
+  gate in the TUI.
 
 - **`/prompt` inspector, tool-repeat guard, redundant command removal
   (v1.0.96)** — the new read-only `/prompt` slash command

@@ -100,11 +100,15 @@ pub const DEFAULT_SEARCH_MAX_RETRIES: u32 = 2;
 /// (Milestone H-002). Subsequent retries double this value (200 ms, 400 ms, …).
 pub const DEFAULT_SEARCH_RETRY_BASE_DELAY_MS: u64 = 200;
 
-/// Default number of consecutive search-tool failures after which the
-/// circuit-breaker opens (Milestone H-003). Once open, no further search
-/// calls are issued for the remainder of the gather pass. `0` disables the
-/// circuit-breaker entirely.
-pub const DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
+/// Per-query search allowance used when the gatherer runs uncapped
+/// (`volume_cap == None`). Large enough to accept engine-max result pages
+/// (OpenAlex returns up to 75 per query) without truncating anything; the
+/// per-fetch timeout and fetch concurrency remain the real volume bounds.
+const UNCAPTED_MAX_RESULTS: usize = 500;
+
+/// Fetch-budget allowance used when the gatherer runs uncapped: effectively
+/// unbounded, so every retained candidate is fetched.
+const UNCAPTED_FETCH_BUDGET: usize = usize::MAX;
 
 /// Minimum extracted content length (in characters) for a fetched page to be
 /// accepted as a web source. Pages whose cleaned body is shorter than this are
@@ -324,6 +328,47 @@ impl GatherResult {
     }
 }
 
+/// Per-engine width-sweep accounting row (T-006). One row per backend search
+/// engine, so the progress table can show how each engine's hits fared
+/// through deduplication, pre-filtering, fetching, and capture.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct EngineSweepStat {
+    /// Engine name (e.g. `langsearch`, `openalex`).
+    pub engine: String,
+    /// Unique URLs credited to this engine that survived deduplication.
+    pub considered: usize,
+    /// URLs credited to this engine that were captured as sources.
+    pub captured: usize,
+    /// URLs credited to this engine that were rejected by a gather filter or
+    /// a fetch failure/timeout.
+    pub excluded: usize,
+}
+
+/// Credit one URL outcome to every engine listed in a comma-separated engine
+/// CSV (consensus hits credit each contributing engine, so per-engine sums
+/// may exceed the global unique-URL counts).
+fn bump_engine_stats(
+    stats: &mut std::collections::BTreeMap<String, EngineSweepStat>,
+    engines_csv: &str,
+    update: impl Fn(&mut EngineSweepStat),
+) {
+    for engine in engines_csv
+        .split(',')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    {
+        let entry = stats
+            .entry(engine.to_string())
+            .or_insert_with(|| EngineSweepStat {
+                engine: engine.to_string(),
+                considered: 0,
+                captured: 0,
+                excluded: 0,
+            });
+        update(entry);
+    }
+}
+
 /// Search-result row returned by a [`WebSearchTool`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebSearchHit {
@@ -509,14 +554,6 @@ pub enum GatherEvent {
         /// Error from the previous failed attempt.
         error: String,
     },
-    /// The search circuit-breaker has opened after too many consecutive
-    /// search-tool failures (Milestone H-003). No further search calls will
-    /// be issued for the remainder of this gather pass; the gatherer falls
-    /// back to no hits.
-    SearchCircuitOpen {
-        /// Number of consecutive failures that triggered the breaker.
-        consecutive_failures: u32,
-    },
     /// Width-sweep summary emitted after all parallel sub-query searches and
     /// candidate fetches have resolved. Carries aggregate statistics so the
     /// tier router and the UI can display which `mf_search` backends
@@ -526,14 +563,29 @@ pub enum GatherEvent {
         queries: Vec<String>,
         /// Unique backend search engines that returned at least one hit.
         engines: Vec<String>,
-        /// Number of unique candidate URLs considered after deduplication and
-        /// pre-filtering.
+        /// Number of unique candidate URLs considered after deduplication.
         considered: usize,
         /// Number of sources ultimately captured.
         captured: usize,
         /// Number of candidates excluded by relevance or content-length
         /// filters.
         excluded: usize,
+        /// Per-engine breakdown of the sweep (T-006). Sorted by engine name.
+        /// Consensus hits credit every engine in the source CSV, so
+        /// per-engine sums may exceed the global unique-URL counts.
+        per_engine: Vec<EngineSweepStat>,
+        /// Unique URLs that passed pre-filtering but were dropped because the
+        /// fetch budget (competitive runs only: the volume cap scaled by the
+        /// sub-query count) was already full. Always 0 on uncapped runs.
+        /// These count as considered but are neither captured nor excluded,
+        /// so `considered == captured + excluded + capped + cancelled` holds.
+        capped: usize,
+        /// Fetches cancelled when the phase deadline truncated the pass.
+        /// Structurally 0 — the fetch stage is not deadline-bounded and
+        /// in-flight fetches are never cancelled; the field is retained so
+        /// the balance invariant stays checkable if truncation behavior
+        /// changes. Also neither captured nor excluded.
+        cancelled: usize,
     },
     /// The vault already contained enough sources to satisfy the query for the
     /// current tier, so no new web searches were issued (FR-016, T-021).
@@ -625,12 +677,6 @@ pub struct WebGatherer {
     /// (Milestone H-002). Subsequent retries double the delay. Defaults to
     /// [`DEFAULT_SEARCH_RETRY_BASE_DELAY_MS`] (200 ms).
     search_retry_base_delay_ms: u64,
-    /// Number of consecutive search-tool failures after which the
-    /// circuit-breaker opens (Milestone H-003). Once open, no further search
-    /// calls are issued for the remainder of the gather pass. Defaults to
-    /// [`DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD`] (3). `0` disables the
-    /// circuit-breaker entirely.
-    search_circuit_breaker_threshold: u32,
     /// JSONL URL log (`log/research-<name>-<ts>-<rand>-web.jsonl`) recording
     /// every search hit as `considered`/`captured`/`rejected` with a reason.
     /// `None` disables logging. Set via [`with_gather_log`].
@@ -656,11 +702,12 @@ pub struct WebGatherer {
     oa_min_full_text_chars: usize,
     /// HTTP client used for Unpaywall/Europe PMC queries.
     oa_client: Option<Arc<dyn OpenAccessClient>>,
-    /// Optional wall-clock deadline for the whole gather pass. When set,
-    /// [`WebGatherer::gather_with_observer`] stops issuing searches and stops
-    /// waiting for fetch completions once the deadline passes, returning
-    /// everything captured so far as a partial [`GatherResult`] instead of
-    /// blocking indefinitely. `None` (the default) means no deadline.
+    /// Optional wall-clock deadline for the *search stage* of the gather pass.
+    /// When set, [`WebGatherer::gather_with_observer`] stops issuing searches
+    /// once the deadline passes and proceeds to the fetch stage with whatever
+    /// was captured. The fetch stage is never deadline-bounded: fetches are
+    /// started for every candidate and in-flight fetches are never cancelled
+    /// on deadline. `None` (the default) means no deadline.
     phase_deadline: Option<Instant>,
     /// Optional LLM page summarizer (T-012 / T-013). When configured, each
     /// captured web page body is summarized before it is stored in the vault
@@ -680,6 +727,13 @@ pub struct WebGatherer {
     /// configured, each logical search call is recorded and an end-of-pass
     /// [`GatherEvent::ProviderCallsSummary`] is emitted.
     provider_stats: Option<Arc<ProviderCallStats>>,
+    /// Optional volume cap for competitive (comparison) runs. `Some(n)` makes
+    /// `n` the per-query search allowance and `n * sub-queries` the fetch
+    /// budget (the original T-006 semantics). `None` (the default) runs
+    /// uncapped: every sub-query search asks for engine-max results and every
+    /// retained candidate is fetched — the per-fetch timeout and fetch
+    /// concurrency remain the real volume bounds.
+    volume_cap: Option<usize>,
 }
 
 impl std::fmt::Debug for WebGatherer {
@@ -692,10 +746,6 @@ impl std::fmt::Debug for WebGatherer {
             .field("disable_scholarly", &self.disable_scholarly)
             .field("allow_pdf_web_sources", &self.allow_pdf_web_sources)
             .field("search_max_retries", &self.search_max_retries)
-            .field(
-                "search_circuit_breaker_threshold",
-                &self.search_circuit_breaker_threshold,
-            )
             .field("has_gather_log", &self.gather_log.is_some())
             .field("has_vault", &self.vault.is_some())
             .field("has_summarizer", &self.summarizer.is_some())
@@ -724,7 +774,6 @@ impl WebGatherer {
             allow_pdf_web_sources: false,
             search_max_retries: DEFAULT_SEARCH_MAX_RETRIES,
             search_retry_base_delay_ms: DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
-            search_circuit_breaker_threshold: DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
             gather_log: None,
             vault: None,
             sufficient_sources: None,
@@ -737,23 +786,24 @@ impl WebGatherer {
             search_budget: None,
             query_cache: None,
             provider_stats: None,
+            volume_cap: None,
         }
     }
 
-    /// Set an optional wall-clock deadline for the whole gather pass.
+    /// Set an optional wall-clock deadline for the *search stage* of the
+    /// gather pass.
     ///
-    /// When the deadline passes, no new work is started (FR-008): the
-    /// decomposer call, the wait for each sub-query search result, and the
-    /// wait for each in-flight fetch completion are all bounded by the
-    /// remaining budget, and truncation breaks the search and fetch loops
-    /// before any further search or fetch is polled. Because fetches already
-    /// in flight are cancelled on drop, the worst-case overshoot beyond the
-    /// deadline is the completion of at most one bounded wait — a fetch
-    /// future that has already been polled and resolves just as the deadline
-    /// elapses is still recorded; nothing newer is initiated. Everything
-    /// captured up to that point is returned as a partial [`GatherResult`] so
-    /// the caller can proceed to analysis/synthesis with whatever was
-    /// gathered.
+    /// When the deadline passes, no new search work is started (FR-008): the
+    /// decomposer call and the wait for each sub-query search result are
+    /// bounded by the remaining budget, and truncation breaks the search
+    /// loop before any further search is polled. Everything captured up to
+    /// that point is returned so the caller can proceed to analysis/synthesis
+    /// with whatever was gathered.
+    ///
+    /// The fetch stage is NOT deadline-bounded: every candidate produced by
+    /// the search stage is fetched to completion, in-flight fetches are
+    /// never cancelled on deadline, and each fetch is individually capped by
+    /// `fetch_timeout`, so the stage remains bounded without one.
     #[must_use]
     pub fn with_phase_deadline(mut self, deadline: Option<Instant>) -> Self {
         self.phase_deadline = deadline;
@@ -898,10 +948,9 @@ impl WebGatherer {
     /// connections and memory. The default is [`DEFAULT_FETCH_CONCURRENCY`]
     /// (10).
     ///
-    /// This also bounds the deadline overshoot (FR-008): at most
-    /// `fetch_concurrency` fetches are ever in flight, and truncation by the
-    /// phase deadline cancels the rest, so the phase never starts a fetch
-    /// after the deadline.
+    /// This bounds the maximum in-flight HTTP connections at any moment; it
+    /// does not gate on the phase deadline (the fetch stage is not
+    /// deadline-bounded and fetches are never cancelled on deadline).
     #[must_use]
     pub fn with_fetch_concurrency(mut self, n: usize) -> Self {
         self.fetch_concurrency = n.max(1);
@@ -915,9 +964,9 @@ impl WebGatherer {
     /// is [`DEFAULT_FETCH_TIMEOUT`] (30 seconds). A zero duration is treated
     /// as the default.
     ///
-    /// Together with the phase deadline (FR-008) this bounds the worst-case
-    /// overshoot: a fetch already in flight when the deadline elapses runs at
-    /// most to its own timeout, and no new fetch is started after truncation.
+    /// This per-fetch cap is the bound that keeps the fetch stage finite now
+    /// that the stage is not deadline-bounded: every fetch runs to completion
+    /// or to this timeout, whichever comes first.
     #[must_use]
     pub fn with_fetch_timeout(mut self, timeout: Duration) -> Self {
         self.fetch_timeout = if timeout.is_zero() {
@@ -985,18 +1034,6 @@ impl WebGatherer {
         self
     }
 
-    /// Override the number of consecutive search-tool failures after which
-    /// the circuit-breaker opens (Milestone H-003). Once open, no further
-    /// search calls are issued for the remainder of the gather pass and the
-    /// gatherer falls back to no hits. Setting this to `0` disables the
-    /// circuit-breaker entirely. The default is
-    /// [`DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD`] (3).
-    #[must_use]
-    pub fn with_search_circuit_breaker_threshold(mut self, n: u32) -> Self {
-        self.search_circuit_breaker_threshold = n;
-        self
-    }
-
     /// Attach a run-scoped search budget. Each sub-query search reserves one
     /// call from the shared counter before issuing any provider request; once
     /// exhausted, remaining sub-queries are skipped and the pass degrades to
@@ -1022,6 +1059,18 @@ impl WebGatherer {
     #[must_use]
     pub fn with_provider_stats(mut self, stats: Arc<ProviderCallStats>) -> Self {
         self.provider_stats = Some(stats);
+        self
+    }
+
+    /// Set the volume cap for competitive (comparison) runs. `Some(n)` makes
+    /// `n` the per-query search allowance and `n * sub-queries` the fetch
+    /// budget. `None` (the default) runs uncapped: every sub-query search
+    /// asks for engine-max results and every retained candidate is fetched —
+    /// the per-fetch timeout and fetch concurrency remain the real volume
+    /// bounds.
+    #[must_use]
+    pub fn with_volume_cap(mut self, cap: Option<usize>) -> Self {
+        self.volume_cap = cap;
         self
     }
 
@@ -1312,15 +1361,16 @@ impl WebGatherer {
     ///
     /// # Deadline behaviour (`--web-time`, FR-008)
     ///
-    /// When [`WebGatherer::with_phase_deadline`] set a deadline, every await
-    /// point in this method is bounded by the remaining budget: the decomposer
-    /// call, each search-result wait, and each fetch-completion wait. After
-    /// the deadline elapses no new search or fetch is started; the loops break
-    /// and everything captured so far is returned as a partial result. The
-    /// worst-case overshoot beyond the deadline is the completion of at most
-    /// the fetches already in flight at truncation — in-flight requests are
-    /// cancelled on drop, and each is itself capped by `fetch_timeout` — so
-    /// the phase never runs unbounded past the deadline.
+    /// When [`WebGatherer::with_phase_deadline`] set a deadline, the awaits in
+    /// the *search stage* are bounded by the remaining budget: the decomposer
+    /// call and each search-result wait. After the deadline elapses no new
+    /// search is started; the search loop breaks and everything captured so
+    /// far proceeds to the fetch stage.
+    ///
+    /// The fetch stage is NOT deadline-bounded: every candidate produced by
+    /// the search stage is fetched to completion and in-flight fetches are
+    /// never cancelled on deadline; each fetch is individually capped by
+    /// `fetch_timeout`, so the stage never runs unbounded.
     pub async fn gather_with_observer(
         &self,
         topic: &str,
@@ -1336,11 +1386,12 @@ impl WebGatherer {
 
         tracing::info!(topic, max_results, "research: starting web-gathering phase");
 
-        // Phase deadline (H-001 / --web-time): when set, the gather pass
-        // becomes best-effort. Once the deadline passes we stop issuing new
-        // searches and stop waiting for fetch completions, returning
-        // everything captured so far as a partial result so the session can
-        // proceed to analysis/synthesis with whatever was gathered.
+        // Phase deadline (H-001 / --web-time): when set, the *search stage*
+        // of the gather pass becomes best-effort. Once the deadline passes we
+        // stop issuing new searches and proceed to fetching. The fetch stage
+        // is not deadline-bounded: every candidate produced by the search
+        // stage is fetched to completion and in-flight fetches are never
+        // cancelled on deadline.
         let deadline = self.phase_deadline;
         let deadline_secs = deadline
             .map(|d| {
@@ -1364,23 +1415,31 @@ impl WebGatherer {
             });
         }
         // Deadline emission is single-shot (FR-004): `truncated` may be set by
-        // several bounded waits (decomposer, search loop, fetch loop), but the
-        // `PhaseTimedOut` event fires exactly once, from the single terminal
-        // site at the end of the gather pass, carrying the final captured
-        // count. Interim sites only set the flag and break their loops.
+        // the bounded waits in the search stage (decomposer, search loop), but
+        // the `PhaseTimedOut` event fires exactly once, from the single
+        // terminal site at the end of the gather pass, carrying the final
+        // captured count. Interim sites only set the flag and break their
+        // loops.
         //
-        // No-new-work guarantee (FR-008): all three await points below —
-        // (a) the decomposer call, (b) each `results.next()` in the search
-        // loop, and (c) each `stream.next()` in the fetch loop — are wrapped
-        // in `tokio::time::timeout(remaining(), ..)` via `next_bounded!` or an
-        // explicit call. Once the deadline elapses, `truncated` is set and
-        // both loops break before polling any further search or fetch, so no
-        // new search or fetch is initiated after the deadline. In-flight
-        // futures are cancelled on drop, which cancels the underlying
-        // request; the worst-case overshoot is therefore bounded by the
-        // completion of the bounded waits already resolved at truncation
-        // (at most one in-flight fetch, itself capped by `fetch_timeout`).
+        // No-new-search guarantee (FR-008): both await points in the search
+        // stage — (a) the decomposer call and (b) each `results.next()` in the
+        // search loop — are wrapped in `tokio::time::timeout(remaining(), ..)`
+        // via `next_bounded!` or an explicit call. Once the deadline elapses,
+        // `truncated` is set and the search loop breaks before polling any
+        // further search, so no new search is initiated after the deadline.
+        // The fetch stage below is deliberately NOT bounded this way: no
+        // fetch start is gated on the deadline and in-flight fetches are
+        // never cancelled.
         let mut truncated = false;
+        // True once the configured deadline has passed during this pass. The
+        // flag starts true when the deadline is already in the past at phase
+        // start; macro/inline timeout sites set it when their wait expires,
+        // and the terminal diagnostic also treats the deadline's own state as
+        // ground truth (the unbounded fetch stage can outlive the deadline
+        // without any bounded wait expiring).
+        let mut deadline_fired = deadline
+            .map(|d| d <= std::time::Instant::now())
+            .unwrap_or(false);
         let remaining = || {
             deadline.map_or_else(
                 || std::time::Duration::from_secs(u64::MAX / 2),
@@ -1388,20 +1447,27 @@ impl WebGatherer {
             )
         };
         // Await the next stream item, but bound the wait by the phase
-        // deadline so a stalled search/fetch cannot outlive the budget. The
-        // abandoned futures are cancelled on drop, which cancels the
-        // underlying request.
+        // deadline so a stalled search cannot outlive the budget.
         //
-        // This macro is the mechanism behind the no-new-work guarantee
-        // (FR-008): every stream wait in the search and fetch loops is
-        // deadline-bounded, so after the deadline elapses the loops see
-        // `truncated` and break instead of polling more work.
+        // This macro is the mechanism behind the no-new-search guarantee
+        // (FR-008): every stream wait in the search loop is
+        // deadline-bounded, so after the deadline elapses the loop sees
+        // `truncated` and breaks instead of polling more work. The fetch
+        // loop deliberately does NOT use this macro — fetches run to
+        // completion regardless of the deadline.
         macro_rules! next_bounded {
+            // Only mark truncation when the deadline actually elapsed: a
+            // `Duration::ZERO` timeout on an unready stream also yields
+            // Err(Elapsed) (e.g. when no deadline is configured), which must
+            // not be mistaken for a deadline hit.
             ($stream:expr) => {
                 match tokio::time::timeout(remaining(), $stream.next()).await {
                     Ok(item) => item,
                     Err(_) => {
-                        truncated = true;
+                        if deadline.is_some() {
+                            truncated = true;
+                            deadline_fired = true;
+                        }
                         None
                     }
                 }
@@ -1409,7 +1475,8 @@ impl WebGatherer {
         }
         // Single terminal emission site (FR-004): called once after the
         // gather loops unwind, with the final captured count. Interim
-        // truncation sites set `truncated` and break without emitting.
+        // truncation sites set `truncated`/`deadline_fired` and break without
+        // emitting.
         let emit_deadline_event = |observer: Option<&dyn GatherObserver>, captured: usize| {
             if let Some(obs) = observer {
                 obs.on_event(GatherEvent::PhaseTimedOut {
@@ -1520,7 +1587,10 @@ impl WebGatherer {
                             vec![topic.to_string()]
                         }
                         Err(_) => {
-                            truncated = true;
+                            if deadline.is_some() {
+                                truncated = true;
+                                deadline_fired = true;
+                            }
                             Vec::new()
                         }
                     }
@@ -1549,40 +1619,28 @@ impl WebGatherer {
         // Run each sub-query in parallel with bounded concurrency. Each
         // future owns its query string so we don't borrow `queries`.
         //
-        // Milestone H-002/H-003: each sub-query search is retried up to
+        // Milestone H-002: each sub-query search is retried up to
         // `search_max_retries` times with exponential backoff on transient
-        // failures. A circuit-breaker tracks consecutive failures across all
-        // sub-queries; once it opens, no further search calls are issued and
-        // the gatherer falls back to no hits.
-        //
-        // The retry/circuit-breaker state is shared across futures via
-        // `Arc<AtomicU32>` / `Arc<AtomicBool>` so it works correctly under
-        // `buffer_unordered` parallelism.
+        // failures.
         let search_tool = self.search.clone();
         let max_retries = self.search_max_retries;
         let base_delay_ms = self.search_retry_base_delay_ms;
-        let circuit_threshold = self.search_circuit_breaker_threshold;
+        // Volume policy: uncapped runs (tiered/supervisor default) ask each
+        // search for engine-max results; competitive runs with a volume cap
+        // restrict every sub-query to `cap` hits.
+        let per_query_allowance = self.volume_cap.unwrap_or(UNCAPTED_MAX_RESULTS).max(1);
         let search_budget = self.search_budget.clone();
         let query_cache = self.query_cache.clone();
         let provider_stats = self.provider_stats.clone();
-        let consecutive_failures = Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let circuit_tripped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let search_futures: Vec<_> = queries
             .iter()
             .map(|q| {
                 let q = q.clone();
                 let tool = search_tool.clone();
-                let cf = consecutive_failures.clone();
-                let ct = circuit_tripped.clone();
                 let budget = search_budget.clone();
                 let cache = query_cache.clone();
                 let stats = provider_stats.clone();
                 async move {
-                    // Circuit-breaker check: if already tripped, skip this
-                    // search entirely and return a marker error.
-                    if ct.load(std::sync::atomic::Ordering::Relaxed) {
-                        return SearchCallOutcome::CircuitOpen;
-                    }
                     // Run-scoped search budget: reserve one call before any
                     // provider request. Exhaustion skips the search entirely.
                     if let Some(budget) = &budget
@@ -1601,10 +1659,8 @@ impl WebGatherer {
                     let mut attempt: u32 = 0;
                     let mut last_error;
                     loop {
-                        match tool.search(&q, max_results).await {
+                        match tool.search(&q, per_query_allowance).await {
                             Ok(hits) => {
-                                // Success: reset the consecutive-failure counter.
-                                cf.store(0, std::sync::atomic::Ordering::Relaxed);
                                 // Record one logical search call (retries
                                 // included) and memoise the result.
                                 if let Some(stats) = &stats {
@@ -1617,12 +1673,6 @@ impl WebGatherer {
                             }
                             Err(e) => {
                                 last_error = e.to_string();
-                                let count =
-                                    cf.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                                // Circuit-breaker: trip when threshold reached.
-                                if circuit_threshold > 0 && count >= circuit_threshold {
-                                    ct.store(true, std::sync::atomic::Ordering::Relaxed);
-                                }
                                 if attempt >= max_retries {
                                     // Record the logical call even on terminal
                                     // failure so the provider total reflects
@@ -1659,6 +1709,11 @@ impl WebGatherer {
         let mut any_search_error: Option<String> = None;
         let mut excluded_count = 0usize;
         let mut considered_count = 0usize;
+        // Per-engine accounting (T-006). All bump sites run on the gather
+        // task itself (search loop + fetch dispatch loop), so a plain map
+        // needs no locking.
+        let mut per_engine: std::collections::BTreeMap<String, EngineSweepStat> =
+            std::collections::BTreeMap::new();
         let log_rejected = |url: &str,
                             query: &str,
                             title: &str,
@@ -1694,7 +1749,6 @@ impl WebGatherer {
                 detail,
             );
         };
-        let mut circuit_open_emitted = false;
         let mut budget_exhausted_emitted = false;
 
         while let Some((idx, outcome)) = next_bounded!(results) {
@@ -1721,9 +1775,29 @@ impl WebGatherer {
                         // result instead of re-splitting the engine CSV twice.
                         let is_scholarly = is_scholarly_hit(&hit);
                         let is_encyclopedia = is_encyclopedia_hit(&hit);
+                        // Count every deduplicated hit as considered so the
+                        // summary balances exactly:
+                        // considered = captured + excluded + capped + cancelled.
+                        considered_count += 1;
+                        bump_engine_stats(&mut per_engine, &hit.search_engine, |s| {
+                            s.considered += 1
+                        });
+                        self.log_url_outcome(
+                            &hit.url,
+                            &query,
+                            &hit.title,
+                            &hit.search_tool,
+                            &hit.search_engine,
+                            "considered",
+                            "",
+                            None,
+                        );
                         // Filter out scholarly hits when --no-papers is set.
                         if self.disable_scholarly && is_scholarly {
                             excluded_count += 1;
+                            bump_engine_stats(&mut per_engine, &hit.search_engine, |s| {
+                                s.excluded += 1
+                            });
                             let reason = "scholarly engine excluded by --no-papers";
                             tracing::info!(
                                 query = %query,
@@ -1746,6 +1820,9 @@ impl WebGatherer {
                             && classify_web_source(&hit.url, None) == WebSourceKind::Pdf
                         {
                             excluded_count += 1;
+                            bump_engine_stats(&mut per_engine, &hit.search_engine, |s| {
+                                s.excluded += 1
+                            });
                             let reason = "PDF web source excluded; use --use-pdf to enable";
                             tracing::info!(
                                 query = %query,
@@ -1769,17 +1846,6 @@ impl WebGatherer {
                             }
                             continue;
                         }
-                        considered_count += 1;
-                        self.log_url_outcome(
-                            &hit.url,
-                            &query,
-                            &hit.title,
-                            &hit.search_tool,
-                            &hit.search_engine,
-                            "considered",
-                            "",
-                            None,
-                        );
                         // Scholarly hits (e.g. OpenAlex) are already ranked by
                         // the source engine's own relevance score and carry a
                         // reconstructed abstract in the snippet. The lexical
@@ -1822,6 +1888,9 @@ impl WebGatherer {
                             hits_by_url.push((query.clone(), hit));
                         } else {
                             excluded_count += 1;
+                            bump_engine_stats(&mut per_engine, &hit.search_engine, |s| {
+                                s.excluded += 1
+                            });
                             let reason =
                                 format!("title/snippet relevance too low for query {query}");
                             tracing::info!(
@@ -1865,24 +1934,6 @@ impl WebGatherer {
                         "research: sub-query search failed after retries"
                     );
                     any_search_error = Some(format!("{query}: {error}"));
-                }
-                SearchCallOutcome::CircuitOpen => {
-                    // The circuit-breaker tripped before this sub-query
-                    // started. Emit the circuit-open event once.
-                    if !circuit_open_emitted {
-                        let cf = consecutive_failures.load(std::sync::atomic::Ordering::Relaxed);
-                        if let Some(obs) = observer {
-                            obs.on_event(GatherEvent::SearchCircuitOpen {
-                                consecutive_failures: cf,
-                            });
-                        }
-                        circuit_open_emitted = true;
-                        tracing::warn!(
-                            consecutive_failures = cf,
-                            "research: search circuit-breaker open; skipping remaining sub-queries"
-                        );
-                    }
-                    any_search_error = Some(format!("{query}: search circuit-breaker open"));
                 }
                 SearchCallOutcome::BudgetExhausted => {
                     // The run-scoped search budget ran out before this
@@ -1936,6 +1987,9 @@ impl WebGatherer {
                     considered: considered_count,
                     captured: 0,
                     excluded: excluded_count,
+                    per_engine: Vec::new(),
+                    capped: 0,
+                    cancelled: 0,
                 });
             }
             return Ok(GatherResult {
@@ -1956,13 +2010,12 @@ impl WebGatherer {
         // original search-ranking order afterwards so `web-NN.md` supporting
         // file names track hit position rather than completion timing.
         //
-        // Overshoot bound (FR-008): only `fetch_concurrency` fetch futures
-        // are polled at any moment; `buffer_unordered` does not start a new
-        // fetch until an in-flight one resolves. When the deadline truncates
-        // the loop, the stream (and with it every queued future) is dropped
-        // and the in-flight requests are cancelled, so the phase's overshoot
-        // past the deadline is at most the completion time of the bounded
-        // wait that observed the deadline — never a fresh fetch.
+        // Concurrency bound: only `fetch_concurrency` fetch futures are polled
+        // at any moment; `buffer_unordered` does not start a new fetch until
+        // an in-flight one resolves. The fetch loop is NOT deadline-bounded:
+        // every queued candidate is started and every in-flight fetch runs to
+        // completion or its own `fetch_timeout`, never cancelled on the phase
+        // deadline.
         let fetch_concurrency = self.fetch_concurrency.max(1);
         let fetch_tool = self.fetch.clone();
         let fetch_timeout = self.fetch_timeout;
@@ -1974,9 +2027,27 @@ impl WebGatherer {
                 .iter()
                 .map(|(_, hit)| hit.search_engine.as_str()),
         );
+        // Fetch-budget accounting (T-006): hits beyond the fetch budget are
+        // neither fetched nor counted as excluded, so the summary reports
+        // them separately to keep the balance
+        // considered == captured + excluded + capped + cancelled.
+        //
+        // Volume policy: uncapped runs (the default — tiered/supervisor)
+        // fetch every retained candidate; the per-fetch `fetch_timeout` caps
+        // each page and `fetch_concurrency` bounds parallelism, so a separate
+        // fetch cap would only discard candidates the search already paid for
+        // (observed: 42 retained / 35 capped / 7 captured on a 7-query
+        // sweep). Capped (competitive) runs scale the per-query allowance by
+        // the sub-query count so the cap bounds per-query volume, not the
+        // whole sweep.
+        let fetch_budget = self.volume_cap.map_or(UNCAPTED_FETCH_BUDGET, |cap| {
+            cap.saturating_mul(queries.len().max(1)).max(cap)
+        });
+        let candidate_total = hits_by_url.len();
+        let capped_count = candidate_total.saturating_sub(fetch_budget);
         let fetch_futures = hits_by_url
             .into_iter()
-            .take(max_results)
+            .take(fetch_budget)
             .enumerate()
             .map(|(index, (query, hit))| (index, query, hit))
             .map(|(index, query, hit)| {
@@ -2026,17 +2097,15 @@ impl WebGatherer {
                     (index, query, hit, result, language_fallback)
                 }
             });
-        let mut collected: Vec<(usize, Option<Source>)> = Vec::with_capacity(max_results);
+        let mut collected: Vec<(usize, Option<Source>)> =
+            Vec::with_capacity(candidate_total.min(UNCAPTED_MAX_RESULTS));
         let mut stream = futures::stream::iter(fetch_futures).buffer_unordered(fetch_concurrency);
-        while let Some((index, query, hit, result, language_fallback)) = next_bounded!(stream) {
-            // Deadline reached while waiting for the next fetch completion:
-            // abandon the remaining in-flight fetches (they are cancelled on
-            // drop) and keep everything captured so far. No further fetch is
-            // polled, and none is newly started (FR-008). The `PhaseTimedOut`
-            // event is emitted once at the terminal site.
-            if truncated {
-                break;
-            }
+        // The fetch stage is deliberately NOT deadline-bounded: once the
+        // search stage produced the candidate set, every candidate fetch is
+        // started regardless of the phase deadline and in-flight fetches are
+        // never cancelled on deadline — each fetch is still individually
+        // capped by `fetch_timeout`, so the stage stays bounded.
+        while let Some((index, query, hit, result, language_fallback)) = stream.next().await {
             match result {
                 Ok(Ok(page)) => {
                     let scholarly = page.page_type.as_deref() == Some("scholarly");
@@ -2068,6 +2137,7 @@ impl WebGatherer {
                     };
                     if !retained && !self.keep_low_relevance {
                         excluded_count += 1;
+                        bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.excluded += 1);
                         tracing::info!(
                             query = %query,
                             url = %page.url,
@@ -2200,6 +2270,7 @@ impl WebGatherer {
                     };
                     if content_chars < min_chars {
                         excluded_count += 1;
+                        bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.excluded += 1);
                         let error = if scholarly {
                             format!(
                                 "scholarly abstract too short ({content_chars} < {min_chars} chars)"
@@ -2329,7 +2400,7 @@ impl WebGatherer {
                             body: body_for_source,
                             relevance,
                             search_tool: hit.search_tool,
-                            search_engine: hit.search_engine,
+                            search_engine: hit.search_engine.clone(),
                             content_type: page.content_type.clone(),
                             page_type: page.page_type.clone(),
                             media_type: media_type.clone(),
@@ -2338,6 +2409,7 @@ impl WebGatherer {
                             oa_recovery,
                         }),
                     ));
+                    bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.captured += 1);
                 }
                 Ok(Err(e)) => {
                     if let Some(obs) = observer {
@@ -2353,6 +2425,7 @@ impl WebGatherer {
                         "research: webfetch failed; skipping"
                     );
                     excluded_count += 1;
+                    bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.excluded += 1);
                     log_rejected(
                         &hit.url,
                         &query,
@@ -2378,6 +2451,7 @@ impl WebGatherer {
                         "research: webfetch timed out; skipping"
                     );
                     excluded_count += 1;
+                    bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.excluded += 1);
                     log_rejected(
                         &hit.url,
                         &query,
@@ -2420,9 +2494,25 @@ impl WebGatherer {
             truncated,
             "research: web-gathering phase complete"
         );
-        if truncated {
+        // Emit the timeout diagnostic when the configured deadline actually
+        // passed during the pass. A bounded-wait expiry sets the flag; when
+        // every bounded wait resolved before expiring (common once the fetch
+        // stage is unbounded — the pass outlives the deadline in the fetch
+        // loop instead) the deadline's own state is the ground truth.
+        if deadline_fired
+            || deadline
+                .map(|d| d <= std::time::Instant::now())
+                .unwrap_or(false)
+        {
             emit_deadline_event(observer, sources.len());
         }
+        // Cancellation accounting (T-006): the fetch stage never cancels
+        // fetches for the phase deadline, so this is structurally 0; the
+        // derived counter is kept so the WidthSweepSummary balance invariant
+        // `considered == captured + excluded + capped + cancelled` still
+        // holds if a future truncation site is added to the fetch stage.
+        let cancelled_count =
+            considered_count.saturating_sub(sources.len() + excluded_count + capped_count);
         if let Some(log) = &self.gather_log
             && let Err(e) =
                 log.lock()
@@ -2433,17 +2523,24 @@ impl WebGatherer {
                         "considered": considered_count,
                         "captured": sources.len(),
                         "rejected": excluded_count,
+                        "capped": capped_count,
+                        "cancelled": cancelled_count,
+                        "per_engine": per_engine.values().cloned().collect::<Vec<_>>(),
                     }))
         {
             tracing::warn!(error = %e, "research: failed to write gather summary to web URL log");
         }
         if let Some(obs) = observer {
+            let per_engine_stats: Vec<EngineSweepStat> = per_engine.values().cloned().collect();
             obs.on_event(GatherEvent::WidthSweepSummary {
                 queries: queries.clone(),
                 engines: engines.clone(),
                 considered: considered_count,
                 captured: sources.len(),
                 excluded: excluded_count,
+                per_engine: per_engine_stats,
+                capped: capped_count,
+                cancelled: cancelled_count,
             });
         }
         // End-of-pass provider-call summary, emitted once when a counter is
@@ -2467,8 +2564,8 @@ impl WebGatherer {
     }
 }
 
-/// Outcome of a single sub-query search call, including retry/circuit-breaker
-/// state (Milestone H-002/H-003).
+/// Outcome of a single sub-query search call, including retry state
+/// (Milestone H-002).
 enum SearchCallOutcome {
     /// The search succeeded (retry counts are only tracked on the `Err`
     /// variant, where they drive `SearchRetrying` events).
@@ -2483,9 +2580,6 @@ enum SearchCallOutcome {
         /// Number of retries attempted.
         retries: u32,
     },
-    /// The circuit-breaker was already open when this sub-query started, so no
-    /// search call was made.
-    CircuitOpen,
     /// The run-scoped search budget was exhausted before this sub-query
     /// started, so no search call was made.
     BudgetExhausted,
@@ -3445,6 +3539,8 @@ mod tests {
             "failed youtube fetch must not be captured as a source, got {events:?}"
         );
     }
+    /// On a capped run the fetch budget stops at `max_results` for a single
+    /// query: the third candidate is capped (not fetched).
     #[tokio::test]
     async fn gather_respects_max_results() {
         let hits = vec![
@@ -3494,8 +3590,9 @@ mod tests {
             );
         }
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let g = g.with_volume_cap(Some(2));
         let sources = g.gather("topic", 2).await.unwrap();
-        assert_eq!(sources.len(), 2, "must not exceed max_results");
+        assert_eq!(sources.len(), 2, "capped run must not exceed max_results");
     }
     #[tokio::test]
     async fn gather_rejects_zero_max_results() {
@@ -4376,131 +4473,6 @@ mod tests {
                 GatherEvent::SearchFailed { error } if error.contains("persistent failure")
             )),
             "expected SearchFailed event"
-        );
-    }
-
-    // ── Milestone H-003: circuit-breaker tests ────────────────────────
-
-    #[tokio::test]
-    async fn h003_circuit_breaker_opens_after_threshold_failures() {
-        struct AlwaysFail;
-        #[async_trait]
-        impl WebSearchTool for AlwaysFail {
-            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
-                anyhow::bail!("circuit test failure")
-            }
-        }
-        struct OkFetch;
-        #[async_trait]
-        impl WebFetchTool for OkFetch {
-            async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
-                Ok(WebFetchedPage {
-                    published_at: None,
-                    url: "u".into(),
-                    title: "t".into(),
-                    body: body256("b"),
-                    content_type: None,
-                    page_type: None,
-                    language: None,
-                    author: None,
-                })
-            }
-        }
-        #[derive(Default)]
-        struct CollectEvents(Mutex<Vec<GatherEvent>>);
-        impl GatherObserver for CollectEvents {
-            fn on_event(&self, event: GatherEvent) {
-                self.0.lock().unwrap().push(event);
-            }
-        }
-        // Use a decomposer that returns 5 sub-queries so the
-        // circuit-breaker has a chance to trip mid-stream.
-        struct FiveQueries;
-        #[async_trait]
-        impl QueryDecomposer for FiveQueries {
-            async fn decompose(&self, _topic: &str) -> anyhow::Result<Vec<String>> {
-                Ok((0..5).map(|i| format!("q{i}")).collect())
-            }
-        }
-        let g = WebGatherer::new(Arc::new(AlwaysFail), Arc::new(OkFetch))
-            .with_decomposer(Arc::new(FiveQueries))
-            .with_search_max_retries(0)
-            .with_search_circuit_breaker_threshold(3)
-            .with_search_retry_base_delay_ms(0);
-        let obs = CollectEvents::default();
-        let result = g
-            .gather_with_observer("topic", 5, Some(&obs))
-            .await
-            .unwrap();
-        assert!(result.sources.is_empty());
-        let events = obs.0.lock().unwrap();
-        // CircuitOpen should be emitted at least once.
-        assert!(
-            events.iter().any(|e| matches!(
-                e,
-                GatherEvent::SearchCircuitOpen { consecutive_failures }
-                    if *consecutive_failures >= 3
-            )),
-            "expected SearchCircuitOpen event with failures >= 3, got {events:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn h003_circuit_breaker_disabled_when_threshold_zero() {
-        struct AlwaysFail;
-        #[async_trait]
-        impl WebSearchTool for AlwaysFail {
-            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
-                anyhow::bail!("no circuit failure")
-            }
-        }
-        struct OkFetch;
-        #[async_trait]
-        impl WebFetchTool for OkFetch {
-            async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
-                Ok(WebFetchedPage {
-                    published_at: None,
-                    url: "u".into(),
-                    title: "t".into(),
-                    body: body256("b"),
-                    content_type: None,
-                    page_type: None,
-                    language: None,
-                    author: None,
-                })
-            }
-        }
-        #[derive(Default)]
-        struct CollectEvents(Mutex<Vec<GatherEvent>>);
-        impl GatherObserver for CollectEvents {
-            fn on_event(&self, event: GatherEvent) {
-                self.0.lock().unwrap().push(event);
-            }
-        }
-        struct ThreeQueries;
-        #[async_trait]
-        impl QueryDecomposer for ThreeQueries {
-            async fn decompose(&self, _topic: &str) -> anyhow::Result<Vec<String>> {
-                Ok((0..3).map(|i| format!("q{i}")).collect())
-            }
-        }
-        let g = WebGatherer::new(Arc::new(AlwaysFail), Arc::new(OkFetch))
-            .with_decomposer(Arc::new(ThreeQueries))
-            .with_search_max_retries(0)
-            .with_search_circuit_breaker_threshold(0)
-            .with_search_retry_base_delay_ms(0);
-        let obs = CollectEvents::default();
-        let _result = g
-            .gather_with_observer("topic", 5, Some(&obs))
-            .await
-            .unwrap();
-        let events = obs.0.lock().unwrap();
-        // No circuit-open event should be emitted.
-        assert!(
-            !events
-                .iter()
-                .any(|e| matches!(e, GatherEvent::SearchCircuitOpen { .. })),
-            "circuit breaker should be disabled when threshold is 0"
         );
     }
 
@@ -5497,6 +5469,9 @@ mod tests {
             considered,
             captured,
             excluded,
+            per_engine,
+            capped,
+            cancelled,
         }) = summary
         {
             assert_eq!(queries, &["Rust async runtime".to_string()]);
@@ -5504,7 +5479,255 @@ mod tests {
             assert_eq!(*considered, 2);
             assert_eq!(*captured, result.sources.len());
             assert_eq!(*excluded, 0);
+            assert_eq!(*capped, 0);
+            assert_eq!(*cancelled, 0);
+            assert_eq!(
+                per_engine
+                    .iter()
+                    .map(|s| (s.engine.as_str(), s.considered, s.captured, s.excluded))
+                    .collect::<Vec<_>>(),
+                vec![("langsearch", 1, 1, 0), ("tavily", 1, 1, 0)],
+            );
         }
+    }
+
+    /// T-006: the per-engine summary table balances exactly —
+    /// considered == captured + excluded + capped + cancelled — and credits
+    /// every engine in a consensus CSV. Covers a PDF exclusion, a pre-filter
+    /// exclusion, and scholarly/encyclopedia snippet-only captures.
+    #[tokio::test]
+    async fn width_sweep_summary_per_engine_accounting_balances() {
+        let hits = vec![
+            WebSearchHit {
+                url: "https://example.com/paper.pdf".into(),
+                title: "PDF paper".into(),
+                snippet: "topic Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "langsearch".into(),
+                author: None,
+            },
+            WebSearchHit {
+                url: "https://openalex.example/paper".into(),
+                title: "OpenAlex paper".into(),
+                snippet: "We evaluate asynchronous runtimes in Rust across a range of benchmark workloads and report detailed performance comparisons. (Year: 2024 | Cited: 5 | OA: yes)".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "openalex".into(),
+                author: None,
+            },
+            WebSearchHit {
+                url: "https://wikipedia.example".into(),
+                title: "Wikipedia summary".into(),
+                snippet: "Rust is a multi-paradigm, general-purpose programming language emphasizing performance and safety, especially safe concurrency.".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "wikipedia".into(),
+                author: None,
+            },
+            // Consensus hit credited to both engines in the CSV.
+            WebSearchHit {
+                url: "https://shared.example".into(),
+                title: "Shared result".into(),
+                snippet: "topic Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "langsearch, tavily".into(),
+                author: None,
+            },
+            // Unrelated hit rejected by the title/snippet pre-filter.
+            WebSearchHit {
+                url: "https://unrelated.example".into(),
+                title: "Cooking recipes for the weekend".into(),
+                snippet: "delicious pancakes and waffles with maple syrup".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "langsearch".into(),
+                author: None,
+            },
+        ];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://shared.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://shared.example".into(),
+                title: "Shared result".into(),
+                body: body256("shared body"),
+                content_type: None,
+                page_type: None,
+                language: None,
+                author: None,
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+
+        #[derive(Default)]
+        struct CollectEvents(Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        let obs = CollectEvents::default();
+        let result = g
+            .gather_with_observer("Rust async runtime", 10, Some(&obs))
+            .await
+            .unwrap();
+
+        // PDF excluded, pre-filter excluded, openalex + wikipedia synthesized,
+        // shared page fetched: 5 considered = 2 captured + 2 excluded + 0 + 0.
+        assert_eq!(result.considered_count, 5);
+        assert_eq!(result.sources.len(), 3);
+        assert_eq!(result.excluded_count, 2);
+
+        let events = obs.0.lock().unwrap();
+        let summary = events.iter().find(
+            |e| matches!(e, GatherEvent::WidthSweepSummary { engines, .. } if !engines.is_empty()),
+        );
+        let Some(GatherEvent::WidthSweepSummary {
+            considered,
+            captured,
+            excluded,
+            per_engine,
+            capped,
+            cancelled,
+            ..
+        }) = summary
+        else {
+            panic!("expected WidthSweepSummary event, got {events:?}");
+        };
+        assert_eq!(*considered, 5);
+        assert_eq!(*captured, 3);
+        assert_eq!(*excluded, 2);
+        assert_eq!(*capped, 0);
+        assert_eq!(*cancelled, 0);
+        assert_eq!(
+            considered,
+            &(captured + excluded + capped + cancelled),
+            "summary must balance"
+        );
+        let by_engine: std::collections::HashMap<&str, (usize, usize, usize)> = per_engine
+            .iter()
+            .map(|s| (s.engine.as_str(), (s.considered, s.captured, s.excluded)))
+            .collect();
+        // langsearch: PDF excluded + unrelated excluded + shared page
+        // (captured — the shared URL is a normal page credited to both
+        // engines in the consensus CSV).
+        assert_eq!(by_engine.get("langsearch"), Some(&(3, 1, 2)));
+        // tavily: consensus CSV credit for the shared captured page.
+        assert_eq!(by_engine.get("tavily"), Some(&(1, 1, 0)));
+        assert_eq!(by_engine.get("openalex"), Some(&(1, 1, 0)));
+        assert_eq!(by_engine.get("wikipedia"), Some(&(1, 1, 0)));
+    }
+
+    /// T-006: on a capped (competitive) run, hits beyond the fetch budget
+    /// are reported as `capped` so the summary still balances instead of
+    /// silently vanishing.
+    #[tokio::test]
+    async fn width_sweep_summary_reports_fetch_capped_hits() {
+        let hits = vec![
+            WebSearchHit {
+                url: "https://openalex.example/paper".into(),
+                title: "OpenAlex paper".into(),
+                snippet: "We evaluate asynchronous runtimes in Rust across a range of benchmark workloads and report detailed performance comparisons. (Year: 2024 | Cited: 5 | OA: yes)".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "openalex".into(),
+                author: None,
+            },
+            WebSearchHit {
+                url: "https://wikipedia.example".into(),
+                title: "Wikipedia summary".into(),
+                snippet: "Rust is a multi-paradigm, general-purpose programming language emphasizing performance and safety, especially safe concurrency.".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "wikipedia".into(),
+                author: None,
+            },
+            WebSearchHit {
+                url: "https://langsearch.example".into(),
+                title: "LangSearch result".into(),
+                snippet: "topic Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "langsearch".into(),
+                author: None,
+            },
+        ];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://langsearch.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://langsearch.example".into(),
+                title: "title".into(),
+                body: body256("body"),
+                content_type: None,
+                page_type: None,
+                language: None,
+                author: None,
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        // Capped (competitive-style) run: budget 2 keeps the two snippet-only
+        // hits and caps the third.
+        let g = g.with_volume_cap(Some(2));
+        let result = g
+            .gather_with_observer("Rust async runtime", 2, None)
+            .await
+            .unwrap();
+        // 3 considered = 2 captured + 0 excluded + 1 capped.
+        assert_eq!(result.considered_count, 3);
+        assert_eq!(result.sources.len(), 2);
+        assert_eq!(result.excluded_count, 0);
+    }
+
+    /// Uncapped runs (the default) fetch every retained candidate regardless
+    /// of the caller's `max_results`; the same run with a volume cap trims to
+    /// the capped budget. Uses one query so the two policies differ only in
+    /// the cap.
+    #[tokio::test]
+    async fn uncapped_run_fetches_every_retained_candidate() {
+        let hits: Vec<WebSearchHit> = (0..3)
+            .map(|i| WebSearchHit {
+                url: format!("https://{i}.example"),
+                title: format!("Rust async runtime result {i}"),
+                snippet: "topic Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "test".into(),
+                search_engine: "test".into(),
+                author: None,
+            })
+            .collect();
+        let mut pages = std::collections::HashMap::new();
+        for i in 0..3 {
+            pages.insert(
+                format!("https://{i}.example"),
+                WebFetchedPage {
+                    published_at: None,
+                    url: format!("https://{i}.example"),
+                    title: format!("title-{i}"),
+                    body: body256("body"),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                    author: None,
+                },
+            );
+        }
+        // Uncapped: all 3 candidates are fetched and captured even though
+        // `max_results` is 2.
+        let (g, _, _) = gatherer_with(hits.clone(), pages.clone(), Vec::new());
+        let result = g.gather_with_observer("topic", 2, None).await.unwrap();
+        assert_eq!(result.considered_count, 3);
+        assert_eq!(result.sources.len(), 3, "uncapped runs fetch everything");
+
+        // Capped: budget 2 keeps 2 candidates and caps the third.
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let g = g.with_volume_cap(Some(2));
+        let result = g.gather_with_observer("topic", 2, None).await.unwrap();
+        assert_eq!(result.sources.len(), 2, "capped run stops at the budget");
     }
 
     /// PDF search hits are skipped by default, so they do not consume the
@@ -5524,5 +5747,197 @@ mod tests {
         let result = g.gather_with_observer("topic", 5, None).await.unwrap();
         assert_eq!(result.pdf_count, 0);
         assert!(result.sources.is_empty());
+    }
+
+    /// On a capped run the volume cap is also the per-query search allowance
+    /// passed to the search tool, scaled per sub-query for the fetch budget
+    /// (original T-006 semantics, now restricted to competitive runs).
+    #[tokio::test]
+    async fn volume_cap_sets_per_query_search_allowance() {
+        #[derive(Default)]
+        struct RecordingSearch {
+            allowances: Mutex<Vec<usize>>,
+        }
+        #[async_trait]
+        impl WebSearchTool for RecordingSearch {
+            async fn search(
+                &self,
+                _query: &str,
+                max_results: usize,
+            ) -> anyhow::Result<Vec<WebSearchHit>> {
+                self.allowances.lock().unwrap().push(max_results);
+                Ok((0..4)
+                    .map(|i| WebSearchHit {
+                        url: format!("https://{i}.example"),
+                        title: format!("Rust async runtime result {i}"),
+                        snippet: "topic Rust async runtime".into(),
+                        matched_query: String::new(),
+                        search_tool: "test".into(),
+                        search_engine: "test".into(),
+                        author: None,
+                    })
+                    .collect())
+            }
+        }
+        struct OkFetch;
+        #[async_trait]
+        impl WebFetchTool for OkFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: url.to_string(),
+                    title: format!("title-{url}"),
+                    body: body256(&format!("body-{url}")),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                    author: None,
+                })
+            }
+        }
+        // Capped run: the search tool sees the cap (2), not the caller's
+        // `max_results` (10). 4 hits with a per-query allowance of 2 and a
+        // fetch budget of 2 x 1 query = 2 → 4 considered = 2 captured + 2
+        // capped.
+        let search = Arc::new(RecordingSearch::default());
+        let g = WebGatherer::new(search.clone(), Arc::new(OkFetch)).with_volume_cap(Some(2));
+        let result = g.gather_with_observer("topic", 10, None).await.unwrap();
+        assert_eq!(
+            search.allowances.lock().unwrap().as_slice(),
+            &[2],
+            "capped run passes the cap as the per-query allowance"
+        );
+        assert_eq!(result.sources.len(), 2);
+        assert_eq!(result.excluded_count, 0);
+
+        // Uncapped run: the search tool sees the large uncapped allowance.
+        let search = Arc::new(RecordingSearch::default());
+        let g = WebGatherer::new(search.clone(), Arc::new(OkFetch));
+        let result = g.gather_with_observer("topic", 10, None).await.unwrap();
+        assert_eq!(
+            search.allowances.lock().unwrap().as_slice(),
+            &[UNCAPTED_MAX_RESULTS],
+            "uncapped run asks for engine-max results"
+        );
+        assert_eq!(result.sources.len(), 4, "uncapped run fetches everything");
+    }
+
+    /// Uncapped multi-query sweeps fetch every retained candidate: 3
+    /// sub-queries x 2 hits are all captured with no capping, even though the
+    /// caller's `max_results` is 2.
+    #[tokio::test]
+    async fn fetch_budget_scales_with_sub_query_count() {
+        struct MultiQuerySearch;
+        #[async_trait]
+        impl WebSearchTool for MultiQuerySearch {
+            async fn search(
+                &self,
+                query: &str,
+                _max_results: usize,
+            ) -> anyhow::Result<Vec<WebSearchHit>> {
+                // Each sub-query returns 2 unique hits well above any single
+                // global cap of 2.
+                Ok((0..2)
+                    .map(|i| WebSearchHit {
+                        url: format!("https://{i}.{query}.example"),
+                        title: format!("Result {i} for {query}"),
+                        snippet: format!("topic about {query} number {i}"),
+                        matched_query: String::new(),
+                        search_tool: "test".into(),
+                        search_engine: "test".into(),
+                        author: None,
+                    })
+                    .collect())
+            }
+        }
+        struct OkFetch;
+        #[async_trait]
+        impl WebFetchTool for OkFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: url.to_string(),
+                    title: format!("title-{url}"),
+                    body: body256(&format!("body-{url}")),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                    author: None,
+                })
+            }
+        }
+        struct ThreeQueries;
+        #[async_trait]
+        impl QueryDecomposer for ThreeQueries {
+            async fn decompose(&self, _topic: &str) -> anyhow::Result<Vec<String>> {
+                Ok((0..3).map(|i| format!("q{i}")).collect())
+            }
+        }
+        let g = WebGatherer::new(Arc::new(MultiQuerySearch), Arc::new(OkFetch))
+            .with_decomposer(Arc::new(ThreeQueries));
+        let result = g.gather_with_observer("topic", 2, None).await.unwrap();
+        // 3 sub-queries x 2 hits = 6 unique candidates; the run is uncapped,
+        // so nothing is capped and everything is captured.
+        assert_eq!(result.considered_count, 6);
+        assert_eq!(result.sources.len(), 6, "no candidate should be capped");
+    }
+
+    /// A capped multi-query sweep scales the fetch budget by the sub-query
+    /// count: with cap 2 and 3 sub-queries the budget is 6, so all 6 unique
+    /// candidates are captured even though the cap is smaller than the
+    /// candidate total.
+    #[tokio::test]
+    async fn volume_cap_scales_fetch_budget_with_sub_query_count() {
+        struct MultiQuerySearch;
+        #[async_trait]
+        impl WebSearchTool for MultiQuerySearch {
+            async fn search(
+                &self,
+                query: &str,
+                _max_results: usize,
+            ) -> anyhow::Result<Vec<WebSearchHit>> {
+                Ok((0..2)
+                    .map(|i| WebSearchHit {
+                        url: format!("https://{i}.{query}.example"),
+                        title: format!("Result {i} for {query}"),
+                        snippet: format!("topic about {query} number {i}"),
+                        matched_query: String::new(),
+                        search_tool: "test".into(),
+                        search_engine: "test".into(),
+                        author: None,
+                    })
+                    .collect())
+            }
+        }
+        struct OkFetch;
+        #[async_trait]
+        impl WebFetchTool for OkFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: url.to_string(),
+                    title: format!("title-{url}"),
+                    body: body256(&format!("body-{url}")),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                    author: None,
+                })
+            }
+        }
+        struct ThreeQueries;
+        #[async_trait]
+        impl QueryDecomposer for ThreeQueries {
+            async fn decompose(&self, _topic: &str) -> anyhow::Result<Vec<String>> {
+                Ok((0..3).map(|i| format!("q{i}")).collect())
+            }
+        }
+        let g = WebGatherer::new(Arc::new(MultiQuerySearch), Arc::new(OkFetch))
+            .with_decomposer(Arc::new(ThreeQueries))
+            .with_volume_cap(Some(2));
+        let result = g.gather_with_observer("topic", 2, None).await.unwrap();
+        // Budget = cap 2 x 3 sub-queries = 6 = candidate total: no capping.
+        assert_eq!(result.considered_count, 6);
+        assert_eq!(result.sources.len(), 6, "scaled budget covers the sweep");
     }
 }

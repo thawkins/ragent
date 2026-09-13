@@ -536,8 +536,16 @@ fn test_blocked_engines_listed() {
         EngineReport::blocked("brave", "rate-limited"),
     ];
     let output = merge_and_rank(&reports, "test");
-    assert!(output.blocked_engines.contains(&"brave".to_string()));
-    assert!(!output.blocked_engines.contains(&"ddg".to_string()));
+    // T-016: entries are "name: reason" so the cause of a block is visible.
+    assert!(
+        output
+            .blocked_engines
+            .iter()
+            .any(|e| e.starts_with("brave")),
+        "expected a 'brave: …' blocked entry, got {:?}",
+        output.blocked_engines
+    );
+    assert!(!output.blocked_engines.iter().any(|e| e.starts_with("ddg")));
 }
 
 #[test]

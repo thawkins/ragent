@@ -3,7 +3,7 @@
 //! Implements **FR-008**, **FR-009**, and **NFR-003** (T-015).
 //!
 //! This module merges results from multiple keyless search backends
-//! (`DuckDuckGo`, Brave, …), deduplicates by normalised URL, boosts results
+//! (OpenAlex, Wikipedia, …), deduplicates by normalised URL, boosts results
 //! that appear across multiple engines (cross-engine consensus), assigns a
 //! normalised relevance score (0.0–1.0), derives a coarse `fetch_relevance`
 //! tier (`high` / `med` / `low`), mines related queries from titles and
@@ -82,9 +82,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::engine::{
-    EngineReport, RawResult, blocked_engine_names, collect_all_results, normalise_result_url,
-};
+use super::engine::{EngineReport, RawResult, collect_all_results, normalise_result_url};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -233,16 +231,26 @@ pub fn merge_and_rank(reports: &[EngineReport], query: &str) -> MergeOutput {
     let total_engines = reports.len();
     let total_raw_results = reports.iter().map(|r| r.result_count).sum();
     let engines_with_results = reports.iter().filter(|r| r.has_results()).count();
-    let blocked_engines: Vec<String> = blocked_engine_names(reports)
+    // Surface the block reason alongside the engine name so a bare "blocked"
+    // list still tells the caller *why* (rate-limit vs quota vs HTTP error)
+    // without forcing them into tracing logs (FR-008).
+    let blocked_engines: Vec<String> = reports
         .iter()
-        .map(std::string::ToString::to_string)
+        .filter(|r| r.engine_blocked || (!r.error.is_empty() && !r.has_results()))
+        .map(|r| {
+            if r.error.is_empty() {
+                r.engine.clone()
+            } else {
+                format!("{}: {}", r.engine, r.error)
+            }
+        })
         .collect();
 
-    // Collect all results.
+    // Collect all results (for related-query mining).
     let all_results = collect_all_results(reports);
 
-    // Group by normalised URL, preserving flattened-list positions.
-    let groups = group_by_url(&all_results);
+    // Group by normalised URL, preserving per-engine ranks.
+    let groups = group_by_url(reports);
 
     // Score each group.
     let mut scored: Vec<ScoredResult> = groups
@@ -307,26 +315,31 @@ struct ScoredResult {
     author: Option<String>,
 }
 
-/// An entry in a result group, carrying the original flattened-list position
-/// for rank scoring.
+/// An entry in a result group, carrying the entry's rank position within its
+/// own engine's result list (0-based) for rank scoring.
+///
+/// Ranks are per-engine rather than per flattened cross-engine list: the
+/// first engine's result count must not penalise later engines' entries.
 #[derive(Debug, Clone)]
 struct GroupEntry {
     result: RawResult,
-    flat_index: usize,
+    rank_in_engine: usize,
 }
 
-/// Group raw results by their normalised URL, preserving the flattened-list
-/// position of each entry for rank scoring.
+/// Group raw results by their normalised URL, preserving each entry's rank
+/// position within its own engine's result list.
 ///
 /// Returns a map from normalised URL → list of group entries.
-fn group_by_url(results: &[RawResult]) -> HashMap<String, Vec<GroupEntry>> {
+fn group_by_url(reports: &[EngineReport]) -> HashMap<String, Vec<GroupEntry>> {
     let mut groups: HashMap<String, Vec<GroupEntry>> = HashMap::new();
-    for (i, result) in results.iter().enumerate() {
-        let norm = normalise_result_url(&result.url);
-        groups.entry(norm).or_default().push(GroupEntry {
-            result: result.clone(),
-            flat_index: i,
-        });
+    for report in reports {
+        for (rank, result) in report.results.iter().enumerate() {
+            let norm = normalise_result_url(&result.url);
+            groups.entry(norm).or_default().push(GroupEntry {
+                result: result.clone(),
+                rank_in_engine: rank,
+            });
+        }
     }
     groups
 }
@@ -337,7 +350,9 @@ fn group_by_url(results: &[RawResult]) -> HashMap<String, Vec<GroupEntry>> {
 /// - Best entry score across all engines. When an engine provides its own
 ///   relevance score (`RawResult.score`, e.g. OpenAlex's `relevance_score`),
 ///   that engine-provided score is used directly. Otherwise a positional
-///   rank score is derived from the entry's flattened-list position.
+///   rank score is derived from the entry's rank within its own engine's
+///   result list (never from the flattened cross-engine list — an engine
+///   returning many results must not bury later engines' entries).
 /// - Consensus boost: +0.15 per additional engine beyond the first.
 fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) -> ScoredResult {
     // Count distinct engines.
@@ -346,11 +361,15 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
     let engine_count = distinct_engines.len();
 
     // Best entry score: use the engine-provided score when available (e.g.
-    // OpenAlex's normalised `relevance_score`); fall back to a positional
-    // rank score for keyless backends that do not provide scores.
+    // OpenAlex's normalised `relevance_score`); fall back to the entry's
+    // per-engine rank score for keyless backends that do not provide scores.
     let best_entry_score = entries
         .iter()
-        .map(|e| e.result.score.unwrap_or_else(|| rank_score(e.flat_index)))
+        .map(|e| {
+            e.result
+                .score
+                .unwrap_or_else(|| rank_score(e.rank_in_engine))
+        })
         .fold(0.0_f64, f64::max);
 
     // Consensus boost.
@@ -486,7 +505,13 @@ pub fn mine_related_queries(results: &[RawResult], query: &str) -> Vec<String> {
 /// Merge and rank results, capping to `max_results`.
 ///
 /// Convenience wrapper around [`merge_and_rank`] that truncates the result
-/// list to `max_results`.
+/// list to `max_results`. When two or more engines returned results, the
+/// truncation is **diversity-aware**: no single engine may occupy more than
+/// half of the capped slots, so an engine contributing a large scored result
+/// block (e.g. OpenAlex returning up to 75 hits) cannot crowd every other
+/// engine out of the final list. Slots no other engine can fill are handed
+/// back to the highest-scoring entries of the dominant engine, so a run where
+/// only one engine contributed still returns the full `max_results`.
 ///
 /// # Examples
 ///
@@ -513,6 +538,95 @@ pub fn merge_and_rank_with_cap(
     max_results: usize,
 ) -> MergeOutput {
     let mut output = merge_and_rank(reports, query);
-    output.results.truncate(max_results);
+    output.results = diversity_truncate(&output.results, max_results);
     output
+}
+
+/// Per-engine share limit applied by [`merge_and_rank_with_cap`].
+///
+/// A single engine may hold at most half of the merged slots (minimum 2) when
+/// more than one engine returned results; with only one contributing engine
+/// the limit is not applied.
+fn per_engine_share_limit(max_results: usize) -> usize {
+    (max_results.div_ceil(2)).max(2)
+}
+
+/// Count how many results each engine contributes across a result list.
+///
+/// The `source` field is a comma-separated engine list for consensus URLs
+/// (one URL returned by several engines); each listed engine is credited
+/// with the result so a consensus URL consumes budget in every engine that
+/// backed it.
+fn count_engines<'a>(results: impl Iterator<Item = &'a ConsensusResult>) -> HashMap<String, usize> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for result in results {
+        for engine in result
+            .source
+            .split(',')
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+        {
+            *counts.entry(engine.to_string()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+/// Truncate the ranked result list to `max_results` with a per-engine share
+/// limit, so no single engine can monopolise the capped merge (see
+/// [`merge_and_rank_with_cap`]).
+///
+/// Pass 1 keeps results whose every contributing engine is still under the
+/// share limit. Pass 2 fills any remaining slots with the highest-scoring
+/// skipped results regardless of engine, so a merge fed by engines with few
+/// candidates still returns the full budget.
+fn diversity_truncate(results: &[ConsensusResult], max_results: usize) -> Vec<ConsensusResult> {
+    if results.len() <= max_results {
+        return results.to_vec();
+    }
+
+    // One contributing engine → plain truncation keeps full fidelity.
+    let engine_counts = count_engines(results.iter());
+    if engine_counts.len() <= 1 {
+        return results[..max_results].to_vec();
+    }
+
+    let limit = per_engine_share_limit(max_results);
+    let mut kept: Vec<ConsensusResult> = Vec::with_capacity(max_results);
+    let mut held = count_engines(std::iter::empty());
+    let mut skipped: Vec<&ConsensusResult> = Vec::new();
+
+    for result in results {
+        if kept.len() == max_results {
+            break;
+        }
+        let engines: Vec<&str> = result
+            .source
+            .split(',')
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .collect();
+        let under_limit = engines
+            .iter()
+            .all(|e| held.get(*e).copied().unwrap_or(0) < limit);
+        if under_limit {
+            for e in &engines {
+                *held.entry((*e).to_string()).or_insert(0) += 1;
+            }
+            kept.push(result.clone());
+        } else {
+            skipped.push(result);
+        }
+    }
+
+    // Fill leftover slots (engines with fewer candidates than their share)
+    // with the highest-scoring skipped results.
+    for result in skipped {
+        if kept.len() == max_results {
+            break;
+        }
+        kept.push(result.clone());
+    }
+
+    kept
 }

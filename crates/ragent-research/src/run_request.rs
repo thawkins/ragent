@@ -20,8 +20,8 @@ use crate::session::{
     RunEngineConfig, SessionConfig, WebConfig,
 };
 use crate::web_gatherer::{
-    DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
-    DEFAULT_SEARCH_MAX_RETRIES, DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
+    DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_SEARCH_MAX_RETRIES,
+    DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
 };
 use crate::{
     DEFAULT_LOCAL_CONCURRENCY, DEFAULT_MAX_LOCAL_SOURCES, DEFAULT_OA_MIN_FULL_TEXT_CHARS,
@@ -88,9 +88,6 @@ pub struct ResearchRunRequest {
     pub search_max_retries: Option<u32>,
     /// `--search-retry-base-delay-ms N` — first retry backoff base delay.
     pub search_retry_base_delay_ms: Option<u64>,
-    /// `--search-circuit-breaker-threshold N` — consecutive failures before
-    /// circuit breaker opens.
-    pub search_circuit_breaker_threshold: Option<u32>,
     /// Override the maximum number of web sources to capture.
     pub max_web_results: Option<usize>,
     /// `--max-search-calls N` — hard cap on total web-search calls for the
@@ -107,7 +104,10 @@ pub struct ResearchRunRequest {
     pub mode: Option<String>,
     /// `--max-concurrent-research-units N` for supervisor/competitive modes.
     pub max_concurrent_research_units: Option<usize>,
-    /// `--no-clarify` disables the single clarifying question.
+    /// `--clarify` / `--no-clarify` control the single clarifying question
+    /// asked before web searches when the topic looks ambiguous. When `None`
+    /// the builder defaults it to `false` (no clarification); pass `Some(true)`
+    /// via `--clarify` to enable it.
     pub clarify: Option<bool>,
     /// `--brief <TEXT>` explicit research brief.
     pub brief: Option<String>,
@@ -200,7 +200,6 @@ impl ResearchRunRequest {
                 local_phase_timeout_secs,
                 search_max_retries,
                 search_retry_base_delay_ms,
-                search_circuit_breaker_threshold,
                 max_web_results,
                 max_search_calls,
                 max_local_sources,
@@ -235,7 +234,6 @@ impl ResearchRunRequest {
                     local_phase_timeout_secs,
                     search_max_retries,
                     search_retry_base_delay_ms,
-                    search_circuit_breaker_threshold,
                     max_web_results,
                     max_search_calls,
                     max_local_sources,
@@ -407,9 +405,6 @@ pub fn build_session_config(
             search_retry_base_delay_ms: req
                 .search_retry_base_delay_ms
                 .unwrap_or(DEFAULT_SEARCH_RETRY_BASE_DELAY_MS),
-            search_circuit_breaker_threshold: req
-                .search_circuit_breaker_threshold
-                .unwrap_or(DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD),
             open_access_recovery: cfg_research
                 .map(|r| r.open_access_recovery)
                 .unwrap_or(false),
@@ -425,7 +420,7 @@ pub fn build_session_config(
                 .max_concurrent_research_units
                 .unwrap_or(crate::supervisor::DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS),
         },
-        clarify: req.clarify.unwrap_or(true),
+        clarify: req.clarify.unwrap_or(false),
         brief: req.brief.clone(),
         invocation: req.invocation.clone(),
         models: ModelConfig {
@@ -542,10 +537,6 @@ mod tests {
             cfg.resilience.search_retry_base_delay_ms,
             DEFAULT_SEARCH_RETRY_BASE_DELAY_MS
         );
-        assert_eq!(
-            cfg.resilience.search_circuit_breaker_threshold,
-            DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD
-        );
         assert!(!cfg.resilience.open_access_recovery);
         assert!(cfg.resilience.contact_email.is_none());
         assert_eq!(
@@ -578,7 +569,7 @@ mod tests {
         assert_eq!(
             cfg.web.web_phase_timeout_secs,
             Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS),
-            "default web_phase_timeout must be 60 seconds (NFR-003)"
+            "default web_phase_timeout must be 180 seconds (NFR-003)"
         );
     }
 

@@ -192,11 +192,10 @@ impl GatherObserver for StateGatherForwarder {
             }
             GatherEvent::SearchReturnedNoHits
             | GatherEvent::SearchRetrying { .. }
-            | GatherEvent::SearchCircuitOpen { .. }
             | GatherEvent::SearchBudgetExhausted { .. }
             | GatherEvent::ProviderCallsSummary { .. }
             | GatherEvent::WidthSweepSummary { .. } => {
-                // Retry/circuit diagnostics and the summary are surfaced by
+                // Retry diagnostics and the summary are surfaced by
                 // the session-level forwarder; the engine only needs the
                 // sources delivered via SourceCaptured.
             }
@@ -281,10 +280,13 @@ impl IterativeEngine {
         }
     }
 
-    /// Bound each iteration's web-gathering phase by a wall-clock deadline
+    /// Bound each iteration's web *search stage* by a wall-clock deadline
     /// (FR-006). The timeout is converted to a fresh `Instant` at the start of
     /// every iteration, so a multi-iteration run gets the full budget per
-    /// iteration; `None` (or a zero duration) disables the deadline.
+    /// iteration; `None` (or a zero duration) disables the deadline. The
+    /// fetch stage is never deadline-bounded: every candidate found by a
+    /// truncated search stage is still fetched to completion and in-flight
+    /// fetches are never cancelled.
     #[must_use]
     pub fn with_phase_deadline(mut self, timeout: Option<std::time::Duration>) -> Self {
         self.web_phase_deadline = timeout.filter(|d| !d.is_zero());

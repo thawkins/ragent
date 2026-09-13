@@ -6,7 +6,7 @@
 //! search pipeline:
 //!
 //! - [`SearchEngine`] — an `async` trait implemented by each search backend
-//!   adapter (`DuckDuckGo`, Brave, …). Backends are keyless: they scrape public
+//!   adapter (OpenAlex, Wikipedia, …). Backends are keyless: they do not
 //!   search-engine HTML result pages and parse the results. No API keys,
 //!   tokens, or accounts are required (FR-023).
 //! - [`RawResult`] — a single search result as returned by one engine, before
@@ -52,6 +52,7 @@
 //! ```
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use thiserror::Error;
 
@@ -445,7 +446,7 @@ pub enum SearchEngineError {
 /// pages and parse the results. No API keys, tokens, or accounts are required
 /// (FR-023).
 ///
-/// Each adapter (`DuckDuckGo`, Brave, …) implements this trait and is queried
+/// Each adapter (OpenAlex, Wikipedia, …) implements this trait and is queried
 /// in parallel by the `mf_search` consensus merger. The merger collects
 /// [`EngineReport`]s from all backends, merges and deduplicates results by
 /// normalised URL, and ranks them with cross-engine consensus boosting.
@@ -539,6 +540,30 @@ pub trait SearchEngine: Send + Sync {
 #[must_use]
 pub fn normalise_result_url(url: &str) -> String {
     normalise_url(url).unwrap_or_else(|_| url.to_string())
+}
+
+/// Remove quote characters from a search query.
+///
+/// Several search backends reject quoted-phrase syntax on restricted (free)
+/// accounts — Serper returns HTTP 400 "Query pattern not allowed for free
+/// accounts", which blocks that engine for the whole query. Stripping both
+/// ASCII quotes and smart/typographic quotes (`'` `"` `'` `"` `"` `«` `»`)
+/// keeps every engine reachable; the unquoted multi-term query still matches
+/// the same terms without phrase semantics. Callers that embed quoted phrases
+/// (e.g. a TUI echoing a quoted slash-command argument) therefore degrade
+/// gracefully instead of silently losing engines.
+#[must_use]
+pub fn strip_disallowed_quotes(query: &str) -> String {
+    query
+        .replace(
+            [
+                '"', '\'', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{00AB}', '\u{00BB}',
+            ],
+            "",
+        )
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Remove duplicate results by normalised URL, preserving first occurrence.
@@ -683,6 +708,101 @@ pub fn blocked_engine_names(reports: &[EngineReport]) -> Vec<&str> {
         .filter(|r| r.engine_blocked || (!r.error.is_empty() && !r.has_results()))
         .map(|r| r.engine.as_str())
         .collect()
+}
+
+/// Default number of search-attempt retries for transient engine failures.
+///
+/// A search attempt is transient when the engine reported an error that is
+/// likely to succeed on retry: Wikipedia-style rate limiting (HTTP 429),
+/// server errors (HTTP 5xx), or request-level transport failures (timeout,
+/// connect, request builder). Wikimedia's shared limiter windows outlast a
+/// single 1s backoff, so two retries with short exponential backoff are the
+/// engine-level default (T-016).
+pub const DEFAULT_SEARCH_MAX_RETRIES: u32 = 2;
+
+/// Default delay before the first transient search retry. Subsequent retries
+/// double this base (1s, 2s for [`DEFAULT_SEARCH_MAX_RETRIES`] == 2).
+pub const DEFAULT_SEARCH_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Classify whether an [`EngineReport`] represents a transient failure worth
+/// retrying once inside the engine call path.
+///
+/// Transient when:
+/// - the engine is Wikipedia and the message mentions `429` / `rate-limit`
+///   (Wikimedia's shared limiter window closes quickly), or
+/// - the message mentions an HTTP `5xx` status, or
+/// - the report is an *error* report (`engine_blocked == false`) whose message
+///   starts with `HTTP request failed:` (per the engine adapters' convention)
+///   and mentions a timeout/connect/request-class transport problem.
+///
+/// NOT transient: quota-style blocks (HTTP 402/403/432, missing key) and the
+/// OpenAlex daily-budget 429, which does not reset until midnight UTC and
+/// would only be hammered by pointless retries.
+#[must_use]
+pub fn report_is_transient(report: &EngineReport) -> bool {
+    if !report.results.is_empty() {
+        return false;
+    }
+    let msg = report.error.as_str();
+    if msg.is_empty() {
+        return false;
+    }
+    let lower = msg.to_ascii_lowercase();
+    if msg.contains("429") || lower.contains("rate-limit") {
+        // OpenAlex's budget-based 429 is a daily quota, not a burst window —
+        // the provider payload itself says "Insufficient budget"; do not
+        // retry it, but DO retry Wikipedia's plain per-IP limiter.
+        let openalex_daily_quota = report.engine == "openalex" && msg.contains("budget");
+        if !openalex_daily_quota {
+            return true;
+        }
+    }
+    if msg.contains("HTTP 5") {
+        // HTTP 500/502/503/504 etc.
+        return true;
+    }
+    if !report.engine_blocked && msg.starts_with("HTTP request failed:") {
+        return lower.contains("timeout")
+            || lower.contains("timed out")
+            || lower.contains("connect")
+            || lower.contains("request error")
+            || lower.contains("error sending request");
+    }
+    false
+}
+
+/// Search one engine with up to `max_retries` transient retries.
+///
+/// The first attempt runs immediately; when the returned report classifies as
+/// transient (see [`report_is_transient`]) the call waits `retry_delay` and
+/// tries the engine again. Non-transient results are returned as-is. This is
+/// the engine-level retry home for every `mf_search` caller (TUI, CLI, tools,
+/// research), so no caller implements its own retry loop (spec T-016).
+pub async fn search_with_retry(
+    engine: &Arc<dyn SearchEngine>,
+    query: &str,
+    opts: &SearchOptions,
+    max_retries: u32,
+    retry_delay: std::time::Duration,
+) -> EngineReport {
+    let mut attempt: u32 = 0;
+    loop {
+        let report = engine.search(query, opts).await;
+        if attempt >= max_retries || !report_is_transient(&report) {
+            return report;
+        }
+        attempt += 1;
+        // Exponential backoff: retry_delay, 2*retry_delay, 4*retry_delay, …
+        let delay = retry_delay.saturating_mul(1u32 << (attempt - 1));
+        tracing::warn!(
+            engine = %report.engine,
+            attempt,
+            delay_ms = delay.as_millis(),
+            error = %report.error,
+            "search engine transiently failed; retrying"
+        );
+        tokio::time::sleep(delay).await;
+    }
 }
 
 // ---------------------------------------------------------------------------

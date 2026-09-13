@@ -1,9 +1,10 @@
 //! Integration tests for the `--web-time` / `web_phase_timeout_secs`
 //! web-gathering phase deadline (Milestone H-001 extension).
 //!
-//! When the phase deadline elapses, the gatherer must return everything
-//! captured so far as a partial [`GatherResult`] so the session proceeds to
-//! analysis/synthesis instead of discarding the phase.
+//! The deadline bounds the *search stage*: when it elapses, no new searches
+//! are issued and the pass proceeds with whatever was found. The fetch stage
+//! is never deadline-bounded — fetches are never gated on or cancelled by the
+//! deadline; each fetch runs to completion or its own `fetch_timeout`.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -28,7 +29,10 @@ impl WebSearchTool for FakeSearch {
     }
 }
 
-/// Fetch that returns instantly for `fast` URLs and sleeps 120 s otherwise.
+/// Fetch that returns instantly for `fast` URLs and otherwise returns a
+/// slow-marker page after a moderate sleep (1.5 s). The sleep is long enough
+/// to outlive the test deadlines but short enough to keep the
+/// non-deadline-bounded fetch stage fast.
 struct MixedFetch {
     fast: Vec<String>,
 }
@@ -54,12 +58,12 @@ impl WebFetchTool for MixedFetch {
                 author: None,
             })
         } else {
-            tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
             Ok(WebFetchedPage {
                 published_at: None,
                 url: url.to_string(),
                 title: "Slow page".into(),
-                body: "slow body".into(),
+                body: "slow body about Rust async runtime. ".repeat(12),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -155,14 +159,17 @@ async fn test_web_deadline_returns_partial_sources_and_proceeds() {
         .await
         .expect("run should complete despite the deadline");
 
-    // The run must not have waited for the slow fetch (120 s sleep).
+    // The fetch stage is not deadline-bounded, but the "slow" fetch only
+    // sleeps 1.5 s, so the whole run must stay well under that order of
+    // magnitude (no artificial stall).
     assert!(
         started.elapsed() < std::time::Duration::from_secs(30),
-        "run should honour the web phase deadline instead of blocking on slow fetches"
+        "run should stay prompt with moderate fetches, took {:?}",
+        started.elapsed()
     );
 
-    // Everything captured before the deadline was ingested: the two fast
-    // pages, not the slow one.
+    // Fetches are never cancelled on the phase deadline: every searched
+    // candidate is fetched and ingested, fast AND slow.
     let web_urls: Vec<&str> = outcome
         .sources
         .iter()
@@ -173,12 +180,12 @@ async fn test_web_deadline_returns_partial_sources_and_proceeds() {
         .collect();
     assert_eq!(
         web_urls.len(),
-        2,
-        "expected the two fast sources, got {web_urls:?}"
+        3,
+        "all three searched sources must be captured now that fetches are never cancelled, got {web_urls:?}"
     );
     assert!(
-        !web_urls.iter().any(|u| u.contains("slow")),
-        "the slow source must not have been captured: {web_urls:?}"
+        web_urls.iter().any(|u| u.contains("slow")),
+        "the slow source must be captured too (its fetch ran to completion): {web_urls:?}"
     );
 
     // The deadline was surfaced as a `web_deadline` RunStep diagnostic.
@@ -200,13 +207,12 @@ async fn test_web_deadline_returns_partial_sources_and_proceeds() {
         );
     }
 
-    // T-004 / FR-002 / FR-003 / FR-005 / NFR-002: the partial corpus must
-    // survive all the way to a written RESEARCH.md with citations to only the
-    // captured sources.
+    // The complete corpus (deadline only truncates the *search stage*) must
+    // survive all the way to a written RESEARCH.md citing every source.
     let research_md = research_root.join("web-deadline-partial/RESEARCH.md");
     assert!(
         research_md.is_file(),
-        "RESEARCH.md must be written after a truncated web phase"
+        "RESEARCH.md must be written after the gather phase"
     );
     let body = tokio::fs::read_to_string(&research_md).await.unwrap();
     assert!(
@@ -218,12 +224,8 @@ async fn test_web_deadline_returns_partial_sources_and_proceeds() {
         "RESEARCH.md should cite the second captured source title; got:\n{body}"
     );
     assert!(
-        body.contains("[#1]"),
-        "RESEARCH.md should contain a citation marker for the partial corpus; got:\n{body}"
-    );
-    assert!(
-        !body.contains("slow.example"),
-        "RESEARCH.md must not cite the source that missed the deadline; got:\n{body}"
+        body.contains("slow.example"),
+        "RESEARCH.md must cite the slow source too — its fetch was never cancelled; got:\n{body}"
     );
     assert!(
         body.contains("## References Index"),
@@ -232,13 +234,13 @@ async fn test_web_deadline_returns_partial_sources_and_proceeds() {
 }
 
 #[tokio::test]
-async fn test_default_web_phase_timeout_is_60_seconds() {
+async fn test_default_web_phase_timeout_is_180_seconds() {
     assert_eq!(
-        DEFAULT_WEB_PHASE_TIMEOUT_SECS, 60,
-        "the web phase deadline default should be 60 seconds"
+        DEFAULT_WEB_PHASE_TIMEOUT_SECS, 180,
+        "the web phase deadline default should be 180 seconds"
     );
     let cfg = SessionConfig::default();
-    assert_eq!(cfg.web.web_phase_timeout_secs, Some(60));
+    assert_eq!(cfg.web.web_phase_timeout_secs, Some(180));
 }
 
 #[tokio::test]
@@ -459,148 +461,6 @@ async fn test_phase_start_notification_absent_when_deadline_disabled() {
         "no web_phase_start event should fire when the deadline is disabled, got {events:?}"
     );
 }
-/// The iterative engine path must honour the same web-phase deadline as the
-/// overlapped single-pass path (FR-006): every iteration's web-gathering
-/// phase is bounded by the configured timeout, and a truncated gather still
-/// yields the sources captured so far so the iteration completes.
-#[tokio::test]
-async fn test_iterative_engine_respects_web_phase_deadline() {
-    use ragent_research::{
-        EngineConfig, HeuristicPlanner, IterativeEngine, NoopAnalysisEngine, SimpleCritic,
-    };
-
-    let web = WebGatherer::new(
-        Arc::new(EchoSearch {
-            urls: vec![
-                "https://fast-one.example".to_string(),
-                "https://fast-two.example".to_string(),
-                "https://slow.example".to_string(),
-            ],
-        }),
-        Arc::new(MixedFetch {
-            fast: vec![
-                "https://fast-one.example".to_string(),
-                "https://fast-two.example".to_string(),
-            ],
-        }),
-    );
-
-    let engine = IterativeEngine::new(
-        Arc::new(HeuristicPlanner::new()),
-        Some(web),
-        Arc::new(NoopAnalysisEngine),
-        Arc::new(SimpleCritic),
-        EngineConfig {
-            max_iterations: 2,
-            max_sources_per_question: 2,
-            max_concurrency: 2,
-            force_deeper: false,
-        },
-    )
-    .with_phase_deadline(Some(std::time::Duration::from_secs(1)));
-
-    let observer = Arc::new(CaptureEvents::default());
-    let started = Instant::now();
-    let state = engine
-        .run("Rust async runtime", observer.clone())
-        .await
-        .expect("iterative run should complete despite the deadline");
-
-    // Without the per-iteration deadline the slow fetch (120 s sleep) would
-    // stall the web gathering; the deadline must bound it well below that.
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(60),
-        "iterative web gathering should be bounded by the phase deadline, took {:?}",
-        started.elapsed()
-    );
-
-    // Partial sources captured before the deadline were kept for synthesis.
-    let fast_count = state
-        .sources
-        .iter()
-        .filter(|s| matches!(s, ragent_research::Source::Web { url, .. } if url.contains("fast")))
-        .count();
-    assert!(
-        fast_count >= 2,
-        "fast sources captured before the deadline must be ingested, got {fast_count} of {:?}",
-        state.sources
-    );
-    assert!(
-        !state
-            .sources
-            .iter()
-            .any(|s| matches!(s, ragent_research::Source::Web { url, .. }
-                if url.contains("slow"))),
-        "the slow source must not have been captured: {:?}",
-        state.sources
-    );
-
-    // FR-009 on the iterative path: the engine forwarder emits a
-    // `web_phase_start` RunStep carrying the effective deadline. With the 1s
-    // budget and fast-only fetches, all sub-questions complete before the
-    // deadline expires, so this test verifies the deadline is *attached* and
-    // the phase-start event is forwarded; it does not necessarily truncate.
-    let events = observer.0.lock().unwrap();
-    let starts = events
-        .iter()
-        .filter(|e| {
-            matches!(
-                e,
-                SessionEvent::RunStep { step, .. } if step == "web_phase_start"
-            )
-        })
-        .count();
-    assert!(
-        starts >= 1,
-        "expected a web_phase_start RunStep event from the engine forwarder, got {events:?}"
-    );
-    for e in events.iter().filter(|e| {
-        matches!(
-            e,
-            SessionEvent::RunStep { step, .. } if step == "web_phase_start"
-        )
-    }) {
-        if let SessionEvent::RunStep {
-            detail: Some(d), ..
-        } = e
-        {
-            assert_eq!(d, "web phase deadline: 1s", "engine forwarder detail");
-        }
-    }
-
-    // FR-006 / FR-008: the run completed well below the per-fetch sleep time,
-    // proving the per-iteration deadline is active even if fast fetches beat it.
-    // A separate test exercises the truncation path directly via
-    // `gather_with_observer`.
-}
-
-/// A search tool that lexically matches whatever query it is given, so the
-/// heuristic planner's rephrased sub-questions do not trip the title/snippet
-/// relevance pre-filter.
-struct EchoSearch {
-    urls: Vec<String>,
-}
-
-#[async_trait::async_trait]
-impl WebSearchTool for EchoSearch {
-    async fn search(&self, query: &str, max_results: usize) -> anyhow::Result<Vec<WebSearchHit>> {
-        // Embed the query into title and snippet so every term matches.
-        Ok(self
-            .urls
-            .iter()
-            .take(max_results)
-            .map(|url| WebSearchHit {
-                url: url.clone(),
-                title: format!("{query} - {url}"),
-                snippet: query.to_string(),
-                matched_query: query.to_string(),
-                search_tool: "test".into(),
-                search_engine: "test".into(),
-                author: None,
-            })
-            .collect())
-    }
-}
 
 /// FR-008 helper: a search tool that records the wall-clock time of every
 /// call so tests can assert that no search was issued after the deadline.
@@ -647,12 +507,11 @@ impl ragent_research::QueryDecomposer for MultiQueries {
     }
 }
 
-/// FR-008 helper: a fetch tool that records the wall-clock time of every call
-/// and sleeps `slow_delay` for non-fast URLs, so tests can assert that no
-/// fetch is started after the deadline and bound the phase's overshoot.
+/// Helper: a fetch tool that records the wall-clock time of every call and
+/// completes every page after a configurable delay. The fetch stage is never
+/// deadline-bounded, so fetches that start are always allowed to finish.
 struct CountingFetch {
-    fast: Vec<String>,
-    slow_delay: std::time::Duration,
+    delay: std::time::Duration,
     call_times: Mutex<Vec<Instant>>,
 }
 
@@ -660,45 +519,25 @@ impl CountingFetch {
     fn calls(&self) -> usize {
         self.call_times.lock().unwrap().len()
     }
-
-    fn calls_after(&self, deadline: Instant) -> usize {
-        self.call_times
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|t| **t > deadline)
-            .count()
-    }
 }
 
 #[async_trait::async_trait]
 impl WebFetchTool for CountingFetch {
     async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
         self.call_times.lock().unwrap().push(Instant::now());
-        if self.fast.iter().any(|u| u == url) {
-            Ok(WebFetchedPage {
-                published_at: None,
-                url: url.to_string(),
-                title: format!("Fast page {url}"),
-                body: "Rust async runtime details. ".repeat(30),
-                content_type: None,
-                page_type: None,
-                language: None,
-                author: None,
-            })
-        } else {
-            tokio::time::sleep(self.slow_delay).await;
-            Ok(WebFetchedPage {
-                published_at: None,
-                url: url.to_string(),
-                title: "Slow page".into(),
-                body: "slow body".into(),
-                content_type: None,
-                page_type: None,
-                language: None,
-                author: None,
-            })
+        if !self.delay.is_zero() {
+            tokio::time::sleep(self.delay).await;
         }
+        Ok(WebFetchedPage {
+            published_at: None,
+            url: url.to_string(),
+            title: format!("Page {url}"),
+            body: "Rust async runtime details. ".repeat(30),
+            content_type: None,
+            page_type: None,
+            language: None,
+            author: None,
+        })
     }
 }
 
@@ -715,8 +554,7 @@ async fn test_no_search_issued_after_deadline() {
         call_times: Mutex::new(Vec::new()),
     });
     let fetch = Arc::new(CountingFetch {
-        fast: vec!["https://fast-one.example".to_string()],
-        slow_delay: std::time::Duration::from_secs(120),
+        delay: std::time::Duration::ZERO,
         call_times: Mutex::new(Vec::new()),
     });
     let deadline = Instant::now() + std::time::Duration::from_millis(500);
@@ -765,12 +603,12 @@ async fn test_no_search_issued_after_deadline() {
     );
 }
 
-/// FR-008 (in-flight overshoot bound): with the deadline expiring mid-fetch,
-/// the phase must return promptly instead of waiting for the slow pages, and
-/// must not start any fetch after the deadline.
+/// Fetch-stage deadline neutrality: fetches are never gated on or cancelled
+/// by the phase deadline. With the deadline expiring mid-fetch, every
+/// candidate produced by the search stage is still started and every
+/// in-flight fetch runs to completion (or its own `--fetch-timeout-secs`).
 #[tokio::test]
-async fn test_overshoot_bounded_by_in_flight_fetch_timeout() {
-    let fast_urls = vec!["https://fast-one.example".to_string()];
+async fn test_fetches_run_to_completion_past_deadline() {
     let search = Arc::new(CountingSearch {
         hits: vec![
             hit("https://fast-one.example"),
@@ -781,44 +619,45 @@ async fn test_overshoot_bounded_by_in_flight_fetch_timeout() {
         call_times: Mutex::new(Vec::new()),
     });
     let fetch = Arc::new(CountingFetch {
-        fast: fast_urls,
-        slow_delay: std::time::Duration::from_secs(120),
+        delay: std::time::Duration::from_millis(1500),
         call_times: Mutex::new(Vec::new()),
     });
-    // 1 s deadline: generous enough that the instant fast fetch is reliably
-    // processed before truncation under parallel test scheduling, while the
-    // 120 s slow fetches stay far beyond it.
-    let deadline = Instant::now() + std::time::Duration::from_secs(1);
+    // 500 ms deadline: the searches have already resolved, but every fetch
+    // (1500 ms each) will still be in flight when the deadline passes.
+    let deadline = Instant::now() + std::time::Duration::from_millis(500);
     let web = WebGatherer::new(search.clone(), fetch.clone())
         .with_phase_deadline(Some(deadline))
-        .with_fetch_timeout(std::time::Duration::from_secs(2));
+        .with_fetch_timeout(std::time::Duration::from_secs(10));
 
     let started = Instant::now();
     let result = web
         .gather_with_observer("Rust async runtime", 5, None)
         .await
-        .expect("deadline-truncated gather must return a partial result");
+        .expect("gather must return every fetched source");
     let elapsed = started.elapsed();
 
-    // The slow fetches sleep for 120 s; the phase deadline (1 s) must bound
-    // the whole phase far below that instead of waiting for them.
+    // The phase now waits for all fetches: 3 x 1500 ms fetches run
+    // concurrently under the default concurrency, so the phase takes at
+    // least ~1.5 s — well past the 500 ms deadline — and never truncates
+    // them.
+    assert!(
+        elapsed >= std::time::Duration::from_millis(1400),
+        "the fetch stage must wait for in-flight fetches past the deadline, took {elapsed:?}"
+    );
     assert!(
         elapsed < std::time::Duration::from_secs(30),
-        "phase overshoot must be bounded, not wait for in-flight slow fetches, took {elapsed:?}"
+        "but must not stall unboundedly, took {elapsed:?}"
     );
-    // The fast page was captured before the deadline; the slow ones were not.
-    assert_eq!(result.sources.len(), 1, "got {:?}", result.sources);
-    // All fetches were started before the deadline (the whole batch is
-    // polled at once under the default concurrency); none started after.
+    assert_eq!(
+        result.sources.len(),
+        3,
+        "every searched candidate must be captured — none cancelled, got {:?}",
+        result.sources
+    );
     assert_eq!(
         fetch.calls(),
         3,
         "every candidate may be fetched once, got {:?}",
         fetch.call_times.lock().unwrap()
-    );
-    assert_eq!(
-        fetch.calls_after(deadline),
-        0,
-        "no fetch may start after the deadline"
     );
 }

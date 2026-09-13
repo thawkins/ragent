@@ -66,6 +66,7 @@ use std::time::Instant;
 
 use super::engine::{
     EngineReport, Freshness, RawResult, SearchEngine, SearchOptions, dedup_results_by_url,
+    strip_disallowed_quotes,
 };
 
 // ---------------------------------------------------------------------------
@@ -347,7 +348,7 @@ pub fn build_request(
     let mut params: Vec<(String, String)> = Vec::new();
 
     // search
-    let search = truncate_query(query);
+    let search = truncate_query(&strip_disallowed_quotes(query));
     params.push(("search".to_string(), search));
 
     // per_page (FR-012)
@@ -551,10 +552,11 @@ pub fn parse_response(value: &serde_json::Value) -> Vec<RawResult> {
 ///
 /// OpenAlex relevance scores are unbounded positive floats (typically 1–100+).
 /// We apply a soft normalisation: divide by a scale factor and clamp to 1.0.
-/// The scale factor of 30.0 maps typical scores (~5–30) into the 0.17–1.0
-/// band, which fits the consensus ranker's expected range.
+/// The scale factor of 100.0 keeps typical scores (~5–60) in a 0.05–0.6 band
+/// so top hits retain headroom and do not all saturate at 1.0 — a full-saturation
+/// tie block would arbitrarily crowd other engines out of the merge cap.
 fn normalise_relevance(score: f64) -> f64 {
-    const SCALE: f64 = 30.0;
+    const SCALE: f64 = 100.0;
     (score / SCALE).clamp(0.0, 1.0)
 }
 

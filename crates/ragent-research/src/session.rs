@@ -48,6 +48,52 @@ struct GatherEventForwarder {
     observer: Arc<dyn SessionObserver>,
 }
 
+/// Build the width-sweep progress detail: a one-line summary followed by a
+/// per-engine `considered/captured/excluded` table (T-006). The balance
+/// `considered == captured + excluded + capped + cancelled` always holds,
+/// where `capped` URLs were dropped by the fetch budget. `cancelled` is
+/// structurally 0 — the fetch stage is not deadline-bounded and never
+/// cancels fetches on the phase deadline; it is rendered only if a future
+/// truncation site ever makes it non-zero.
+fn format_width_sweep_detail(
+    query_count: usize,
+    engines: &str,
+    considered: usize,
+    captured: usize,
+    excluded: usize,
+    per_engine: &[crate::web_gatherer::EngineSweepStat],
+    capped: usize,
+    cancelled: usize,
+) -> String {
+    let mut out = format!(
+        "queries={query_count}, engines=[{engines}], considered={considered}, \
+         captured={captured}, excluded={excluded}"
+    );
+    if capped > 0 || cancelled > 0 {
+        out.push_str(&format!(", capped={capped}, cancelled={cancelled}"));
+    }
+    if per_engine.is_empty() {
+        return out;
+    }
+    out.push_str("\nengine         considered captured excluded");
+    for stat in per_engine {
+        out.push_str(&format!(
+            "\n{: <12} {: >10} {: >8} {: >8}",
+            stat.engine, stat.considered, stat.captured, stat.excluded
+        ));
+    }
+    out.push_str(&format!(
+        "\n{: <12} {: >10} {: >8} {: >8}",
+        "totals", considered, captured, excluded
+    ));
+    if capped > 0 || cancelled > 0 {
+        out.push_str(&format!(
+            "\n(unfetched: {capped} fetch-capped, {cancelled} deadline-cancelled)"
+        ));
+    }
+    out
+}
+
 impl GatherObserver for GatherEventForwarder {
     fn on_event(&self, event: GatherEvent) {
         match event {
@@ -99,9 +145,8 @@ impl GatherObserver for GatherEventForwarder {
                     media_type,
                 });
             }
-            // H-002/H-003: retry and circuit-breaker events are forwarded as
-            // WebSearchFailed diagnostics so the UI surfaces the transient
-            // failure and the circuit-open state transparently.
+            // H-002: retry events are logged so the UI surfaces the
+            // transient failure transparently.
             GatherEvent::SearchRetrying {
                 query,
                 attempt,
@@ -114,22 +159,26 @@ impl GatherObserver for GatherEventForwarder {
                     "research: web search retrying (forwarded to UI)"
                 );
             }
-            GatherEvent::SearchCircuitOpen {
-                consecutive_failures,
-            } => {
-                self.observer.on_event(SessionEvent::WebSearchFailed {
-                    error: format!(
-                        "search circuit-breaker open after {consecutive_failures} consecutive failures"
-                    ),
-                });
-            }
             GatherEvent::WidthSweepSummary {
                 queries,
                 engines,
                 considered,
                 captured,
                 excluded,
+                per_engine,
+                capped,
+                cancelled,
             } => {
+                let detail = format_width_sweep_detail(
+                    queries.len(),
+                    &engines.join(", "),
+                    considered,
+                    captured,
+                    excluded,
+                    &per_engine,
+                    capped,
+                    cancelled,
+                );
                 self.observer.on_event(SessionEvent::RunStep {
                     step: crate::run_manifest::RunStep::WidthSweep
                         .as_str()
@@ -137,14 +186,7 @@ impl GatherObserver for GatherEventForwarder {
                     status: crate::run_manifest::StepStatus::InProgress
                         .as_str()
                         .to_string(),
-                    detail: Some(format!(
-                        "queries={}, engines=[{}], considered={}, captured={}, excluded={}",
-                        queries.len(),
-                        engines.join(", "),
-                        considered,
-                        captured,
-                        excluded
-                    )),
+                    detail: Some(detail),
                 });
             }
             GatherEvent::VaultSufficient {
@@ -219,7 +261,7 @@ impl GatherObserver for GatherEventForwarder {
     }
 }
 /// Inputs the caller supplies to [`ResearchSession::run`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SessionConfig {
     /// Topic and seed inputs.
     pub input: InputConfig,
@@ -236,7 +278,8 @@ pub struct SessionConfig {
     /// Engine selection (tier/depth/iterations).
     pub engine: RunEngineConfig,
     /// When `true`, ask a single clarifying question before web searches if
-    /// the topic is ambiguous (FR-005, FR-017). Defaults to `true`.
+    /// the topic is ambiguous (FR-005, FR-017). Defaults to `false`; front-end
+    /// callers opt in with `--clarify`.
     pub clarify: bool,
     /// Explicit research brief generated from the user's prompt. When `Some`,
     /// downstream agents use this as their mission statement instead of
@@ -250,25 +293,6 @@ pub struct SessionConfig {
     /// When `true`, run the deterministic self-evaluation scorecard and append
     /// it to the assembled report (FR-008 / T-015).
     pub evaluate: bool,
-}
-
-impl Default for SessionConfig {
-    fn default() -> Self {
-        Self {
-            input: InputConfig::default(),
-            output: OutputConfig::default(),
-            web: WebConfig::default(),
-            local: LocalConfig::default(),
-            analysis: AnalysisConfig::default(),
-            resilience: ResilienceConfig::default(),
-            engine: RunEngineConfig::default(),
-            clarify: true,
-            brief: None,
-            invocation: None,
-            models: ModelConfig::default(),
-            evaluate: false,
-        }
-    }
 }
 
 /// Topic and seed inputs for a research session.
@@ -370,13 +394,13 @@ pub struct WebConfig {
 }
 
 /// Default wall-clock budget for the entire web-gathering phase
-/// ([`WebConfig::web_phase_timeout_secs`]). 60 seconds keeps `/research
-/// create` responsive by default: when the budget elapses the gatherer stops
-/// issuing new searches and fetches and returns everything captured so far,
-/// so the run proceeds to analysis/synthesis with the partial source set.
-/// Override per run with `--web-time N` (`--web-phase-timeout-secs N`), or
-/// disable with `--web-time 0`.
-pub const DEFAULT_WEB_PHASE_TIMEOUT_SECS: u64 = 60;
+/// ([`WebConfig::web_phase_timeout_secs`]). 180 seconds gives the web phase
+/// room to gather a fuller source set by default: when the budget elapses the
+/// gatherer stops issuing new searches and fetches and returns everything
+/// captured so far, so the run proceeds to analysis/synthesis with the
+/// partial source set. Override per run with `--web-time N`
+/// (`--web-phase-timeout-secs N`), or disable with `--web-time 0`.
+pub const DEFAULT_WEB_PHASE_TIMEOUT_SECS: u64 = 180;
 
 /// Local/spec gathering knobs for a research session.
 #[derive(Debug, Clone)]
@@ -448,12 +472,6 @@ pub struct ResilienceConfig {
     /// (Milestone H-002). Subsequent retries double this value. Defaults to
     /// [`crate::web_gatherer::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS`] (200 ms).
     pub search_retry_base_delay_ms: u64,
-    /// Number of consecutive search-tool failures after which the
-    /// circuit-breaker opens (Milestone H-003). Once open, no further search
-    /// calls are issued for the remainder of the gather pass. Defaults to
-    /// [`crate::web_gatherer::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD`] (3).
-    /// `0` disables the circuit-breaker entirely.
-    pub search_circuit_breaker_threshold: u32,
     /// Enable open-access recovery via Unpaywall and Europe PMC for short
     /// scholarly sources (FR-010). Defaults to `false`; T-018 will wire
     /// this from `ragent.json` and CLI flags.
@@ -600,8 +618,6 @@ impl Default for ResilienceConfig {
         Self {
             search_max_retries: crate::web_gatherer::DEFAULT_SEARCH_MAX_RETRIES,
             search_retry_base_delay_ms: crate::web_gatherer::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
-            search_circuit_breaker_threshold:
-                crate::web_gatherer::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
             open_access_recovery: false,
             contact_email: None,
             oa_min_full_text_chars: crate::open_access::DEFAULT_OA_MIN_FULL_TEXT_CHARS,
@@ -1423,6 +1439,16 @@ impl ResearchSession {
             let w = match &search_budget {
                 Some(budget) => w.with_search_budget(budget.clone()),
                 None => w,
+            };
+            // Competitive (comparison) runs cap search/fetch volume so one
+            // comparison does not issue engine-max searches per entity:
+            // per-query allowance + fetch budget both come from
+            // `effective_web_budget()`. Tiered/supervisor runs stay uncapped —
+            // the per-fetch timeout bounds each page instead.
+            let w = if config.engine.mode == ResearchMode::Competitive {
+                w.with_volume_cap(Some(config.effective_web_budget()))
+            } else {
+                w
             };
             w.with_query_cache(query_cache)
                 .with_provider_stats(provider_stats.clone())
@@ -3074,12 +3100,12 @@ impl ResearchSession {
             if let Some(web) = &self.web {
                 let web_budget = config.effective_web_budget();
                 // H-001 / --web-time: convert the optional phase timeout into
-                // a wall-clock deadline. When the deadline passes the
-                // gatherer returns a partial result with everything captured
-                // so far (plus a `web_deadline` RunStep diagnostic) instead
-                // of discarding the phase, so analysis/synthesis still runs
-                // over the partial source set. `--web-time 0` disables the
-                // deadline entirely.
+                // a wall-clock deadline for the *search stage*. When the
+                // deadline passes the search stage returns with whatever was
+                // searched so far (plus a `web_deadline` RunStep diagnostic)
+                // and every candidate found is then fetched to completion —
+                // fetches are never gated on or cancelled by the deadline.
+                // `--web-time 0` disables the deadline entirely.
                 let run_tag = crate::tier_router::default_run_tag("web-gather");
                 let vault = match SourceVault::open(project_root, &run_tag) {
                     Ok(v) => Some(Arc::new(v)),
@@ -3141,9 +3167,6 @@ impl ResearchSession {
                     .with_allow_pdf_web_sources(allow_pdf_web_sources)
                     .with_search_max_retries(config.resilience.search_max_retries)
                     .with_search_retry_base_delay_ms(config.resilience.search_retry_base_delay_ms)
-                    .with_search_circuit_breaker_threshold(
-                        config.resilience.search_circuit_breaker_threshold,
-                    )
                     .with_open_access_recovery(
                         config.resilience.open_access_recovery,
                         config.resilience.contact_email.clone(),
@@ -3281,7 +3304,8 @@ impl ResearchSession {
             config.engine_config(),
         )
         // FR-006: the iterative path must honour the same web-phase deadline
-        // as the overlapped single-pass path. `Some(0)` disables it.
+        // as the overlapped single-pass path (search stage only; the fetch
+        // stage is never deadline-bounded). `Some(0)` disables it.
         .with_phase_deadline(
             config
                 .web
@@ -5864,17 +5888,20 @@ mod tests {
             WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
         };
 
-        // Search returns one hit immediately but fetch sleeps 60s.
+        // Search returns one hit immediately; the fetch is moderately slow
+        // (2 s) so it stays in flight when the 1 s search-stage deadline
+        // fires. The fetch is NOT cancelled: the run waits for it (fetch
+        // timeout is an hour, so it cannot fire first).
         struct SlowFetch;
         #[async_trait]
         impl WebFetchTool for SlowFetch {
             async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 Ok(WebFetchedPage {
                     published_at: None,
                     url: _url.to_string(),
-                    title: "slow".into(),
-                    body: "slow body".into(),
+                    title: "Rust async runtime slow mirror".into(),
+                    body: "slow body with query terms Rust async runtime Tokio. ".repeat(10),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -5898,7 +5925,7 @@ mod tests {
             }
         }
         let web = WebGatherer::new(Arc::new(FastSearch), Arc::new(SlowFetch))
-            .with_fetch_timeout(std::time::Duration::from_secs(60));
+            .with_fetch_timeout(std::time::Duration::from_secs(3600));
 
         let tmp = TempDir::new().unwrap();
         let research_root = tmp.path().join("research");
@@ -5936,8 +5963,17 @@ mod tests {
             }
         }
         let obs = Arc::new(CollectEvents::default());
+        let started = std::time::Instant::now();
         let outcome = session.run("h001timeout", "Test", &cfg, obs.clone()).await;
         assert!(outcome.is_ok(), "run should complete even with timeout");
+        // The 1 s search-stage deadline fired while the 2 s fetch was in
+        // flight: the run must have waited for the fetch (fetches are never
+        // cancelled on the phase deadline).
+        assert!(
+            started.elapsed() >= std::time::Duration::from_secs(2),
+            "the in-flight fetch must run to completion past the deadline, took {:?}",
+            started.elapsed()
+        );
         let events = obs.0.lock().unwrap();
         // The web phase deadline should emit a `web_deadline` RunStep
         // diagnostic instead of discarding the phase.
@@ -5947,6 +5983,17 @@ mod tests {
                 SessionEvent::RunStep { step, .. } if step == "web_deadline"
             )),
             "expected RunStep web_deadline event, got {events:?}"
+        );
+        // The slow fetch completed and its source was ingested — no fetch
+        // cancellation.
+        let outcome = outcome.unwrap();
+        assert!(
+            outcome.sources.iter().any(|s| matches!(
+                s,
+                Source::Web { url, .. } if url.contains("slow.example")
+            )),
+            "the in-flight slow fetch must be captured, got {:?}",
+            outcome.sources
         );
     }
 
@@ -6088,7 +6135,6 @@ mod tests {
             resilience: ResilienceConfig {
                 search_max_retries: 5,
                 search_retry_base_delay_ms: 0,
-                search_circuit_breaker_threshold: 10,
                 ..ResilienceConfig::default()
             },
             clarify: false,

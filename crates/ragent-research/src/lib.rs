@@ -199,8 +199,7 @@ pub use verify::{KeywordVerifier, VerificationResult, Verifier};
 pub use web_date::extract_published_at;
 pub use web_gatherer::{
     DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_MAX_WEB_RESULTS,
-    DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD, DEFAULT_SEARCH_MAX_RETRIES,
-    DEFAULT_SEARCH_RETRY_BASE_DELAY_MS, GatherEvent, GatherResult, HeuristicQueryDecomposer,
-    LlmQueryDecomposer, QueryDecomposer, WebFetchTool, WebFetchedPage, WebGatherError, WebGatherer,
-    WebSearchHit, WebSearchTool, WebSourceKind, classify_web_source,
+    DEFAULT_SEARCH_MAX_RETRIES, DEFAULT_SEARCH_RETRY_BASE_DELAY_MS, GatherEvent, GatherResult,
+    HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer, WebFetchTool, WebFetchedPage,
+    WebGatherError, WebGatherer, WebSearchHit, WebSearchTool, WebSourceKind, classify_web_source,
 };

@@ -9,6 +9,7 @@
 //! - [`langsearch`] — LangSearch API-backed backend (T-003).
 //! - [`tavily`] — Tavily API-backed backend (T-001, T-002).
 //! - [`perplexity`] — Perplexity Sonar API-backed backend.
+//! - [`serper`] — Serper (Google Search) API-backed backend.
 //! - [`openalex`] — OpenAlex keyless scholarly-works backend (spec `openalex`).
 //! - [`wikipedia`] — Wikipedia REST API keyless encyclopedia backend (spec
 //!   `wikisearch`).
@@ -48,15 +49,17 @@ pub mod exa;
 pub mod langsearch;
 pub mod openalex;
 pub mod perplexity;
+pub mod serper;
 pub mod tavily;
 pub mod wikipedia;
 
 // Re-export commonly used types at the module level.
 pub use consensus::{ConsensusResult, MergeOutput, merge_and_rank, merge_and_rank_with_cap};
 pub use engine::{
-    EngineReport, Freshness, RawResult, SearchEngine, SearchEngineError, SearchOptions,
-    blocked_engine_names, collect_all_results, count_engines_with_results, count_total_results,
-    dedup_results_by_url, normalise_result_url,
+    DEFAULT_SEARCH_MAX_RETRIES, DEFAULT_SEARCH_RETRY_DELAY, EngineReport, Freshness, RawResult,
+    SearchEngine, SearchEngineError, SearchOptions, blocked_engine_names, collect_all_results,
+    count_engines_with_results, count_total_results, dedup_results_by_url, normalise_result_url,
+    report_is_transient, search_with_retry,
 };
 
 use std::collections::HashMap;
@@ -76,6 +79,62 @@ pub const SEARCH_CACHE_TTL: Duration = Duration::from_mins(5);
 /// already has a 30-second timeout; this per-engine timeout matches it so a
 /// slow engine is given a full window to respond before being dropped.
 pub const ENGINE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Stagger between the start of consecutive engine futures in one parallel
+/// batch.
+///
+/// All engine futures fire at `t=0` today, so any backend with a rate limiter
+/// that penalizes bursts (Wikipedia's Action API, OpenAlex) gets hit by its
+/// own request *and* by every other engine's at once whenever the caller runs
+/// a fan-out. A short start-up stagger keeps the engines parallel overall
+/// while spreading the first-request spikes.
+pub const ENGINE_STAGGER: Duration = Duration::from_millis(120);
+
+/// Run one [`SearchEngine`] with timeout, transient retry and staggered start.
+///
+/// This is the single per-engine call path used by both
+/// [`SearchOrchestrator::search`] and [`SearchOrchestrator::search_per_engine`]
+/// so every surface (TUI `/websearch`, CLI `mf_search`, research web-gather)
+/// inherits the same resilience behaviour from the engine level instead of
+/// re-implementing retries per surface. The `stagger_index`-th engine is
+/// started `stagger_index * ENGINE_STAGGER` after the batch begins so
+/// bursty keyless backends (Wikipedia, OpenAlex) don't all fire at once.
+pub async fn run_engine_with_resilience(
+    engine: Arc<dyn SearchEngine>,
+    query: &str,
+    opts: &SearchOptions,
+    stagger_index: usize,
+) -> EngineReport {
+    if stagger_index > 0 {
+        tokio::time::sleep(ENGINE_STAGGER * stagger_index as u32).await;
+    }
+    let name = engine.name().to_string();
+    match tokio::time::timeout(
+        ENGINE_TIMEOUT,
+        search_with_retry(
+            &engine,
+            query,
+            opts,
+            DEFAULT_SEARCH_MAX_RETRIES,
+            DEFAULT_SEARCH_RETRY_DELAY,
+        ),
+    )
+    .await
+    {
+        Ok(report) => report,
+        Err(_) => {
+            tracing::warn!(
+                engine = %name,
+                timeout_secs = ENGINE_TIMEOUT.as_secs(),
+                "search engine timed out, dropping from merge"
+            );
+            EngineReport::error(
+                name,
+                format!("engine timed out after {}s", ENGINE_TIMEOUT.as_secs()),
+            )
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // SearchOutput
@@ -267,32 +326,18 @@ impl SearchOrchestrator {
             pe
         };
 
-        // Run all backends in parallel, each wrapped in a per-engine timeout.
-        // Engines that exceed ENGINE_TIMEOUT are dropped from the merge.
+        // Run all backends in parallel, each wrapped in a per-engine timeout,
+        // one transient retry, and a staggered start (T-016). Engines that
+        // exceed ENGINE_TIMEOUT are dropped from the merge.
         let futures: Vec<_> = self
             .engines
             .iter()
-            .map(|engine| {
+            .enumerate()
+            .map(|(idx, engine)| {
                 let engine = engine.clone();
                 let query = query.to_string();
                 let opts = per_engine_opts.clone();
-                async move {
-                    let name = engine.name().to_string();
-                    match tokio::time::timeout(ENGINE_TIMEOUT, engine.search(&query, &opts)).await {
-                        Ok(report) => report,
-                        Err(_) => {
-                            tracing::warn!(
-                                engine = %name,
-                                timeout_secs = ENGINE_TIMEOUT.as_secs(),
-                                "search engine timed out, dropping from merge"
-                            );
-                            EngineReport::error(
-                                name,
-                                format!("engine timed out after {}s", ENGINE_TIMEOUT.as_secs()),
-                            )
-                        }
-                    }
-                }
+                async move { run_engine_with_resilience(engine, &query, &opts, idx).await }
             })
             .collect();
 
@@ -341,30 +386,18 @@ impl SearchOrchestrator {
             return Vec::new();
         }
 
+        // Same per-engine call path as `search` (T-016): timeout, one
+        // transient retry, staggered start. Diagnostics and the live
+        // `/websearch test` probe get the same resilience as merged search.
         let futures: Vec<_> = self
             .engines
             .iter()
-            .map(|engine| {
+            .enumerate()
+            .map(|(idx, engine)| {
                 let engine = engine.clone();
                 let query = query.to_string();
                 let opts = opts.clone();
-                async move {
-                    let name = engine.name().to_string();
-                    match tokio::time::timeout(ENGINE_TIMEOUT, engine.search(&query, &opts)).await {
-                        Ok(report) => report,
-                        Err(_) => {
-                            tracing::warn!(
-                                engine = %name,
-                                timeout_secs = ENGINE_TIMEOUT.as_secs(),
-                                "search engine timed out, dropping from results"
-                            );
-                            EngineReport::error(
-                                name,
-                                format!("engine timed out after {}s", ENGINE_TIMEOUT.as_secs()),
-                            )
-                        }
-                    }
-                }
+                async move { run_engine_with_resilience(engine, &query, &opts, idx).await }
             })
             .collect();
 
@@ -597,11 +630,15 @@ mod tests {
 
         let output = orchestrator.search("test", &SearchOptions::default()).await;
 
+        // T-016: blocked entries are "name: reason" so callers see the cause.
         assert!(
             output
                 .merge
                 .blocked_engines
-                .contains(&"blocked".to_string())
+                .iter()
+                .any(|e| e.starts_with("blocked")),
+            "expected an entry starting with 'blocked', got {:?}",
+            output.merge.blocked_engines
         );
         assert_eq!(output.merge.results.len(), 1);
     }
@@ -828,9 +865,14 @@ mod tests {
         assert_eq!(output.merge.results.len(), 1);
         assert_eq!(output.merge.results[0].title, "A");
 
-        // Slow engine is reported as blocked/errored (it contributed no results).
+        // Slow engine is reported as blocked/errored (it contributed no
+        // results). T-016: entries carry `name: reason`.
         assert!(
-            output.merge.blocked_engines.contains(&"slow".to_string()),
+            output
+                .merge
+                .blocked_engines
+                .iter()
+                .any(|e| e.starts_with("slow")),
             "expected 'slow' in blocked_engines, got {:?}",
             output.merge.blocked_engines
         );

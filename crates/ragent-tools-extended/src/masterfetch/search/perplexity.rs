@@ -43,6 +43,7 @@ use serde_json::json;
 
 use super::engine::{
     EngineReport, Freshness, RawResult, SearchEngine, SearchOptions, dedup_results_by_url,
+    strip_disallowed_quotes,
 };
 
 // ---------------------------------------------------------------------------
@@ -280,7 +281,7 @@ pub fn build_request_body(query: &str, opts: &SearchOptions, model: &str) -> ser
     let mut body = json!({
         "model": model,
         "messages": [
-            { "role": "user", "content": truncate_query(query) }
+            { "role": "user", "content": truncate_query(&strip_disallowed_quotes(query)) }
         ],
         "max_tokens": max_tokens,
     });

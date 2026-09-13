@@ -18,6 +18,55 @@ use crate::app::state::{App, LogLevel};
 
 // Re-export status types from theme
 
+/// Marker the TUI question dialog returns when the user dismisses the prompt
+/// with Esc (see the free-text question key handling in `src/input.rs`).
+const QUESTION_DISMISSED_MARKER: &str = "[User dismissed question]";
+
+/// Ask the user a single clarifying question through the TUI question dialog
+/// and wait for the answer.
+///
+/// Mirrors the `ask_user` tool: publishes [`Event::QuestionRequested`] on the
+/// app event bus and awaits the matching [`Event::QuestionAnswered`] reply.
+/// Returns `None` when the event bus closes before the user answers.
+async fn ask_user_clarification(
+    event_bus: &Arc<EventBus>,
+    session_id: &str,
+    question: &str,
+) -> Option<String> {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    // Subscribe before publishing so the reply cannot be missed.
+    let mut rx = event_bus.subscribe();
+    event_bus.publish(Event::QuestionRequested {
+        session_id: session_id.to_string(),
+        request_id: request_id.clone(),
+        question: question.to_string(),
+        options: Vec::new(),
+    });
+    loop {
+        match rx.recv().await {
+            Ok(Event::QuestionAnswered {
+                session_id: ref answered_session,
+                request_id: ref answered_request,
+                response: ref answer,
+            }) if answered_session == session_id && answered_request == &request_id => {
+                return Some(answer.clone());
+            }
+            Ok(_) => {
+                // Unrelated event; keep waiting.
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                // Dropped events; keep waiting.
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+        }
+    }
+}
+
+/// Returns `true` when the user supplied a usable clarification answer.
+fn clarification_answered(answer: Option<&str>) -> bool {
+    matches!(answer, Some(a) if !a.trim().is_empty() && a.trim() != QUESTION_DISMISSED_MARKER)
+}
+
 /// Run concept-extraction for a `/research cluster` command end-to-end.
 ///
 /// All progress and result events are published directly to `event_bus`; the
@@ -190,7 +239,6 @@ impl App {
                 local_phase_timeout_secs,
                 search_max_retries,
                 search_retry_base_delay_ms,
-                search_circuit_breaker_threshold,
                 max_web_results,
                 max_search_calls,
                 max_local_sources,
@@ -259,7 +307,6 @@ impl App {
                     local_phase_timeout_secs,
                     search_max_retries,
                     search_retry_base_delay_ms,
-                    search_circuit_breaker_threshold,
                     max_web_results,
                     max_search_calls,
                     max_local_sources,
@@ -301,9 +348,48 @@ impl App {
                 let event_bus_for_spawn = self.event_bus.clone();
                 let session_id_for_spawn = self.session_id.clone().unwrap_or_default();
                 tokio::spawn(async move {
-                    let outcome = session
-                        .run(&name_for_spawn, &title, &config, observer_clone)
-                        .await;
+                    let outcome: Result<ragent_research::RunOutcome, String> = async {
+                        match session
+                            .run(&name_for_spawn, &title, &config, observer_clone.clone())
+                            .await
+                        {
+                            Ok(o) => Ok(o),
+                            Err(ragent_research::ResearchError::NeedsClarification {
+                                question,
+                            }) => {
+                                // Route the clarifying question through the
+                                // TUI question dialog (ask_user) and re-run
+                                // the session with the clarified topic.
+                                let answer = ask_user_clarification(
+                                    &event_bus_for_spawn,
+                                    &session_id_for_spawn,
+                                    &question,
+                                )
+                                .await;
+                                if clarification_answered(answer.as_deref()) {
+                                    let mut config = config.clone();
+                                    config.input.topic = format!(
+                                        "{} (clarification: {})",
+                                        config.input.topic,
+                                        answer.unwrap_or_default()
+                                    );
+                                    session
+                                        .run(
+                                            &name_for_spawn,
+                                            &title,
+                                            &config,
+                                            observer_clone.clone(),
+                                        )
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                } else {
+                                    Err("clarification cancelled".to_string())
+                                }
+                            }
+                            Err(e) => Err(e.to_string()),
+                        }
+                    }
+                    .await;
                     match outcome {
                         Ok(o) => {
                             let provider_calls = if o.provider_tool_calls.is_empty() {
@@ -666,10 +752,42 @@ impl App {
                                 "research: updating `{name}` — replaying `{recorded}`"
                             ),
                         });
-                        session
+                        match session
                             .run(&name, &item.title, &config, observer_for_spawn.clone())
                             .await
-                            .map_err(|e| e.to_string())
+                        {
+                            Ok(o) => Ok(o),
+                            Err(ragent_research::ResearchError::NeedsClarification {
+                                question,
+                            }) => {
+                                // Route the clarifying question through the
+                                // TUI question dialog (ask_user) and re-run
+                                // with the clarified topic when answered.
+                                let answer =
+                                    ask_user_clarification(&event_bus, &session_id, &question)
+                                        .await;
+                                if clarification_answered(answer.as_deref()) {
+                                    let mut config = config.clone();
+                                    config.input.topic = format!(
+                                        "{} (clarification: {})",
+                                        config.input.topic,
+                                        answer.unwrap_or_default()
+                                    );
+                                    session
+                                        .run(
+                                            &name,
+                                            &item.title,
+                                            &config,
+                                            observer_for_spawn.clone(),
+                                        )
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                } else {
+                                    Err("clarification cancelled".to_string())
+                                }
+                            }
+                            Err(e) => Err(e.to_string()),
+                        }
                     }
                     .await;
                     match run_result {

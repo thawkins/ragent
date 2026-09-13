@@ -194,8 +194,8 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ## Highlights (1.0.76)
 
-- **`--web-time` web-phase deadline (60 s default)** — `/research create` now
-  caps the web-gathering phase at 60 seconds by default; when the deadline passes,
+- **`--web-time` web-phase deadline (180 s default)** — `/research create` now
+  caps the web-gathering phase at 180 seconds by default; when the deadline passes,
   everything gathered so far is ingested and the run proceeds to
   analysis/synthesis with the partial source set instead of discarding the phase.
 - **No-new-work-after-deadline guarantee** — once the deadline elapses, no new

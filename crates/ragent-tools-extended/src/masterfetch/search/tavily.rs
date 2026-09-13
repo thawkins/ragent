@@ -42,7 +42,10 @@ use std::time::Instant;
 
 use serde_json::json;
 
-use super::engine::{EngineReport, RawResult, SearchEngine, SearchOptions, dedup_results_by_url};
+use super::engine::{
+    EngineReport, RawResult, SearchEngine, SearchOptions, dedup_results_by_url,
+    strip_disallowed_quotes,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -264,7 +267,7 @@ impl SearchEngine for TavilyEngine {
 pub fn build_request_body(query: &str, opts: &SearchOptions) -> serde_json::Value {
     let max_results = opts.max_results.clamp(MIN_COUNT, MAX_COUNT);
     json!({
-        "query": truncate_query(query),
+        "query": truncate_query(&strip_disallowed_quotes(query)),
         "max_results": max_results,
         "include_answer": false,
         "search_depth": "basic",
