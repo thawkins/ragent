@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -158,14 +159,14 @@ async fn collect_git_context(working_dir: &Path) -> String {
 
     let mut output = String::new();
     if let Some(branch) = branch {
-        output.push_str(&format!("**Branch:** {branch}\n"));
+        let _ = writeln!(output, "**Branch:** {branch}");
     }
     if let Some(origin_head) = origin_head {
         let cleaned = origin_head
             .trim()
             .strip_prefix("refs/remotes/origin/")
             .unwrap_or(origin_head.trim());
-        output.push_str(&format!("**Origin HEAD:** {cleaned}\n"));
+        let _ = writeln!(output, "**Origin HEAD:** {cleaned}");
     }
     if let Some(status) = status {
         output.push_str("**Status:**\n```\n");
@@ -1548,7 +1549,7 @@ fn read_git_status(working_dir: &Path) -> String {
     {
         let branch = branch.trim();
         if !branch.is_empty() {
-            output.push_str(&format!("**Branch:** {branch}\n"));
+            let _ = writeln!(output, "**Branch:** {branch}");
         }
     }
 
@@ -1843,7 +1844,7 @@ pub fn collect_agents_md_content_with_discovery(
             } else {
                 ""
             };
-            result.push_str(&format!("- {file_rel}{marker}\n"));
+            let _ = writeln!(result, "- {file_rel}{marker}");
         }
         result.push('\n');
 
@@ -1855,7 +1856,7 @@ pub fn collect_agents_md_content_with_discovery(
             let content = expand_includes(&raw, base_dir, &include_roots, &mut Vec::new(), 0);
             let content = content.trim();
             if !content.is_empty() {
-                result.push_str(&format!("### From: {rel}\n\n"));
+                let _ = writeln!(result, "### From: {rel}\n");
                 result.push_str(content);
                 result.push_str("\n\n");
             }
@@ -2175,6 +2176,16 @@ pub fn build_memory_prompt_section(
         if let Ok(memories) = sqlite_storage.list_memories_for_project(working_dir, max_rows)
             && !memories.is_empty()
         {
+            // PERF-039: the token cost of a rendered memory entry is stable for
+            // a given `(id, content, category, confidence)` tuple, so memoise it
+            // by row id alongside a fingerprint of that tuple. The prompt
+            // section is rebuilt every step; on a hit the entry is not
+            // re-rendered or re-tokenised. A content or confidence update
+            // (which changes the fingerprint) invalidates the entry.
+            type EntryMemo = HashMap<i64, (u64, usize)>;
+            static ENTRY_TOKENS: OnceLock<Mutex<EntryMemo>> = OnceLock::new();
+            let entry_tokens_cache = ENTRY_TOKENS.get_or_init(|| Mutex::new(HashMap::new()));
+
             out.push_str("## Relevant Memories\n");
             // M-002: fetch all tags for these memories in one batched query
             // instead of one `get_memory_tags` SQLite round-trip per memory.
@@ -2192,14 +2203,37 @@ pub fn build_memory_prompt_section(
             let mut omitted = 0usize;
             for (kept, mem) in memories.iter().enumerate() {
                 let mem_tags: Vec<String> = tags_map.get(&mem.id).cloned().unwrap_or_default();
-                let mut entry = format!(
-                    "- [{}] {} (confidence: {:.2})\n",
-                    mem.category, mem.content, mem.confidence,
-                );
-                if !mem_tags.is_empty() {
-                    entry.push_str(&format!("  tags: {}\n", mem_tags.join(", ")));
-                }
-                let entry_tokens = crate::compaction::estimator::estimate_text_tokens(&entry);
+                // Fingerprint the fields the rendered entry depends on.
+                let fingerprint = {
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = rustc_hash::FxHasher::default();
+                    mem.content.hash(&mut hasher);
+                    mem.category.hash(&mut hasher);
+                    mem.confidence.to_bits().hash(&mut hasher);
+                    hasher.finish()
+                };
+                let entry_tokens = {
+                    let cached = entry_tokens_cache
+                        .lock()
+                        .ok()
+                        .and_then(|guard| guard.get(&mem.id).copied())
+                        .filter(|(fp, _)| *fp == fingerprint)
+                        .map(|(_, tokens)| tokens);
+                    match cached {
+                        Some(tokens) => tokens,
+                        None => {
+                            let entry = format!(
+                                "- [{}] {} (confidence: {:.2})\n",
+                                mem.category, mem.content, mem.confidence,
+                            );
+                            let tokens = crate::compaction::estimator::estimate_text_tokens(&entry);
+                            if let Ok(mut guard) = entry_tokens_cache.lock() {
+                                guard.insert(mem.id, (fingerprint, tokens));
+                            }
+                            tokens
+                        }
+                    }
+                };
 
                 if let Some(budget) = budget {
                     if used_tokens.saturating_add(entry_tokens) > budget {
@@ -2207,16 +2241,26 @@ pub fn build_memory_prompt_section(
                         break;
                     }
                 }
-                out.push_str(&entry);
+                // PERF-039: write the admitted entry straight into the buffer
+                // instead of building an intermediate `String`.
+                let _ = writeln!(
+                    out,
+                    "- [{}] {} (confidence: {:.2})",
+                    mem.category, mem.content, mem.confidence,
+                );
+                if !mem_tags.is_empty() {
+                    let _ = writeln!(out, "  tags: {}", mem_tags.join(", "));
+                }
                 used_tokens = used_tokens.saturating_add(entry_tokens);
             }
 
             if omitted > 0 {
-                out.push_str(&format!(
-                    "_({} more memory/memories omitted to stay within the {}-token budget)_\n",
+                let _ = writeln!(
+                    out,
+                    "_({} more memory/memories omitted to stay within the {}-token budget)_",
                     omitted,
-                    budget.unwrap(),
-                ));
+                    budget.unwrap_or(0),
+                );
             }
             out.push('\n');
         }
@@ -2274,10 +2318,11 @@ pub fn skills_prompt_section(registry: &crate::skill::SkillRegistry, agent: &Age
             .as_deref()
             .map(|h| format!(" {h}"))
             .unwrap_or_default();
-        section.push_str(&format!(
-            "- `/{}{}`  — {}\n",
+        let _ = writeln!(
+            section,
+            "- `/{}{}`  — {}",
             entry.name, hint, entry.description
-        ));
+        );
     }
     section
 }
@@ -2541,11 +2586,11 @@ fn build_system_prompt_with_storage_inner(
         .as_deref()
         .is_none_or(|p| !p.contains("{{WORKING_DIR}}"))
     {
-        prompt.push_str(&format!(
-            "## Working Directory\n\
-             You are operating in: {}\n\n",
+        let _ = write!(
+            prompt,
+            "## Working Directory\nYou are operating in: {}\n\n",
             working_dir.display()
-        ));
+        );
     }
 
     // File tree context (skip if already embedded via template variable)
@@ -2735,12 +2780,13 @@ fn build_system_prompt_with_storage_inner(
             }
             traits.push(model_tier);
 
-            section.push_str(&format!(
-                "- `{}` — {} [{}]\n",
+            let _ = writeln!(
+                section,
+                "- `{}` — {} [{}]",
                 sa.name,
                 sa.description,
                 traits.join(", "),
-            ));
+            );
         }
 
         // Append any project/global custom agents so the LLM knows they're available
@@ -2760,12 +2806,13 @@ fn build_system_prompt_with_storage_inner(
                 if can_bash {
                     traits.push("can run shell commands");
                 }
-                section.push_str(&format!(
-                    "- `{}` — {} [{}]\n",
+                let _ = writeln!(
+                    section,
+                    "- `{}` — {} [{}]",
                     ca.name,
                     ca.description,
                     traits.join(", "),
-                ));
+                );
             }
         }
 

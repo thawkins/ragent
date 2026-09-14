@@ -401,19 +401,33 @@ async fn send_message(
         }
     });
 
-    let stream = BroadcastStream::new(rx).filter_map(move |result| {
-        let session_id = id.clone();
-        async move {
-            match result {
+    // PERF-056: clone the session id once per connection; the filter closure
+    // borrows it, and dropped (Lagged) events are counted and warned.
+    let sse_session_id = id.clone();
+    let lagged = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let stream = BroadcastStream::new(rx).filter_map({
+        let lagged = Arc::clone(&lagged);
+        move |result| {
+            let mapped = match result {
                 Ok(event) => {
-                    if event_matches_session(&event, &session_id) {
+                    if event_matches_session(&event, &sse_session_id) {
                         Some(Ok::<_, std::convert::Infallible>(event_to_sse(&event)))
                     } else {
                         None
                     }
                 }
-                Err(_) => None,
-            }
+                Err(err) => {
+                    let dropped = lagged.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    tracing::warn!(
+                        session_id = %sse_session_id,
+                        dropped_batches = dropped,
+                        error = %err,
+                        "session SSE client lagged; events dropped"
+                    );
+                    None
+                }
+            };
+            std::future::ready(mapped)
         }
     });
 
@@ -509,10 +523,23 @@ async fn events_stream(
     State(state): State<AppState>,
 ) -> Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
     let rx = state.event_bus.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(|result| async move {
-        match result {
-            Ok(event) => Some(Ok(event_to_sse(&event))),
-            Err(_) => None,
+    let lagged = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let stream = BroadcastStream::new(rx).filter_map({
+        let lagged = Arc::clone(&lagged);
+        move |result| {
+            let mapped = match result {
+                Ok(event) => Some(Ok(event_to_sse(&event))),
+                Err(err) => {
+                    let dropped = lagged.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    tracing::warn!(
+                        dropped_batches = dropped,
+                        error = %err,
+                        "events SSE client lagged; events dropped"
+                    );
+                    None
+                }
+            };
+            std::future::ready(mapped)
         }
     });
     Sse::new(stream).keep_alive(KeepAlive::default())

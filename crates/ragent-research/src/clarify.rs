@@ -6,6 +6,15 @@
 //! may layer an LLM-based ambiguity detector on top.
 
 use regex::Regex;
+use std::sync::LazyLock;
+
+/// Concrete-identifier detector: years, `vN.N` versions, or "version N".
+///
+/// Hoisted to a process-wide static (PERF-066) — this runs on every
+/// `/research` clarification check.
+static CONCRETE_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(20\d{2}|19\d{2}|v\d+\.\d+|version \d+\.?d+)").expect("valid concrete-id regex")
+});
 
 /// Returns a single clarifying question when the topic looks ambiguous.
 ///
@@ -55,10 +64,7 @@ pub fn needs_clarification(topic: &str) -> Option<String> {
 
     // If the topic contains numbers, years, or product/version identifiers,
     // treat it as sufficiently concrete.
-    if Regex::new(r"\b(20\d{2}|19\d{2}|v\d+\.\d+|version \d+\.?d+)")
-        .ok()?
-        .is_match(&lower)
-    {
+    if CONCRETE_ID_RE.is_match(&lower) {
         return None;
     }
 

@@ -128,8 +128,8 @@ pub struct SelectedSplit {
 /// Result of a successful [`compact`] run.
 #[derive(Debug, Clone)]
 pub struct CompactionOutcome {
-    /// The LLM-produced summary text.
-    pub summary: String,
+    /// The LLM-produced summary text (PERF-038: shared via `Arc<str>`).
+    pub summary: std::sync::Arc<str>,
     /// The new message list: `[compaction_msg, ...recent_messages]`.
     pub new_messages: Vec<Message>,
     /// The synthetic compaction message (first element of `new_messages`).
@@ -155,37 +155,40 @@ pub struct CompactionOutcome {
 ///
 /// # Arguments
 ///
-/// * `messages` — full conversation history in ragent internal format.
+/// * `messages` — full conversation history (consumed; head and recent
+///   messages are *moved* out rather than cloned — PERF-038).
 /// * `config` — compaction configuration (supplies `keep_fraction` and
 ///   `tool_output_max_chars`).
 /// * `context_window` — the model's context window in tokens, used to turn the
 ///   configured `keep` fraction into an absolute token budget.
 #[must_use]
 pub fn select(
-    messages: &[Message],
+    messages: Vec<Message>,
     config: &CompactionConfig,
     context_window: usize,
 ) -> SelectedSplit {
     let tool_max = config.tool_output_max_chars();
     let keep_tokens = ((config.keep_fraction() * context_window as f64) as usize).max(1);
 
-    // (original_index, serialised_text, token_cost) for every non-compaction
-    // message with non-empty serialised content.
-    let conv: Vec<(usize, String, usize)> = messages
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| m.role != Role::Compaction)
-        .map(|(i, m)| {
-            let serialized = serialize_message(m, tool_max);
-            let cost = estimate_text_tokens(&serialized);
-            (i, serialized, cost)
-        })
-        .filter(|(_, s, _)| !s.is_empty())
-        .collect();
+    // (original_index, token_cost, serialised_text) for every non-compaction
+    // message with non-empty serialised content. Serialise each message once;
+    // the string is later reused for the head transcript.
+    let mut conv: Vec<(usize, usize, String)> = Vec::new();
+    for (i, m) in messages.iter().enumerate() {
+        if m.role == Role::Compaction {
+            continue;
+        }
+        let serialized = serialize_message(m, tool_max);
+        if serialized.is_empty() {
+            continue;
+        }
+        let cost = estimate_text_tokens(&serialized);
+        conv.push((i, cost, serialized));
+    }
 
     // Total token cost of all non-compaction messages (used for compression
     // stats in `compact` without re-serialising).
-    let original_tokens: usize = conv.iter().map(|(_, _, cost)| *cost).sum();
+    let original_tokens: usize = conv.iter().map(|(_, cost, _)| *cost).sum();
 
     if conv.is_empty() {
         return SelectedSplit {
@@ -198,9 +201,9 @@ pub fn select(
     }
 
     // Always keep at least the last message verbatim.
-    let mut total = conv.last().expect("non-empty conv").2;
+    let mut total = conv.last().expect("non-empty conv").1;
     let mut split_idx = conv.len() - 1;
-    for (idx, &(_, _, cost)) in conv.iter().enumerate().rev().skip(1) {
+    for (idx, &(_, cost, _)) in conv.iter().enumerate().rev().skip(1) {
         if total + cost > keep_tokens {
             break;
         }
@@ -217,26 +220,42 @@ pub fn select(
     if split_idx == 0 && conv.len() > 1 {
         split_idx = 1;
         // Recalculate the recent-token total for the reduced tail.
-        total = conv[split_idx..].iter().map(|(_, _, c)| *c).sum();
+        total = conv[split_idx..].iter().map(|(_, c, _)| *c).sum();
     }
 
-    let recent_messages: Vec<Message> = conv[split_idx..]
-        .iter()
-        .map(|(i, _, _)| messages[*i].clone())
-        .collect();
-    let head_messages: Vec<Message> = conv[..split_idx]
-        .iter()
-        .map(|(i, _, _)| messages[*i].clone())
-        .collect();
+    // PERF-038: build the head transcript from the strings already serialised
+    // above (no second serialisation pass), then partition the owned history in
+    // place by *moving* each retained message into either the head or the recent
+    // tail — no per-message deep clone.
+    //
+    // Join the head transcript with a single allocation pre-sized to the exact
+    // byte count (segment bytes + two separator bytes between segments).
+    let head_count = split_idx;
+    let head_bytes: usize = conv[..head_count].iter().map(|(_, _, s)| s.len()).sum();
+    let separators = head_count.saturating_sub(1) * 2;
+    let mut head_transcript = String::with_capacity(head_bytes + separators);
+    for (k, (_, _, s)) in conv[..head_count].iter().enumerate() {
+        if k > 0 {
+            head_transcript.push_str("\n\n");
+        }
+        head_transcript.push_str(s);
+    }
 
-    // Reuse the already-serialised head strings instead of re-serialising in
-    // `compact`.
-    let head_transcript: String = conv[..split_idx]
-        .iter()
-        .filter(|(_, s, _)| !s.is_empty())
-        .map(|(_, s, _)| s.as_str())
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    // Take each retained message out of its slot exactly once. `conv` already
+    // holds the original index of every retained message in order.
+    let mut slots: Vec<Option<Message>> = messages.into_iter().map(Some).collect();
+    let mut head_messages: Vec<Message> = Vec::with_capacity(head_count);
+    let mut recent_messages: Vec<Message> = Vec::with_capacity(conv.len() - head_count);
+    for (k, (idx, _, _)) in conv.iter().enumerate() {
+        let message = slots[*idx]
+            .take()
+            .expect("each retained message is taken exactly once");
+        if k < head_count {
+            head_messages.push(message);
+        } else {
+            recent_messages.push(message);
+        }
+    }
 
     SelectedSplit {
         head_messages,
@@ -457,10 +476,16 @@ pub async fn compact(
     cancel: &AtomicBool,
 ) -> Result<CompactionOutcome> {
     let original_message_count = messages.len();
+    let non_compaction_count = messages
+        .iter()
+        .filter(|m| m.role != Role::Compaction)
+        .count();
     let tool_max = config.tool_output_max_chars();
 
-    // 1. Select verbatim recent tail + head to summarise.
-    let split = select(&messages, config, context_window);
+    // 1. Select verbatim recent tail + head to summarise. `select` consumes the
+    //    history, moving the retained messages instead of cloning them
+    //    (PERF-038).
+    let split = select(messages, config, context_window);
 
     // 2. Nothing-to-summarise guard (OpenCode:
     //    `if (!selected || (selected.head.length === 0 && previousSummary?.
@@ -475,10 +500,7 @@ pub async fn compact(
         tracing::debug!(
             session_id,
             reason,
-            non_compaction_msgs = messages
-                .iter()
-                .filter(|m| m.role != Role::Compaction)
-                .count(),
+            non_compaction_msgs = non_compaction_count,
             "compaction skipped: nothing to summarise (single-message context)"
         );
         bail!("compaction has nothing to summarise: single-message context");
@@ -569,11 +591,16 @@ pub async fn compact(
     }
 
     // 6. Build the replacement message list: [compaction_msg, ...recent].
-    let compaction_message = build_compaction_message(session_id, summary);
-    let kept_message_count = split.recent_messages.len();
+    //    PERF-038: move the retained recent messages out of `split` and share
+    //    the summary via `Arc<str>` so it is not cloned for both the compaction
+    //    message and the returned outcome.
+    let summary: Arc<str> = Arc::from(summary);
+    let compaction_message = build_compaction_message(session_id, &summary);
+    let mut recent = split.recent_messages;
+    let kept_message_count = recent.len();
     let mut new_messages = Vec::with_capacity(1 + kept_message_count);
     new_messages.push(compaction_message.clone());
-    new_messages.extend(split.recent_messages.iter().cloned());
+    new_messages.append(&mut recent);
 
     // 7. Token estimates for the finished event. Reuse the original_tokens
     //    already computed by `select` to avoid re-serialising every message.
@@ -606,7 +633,7 @@ pub async fn compact(
     });
 
     Ok(CompactionOutcome {
-        summary: summary.to_string(),
+        summary,
         new_messages,
         compaction_message,
         original_message_count,

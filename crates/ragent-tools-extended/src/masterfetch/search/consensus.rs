@@ -80,7 +80,9 @@
 //! assert!(result.results[0].engines_consensus.contains("2"));
 //! ```
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+// PERF-080: FxHash for short non-adversarial URL keys.
+use rustc_hash::FxHashMap as HashMap;
 
 use super::engine::{
     EngineReport, RawResult, collect_all_results, normalise_result_url, report_is_failed,
@@ -320,7 +322,7 @@ struct GroupEntry {
 ///
 /// Returns a map from normalised URL → list of group entries.
 fn group_by_url(reports: &[EngineReport]) -> HashMap<String, Vec<GroupEntry>> {
-    let mut groups: HashMap<String, Vec<GroupEntry>> = HashMap::new();
+    let mut groups: HashMap<String, Vec<GroupEntry>> = HashMap::default();
     for report in reports {
         for (rank, result) in report.results.iter().enumerate() {
             let norm = normalise_result_url(&result.url);
@@ -453,7 +455,7 @@ pub fn mine_related_queries(results: &[RawResult], query: &str) -> Vec<String> {
     let stopwords: HashSet<&str> = STOPWORDS.iter().copied().collect();
 
     // Count term frequency across all titles and snippets.
-    let mut term_counts: HashMap<String, usize> = HashMap::new();
+    let mut term_counts: HashMap<String, usize> = HashMap::default();
 
     for result in results {
         let text = format!("{} {}", result.title, result.snippet).to_ascii_lowercase();
@@ -554,7 +556,7 @@ fn source_engines(source: &str) -> impl Iterator<Item = &str> {
 /// with the result so a consensus URL consumes budget in every engine that
 /// backed it.
 fn count_engines<'a>(results: impl Iterator<Item = &'a ConsensusResult>) -> HashMap<String, usize> {
-    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut counts: HashMap<String, usize> = HashMap::default();
     for result in results {
         for engine in source_engines(&result.source) {
             *counts.entry(engine.to_string()).or_insert(0) += 1;
@@ -585,7 +587,7 @@ fn diversity_truncate(results: Vec<ConsensusResult>, max_results: usize) -> Vec<
 
     let limit = per_engine_share_limit(max_results);
     let mut kept: Vec<ConsensusResult> = Vec::with_capacity(max_results);
-    let mut held: HashMap<String, usize> = HashMap::new();
+    let mut held: HashMap<String, usize> = HashMap::default();
     let mut skipped: Vec<ConsensusResult> = Vec::new();
 
     for result in results {

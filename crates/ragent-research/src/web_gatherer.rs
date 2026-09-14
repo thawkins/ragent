@@ -57,7 +57,7 @@ mod title;
 
 pub use classify::{WebSourceKind, classify_web_source};
 pub use decomposer::{HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer};
-use relevance::compute_relevance_label;
+pub use relevance::PreparedQuery;
 use title::clean_web_source_title;
 
 /// Maximum number of focused sub-queries the research decomposer will
@@ -234,7 +234,7 @@ fn synthesize_hit_page(hit: &WebSearchHit, page_type: &str) -> WebFetchedPage {
     WebFetchedPage {
         url: hit.url.clone(),
         title: hit.title.clone(),
-        body: hit.snippet.clone(),
+        body: Arc::from(hit.snippet.as_str()),
         published_at: None,
         content_type: None,
         page_type: Some(page_type.to_string()),
@@ -423,7 +423,11 @@ pub struct WebFetchedPage {
     pub title: String,
     /// Rendered text body of the page, in UTF-8. HTML tags should already
     /// have been stripped by the implementation.
-    pub body: String,
+    ///
+    /// PERF-077: stored behind an `Arc<str>` so the CPU-bound language-detection
+    /// `spawn_blocking` closure can take a refcount clone instead of copying the
+    /// whole page body onto a worker thread.
+    pub body: Arc<str>,
     /// Publication date parsed from the page's embedded metadata, when the
     /// fetcher was able to determine one. `None` when the page did not expose
     /// a parseable publication date.
@@ -474,7 +478,7 @@ pub trait WebFetchTool: Send + Sync {
     ) -> anyhow::Result<WebFetchedPage> {
         let mut page = self.fetch(url).await?;
         if page.body.len() > max_bytes {
-            page.body = truncate_body_to_bytes(&page.body, max_bytes);
+            page.body = Arc::from(truncate_body_to_bytes(&page.body, max_bytes));
         }
         Ok(page)
     }
@@ -1220,8 +1224,8 @@ impl WebGatherer {
     /// any full-page fetch, saving bandwidth and prompt budget
     /// (Milestone B-001). When `keep_low_relevance` is enabled the hit is
     /// retained but its label is still computed for later reporting.
-    fn filter_hit(&self, query: &str, hit: &WebSearchHit) -> Option<(String, bool)> {
-        let (label, retained) = compute_relevance_label(query, &hit.title, &hit.snippet, &hit.url);
+    fn filter_hit(&self, prepared: &PreparedQuery, hit: &WebSearchHit) -> Option<(String, bool)> {
+        let (label, retained) = prepared.label(&hit.title, &hit.snippet, &hit.url);
         if retained || self.keep_low_relevance {
             Some((label, retained))
         } else {
@@ -1674,8 +1678,12 @@ impl WebGatherer {
                                 if let Some(stats) = &stats {
                                     stats.record(&hit_search_tool(&hits));
                                 }
+                                // PERF-077: share the hit vector behind an Arc
+                                // so caching is a refcount hand-off rather than
+                                // a deep clone of every hit.
+                                let hits: Arc<[WebSearchHit]> = hits.into();
                                 if let Some(cache) = &cache {
-                                    cache.insert(&q, hits.clone());
+                                    cache.insert(&q, Arc::clone(&hits));
                                 }
                                 return SearchCallOutcome::Ok { hits };
                             }
@@ -1712,7 +1720,15 @@ impl WebGatherer {
             .buffer_unordered(4)
             .enumerate();
 
-        let mut hits_by_url: Vec<(String, WebSearchHit)> = Vec::new();
+        // PERF-077: the sub-query text is shared by every hit under it via
+        // `Arc<str>` so each hit stores a refcount bump rather than its own
+        // `String` copy of the query.
+        let mut hits_by_url: Vec<(Arc<str>, WebSearchHit)> = Vec::new();
+        // Per-sub-query prepared relevance query, built lazily on first use so
+        // each query's normalisation and morphological variants are computed
+        // exactly once per gather pass (PERF-068).
+        let mut prepared_queries: std::collections::HashMap<String, PreparedQuery> =
+            std::collections::HashMap::new();
         let mut seen_urls: HashSet<String> = HashSet::new();
         let mut any_search_error: Option<String> = None;
         let mut excluded_count = 0usize;
@@ -1768,13 +1784,16 @@ impl WebGatherer {
             if truncated {
                 break;
             }
-            let query = queries
-                .get(idx)
-                .cloned()
-                .unwrap_or_else(|| topic.to_string());
+            // PERF-077: share one `Arc<str>` per sub-query with every hit it
+            // yields, instead of cloning the query `String` per hit below.
+            let query: Arc<str> =
+                Arc::from(queries.get(idx).map_or(topic, std::string::String::as_str));
             match outcome {
                 SearchCallOutcome::Ok { hits } => {
-                    for mut hit in hits {
+                    // `hits` is an `Arc<[WebSearchHit]>`; clone it into an owned
+                    // `Vec` so each hit can be mutated in place below. The Arc
+                    // keeps the cache entry alive without a deep copy.
+                    for mut hit in hits.iter().cloned() {
                         let url_key = hit.url.to_lowercase();
                         if !seen_urls.insert(url_key) {
                             continue;
@@ -1864,7 +1883,7 @@ impl WebGatherer {
                         if is_scholarly {
                             hit.matched_query =
                                 format!("{query} [Scholarly — engine-ranked abstract]");
-                            hits_by_url.push((query.clone(), hit));
+                            hits_by_url.push((Arc::clone(&query), hit));
                             continue;
                         }
                         // Encyclopedia hits (e.g. Wikipedia) are already ranked
@@ -1877,12 +1896,17 @@ impl WebGatherer {
                         if is_encyclopedia {
                             hit.matched_query =
                                 format!("{query} [Encyclopedia — engine-ranked summary]");
-                            hits_by_url.push((query.clone(), hit));
+                            hits_by_url.push((Arc::clone(&query), hit));
                             continue;
                         }
                         // Pre-filter by title/snippet relevance before any
-                        // expensive full-page fetch (B-001).
-                        if let Some((label, retained)) = self.filter_hit(&query, &hit) {
+                        // expensive full-page fetch (B-001). The query is
+                        // normalised once per sub-query and reused for every
+                        // hit under it (PERF-068).
+                        let prepared = prepared_queries
+                            .entry(query.to_string())
+                            .or_insert_with(|| PreparedQuery::new(&query));
+                        if let Some((label, retained)) = self.filter_hit(prepared, &hit) {
                             if !retained {
                                 // Retained because keep_low_relevance is on.
                                 tracing::info!(
@@ -1893,7 +1917,7 @@ impl WebGatherer {
                                 );
                             }
                             hit.matched_query = format!("{query} [{label}]");
-                            hits_by_url.push((query.clone(), hit));
+                            hits_by_url.push((Arc::clone(&query), hit));
                         } else {
                             excluded_count += 1;
                             bump_engine_stats(&mut per_engine, &hit.search_engine, |s| {
@@ -1929,7 +1953,7 @@ impl WebGatherer {
                     if let Some(obs) = observer {
                         for r in 1..=retries {
                             obs.on_event(GatherEvent::SearchRetrying {
-                                query: query.clone(),
+                                query: query.to_string(),
                                 attempt: r,
                                 error: error.clone(),
                             });
@@ -2090,6 +2114,9 @@ impl WebGatherer {
                     // it stalls the whole event stream behind every page.
                     let language_fallback = match &result {
                         Ok(Ok(page)) => {
+                            // PERF-077: clone the body `Arc`, not the page
+                            // bytes, so language detection adds no page-sized
+                            // allocation and the page keeps its own copy.
                             let body = page.body.clone();
                             tokio::task::spawn_blocking(move || {
                                 detectable_body(&body).and_then(detect_language_best_effort)
@@ -2139,7 +2166,12 @@ impl WebGatherer {
                     } else if encyclopedia {
                         ("Encyclopedia — engine-ranked summary".to_string(), true)
                     } else {
-                        compute_relevance_label(&query, &title, &hit.snippet, &page.url)
+                        // Post-fetch relevance, reusing the prepared query built
+                        // by the pre-filter (PERF-068).
+                        let prepared = prepared_queries
+                            .entry(query.to_string())
+                            .or_insert_with(|| PreparedQuery::new(&query));
+                        prepared.label(&title, &hit.snippet, &page.url)
                     };
                     if !retained && !self.keep_low_relevance {
                         excluded_count += 1;
@@ -2573,8 +2605,9 @@ enum SearchCallOutcome {
     /// The search succeeded (retry counts are only tracked on the `Err`
     /// variant, where they drive `SearchRetrying` events).
     Ok {
-        /// Search hits returned by the tool.
-        hits: Vec<WebSearchHit>,
+        /// Search hits returned by the tool, shared behind an `Arc` so the
+        /// cache insert is a refcount hand-off (PERF-077).
+        hits: Arc<[WebSearchHit]>,
     },
     /// The search failed after all retries were exhausted.
     Err {
@@ -2691,8 +2724,7 @@ mod tests {
 
     #[test]
     fn relevance_exact_title_match_unchanged() {
-        let (label, retained) = compute_relevance_label(
-            "Rust async runtime",
+        let (label, retained) = PreparedQuery::new("Rust async runtime").label(
             "Rust async runtime",
             "some unrelated snippet",
             "https://example.com/foo",
@@ -2703,8 +2735,7 @@ mod tests {
 
     #[test]
     fn relevance_low_when_no_terms_match() {
-        let (label, retained) = compute_relevance_label(
-            "quantum computing",
+        let (label, retained) = PreparedQuery::new("quantum computing").label(
             "Rust async runtime",
             "tokio and futures",
             "https://example.com/rust",
@@ -2762,7 +2793,7 @@ mod tests {
                 published_at: None,
                 url: "https://good.example".into(),
                 title: "Rust async runtime guide".into(),
-                body: body256("body good"),
+                body: Arc::from(body256("body good")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -2775,7 +2806,7 @@ mod tests {
                 published_at: None,
                 url: "https://bad.example".into(),
                 title: "completely unrelated shopping page".into(),
-                body: body256("body bad"),
+                body: Arc::from(body256("body bad")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -2939,7 +2970,7 @@ mod tests {
                 published_at: None,
                 url: "https://shared.example/paper".into(),
                 title: "Rust async runtime".into(),
-                body: body256("full page body for the shared URL"),
+                body: Arc::from(body256("full page body for the shared URL")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -3074,7 +3105,7 @@ mod tests {
                 published_at: None,
                 url: "https://en.wikipedia.org/wiki/Rust_(programming_language)".into(),
                 title: "Rust (programming language)".into(),
-                body: body256("full page body for the shared Wikipedia URL"),
+                body: Arc::from(body256("full page body for the shared Wikipedia URL")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -3120,7 +3151,7 @@ mod tests {
                 published_at: None,
                 url: "https://bad.example".into(),
                 title: "completely unrelated page".into(),
-                body: body256("body"),
+                body: Arc::from(body256("body")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -3152,7 +3183,7 @@ mod tests {
                 published_at: None,
                 url: "https://huge.example".into(),
                 title: "Huge page".into(),
-                body: "x".repeat(MAX_SOURCE_BODY_BYTES + 1024),
+                body: Arc::from("x".repeat(MAX_SOURCE_BODY_BYTES + 1024)),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -3273,7 +3304,7 @@ mod tests {
                     published_at: None,
                     url: url.into(),
                     title: format!("Title {url}"),
-                    body: body256("body"),
+                    body: Arc::from(body256("body")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -3324,7 +3355,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: body256("b"),
+                    body: Arc::from(body256("b")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -3378,7 +3409,7 @@ mod tests {
                 published_at: None,
                 url: "https://a.example".into(),
                 title: "A — resolved".into(),
-                body: body256("body a"),
+                body: Arc::from(body256("body a")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -3391,7 +3422,7 @@ mod tests {
                 published_at: None,
                 url: "https://b.example".into(),
                 title: "B — resolved".into(),
-                body: body256("body b"),
+                body: Arc::from(body256("body b")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -3404,7 +3435,7 @@ mod tests {
                 published_at: None,
                 url: "https://c.example".into(),
                 title: String::new(), // empty title should fall back to search hit title
-                body: body256("body c"),
+                body: Arc::from(body256("body c")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -3467,7 +3498,7 @@ mod tests {
                 published_at: None,
                 url: "https://ok".into(),
                 title: "OK".into(),
-                body: body256("b"),
+                body: Arc::from(body256("b")),
 
                 content_type: None,
                 page_type: None,
@@ -3583,7 +3614,7 @@ mod tests {
                     published_at: None,
                     url: u.into(),
                     title: u.into(),
-                    body: body256("b"),
+                    body: Arc::from(body256("b")),
 
                     content_type: None,
                     page_type: None,
@@ -3643,7 +3674,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: body256("b"),
+                    body: Arc::from(body256("b")),
 
                     content_type: None,
                     page_type: None,
@@ -3734,7 +3765,7 @@ mod tests {
                 published_at: None,
                 url: "https://ok".into(),
                 title: "OK".into(),
-                body: body256("b"),
+                body: Arc::from(body256("b")),
 
                 content_type: None,
                 page_type: None,
@@ -3792,7 +3823,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: format!("title-{url}"),
-                    body: body256(&format!("body-{url}")),
+                    body: Arc::from(body256(&format!("body-{url}"))),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -4051,7 +4082,7 @@ mod tests {
                 published_at: None,
                 url: _url.to_string(),
                 title: format!("title-{_url}"),
-                body: body256(&format!("body-{_url}")),
+                body: Arc::from(body256(&format!("body-{_url}"))),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -4249,7 +4280,7 @@ mod tests {
                 published_at: None,
                 url: "https://fr.example".into(),
                 title: "Article".into(),
-                body: body256("corps de texte"),
+                body: Arc::from(body256("corps de texte")),
                 content_type: None,
                 page_type: None,
                 language: Some("French".into()),
@@ -4277,7 +4308,7 @@ mod tests {
                 published_at: None,
                 url: "https://es.example".into(),
                 title: "Página".into(),
-                body: body256("cuerpo"),
+                body: Arc::from(body256("cuerpo")),
                 content_type: None,
                 page_type: None,
                 language: Some("Spanish".into()),
@@ -4326,7 +4357,7 @@ mod tests {
             WebFetchedPage {
                 url: "https://example.com/paper.pdf".into(),
                 title: "PDF".into(),
-                body: body256("pdf body"),
+                body: Arc::from(body256("pdf body")),
                 content_type: Some("application/pdf".into()),
                 page_type: Some("pdf".into()),
                 published_at: None,
@@ -4339,7 +4370,7 @@ mod tests {
             WebFetchedPage {
                 url: "https://www.youtube.com/watch?v=abc123".into(),
                 title: "YouTube".into(),
-                body: body256("youtube transcript"),
+                body: Arc::from(body256("youtube transcript")),
                 content_type: Some("text/html".into()),
                 page_type: Some("youtube".into()),
                 published_at: None,
@@ -4398,7 +4429,7 @@ mod tests {
                 published_at: None,
                 url: "https://retry.example".into(),
                 title: "Rust async runtime".into(),
-                body: body256("body"),
+                body: Arc::from(body256("body")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -4439,7 +4470,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: body256("b"),
+                    body: Arc::from(body256("b")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -4498,7 +4529,7 @@ mod tests {
                 url: "https://short.example".into(),
                 title: "Short page".into(),
                 // 100 chars — below the 256-char minimum.
-                body: "x".repeat(100),
+                body: Arc::from("x".repeat(100)),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -4532,7 +4563,7 @@ mod tests {
                 url: "https://exact.example".into(),
                 title: "Exact page".into(),
                 // Exactly 256 chars — at the minimum.
-                body: "x".repeat(MIN_EXTRACTABLE_CONTENT_CHARS),
+                body: Arc::from("x".repeat(MIN_EXTRACTABLE_CONTENT_CHARS)),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -4566,7 +4597,7 @@ mod tests {
                 published_at: None,
                 url: "https://preview.example".into(),
                 title: "Preview page".into(),
-                body: "Rust async runtime programming guide with Tokio tasks, futures, channels, and executors. ".repeat(20),
+                body: Arc::from("Rust async runtime programming guide with Tokio tasks, futures, channels, and executors. ".repeat(20)),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -4755,7 +4786,7 @@ mod tests {
                 published_at: None,
                 url: "https://web.example".into(),
                 title: "Web page".into(),
-                body: body256("fresh web content"),
+                body: Arc::from(body256("fresh web content")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -4882,7 +4913,7 @@ mod tests {
                 published_at: None,
                 url: "https://web.example".into(),
                 title: "Web page".into(),
-                body: body256("fresh web content"),
+                body: Arc::from(body256("fresh web content")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -5028,7 +5059,7 @@ mod tests {
                 published_at: None,
                 url: "https://web.example".into(),
                 title: "Web page".into(),
-                body: body256("fresh web content with many details"),
+                body: Arc::from(body256("fresh web content with many details")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -5137,7 +5168,7 @@ mod tests {
             WebFetchedPage {
                 url: "https://oa.example.com/full.pdf".into(),
                 title: "Recovered Full Text".into(),
-                body: body256("open access full text content here"),
+                body: Arc::from(body256("open access full text content here")),
                 published_at: None,
                 content_type: Some("application/pdf".into()),
                 page_type: None,
@@ -5197,7 +5228,7 @@ mod tests {
             WebFetchedPage {
                 url: "https://doi.org/10.1234/example".into(),
                 title: "Open Paper".into(),
-                body: body256("already long full text"),
+                body: Arc::from(body256("already long full text")),
                 published_at: None,
                 content_type: None,
                 page_type: Some("scholarly".into()),
@@ -5332,7 +5363,7 @@ mod tests {
                     published_at: None,
                     url: url.into(),
                     title: format!("title {url}"),
-                    body: body256("body"),
+                    body: Arc::from(body256("body")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -5385,7 +5416,7 @@ mod tests {
                 published_at: None,
                 url: "https://shared.example".into(),
                 title: "Shared result".into(),
-                body: body256("shared body"),
+                body: Arc::from(body256("shared body")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -5433,7 +5464,7 @@ mod tests {
                     published_at: None,
                     url: url.into(),
                     title: format!("title {url}"),
-                    body: body256("body"),
+                    body: Arc::from(body256("body")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -5556,7 +5587,7 @@ mod tests {
                 published_at: None,
                 url: "https://shared.example".into(),
                 title: "Shared result".into(),
-                body: body256("shared body"),
+                body: Arc::from(body256("shared body")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -5665,7 +5696,7 @@ mod tests {
                 published_at: None,
                 url: "https://langsearch.example".into(),
                 title: "title".into(),
-                body: body256("body"),
+                body: Arc::from(body256("body")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -5711,7 +5742,7 @@ mod tests {
                     published_at: None,
                     url: format!("https://{i}.example"),
                     title: format!("title-{i}"),
-                    body: body256("body"),
+                    body: Arc::from(body256("body")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -5790,7 +5821,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: format!("title-{url}"),
-                    body: body256(&format!("body-{url}")),
+                    body: Arc::from(body256(&format!("body-{url}"))),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -5861,7 +5892,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: format!("title-{url}"),
-                    body: body256(&format!("body-{url}")),
+                    body: Arc::from(body256(&format!("body-{url}"))),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -5920,7 +5951,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: format!("title-{url}"),
-                    body: body256(&format!("body-{url}")),
+                    body: Arc::from(body256(&format!("body-{url}"))),
                     content_type: None,
                     page_type: None,
                     language: None,

@@ -21,8 +21,53 @@
 
 use chrono::{DateTime, NaiveDate, Utc};
 use regex::Regex;
+use std::sync::LazyLock;
 
 use ragent_types::html::strip_tags;
+
+// ---------------------------------------------------------------------------
+// Hoisted regexes (PERF-065)
+//
+// All seven patterns are per-invocation today; compile them once per process
+// instead (the convention already used in `title.rs` and `analysis/parser.rs`).
+// ---------------------------------------------------------------------------
+
+/// `<script type="application/ld+json">...</script>` block (body in group 1).
+static JSONLD_SCRIPT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)<script[^>]*type=["']application/ld\+json["'][^>]*>(.*?)</script>"#)
+        .expect("valid json-ld regex")
+});
+
+/// JSON `"datePublished"|"dateCreated"|"dateModified"` value token.
+static JSON_DATE_KEY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)"date(?:Published|Created|Modified)"\s*:\s*"([^"]+)""#)
+        .expect("valid date-key regex")
+});
+
+/// Opening `<meta ...>` tag carrying a `property`/`name` attribute (group 1).
+static META_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)<meta\s+[^>]*(?:property|name)\s*=\s*["']([^"']+)["'][^>]*>"#)
+        .expect("valid meta regex")
+});
+
+/// `content="..."` attribute value.
+static CONTENT_ATTR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)content\s*=\s*["']([^"']*)["']"#).expect("valid content regex")
+});
+
+/// `<time datetime="...">` element (group 1).
+static TIME_DATETIME_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)<time[^>]*datetime\s*=\s*["']([^"']+)["']"#).expect("valid time regex")
+});
+
+/// ISO date token `YYYY-MM-DD`.
+static ISO_DATE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b(\d{4})-(\d{2})-(\d{2})\b").expect("valid iso regex"));
+
+/// Long-form date token `Month D, YYYY` / `D Month YYYY`.
+static LONG_DATE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})\b").expect("valid long regex")
+});
 
 /// Extract the most likely publication date from a raw HTML document.
 ///
@@ -50,10 +95,7 @@ pub fn extract_published_at(html: &str) -> Option<DateTime<Utc>> {
 /// Pull `datePublished` / `dateCreated` out of any `<script
 /// type="application/ld+json">` block.
 fn extract_from_json_ld(html: &str) -> Option<DateTime<Utc>> {
-    let re =
-        Regex::new(r#"(?is)<script[^>]*type=["']application/ld\+json["'][^>]*>(.*?)</script>"#)
-            .expect("valid json-ld regex");
-    for cap in re.captures_iter(html) {
+    for cap in JSONLD_SCRIPT_RE.captures_iter(html) {
         let raw = cap.get(1)?.as_str();
         // The JSON-LD block may be a single object or an array; try both,
         // and tolerate trailing commas / wrapped strings.
@@ -67,9 +109,7 @@ fn extract_from_json_ld(html: &str) -> Option<DateTime<Utc>> {
 /// Search a raw JSON string for `datePublished` or `dateCreated` values and
 /// parse the first hit. Handles both object and array forms.
 fn find_date_in_json_value(raw: &str) -> Option<DateTime<Utc>> {
-    let key_re = Regex::new(r#"(?i)"date(?:Published|Created|Modified)"\s*:\s*"([^"]+)""#)
-        .expect("valid date-key regex");
-    for cap in key_re.captures_iter(raw) {
+    for cap in JSON_DATE_KEY_RE.captures_iter(raw) {
         let val = cap.get(1)?.as_str();
         if let Some(dt) = parse_date_string(val) {
             return Some(dt);
@@ -98,9 +138,7 @@ fn extract_from_meta(html: &str) -> Option<DateTime<Utc>> {
     // Match <meta property="KEY" content="VAL"> OR <meta name="KEY" content="VAL">.
     // HTML attributes are case-insensitive; the regex uses the inline `(?i)`
     // flag and allows single or double quotes.
-    let meta_re = Regex::new(r#"(?is)<meta\s+[^>]*(?:property|name)\s*=\s*["']([^"']+)["'][^>]*>"#)
-        .expect("valid meta regex");
-    for meta_cap in meta_re.captures_iter(html) {
+    for meta_cap in META_TAG_RE.captures_iter(html) {
         let attr_key = meta_cap.get(1)?.as_str().to_lowercase();
         if KEYS.iter().any(|k| *k == attr_key) {
             // Re-scan this meta tag for a content="..." attribute.
@@ -117,17 +155,15 @@ fn extract_from_meta(html: &str) -> Option<DateTime<Utc>> {
 
 /// Pull the `content="..."` attribute value out of a single `<meta ...>` tag.
 fn extract_content_attr(tag: &str) -> Option<String> {
-    let re = Regex::new(r#"(?i)content\s*=\s*["']([^"']*)["']"#).expect("valid content regex");
-    re.captures(tag)
+    CONTENT_ATTR_RE
+        .captures(tag)
         .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
 }
 
 /// Extract from `<time datetime="...">` elements, preferring the first one
 /// (which is typically the article publication time in article markup).
 fn extract_from_time_elements(html: &str) -> Option<DateTime<Utc>> {
-    let re =
-        Regex::new(r#"(?i)<time[^>]*datetime\s*=\s*["']([^"']+)["']"#).expect("valid time regex");
-    for cap in re.captures_iter(html) {
+    for cap in TIME_DATETIME_RE.captures_iter(html) {
         let val = cap.get(1)?.as_str();
         if let Some(dt) = parse_date_string(val) {
             return Some(dt);
@@ -142,8 +178,7 @@ fn extract_from_visible_text(html: &str) -> Option<DateTime<Utc>> {
     let text = strip_tags(html);
     let head: String = text.chars().take(500).collect();
     // ISO date first: YYYY-MM-DD.
-    let iso_re = Regex::new(r"\b(\d{4})-(\d{2})-(\d{2})\b").expect("valid iso regex");
-    if let Some(cap) = iso_re.captures(&head) {
+    if let Some(cap) = ISO_DATE_RE.captures(&head) {
         let s = format!("{}-{}-{}", &cap[1], &cap[2], &cap[3]);
         if let Some(dt) = parse_date_string(&s) {
             return Some(dt);
@@ -151,9 +186,7 @@ fn extract_from_visible_text(html: &str) -> Option<DateTime<Utc>> {
     }
     // Long-form: "Month D, YYYY" or "D Month YYYY". Case-insensitive on the
     // month name so "january" / "JANUARY" also match.
-    let long_re =
-        Regex::new(r"(?i)\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})\b").expect("valid long regex");
-    if let Some(cap) = long_re.captures(&head) {
+    if let Some(cap) = LONG_DATE_RE.captures(&head) {
         let month = cap[1].to_lowercase();
         let day = &cap[2];
         let year = &cap[3];

@@ -272,8 +272,13 @@ pub fn is_youtube_url(url: &str) -> bool {
 /// fallback when the player response is missing.
 #[must_use]
 pub fn fallback_title_from_html(html: &str) -> Option<String> {
-    let re = regex::Regex::new(r"<title>(.*?)\s*-?\s*YouTube</title>").ok()?;
-    re.captures(html)
+    /// Hoisted to a process-wide static (PERF-064) — compiled once.
+    static TITLE_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"<title>(.*?)\s*-?\s*YouTube</title>")
+            .expect("valid youtube title regex")
+    });
+    TITLE_RE
+        .captures(html)
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().trim().to_string())
         .filter(|t| !t.is_empty())

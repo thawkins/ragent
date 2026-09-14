@@ -62,6 +62,7 @@ fn test_processor() -> SessionProcessor {
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         bg_service: std::sync::OnceLock::new(),
         activity_log: std::sync::OnceLock::new(),
+        activity_log_tx: tokio::sync::Mutex::new(None),
         skill_registry_cache: parking_lot::Mutex::new(None),
         active_loops: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         active_loop_specs: tokio::sync::RwLock::new(std::collections::HashMap::new()),
@@ -155,4 +156,45 @@ fn default_system_prompt_cache_works_through_cache_module() {
     let cache = SystemPromptCache::new();
     let result = cache.get_tool_reference(&ToolRegistry::new(), |_r| "x".to_string());
     assert_eq!(result, Some("x".to_string()));
+}
+
+/// PERF-034: the subagent wire surface is computed once per tool-registry
+/// version and shared by refcount on every later call.
+#[test]
+fn subagent_tool_definitions_are_cached_and_filter_interactive_tools() {
+    use ragent_agent::tool::ToolRegistry;
+    use ragent_agent::tool::aliases::{AskUserTool, RunCodeTool};
+    use ragent_agent::tool::plan::PlanEnterTool;
+
+    let registry = ToolRegistry::new();
+    registry.register(std::sync::Arc::new(PlanEnterTool));
+    registry.register(std::sync::Arc::new(AskUserTool));
+
+    let cache = SystemPromptCache::new();
+    let first = cache
+        .get_subagent_tool_definitions(&registry)
+        .expect("filtered definitions");
+    // `ask_user` is interactive and must be excluded from the subagent surface.
+    assert!(first.iter().any(|d| d.name == "plan_enter"));
+    assert!(!first.iter().any(|d| d.name == "ask_user"));
+
+    let second = cache
+        .get_subagent_tool_definitions(&registry)
+        .expect("cached definitions");
+    assert!(
+        std::sync::Arc::ptr_eq(&first, &second),
+        "unchanged registry version must return the cached allocation, not a rebuild"
+    );
+
+    // Registering a tool bumps the registry version, forcing a rebuild.
+    registry.register(std::sync::Arc::new(RunCodeTool));
+    let third = cache
+        .get_subagent_tool_definitions(&registry)
+        .expect("rebuilt definitions");
+    assert!(
+        !std::sync::Arc::ptr_eq(&second, &third),
+        "a registry version change must invalidate the cached surface"
+    );
+    assert!(third.iter().any(|d| d.name == "run_code"));
+    assert!(!third.iter().any(|d| d.name == "ask_user"));
 }

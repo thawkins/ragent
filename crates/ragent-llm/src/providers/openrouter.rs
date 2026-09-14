@@ -602,7 +602,9 @@ impl OpenRouterClient {
         let base_url = self.base_url.clone();
 
         let event_stream = async_stream::stream! {
-            let mut buffer = String::new();
+            // PERF-063: pre-size the SSE accumulation buffer so a long stream does
+            // not repeatedly realloc/copy as it grows.
+            let mut buffer = String::with_capacity(8 * 1024);
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
             let mut in_reasoning_block = false;
             let mut yielded_event = false;

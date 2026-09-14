@@ -159,15 +159,21 @@ fn serialize_image_attachment(image: &ImageData) -> String {
 /// The truncation is Unicode-safe: it never splits a multi-byte code point or
 /// a grapheme cluster. If `max` lands in the middle of a character, the cut is
 /// moved to the preceding character boundary.
+///
+/// PERF-038: a single `char_indices().nth(max)` pass locates the cut byte,
+/// avoiding the two full character scans (`chars().count()` then
+/// `chars().take(max)`) of the original implementation.
 #[must_use]
 pub fn truncate(value: &str, max: usize) -> String {
-    if value.chars().count() <= max {
-        value.to_string()
-    } else {
-        // Build the prefix by taking exactly `max` characters. This avoids
-        // byte-index slicing which panics on multi-byte UTF-8 sequences.
-        let prefix: String = value.chars().take(max).collect();
-        format!("{prefix}\n[truncated]")
+    match value.char_indices().nth(max) {
+        Some((cut, _)) => {
+            let mut out = String::with_capacity(cut + "[truncated]".len() + 1);
+            out.push_str(&value[..cut]);
+            out.push_str("\n[truncated]");
+            out
+        }
+        // Fewer than `max` characters: the whole string fits.
+        None => value.to_string(),
     }
 }
 

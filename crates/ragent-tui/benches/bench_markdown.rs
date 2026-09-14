@@ -91,5 +91,36 @@ fn bench_normalize_ascii_tables(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_render_markdown, bench_normalize_ascii_tables);
+/// PERF-042: guard the single wrapping helper the streaming message cache
+/// relies on (`wrap_line_styled`) across document sizes and terminal widths.
+fn bench_wrap_line_styled(c: &mut Criterion) {
+    use ratatui::text::Line;
+
+    let mut group = c.benchmark_group("wrap_line_styled");
+    for &chars in &[80usize, 1_000, 10_000] {
+        let text = "word ".repeat(chars / 5);
+        for &width in &[None, Some(40usize), Some(120)] {
+            let line = Line::from(text.clone());
+            let label = match width {
+                Some(w) => format!("{chars}ch_w{w}"),
+                None => format!("{chars}ch_nowrap"),
+            };
+            group.bench_with_input(BenchmarkId::new("wrap", &label), &width, |b, &w| {
+                if let Some(w) = w {
+                    b.iter(|| ragent_tui::layout::wrap_line_styled_testable(&line, w));
+                } else {
+                    b.iter(|| ragent_tui::layout::wrap_line_styled_testable(&line, 0));
+                }
+            });
+        }
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_render_markdown,
+    bench_normalize_ascii_tables,
+    bench_wrap_line_styled,
+);
 criterion_main!(benches);

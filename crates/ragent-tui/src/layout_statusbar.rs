@@ -224,6 +224,14 @@ pub fn render_status_bar_v2(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(ratatui::widgets::Paragraph::new(line2), line2_area);
 }
 
+/// Sum the display width of a span set.
+///
+/// Widths are measured with `unicode-width` so each span set is sized exactly
+/// once per frame (PERF-048).
+fn spans_width(spans: &[Span<'_>]) -> u16 {
+    spans.iter().map(|s| s.width() as u16).sum()
+}
+
 /// Build the display text for the last-prompt tag shown on the top status
 /// line: the first `max_chars` characters of the prompt, followed by `....`
 /// when the prompt is longer, wrapped in square brackets.
@@ -251,10 +259,10 @@ fn build_line1(
     mode: ResponsiveMode,
     width: u16,
 ) -> Line<'static> {
-    let mut spans: Vec<Span<'static>> = Vec::new();
-
-    // Application name and version prefix — identifies the running build at a glance.
-    spans.push(Span::styled(
+    // Application name and version prefix — identifies the running build at a
+    // glance. Built once here and reused below for both the width budget and
+    // the rendered line (PERF-048).
+    let prefix = Span::styled(
         format!(
             "{} {} v{} ",
             indicators::HEALTHY,
@@ -264,7 +272,7 @@ fn build_line1(
         Style::default()
             .fg(colors::HEALTHY)
             .add_modifier(Modifier::BOLD),
-    ));
+    );
 
     // Left section: Working directory
     let left = build_line1_left(app, config, mode);
@@ -278,24 +286,32 @@ fn build_line1(
     // prompt or the terminal is too narrow to fit the cwd, branch, tag, and
     // status sections without clipping.
     let center = build_line1_center(app, config, mode);
-    let center_width: u16 = center.iter().map(|s| s.width() as u16).sum();
-
-    // Right section: Status message
     let right = build_line1_right(app, config, mode);
-    let right_width: u16 = right.iter().map(|s| s.width() as u16).sum();
 
-    let prefix_width: u16 = spans.iter().map(|s| s.width() as u16).sum();
-    let left_width: u16 = left.iter().map(|s| s.width() as u16).sum();
+    // Measure each span set exactly once (PERF-048) and build the prefix span
+    // once for both the width budget and the rendered line.
+    let prefix_width: u16 = prefix.width() as u16;
+    let left_width = spans_width(&left);
+    let center_width = spans_width(&center);
+    let right_width = spans_width(&right);
 
     let prompt_tag = prompt_display_text(&app.last_prompt, 32);
-    let mut rendered_tag = false;
-    if !prompt_tag.is_empty() {
+    // The branch section and the tag render adjacently, separated by one space,
+    // as a single group placed immediately after the cwd section.
+    let group_width = if prompt_tag.is_empty() {
+        0
+    } else {
         use unicode_width::UnicodeWidthStr;
-        let tag_width = prompt_tag.width() as u16;
-        // The branch section and the tag render adjacently, separated by
-        // one space, as a single group placed immediately after the cwd
-        // section.
-        let group_width = center_width.saturating_add(1).saturating_add(tag_width);
+        center_width
+            .saturating_add(1)
+            .saturating_add(prompt_tag.width() as u16)
+    };
+    // Minimum readable span width for the shortened cwd section.
+    const MIN_CWD_SPAN: u16 = 12;
+    // `Some(cwd_span)` when the branch + tag group renders; `None` otherwise.
+    let tag_plan: Option<u16> = if group_width == 0 {
+        None
+    } else {
         // Widest the cwd section may render while keeping the group and the
         // right-hand status inside the terminal width.
         let max_cwd_span = width
@@ -306,17 +322,21 @@ fn build_line1(
             .saturating_add(left_width)
             .saturating_add(group_width)
             .saturating_add(right_width);
-        let cwd_fits_natural = natural_total <= width;
-        // Minimum readable span width for the shortened cwd section.
-        const MIN_CWD_SPAN: u16 = 12;
-        if cwd_fits_natural || max_cwd_span >= MIN_CWD_SPAN {
-            let cwd_span = if cwd_fits_natural {
-                left_width
-            } else {
-                max_cwd_span
-            };
-            if cwd_fits_natural {
-                spans.extend(left.clone());
+        if natural_total <= width {
+            Some(left_width)
+        } else if max_cwd_span >= MIN_CWD_SPAN {
+            Some(max_cwd_span)
+        } else {
+            None
+        }
+    };
+
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(8);
+    spans.push(prefix);
+    match tag_plan {
+        Some(cwd_span) => {
+            if cwd_span == left_width {
+                spans.extend(left);
             } else {
                 // Shorten the working directory (including the `Project: `
                 // label) so the branch + tag group and the status fit.
@@ -333,10 +353,10 @@ fn build_line1(
                 ));
             }
             // Branch + tag group, immediately after the cwd section.
-            spans.extend(center.clone());
+            spans.extend(center);
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
-                prompt_tag.clone(),
+                prompt_tag,
                 Style::default()
                     .fg(colors::IN_PROGRESS)
                     .add_modifier(Modifier::BOLD),
@@ -349,24 +369,23 @@ fn build_line1(
             if gap > 0 {
                 spans.push(Span::raw(" ".repeat(gap as usize)));
             }
-            rendered_tag = true;
         }
-    }
-    if !rendered_tag {
-        spans.extend(left);
+        None => {
+            spans.extend(left);
 
-        // Calculate gap between sections
-        let total_used = left_width
-            .saturating_add(center_width)
-            .saturating_add(right_width);
-        let gap_size = width.saturating_sub(prefix_width + total_used);
+            // Calculate gap between sections
+            let total_used = left_width
+                .saturating_add(center_width)
+                .saturating_add(right_width);
+            let gap_size = width.saturating_sub(prefix_width.saturating_add(total_used));
 
-        // Add center section
-        spans.extend(center);
+            // Add center section
+            spans.extend(center);
 
-        // Add gap
-        if gap_size > 0 {
-            spans.push(Span::raw(" ".repeat(gap_size as usize)));
+            // Add gap
+            if gap_size > 0 {
+                spans.push(Span::raw(" ".repeat(gap_size as usize)));
+            }
         }
     }
 
@@ -391,13 +410,14 @@ fn build_line2(
 
     // Center section: Token usage
     let center = build_line2_center(app, config, mode);
-    let center_width: u16 = center.iter().map(|s| s.width() as u16).sum();
 
     // Right section: Service status
     let right = build_line2_right(app, config, mode);
-    let right_width: u16 = right.iter().map(|s| s.width() as u16).sum();
 
-    let left_width: u16 = spans.iter().map(|s| s.width() as u16).sum();
+    // Measure each span set exactly once (PERF-048).
+    let center_width = spans_width(&center);
+    let right_width = spans_width(&right);
+    let left_width = spans_width(&spans);
 
     // Codeindex busy indicators (top-right, after the service icons). These
     // render in every responsive mode because they are appended in
@@ -423,7 +443,7 @@ fn build_line2(
                 .add_modifier(Modifier::BOLD),
         ));
     }
-    let busy_width: u16 = busy.iter().map(|s| s.width() as u16).sum();
+    let busy_width = spans_width(&busy);
 
     // Calculate gap
     let total_used = left_width

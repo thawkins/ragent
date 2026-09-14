@@ -31,7 +31,7 @@ impl GitLabClient {
         Ok(Self {
             token,
             base_url: config.instance_url.trim_end_matches('/').to_string(),
-            client: reqwest::Client::new(),
+            client: crate::http_client::shared_client(),
         })
     }
 
@@ -41,7 +41,7 @@ impl GitLabClient {
         Self {
             token,
             base_url: base_url.trim_end_matches('/').to_string(),
-            client: reqwest::Client::new(),
+            client: crate::http_client::shared_client(),
         }
     }
 
@@ -179,6 +179,16 @@ impl GitLabClient {
     #[must_use]
     pub fn instance_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Return the resolved Personal Access Token.
+    ///
+    /// Lets callers that need a raw HTTP request (e.g. the CI job-trace
+    /// endpoint, which returns plain text) reuse the already-resolved token
+    /// instead of hitting the credential store a second time (PERF-059).
+    #[must_use]
+    pub fn token(&self) -> &str {
+        &self.token
     }
 
     /// Fetch a GitLab project's metadata via `GET /projects/:id` (FR-008,

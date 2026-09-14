@@ -53,9 +53,9 @@
 //! assert_eq!(deduped[0].title, "A");
 //! ```
 
-use std::collections::HashSet;
 use std::sync::Arc;
-
+// PERF-080: FxHash for short non-adversarial URL keys.
+use rustc_hash::FxHashSet as HashSet;
 use thiserror::Error;
 
 use crate::masterfetch::urlnorm::normalise_url;
@@ -605,7 +605,7 @@ pub fn strip_disallowed_quotes(query: &str) -> String {
 /// ```
 #[must_use]
 pub fn dedup_results_by_url(results: &[RawResult]) -> Vec<RawResult> {
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen: HashSet<String> = HashSet::default();
     let mut deduped: Vec<RawResult> = Vec::with_capacity(results.len());
 
     for result in results {

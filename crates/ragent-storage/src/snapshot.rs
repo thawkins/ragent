@@ -68,35 +68,41 @@ impl IncrementalSnapshot {
     /// Returns an error if a diff cannot be applied (base file missing or diff
     /// corrupt). If a base file was pure binary the diff text will be empty and
     /// the file will be carried forward unchanged.
-    pub fn to_full(&self, base: &Snapshot) -> Result<Snapshot> {
-        let mut files = base.files.clone();
+    /// This consumes the delta and the base snapshot: the base file map is
+    /// moved (not cloned) and the added files' byte vectors are moved into the
+    /// result, so expanding performs no full byte-map clone (PERF-070).
+    pub fn to_full(self, base: Snapshot) -> Result<Snapshot> {
+        // PERF-070: move the base file map out of `base` rather than cloning
+        // every file's bytes. `Snapshot` has no `Drop` impl, so the partial
+        // move of `base.files` is sound.
+        let mut files = base.files;
 
         // Remove deleted files
         for path in &self.deleted {
             files.remove(path);
         }
 
-        // Apply text diffs
-        for (path, diff_text) in &self.diffs {
+        // Apply text diffs, consuming the diff map.
+        for (path, diff_text) in self.diffs {
             if diff_text.is_empty() {
                 // Binary file or empty diff — carry base forward unchanged
                 continue;
             }
-            let base_bytes = files.get(path).map(std::vec::Vec::as_slice).unwrap_or(b"");
+            let base_bytes = files.get(&path).map(std::vec::Vec::as_slice).unwrap_or(b"");
             let base_str = String::from_utf8_lossy(base_bytes);
-            let patched = apply_unified_diff(&base_str, diff_text)?;
-            files.insert(path.clone(), patched.into_bytes());
+            let patched = apply_unified_diff(&base_str, &diff_text)?;
+            files.insert(path, patched.into_bytes());
         }
 
-        // Add new files
-        for (path, content) in &self.added {
-            files.insert(path.clone(), content.clone());
+        // Add new files, moving each byte vector instead of cloning it.
+        for (path, content) in self.added {
+            files.insert(path, content);
         }
 
         Ok(Snapshot {
             id: uuid::Uuid::new_v4().to_string(),
-            session_id: self.session_id.clone(),
-            message_id: self.message_id.clone(),
+            session_id: self.session_id,
+            message_id: self.message_id,
             files,
             created_at: self.created_at,
         })

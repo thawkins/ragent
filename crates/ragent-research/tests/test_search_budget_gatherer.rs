@@ -58,7 +58,9 @@ impl ragent_research::web_gatherer::WebFetchTool for AlwaysFetch {
         Ok(WebFetchedPage {
             url: url.to_string(),
             title: url.to_string(),
-            body: "x".repeat(ragent_research::web_gatherer::MIN_EXTRACTABLE_CONTENT_CHARS * 2),
+            body: Arc::from(
+                "x".repeat(ragent_research::web_gatherer::MIN_EXTRACTABLE_CONTENT_CHARS * 2),
+            ),
             published_at: None,
             content_type: None,
             page_type: None,

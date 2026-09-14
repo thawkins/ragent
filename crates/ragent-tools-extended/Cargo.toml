@@ -61,6 +61,8 @@ lopdf = { workspace = true }
 url = { workspace = true }
 rusqlite = { workspace = true }
 lingua = { workspace = true }
+# PERF-080: FxHash for short non-adversarial map keys (URLs, engine names).
+rustc-hash = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.14"

@@ -44,6 +44,21 @@ use ragent_types::message::{Message, MessagePart, Role};
 /// from ~41 SQL round-trips to a single `CREATE TABLE` + `SELECT`.
 const SCHEMA_VERSION: u32 = 1;
 
+// PERF-071: static SQL bodies hoisted to `const &str` so the session read
+// paths build no `String` and the prepared-statement cache sees a stable
+// key.  The two variants exist only for the legacy pre-`format_version`
+// schema; the common path is the `_FMT_VERSION` form.
+const SQL_GET_SESSION_FMT_VERSION: &str = "SELECT id, title, project_id, directory, parent_id, version, format_version, \
+     created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1";
+const SQL_GET_SESSION_LEGACY: &str = "SELECT id, title, project_id, directory, parent_id, version, \
+     created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1";
+const SQL_LIST_SESSIONS_FMT_VERSION: &str = "SELECT id, title, project_id, directory, parent_id, version, format_version, \
+     created_at, updated_at, archived_at, summary \
+     FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC";
+const SQL_LIST_SESSIONS_LEGACY: &str = "SELECT id, title, project_id, directory, parent_id, version, \
+     created_at, updated_at, archived_at, summary \
+     FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC";
+
 /// Extract searchable text content from a message's parts.
 ///
 /// Concatenates all [`MessagePart::Text`] blocks, tool-call names, and
@@ -270,6 +285,14 @@ pub fn deobfuscate_key(encoded: &str) -> String {
 /// SQLite-backed storage for sessions, messages, and provider credentials.
 pub struct Storage {
     conn: Mutex<Connection>,
+    /// PERF-069: a second, read-only connection used by the read-only query
+    /// methods so a long-running write (or the startup FTS warm-up on another
+    /// connection) never serialises reads behind it.  With WAL enabled readers
+    /// and writers do not block each other, so this connection is always a
+    /// consistent snapshot reader.  `None` for in-memory databases, where a
+    /// second connection cannot observe the same data; those fall back to the
+    /// single writer connection.
+    reader: Option<Mutex<Connection>>,
     /// PERF-004: cached result of the `format_version` column-existence
     /// pragma query.  Populated once during [`Storage::migrate`] (or lazily
     /// on the first session read if the storage was constructed without
@@ -290,6 +313,23 @@ macro_rules! lock_conn {
     };
 }
 
+/// PERF-069: acquires the read-only connection lock, falling back to the
+/// writer connection when no separate reader exists (in-memory storage).
+/// Maps a poisoned mutex to an anyhow error.
+macro_rules! lock_conn_read {
+    ($self:expr) => {
+        match &$self.reader {
+            Some(reader) => reader
+                .lock()
+                .map_err(|e| anyhow::anyhow!("database read lock poisoned: {e}")),
+            None => $self
+                .conn
+                .lock()
+                .map_err(|e| anyhow::anyhow!("database lock poisoned: {e}")),
+        }
+    };
+}
+
 impl Storage {
     /// Acquire the internal connection lock for raw SQL access.
     ///
@@ -301,6 +341,17 @@ impl Storage {
         self.conn
             .lock()
             .map_err(|e| anyhow::anyhow!("database lock poisoned: {e}"))
+    }
+
+    /// PERF-069: whether this storage has a dedicated read-only connection.
+    ///
+    /// Returns `true` for file-backed storage that opened its reader
+    /// successfully, `false` for in-memory storage (and any file-backed
+    /// storage whose reader could not be opened), where reads share the
+    /// writer connection.
+    #[must_use]
+    pub fn has_reader(&self) -> bool {
+        self.reader.is_some()
     }
 
     /// PERF-004: return whether the `sessions.format_version` column
@@ -374,12 +425,37 @@ impl Storage {
         // grow to hundreds of MB. The default is 1000 pages; 500 is more
         // aggressive for a desktop agent that may run for hours.
         conn.pragma_update(None, "wal_autocheckpoint", 500)?;
-        let storage = Self {
+        let mut storage = Self {
             conn: Mutex::new(conn),
+            reader: None,
             has_format_version: std::sync::atomic::AtomicBool::new(false),
         };
         storage.migrate()?;
+        // PERF-069: open the dedicated read-only connection after migration so
+        // the schema is complete. On any failure the reader is left `None` and
+        // reads fall back to sharing the writer connection — a graceful
+        // degradation rather than an `open` failure.
+        storage.reader = Self::open_read_only(path);
         Ok(storage)
+    }
+
+    /// PERF-069: opens a second, read-only connection to the same database
+    /// file for the read-only query paths. Returns `None` if the connection
+    /// cannot be opened (e.g. the file is not readable), in which case callers
+    /// fall back to the writer connection.
+    ///
+    /// WAL is a persistent database property set by the writer, so a
+    /// read-only connection automatically observes it and never needs to run
+    /// the `journal_mode` pragma (which would require a write). Only the
+    /// connection-local `busy_timeout` is set so a transient lock during a
+    /// checkpoint does not surface as `SQLITE_BUSY`.
+    fn open_read_only(path: &Path) -> Option<Mutex<Connection>> {
+        let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = Connection::open_with_flags(path, flags).ok()?;
+        conn.pragma_update(None, "busy_timeout", 30000).ok()?;
+        Some(Mutex::new(conn))
     }
 
     /// R-23: Run a `PRAGMA wal_checkpoint(TRUNCATE)` to truncate the WAL file
@@ -419,6 +495,9 @@ impl Storage {
         let conn = Connection::open_in_memory()?;
         let storage = Self {
             conn: Mutex::new(conn),
+            // PERF-069: in-memory databases cannot be shared with a second
+            // connection, so reads share the writer connection.
+            reader: None,
             has_format_version: std::sync::atomic::AtomicBool::new(false),
         };
         storage.migrate()?;
@@ -827,24 +906,21 @@ impl Storage {
     /// assert_eq!(session.unwrap().directory, "/home/user/project");
     /// ```
     pub fn get_session(&self, id: &str) -> Result<Option<SessionRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         // PERF-004: skip the pragma_table_info round-trip when we already
         // know from `migrate()` whether the `format_version` column exists.
         // On the rare miss (storage constructed without migrate, or the
         // flag was never set), fall back to the pragma query and cache the
         // result so subsequent calls stay on the fast path.
         let has_format_version = self.has_format_version_cached(&conn)?;
+        // PERF-071: use hoisted `const &str` SQL so no `String` is built per call.
         let sql = if has_format_version {
-            "SELECT id, title, project_id, directory, parent_id, version, format_version, \
-             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1"
-                .to_string()
+            SQL_GET_SESSION_FMT_VERSION
         } else {
-            "SELECT id, title, project_id, directory, parent_id, version, \
-             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1"
-                .to_string()
+            SQL_GET_SESSION_LEGACY
         };
 
-        let mut stmt = conn.prepare_cached(&sql)?;
+        let mut stmt = conn.prepare_cached(sql)?;
         let row = stmt
             .query_row(params![id], |row| {
                 Ok(SessionRow {
@@ -899,23 +975,18 @@ impl Storage {
     /// assert_eq!(sessions.len(), 2);
     /// ```
     pub fn list_sessions(&self) -> Result<Vec<SessionRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         // PERF-004: use the cached `format_version` existence flag so we
         // skip the pragma round-trip on every `list_sessions` call.
         let has_format_version = self.has_format_version_cached(&conn)?;
+        // PERF-071: use hoisted `const &str` SQL so no `String` is built per call.
         let sql = if has_format_version {
-            "SELECT id, title, project_id, directory, parent_id, version, format_version, \
-             created_at, updated_at, archived_at, summary \
-             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC"
-                .to_string()
+            SQL_LIST_SESSIONS_FMT_VERSION
         } else {
-            "SELECT id, title, project_id, directory, parent_id, version, \
-             created_at, updated_at, archived_at, summary \
-             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC"
-                .to_string()
+            SQL_LIST_SESSIONS_LEGACY
         };
 
-        let mut stmt = conn.prepare_cached(&sql)?;
+        let mut stmt = conn.prepare_cached(sql)?;
         let rows = stmt
             .query_map([], |row| {
                 Ok(SessionRow {
@@ -1084,7 +1155,7 @@ impl Storage {
     /// assert_eq!(messages[0].text_content(), "Hi");
     /// ```
     pub fn get_messages(&self, session_id: &str) -> Result<Vec<Message>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, session_id, role, parts, created_at, updated_at \
              FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
@@ -1313,7 +1384,7 @@ impl Storage {
     /// assert!(storage.list_run_cost_summaries("sess-1").unwrap().is_empty());
     /// ```
     pub fn list_run_cost_summaries(&self, session_id: &str) -> Result<Vec<RunCostSummaryRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, session_id, model_id, input_tokens, output_tokens, total_cost_usd, \
              duration_ms, created_at \
@@ -1412,6 +1483,8 @@ impl Storage {
     /// assert_eq!(key.unwrap(), "sk-ant-my-key");
     /// ```
     pub fn get_provider_auth(&self, provider_id: &str) -> Result<Option<String>> {
+        // NOTE: must use the writer connection (not `lock_conn_read!`) because
+        // the legacy-credential branch below may auto-migrate the row.
         let conn = lock_conn!(self)?;
         let mut stmt =
             conn.prepare_cached("SELECT api_key FROM provider_auth WHERE provider_id = ?1")?;
@@ -1449,7 +1522,7 @@ impl Storage {
     /// Returns an error if the database query fails.
     pub fn seed_secret_registry(&self) -> Result<()> {
         let keys: Vec<String> = {
-            let conn = lock_conn!(self)?;
+            let conn = lock_conn_read!(self)?;
             let mut stmt = conn.prepare_cached("SELECT api_key FROM provider_auth")?;
             stmt.query_map([], |row| row.get::<_, String>(0))?
                 .filter_map(std::result::Result::ok)
@@ -1526,7 +1599,7 @@ impl Storage {
     /// assert_eq!(val.unwrap(), "dark");
     /// ```
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached("SELECT value FROM settings WHERE key = ?1")?;
         let val = stmt
             .query_row(params![key], |row| row.get::<_, String>(0))
@@ -1557,7 +1630,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn get_discovered_models(&self, provider_id: &str) -> Result<Option<String>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn
             .prepare_cached("SELECT models_json FROM discovered_models WHERE provider_id = ?1")?;
         let val = stmt
@@ -1609,7 +1682,7 @@ impl Storage {
         session_id: &str,
         status_filter: Option<&str>,
     ) -> Result<Vec<TaskRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let rows = match status_filter {
             Some(s) if s != "all" => {
                 let mut stmt = conn.prepare_cached(
@@ -1796,7 +1869,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn get_task(&self, id: &str, session_id: &str) -> Result<Option<TaskRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, session_id, title, status, description, created_at, updated_at,
                     active_form, owner, metadata, blocked_by
@@ -2001,7 +2074,7 @@ impl Storage {
 
     /// Fetches a single initiative by ID, scoped to `project`.
     pub fn get_initiative(&self, id: &str, project: &str) -> Result<Option<InitiativeRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, title, description, status, milestones_json, progress, project, session_id, created_at, updated_at, closed_at
              FROM initiatives WHERE id = ?1 AND project = ?2",
@@ -2020,7 +2093,7 @@ impl Storage {
         project: &str,
         status_filter: Option<&str>,
     ) -> Result<Vec<InitiativeRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let rows = match status_filter {
             Some(s) if s != "all" => {
                 let mut stmt = conn.prepare_cached(
@@ -2177,7 +2250,7 @@ impl Storage {
     ///
     /// Returns `None` if no event with the given id exists.
     pub fn get_cron_event(&self, id: &str) -> Result<Option<CronEventRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let row = conn
             .query_row(
                 "SELECT id, agent_type, prompt, schedule_form, start_at, \
@@ -2194,7 +2267,7 @@ impl Storage {
     ///
     /// Used by the `/cron list` slash command.
     pub fn list_cron_events(&self) -> Result<Vec<CronEventRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, agent_type, prompt, schedule_form, start_at, \
            duration_secs, schedule_raw, enabled, next_due, created_at, \
@@ -2211,7 +2284,7 @@ impl Storage {
     ///
     /// Returns events ordered by `next_due` ascending.
     pub fn list_due_cron_events(&self, now: &DateTime<Utc>) -> Result<Vec<CronEventRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let now_str = now.to_rfc3339();
         let mut stmt = conn.prepare_cached(
             "SELECT id, agent_type, prompt, schedule_form, start_at, \
@@ -2231,7 +2304,7 @@ impl Storage {
     ///
     /// Returns events ordered by `next_due` ascending.
     pub fn list_disabled_due_cron_events(&self, now: &DateTime<Utc>) -> Result<Vec<CronEventRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let now_str = now.to_rfc3339();
         let mut stmt = conn.prepare_cached(
             "SELECT id, agent_type, prompt, schedule_form, start_at, \
@@ -2349,7 +2422,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn get_memory(&self, id: i64) -> Result<Option<MemoryRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let row = conn
             .query_row(
                 "SELECT id, content, category, source, confidence, project, session_id,
@@ -2382,7 +2455,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn get_memory_tags(&self, memory_id: i64) -> Result<Vec<String>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt =
             conn.prepare_cached("SELECT tag FROM memory_tags WHERE memory_id = ?1 ORDER BY tag")?;
         let tags: Vec<String> = stmt
@@ -2403,7 +2476,7 @@ impl Storage {
         if memory_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         // Build a dynamic `IN (?1, ?2, ...)` clause.
         let placeholders: Vec<String> = (1..=memory_ids.len()).map(|i| format!("?{i}")).collect();
         let sql = format!(
@@ -2441,7 +2514,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn get_all_memory_tags(&self) -> Result<std::collections::HashMap<i64, Vec<String>>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt =
             conn.prepare_cached("SELECT memory_id, tag FROM memory_tags ORDER BY memory_id, tag")?;
         let mut map: std::collections::HashMap<i64, Vec<String>> = std::collections::HashMap::new();
@@ -2602,7 +2675,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn list_memories(&self, project: &str, limit: usize) -> Result<Vec<MemoryRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, content, category, source, confidence, project, session_id,
                     created_at, updated_at, access_count, last_accessed
@@ -2770,7 +2843,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn count_memories(&self) -> Result<u64> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let count: u64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
         Ok(count)
     }
@@ -2786,7 +2859,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn count_memories_for_project(&self, project_dir: &Path) -> Result<u64> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let full = project_dir.to_string_lossy();
         let name = project_dir
             .file_name()
@@ -2823,7 +2896,7 @@ impl Storage {
         project_dir: &Path,
         limit: usize,
     ) -> Result<Vec<MemoryRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let full = project_dir.to_string_lossy();
         let name = project_dir
             .file_name()
@@ -2868,7 +2941,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn list_all_memories(&self, limit: usize) -> Result<Vec<MemoryRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, content, category, source, confidence, project, session_id,
                     created_at, updated_at, access_count, last_accessed
@@ -2958,7 +3031,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn list_memory_embeddings(&self) -> Result<Vec<(i64, Vec<u8>)>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt =
             conn.prepare_cached("SELECT id, embedding FROM memories WHERE embedding IS NOT NULL")?;
         let rows: Vec<(i64, Vec<u8>)> = stmt
@@ -3079,7 +3152,7 @@ impl Storage {
         message_id: &str,
         dimensions: usize,
     ) -> Result<Option<Vec<f32>>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT embedding FROM messages_embedding \
                    WHERE message_id = ?1 AND dimensions = ?2",
@@ -3095,7 +3168,7 @@ impl Storage {
 
     /// Lists all stored session-message embeddings.
     pub fn list_message_embeddings(&self) -> Result<Vec<(String, Vec<u8>, usize)>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn
             .prepare_cached("SELECT message_id, embedding, dimensions FROM messages_embedding")?;
         let rows = stmt
@@ -3245,7 +3318,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn list_entities(&self) -> Result<Vec<KgEntityRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, name, entity_type, mention_count, created_at, updated_at FROM kg_entities ORDER BY mention_count DESC",
         )?;
@@ -3270,7 +3343,7 @@ impl Storage {
     ///
     /// Returns an error if the query fails.
     pub fn list_relationships(&self) -> Result<Vec<KgRelationshipRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, source_id, target_id, relation_type, confidence, source_memory_id, created_at FROM kg_relationships ORDER BY confidence DESC",
         )?;
@@ -3300,7 +3373,7 @@ impl Storage {
         &self,
         entity_id: i64,
     ) -> Result<(Vec<KgEntityRow>, Vec<KgRelationshipRow>)> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
 
         // Find all relationships where this entity is source or target.
         let mut rel_stmt = conn.prepare_cached(
@@ -3385,7 +3458,7 @@ impl Storage {
     /// assert!(storage.has_assistant_messages("sess-1").unwrap());
     /// ```
     pub fn has_assistant_messages(&self, session_id: &str) -> Result<bool> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let exists: Option<i64> = conn
             .query_row(
                 "SELECT 1 FROM messages WHERE session_id = ?1 AND role IN ('assistant', 'compaction') LIMIT 1",
@@ -3458,7 +3531,7 @@ impl Storage {
 
     /// Fetches a single background task by id.
     pub fn get_background_task(&self, id: &str) -> Result<Option<BackgroundTaskRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, session_id, command, status, exit_code, stdout, stderr,
                     progress_json, created_at, updated_at, completed_at
@@ -3490,7 +3563,7 @@ impl Storage {
         status: Option<&str>,
         limit: usize,
     ) -> Result<Vec<BackgroundTaskRow>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let mut sql = String::from(
             "SELECT id, session_id, command, status, exit_code, stdout, stderr,
                     progress_json, created_at, updated_at, completed_at
@@ -3694,7 +3767,7 @@ impl Storage {
         query: &str,
         limit: usize,
     ) -> Result<Vec<MessageSearchResult>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
 
         // Sanitise the FTS query.
         let safe_query = sanitise_fts_query(query);
@@ -3766,7 +3839,7 @@ impl Storage {
         &self,
         params: &SessionSearchParams,
     ) -> Result<Vec<MessageSearchResult>> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
 
         // Sanitise the FTS query.
         let safe_query = sanitise_fts_query(&params.query);
@@ -3906,7 +3979,7 @@ impl Storage {
     /// assert_eq!(stats.total, 2);
     /// ```
     pub fn conversation_stats(&self, session_id: &str) -> Result<ConversationStats> {
-        let conn = lock_conn!(self)?;
+        let conn = lock_conn_read!(self)?;
         let total: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM messages WHERE session_id = ?1",

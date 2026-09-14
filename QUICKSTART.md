@@ -1689,6 +1689,23 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.103
+
+- **Agent per-turn hot path (M1 performance pass, PERF-032..040 + PERF-048)**
+  — the agent loop no longer deep-clones its transcript every turn or re-sums
+  the whole history per step. The provider-facing transcript is shared behind
+  an `Arc<Vec<ChatMessage>>`; a pure append to the conversation converts only
+  the new tail; the subagent tool surface is cached; `LoopTracker` is `Copy`;
+  a token tracker keeps the per-step compaction estimate incremental; tool
+  results pair with their calls in one pass; the compaction prompt and memory
+  prompt are built into a single buffer; and the activity log is written by
+  one background task per process instead of a `spawn_blocking` per event.
+  No user-visible behaviour change. `rustls` was also bumped to 0.23.45
+  (RUSTSEC-2026-0285, a TLS 1.3 handshake boundary issue).
+- **Second `/simplify` sweep** — the API-key `mf_search` engines now share
+  common preflight/finish/mask helpers, engine-merge output is deterministic,
+  and the research web-gatherer volume policy is one helper.
+
 ## Version 1.0.100
 
 - **Serper engine for `mf_search`** — a fifth optional API-backed search

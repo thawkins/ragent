@@ -188,3 +188,65 @@ fn test_evaluate_trigger_default_uses_seventy_percent_floor() {
     let below_floor = evaluate_trigger(&config, 6_999, 0, 10_000, 0);
     assert!(!below_floor.should_compact);
 }
+
+// --- PERF-036: RequestTokenTracker ------------------------------------------
+
+use crate::compaction::estimator::RequestTokenTracker;
+
+/// PERF-036: the incremental tracker must return exactly the same value as the
+/// one-shot `estimate_request_tokens` across append / edit / shrink sequences,
+/// while only re-costing the changed messages.
+#[test]
+fn test_request_token_tracker_matches_full_estimate() {
+    let tools: Vec<ToolDefinition> = vec![ToolDefinition {
+        name: "read".to_string(),
+        description: "reads a file".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+    }];
+    let system = Some("you are a coding agent");
+    let hint = 123u64;
+
+    let mut tracker = RequestTokenTracker::new();
+    let mut messages = vec![user_msg("hello")];
+
+    // First call: nothing memoised.
+    assert_eq!(
+        tracker.estimate(system, &messages, &tools, Some(hint)),
+        estimate_request_tokens(system, &messages, &tools)
+    );
+
+    // Appends must match the full estimate.
+    messages.push(assistant_msg("hi there, how can I help?"));
+    assert_eq!(
+        tracker.estimate(system, &messages, &tools, Some(hint)),
+        estimate_request_tokens(system, &messages, &tools)
+    );
+
+    // In-place edit of the last message (the assistant placeholder case).
+    messages[1] = assistant_msg("a much longer assistant reply that grew in place");
+    assert_eq!(
+        tracker.estimate(system, &messages, &tools, Some(hint)),
+        estimate_request_tokens(system, &messages, &tools)
+    );
+
+    // A shorter list models compaction replacing the history.
+    messages.truncate(1);
+    assert_eq!(
+        tracker.estimate(system, &messages, &tools, Some(hint)),
+        estimate_request_tokens(system, &messages, &tools)
+    );
+
+    // A tool-definition change must be picked up (hint changes).
+    let more_tools = vec![
+        tools[0].clone(),
+        ToolDefinition {
+            name: "write".to_string(),
+            description: "writes a file".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        },
+    ];
+    assert_eq!(
+        tracker.estimate(system, &messages, &more_tools, Some(456)),
+        estimate_request_tokens(system, &messages, &more_tools)
+    );
+}

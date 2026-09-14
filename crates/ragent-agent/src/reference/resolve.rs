@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 
-use super::fuzzy::{collect_project_files, fuzzy_match};
+use super::fuzzy::{collect_project_files_async, fuzzy_match};
 use super::parse::{FileRef, ParsedRef, parse_refs};
 // Source-of-truth for office/PDF reading lives in ragent-tools-extended;
 // the agent-local copies under crate::tool are dormant duplicates slated
@@ -207,7 +207,8 @@ async fn resolve_url(client: &reqwest::Client, url: &str, raw: &str) -> Result<R
 
 /// Resolve a fuzzy name by finding the best-matching project file.
 async fn resolve_fuzzy(name: &str, raw: &str, working_dir: &Path) -> Result<ResolvedRef> {
-    let candidates = collect_project_files(working_dir, 10_000);
+    // PERF-051: the tree walk is filesystem-bound; run it off the async worker.
+    let candidates = collect_project_files_async(working_dir, 10_000).await?;
     let matches = fuzzy_match(name, &candidates);
 
     let best = matches

@@ -113,7 +113,6 @@ mod interaction_tests {
             scroll_offset: 10,
             max_scroll: 100,
             line_cache: ragent_tui::app::OutputViewLineCache {
-                lines: Vec::new(),
                 wrapped_lines: Vec::new(),
                 content_lines: Vec::new(),
                 wrapped_count: 0,

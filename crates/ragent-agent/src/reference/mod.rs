@@ -15,6 +15,6 @@ pub mod fuzzy;
 pub mod parse;
 pub mod resolve;
 
-pub use fuzzy::{FuzzyMatch, collect_project_files, fuzzy_match};
+pub use fuzzy::{FuzzyMatch, collect_project_files, collect_project_files_async, fuzzy_match};
 pub use parse::{FileRef, ParsedRef, parse_refs};
 pub use resolve::{ResolvedRef, resolve_all_refs, resolve_ref};

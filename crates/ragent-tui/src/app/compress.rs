@@ -143,8 +143,10 @@ impl App {
             .any(|m| m.role == Role::Compaction || m.role == Role::Assistant);
         self.messages = new_messages;
         // Structural change: the cache must be rebuilt from scratch because
-        // the whole timeline was replaced by the summary message.
-        self.message_line_cache.clear();
+        // the whole timeline was replaced by the summary message.  Resetting
+        // the cache also clears the staleness watermark so the next render
+        // starts scanning from index 0.
+        self.reset_message_cache();
         if summary_present {
             self.push_log_no_agent(
                 LogLevel::Info,

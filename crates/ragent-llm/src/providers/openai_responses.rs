@@ -407,7 +407,9 @@ impl ResponsesApiClient {
             }
 
             let stream = response.bytes_stream();
-            let mut buffer = String::new();
+            // PERF-063: pre-size the SSE accumulation buffer so a long stream does
+            // not repeatedly realloc/copy as it grows.
+            let mut buffer = String::with_capacity(8 * 1024);
             futures::pin_mut!(stream);
 
             loop {

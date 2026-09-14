@@ -72,6 +72,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         activity_log: std::sync::OnceLock::new(),
+        activity_log_tx: tokio::sync::Mutex::new(None),
         skill_registry_cache: parking_lot::Mutex::new(None),
         active_loops: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         active_loop_specs: tokio::sync::RwLock::new(std::collections::HashMap::new()),
@@ -947,21 +948,33 @@ fn test_slash_cost_no_samples_shows_message() {
 fn test_slash_clip_copies_rendered_message_lines() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
-    app.message_content_lines = vec![
-        "You: hello world".to_string(),
-        "Assistant: hi there".to_string(),
-        String::new(),
-        "Assistant: second block".to_string(),
-    ];
+    app.messages.push(ragent_agent::message::Message::user_text(
+        "s1",
+        "hello world",
+    ));
+    app.messages
+        .push(ragent_agent::message::Message::assistant_text(
+            "s1", "hi there",
+        ));
+
+    // PERF-041: the copy buffer is rebuilt on demand from the per-message
+    // cache, so the transcript must be rendered at least once first.
+    render_app_to_string(&mut app, 100, 30);
+    assert!(
+        !app.message_content_lines.is_empty(),
+        "render must populate the copy buffer"
+    );
+    let expected_chars = app.message_content_lines.join("\n").len();
+    let expected_lines = app.message_content_lines.len();
 
     app.execute_slash_command("/clip");
 
-    assert_eq!(app.status, "clip: copied 61 chars");
+    assert_eq!(app.status, format!("clip: copied {expected_chars} chars"));
     assert!(!app.messages.is_empty(), "clip should create a message");
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("From: /clip"));
-    assert!(text.contains("61 characters"));
-    assert!(text.contains("4 rendered lines"));
+    assert!(text.contains(&format!("{expected_chars} characters")));
+    assert!(text.contains(&format!("{expected_lines} rendered lines")));
     // The clipboard write itself is fire-and-forget on a background thread
     // (see clipboard::set_clipboard_text); verify it was issued without
     // stalling the test on the Linux wait() workaround.
@@ -2629,7 +2642,6 @@ fn test_output_view_paging_shortcuts() {
         scroll_offset: 10,
         max_scroll: 50,
         line_cache: ragent_tui::app::OutputViewLineCache {
-            lines: Vec::new(),
             wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,
@@ -2664,7 +2676,6 @@ fn test_output_view_escape_closes_overlay() {
         scroll_offset: 0,
         max_scroll: 0,
         line_cache: ragent_tui::app::OutputViewLineCache {
-            lines: Vec::new(),
             wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,
@@ -2700,7 +2711,6 @@ fn test_output_view_team_member_without_session_uses_log_filter() {
         scroll_offset: 0,
         max_scroll: 0,
         line_cache: ragent_tui::app::OutputViewLineCache {
-            lines: Vec::new(),
             wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,

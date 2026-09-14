@@ -202,8 +202,12 @@ impl LlmClient for AzureFoundryClient {
             format!("{}/openai/v1/chat/completions", self.base_url)
         };
         let body = self.inner.build_request_body(&request);
-        let body_bytes =
-            serde_json::to_vec(&body).context("serialise Azure Foundry request body")?;
+        // PERF-061: serialise once into a reference-counted `Bytes` so each
+        // retry attempt clones only the refcount instead of copying the whole
+        // request payload (up to 5 attempts per request).
+        let body_bytes = bytes::Bytes::from(
+            serde_json::to_vec(&body).context("serialise Azure Foundry request body")?,
+        );
 
         tracing::info!(
             endpoint = %url,

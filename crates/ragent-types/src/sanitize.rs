@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::borrow::Cow;
 use std::sync::{LazyLock, RwLock};
 
 use regex::Regex;
@@ -48,8 +48,10 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// [`redact_secrets`], complementing the regex-based pattern matching.
 /// The registry is seeded from the database on startup and updated
 /// whenever provider credentials change.
-static SECRET_REGISTRY: LazyLock<RwLock<HashSet<String>>> =
-    LazyLock::new(|| RwLock::new(HashSet::new()));
+///
+/// PERF-055: the registry is kept sorted longest-first on insert so
+/// [`redact_secrets_cow`] does not have to collect and sort it on every call.
+static SECRET_REGISTRY: LazyLock<RwLock<Vec<String>>> = LazyLock::new(|| RwLock::new(Vec::new()));
 
 /// Registers a secret value for exact-match redaction.
 ///
@@ -69,9 +71,8 @@ pub fn register_secret(secret: &str) {
     if secret.is_empty() {
         return;
     }
-    if let Ok(mut registry) = SECRET_REGISTRY.write() {
-        registry.insert(secret.to_string());
-    }
+    let mut registry = registry_write();
+    register_secret_inner(&mut registry, secret);
 }
 
 /// Removes a secret value from the exact-match redaction registry.
@@ -88,7 +89,7 @@ pub fn register_secret(secret: &str) {
 /// ```
 pub fn unregister_secret(secret: &str) {
     if let Ok(mut registry) = SECRET_REGISTRY.write() {
-        registry.remove(secret);
+        registry.retain(|s| s != secret);
     }
 }
 
@@ -107,10 +108,33 @@ pub fn seed_secrets(secrets: impl IntoIterator<Item = String>) {
     if let Ok(mut registry) = SECRET_REGISTRY.write() {
         for s in secrets {
             if !s.is_empty() {
-                registry.insert(s);
+                registry.push(s);
             }
         }
+        sort_by_len_desc(&mut registry);
     }
+}
+
+/// Acquire a write guard on the registry, recovering from poison.
+fn registry_write() -> std::sync::RwLockWriteGuard<'static, Vec<String>> {
+    SECRET_REGISTRY
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Insert `secret` (if new) and re-sort longest-first.
+fn register_secret_inner(registry: &mut Vec<String>, secret: &str) {
+    if registry.iter().any(|s| s == secret) {
+        return;
+    }
+    registry.push(secret.to_string());
+    sort_by_len_desc(registry);
+}
+
+/// Sort secrets by descending length so a shorter secret that is a substring
+/// of a longer one cannot partially replace it first.
+fn sort_by_len_desc(registry: &mut [String]) {
+    registry.sort_by(|a, b| b.len().cmp(&a.len()));
 }
 
 /// Redacts sensitive data such as API keys, secret keys, and bearer tokens
@@ -133,18 +157,51 @@ pub fn seed_secrets(secrets: impl IntoIterator<Item = String>) {
 /// assert!(!cleaned.contains("abcdefghijklmnopqrstuvwxyz"));
 /// ```
 pub fn redact_secrets(msg: &str) -> String {
-    let mut result = msg.to_string();
+    redact_secrets_cow(msg).into_owned()
+}
 
-    // Layer 1: exact-match registered secrets (longest first to avoid
-    // partial replacements when one secret is a substring of another).
-    if let Ok(registry) = SECRET_REGISTRY.read()
-        && !registry.is_empty()
-    {
-        let mut secrets: Vec<&str> = registry.iter().map(String::as_str).collect();
-        secrets.sort_by_key(|b| std::cmp::Reverse(b.len()));
-        for secret in secrets {
-            if result.contains(secret) {
-                result = result.replace(secret, "[REDACTED]");
+/// Cow-returning variant of [`redact_secrets`] (PERF-055).
+///
+/// Returns [`Cow::Borrowed`] without allocating when the message contains no
+/// registered secret and does not match the secret regex — the common case for
+/// streaming events. Callers on hot paths (e.g. SSE serialisation) should use
+/// this and keep the borrowed slice rather than materialising a `String`.
+///
+/// # Examples
+///
+/// ```rust
+/// use std::borrow::Cow;
+/// use ragent_types::sanitize::redact_secrets_cow;
+///
+/// let clean = redact_secrets_cow("nothing sensitive here");
+/// assert!(matches!(clean, Cow::Borrowed(_)));
+/// ```
+pub fn redact_secrets_cow(msg: &str) -> Cow<'_, str> {
+    let registry_empty = SECRET_REGISTRY
+        .read()
+        .map(|registry| registry.is_empty())
+        .unwrap_or(true);
+
+    if registry_empty && !SECRET_PATTERN.is_match(msg) {
+        return Cow::Borrowed(msg);
+    }
+
+    Cow::Owned(redact_secrets_owned(msg, registry_empty))
+}
+
+/// Apply both redaction layers, allocating the result.
+fn redact_secrets_owned(msg: &str, registry_empty: bool) -> String {
+    let mut result: Cow<'_, str> = Cow::Borrowed(msg);
+
+    // Layer 1: exact-match registered secrets, already longest-first.
+    if !registry_empty && let Ok(registry) = SECRET_REGISTRY.read() {
+        for secret in registry.iter() {
+            if result.contains(secret.as_str()) {
+                let replaced = match result {
+                    Cow::Borrowed(text) => text.replace(secret.as_str(), "[REDACTED]"),
+                    Cow::Owned(text) => text.replace(secret.as_str(), "[REDACTED]"),
+                };
+                result = Cow::Owned(replaced);
             }
         }
     }

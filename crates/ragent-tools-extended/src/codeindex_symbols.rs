@@ -21,7 +21,7 @@ impl Tool for CodeIndexSymbolsTool {
 
     fn description(&self) -> &'static str {
         "Query symbols (functions, structs, enums, traits) from the codebase index. \
-         All parameters are optional: 'name' (substring), 'kind' (function/struct/etc.), \
+         All parameters are optional: 'name' (leading fragment), 'kind' (function/struct/etc.), \
          'file_path' (path substring), 'language' (e.g. rust), 'visibility' \
          (public/private/crate), and 'limit' (default 50, max 200). Returns structured \
          results with location, signature, and documentation. USE THIS instead of \
@@ -35,7 +35,7 @@ impl Tool for CodeIndexSymbolsTool {
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Filter by symbol name (case-insensitive substring match)"
+                    "description": "Filter by symbol name (case-insensitive leading-fragment match)"
                 },
                 "kind": {
                     "type": "string",

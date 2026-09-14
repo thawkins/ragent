@@ -70,6 +70,7 @@ fn make_app() -> App {
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         activity_log: std::sync::OnceLock::new(),
+        activity_log_tx: tokio::sync::Mutex::new(None),
         skill_registry_cache: parking_lot::Mutex::new(None),
         active_loops: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         active_loop_specs: tokio::sync::RwLock::new(std::collections::HashMap::new()),
@@ -267,7 +268,6 @@ fn test_click_outside_output_view_closes_overlay() {
         scroll_offset: 0,
         max_scroll: 0,
         line_cache: ragent_tui::app::OutputViewLineCache {
-            lines: Vec::new(),
             wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,
@@ -396,7 +396,6 @@ fn test_output_view_overlay_renders_non_current_session_message() {
         scroll_offset: 0,
         max_scroll: 0,
         line_cache: ragent_tui::app::OutputViewLineCache {
-            lines: Vec::new(),
             wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,
@@ -462,7 +461,6 @@ fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
         scroll_offset: 0,
         max_scroll: 0,
         line_cache: ragent_tui::app::OutputViewLineCache {
-            lines: Vec::new(),
             wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,
@@ -548,7 +546,6 @@ fn test_output_view_overlay_does_not_render_log_lines() {
         scroll_offset: 0,
         max_scroll: 0,
         line_cache: ragent_tui::app::OutputViewLineCache {
-            lines: Vec::new(),
             wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,

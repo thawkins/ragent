@@ -483,7 +483,26 @@ pub struct SessionProcessor {
     /// etc. Recording is gated at call sites by
     /// [`ragent_config::activity_log::is_enabled`] so that `/alog off`
     /// suppresses all writes without unwiring the handle.
+    ///
+    /// PERF-040: when a store is wired, a single background writer task
+    /// ([`SessionProcessor::start_activity_writer`]) owns it and serialises
+    /// `ActivityLog::append` calls from all sessions over one
+    /// `std::sync::Mutex<Connection>`, draining them with `recv_many` so N
+    /// per-event `spawn_blocking`s collapse into one blocking thread. When no
+    /// store is wired the writer is absent; `record_activity_event` is then a
+    /// no-op and never spawns a task.
     pub activity_log: std::sync::OnceLock<Arc<ragent_storage::ActivityLog>>,
+    /// PERF-040: the per-process activity-log writer task handle plus the
+    /// channel every `record_activity_event` clone sends its append closure
+    /// over. `start_activity_writer` initialises it once with the wired store;
+    /// the `Option` is `None` until then (and forever when logging is off).
+    pub activity_log_tx: tokio::sync::Mutex<
+        Option<
+            tokio::sync::mpsc::UnboundedSender<
+                Box<dyn FnOnce(&ragent_storage::ActivityLog) + Send + 'static>,
+            >,
+        >,
+    >,
     /// C-001: cached skill registry keyed by the mtimes of the scanned
     /// skill directories plus the `extra_dirs` list. `SkillRegistry::load`
     /// does synchronous `std::fs` walks + `serde_yaml` parses across up to
@@ -510,7 +529,7 @@ pub struct SessionProcessor {
     /// T-003: the stored spec carries the resolved budgets (spec value or
     /// the `loop` config default) so consumers see effective limits.
     pub active_loop_specs:
-        tokio::sync::RwLock<HashMap<String, std::sync::Arc<crate::session::loop_state::LoopSpec>>>,
+        tokio::sync::RwLock<HashMap<String, Arc<crate::session::loop_state::LoopSpec>>>,
     /// FR-025: set to `true` when the loop telemetry record
     /// ([`SessionRecorder::record_agent_loop`] plus the per-run tool-call
     /// total) has been published for the current loop run, so it is recorded
@@ -585,6 +604,46 @@ impl SessionProcessor {
         let _ = self.activity_log.set(log);
     }
 
+    /// PERF-040: start the background activity-log writer for the wired store.
+    ///
+    /// Spawns one task that owns the `ActivityLog` and drains every queued
+    /// append closure, batching with `recv_many` so many events collapse into a
+    /// single blocking-thread hop. Called once by the binary right after
+    /// [`Self::set_activity_log`]; a no-op when no store is wired.
+    pub async fn start_activity_writer(&self) {
+        let Some(log) = self.activity_log.get().cloned() else {
+            return;
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        *self.activity_log_tx.lock().await = Some(tx);
+        tokio::spawn(async move {
+            let mut batch: Vec<Box<dyn FnOnce(&ragent_storage::ActivityLog) + Send + 'static>> =
+                Vec::with_capacity(64);
+            loop {
+                // Block for the first event, then opportunistically drain any
+                // others that are already queued so a burst becomes one batch.
+                match rx.recv_many(&mut batch, 64).await {
+                    0 => break, // all senders dropped
+                    _ => {}
+                }
+                if let Err(e) = tokio::task::spawn_blocking({
+                    let log = log.clone();
+                    let batch = std::mem::take(&mut batch);
+                    move || {
+                        for record in batch {
+                            record(&log);
+                        }
+                    }
+                })
+                .await
+                {
+                    tracing::warn!(error = %e, "activity_log: writer task join failed");
+                }
+                batch.clear();
+            }
+        });
+    }
+
     /// Start a goal-driven loop run for `session_id` (spec `agentloop`).
     ///
     ///
@@ -628,7 +687,7 @@ impl SessionProcessor {
         // T-009: record the spec so the permission layer can enforce the
         // loop's tool-set/scope/constraint restrictions on every tool call.
         let mut specs = self.active_loop_specs.write().await;
-        specs.insert(session_id.to_string(), std::sync::Arc::new(spec));
+        specs.insert(session_id.to_string(), Arc::new(spec));
         // T-011 (FR-016): arm a fresh human-interrupt flag for this run.
         self.active_loop_interrupts
             .write()
@@ -1098,17 +1157,25 @@ impl SessionProcessor {
     /// Errors are logged at `warn` level and never propagated — activity
     /// logging is best-effort and must never break the agent loop.
     ///
-    /// The SQLite write is off-loaded to a blocking thread via
-    /// `tokio::task::spawn_blocking` to avoid stalling the async executor.
-    /// The `ActivityLog` owns a `std::sync::Mutex<Connection>` and all its
-    /// public methods are synchronous — calling them directly from an async
-    /// context would block the tokio worker thread during every INSERT.
-    async fn record_activity_event<F>(&self, f: F)
+    /// PERF-040: the append is queued onto the background writer task
+    /// ([`Self::start_activity_writer`]) rather than spawning its own
+    /// `spawn_blocking`. The writer drains the queue in batches, so a turn's
+    /// many events collapse into a small number of blocking-thread hops and no
+    /// per-event task is created. When the writer is not running (no store
+    /// wired), the append is dropped — matching the previous no-op behaviour.
+    ///
+    /// The closure returns `Option<ActivityEvent>` so a batch closure that
+    /// appends several events can yield just the last one (or `None`).
+    ///
+    /// Exposed (rather than private) so integration tests can drive the
+    /// writer; not part of the supported public surface.
+    #[doc(hidden)]
+    pub async fn record_activity_event<F>(&self, f: F)
     where
         F: FnOnce(
                 &ragent_storage::ActivityLog,
             ) -> std::result::Result<
-                ragent_types::activity::ActivityEvent,
+                Option<ragent_types::activity::ActivityEvent>,
                 ragent_storage::AppendError,
             > + Send
             + 'static,
@@ -1116,13 +1183,13 @@ impl SessionProcessor {
         if !ragent_config::activity_log::is_enabled() {
             return;
         }
-        if let Some(log) = self.activity_log.get() {
-            let log = log.clone();
-            match tokio::task::spawn_blocking(move || f(&log)).await {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => tracing::warn!(error = %e, "activity_log: recording failed"),
-                Err(e) => tracing::warn!(error = %e, "activity_log: spawn_blocking failed"),
-            }
+        let tx = self.activity_log_tx.lock().await;
+        if let Some(tx) = tx.as_ref() {
+            let _ = tx.send(Box::new(move |log: &ragent_storage::ActivityLog| {
+                if let Err(e) = f(log) {
+                    tracing::warn!(error = %e, "activity_log: recording failed");
+                }
+            }));
         }
     }
 
@@ -1535,6 +1602,7 @@ impl SessionProcessor {
         let run_id_for_user = run_id.clone();
         self.record_activity_event(move |log| {
             log.record_model_message(&run_id_for_user, "user", &user_content, Some(user_msg_id))
+                .map(Some)
         })
         .await;
 
@@ -1657,7 +1725,9 @@ impl SessionProcessor {
         // 4. Build chat messages from history
         // P-3: `build_turn_chat_messages` also returns the resolved
         // `context_window` so the orchestrator does not re-resolve it below.
-        let (chat_messages_vec, mut last_reported_input_tokens, context_window) = self
+        // PERF-032: the returned history is already an `Arc`, shared with the
+        // session-state cache by refcount (no per-turn transcript clone).
+        let (chat_messages, mut last_reported_input_tokens, context_window) = self
             .build_turn_chat_messages(
                 session_id,
                 agent,
@@ -1672,8 +1742,7 @@ impl SessionProcessor {
         // P-6: hold the per-turn chat history as `Arc<Vec<ChatMessage>>`
         // so the per-retry `ChatRequest` can share it by refcount bump
         // instead of cloning the entire `Vec` on every attempt.
-        let mut chat_messages: std::sync::Arc<Vec<ChatMessage>> =
-            std::sync::Arc::new(chat_messages_vec);
+        let mut chat_messages: std::sync::Arc<Vec<ChatMessage>> = chat_messages;
 
         // 5. Run AGENTS.md init exchange (display-only, skipped for subagents)
         {
@@ -1723,32 +1792,36 @@ impl SessionProcessor {
                     allowed
                 })
         };
-        let mut tool_definitions: std::sync::Arc<Vec<ToolDefinition>> = if max_steps <= 1 {
+        // PERF-034: the wire tool surface is resolved once per turn, but a
+        // sub-agent turn otherwise rebuilds the interactive-filtered vector over
+        // ~111 definitions every turn. When no loop restricts the set, take the
+        // version-keyed cache entry instead; loop-restricted turns keep the
+        // fused filter (they are rare and depend on the loop spec).
+        let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> = if max_steps <= 1 {
             std::sync::Arc::new(Vec::new())
         } else if let Some(allowed) = loop_tool_set {
             let all = self.get_cached_tool_definitions();
             std::sync::Arc::new(
                 all.iter()
-                    .filter(|def| allowed.contains(def.name.as_str()))
+                    .filter(|def| {
+                        allowed.contains(def.name.as_str())
+                            && !(agent_is_subagent
+                                && crate::session::permissions::is_interactive_tool(&def.name))
+                    })
                     .cloned()
                     .collect(),
             )
+        } else if agent_is_subagent {
+            // Interactive-tool block (subagent): remove interactive tools from
+            // the wire surface so a sub-agent is never offered a tool it cannot
+            // use. The dispatch gate below still denies a hallucinated call
+            // (fail closed). Cached by tool-registry version.
+            self.system_prompt_cache()
+                .get_subagent_tool_definitions(&self.tool_registry)
+                .unwrap_or_else(|| self.get_cached_tool_definitions())
         } else {
             self.get_cached_tool_definitions()
         };
-        // Interactive-tool block (subagent): remove interactive tools from
-        // the wire surface so a sub-agent is never offered a tool it cannot
-        // use. The dispatch gate below still denies a hallucinated call
-        // (fail closed).
-        if agent_is_subagent {
-            tool_definitions = std::sync::Arc::new(
-                tool_definitions
-                    .iter()
-                    .filter(|def| !crate::session::permissions::is_interactive_tool(&def.name))
-                    .cloned()
-                    .collect(),
-            );
-        }
         // P-7: prime the tool-definition byte cache alongside the definitions
         // cache so the per-step request-size estimator can reuse the sum.
         let _ = self.get_cached_tool_definition_bytes();
@@ -1805,7 +1878,7 @@ impl SessionProcessor {
         // without holding the `active_loops` lock across an await point.
         // Plain chat turns have no tracker entry and skip the guard entirely.
         let mut loop_tracker: Option<crate::session::loop_state::LoopTracker> =
-            self.active_loops.read().await.get(session_id).cloned();
+            self.active_loops.read().await.get(session_id).copied();
         // T-011 (FR-016): the human-interrupt flag for this session's loop,
         // raised by the TUI `Esc` path
         // ([`SessionProcessor::request_loop_interrupt`]). Plain chat turns
@@ -1820,6 +1893,9 @@ impl SessionProcessor {
         // T-011 (FR-016): set when a safe-point interrupt check fired — the
         // post-loop handler persists the partial turn and ends it normally.
         let mut loop_interrupted = false;
+        // PERF-036: memoise the per-step request-token estimate so a step that
+        // appends one message does not re-sum the whole history + tool schemas.
+        let mut token_tracker = crate::compaction::estimator::RequestTokenTracker::new();
         loop {
             // T-008 (FR-010, FR-013, FR-014, FR-017): the stop-flag guard.
             // No stage of this iteration may run once the loop's stop flag is
@@ -1939,6 +2015,7 @@ impl SessionProcessor {
                         &run_id_for_cancel,
                         ragent_types::activity::TerminationReason::Interrupted,
                     )
+                    .map(Some)
                 })
                 .await;
                 publish_run_cost_summary(total_elapsed_ms);
@@ -1980,10 +2057,14 @@ impl SessionProcessor {
                 let estimate = if last_reported_input_tokens > 0 {
                     0
                 } else {
-                    crate::compaction::estimate_request_tokens(
+                    // PERF-036: incremental estimate — only changed messages are
+                    // re-costed; the tool term reuses the caller's cached byte
+                    // hint so ~111 schemas are not re-serialised each step.
+                    token_tracker.estimate(
                         Some(system_prompt.as_ref()),
                         &chat_messages,
                         &tool_definitions[..],
+                        self.get_cached_tool_definition_bytes(),
                     )
                 };
                 let decision = crate::compaction::evaluate_trigger(
@@ -2186,6 +2267,7 @@ impl SessionProcessor {
                             &assistant_text,
                             Some(assistant_msg_id_for_log),
                         )
+                        .map(Some)
                     })
                     .await;
                 }
@@ -2689,6 +2771,7 @@ impl SessionProcessor {
                     let run_id_for_tc = run_id.clone();
                     self.record_activity_event(move |log| {
                         log.record_tool_call(&run_id_for_tc, tc_id, tc_name, tc_args)
+                            .map(Some)
                     })
                     .await;
                     // P-8/P-9: clone the per-step `ToolContext` rather than
@@ -3352,42 +3435,36 @@ impl SessionProcessor {
                 // P-15: publish a single `ToolCallBatch` for this step with
                 // all per-call summaries, so consumers can render atomically.
                 if !batch_entries.is_empty() {
-                    // Activity log: record each tool result from the batch.
-                    if ragent_config::activity_log::is_enabled() {
-                        if let Some(log) = self.activity_log.get() {
-                            let log = log.clone();
-                            let entries: Vec<_> = batch_entries
-                                .iter()
-                                .map(|e| {
-                                    (
-                                        e.call_id.clone(),
-                                        e.tool.clone(),
-                                        e.success,
-                                        e.content.clone(),
-                                    )
-                                })
-                                .collect();
-                            let run_id_for_results = run_id.clone();
-                            tokio::task::spawn_blocking(move || {
-                                for (call_id, tool, success, content) in entries {
-                                    if let Err(e) = log.record_tool_result(
-                                        &run_id_for_results,
-                                        call_id,
-                                        tool,
-                                        success,
-                                        content,
-                                    ) {
-                                        tracing::warn!(
-                                            error = %e,
-                                            "activity_log: record_tool_result failed"
-                                        );
-                                    }
-                                }
-                            })
-                            .await
-                            .ok();
+                    // Activity log: record each tool result from the batch
+                    // (PERF-040: queued onto the background writer task, which
+                    // batches the whole step into one blocking hop).
+                    let batch_log: Vec<_> = batch_entries
+                        .iter()
+                        .map(|e| {
+                            (
+                                e.call_id.clone(),
+                                e.tool.clone(),
+                                e.success,
+                                e.content.clone(),
+                            )
+                        })
+                        .collect();
+                    let run_id_for_results = run_id.clone();
+                    self.record_activity_event(move |log| {
+                        for (call_id, tool, success, content) in batch_log {
+                            log.record_tool_result(
+                                &run_id_for_results,
+                                call_id,
+                                tool,
+                                success,
+                                content,
+                            )?;
                         }
-                    }
+                        // Each append already yielded its own event; the batch
+                        // closure reports none of its own.
+                        Ok(None)
+                    })
+                    .await;
                     // T-017 (FR-025): tally this iteration's tool calls into
                     // the loop tracker so the run's tool-call total is
                     // published with the loop telemetry on termination. The
@@ -3694,6 +3771,7 @@ impl SessionProcessor {
                     &run_id_for_interrupt,
                     ragent_types::activity::TerminationReason::Interrupted,
                 )
+                .map(Some)
             })
             .await;
             publish_run_cost_summary(total_elapsed_ms);
@@ -3725,6 +3803,7 @@ impl SessionProcessor {
                     &run_id_for_watchdog,
                     ragent_types::activity::TerminationReason::Interrupted,
                 )
+                .map(Some)
             })
             .await;
             publish_run_cost_summary(total_elapsed_ms);
@@ -3805,6 +3884,7 @@ impl SessionProcessor {
                 &run_id_for_complete,
                 ragent_types::activity::TerminationReason::Completed,
             )
+            .map(Some)
         })
         .await;
         crate::hooks::fire_hooks(

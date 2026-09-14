@@ -15,6 +15,7 @@ use rustc_hash::FxHasher;
 
 use crate::agent::AgentInfo;
 use crate::llm::{ChatMessage, ToolDefinition};
+use crate::session::history::history_version_of;
 use crate::tool::{TeamContext, ToolRegistry};
 use ragent_types::ThinkingConfig;
 
@@ -108,6 +109,10 @@ pub struct SystemPromptCache {
     tool_reference: Mutex<Cached<String>>,
     /// Sorted tool definition cache - changes only on tool registration
     tool_definitions: Mutex<Option<(u64, Arc<Vec<ToolDefinition>>)>>,
+    /// PERF-034: the subagent wire surface (tool definitions with interactive
+    /// tools removed), keyed by the tool-registry version. Sub-agent turns share
+    /// one immutable filtered vector instead of rebuilding it every step.
+    subagent_tool_definitions: Mutex<Option<(u64, Arc<Vec<ToolDefinition>>)>>,
     /// Codeindex guidance section - changes only on index state change
     codeindex_guidance: Mutex<Cached<String>>,
     /// Team guidance section - changes only on team membership change
@@ -147,6 +152,7 @@ impl SystemPromptCache {
             agent_prompts: Mutex::new(HashMap::new()),
             tool_reference: Mutex::new(Cached::new()),
             tool_definitions: Mutex::new(None),
+            subagent_tool_definitions: Mutex::new(None),
             codeindex_guidance: Mutex::new(Cached::new()),
             team_guidance: Mutex::new(Cached::new()),
             cache_version: AtomicU64::new(current_cache_version()),
@@ -269,6 +275,34 @@ impl SystemPromptCache {
         let defs = tool_registry.definitions();
         *cache = Some((current_version, Arc::clone(&defs)));
         Some(defs)
+    }
+
+    /// PERF-034: get or compute the subagent wire surface — the tool
+    /// definitions with interactive tools removed — keyed by the tool-registry
+    /// version so repeated sub-agent steps share one immutable vector.
+    pub fn get_subagent_tool_definitions(
+        &self,
+        tool_registry: &ToolRegistry,
+    ) -> Option<Arc<Vec<ToolDefinition>>> {
+        let current_version = tool_registry.version();
+        let mut cache = self.subagent_tool_definitions.lock().ok()?;
+
+        if let Some((version, defs)) = cache.as_ref() {
+            if *version == current_version {
+                return Some(Arc::clone(defs));
+            }
+        }
+
+        let filtered: Arc<Vec<ToolDefinition>> = Arc::new(
+            tool_registry
+                .definitions()
+                .iter()
+                .filter(|def| !crate::session::permissions::is_interactive_tool(&def.name))
+                .cloned()
+                .collect(),
+        );
+        *cache = Some((current_version, Arc::clone(&filtered)));
+        Some(filtered)
     }
 
     /// Get or compute the cached codeindex guidance section.
@@ -453,10 +487,24 @@ impl SystemPromptCache {
 /// recomputes the parts that have changed since the last access.
 #[derive(Debug)]
 pub struct SessionState {
-    /// Cached chat messages (converted from internal Message format)
-    cached_chat_messages: Vec<ChatMessage>,
+    /// Cached chat messages (converted from internal Message format).
+    ///
+    /// PERF-032: held as an `Arc` so handing it out on a cache hit (and
+    /// storing a freshly-built list) is an O(1) refcount operation rather
+    /// than a deep clone of the whole transcript.
+    cached_chat_messages: Arc<Vec<ChatMessage>>,
     /// Number of messages last time we checked
     last_message_count: usize,
+    /// Count of internal history messages the cached transcript was built from.
+    ///
+    /// PERF-033: together with `cached_prefix_version` this lets the loop
+    /// detect a pure append (the incoming history grew and the cached prefix is
+    /// unchanged) and convert only the newly appended messages instead of
+    /// rebuilding the whole vector.
+    cached_history_len: usize,
+    /// Version of the cached internal-history prefix (`messages[..cached_history_len]`)
+    /// recorded when the transcript was stored (PERF-033).
+    cached_prefix_version: u64,
     /// Last time the cache was updated
     last_updated: std::time::Instant,
     /// Session ID this state belongs to
@@ -490,8 +538,10 @@ impl SessionState {
     #[must_use]
     pub fn new(session_id: impl Into<String>) -> Self {
         Self {
-            cached_chat_messages: Vec::new(),
+            cached_chat_messages: Arc::new(Vec::new()),
             last_message_count: 0,
+            cached_history_len: 0,
+            cached_prefix_version: 0,
             last_updated: std::time::Instant::now(),
             session_id: session_id.into(),
             thinking: ThinkingConfig::default(),
@@ -520,8 +570,10 @@ impl SessionState {
 
     /// Clear all cached state (e.g., after compression or reset).
     pub fn clear(&mut self) {
-        self.cached_chat_messages.clear();
+        self.cached_chat_messages = Arc::new(Vec::new());
         self.last_message_count = 0;
+        self.cached_history_len = 0;
+        self.cached_prefix_version = 0;
         self.last_updated = std::time::Instant::now();
         self.last_history_version = 0;
         self.cached_serialised = None;
@@ -548,24 +600,67 @@ impl SessionState {
     /// without re-running `history_to_chat_messages`.  When it differs,
     /// the version is recorded and `None` is returned, signalling that
     /// the caller should rebuild the list.
+    ///
+    /// PERF-032: the cache-hit path returns a refcount bump on the cached
+    /// `Arc`, never a copy of the transcript.
     pub fn cached_chat_messages_for_version(
         &mut self,
         history_version: u64,
-    ) -> Option<&[ChatMessage]> {
+    ) -> Option<Arc<Vec<ChatMessage>>> {
         if self.last_history_version == history_version && !self.cached_chat_messages.is_empty() {
-            Some(&self.cached_chat_messages)
+            Some(Arc::clone(&self.cached_chat_messages))
         } else {
             self.last_history_version = history_version;
             None
         }
     }
 
+    /// PERF-033: take the cached transcript for a pure-append rebuild.
+    ///
+    /// Returns `Some((cached, base_len))` only when the cached transcript is
+    /// non-empty, the incoming history is longer, and the cached prefix
+    /// (`messages[..base_len]`) still hashes to the version recorded when the
+    /// transcript was stored. The cached `Arc` is *moved out* of the state (its
+    /// refcount drops to one) so the caller can extend it in place and hand it
+    /// back to [`Self::store_chat_messages`] without any full-vector copy.
+    pub fn take_cached_for_append(
+        &mut self,
+        messages: &[crate::message::Message],
+    ) -> Option<(Arc<Vec<ChatMessage>>, usize)> {
+        let base_len = self.cached_history_len;
+        if base_len == 0
+            || self.cached_chat_messages.is_empty()
+            || messages.len() <= base_len
+            || history_version_of(&messages[..base_len]) != self.cached_prefix_version
+        {
+            return None;
+        }
+        let cached = std::mem::take(&mut self.cached_chat_messages);
+        Some((cached, base_len))
+    }
+
+    /// Record the internal-history prefix a freshly stored transcript was built
+    /// from (PERF-033). Companion to [`Self::store_chat_messages`]: call it with
+    /// the same history slice used to build the transcript so the next turn can
+    /// detect a pure append.
+    pub fn record_history_base(&mut self, history: &[crate::message::Message]) {
+        self.cached_prefix_version = history_version_of(history);
+        self.cached_history_len = history.len();
+    }
+
     /// Store the rebuilt chat-message list and a serialised snapshot for
     /// the FR-007 fast path.  Companion to
     /// [`Self::cached_chat_messages_for_version`].
-    pub fn store_chat_messages(&mut self, messages: Vec<ChatMessage>, serialised: Option<Vec<u8>>) {
+    ///
+    /// PERF-032: takes the `Arc<Vec<ChatMessage>>` the caller already holds so
+    /// the just-built list is shared by refcount instead of deep-cloned.
+    pub fn store_chat_messages(
+        &mut self,
+        messages: Arc<Vec<ChatMessage>>,
+        serialised: Option<Vec<u8>>,
+    ) {
+        self.last_message_count = messages.len();
         self.cached_chat_messages = messages;
-        self.last_message_count = self.cached_chat_messages.len();
         self.cached_serialised = serialised;
     }
 

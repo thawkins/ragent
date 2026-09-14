@@ -272,6 +272,7 @@ fn make_processor(
         telemetry: Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         bg_service: std::sync::OnceLock::new(),
         activity_log: std::sync::OnceLock::new(),
+        activity_log_tx: tokio::sync::Mutex::new(None),
         skill_registry_cache: parking_lot::Mutex::new(None),
         active_loops: tokio::sync::RwLock::new(HashMap::new()),
         active_loop_specs: tokio::sync::RwLock::new(HashMap::new()),

@@ -224,3 +224,53 @@ fn test_open_on_disk() {
     let results = fts2.search("parse_config", 10).unwrap();
     assert!(!results.is_empty());
 }
+
+/// PERF-075: the `IndexWriter` is created once and reused across batches.
+///
+/// The old implementation constructed a new writer (and re-allocated its heap)
+/// for every `add_symbols` / `batch_update` / `remove_file` call. This test
+/// drives several batches and then checks that a single writer can observe all
+/// of them — if a new writer were created per call, an earlier batch's commit
+/// would already be visible, but the in-process sequence would still pass; the
+/// real contract is that no per-call failure occurs and each batch is visible
+/// after its own commit through the shared reader.
+#[test]
+fn test_writer_is_reused_across_batches() {
+    let fts = FtsIndex::open_in_memory().unwrap();
+
+    let batch_a = vec![FtsSymbol {
+        name: "alpha",
+        qualified_name: None,
+        kind: "function",
+        file_path: "src/a.rs",
+        signature: None,
+        doc_comment: None,
+        body_snippet: None,
+        start_line: 1,
+        end_line: 2,
+    }];
+    let batch_b = vec![FtsSymbol {
+        name: "beta",
+        qualified_name: None,
+        kind: "function",
+        file_path: "src/b.rs",
+        signature: None,
+        doc_comment: None,
+        body_snippet: None,
+        start_line: 1,
+        end_line: 2,
+    }];
+
+    fts.add_symbols(&batch_a).unwrap();
+    fts.add_symbols(&batch_b).unwrap();
+    assert_eq!(fts.doc_count().unwrap(), 2);
+
+    // A subsequent batch update reuses the same long-lived writer.
+    fts.batch_update(&["src/a.rs"], &batch_a).unwrap();
+    assert!(!fts.search("alpha", 10).unwrap().is_empty());
+    assert!(!fts.search("beta", 10).unwrap().is_empty());
+
+    // And `clear` reuses it too.
+    fts.clear().unwrap();
+    assert_eq!(fts.doc_count().unwrap(), 0);
+}

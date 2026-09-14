@@ -663,6 +663,13 @@ impl App {
         start_row = start_row.saturating_add(scroll_top);
         end_row = end_row.saturating_add(scroll_top);
 
+        // PERF-041: the Messages pane's copy buffer is rebuilt on demand
+        // instead of every frame, so refresh it here if it is stale before
+        // reading the selected rows.
+        if sel.pane == SelectionPane::Messages {
+            self.ensure_copy_content_lines();
+        }
+
         let lines: &[String] = match sel.pane {
             SelectionPane::Messages => &self.message_content_lines,
             SelectionPane::Log => &self.log_content_lines,
@@ -1816,7 +1823,6 @@ impl App {
             scroll_offset: 0,
             max_scroll: 0,
             line_cache: crate::app::OutputViewLineCache {
-                lines: Vec::new(),
                 wrapped_lines: Vec::new(),
                 content_lines: Vec::new(),
                 wrapped_count: 0,

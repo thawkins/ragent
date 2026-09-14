@@ -44,11 +44,26 @@ pub use git_tag::GitTagTool;
 use anyhow::{Context, Result};
 use std::process::Command;
 
-/// Run a git command in the given working directory and return stdout and stderr.
+/// Captured result of a single `git` subprocess invocation.
+pub struct GitOutput {
+    /// Raw stdout bytes captured from the child process.
+    pub stdout: Vec<u8>,
+    /// Raw stderr bytes captured from the child process.
+    pub stderr: Vec<u8>,
+    /// Whether the child exited with a zero status.
+    pub success: bool,
+}
+
+/// Spawn `git` once and capture its full output (stdout, stderr, exit status).
+///
+/// This is the single spawn point for every local git tool: deriving stdout,
+/// stderr, and status from one [`std::process::Output`] prevents mutating
+/// subcommands (commit, push, merge, ...) from running twice per call
+/// (PERF-057).
 ///
 /// Sets `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS=false` to prevent interactive
 /// credential prompts from hanging in non-TTY environments.
-pub fn run_git(args: &[&str], cwd: &std::path::Path) -> Result<(String, String)> {
+pub fn run_git_output(args: &[&str], cwd: &std::path::Path) -> Result<GitOutput> {
     let output = Command::new("git")
         .args(args)
         .current_dir(cwd)
@@ -57,24 +72,28 @@ pub fn run_git(args: &[&str], cwd: &std::path::Path) -> Result<(String, String)>
         .output()
         .context("failed to execute `git` — is git installed?")?;
 
+    Ok(GitOutput {
+        stdout: output.stdout,
+        stderr: output.stderr,
+        success: output.status.success(),
+    })
+}
+
+/// Run a git command in the given working directory and return stdout and stderr.
+pub fn run_git(args: &[&str], cwd: &std::path::Path) -> Result<(String, String)> {
+    let output = run_git_output(args, cwd)?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-
     Ok((stdout, stderr))
 }
 
 /// Run a git command and return stdout only, treating non-zero exit as an error.
 pub fn run_git_or_error(args: &[&str], cwd: &std::path::Path) -> Result<String> {
-    let (stdout, stderr) = run_git(args, cwd)?;
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "false")
-        .output()
-        .context("failed to execute `git`")?;
+    let output = run_git_output(args, cwd)?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
 
-    if status.status.success() {
+    if output.success {
         Ok(stdout)
     } else {
         let msg = if stderr.is_empty() { stdout } else { stderr };

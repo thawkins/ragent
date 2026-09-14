@@ -67,12 +67,12 @@ Effort: **S** (< 1 h), **M** (half day), **L** (1-2 days), **XL** (needs design)
 
 | Milestone | Theme | Exit criteria |
 |-----------|-------|---------------|
-| **M1** | Agent per-turn hot path | Per-turn allocation count and `build_turn_chat_messages` time reduced; `cargo bench -p ragent-agent` shows no regression and an improvement on the turn-loop bench |
-| **M2** | TUI render loop | Idle CPU at rest and per-frame allocations both measurably lower on a 500-message transcript; `cargo bench -p ragent-tui` green with improved `bench_history` / `bench_panels` |
-| **M3** | Async runtime hygiene | No blocking `std::fs` on async workers in the audited sites; gather-log write throughput improved; SSE per-event allocations removed |
-| **M4** | Network & resource reuse | No `reqwest::Client` constructed per call; git subprocess spawned once per command; provider token reads cached |
-| **M5** | Regex hoisting | Zero `Regex::new` calls on any per-page / per-candidate / per-plan path; all hoisted to `OnceLock`/`LazyLock` |
-| **M6** | Data layer | Storage read path no longer serialised behind writes; snapshot expand no longer clones file bytes; codeindex stale-diff is O(changed) not O(total) |
+| **M1** | Agent per-turn hot path | **Complete** — PERF-032..040 shipped (plus PERF-048 in the TUI). The provider-facing transcript is handed out and stored behind an `Arc` (no per-turn deep clone), a pure append converts only the new tail, the subagent tool surface and the tool definitions are version-cached, `LoopTracker` is `Copy`, a `RequestTokenTracker` makes the per-step token estimate O(changed message) not O(history), tool/result pairing is one pass, the compaction prompt is built into one buffer, memory-entry token costs are memoised, the activity log is written by a single background task, and the TUI viewers keep one copy of their rendered rows. `cargo bench -p ragent-agent` runs `turn_loop` and `m3_hot_paths`; `tests/test_activity_writer.rs` and `tests/test_no_percall_regex.rs` pin the contracts. **Security**: `rustls` 0.23.43 -> 0.23.45 (RUSTSEC-2026-0285) |
+| **M2** | TUI render loop | **Complete** — PERF-041..048 shipped. Idle frames repaint nothing (PERF-044) and run the input wrap/cursor work, the message staleness scan, and the copy-buffer rebuild only when an input actually changed (PERF-041/043/046); a streamed reply refreshes at most once per 33 ms window (PERF-042). `cargo bench -p ragent-tui` green across `bench_panels` (new `idle_should_render` / `idle_full_frame`), `bench_markdown` (new `wrap_line_styled`), `bench_history`, `bench_cursor`; tests `test_perf_message_cache`, `test_perf_render_idle`, `test_perf_single_copy_lines` pin the contracts |
+| **M3** | Async runtime hygiene | **Complete** — PERF-049..056 shipped. The research gather-log opens its JSONL file once behind a 64 KiB `BufWriter` (flushed at each summary marker, run-log marker and drop) and serialises url records from a borrowed `Serialize` struct: the raw write path measured **1140 ns -> 44 ns per record (25.6x)** and per-record `Value` allocations are gone. `@fuzzy` resolution and the `glob` walk run on `spawn_blocking`, and the `read` tool reuses the async mtime instead of a second blocking stat. `EventBus::publish` moves the event instead of cloning it, `redact_secrets_cow` borrows a non-secret payload (and the duplicate `ragent-agent` registry was folded into `ragent-types`, so one registry serves every subsystem), and both SSE streams clone the session id once per connection and count `Lagged` drops. Benches: `cargo bench -p ragent-research --bench gather_log_bench`; tests `test_sanitize_redact`, `test_event_publish_move`, `test_web_gather_log` |
+| **M4** | Network & resource reuse | **Complete** — PERF-057..063 shipped. `run_git_or_error` derives stdout/stderr/status from a single `git` spawn (`run_git_output` returns a `GitOutput`), so no git tool runs its subprocess twice; `tests/test_git_single_spawn.rs` records invocations via a PATH shim and asserts one spawn per tool. One process-wide `OnceLock<reqwest::Client>` (`ragent_tools_vcs::http_client::shared_client()` and the existing `ragent_llm` `create_http_client()`) now backs every GitHub/GitLab client, both auth modules, the CI job-trace path and the Copilot device-flow poll — `tests/test_shared_http_client.rs` fails if a `reqwest::Client::new()` reappears. Resolved VCS tokens are cached (GitHub by token-file mtime, GitLab per storage handle, invalidated on save/delete) and the job-trace path reuses the client's token instead of decrypting twice. The Azure Foundry retry clones a `bytes::Bytes` refcount rather than the request payload, Ollama Cloud serialises its body once (logs built only when the trace level is enabled), and all 12 streaming providers pre-size their SSE buffer to 8 KiB |
+| **M5** | Regex hoisting | **Complete** — PERF-064..068 shipped. Zero `Regex::new` calls remain on any per-page / per-candidate / per-plan path; all are hoisted to `OnceLock`/`LazyLock` statics (guarded by three `test_no_percall_regex` tests). The relevance scorer builds a `PreparedQuery` once per sub-query and reuses it across candidates: **7.55 µs -> 1.45 µs over four candidates (5.2x)**, and the per-candidate `format!` haystack is gone |
+| **M6** | Data layer | **Complete** — PERF-069..077 shipped. Storage reads no longer serialise behind writes (a dedicated read-only connection + WAL; `test_reader_concurrency` reads during an open write tx), snapshot expand moves rather than clones bytes, the codeindex stale diff is O(scanned) not O(total), the symbol-name filter is an anchored prefix served by a new NOCASE index, per-file upserts are transactional with `RETURNING id`, the Tantivy writer is long-lived, MCP tool lookup is O(1), and the research gatherer shares queries/hits/bodies behind `Arc` |
 | **M7** | Guardrails | CI perf gate + benchmark baselines landed; `PERF-NNN` docs updated; FxHashMap policy documented |
 
 Milestones are ordered by user-visible return. M1/M2/M3 are the release-blocking
@@ -84,6 +84,33 @@ set; M4-M7 are the follow-up train.
 
 The agent turn loop runs on every model step, so any per-turn clone is multiplied
 by steps x turns. This is the highest-leverage area in the workspace.
+
+**Status: complete (PERF-032..040, plus PERF-048).** Verified by
+`cargo test -p ragent-agent` (all suites green incl. the new
+`test_activity_writer` and `test_no_percall_regex` guards) plus
+`cargo bench -p ragent-agent --bench turn_loop`. Notes on the acceptance
+criteria as shipped:
+
+- **PERF-032/033** are delivered together: the cached transcript is an
+  `Arc<Vec<ChatMessage>>`, and `SessionState::take_cached_for_append` +
+  `record_history_base` let a pure append convert only
+  `history[base_len..]` and extend the retained vector. A non-append change
+  (in-place edit, removal) still forces a full rebuild.
+- **PERF-034** caches the subagent-filtered tool definitions in
+  `SystemPromptCache` behind the tool-registry version
+  (`get_subagent_tool_definitions`).
+- **PERF-035** marks `LoopTracker` `Copy` rather than wrapping it in `Arc`,
+  since every field is already `Copy`; the save/restore is now bitwise.
+- **PERF-036** adds a `RequestTokenTracker` that memoises each message's
+  estimated cost by position against its serialised byte length (a cheap change
+  detector) and reuses the tool-definition term while the count and byte hint are
+  stable. A unit test drives it through append / in-place-edit / shrink
+  sequences and asserts equality with `estimate_request_tokens`.
+- **PERF-039** memoises the rendered memory-entry token cost by row id against a
+  `(id, content, category, confidence)` fingerprint stored in a process-wide
+  `OnceLock<Mutex<..>>`; the prompt builders `write!` into one buffer.
+- **PERF-040** replaces the per-event `spawn_blocking` with a bounded queue and
+  one `start_activity_writer` task per process, wired in `src/main.rs`.
 
 | Task | Pri | File:line | Anti-pattern | Fix | Effort | Acceptance |
 |------|-----|-----------|--------------|-----|--------|------------|
@@ -103,6 +130,22 @@ by steps x turns. This is the highest-leverage area in the workspace.
 
 The render loop is the most visible cost: it runs on every keystroke, every
 streamed token, and on an idle safety redraw.
+
+**Status: complete (PERF-041..048).** Verified by
+`tests/test_perf_message_cache.rs`, `tests/test_perf_render_idle.rs`, and
+`tests/test_perf_single_copy_lines.rs` (all green) plus `cargo bench -p
+ragent-tui` (`bench_panels`, `bench_markdown`, `bench_history`, `bench_cursor`).
+Two notes on the acceptance criteria as shipped:
+
+- **PERF-046** caches the wrapped input rows, height, and cursor keyed on
+  `(input text, cursor, selection, inner width)`, so per-frame input work is
+  O(1) when unchanged. The visible-window slice (`slice_flat_wrapped_window` /
+  `slice_group_wrapped_window`) still materialises a small `Vec` of rows, but it
+  is bounded by the viewport height (+1), not the transcript length.
+- **PERF-042** is implemented as a 33 ms re-render throttle (the plan's
+  "throttle re-render to one per frame" option) rather than tail-append
+  incremental wrapping; `compute_next_deadline` schedules the wake that flushes
+  a pending group so the streamed tail is never left stale.
 
 | Task | Pri | File:line | Anti-pattern | Fix | Effort | Acceptance |
 |------|-----|-----------|--------------|-----|--------|------------|
@@ -137,6 +180,24 @@ fixes with outsized latency effects.
 
 ## 8. M4 — Network & resource reuse
 
+**Status: complete (PERF-057..063).** Verified by `cargo test -p ragent-tools-vcs`
+(86 lib + 274 integration, incl. the new `test_git_single_spawn`,
+`test_shared_http_client` and `test_gitlab_token_cache` guards) and
+`cargo test -p ragent-llm` (261 lib + 128 integration); `cargo test -p
+ragent-agent` is also green (80 suites, 0 failures). Two notes on the acceptance
+criteria as shipped:
+
+- **PERF-057** added a `run_git_output` helper returning
+  `GitOutput { stdout, stderr, success }`; `run_git` and `run_git_or_error` both
+  derive their views from that one spawn. The acceptance test asserts one
+  process per tool call by shimming `git` on `PATH`.
+- **PERF-059** caches on invalidation boundaries rather than "once per process
+  lifetime": the GitHub token is keyed on the token file's mtime (so a changed
+  `HOME`/file is still picked up) and the GitLab PAT on the storage handle, with
+  `save_token`/`delete_token` clearing the entry. This preserves the observable
+  behaviour of a stale-free credential read while removing the per-request
+  decrypt.
+
 | Task | Pri | File:line | Anti-pattern | Fix | Effort | Acceptance |
 |------|-----|-----------|--------------|-----|--------|------------|
 | **PERF-057** | P0 | `ragent-tools-vcs/src/git/mod.rs:67-87` | `run_git_or_error` runs **every** git command twice (once for output, once to read exit status). For mutating subcommands this risks double side-effects | Have `run_git` return the `Output`; derive stdout/stderr/status from one spawn | S | Integration test asserts each git tool spawns exactly one process |
@@ -150,6 +211,28 @@ fixes with outsized latency effects.
 ---
 
 ## 9. M5 — Regex hoisting
+
+**Status: complete (PERF-064..068).** Verified by `cargo test -p
+ragent-research` (668 lib + all integration suites green, incl. the new
+prepared-query equivalence tests), `cargo test -p ragent-tools-extended`
+(metadata/youtube suites green), `cargo test -p ragent-agent --lib template`
+green, and `cargo bench -p ragent-research --bench relevance_bench`. Notes on the
+acceptance criteria as shipped:
+
+- **PERF-064** also hoisted the function-local `<title>` regex in
+  `masterfetch/youtube.rs::fallback_title_from_html`, which is on the
+  per-page YouTube fallback path.
+- **PERF-068** is implemented as a reusable `PreparedQuery` (normalised query,
+  lowercased query text, and per-term morphological variants computed once)
+  memoised per gather pass and shared by the pre-fetch and post-fetch filters.
+  `compute_relevance_label` is retained as a thin one-shot wrapper for callers
+  that score a single candidate. The per-candidate haystack `format!` is removed
+  because normalised terms contain no whitespace, so testing title, snippet, and
+  URL separately is equivalent to testing their concatenation. A/B bench:
+  **7.55 µs -> 1.45 µs over four candidates (5.2x)**.
+- Guard tests `tests/test_no_percall_regex.rs` in `ragent-research`,
+  `ragent-tools-extended`, and `ragent-agent` fail if a direct `Regex::new`
+  reappears in a guarded hot-path module.
 
 A single HTML page parse recompiles ~12 regexes today. Every per-page /
 per-candidate regex must become a `OnceLock`/`LazyLock` static.
@@ -177,6 +260,53 @@ per-candidate regex must become a `OnceLock`/`LazyLock` static.
 | **PERF-075** | P2 | `ragent-codeindex/src/search.rs:443` | New Tantivy `IndexWriter` constructed per batch | Hold one long-lived writer behind the mutex | M | Writer created once per process |
 | **PERF-076** | P2 | `ragent-agent/src/mcp/mod.rs:774-783` | `call_tool_by_name` nested linear scan `servers x tools` per `mcp_tool` invocation | Maintain `HashMap<tool_name, server_id>` rebuilt on `refresh_tools` | S | O(1) tool->server lookup |
 | **PERF-077** | P2 | `ragent-research/src/web_gatherer.rs:1678,1867,1880,1896,2093` | Whole `Vec<WebSearchHit>` cloned per cache insert; query `String` cloned per hit; full page body cloned before `spawn_blocking` | `Arc<[WebSearchHit]>` for caches; `Arc<str>` queries; move `page.body` by value | M | Per-page gather allocations drop; cache insert is refcount-only |
+
+---
+
+## 10A. M6 — completion notes
+
+**Status: complete (PERF-069..077).** Verified by `cargo test -p ragent-storage`,
+`cargo test -p ragent-codeindex`, `cargo test -p ragent-research`, and
+`cargo test -p ragent-agent` (all suites green) plus the new guard tests
+`test_reader_concurrency`, `test_snapshot_expand`, and `test_m6_data_layer`.
+Notes on the acceptance criteria as shipped:
+
+- **PERF-069** was delivered as WAL (already present) plus a dedicated
+  read-only connection: `Storage` now holds `conn: Mutex<Connection>` for writes
+  and `reader: Option<Mutex<Connection>>` for reads (file-backed only —
+  in-memory storage falls back to the writer connection). The read-only query
+  methods acquire the reader via a `lock_conn_read!` macro. `test_reader_concurrency`
+  asserts a read completes while a `BEGIN IMMEDIATE` write transaction is held
+  open on the same handle, and that the reader observes committed writes.
+- **PERF-070** changed `IncrementalSnapshot::to_full` to consume `self` and the
+  base `Snapshot` by value, moving the base file map and each added file's bytes
+  instead of cloning them.
+- **PERF-071** hoisted the four session `SELECT` bodies to `const &str`, made the
+  activity-log run-list and run-range reads use `prepare_cached`, and replaced the
+  dynamic range SQL with two static cached statements.
+- **PERF-072** replaced the full `indexed_files` HashMap load with a streamed
+  scan that keeps only an O(scanned) path index, plus a `seen` bitmap for
+  additions; `test_m6_data_layer` exercises a 500-file index.
+- **PERF-073** replaced the leading-wildcard `LIKE` with an anchored, escaped
+  prefix `LIKE ... ESCAPE '\'` served by a new NOCASE index
+  (`idx_symbols_name_nocase`, schema v4). Interior-only substring matches are no
+  longer returned, so the filter docs/tests were updated to say "leading
+  fragment" rather than "substring".
+- **PERF-074** added `RETURNING id` to `upsert_file` and `upsert_symbols`,
+  prepared the batch statements once in `apply_diff`, wrapped the standalone
+  `upsert_symbols` / `upsert_imports` / `upsert_refs` delete+insert pairs in a
+  transaction (skipped when the caller already opened one, via `is_autocommit`),
+  and pushed the reference `LIMIT` into SQL (`find_references_limited`).
+- **PERF-075** added a `Mutex<Option<IndexWriter>>` to `FtsIndex`; the writer is
+  created lazily once and reused by every `add_symbols` / `remove_file` /
+  `batch_update` / `clear`.
+- **PERF-076** added a `tool_name -> server_id` index to `McpClient`, rebuilt on
+  connect / refresh / refresh-for-server / disconnect, so `call_tool_by_name` is
+  an O(1) map lookup.
+- **PERF-077** moved the query into an `Arc<str>` shared by every hit, made the
+  shared query cache store `Arc<[WebSearchHit]>` (insert and get are refcount
+  ops), and changed `WebFetchedPage::body` to `Arc<str>` so the language-detection
+  `spawn_blocking` closure takes a refcount clone rather than a page-sized copy.
 
 ---
 

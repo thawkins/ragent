@@ -42,8 +42,9 @@ use crate::app::{
     ProviderSetupStep, SelectionPane,
 };
 use crate::widgets::message_widget::{
-    canonical_tool_name, capitalize_tool_name, is_agent_notice, plot_output_lines, read_line_range,
-    render_agent_notice_lines, tool_inline_diff, tool_input_summary, tool_result_summary,
+    INDENT_SPACES, canonical_tool_name, capitalize_tool_name, is_agent_notice, plot_output_lines,
+    read_line_range, render_agent_notice_lines, tool_inline_diff, tool_input_summary,
+    tool_result_summary,
 };
 
 /// Padding applied to each side of a content-sized table column.
@@ -54,6 +55,16 @@ const MODEL_PICKER_HEADERS: [&str; 5] = ["Model", "Context", "Cost", "Thinking",
 
 /// Default spacing between table columns (matches `Table::column_spacing`).
 const MODEL_PICKER_COLUMN_SPACING: usize = 1;
+
+/// PERF-042: minimum interval between re-renders of a message whose cache
+/// group is already populated while it is being streamed.
+///
+/// `Message::edit_seq` is bumped on every streamed token, so re-parsing and
+/// re-wrapping the growing reply on every token is O(n^2) over the reply.  A
+/// group that has already been rendered is refreshed at most once per this
+/// interval; the dirty watermark keeps it pending, and the main loop schedules
+/// a wake at the end of the window so the tail is never left stale.
+pub const MESSAGE_STREAM_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(33);
 
 /// Format a model-picker entry into its five display-cell strings.
 ///
@@ -233,17 +244,19 @@ fn render_run_cost_banner(frame: &mut Frame, app: &mut App) {
     );
 }
 
-/// Compute the widths for the Agents/Teams side buttons.
+/// Compute the widths for the Agents/Teams side buttons from pre-built labels.
 ///
 /// Each button width is its label width plus 2 for borders, with a minimum of
 /// 7. When the two buttons and their gap no longer fit in `button_col_area`
 /// the widths are scaled down proportionally so they still fit.
 ///
+/// `draw_input_side_buttons` builds the labels once and passes them here so
+/// the per-frame label allocations are not repeated for the width pass and the
+/// render pass (PERF-048).
+///
 /// Returns `(agents_width, teams_width)`.
-pub(crate) fn input_side_button_widths(app: &App, button_col_w: u16) -> (u16, u16) {
+fn side_button_widths(agents_label: &str, teams_label: &str, button_col_w: u16) -> (u16, u16) {
     let gap = 1u16;
-    let agents_label = agents_button_label(app);
-    let teams_label = teams_button_label(app);
     let agents_w = (agents_label.chars().count() as u16 + 2).max(7);
     let teams_w = (teams_label.chars().count() as u16 + 2).max(7);
     let total = agents_w.saturating_add(gap).saturating_add(teams_w);
@@ -255,6 +268,14 @@ pub(crate) fn input_side_button_widths(app: &App, button_col_w: u16) -> (u16, u1
     let scaled_agents = ((f64::from(agents_w) * scale) as u16).max(7);
     let scaled_teams = ((f64::from(teams_w) * scale) as u16).max(7);
     (scaled_agents, scaled_teams)
+}
+
+pub(crate) fn input_side_button_widths(app: &App, button_col_w: u16) -> (u16, u16) {
+    side_button_widths(
+        &agents_button_label(app),
+        &teams_button_label(app),
+        button_col_w,
+    )
 }
 
 /// Total width the button column needs so the Agents/Teams labels are not
@@ -293,7 +314,12 @@ fn teams_button_label(app: &App) -> String {
 
 fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Rect) {
     let gap = 1u16;
-    let (agents_w, teams_w) = input_side_button_widths(app, button_col_area.width);
+    // Build the labels once and reuse them for both the width pass and the
+    // render pass instead of allocating them again per call (PERF-048).
+    let agents_label = agents_button_label(app);
+    let teams_label = teams_button_label(app);
+    let (agents_w, teams_w) =
+        side_button_widths(&agents_label, &teams_label, button_col_area.width);
     let agents_x = button_col_area.x;
     let teams_x = agents_x.saturating_add(agents_w).saturating_add(gap);
     let y = button_col_area.y;
@@ -352,29 +378,23 @@ fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Re
     };
 
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            agents_button_label(app),
-            agents_text_style,
-        )))
-        .style(agents_text_style)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(agents_border_style),
-        ),
+        Paragraph::new(Line::from(Span::styled(agents_label, agents_text_style)))
+            .style(agents_text_style)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(agents_border_style),
+            ),
         app.agents_button_area,
     );
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            teams_button_label(app),
-            teams_text_style,
-        )))
-        .style(teams_text_style)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(teams_border_style),
-        ),
+        Paragraph::new(Line::from(Span::styled(teams_label, teams_text_style)))
+            .style(teams_text_style)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(teams_border_style),
+            ),
         app.teams_button_area,
     );
 }
@@ -2043,26 +2063,19 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
     frame.render_widget(paragraph, popup);
 }
 
-/// Split `text` into fixed-width character-wrapped lines.
+/// Height of the chat input widget at `inner_width`, borders included.
 ///
-/// Unlike word wrapping, this breaks at exact character boundaries so that
-/// cursor positioning via `pos / width` and `pos % width` is always correct.
-fn char_wrap(text: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return vec![text.to_string()];
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let mut lines = Vec::new();
-    let mut start = 0usize;
-    while start < chars.len() {
-        let end = (start + width).min(chars.len());
-        lines.push(chars[start..end].iter().collect::<String>());
-        start = end;
-    }
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-    lines
+/// PERF-046: the input is character-wrapped (fixed width, no word breaks), so
+/// each logical line occupies `2 + chars` cells of content.  Summing the
+/// per-line row counts is equivalent to counting wrapped rows but performs no
+/// allocation.
+pub(crate) fn input_widget_height(input: &str, inner_width: usize) -> u16 {
+    let width = inner_width.max(1);
+    let rows: usize = input
+        .split('\n')
+        .map(|logical_line| (2 + logical_line.chars().count()).div_ceil(width).max(1))
+        .sum();
+    (rows.max(1) as u16) + 2 // +2 for borders
 }
 
 /// Build wrapped content lines from `Line`s that matches Paragraph word-wrapping.
@@ -2196,26 +2209,40 @@ fn with_cursor_marker(text: &str, cursor: usize) -> String {
     out
 }
 
-fn input_widget_height(input: &str, inner_width: usize) -> u16 {
-    let num_lines = input_widget_lines(input, inner_width).len();
-    (num_lines as u16).max(1) + 2 // +2 for borders
-}
-
-fn input_widget_lines(input: &str, inner_width: usize) -> Vec<String> {
-    if inner_width == 0 {
-        return vec![format!("> {}", input.replace('\n', " ↵ "))];
+/// PERF-046: rebuild the chat input's wrapped rows, height, and cursor
+/// position, but only when one of their inputs changed.
+///
+/// Wrapped rows depend on `(input text, keyboard selection, inner width)`;
+/// the cursor position depends on `(input text, cursor, inner width)`.  When
+/// none of those changed the previous frame's values are reused, so an idle
+/// or non-typing frame performs no wrapping or measurement work.
+fn refresh_input_render_cache(app: &mut App, inner_width: u16) {
+    let selection = app.kb_selection_char_range();
+    let height = input_widget_height(&app.input, inner_width as usize);
+    let cache = &mut app.input_render_cache;
+    let rows_current = cache.key == app.input
+        && cache.selection == selection
+        && cache.width == inner_width
+        && !cache.lines.is_empty();
+    let cursor_current = cache.key == app.input
+        && cache.cursor == app.input_cursor
+        && cache.width == inner_width
+        && cache.height != 0;
+    if rows_current && cursor_current {
+        return;
     }
-    let mut result = Vec::new();
-    for (i, logical_line) in input.split('\n').enumerate() {
-        let prefix = if i == 0 { "> " } else { "  " };
-        let prefixed = format!("{}{}", prefix, logical_line);
-        let wrapped = char_wrap(&prefixed, inner_width);
-        result.extend(wrapped);
+    if !rows_current {
+        cache.lines = input_lines_with_kb_selection(&app.input, inner_width as usize, selection);
+        cache.selection = selection;
     }
-    if result.is_empty() {
-        result.push("> ".to_string());
+    if !cursor_current {
+        cache.cursor_pos =
+            input_cursor_display_pos(&app.input, app.input_cursor, (inner_width as usize).max(1));
+        cache.cursor = app.input_cursor;
     }
-    result
+    cache.height = height;
+    cache.key.clone_from(&app.input);
+    cache.width = inner_width;
 }
 
 /// Wrap one rendered [`Line`] into styled display rows that match ratatui's
@@ -3001,7 +3028,12 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         .saturating_sub(button_col_w)
         .saturating_sub(2)
         .max(1) as usize;
-    let input_height = input_widget_height(&app.input, input_inner_width);
+    // PERF-046: refresh the cached input rows/height/cursor only when the
+    // buffer, the keyboard selection, or the inner width changed.  The
+    // wrapped rows and cursor position are then reused verbatim across
+    // frames, so per-frame input work is O(1) while the user is not typing.
+    refresh_input_render_cache(app, input_inner_width as u16);
+    let input_height = app.input_render_cache.height;
 
     // Whether to show the teammate strip (1 row under the status bar).
     let team_strip = app.active_team.is_some() && !app.team_members.is_empty();
@@ -3302,11 +3334,15 @@ fn render_memory_view_overlay(frame: &mut Frame, app: &mut App) {
     // ── Memory-view line cache (mirrors research view) ────────────────────
     let inner_width = inner.width.saturating_sub(2);
     let cache_width = inner_width;
+    // PERF-048: the memory viewer stores its rendered rows once, in
+    // `wrapped_lines` (the `lines` field is left empty — the markdown rows
+    // returned by `markdown_to_lines` are already wrapped to `cache_width`, so
+    // no un-wrapped copy is needed).
     let need_rebuild =
-        view.line_cache.cache_width != cache_width || view.line_cache.lines.is_empty();
+        view.line_cache.cache_width != cache_width || view.line_cache.wrapped_lines.is_empty();
 
     if need_rebuild {
-        let mut lines: Vec<Line<'_>> = Vec::new();
+        let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from(vec![
             Span::styled("ID: ", Style::default().fg(Color::DarkGray)),
             Span::raw(format!("{}", view.row.id)),
@@ -3344,9 +3380,9 @@ fn render_memory_view_overlay(frame: &mut Frame, app: &mut App) {
             .style(l.style)
         }));
 
-        view.line_cache.lines = lines;
+        // Store the rendered rows once — no `lines.clone()` duplicate.
+        view.line_cache.wrapped_lines = lines;
         view.line_cache.cache_width = cache_width;
-        view.line_cache.wrapped_lines = view.line_cache.lines.clone();
         view.line_cache.content_lines = wrapped_lines_to_strings(&view.line_cache.wrapped_lines);
         view.line_cache.wrapped_count = view.line_cache.wrapped_lines.len() as u16;
     }
@@ -3479,12 +3515,15 @@ fn render_research_view_overlay(frame: &mut Frame, app: &mut App) {
     // scroll geometry and painted rows cannot diverge.
     let inner_width = inner.width.saturating_sub(2);
     let cache_width = inner_width;
+    // PERF-048: the research viewer stores its rendered rows once, in
+    // `wrapped_lines` (the `lines` field is left empty — `markdown_to_lines`
+    // already wraps to `cache_width`, so no un-wrapped copy is needed).
     let need_rebuild =
-        view.line_cache.cache_width != cache_width || view.line_cache.lines.is_empty();
+        view.line_cache.cache_width != cache_width || view.line_cache.wrapped_lines.is_empty();
 
     if need_rebuild {
         let lines = markdown_to_lines(&view.markdown, &base, cache_width as usize);
-        view.line_cache.lines = lines
+        view.line_cache.wrapped_lines = lines
             .into_iter()
             .map(|l| {
                 Line::from(
@@ -3497,7 +3536,6 @@ fn render_research_view_overlay(frame: &mut Frame, app: &mut App) {
             })
             .collect();
         view.line_cache.cache_width = cache_width;
-        view.line_cache.wrapped_lines = view.line_cache.lines.clone();
         view.line_cache.content_lines = wrapped_lines_to_strings(&view.line_cache.wrapped_lines);
         view.line_cache.wrapped_count = view.line_cache.wrapped_lines.len() as u16;
     }
@@ -3761,6 +3799,14 @@ pub fn markdown_to_lines_testable<'a>(
     wrap_width: usize,
 ) -> Vec<Line<'a>> {
     markdown_to_lines(markdown, base_dir, wrap_width)
+}
+
+/// Testable wrapper for the private `wrap_line_styled` helper.
+///
+/// PERF-042: the streaming re-render throttle depends on `wrap_line_styled`
+/// being the single wrapping path the message cache uses; benches guard it.
+pub fn wrap_line_styled_testable(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
+    wrap_line_styled(line, width)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4723,10 +4769,11 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         (generation, session_messages)
     };
 
-    let cache_stale =
-        view.line_cache.source_generation != current_generation || view.line_cache.lines.is_empty();
+    let cache_stale = view.line_cache.source_generation != current_generation
+        || view.line_cache.wrapped_lines.is_empty()
+        || need_rewrap;
 
-    if cache_stale || need_rewrap {
+    if cache_stale {
         let mut lines: Vec<Line<'static>> = Vec::new();
         if let Some(ref msgs) = session_messages {
             // Build a step map from the message transcript itself so that
@@ -4748,21 +4795,13 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
             )));
         }
 
-        view.line_cache.lines = lines;
-        view.line_cache.source_generation = current_generation;
-    }
-
-    // Re-wrap when the width changed or the source lines were rebuilt.
-    if cache_stale || need_rewrap {
-        view.line_cache.wrapped_lines = view
-            .line_cache
-            .lines
-            .iter()
-            .flat_map(|l| wrap_line_styled(l, w))
-            .collect();
+        // PERF-048: store the rendered rows once, in `wrapped_lines`; the
+        // un-wrapped `lines` are transient and are not retained.
+        view.line_cache.wrapped_lines = lines.iter().flat_map(|l| wrap_line_styled(l, w)).collect();
         view.line_cache.content_lines = wrapped_lines_to_strings(&view.line_cache.wrapped_lines);
         view.line_cache.wrapped_count = view.line_cache.wrapped_lines.len() as u16;
         view.line_cache.cache_width = inner_width;
+        view.line_cache.source_generation = current_generation;
     }
 
     // Compute scroll geometry from the cached wrapped count.
@@ -5074,11 +5113,14 @@ fn messages_to_lines(
                                 Span::raw(line.to_owned()),
                             ]));
                         } else {
-                            lines.push(Line::from(Span::raw(format!(
-                                "{}{}",
-                                " ".repeat(indent),
-                                line
-                            ))));
+                            // PERF-047: indentation is emitted as its own
+                            // borrowed span instead of `format!`-ing a fresh
+                            // String with `repeat()` per line (two allocations
+                            // saved per continuation line).
+                            lines.push(Line::from(vec![
+                                Span::raw(&INDENT_SPACES[..indent]),
+                                Span::raw(line.to_string()),
+                            ]));
                         }
                     }
                 }
@@ -5401,8 +5443,11 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let need_rewrap = app.message_cache_width != inner_width;
 
     // Reconcile cache length: if messages were added or removed, adjust.
+    let cache_len_before = app.message_line_cache.len();
     if app.message_line_cache.len() > messages_to_show.len() {
         app.message_line_cache.truncate(messages_to_show.len());
+        // The cache shrank; the watermark may now point past the end.
+        app.message_cache_dirty_from = app.message_cache_dirty_from.min(messages_to_show.len());
     }
 
     // Ensure every message has a cache slot.
@@ -5415,16 +5460,42 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             edit_seq: 0, // rendered on the first pass below
         });
     }
+    let cache_len_changed = app.message_line_cache.len() != cache_len_before;
 
     // Re-render stale groups.  A group is stale when its cached `edit_seq`
     // no longer matches the message's current `edit_seq`, or when the slot
     // was just created and has no lines yet.  When only the last message
     // was modified by streaming (append_assistant_text,
     // update_tool_call_status, etc.) only that one group is re-rendered.
+    //
+    // PERF-043: the scan starts at the lowest index any mutation lowered the
+    // watermark to, so an idle frame iterates zero groups instead of the
+    // whole transcript.
     let w = inner_width.max(1) as usize;
-    for (i, msg) in messages_to_show.iter().enumerate() {
+    let scan_from = app.message_cache_dirty_from.min(messages_to_show.len());
+    // PERF-042: bound streaming re-render frequency.  `edit_seq` is bumped on
+    // every `TextDelta`, so without throttling a growing reply is re-parsed and
+    // re-wrapped on every token — O(n^2) over the reply.  A group that has
+    // already been rendered may refresh at most once per
+    // `MESSAGE_STREAM_MIN_INTERVAL`; intermediate edits stay pending via the
+    // dirty watermark and render on a later frame.
+    let throttle_ok = app
+        .message_stream_throttle_at
+        .is_none_or(|t| t.elapsed() >= MESSAGE_STREAM_MIN_INTERVAL);
+    let mut any_rendered = false;
+    let mut pending_from = messages_to_show.len();
+    for i in scan_from..messages_to_show.len() {
+        let msg = &messages_to_show[i];
         let group = &mut app.message_line_cache[i];
         if group.edit_seq != msg.edit_seq || group.lines.is_empty() {
+            // A brand-new group must render immediately so it is never blank;
+            // otherwise the throttle governs how often the group may refresh.
+            if !group.lines.is_empty() && !throttle_ok {
+                if i < pending_from {
+                    pending_from = i;
+                }
+                continue;
+            }
             group.lines =
                 message_to_lines(msg, &app.tool_step_map, &app.sid_to_display_name, &app.cwd);
             group.edit_seq = msg.edit_seq;
@@ -5442,10 +5513,18 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                 .collect();
             group.content_lines = wrapped_lines_to_strings(&group.wrapped_lines);
             group.wrapped_count = group.wrapped_lines.len() as u16;
+            any_rendered = true;
         }
+    }
+    // Everything before `pending_from` is up to date; a throttled group keeps
+    // its index so the next frame retries it.
+    app.message_cache_dirty_from = pending_from;
+    if any_rendered {
+        app.message_stream_throttle_at = Some(std::time::Instant::now());
     }
 
     // Re-wrap all groups when the width changed (FR-003).
+    let mut rewrapped_clean = false;
     if need_rewrap {
         for group in app.message_line_cache.iter_mut() {
             group.wrapped_lines = group
@@ -5457,21 +5536,34 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             group.wrapped_count = group.wrapped_lines.len() as u16;
         }
         app.message_cache_width = inner_width;
+        rewrapped_clean = true;
     }
 
-    // Accumulate the total wrapped line count and collect the content lines
-    // used for text-selection copy.  The full `all_lines` vector is never
-    // materialised any more (see the scroll-window slice below) — only the
-    // visible window is passed to ratatui.
-    let mut all_content_lines: Vec<String> = Vec::new();
+    // Sum the cached wrapped counts, and rebuild the flat plain-text copy
+    // buffer only when a group's wrapped rows changed (PERF-041).  Idle frames
+    // no longer clone every rendered row into `message_content_lines`.
     let mut total_wrapped: u16 = 0;
     for group in app.message_line_cache.iter() {
-        all_content_lines.extend(group.content_lines.iter().cloned());
         total_wrapped = total_wrapped.saturating_add(group.wrapped_count);
     }
 
-    // Store the flattened content lines for text-selection copy.
-    app.message_content_lines = all_content_lines;
+    // PERF-041: rebuild the flat plain-text copy buffer only when a group was
+    // re-rendered, a clean group was re-wrapped at a new width, or the cache
+    // length changed this frame.  Idle frames no longer clone every rendered
+    // row into `message_content_lines`; a copy path that needs fresh data
+    // calls `App::ensure_copy_content_lines`, which rebuilds on demand from
+    // the per-message cache.
+    if rewrapped_clean || cache_len_changed {
+        app.message_content_lines_dirty = true;
+    }
+    if any_rendered || app.message_content_lines_dirty {
+        let mut all_content_lines: Vec<String> = Vec::new();
+        for group in app.message_line_cache.iter() {
+            all_content_lines.extend(group.content_lines.iter().cloned());
+        }
+        app.message_content_lines = all_content_lines;
+        app.message_content_lines_dirty = false;
+    }
 
     // Compute scroll geometry from the cached wrapped counts (cheap — no
     // re-wrapping involved).
@@ -5546,9 +5638,55 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn render_input(frame: &mut Frame, app: &App, area: Rect) {
-    let inner_width = area.width.saturating_sub(2).max(1) as usize;
+/// PERF-041: render any per-message cache group that is still behind its
+/// message, then rebuild the flat plain-text copy buffer from the cache.
+///
+/// The render loop throttles re-rendering of an actively-streaming group
+/// (PERF-042), so at the moment a copy is requested that group may still hold
+/// the previous frame's rows.  Render the stale groups first so the copy
+/// reads exactly what is on screen, then project the wrapped rows into
+/// `message_content_lines`.
+pub fn ensure_message_copy_lines(app: &mut App) {
+    let w = app.message_cache_width.max(1) as usize;
+    // Render only the groups whose `edit_seq` is behind (usually the single
+    // streaming message), so a copy costs one group render at most.
+    for i in 0..app.message_line_cache.len() {
+        let stale = app
+            .messages
+            .get(i)
+            .map(|msg| app.message_line_cache[i].edit_seq != msg.edit_seq)
+            .unwrap_or(false);
+        if !stale {
+            continue;
+        }
+        let lines = message_to_lines(
+            &app.messages[i],
+            &app.tool_step_map,
+            &app.sid_to_display_name,
+            &app.cwd,
+        );
+        let edit_seq = app.messages[i].edit_seq;
+        let group = &mut app.message_line_cache[i];
+        group.lines = lines;
+        group.edit_seq = edit_seq;
+        group.wrapped_lines = group
+            .lines
+            .iter()
+            .flat_map(|l| wrap_line_styled(l, w))
+            .collect();
+        group.content_lines = wrapped_lines_to_strings(&group.wrapped_lines);
+        group.wrapped_count = group.wrapped_lines.len() as u16;
+    }
+    app.message_cache_dirty_from = app.message_line_cache.len();
+    let mut rebuilt = Vec::new();
+    for group in &app.message_line_cache {
+        rebuilt.extend(group.content_lines.iter().cloned());
+    }
+    app.message_content_lines = rebuilt;
+    app.message_content_lines_dirty = false;
+}
 
+fn render_input(frame: &mut Frame, app: &App, area: Rect) {
     // Build title: show focused teammate or staged attachments in the block title.
     let (title, title_style) = if let Some(ref focused_id) = app.focused_teammate {
         let name = app
@@ -5608,15 +5746,17 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
         // Cursor sits right after the "> " prefix.
         frame.set_cursor_position((area.x + 1 + 2, area.y + 1));
     } else {
-        let kb_sel = app.kb_selection_char_range();
-        let wrapped_lines = input_lines_with_kb_selection(&app.input, inner_width, kb_sel);
+        // PERF-046: reuse the rows and cursor position cached by
+        // `refresh_input_render_cache` instead of re-wrapping and re-measuring
+        // the buffer on every frame.
+        let cache = &app.input_render_cache;
+        let wrapped_lines = cache.lines.clone();
         let paragraph = Paragraph::new(wrapped_lines).block(block);
         frame.render_widget(paragraph, area);
 
         // Position cursor accounting for wrapped lines.
         // Use the character index (not byte length) so unicode content behaves.
-        let (cursor_line, cursor_col) =
-            input_cursor_display_pos(&app.input, app.input_cursor, inner_width);
+        let (cursor_line, cursor_col) = cache.cursor_pos;
         let cursor_x = area.x + 1 + cursor_col as u16;
         let cursor_y = area.y + 1 + cursor_line as u16;
         frame.set_cursor_position((cursor_x, cursor_y));

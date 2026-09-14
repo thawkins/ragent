@@ -414,11 +414,34 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.100** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.103** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **M1 agent per-turn hot path — PERF-032..040 + PERF-048 complete
+  (v1.0.103)** — the per-turn allocation and clone load in the agent loop is
+  removed: the provider-facing transcript is held and handed out behind an
+  `Arc<Vec<ChatMessage>>` (no per-turn deep clone), a pure history append
+  converts only the new tail (`SessionState::take_cached_for_append`), the
+  subagent tool surface is cached behind the tool-registry version, `LoopTracker`
+  is `Copy`, a new `RequestTokenTracker` makes the per-step token estimate
+  O(changed message) instead of O(history), tool/result pairing is a single
+  pass, the compaction prompt is assembled into one buffer, memory-entry token
+  costs are memoised, the activity log is written by one background task per
+  process, and the TUI viewers retain a single copy of their rendered rows.
+  New benches `turn_loop` / `m3_hot_paths`; new guards `test_activity_writer`
+  and `test_no_percall_regex`. `rustls` bumped 0.23.43 -> 0.23.45
+  (RUSTSEC-2026-0285).
+
+- **Simplify/quality pass across the search, research, agent, and TUI crates
+  (v1.0.102)** — the second `/simplify` sweep deduplicated the API-key search
+  engines behind shared preflight/finish/mask helpers, made engine-merge output
+  deterministic with renumbered positions, resolved the web-gatherer volume
+  policy through one `volume_policy()` helper, and removed the vestigial
+  deadline flag. A third pass (v1.0.101) followed the same pattern across
+  `masterfetch::search` and `ragent-research`.
 
 - **Serper search engine, mf_search resilience, and research webgather
   cleanups (v1.0.100)** — `mf_search` gained a fifth optional API-backed

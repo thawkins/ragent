@@ -60,8 +60,10 @@ impl WebFetchTool for FakeFetch {
             published_at: None,
             url: url.to_string(),
             title: format!("Article about {url}"),
-            body: "Body text covering the topic in enough detail to serve as a research source. "
-                .repeat(30),
+            body: Arc::from(
+                "Body text covering the topic in enough detail to serve as a research source. "
+                    .repeat(30),
+            ),
             content_type: None,
             page_type: None,
             language: None,

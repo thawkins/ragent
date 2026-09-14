@@ -520,16 +520,19 @@ impl LlmClient for OllamaCloudClient {
             has_tools = !request.tools.is_empty(),
             tool_count = request.tools.len(),
             "Ollama Cloud request"
-        ); // Log the full request body at debug level (visible when RUST_LOG=debug or when tools are present).
-        if tracing::enabled!(tracing::Level::DEBUG) || !request.tools.is_empty() {
-            let body_preview = serde_json::to_string(&body).unwrap_or_default();
-            let preview_len = body_preview.len().min(800);
-            tracing::debug!(body = %&body_preview[..preview_len], "Ollama Cloud request body (truncated)");
-        }
-
+        );
         let timeout_secs = request.stream_timeout_secs.unwrap_or(600);
+        // PERF-062: serialise the request body exactly once. The debug preview
+        // is a borrowed slice of the same bytes and is only built when debug
+        // logging is actually enabled, so a disabled log costs nothing.
         let body_bytes =
             serde_json::to_vec(&body).context("serialise Ollama Cloud request body")?;
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            let preview_len = body_bytes.len().min(800);
+            let body_preview = String::from_utf8_lossy(&body_bytes[..preview_len]);
+            tracing::debug!(body = %body_preview, "Ollama Cloud request body (truncated)");
+        }
+
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
             self.http
@@ -566,7 +569,9 @@ impl LlmClient for OllamaCloudClient {
         let stream = response.bytes_stream();
         let model_name = request.model.clone();
         let event_stream = async_stream::stream! {
-            let mut buffer = String::new();
+            // PERF-063: pre-size the SSE accumulation buffer so a long stream does
+            // not repeatedly realloc/copy as it grows.
+            let mut buffer = String::with_capacity(8 * 1024);
             // F6: set once any tool call is seen in the stream; later content
             // deltas are suppressed as duplicate narration.
             let mut tool_calls_seen = false;
@@ -717,15 +722,18 @@ impl LlmClient for OllamaCloudClient {
                     }
 
                     if parsed.get("done").and_then(serde_json::Value::as_bool) == Some(true) {
-                        // Log full done frame so we can see if tool_calls appear there
-                        let done_preview = serde_json::to_string(&parsed).unwrap_or_default();
-                        let preview_len = done_preview.len().min(500);
-                        tracing::info!(
-                            model = %model_name,
-                            open_tool_calls = open_tool_calls.len(),
-                            done_frame = %&done_preview[..preview_len],
-                            "Ollama Cloud: done frame received"
-                        );
+                        // PERF-062: only serialise the done frame for the log
+                        // when INFO logging is actually enabled.
+                        if tracing::enabled!(tracing::Level::INFO) {
+                            let done_preview = serde_json::to_string(&parsed).unwrap_or_default();
+                            let preview_len = done_preview.len().min(500);
+                            tracing::info!(
+                                model = %model_name,
+                                open_tool_calls = open_tool_calls.len(),
+                                done_frame = %&done_preview[..preview_len],
+                                "Ollama Cloud: done frame received"
+                            );
+                        }
 
                         if let Some(prompt_tokens) = parsed.get("prompt_eval_count").and_then(serde_json::Value::as_u64)
                         {

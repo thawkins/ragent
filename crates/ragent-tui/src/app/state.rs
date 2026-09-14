@@ -21,7 +21,7 @@ use ragent_agent::session::processor::SessionProcessor;
 use ragent_agent::storage::Storage;
 use ragent_agent::trigger::TriggerRuntime;
 use ragent_config::OtelProtocol;
-use ragent_team::team::{SwarmState, TeamConfig, TeamMember};
+use ragent_team::team::{MemberStatus, SwarmState, TeamConfig, TeamMember};
 use serde::Serialize;
 
 use crate::app::session_ops::recover_poisoned;
@@ -1236,14 +1236,13 @@ pub enum OutputViewTarget {
 /// Cached rendered lines for the output-view overlay (mirrors
 /// [`MessageLineGroup`] / [`LogLineGroup`]).
 ///
-/// Holds the un-wrapped lines for the current target together with the
-/// pre-wrapped rows at the cached terminal width.  The scroll geometry and
-/// visible-window slice both come from `wrapped_lines`, so the coordinate
-/// systems cannot diverge and whitespace-only rows do not gain phantom rows.
-#[derive(Clone)]
+/// Holds the pre-wrapped rows at the cached terminal width for the current
+/// target.  The scroll geometry and visible-window slice both come from
+/// `wrapped_lines`, so the coordinate systems cannot diverge and
+/// whitespace-only rows do not gain phantom rows.  The un-wrapped source lines
+/// are not retained (PERF-048): the viewers render one copy of their lines.
+#[derive(Clone, Default)]
 pub struct OutputViewLineCache {
-    /// Un-wrapped rendered lines for the current target.
-    pub lines: Vec<ratatui::text::Line<'static>>,
     /// Pre-wrapped styled lines at the cached width (one per display row).
     pub wrapped_lines: Vec<ratatui::text::Line<'static>>,
     /// Word-wrapped plain-text content lines (for text-selection copy).
@@ -1252,8 +1251,33 @@ pub struct OutputViewLineCache {
     pub wrapped_count: u16,
     /// Terminal inner width when `wrapped_lines` was last computed.
     pub cache_width: u16,
-    /// Generation key of the source data used to build `lines`.
+    /// Generation key of the source data used to build `wrapped_lines`.
     pub source_generation: u64,
+}
+
+/// PERF-046: cached wrapped rows and cursor position for the chat input.
+///
+/// The input area re-wrapped the whole buffer and re-measured the cursor on
+/// every frame, even when nothing changed.  The wrapped rows and the cursor's
+/// display position depend only on `(input text, keyboard selection, inner
+/// width)` / `(input text, cursor, inner width)`, so they are rebuilt only when
+/// one of those inputs changes and reused verbatim otherwise.
+#[derive(Clone, Default)]
+pub struct InputRenderCache {
+    /// Input text the cached rows were built from.
+    pub key: String,
+    /// Character cursor offset the cached cursor position was measured at.
+    pub cursor: usize,
+    /// Keyboard-selection range the cached rows were built with.
+    pub selection: Option<(usize, usize)>,
+    /// Inner width the cached rows were wrapped at.
+    pub width: u16,
+    /// Wrapped styled rows (one per display row).
+    pub lines: Vec<ratatui::text::Line<'static>>,
+    /// Height the input widget occupies at the cached width (rows + borders).
+    pub height: u16,
+    /// Cursor position (display row, column) inside the wrapped rows.
+    pub cursor_pos: (usize, usize),
 }
 
 /// State for the scrollable output overlay panel.
@@ -1939,6 +1963,37 @@ pub struct App {
     /// fields of [`message_line_cache`] were last computed.  When the width
     /// changes, all groups need re-wrapping (but not re-rendering).
     pub message_cache_width: u16,
+    /// PERF-043: lowest message index whose cache group may be stale.
+    ///
+    /// Every site that mutates a message in place (the `Message::touch()`
+    /// call sites) lowers this watermark to the mutated index, so the render
+    /// path only has to scan `[message_cache_dirty_from, len)` for staleness
+    /// instead of the whole transcript.  An idle frame performs zero
+    /// iterations here.
+    pub message_cache_dirty_from: usize,
+    /// PERF-042: instant of the most recent throttled streaming re-render, or
+    /// `None` when no re-render has been throttled yet.  While a message grows
+    /// token-by-token its cache group is re-rendered at most once per
+    /// `message_stream_min_interval`, bounding streaming CPU instead of
+    /// re-parsing the whole reply on every token.
+    pub message_stream_throttle_at: Option<std::time::Instant>,
+    /// PERF-041: `true` when `message_content_lines` no longer reflects the
+    /// per-message wrapped rows and must be rebuilt before a copy reads it.
+    /// Idle frames leave this `false`; a deferred streaming group, a width
+    /// re-wrap, or a cache reconciliation sets it, and
+    /// [`App::ensure_copy_content_lines`] rebuilds on demand.
+    pub message_content_lines_dirty: bool,
+    /// PERF-045: instant of the last housekeeping-poll pass.  The cheap,
+    /// periodic `poll_*`/`refresh_*` jobs are gated behind
+    /// [`HOUSEKEEPING_INTERVAL`] so a wake that only drained a keystroke does
+    /// not run them all.
+    pub jobs_last_poll: std::time::Instant,
+    /// PERF-045: number of housekeeping passes executed.  Exposed so tests
+    /// (and future metrics) can confirm that rapid wakes are skipped.
+    pub housekeeping_runs: u64,
+    /// PERF-046: last rendered chat-input rows, keyed on
+    /// `(input text, cursor, keyboard selection, inner width)`.
+    pub input_render_cache: InputRenderCache,
 
     // ── Autopilot (M2 Task 2.1) ─────────────────────────────────────────────
     /// True when autopilot mode is active. Agent continues autonomously until
@@ -2317,6 +2372,103 @@ impl App {
         Ok(())
     }
 
+    /// PERF-045: run the cheap housekeeping polls at most once per
+    /// [`HOUSEKEEPING_INTERVAL`].
+    ///
+    /// The main loop previously invoked ~18 `poll_*`/`refresh_*` jobs on every
+    /// wake, including wakes as short as a single keystroke.  Each job has its
+    /// own coarse interval internally, but the call overhead and lock probes
+    /// still ran.  This gate collapses them into one pass every
+    /// [`HOUSEKEEPING_INTERVAL`]; a wake that is only draining a keystroke or a
+    /// single streamed token skips the pass entirely.
+    ///
+    /// Returns `true` when the pass ran, `false` when it was skipped as not
+    /// yet due.
+    pub fn run_housekeeping_if_due(&mut self) -> bool {
+        if self.jobs_last_poll.elapsed() < HOUSEKEEPING_INTERVAL {
+            return false;
+        }
+        self.jobs_last_poll = std::time::Instant::now();
+        self.housekeeping_runs = self.housekeeping_runs.saturating_add(1);
+        true
+    }
+
+    /// PERF-045: the instant the next housekeeping pass is due.
+    pub fn housekeeping_due_at(&self) -> std::time::Instant {
+        self.jobs_last_poll + HOUSEKEEPING_INTERVAL
+    }
+
+    /// PERF-044: whether the periodic safety redraw must actually paint.
+    ///
+    /// The main loop wakes every `IDLE_REDRAW_INTERVAL_MS` even when nothing
+    /// set `needs_redraw`, as a stale-frame guard.  Painting an unchanged
+    /// frame is pure waste, so the safety redraw becomes a no-op unless one of
+    /// the self-advancing displays below is live: a permission countdown, a
+    /// web-phase countdown, a visible Agents/Teams panel with a ticking
+    /// elapsed column, or an active spinner/progress latch.  Every one of
+    /// these advances with wall-clock time rather than an event, and the main
+    /// loop schedules a 250 ms wake while any is active, so none of them can
+    /// freeze.
+    pub fn needs_periodic_redraw(&self) -> bool {
+        !self.permission_queue.is_empty()
+            || self
+                .research_progress
+                .iter()
+                .any(|p| !p.done && p.web_phase_deadline.is_some())
+            || self.live_elapsed_panel_visible()
+            || self.periodic_animation_active()
+    }
+
+    /// PERF-044: whether a visible panel renders a per-second elapsed clock.
+    ///
+    /// The Agents panel shows `format_elapsed(created_at)` for live tasks and
+    /// the Teams panel for live members; both tick with wall-clock time and
+    /// emit no events, so the safety redraw must keep painting while such a
+    /// panel is on screen.
+    pub(crate) fn live_elapsed_panel_visible(&self) -> bool {
+        use ragent_agent::task::TaskStatus;
+        if self.show_agents_window {
+            let task_live = self.active_tasks.iter().any(|t| {
+                matches!(
+                    t.status,
+                    TaskStatus::Running | TaskStatus::Suspended | TaskStatus::Terminating
+                )
+            });
+            let bg_live = self.bg_tasks.iter().any(|t| t.status == "running");
+            if task_live || bg_live {
+                return true;
+            }
+        }
+        if self.show_teams_window && self.active_team.is_some() {
+            let member_live = self
+                .team_members
+                .iter()
+                .any(|m| !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed));
+            if member_live {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// PERF-044: the wall-clock-driven animation latches shared by the redraw
+    /// decision and the main loop's deadline computation.
+    ///
+    /// A wedged run can leave a latch set past its self-healing staleness cap;
+    /// such a latch no longer counts as active so the loop returns to its idle
+    /// cadence (see `poll_stale_spinners`).
+    pub fn periodic_animation_active(&self) -> bool {
+        self.model_loading_state.as_ref().is_some_and(|s| {
+            s.started_at.elapsed() < std::time::Duration::from_secs(crate::MODEL_LOADING_STALE_SECS)
+        }) || self.model_download_state.as_ref().is_some_and(|s| {
+            s.started_at.elapsed()
+                < std::time::Duration::from_secs(crate::MODEL_DOWNLOAD_STALE_SECS)
+        }) || (self.active_bench_task_id.is_some() && !self.bench_stale())
+            || self.code_index_busy
+            || self.code_index_graph_busy
+            || (self.autopilot_enabled && self.autopilot_pending_continue.is_some())
+    }
+
     /// Save input history to the configured file.
     ///
     /// # Errors
@@ -2633,6 +2785,15 @@ impl App {
 /// The registry snapshot is authoritative and the merge idempotent, so this
 /// poll is both cheap and silent when the panel is already in sync.
 pub const AGENTS_RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// PERF-045: interval between housekeeping-poll passes in the main loop.
+///
+/// The cheap, periodic `poll_*`/`refresh_*` jobs (compaction/bench/newproj
+/// result drains, stat refreshes, status/banner expiry, swarm and spinner
+/// reconciliation) are collapsed into one pass per this interval.  Each job
+/// keeps its own internal cadence; this gate only avoids invoking them on
+/// wakes that are merely draining a keystroke or a single streamed token.
+pub const HOUSEKEEPING_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Auto-dismiss timeout (in seconds) for the transient run-cost banner.
 pub const RUN_COST_BANNER_EXPIRY_SECS: u64 = 15;

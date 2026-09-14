@@ -943,8 +943,9 @@ impl ActivityLog {
     /// Returns an error if storage is unavailable (FR-017).
     pub fn list_runs(&self) -> Result<Vec<RunId>> {
         let conn = self.lock()?;
+        // PERF-071: cached prepare for this static statement.
         let mut stmt =
-            conn.prepare("SELECT DISTINCT run_id FROM activity_events ORDER BY run_id")?;
+            conn.prepare_cached("SELECT DISTINCT run_id FROM activity_events ORDER BY run_id")?;
         let run_ids: Result<Vec<String>, rusqlite::Error> =
             stmt.query_map([], |row| row.get(0))?.collect();
         Ok(run_ids?.into_iter().map(RunId::from).collect())
@@ -1574,16 +1575,23 @@ impl ActivityLog {
         run_id: &RunId,
         upto: Option<u64>,
     ) -> Result<Vec<ActivityEvent>> {
-        let mut sql = String::from(
-            "SELECT run_id, seq, id, schema_version, timestamp, kind
-             FROM activity_events
-             WHERE run_id = ?1",
-        );
-        if upto.is_some() {
-            sql.push_str(" AND seq <= ?2");
-        }
-        sql.push_str(" ORDER BY seq ASC");
-        let mut stmt = conn.prepare(&sql)?;
+        // PERF-071: hoist the two static SQL bodies instead of building a
+        // `String` (and re-preparing a distinct statement) on every read.
+        let mut stmt = if upto.is_some() {
+            conn.prepare_cached(
+                "SELECT run_id, seq, id, schema_version, timestamp, kind
+                 FROM activity_events
+                 WHERE run_id = ?1 AND seq <= ?2
+                 ORDER BY seq ASC",
+            )?
+        } else {
+            conn.prepare_cached(
+                "SELECT run_id, seq, id, schema_version, timestamp, kind
+                 FROM activity_events
+                 WHERE run_id = ?1
+                 ORDER BY seq ASC",
+            )?
+        };
         let rows = if let Some(seq) = upto {
             stmt.query_map(params![run_id.as_str(), seq as i64], row_to_event)
                 .context("Failed to query activity events")?

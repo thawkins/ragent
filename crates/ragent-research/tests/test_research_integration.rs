@@ -396,7 +396,7 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
                 published_at: None,
                 url: url.to_string(),
                 title: "Example Page".into(),
-                body: "Real page body — talks about Rust lifetimes. ".repeat(10),
+                body: Arc::from("Real page body — talks about Rust lifetimes. ".repeat(10)),
                 content_type: None,
                 page_type: None,
                 language: Some("English".into()),
@@ -855,7 +855,7 @@ async fn competitive_mode_produces_comparison_table_and_entity_profiles() {
             Ok(WebFetchedPage {
                 url: url.to_string(),
                 title: format!("{entity} inference platform"),
-                body,
+                body: body.into(),
                 published_at: None,
                 content_type: None,
                 page_type: None,

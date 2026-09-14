@@ -465,12 +465,9 @@ impl Tool for GitlabGetJobLogTool {
             "{}/api/v4/projects/{project}/jobs/{job_id}/trace",
             client_obj.instance_url()
         );
-        let resp = reqwest::Client::new()
+        let resp = crate::http_client::shared_client()
             .get(&url)
-            .header(
-                "PRIVATE-TOKEN",
-                &super::super::gitlab::auth::load_token(storage).context("No GitLab token")?,
-            )
+            .header("PRIVATE-TOKEN", client_obj.token())
             .header("User-Agent", "ragent/0.1")
             .send()
             .await

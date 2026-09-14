@@ -1605,6 +1605,7 @@ mod tests {
                 std::collections::HashMap::new(),
             )),
             activity_log: std::sync::OnceLock::new(),
+            activity_log_tx: tokio::sync::Mutex::new(None),
             skill_registry_cache: parking_lot::Mutex::new(None),
             active_loops: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             active_loop_specs: tokio::sync::RwLock::new(std::collections::HashMap::new()),

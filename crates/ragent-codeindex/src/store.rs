@@ -15,8 +15,30 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::debug;
 
+/// PERF-073: builds a `LIKE` prefix pattern for `name`, escaping the `LIKE`
+/// metacharacters (`\\`, `%`, `_`) so a name containing them is matched
+/// literally.  The caller binds the result with `ESCAPE '\'`.
+///
+/// The pattern begins with the literal name and ends in a single trailing `%`
+/// (not a leading wildcard), so `SQLite` can satisfy it from the NOCASE
+/// collated `idx_symbols_name_nocase` index instead of scanning the whole
+/// `symbols` table.
+fn like_prefix_pattern(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 1);
+    for ch in name.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out.push('%');
+    out
+}
+
 /// Current schema version — bump when migrating.
-const SCHEMA_VERSION: i32 = 3;
+///
+/// v4 (PERF-073): added the `idx_symbols_name_nocase` collation index.
+const SCHEMA_VERSION: i32 = 4;
 
 /// Persistent store for the code index, backed by `SQLite`.
 pub struct IndexStore {
@@ -102,6 +124,10 @@ impl IndexStore {
             );
 
             CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
+            -- PERF-073: NOCASE collation index so the anchored prefix name
+            -- filter (`name COLLATE NOCASE LIKE 'prefix%'`) is an index range
+            -- scan rather than a full table scan.
+            CREATE INDEX IF NOT EXISTS idx_symbols_name_nocase ON symbols(name COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS idx_symbols_kind ON symbols(kind);
             CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_id);
             CREATE INDEX IF NOT EXISTS idx_symbols_parent ON symbols(parent_id);
@@ -202,9 +228,24 @@ impl IndexStore {
 
     // ── File CRUD ───────────────────────────────────────────────────────────
 
+    /// PERF-074: the file upsert body (no result row), reused by the batch
+    /// `apply_diff` path where per-row results are not needed.
+    const SQL_UPSERT_FILE: &'static str =
+        "INSERT INTO indexed_files (path, content_hash, byte_size, language, last_indexed, mtime_ns, line_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(path) DO UPDATE SET
+            content_hash = excluded.content_hash,
+            byte_size    = excluded.byte_size,
+            language     = excluded.language,
+            last_indexed = excluded.last_indexed,
+            mtime_ns     = excluded.mtime_ns,
+            line_count   = excluded.line_count";
+
     /// Insert or update a file entry. Returns the row ID.
     pub fn upsert_file(&self, entry: &FileEntry) -> Result<i64> {
-        self.conn.execute(
+        // PERF-074: `RETURNING id` returns the existing row's id on the update
+        // branch too, removing the second `SELECT id` that followed the insert.
+        let file_id: i64 = self.conn.query_row(
             "INSERT INTO indexed_files (path, content_hash, byte_size, language, last_indexed, mtime_ns, line_count)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(path) DO UPDATE SET
@@ -213,7 +254,8 @@ impl IndexStore {
                 language     = excluded.language,
                 last_indexed = excluded.last_indexed,
                 mtime_ns     = excluded.mtime_ns,
-                line_count   = excluded.line_count",
+                line_count   = excluded.line_count
+             RETURNING id",
             params![
                 entry.path,
                 entry.content_hash,
@@ -223,12 +265,6 @@ impl IndexStore {
                 entry.mtime_ns,
                 entry.line_count as i64,
             ],
-        )?;
-        // last_insert_rowid() returns 0 on UPDATE (no insert happened),
-        // so always query for the actual id by path.
-        let file_id: i64 = self.conn.query_row(
-            "SELECT id FROM indexed_files WHERE path = ?1",
-            [&entry.path],
             |row| row.get(0),
         )?;
         Ok(file_id)
@@ -278,9 +314,9 @@ impl IndexStore {
 
     /// Get a symbol by its exact (case-sensitive) name.
     ///
-    /// A keyed equality lookup; use this instead of the substring
+    /// A keyed equality lookup; use this instead of the fragment
     /// [`Self::query_symbols`] when the caller only wants the exact symbol,
-    /// so a short name (`new`, `mod`) does not pull thousands of substring
+    /// so a short name (`new`, `mod`) does not pull thousands of fragment
     /// rows out of the store under the lock.
     pub fn get_symbol_by_exact_name(&self, name: &str) -> Result<Option<Symbol>> {
         let raw = self
@@ -485,46 +521,51 @@ impl IndexStore {
     /// Identifies files to add (new on disk), update (hash changed), and
     /// remove (no longer on disk).
     pub fn get_stale_files(&self, scanned: &[ScannedFile]) -> Result<StaleDiff> {
-        // Build a map of currently indexed files: path → hash.
-        let mut stmt = self
-            .conn
-            .prepare("SELECT path, content_hash FROM indexed_files")?;
-        let indexed: HashMap<String, String> = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .filter_map(std::result::Result::ok)
-            .collect();
-
-        // Build a set of scanned paths for removal detection.
-        let scanned_paths: std::collections::HashSet<String> = scanned
-            .iter()
-            .map(|f| f.path.to_string_lossy().to_string())
-            .collect();
+        // PERF-072: previously this loaded the *entire* `indexed_files` table
+        // into a `HashMap` and built a `HashSet` of all scanned paths on every
+        // call — O(total files) memory even when nothing changed.  Instead we
+        // build an O(scanned) index (path → position) plus a `seen` bitmap, then
+        // stream the stored rows once:
+        //   - a stored path absent from `scanned_index`   → remove
+        //   - a stored path whose hash differs            → update
+        // Scanned paths never seen during the stream       → add.
+        // Memory is therefore O(scanned) regardless of how large the index is.
+        let mut scanned_index: HashMap<String, usize> = HashMap::with_capacity(scanned.len());
+        for (i, file) in scanned.iter().enumerate() {
+            scanned_index.insert(file.path.to_string_lossy().into_owned(), i);
+        }
+        let mut seen = vec![false; scanned.len()];
 
         let mut diff = StaleDiff::default();
 
-        for file in scanned {
-            let path_str = file.path.to_string_lossy().to_string();
-            match indexed.get(&path_str) {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT path, content_hash FROM indexed_files")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let path: String = row.get(0)?;
+            let stored_hash: String = row.get(1)?;
+            match scanned_index.get(path.as_str()) {
                 None => {
-                    // New file — not yet indexed.
-                    diff.to_add.push(file.clone());
+                    // Indexed but no longer on disk — remove.
+                    diff.to_remove.push(path);
                 }
-                Some(old_hash) if *old_hash != file.hash => {
-                    // Hash changed — needs re-indexing.
-                    diff.to_update.push(file.clone());
-                }
-                _ => {
-                    // Unchanged.
+                Some(&idx) => {
+                    seen[idx] = true;
+                    if scanned[idx].hash != stored_hash {
+                        // Hash changed — needs re-indexing.
+                        diff.to_update.push(scanned[idx].clone());
+                    }
                 }
             }
         }
+        drop(rows);
+        drop(stmt);
 
-        // Files in the index that are no longer on disk.
-        for indexed_path in indexed.keys() {
-            if !scanned_paths.contains(indexed_path) {
-                diff.to_remove.push(indexed_path.clone());
+        // Files on disk that were never seen in the index — add.
+        for (i, file) in scanned.iter().enumerate() {
+            if !seen[i] {
+                diff.to_add.push(file.clone());
             }
         }
 
@@ -544,33 +585,30 @@ impl IndexStore {
     pub fn apply_diff(&self, diff: &StaleDiff) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
 
+        // PERF-074: prepare the upsert once for the whole batch (inside the
+        // transaction) instead of re-parsing the statement per row.
+        let mut upsert = tx.prepare_cached(Self::SQL_UPSERT_FILE)?;
+
         for file in diff.to_add.iter().chain(diff.to_update.iter()) {
             let entry = scanned_to_entry(file);
-            tx.execute(
-                "INSERT INTO indexed_files (path, content_hash, byte_size, language, last_indexed, mtime_ns, line_count)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(path) DO UPDATE SET
-                    content_hash = excluded.content_hash,
-                    byte_size    = excluded.byte_size,
-                    language     = excluded.language,
-                    last_indexed = excluded.last_indexed,
-                    mtime_ns     = excluded.mtime_ns,
-                    line_count   = excluded.line_count",
-                params![
-                    entry.path,
-                    entry.content_hash,
-                    entry.byte_size as i64,
-                    entry.language,
-                    entry.last_indexed.to_rfc3339(),
-                    entry.mtime_ns,
-                    entry.line_count as i64,
-                ],
-            )?;
+            upsert.execute(params![
+                entry.path,
+                entry.content_hash,
+                entry.byte_size as i64,
+                entry.language,
+                entry.last_indexed.to_rfc3339(),
+                entry.mtime_ns,
+                entry.line_count as i64,
+            ])?;
         }
+        drop(upsert);
 
+        // PERF-074: one prepared delete for the whole removal batch.
+        let mut delete = tx.prepare_cached("DELETE FROM indexed_files WHERE path = ?1")?;
         for path in &diff.to_remove {
-            tx.execute("DELETE FROM indexed_files WHERE path = ?1", [path])?;
+            delete.execute([path])?;
         }
+        drop(delete);
 
         tx.commit()?;
         Ok(())
@@ -600,15 +638,36 @@ impl IndexStore {
     /// The `file_id` field on each `Symbol` must be set correctly before calling.
     /// Returns the number of symbols inserted.
     pub fn upsert_symbols(&self, file_id: i64, symbols: &[Symbol]) -> Result<usize> {
-        // Delete existing symbols for this file first.
-        self.conn
-            .execute("DELETE FROM symbols WHERE file_id = ?1", [file_id])?;
+        // PERF-074: when called standalone (no transaction already open) wrap
+        // the delete + re-insert in a single transaction so the operation is
+        // atomic and rows are not auto-committed one by one.  When a caller has
+        // already opened a batch transaction (the `full_reindex` path) run
+        // inside it instead of starting a nested one.
+        if self.conn.is_autocommit() {
+            let tx = self.conn.unchecked_transaction()?;
+            let count = Self::upsert_symbols_inner(&tx, file_id, symbols)?;
+            tx.commit()?;
+            Ok(count)
+        } else {
+            Self::upsert_symbols_inner(&self.conn, file_id, symbols)
+        }
+    }
 
-        let mut stmt = self.conn.prepare_cached(
+    /// PERF-074: the symbol replace body, run on either the live connection or
+    /// an open transaction.
+    ///
+    /// `INSERT ... RETURNING id` removes the separate `last_insert_rowid()`
+    /// round-trip per row.
+    fn upsert_symbols_inner(conn: &Connection, file_id: i64, symbols: &[Symbol]) -> Result<usize> {
+        // Delete existing symbols for this file first.
+        conn.execute("DELETE FROM symbols WHERE file_id = ?1", [file_id])?;
+
+        let mut stmt = conn.prepare_cached(
             "INSERT INTO symbols (file_id, name, qualified_name, kind, visibility,
                 start_line, end_line, start_col, end_col, parent_id,
                 signature, doc_comment, body_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             RETURNING id",
         )?;
 
         // Build a map from temporary IDs to real (SQLite-assigned) IDs.
@@ -620,22 +679,24 @@ impl IndexStore {
             if sym.parent_id.is_some() {
                 continue;
             }
-            stmt.execute(params![
-                file_id,
-                sym.name,
-                sym.qualified_name,
-                sym.kind.to_string(),
-                sym.visibility.to_string(),
-                i64::from(sym.start_line),
-                i64::from(sym.end_line),
-                i64::from(sym.start_col),
-                i64::from(sym.end_col),
-                Option::<i64>::None,
-                sym.signature,
-                sym.doc_comment,
-                sym.body_hash,
-            ])?;
-            let real_id = self.conn.last_insert_rowid();
+            let real_id: i64 = stmt.query_row(
+                params![
+                    file_id,
+                    sym.name,
+                    sym.qualified_name,
+                    sym.kind.to_string(),
+                    sym.visibility.to_string(),
+                    i64::from(sym.start_line),
+                    i64::from(sym.end_line),
+                    i64::from(sym.start_col),
+                    i64::from(sym.end_col),
+                    Option::<i64>::None,
+                    sym.signature,
+                    sym.doc_comment,
+                    sym.body_hash,
+                ],
+                |row| row.get(0),
+            )?;
             id_map.insert(sym.id, real_id);
             count += 1;
         }
@@ -646,22 +707,24 @@ impl IndexStore {
                 continue;
             }
             let real_parent_id = sym.parent_id.and_then(|pid| id_map.get(&pid).copied());
-            stmt.execute(params![
-                file_id,
-                sym.name,
-                sym.qualified_name,
-                sym.kind.to_string(),
-                sym.visibility.to_string(),
-                i64::from(sym.start_line),
-                i64::from(sym.end_line),
-                i64::from(sym.start_col),
-                i64::from(sym.end_col),
-                real_parent_id,
-                sym.signature,
-                sym.doc_comment,
-                sym.body_hash,
-            ])?;
-            let real_id = self.conn.last_insert_rowid();
+            let real_id: i64 = stmt.query_row(
+                params![
+                    file_id,
+                    sym.name,
+                    sym.qualified_name,
+                    sym.kind.to_string(),
+                    sym.visibility.to_string(),
+                    i64::from(sym.start_line),
+                    i64::from(sym.end_line),
+                    i64::from(sym.start_col),
+                    i64::from(sym.end_col),
+                    real_parent_id,
+                    sym.signature,
+                    sym.doc_comment,
+                    sym.body_hash,
+                ],
+                |row| row.get(0),
+            )?;
             id_map.insert(sym.id, real_id);
             count += 1;
         }
@@ -685,11 +748,16 @@ impl IndexStore {
         }
 
         if let Some(ref name) = filter.name {
+            // PERF-073: anchored prefix match (LIKE metacharacters escaped) so
+            // SQLite can satisfy it from `idx_symbols_name_nocase` instead of
+            // scanning the whole `symbols` table.  A leading name fragment still
+            // finds a symbol (e.g. `Server` matches `ServerProcessor`); only
+            // interior-only fragments are no longer matched.
             conditions.push(format!(
-                "s.name LIKE '%' || ?{} || '%' COLLATE NOCASE",
+                "s.name COLLATE NOCASE LIKE ?{} ESCAPE '\\'",
                 bind_values.len() + 1
             ));
-            bind_values.push(name.clone());
+            bind_values.push(like_prefix_pattern(name));
         }
         if let Some(kind) = filter.kind {
             conditions.push(format!("s.kind = ?{}", bind_values.len() + 1));
@@ -700,8 +768,11 @@ impl IndexStore {
             bind_values.push(vis.to_string());
         }
         if let Some(ref fp) = filter.file_path {
+            // PERF-073: match the case-insensitive semantics of the name filter
+            // (the leading wildcard is intrinsic to a path-substring filter and
+            // cannot use an index either way).
             conditions.push(format!(
-                "f.path LIKE '%' || ?{} || '%'",
+                "f.path COLLATE NOCASE LIKE '%' || ?{} || '%'",
                 bind_values.len() + 1
             ));
             bind_values.push(fp.clone());
@@ -813,10 +884,29 @@ impl IndexStore {
 
     /// Insert imports for a file, replacing any existing imports for that file.
     pub fn upsert_imports(&self, file_id: i64, imports: &[ImportEntry]) -> Result<usize> {
-        self.conn
-            .execute("DELETE FROM imports WHERE file_id = ?1", [file_id])?;
+        // PERF-074: wrap the delete + re-insert in a single transaction when no
+        // batch transaction is already open, so rows are not auto-committed one
+        // by one and a mid-way failure cannot leave a partial import set.
+        if self.conn.is_autocommit() {
+            let tx = self.conn.unchecked_transaction()?;
+            let count = Self::upsert_imports_inner(&tx, file_id, imports)?;
+            tx.commit()?;
+            Ok(count)
+        } else {
+            Self::upsert_imports_inner(&self.conn, file_id, imports)
+        }
+    }
 
-        let mut stmt = self.conn.prepare_cached(
+    /// PERF-074: the import replace body, run on the live connection or an
+    /// open transaction.
+    fn upsert_imports_inner(
+        conn: &Connection,
+        file_id: i64,
+        imports: &[ImportEntry],
+    ) -> Result<usize> {
+        conn.execute("DELETE FROM imports WHERE file_id = ?1", [file_id])?;
+
+        let mut stmt = conn.prepare_cached(
             "INSERT INTO imports (file_id, imported_name, source_module, alias, line, kind)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
@@ -923,10 +1013,25 @@ impl IndexStore {
 
     /// Insert symbol references for a file, replacing existing ones.
     pub fn upsert_refs(&self, file_id: i64, refs: &[SymbolRef]) -> Result<usize> {
-        self.conn
-            .execute("DELETE FROM symbol_refs WHERE file_id = ?1", [file_id])?;
+        // PERF-074: wrap the delete + re-insert in a single transaction when no
+        // batch transaction is already open, so rows are not auto-committed one
+        // by one and a mid-way failure cannot leave a partial ref set.
+        if self.conn.is_autocommit() {
+            let tx = self.conn.unchecked_transaction()?;
+            let count = Self::upsert_refs_inner(&tx, file_id, refs)?;
+            tx.commit()?;
+            Ok(count)
+        } else {
+            Self::upsert_refs_inner(&self.conn, file_id, refs)
+        }
+    }
 
-        let mut stmt = self.conn.prepare_cached(
+    /// PERF-074: the symbol-ref replace body, run on the live connection or an
+    /// open transaction.
+    fn upsert_refs_inner(conn: &Connection, file_id: i64, refs: &[SymbolRef]) -> Result<usize> {
+        conn.execute("DELETE FROM symbol_refs WHERE file_id = ?1", [file_id])?;
+
+        let mut stmt = conn.prepare_cached(
             "INSERT INTO symbol_refs (symbol_name, file_id, line, col, kind)
              VALUES (?1, ?2, ?3, ?4, ?5)",
         )?;
@@ -956,6 +1061,45 @@ impl IndexStore {
         )?;
 
         let rows = stmt.query_map([symbol_name], |row| {
+            Ok(SymbolRef {
+                symbol_name: row.get(0)?,
+                file_id: row.get(1)?,
+                file_path: row.get(5)?,
+                line: row.get::<_, i64>(2)? as u32,
+                col: row.get::<_, i64>(3)? as u32,
+                kind: row.get(4)?,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// PERF-074: find up to `limit` references to a symbol by name, with the
+    /// `LIMIT` pushed into SQL so the store never materialises and then
+    /// truncates the full reference set.  `limit == 0` means no limit.
+    pub fn find_references_limited(
+        &self,
+        symbol_name: &str,
+        limit: usize,
+    ) -> Result<Vec<SymbolRef>> {
+        if limit == 0 {
+            return self.find_references(symbol_name);
+        }
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT r.symbol_name, r.file_id, r.line, r.col, r.kind,
+                    COALESCE(f.path, '') as file_path
+             FROM symbol_refs r
+             LEFT JOIN indexed_files f ON f.id = r.file_id
+             WHERE r.symbol_name = ?1
+             ORDER BY f.path, r.line
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(params![symbol_name, limit as i64], |row| {
             Ok(SymbolRef {
                 symbol_name: row.get(0)?,
                 file_id: row.get(1)?,

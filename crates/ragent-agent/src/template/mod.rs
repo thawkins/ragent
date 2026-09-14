@@ -146,6 +146,14 @@ impl TemplateInfo {
     }
 }
 
+/// Matches `{{placeholder}}` tokens in a template body.
+///
+/// Hoisted to a process-wide static (PERF-067): the pattern is constant and
+/// previously recompiled on every loop iteration inside `extract_placeholders`.
+static PLACEHOLDER_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"\{\{(\w+)\}\}").expect("placeholder regex is valid")
+});
+
 /// Extract placeholder names from a template body.
 ///
 /// Finds all `{{name}}` patterns and returns the unique placeholder names.
@@ -153,10 +161,7 @@ fn extract_placeholders(body: &str) -> Vec<String> {
     let mut placeholders = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    for cap in regex::Regex::new(r"\{\{(\w+)\}\}")
-        .unwrap()
-        .captures_iter(body)
-    {
+    for cap in PLACEHOLDER_RE.captures_iter(body) {
         if let Some(name) = cap.get(1).and_then(|m| m.as_str().into()) {
             if seen.insert(name.to_string()) {
                 placeholders.push(name.to_string());

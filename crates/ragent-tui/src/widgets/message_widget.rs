@@ -16,6 +16,13 @@ use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 /// Sentinel prefix used to identify agent-notice chat bubbles.
 const AGENT_NOTICE_PREFIX: &str = "📋 Agent Notice";
 
+/// Static run of spaces used to indent continuation lines of a text part.
+///
+/// PERF-047: emitting the indent as a borrowed span against this constant
+/// avoids allocating a fresh `String` (and the `format!` result) per line.
+/// The longest indent any role uses is 13 (`[compaction] `).
+pub(crate) const INDENT_SPACES: &str = "                ";
+
 /// Returns true if the text is an agent-notice bubble.
 pub(crate) fn is_agent_notice(text: &str) -> bool {
     text.trim_start().starts_with(AGENT_NOTICE_PREFIX)
@@ -3327,11 +3334,14 @@ impl<'a> MessageWidget<'a> {
                                 Span::raw(line.to_string()),
                             ]));
                         } else {
-                            lines.push(Line::from(Span::raw(format!(
-                                "{}{}",
-                                " ".repeat(indent),
-                                line
-                            ))));
+                            // PERF-047: indentation is emitted as its own
+                            // borrowed span instead of `format!`-ing a fresh
+                            // String with `repeat()` per line (two allocations
+                            // saved per continuation line).
+                            lines.push(Line::from(vec![
+                                Span::raw(&INDENT_SPACES[..indent]),
+                                Span::raw(line.to_string()),
+                            ]));
                         }
                     }
                 }

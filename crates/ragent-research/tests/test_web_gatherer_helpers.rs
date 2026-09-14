@@ -12,7 +12,7 @@ mod relevance;
 mod classify;
 
 use classify::{WebSourceKind, classify_web_source};
-use relevance::{compute_relevance_label, normalize_query_terms, term_matches};
+use relevance::{PreparedQuery, compute_relevance_label, normalize_query_terms, term_matches};
 use title::{
     MAX_WEB_SOURCE_TITLE_CHARS, clean_title_text, clean_web_source_title, truncate_title_words,
 };
@@ -270,4 +270,71 @@ fn relevance_label_low_ratio_without_title_signal_stays_rejected() {
         "https://shop.example",
     );
     assert!(!retained);
+}
+
+// ── prepared-query equivalence tests (PERF-068) ──────────────────────────
+
+#[test]
+fn prepared_query_matches_compute_relevance_label() {
+    let query = "how to configure and operate agentic AI loops";
+    let prepared = PreparedQuery::new(query);
+    let cases = [
+        (
+            "Designing agentic loops",
+            "Patterns for structuring autonomous agent systems.",
+            "https://simonwillison.net/2025/Sep/30/designing-agentic-loops",
+        ),
+        (
+            "What is an agentic loop? (And how to build one)",
+            "A practical guide to building agentic loops in production.",
+            "https://www.inngest.com/blog/agent-loop-architecture",
+        ),
+        (
+            "Semantic Role Labeling: A Systematical Survey",
+            "We survey semantic role labeling methods.",
+            "https://arxiv.org/html/2502.08660v1",
+        ),
+        ("", "no title at all", "https://example.com/empty-title"),
+    ];
+    for (title, snippet, url) in cases {
+        assert_eq!(
+            prepared.label(title, snippet, url),
+            compute_relevance_label(query, title, snippet, url),
+            "prepared vs one-shot mismatch for title {title:?}"
+        );
+    }
+}
+
+#[test]
+fn prepared_query_empty_query_is_match_unavailable() {
+    let prepared = PreparedQuery::new("");
+    let (label, retained) = prepared.label("anything", "anything", "https://example.com");
+    assert_eq!(label, "Match score unavailable");
+    assert!(retained);
+}
+
+#[test]
+fn prepared_query_handles_uppercase_url_without_changing_result() {
+    // The Cow lowercase path must still match a mixed-case URL exactly as the
+    // unconditional-to_lowercase path did.
+    let query = "rust async";
+    let prepared = PreparedQuery::new(query);
+    assert_eq!(
+        prepared.label("unrelated", "unrelated", "HTTPS://EXAMPLE.COM/RUST-ASYNC"),
+        compute_relevance_label(
+            query,
+            "unrelated",
+            "unrelated",
+            "HTTPS://EXAMPLE.COM/RUST-ASYNC"
+        ),
+    );
+    assert_eq!(
+        prepared.label("unrelated", "unrelated", "HTTPS://EXAMPLE.COM/RUST-ASYNC"),
+        compute_relevance_label(
+            query,
+            "unrelated",
+            "unrelated",
+            "https://example.com/rust-async"
+        ),
+    );
 }

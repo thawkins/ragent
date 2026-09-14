@@ -314,7 +314,7 @@ impl App {
         let Some(header_line) = self.newproj_progress_slug.clone() else {
             return;
         };
-        for msg in self.messages.iter_mut() {
+        for (i, msg) in self.messages.iter_mut().enumerate() {
             if msg.role != ragent_agent::message::Role::Assistant {
                 continue;
             }
@@ -323,6 +323,7 @@ impl App {
             {
                 *text = rendered;
                 msg.touch();
+                self.mark_message_dirty(i);
                 return;
             }
         }

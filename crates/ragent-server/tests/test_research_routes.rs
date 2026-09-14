@@ -66,6 +66,7 @@ fn test_state(token: &str) -> AppState {
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         activity_log: std::sync::OnceLock::new(),
+        activity_log_tx: tokio::sync::Mutex::new(None),
         skill_registry_cache: parking_lot::Mutex::new(None),
         active_loops: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         active_loop_specs: tokio::sync::RwLock::new(std::collections::HashMap::new()),

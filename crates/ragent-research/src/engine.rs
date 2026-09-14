@@ -629,7 +629,7 @@ mod tests {
                 published_at: None,
                 url: url.to_string(),
                 title: "fake".to_string(),
-                body: "body text ".repeat(30),
+                body: Arc::from("body text ".repeat(30)),
                 content_type: None,
                 page_type: None,
                 language: None,

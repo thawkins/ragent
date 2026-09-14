@@ -1,28 +1,60 @@
 //! GitHub OAuth device flow and token storage.
 
 use anyhow::{Context, Result, bail};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
+
+/// PERF-059: last token read from disk, keyed by the file's modification time
+/// so a changed token file is re-read but an unchanged one is served from
+/// memory. Keying on mtime (rather than a bare process-global cache) keeps the
+/// cache correct when `HOME` changes between calls, as it does in tests.
+static TOKEN_FILE_CACHE: Mutex<Option<(PathBuf, SystemTime, Option<String>)>> = Mutex::new(None);
+
+/// Read the stored GitHub token file, caching the value against the file's
+/// modification time.
+fn read_cached_token(path: &Path) -> Option<String> {
+    let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+
+    let mut cache = TOKEN_FILE_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let (Some(mtime), Some((cached_path, cached_mtime, value))) = (mtime, cache.as_ref())
+        && cached_path == path
+        && *cached_mtime == mtime
+    {
+        return value.clone();
+    }
+
+    let value = match std::fs::read_to_string(path) {
+        Ok(raw) => {
+            let trimmed = raw.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        }
+        Err(_) => None,
+    };
+
+    *cache = mtime.map(|mtime| (path.to_path_buf(), mtime, value.clone()));
+    value
+}
 
 /// Resolve GitHub token from environment or stored file.
 /// Returns `None` if no token is configured.
 #[must_use]
 pub fn load_token() -> Option<String> {
-    // 1. Environment variable
+    // 1. Environment variable (already in memory — no cache needed)
     if let Ok(token) = std::env::var("GITHUB_TOKEN")
         && !token.is_empty()
     {
         return Some(token);
     }
-    // 2. Stored file
-    if let Some(path) = token_file_path()
-        && let Ok(token) = std::fs::read_to_string(&path)
-    {
-        let token = token.trim().to_string();
-        if !token.is_empty() {
-            return Some(token);
-        }
-    }
-    None
+    // 2. Stored file (cached against mtime)
+    let path = token_file_path()?;
+    read_cached_token(&path)
 }
 
 /// Save a GitHub token to `~/.ragent/github_token`.
@@ -35,6 +67,11 @@ pub fn save_token(token: &str) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     }
+    // Invalidate the mtime-keyed read cache so the new token is visible even
+    // if the write lands inside the filesystem's mtime granularity.
+    *TOKEN_FILE_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     Ok(())
 }
 
@@ -45,6 +82,9 @@ pub fn delete_token() -> Result<()> {
     {
         std::fs::remove_file(&path)?;
     }
+    *TOKEN_FILE_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     Ok(())
 }
 
@@ -69,7 +109,7 @@ pub struct DeviceFlowState {
 
 /// Initiate GitHub OAuth device flow.
 pub async fn start_device_flow(client_id: &str) -> Result<DeviceFlowState> {
-    let client = reqwest::Client::new();
+    let client = crate::http_client::shared_client();
     let resp = client
         .post("https://github.com/login/device/code")
         .header("Accept", "application/json")
@@ -104,7 +144,7 @@ pub async fn start_device_flow(client_id: &str) -> Result<DeviceFlowState> {
 /// Poll for OAuth token after user has authorized.
 /// Returns `Ok(Some(token))` when authorized, `Ok(None)` to keep polling.
 pub async fn poll_device_flow(client_id: &str, state: &DeviceFlowState) -> Result<Option<String>> {
-    let client = reqwest::Client::new();
+    let client = crate::http_client::shared_client();
     let resp = client
         .post("https://github.com/login/oauth/access_token")
         .header("Accept", "application/json")

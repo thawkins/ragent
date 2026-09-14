@@ -98,15 +98,37 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.82). The core architecture, tool system,
+Ragent is in **beta** (v1.0.103). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.44 → v1.0.82):**
+**Current Release Highlights (v1.0.44 → v1.0.103):**
 
+- **Agent per-turn hot path (PERF-032..040 + PERF-048)** — the
+  per-turn allocation and clone load in the agent loop is removed: the
+  provider-facing transcript is held and handed out behind an
+  `Arc<Vec<ChatMessage>>` (no per-turn deep clone, PERF-032); a pure history
+  append converts only the new tail (`SessionState::take_cached_for_append` +
+  `record_history_base`, PERF-033); the subagent tool surface is cached behind
+  the tool-registry version (PERF-034); `LoopTracker` is `Copy` (PERF-035); a
+  `RequestTokenTracker` makes the per-step compaction token estimate
+  O(changed message) instead of O(history) (PERF-036); tool/result pairing is a
+  single pass (PERF-037); the compaction prompt is assembled into one buffer
+  (PERF-038); memory-entry token costs are memoised and prompt builders use
+  `write!` (PERF-039); the activity log is written by one background task per
+  process fed by a bounded queue (PERF-040); and the TUI viewers retain a single
+  copy of their rendered rows (PERF-048). New benches `turn_loop` /
+  `m3_hot_paths`; new guards `test_activity_writer` and `test_no_percall_regex`.
+  `rustls` bumped 0.23.43 -> 0.23.45 (RUSTSEC-2026-0285).
+- **Data-layer, network, TUI, and regex performance milestones** — the M2..M6
+  performance plan is complete: the TUI render loop repaints nothing at idle,
+  the async runtime no longer blocks workers, network clients and git spawns are
+  reused, every page/candidate regex is hoisted to a `OnceLock`/`LazyLock`
+  static, and the storage/code-index/MCP/research data paths no longer copy work
+  on hot paths (`docs/PERFPLAN.md`, `docs/agentorch.md` §10).
 - **Research-crate simplify pass (v1.0.88)** — a `/simplify`
   audit over all `ragent-research` sources: fixed a `parse_subject_summary`
   slice panic (`}`-before-`{`), made `AnalysisEngine::with_brief` a required
@@ -2797,6 +2819,13 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.103 | 2026-09-14 | M1 agent per-turn hot path (PERF-032..040 + PERF-048): the provider-facing transcript is held behind an `Arc<Vec<ChatMessage>>` (no per-turn deep clone, PERF-032), a pure history append converts only the new tail (`take_cached_for_append` + `record_history_base`, PERF-033), the subagent tool surface is cached behind the tool-registry version (PERF-034), `LoopTracker` is `Copy` (PERF-035), the new `RequestTokenTracker` makes the per-step pre-send token estimate O(changed message) instead of O(history) (PERF-036), tool/result pairing is a single pass (PERF-037), the compaction prompt is assembled into one buffer (PERF-038), memory-entry token costs are memoised (PERF-039), the activity log is written by one background task per process (PERF-040), and the TUI viewers retain a single copy of their rendered rows (PERF-048). New benches `turn_loop`/`m3_hot_paths`; new guards `test_activity_writer`/`test_no_percall_regex`. Security: `rustls` 0.23.43 -> 0.23.45 (RUSTSEC-2026-0285). |
+| v1.0.102 | 2026-09-14 | Second `/simplify` sweep across the search, research, agent, and TUI crates: the API-key `mf_search` engines (tavily/perplexity/exa/serper/langsearch) share `engine_http_client`/`api_engine_preflight`/`finish_json_search`/`mask_api_key` plus `truncate_snippet`/`truncate_query_to` (~150 dup lines removed), `strip_disallowed_quotes` is a single allocation, `search_with_retry` caps the backoff shift at 31, and `diversity_truncate` takes/returns owned vectors and re-syncs `total_merged_results`; the research web-gatherer volume policy is one `volume_policy()` helper and the vestigial `deadline_fired` flag is gone. |
+| v1.0.101 | 2026-09-13 | Simplify pass over four crates: deterministic engine-merge output (sorted `source` strings) with positions renumbered after truncation, poison-tolerant mutexes in `masterfetch::search`, and further deduplication in `ragent-research`. |
+| v1.0.100 | 2026-09-13 | Serper (Google) added as a fifth optional API-backed `mf_search` engine (`serper_api_key`); engine-level retry (`search_with_retry`, 2 retries, 1 s/2 s backoff) for transient Wikipedia 429 / HTTP 5xx / transport failures with account-level quota blocks reported as `blocked_engines`; the orchestrator staggers engine starts by 120 ms (fixes the "only LangSearch results" `/websearch search` symptom); the research web-gatherer fetches to completion instead of cancelling at the `--web-time` deadline and the consecutive-failure search circuit breaker was removed in favour of the retry policy; `/research` gained a TUI clarification gate. |
+| v1.0.99 | 2026-09-13 | Width-sweep volume cap removed except in competitive mode (uncapped gather by default; the 60 s phase deadline and `--fetch-concurrently` bound the work), pre-fetch relevance filter gained morphological term matching, and merge diversity bounds any single engine to half the merged slate. |
+| v1.0.98 | 2026-09-13 | GCF tool-result encoding (spec `gcf`, FR-001..FR-009): opt-in `gcf.enabled` config, lossless re-encoding of large JSON tool results inside `[BEGIN GCF generic]` blocks. |
+| v1.0.97 | 2026-09-12 | `/toolchain list` hang fix (FR-012): the probe worker thread is detached after a receive timeout instead of being joined. |
 | v1.0.96 | 2026-09-12 | `/prompt` system-prompt inspector (read-only TUI slash command rendering the assembled system prompt an agent would receive in primary or subagent mode with the effective tool surface; report cap, tool-free agents render `(no tools)`; five test files), tool-repeat guard FR-044 (after five consecutive identical tool calls the sixth raises a `tool:repeat` permission prompt in interactive runs and auto-denies with a corrective observation in unattended runs), edit-tool line-structure guard FR-045 (the whitespace-flexible fallback lane can no longer join or split lines; regression tests), edit-guidance prompt rewrite with failure-recovery instructions matching the actual error machinery, redundant slash commands removed (`/opt` with its `ragent-prompt_opt` crate and `POST /opt` endpoint, `/tasks` alias of `/task list`, `/theme` registered but never dispatched), and the slashcommands how-to doc set (75 command docs + INDEX.md + PDFs). |
 | v1.0.95 | 2026-09-11 | AgentNotice chat-bubble separation (TUI event handler forces a new assistant message before and after appending a notice so consecutive notices render as their own yellow bubbles; regression tests in `test_agent_notice_separation.rs`) and `/toolchain list` fixed-width table (columns fixed at 10/10/10/50 characters — FR-017, constant 93-column grid; Language/Runtime cells clip, Status and Version cells word-wrap onto continuation grid lines; `COLUMN_WIDEN_CHARS` replaced by `TABLE_COLUMN_WIDTHS`; renderer tests, TUI regression tests, and the toolchain howto updated). |
 | v1.0.94 | 2026-09-11 | Documentation and statistics refresh: regenerated STATS.md from the live tree, updated CHANGELOG/README/QUICKSTART/TUI-QUICKSTART and all 20 howto PDFs for the v1.0.94 release. |

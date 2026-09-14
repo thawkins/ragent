@@ -323,6 +323,68 @@ fn bench_teams_panel(c: &mut Criterion) {
     group.finish();
 }
 
+// =========================================================================
+// Bench: idle render loop guards (PERF-044 / PERF-046)
+// =========================================================================
+
+/// Measure the idle-wake decision and the warm full-frame render it guards.
+///
+/// PERF-044 / PERF-046: an idle wake must (a) decide not to paint in
+/// nanoseconds, and (b) never pay for a full frame or an input re-wrap while
+/// the buffer and terminal width are unchanged.
+fn bench_idle_render(c: &mut Criterion) {
+    let session_id = "bench-session-0001";
+
+    // (a) The per-wake decision itself.
+    let mut decision_group = c.benchmark_group("idle_should_render");
+    {
+        let mut app = make_app();
+        app.session_id = Some(session_id.to_string());
+        app.messages = build_messages(500, session_id);
+        app.needs_redraw = false;
+        let last_draw = std::time::Instant::now();
+        decision_group.bench_function("idle_500", |b| {
+            b.iter(|| ragent_tui::should_render(&app, last_draw));
+        });
+        app.needs_redraw = true;
+        decision_group.bench_function("dirty_500", |b| {
+            b.iter(|| ragent_tui::should_render(&app, last_draw));
+        });
+    }
+    decision_group.finish();
+
+    // (b) A warm full-frame render with an unchanged input buffer: the
+    // input render cache must make the input area O(1) while typing pauses.
+    let mut render_group = c.benchmark_group("idle_full_frame");
+    for &count in &[100, 500] {
+        let mut app = make_app();
+        app.session_id = Some(session_id.to_string());
+        app.messages = build_messages(count, session_id);
+        app.input = "a long-ish draft prompt that stays unchanged".to_string();
+        app.input_cursor = app.input.chars().count();
+
+        // Prime every cache (messages, input, status bar).
+        {
+            let backend = TestBackend::new(160, 40);
+            let mut terminal = Terminal::new(backend).expect("test terminal");
+            terminal
+                .draw(|frame| ragent_tui::layout::render(frame, &mut app))
+                .expect("prime caches");
+        }
+
+        render_group.bench_with_input(BenchmarkId::new("warm", count), &count, |b, _| {
+            b.iter(|| {
+                let backend = TestBackend::new(160, 40);
+                let mut terminal = Terminal::new(backend).expect("test terminal");
+                terminal
+                    .draw(|frame| ragent_tui::layout::render(frame, &mut app))
+                    .expect("draw");
+            });
+        });
+    }
+    render_group.finish();
+}
+
 // Suppress unused-import warnings for items that are part of the public API
 // surface exercised by the benchmark helpers.
 #[allow(dead_code)]
@@ -336,5 +398,6 @@ criterion_group!(
     bench_message_list,
     bench_active_agents,
     bench_teams_panel,
+    bench_idle_render,
 );
 criterion_main!(benches);

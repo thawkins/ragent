@@ -10,6 +10,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 
 use crate::storage::Storage;
 use ragent_config::Config;
@@ -18,6 +19,40 @@ use ragent_config::Config;
 const DB_PROVIDER_ID: &str = "gitlab";
 /// Database settings key for the JSON-serialised GitLab config.
 const DB_SETTING_KEY: &str = "gitlab_config";
+
+/// PERF-059: last resolved GitLab token, keyed by the storage handle identity.
+///
+/// The token is encrypted at rest and decrypted on read, so resolving it on
+/// every request costs a database round-trip plus a decryption. Caching it per
+/// storage handle means the read happens once per process (until a save or
+/// delete invalidates the entry). The key is the storage trait object's data
+/// address, which is stable for the lifetime of the concrete store.
+static TOKEN_CACHE: Mutex<Option<(usize, String)>> = Mutex::new(None);
+
+/// Cache key standing for "the token is present but the store identity is not
+/// tracked". Used when the caller passes a reference to a store we cannot
+/// derive a stable identity for; caching under a constant key still collapses
+/// the repeated decrypts within one flow.
+const UNKNOWN_STORE_KEY: usize = usize::MAX;
+
+/// Compute a stable identity key for a storage handle.
+///
+/// Uses only the data pointer of the trait object (never a dereference), so no
+/// `unsafe` is required and the address is valid to compare while the caller
+/// holds the same handle.
+fn storage_cache_key(storage: &Storage) -> usize {
+    let ptr: *const dyn crate::storage::StorageBackend = storage;
+    let key = ptr.cast::<()>() as usize;
+    if key == 0 { UNKNOWN_STORE_KEY } else { key }
+}
+
+/// Drop the cached token (called on save/delete so a changed credential is
+/// re-read immediately).
+fn invalidate_token_cache() {
+    *TOKEN_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
 
 /// Stored GitLab configuration (everything except the token).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +70,9 @@ pub struct GitLabConfig {
 /// Resolve the GitLab PAT.
 ///
 /// Priority: `GITLAB_TOKEN` env → `ragent.json` → encrypted database.
+/// The database lookup is cached per storage handle (PERF-059) so repeat calls
+/// do not re-decrypt the credential; [`save_token`] and [`delete_token`] clear
+/// the cache.
 #[must_use]
 pub fn load_token(storage: &Storage) -> Option<String> {
     // 1. Environment variable
@@ -44,7 +82,7 @@ pub fn load_token(storage: &Storage) -> Option<String> {
         return Some(token);
     }
 
-    // 2. ragent.json
+    // 2. ragent.json (already parsed/cached by `Config::load`)
     if let Ok(cfg) = Config::load()
         && let Some(ref t) = cfg.gitlab.token
         && !t.is_empty()
@@ -52,8 +90,26 @@ pub fn load_token(storage: &Storage) -> Option<String> {
         return Some(t.clone());
     }
 
-    // 3. Encrypted database
-    storage.get_provider_auth(DB_PROVIDER_ID).ok().flatten()
+    // 3. Encrypted database, cached by storage handle identity
+    let key = storage_cache_key(storage);
+    {
+        let cache = TOKEN_CACHE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((cached_key, token)) = cache.as_ref()
+            && *cached_key == key
+        {
+            return Some(token.clone());
+        }
+    }
+
+    let token = storage.get_provider_auth(DB_PROVIDER_ID).ok().flatten();
+    if let Some(ref value) = token {
+        *TOKEN_CACHE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((key, value.clone()));
+    }
+    token
 }
 
 /// Resolve the GitLab configuration (instance URL + username).
@@ -125,12 +181,16 @@ pub fn load_config(storage: &Storage) -> Option<GitLabConfig> {
 
 /// Save a GitLab PAT to the encrypted database.
 pub fn save_token(storage: &Storage, token: &str) -> Result<()> {
-    storage.set_provider_auth(DB_PROVIDER_ID, token)
+    storage.set_provider_auth(DB_PROVIDER_ID, token)?;
+    invalidate_token_cache();
+    Ok(())
 }
 
 /// Delete the stored GitLab token from the database.
 pub fn delete_token(storage: &Storage) -> Result<()> {
-    storage.delete_provider_auth(DB_PROVIDER_ID)
+    storage.delete_provider_auth(DB_PROVIDER_ID)?;
+    invalidate_token_cache();
+    Ok(())
 }
 
 /// Save the GitLab configuration (instance URL + username) to the database.
@@ -162,7 +222,7 @@ fn load_config_from_db(storage: &Storage) -> Option<GitLabConfig> {
 /// Calls `GET /api/v4/user` and returns the authenticated username on success.
 pub async fn validate_token(instance_url: &str, token: &str) -> Result<String> {
     let url = format!("{}/api/v4/user", instance_url.trim_end_matches('/'));
-    let client = reqwest::Client::new();
+    let client = crate::http_client::shared_client();
     let resp = client
         .get(&url)
         .header("PRIVATE-TOKEN", token)

@@ -168,3 +168,25 @@ fn test_collect_project_files_cache_invalidates_on_mtime_change() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+// ── PERF-051: async walk wrapper ─────────────────────────────────────────
+
+#[tokio::test]
+async fn test_collect_project_files_async_matches_sync_walk() {
+    let tmp = std::env::temp_dir().join("ragent_test_fuzzy_collect_async");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("src")).expect("mkdir");
+    std::fs::write(tmp.join("src/main.rs"), "fn main() {}").expect("write");
+    std::fs::write(tmp.join("Cargo.toml"), "[package]").expect("write");
+
+    let files = collect_project_files_async(&tmp, 100)
+        .await
+        .expect("blocking walk joins");
+    assert!(files.iter().any(|p| p == Path::new("src/main.rs")));
+    assert!(files.iter().any(|p| p == Path::new("Cargo.toml")));
+    // Shares the same process-wide cache as the sync entry point.
+    let sync_files = collect_project_files(&tmp, 100);
+    assert_eq!(files, sync_files);
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

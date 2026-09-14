@@ -195,6 +195,130 @@ pub fn estimate_chat_request_tokens(request: &ChatRequest) -> usize {
     estimate_request_tokens(request.system.as_deref(), &request.messages, &request.tools)
 }
 
+/// PERF-036: an incrementally-maintained request-token tally.
+///
+/// The pre-send compaction check runs once per agent-loop step, but the
+/// provider-reported input-token figure is unavailable on the first step of a
+/// turn, so the local estimate re-sums the entire history plus every tool
+/// definition on every step — O(history) per step and O(history^2) over a
+/// session. This tracker memoises the estimated cost of each provider-facing
+/// message by its position and folds in the system prompt and tool definitions,
+/// so a step that appends one message recomputes only that message.
+///
+/// Correctness: the estimate returned always equals
+/// [`estimate_request_tokens`] for the same inputs (see the unit test that
+/// drives the tracker through append / in-place-edit / shrink sequences).
+pub struct RequestTokenTracker {
+    /// `(estimated_cost, content_byte_len)` per message, in list order. The
+    /// byte length is a cheap change detector: a message whose serialised byte
+    /// length is unchanged keeps its previous cost.
+    per_message: Vec<(usize, usize)>,
+    /// Running total of the per-message costs.
+    message_total: usize,
+    /// Cached tool-definition token cost.
+    tool_tokens: usize,
+    /// `(tool count, caller byte hint)` the cached `tool_tokens` was built from.
+    tool_key: Option<(usize, Option<u64>)>,
+}
+
+impl Default for RequestTokenTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RequestTokenTracker {
+    /// Create an empty tracker.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            per_message: Vec::new(),
+            message_total: 0,
+            tool_tokens: 0,
+            tool_key: None,
+        }
+    }
+
+    /// Reset the per-message memo (used when compaction replaces the list).
+    pub fn reset(&mut self) {
+        self.per_message.clear();
+        self.message_total = 0;
+    }
+
+    /// Estimate the request token load, recomputing only changed messages.
+    ///
+    /// `tool_bytes_hint` is the caller's cached tool-definition byte size
+    /// (P-7 / PERF-014, tied to the tool-registry version); when the tool count
+    /// and hint are unchanged the tool term is reused instead of re-serialising
+    /// every schema.
+    pub fn estimate(
+        &mut self,
+        system: Option<&str>,
+        messages: &[ChatMessage],
+        tools: &[ToolDefinition],
+        tool_bytes_hint: Option<u64>,
+    ) -> usize {
+        // A shorter list means compaction replaced the history; drop the memo.
+        if messages.len() < self.per_message.len() {
+            self.reset();
+        }
+        for (i, msg) in messages.iter().enumerate() {
+            let byte_len = message_content_bytes(msg);
+            match self.per_message.get_mut(i) {
+                Some(entry) => {
+                    if entry.1 == byte_len {
+                        continue;
+                    }
+                    self.message_total -= entry.0;
+                    let cost = estimate_message_tokens(msg);
+                    *entry = (cost, byte_len);
+                    self.message_total += cost;
+                }
+                None => {
+                    let cost = estimate_message_tokens(msg);
+                    self.per_message.push((cost, byte_len));
+                    self.message_total += cost;
+                }
+            }
+        }
+
+        let tool_key = (tools.len(), tool_bytes_hint);
+        if self.tool_key != Some(tool_key) {
+            self.tool_tokens = estimate_tool_tokens(tools);
+            self.tool_key = Some(tool_key);
+        }
+
+        let system_tokens = system.map_or(0, estimate_text_tokens);
+        system_tokens + self.tool_tokens + self.message_total
+    }
+}
+
+/// The serialised byte length of a message's role + content, matching the
+/// accounting in [`estimate_message_tokens`]. Used as a cheap change detector.
+fn message_content_bytes(message: &ChatMessage) -> usize {
+    let mut bytes = message.role.len();
+    match &message.content {
+        ChatContent::Text(text) => bytes += text.len(),
+        ChatContent::Parts(parts) => {
+            for part in parts {
+                match part {
+                    ContentPart::Text { text } => bytes += text.len(),
+                    ContentPart::ToolUse { id, name, input } => {
+                        bytes += id.len() + name.len() + json_serialized_len(input);
+                    }
+                    ContentPart::ToolResult {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => bytes += tool_use_id.len() + content.len(),
+                    ContentPart::ImageUrl { url } => bytes += url.len(),
+                }
+            }
+        }
+    }
+    bytes
+}
+
 /// Convert a raw byte count into a token estimate using [`CHARS_PER_TOKEN`].
 fn estimate_text_tokens_from_bytes(bytes: usize) -> usize {
     if bytes == 0 {

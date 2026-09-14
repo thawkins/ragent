@@ -21,6 +21,13 @@ use ragent_llm::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
 use ragent_llm::provider::ProviderRegistry;
 use regex::Regex;
 use std::sync::Arc;
+use std::sync::LazyLock;
+
+/// Matches an optional triple-backtick code fence (with an optional `json`
+/// language tag) around the LLM's JSON sub-question array. Hoisted to a
+/// process-wide static (PERF-066) — compiled once, not per plan.
+static CODE_FENCE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"```(?:json)?\s*([\s\S]*?)```").expect("valid code-fence regex"));
 
 /// Abstraction over topic planners.
 #[async_trait]
@@ -282,8 +289,7 @@ impl Planner for LlmPlanner {
 /// amount of surrounding markdown fencing.
 fn parse_llm_questions(text: &str, topic: &str) -> Option<Vec<LlmSubQuestion>> {
     let text = text.trim();
-    let code_fence = Regex::new(r"```(?:json)?\s*([\s\S]*?)```").ok()?;
-    let inner = code_fence
+    let inner = CODE_FENCE_RE
         .captures(text)
         .and_then(|c| c.get(1).map(|m| m.as_str()))
         .unwrap_or(text);

@@ -50,7 +50,12 @@ fn read_cache() -> &'static Mutex<LruCache<CacheKey, Arc<String>>> {
 }
 
 /// Read a file, using the LRU cache when the mtime has not changed.
-async fn cached_read(path: &Path) -> Result<Arc<String>> {
+///
+/// Returns the content together with the mtime observed by the async metadata
+/// call, so callers no longer need a second blocking `std::fs::metadata`
+/// (PERF-053). `SystemTime::UNIX_EPOCH` is returned when the mtime could not be
+/// read.
+async fn cached_read(path: &Path) -> Result<(Arc<String>, SystemTime)> {
     let mtime = tokio::fs::metadata(path)
         .await
         .ok()
@@ -68,7 +73,7 @@ async fn cached_read(path: &Path) -> Result<Arc<String>> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(content) = cache.get(&key) {
-            return Ok(Arc::clone(content));
+            return Ok((Arc::clone(content), mtime));
         }
     }
 
@@ -83,7 +88,7 @@ async fn cached_read(path: &Path) -> Result<Arc<String>> {
     // M-019: bypass caching for files above the per-file threshold so a single
     // huge file cannot dominate the cache.
     if raw.len() > CACHE_MAX_FILE_BYTES {
-        return Ok(Arc::new(raw));
+        return Ok((Arc::new(raw), mtime));
     }
 
     let arc = Arc::new(raw);
@@ -105,7 +110,7 @@ async fn cached_read(path: &Path) -> Result<Arc<String>> {
             }
         }
     }
-    Ok(arc)
+    Ok((arc, mtime))
 }
 
 /// Lines threshold above which we return a summary instead of the full file.
@@ -205,10 +210,12 @@ impl Tool for ReadTool {
             );
         }
 
-        let content = cached_read(&path).await?;
+        let (content, mtime) = cached_read(&path).await?;
 
         // Record read timestamp for stale-write detection by edit tools.
-        record_read_timestamp(&path, ctx);
+        // PERF-053: reuse the mtime already fetched by `cached_read` instead of
+        // a second blocking `std::fs::metadata`.
+        record_read_timestamp(&path, mtime, ctx);
 
         let start_line = input["start_line"].as_u64().map(|n| n as usize);
         let mut end_line = input["end_line"].as_u64().map(|n| n as usize);
@@ -355,10 +362,10 @@ impl Tool for ReadTool {
 /// Record the file's last-modified time (mtime in milliseconds since the UNIX
 /// epoch) in the session read-timestamp map. This is used by edit tools to
 /// reject edits when the file has been modified since it was read.
-fn record_read_timestamp(path: &Path, ctx: &ToolContext) {
-    if let Ok(meta) = std::fs::metadata(path)
-        && let Ok(mtime) = meta.modified()
-    {
+fn record_read_timestamp(path: &Path, mtime: SystemTime, ctx: &ToolContext) {
+    // `SystemTime::UNIX_EPOCH` is the sentinel for "mtime unavailable"; skip
+    // recording so the stale-file guard is not armed with a bogus timestamp.
+    if mtime != SystemTime::UNIX_EPOCH {
         let millis = mtime
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as u64);

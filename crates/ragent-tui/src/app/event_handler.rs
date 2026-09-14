@@ -2111,7 +2111,6 @@ impl App {
             scroll_offset: 0,
             max_scroll: 0,
             line_cache: OutputViewLineCache {
-                lines: Vec::new(),
                 wrapped_lines: Vec::new(),
                 content_lines: Vec::new(),
                 wrapped_count: 0,
@@ -2193,7 +2192,6 @@ impl App {
             scroll_offset: 0,
             max_scroll: 0,
             line_cache: crate::app::OutputViewLineCache {
-                lines: Vec::new(),
                 wrapped_lines: Vec::new(),
                 content_lines: Vec::new(),
                 wrapped_count: 0,
@@ -2457,7 +2455,7 @@ impl App {
         // line, replacing it in place; otherwise we insert a new message.
         let header_line = format!("{HEADER} — `{}`", name);
 
-        for msg in self.messages.iter_mut() {
+        for (i, msg) in self.messages.iter_mut().enumerate() {
             if msg.role != Role::Assistant {
                 continue;
             }
@@ -2471,6 +2469,7 @@ impl App {
             {
                 *text = rendered;
                 msg.touch();
+                self.mark_message_dirty(i);
                 return;
             }
         }
@@ -2506,6 +2505,9 @@ impl App {
                     });
                 }
                 last.touch();
+                // PERF-043: only this (last) group's cache is stale.
+                let idx = self.messages.len() - 1;
+                self.mark_message_dirty(idx);
                 return;
             }
         }
@@ -2535,6 +2537,8 @@ impl App {
                 });
             }
             last.touch();
+            let idx = self.messages.len() - 1;
+            self.mark_message_dirty(idx);
             return;
         }
         if let Some(ref sid) = self.session_id {
@@ -2570,6 +2574,8 @@ impl App {
                 }),
             });
             last.touch();
+            let idx = self.messages.len() - 1;
+            self.mark_message_dirty(idx);
             return;
         }
         if let Some(ref sid) = self.session_id {
@@ -2604,34 +2610,10 @@ impl App {
     ) {
         use ragent_agent::message::ToolCallStatus;
 
-        for msg in self.messages.iter_mut().rev() {
-            for part in msg.parts.iter_mut() {
-                if let MessagePart::ToolCall {
-                    call_id: cid,
-                    state,
-                    ..
-                } = part
-                    && cid == call_id
-                {
-                    state.status = if success {
-                        ToolCallStatus::Completed
-                    } else {
-                        ToolCallStatus::Error
-                    };
-                    if let Some(err) = error {
-                        state.error = Some(err.to_string());
-                    }
-                    state.duration_ms = Some(duration_ms);
-                    msg.touch();
-                    return;
-                }
-            }
-        }
-    }
-
-    pub(crate) fn update_tool_call_input(&mut self, call_id: &str, args_json: &str) -> bool {
-        if let Ok(input) = serde_json::from_str::<serde_json::Value>(args_json) {
-            for msg in self.messages.iter_mut().rev() {
+        for idx in (0..self.messages.len()).rev() {
+            let found = {
+                let msg = &mut self.messages[idx];
+                let mut found = false;
                 for part in msg.parts.iter_mut() {
                     if let MessagePart::ToolCall {
                         call_id: cid,
@@ -2640,17 +2622,67 @@ impl App {
                     } = part
                         && cid == call_id
                     {
-                        // Never overwrite an input that was already populated
-                        // (e.g. by the per-call ToolCallArgs event). A later
-                        // ToolCallBatch fallback carrying the same args would
-                        // otherwise clobber it — and batch entries built by
-                        // older code paths may carry a placeholder `{}`.
-                        if state.input.is_null() {
-                            state.input = input;
-                            msg.touch();
+                        state.status = if success {
+                            ToolCallStatus::Completed
+                        } else {
+                            ToolCallStatus::Error
+                        };
+                        if let Some(err) = error {
+                            state.error = Some(err.to_string());
                         }
-                        return true;
+                        state.duration_ms = Some(duration_ms);
+                        found = true;
+                        break;
                     }
+                }
+                found
+            };
+            if found {
+                self.messages[idx].touch();
+                self.mark_message_dirty(idx);
+                return;
+            }
+        }
+    }
+
+    pub(crate) fn update_tool_call_input(&mut self, call_id: &str, args_json: &str) -> bool {
+        if let Ok(input) = serde_json::from_str::<serde_json::Value>(args_json) {
+            for idx in (0..self.messages.len()).rev() {
+                // `applied` tracks whether the input was actually written
+                // (the part may already carry populated args).
+                let (found, applied) = {
+                    let msg = &mut self.messages[idx];
+                    let mut found = false;
+                    let mut applied = false;
+                    for part in msg.parts.iter_mut() {
+                        if let MessagePart::ToolCall {
+                            call_id: cid,
+                            state,
+                            ..
+                        } = part
+                            && cid == call_id
+                        {
+                            // Never overwrite an input that was already populated
+                            // (e.g. by the per-call ToolCallArgs event). A later
+                            // ToolCallBatch fallback carrying the same args would
+                            // otherwise clobber it — and batch entries built by
+                            // older code paths may carry a placeholder `{}`.
+                            if state.input.is_null() {
+                                state.input = input.clone();
+                                applied = true;
+                            }
+                            found = true;
+                            break;
+                        }
+                    }
+                    (found, applied)
+                };
+                if found {
+                    if applied {
+                        self.messages[idx].touch();
+                        self.mark_message_dirty(idx);
+                    }
+                    return true;
                 }
             }
         }
@@ -2686,32 +2718,42 @@ impl App {
         let call_ids: Vec<String> = self.pending_tool_args.keys().cloned().collect();
         for call_id in call_ids {
             let mut applied = false;
-            for msg in self.messages.iter_mut().rev() {
-                for part in msg.parts.iter_mut() {
-                    if let MessagePart::ToolCall {
-                        call_id: cid,
-                        state,
-                        ..
-                    } = part
-                        && cid == &call_id
-                    {
-                        if state.input.is_null() {
-                            let Some(args_json) = self.pending_tool_args.get(&call_id).cloned()
-                            else {
-                                break;
-                            };
-                            if let Ok(input) = serde_json::from_str::<serde_json::Value>(&args_json)
-                            {
-                                state.input = input;
-                                msg.touch();
+            for idx in (0..self.messages.len()).rev() {
+                let did_apply = {
+                    let msg = &mut self.messages[idx];
+                    let mut did_apply = false;
+                    for part in msg.parts.iter_mut() {
+                        if let MessagePart::ToolCall {
+                            call_id: cid,
+                            state,
+                            ..
+                        } = part
+                            && cid == &call_id
+                        {
+                            if state.input.is_null() {
+                                let Some(args_json) = self.pending_tool_args.get(&call_id).cloned()
+                                else {
+                                    break;
+                                };
+                                if let Ok(input) =
+                                    serde_json::from_str::<serde_json::Value>(&args_json)
+                                {
+                                    state.input = input;
+                                    did_apply = true;
+                                }
                             }
+                            applied = true;
+                            break;
                         }
-                        self.pending_tool_args.remove(&call_id);
-                        applied = true;
-                        break;
                     }
+                    did_apply
+                };
+                if did_apply {
+                    self.messages[idx].touch();
+                    self.mark_message_dirty(idx);
                 }
                 if applied {
+                    self.pending_tool_args.remove(&call_id);
                     break;
                 }
             }
@@ -2733,19 +2775,29 @@ impl App {
                 }
             }
         }
-        for msg in self.messages.iter_mut().rev() {
-            for part in msg.parts.iter_mut() {
-                if let MessagePart::ToolCall {
-                    call_id: cid,
-                    state,
-                    ..
-                } = part
-                    && cid == call_id
-                {
-                    state.output = Some(value);
-                    msg.touch();
-                    return;
+        for idx in (0..self.messages.len()).rev() {
+            let found = {
+                let msg = &mut self.messages[idx];
+                let mut found = false;
+                for part in msg.parts.iter_mut() {
+                    if let MessagePart::ToolCall {
+                        call_id: cid,
+                        state,
+                        ..
+                    } = part
+                        && cid == call_id
+                    {
+                        state.output = Some(value.clone());
+                        found = true;
+                        break;
+                    }
                 }
+                found
+            };
+            if found {
+                self.messages[idx].touch();
+                self.mark_message_dirty(idx);
+                return;
             }
         }
     }

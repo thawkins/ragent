@@ -12,41 +12,59 @@
 //! matches the research directory naming (`research-<name>-<ts>-<rand>`)
 //! with a `-web` suffix.
 //!
-//! Writing is best-effort: every record is appended and flushed immediately,
-//! so a killed run never silently loses its log entries; failures are
-//! reported via `tracing::warn` by the caller and never abort a gather.
+//! PERF-049: the log file is opened once, on the first append, and held
+//! behind a 64 KiB `BufWriter`, so a sweep no longer performs an `open` plus
+//! two `write_all` plus a `flush` syscall per record. The writer is flushed
+//! when a `gather_summary` marker is written and again when the `GatherLog`
+//! is dropped (`BufWriter`'s drop flushes best-effort), so a completed run is
+//! durable. Records written between the last summary and a hard kill
+//! (SIGKILL) may still be lost from the buffer; failures are reported via
+//! `tracing::warn` by the caller and never abort a gather.
+//!
+//! PERF-050: per-URL records are serialised from a borrowed
+//! `#[derive(Serialize)]` struct rather than a `serde_json::Value` tree, so a
+//! record no longer allocates a `Value` map or clones every detail
+//! key/value.
 
-use std::fs;
-use std::io::Write;
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::Utc;
-use serde_json::json;
+use serde::{Serialize, Serializer, ser::SerializeMap};
 use uuid::Uuid;
+
+/// Write buffer size for the log file (PERF-049).
+const WRITE_BUF_BYTES: usize = 64 * 1024;
 
 /// JSONL logger for one web-gathering pass.
 #[derive(Clone)]
 ///
-/// Owns the log file path; construct via [`GatherLog::new`], then append
-/// records with [`GatherLog::log_url`] and marker events with
-/// [`GatherLog::log_event`]. Thread-safe through callers' external
-/// synchronisation (each record opens, appends and flushes atomically).
+/// Owns the log file path and a shared buffered writer; construct via
+/// [`GatherLog::new`], then append records with [`GatherLog::log_url`] and
+/// marker events with [`GatherLog::log_event`]. `GatherLog` is `Clone`; clones
+/// share the same writer, so they all append to the one file. The log file is
+/// created lazily by the first append.
 pub struct GatherLog {
     /// Full path of the JSONL log file.
     path: PathBuf,
+    /// Shared buffered writer, opened on the first append (PERF-049).
+    writer: Arc<Mutex<Option<BufWriter<File>>>>,
 }
 
 impl GatherLog {
-    /// Open (creating if needed) a new gather log inside `log_dir`.
+    /// Prepare a new gather log inside `log_dir`.
     ///
     /// `research_name` is sanitised so the file name is filesystem-safe and
-    /// truncated to 64 characters. A short UUID suffix keeps repeated
-    /// gather passes within one research run from clobbering each other.
+    /// truncated to 64 characters. A short UUID suffix keeps repeated gather
+    /// passes within one research run from clobbering each other. The log file
+    /// itself is created by the first append and its handle retained behind a
+    /// buffered writer, so per-record appends are in-memory writes (PERF-049).
     ///
     /// # Errors
     ///
-    /// Returns an error when the directory cannot be created or the log file
-    /// cannot be opened for appending.
+    /// Returns an error when the log directory cannot be created.
     pub fn new(log_dir: &Path, research_name: &str) -> anyhow::Result<Self> {
         fs::create_dir_all(log_dir)?;
         let timestamp = Utc::now().format("%Y%m%d-%H%M%S").to_string();
@@ -56,7 +74,10 @@ impl GatherLog {
             sanitize(research_name)
         );
         let path = log_dir.join(name);
-        Ok(Self { path })
+        Ok(Self {
+            path,
+            writer: Arc::new(Mutex::new(None)),
+        })
     }
 
     /// Path of the underlying log file.
@@ -64,14 +85,39 @@ impl GatherLog {
         &self.path
     }
 
+    /// Flush buffered records to disk.
+    ///
+    /// A no-op when nothing has been written yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the underlying write fails.
+    pub fn flush(&self) -> anyhow::Result<()> {
+        let mut guard = self
+            .writer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(writer) = guard.as_mut() {
+            writer.flush()?;
+        }
+        Ok(())
+    }
+
     /// Append a raw JSON event (used for `gather_start`,
     /// `queries_decomposed`, and `gather_summary` markers).
+    ///
+    /// A `gather_summary` marker flushes the writer so a completed sweep is
+    /// durable without a per-record flush.
     ///
     /// # Errors
     ///
     /// Returns an error when serialisation or the append/flush fails.
     pub fn log_event(&self, event: &serde_json::Value) -> anyhow::Result<()> {
-        self.append_line(&serde_json::to_string(event)?)
+        self.append_line(&serde_json::to_string(event)?)?;
+        if event.get("event").and_then(serde_json::Value::as_str) == Some("gather_summary") {
+            self.flush()?;
+        }
+        Ok(())
     }
 
     /// Append one per-URL outcome record.
@@ -90,7 +136,7 @@ impl GatherLog {
     ///
     /// # Errors
     ///
-    /// Returns an error when serialisation or the append/flush fails.
+    /// Returns an error when serialisation or the append fails.
     #[allow(clippy::too_many_arguments)]
     pub fn log_url(
         &self,
@@ -103,35 +149,89 @@ impl GatherLog {
         reason: Option<&str>,
         detail: Option<&serde_json::Value>,
     ) -> anyhow::Result<()> {
-        let mut record = json!({
-            "timestamp": Utc::now().to_rfc3339(),
-            "url": url,
-            "query": query,
-            "status": status,
-            "title": title,
-            "search_tool": search_tool,
-            "search_engine": search_engine,
-            "reason": reason,
-        });
-        if let (Some(detail), Some(obj)) = (detail, record.as_object_mut())
-            && let Some(extra) = detail.as_object()
-        {
-            for (k, v) in extra {
-                obj.insert(k.clone(), v.clone());
-            }
-        }
+        let record = UrlRecord {
+            timestamp: Rfc3339Now,
+            url,
+            query,
+            status,
+            title,
+            search_tool,
+            search_engine,
+            reason,
+            detail: FlattenDetail(detail.and_then(serde_json::Value::as_object)),
+        };
         self.append_line(&serde_json::to_string(&record)?)
     }
 
+    /// Append one already-serialised JSON line.
     fn append_line(&self, line: &str) -> anyhow::Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)?;
-        file.write_all(line.as_bytes())?;
-        file.write_all(b"\n")?;
-        file.flush()?;
+        let mut guard = self.open_writer()?;
+        let writer = guard
+            .as_mut()
+            .expect("open_writer always leaves a writer in place");
+        writer.write_all(line.as_bytes())?;
+        writer.write_all(b"\n")?;
         Ok(())
+    }
+
+    /// Lock the writer, opening the log file on first use.
+    fn open_writer(&self) -> anyhow::Result<MutexGuard<'_, Option<BufWriter<File>>>> {
+        let mut guard = self
+            .writer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if guard.is_none() {
+            if let Some(parent) = self.path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                fs::create_dir_all(parent)?;
+            }
+            let file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)?;
+            *guard = Some(BufWriter::with_capacity(WRITE_BUF_BYTES, file));
+        }
+        Ok(guard)
+    }
+}
+
+/// Borrowed-fields record for one per-URL outcome (PERF-050).
+#[derive(Serialize)]
+struct UrlRecord<'a> {
+    timestamp: Rfc3339Now,
+    url: &'a str,
+    query: &'a str,
+    status: &'a str,
+    title: &'a str,
+    search_tool: &'a str,
+    search_engine: &'a str,
+    reason: Option<&'a str>,
+    #[serde(flatten)]
+    detail: FlattenDetail<'a>,
+}
+
+/// Serialises `detail` entries as top-level record fields.
+struct FlattenDetail<'a>(Option<&'a serde_json::Map<String, serde_json::Value>>);
+
+impl Serialize for FlattenDetail<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
+        if let Some(detail) = self.0 {
+            for (key, value) in detail {
+                map.serialize_entry(key, value)?;
+            }
+        }
+        map.end()
+    }
+}
+
+/// Serialises the current UTC instant as an RFC 3339 string.
+struct Rfc3339Now;
+
+impl Serialize for Rfc3339Now {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&Utc::now().to_rfc3339())
     }
 }
 
@@ -158,7 +258,7 @@ mod tests {
     fn gather_log_writes_considered_and_rejected_records() {
         let dir = tempfile::tempdir().unwrap();
         let log = GatherLog::new(dir.path(), "my research").unwrap();
-        log.log_event(&json!({"event": "gather_start", "topic": "t"}))
+        log.log_event(&serde_json::json!({"event": "gather_start", "topic": "t"}))
             .unwrap();
         log.log_url(
             "https://a.example",
@@ -179,9 +279,10 @@ mod tests {
             "mf_search",
             "openalex",
             Some("relevance too low (Low)"),
-            Some(&json!({"relevance": "Low"})),
+            Some(&serde_json::json!({"relevance": "Low"})),
         )
         .unwrap();
+        log.flush().unwrap();
 
         let contents = fs::read_to_string(log.path()).unwrap();
         let lines: Vec<&str> = contents.lines().collect();
@@ -192,6 +293,7 @@ mod tests {
         assert_eq!(considered["status"], "considered");
         assert_eq!(considered["url"], "https://a.example");
         assert!(considered["reason"].is_null());
+        assert!(considered["timestamp"].is_string());
         let rejected: serde_json::Value = serde_json::from_str(lines[2]).unwrap();
         assert_eq!(rejected["status"], "rejected");
         assert_eq!(rejected["reason"], "relevance too low (Low)");
@@ -204,6 +306,34 @@ mod tests {
             .to_string();
         assert!(file_name.starts_with("research-my-research-"));
         assert!(file_name.ends_with("-web.jsonl"));
+    }
+
+    #[test]
+    fn new_does_not_create_the_file_until_the_first_append() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = GatherLog::new(dir.path(), "lazy").unwrap();
+        assert!(!log.path().exists());
+        log.flush().unwrap();
+        assert!(!log.path().exists());
+
+        log.log_url("u", "q", "considered", "t", "tool", "engine", None, None)
+            .unwrap();
+        assert!(log.path().exists());
+    }
+
+    #[test]
+    fn gather_summary_flushes_without_explicit_flush() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = GatherLog::new(dir.path(), "flush-test").unwrap();
+        log.log_url("u", "q", "considered", "t", "tool", "engine", None, None)
+            .unwrap();
+        log.log_event(&serde_json::json!({"event": "gather_summary", "captured": 1}))
+            .unwrap();
+
+        // No explicit flush / drop: the summary marker must have flushed both
+        // the preceding record and itself.
+        let contents = fs::read_to_string(log.path()).unwrap();
+        assert_eq!(contents.lines().count(), 2);
     }
 
     #[test]

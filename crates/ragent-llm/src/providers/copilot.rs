@@ -480,7 +480,9 @@ impl LlmClient for CopilotClient {
         let stream = response.bytes_stream();
 
         let event_stream = async_stream::stream! {
-            let mut buffer = String::new();
+            // PERF-063: pre-size the SSE accumulation buffer so a long stream does
+            // not repeatedly realloc/copy as it grows.
+            let mut buffer = String::with_capacity(8 * 1024);
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
 
             if let Some(ev) = rate_limit_event {
@@ -853,7 +855,7 @@ pub async fn start_copilot_device_flow() -> Result<DeviceFlowStart> {
 /// - Network request fails
 /// - Response parsing fails
 pub async fn poll_copilot_device_flow(device_code: &str) -> Result<Option<String>> {
-    let http = reqwest::Client::new();
+    let http = crate::provider::http_client::create_http_client();
     let resp = http
         .post("https://github.com/login/oauth/access_token")
         .header("Accept", "application/json")

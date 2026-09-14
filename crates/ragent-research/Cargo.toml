@@ -28,6 +28,8 @@ ragent-tools-extended = { path = "../ragent-tools-extended" }
 reqwest = { workspace = true }
 tokio = { workspace = true }
 regex = { workspace = true }
+# PERF-080: FxHash for short non-adversarial map keys (query, path, term).
+rustc-hash = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
@@ -49,6 +51,14 @@ harness = false
 
 [[bench]]
 name = "gatherer_bench"
+harness = false
+
+[[bench]]
+name = "gather_log_bench"
+harness = false
+
+[[bench]]
+name = "relevance_bench"
 harness = false
 
 [lints]

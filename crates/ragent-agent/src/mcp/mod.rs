@@ -255,6 +255,12 @@ pub struct McpClient {
     /// and all `HttpMcpClient` instances share the same connection pool and
     /// TLS session cache (FR-007).
     http_client: reqwest::Client,
+    /// PERF-076: `tool_name -> server_id` lookup index derived from `servers`,
+    /// rebuilt whenever the server list or a server's tool manifest changes.
+    /// Turns `call_tool_by_name`'s nested `servers x tools` scan into an O(1)
+    /// map lookup.  First connected server advertising a name wins, matching
+    /// the previous linear-scan semantics.
+    tool_index: HashMap<String, String>,
 }
 
 impl Drop for McpClient {
@@ -301,6 +307,25 @@ impl McpClient {
             servers: Vec::new(),
             connections: Arc::new(RwLock::new(HashMap::new())),
             http_client: reqwest::Client::new(),
+            tool_index: HashMap::new(),
+        }
+    }
+
+    /// PERF-076: rebuild the `tool_name -> server_id` index from the current
+    /// server list.  Called after any mutation of `servers` or a server's tool
+    /// manifest.  The first connected server advertising a name wins, so a
+    /// duplicate tool name does not override the earlier server.
+    fn rebuild_tool_index(&mut self) {
+        self.tool_index.clear();
+        for server in &self.servers {
+            if server.status != McpStatus::Connected {
+                continue;
+            }
+            for tool in &server.tools {
+                self.tool_index
+                    .entry(tool.name.clone())
+                    .or_insert_with(|| server.id.clone());
+            }
         }
     }
 
@@ -342,6 +367,7 @@ impl McpClient {
                 tools: Vec::new(),
             };
             self.servers.push(server);
+            self.rebuild_tool_index();
             tracing::info!(server_id = id, "MCP server registered as disabled");
             return Ok(());
         }
@@ -365,6 +391,7 @@ impl McpClient {
                     tools: tool_defs,
                 };
                 self.servers.push(server);
+                self.rebuild_tool_index();
 
                 let mut conns = self.connections.write().await;
                 conns.insert(id.to_string(), connection);
@@ -386,6 +413,7 @@ impl McpClient {
                     tools: Vec::new(),
                 };
                 self.servers.push(server);
+                self.rebuild_tool_index();
                 tracing::error!(
                     server_id = id,
                     error = %error_msg,
@@ -600,6 +628,10 @@ impl McpClient {
             }
         }
 
+        // PERF-076: the manifests changed — rebuild the lookup index. Drop the
+        // connections read guard first so `&mut self` is free to borrow.
+        drop(conns);
+        self.rebuild_tool_index();
         Ok(())
     }
 
@@ -650,6 +682,8 @@ impl McpClient {
         if let Some(server) = self.servers.iter_mut().find(|s| s.id == server_id) {
             server.tools = tool_defs.clone();
         }
+        // PERF-076: the manifest changed — rebuild the lookup index.
+        self.rebuild_tool_index();
 
         tracing::info!(
             server_id,
@@ -769,18 +803,13 @@ impl McpClient {
     /// # }
     /// ```
     pub async fn call_tool_by_name(&self, tool_name: &str, input: Value) -> anyhow::Result<Value> {
-        let server_id = self
-            .servers
-            .iter()
-            .find(|s| {
-                s.status == McpStatus::Connected && s.tools.iter().any(|t| t.name == tool_name)
-            })
-            .map(|s| s.id.clone())
-            .ok_or_else(|| {
-                anyhow::anyhow!("No connected MCP server provides tool '{tool_name}'")
-            })?;
+        // PERF-076: O(1) lookup in the maintained `tool_name -> server_id`
+        // index instead of a nested `servers x tools` scan.
+        let Some(server_id) = self.tool_index.get(tool_name) else {
+            anyhow::bail!("No connected MCP server provides tool '{tool_name}'");
+        };
 
-        self.call_tool(&server_id, tool_name, input).await
+        self.call_tool(server_id, tool_name, input).await
     }
 
     /// Format a [`CallToolResult`] into a JSON [`Value`].
@@ -864,6 +893,8 @@ impl McpClient {
                 server.status = McpStatus::Disabled;
                 server.tools.clear();
             }
+            // PERF-076: drop the disconnected server's tools from the index.
+            self.rebuild_tool_index();
 
             tracing::info!(server_id, "MCP server disconnected");
         }

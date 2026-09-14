@@ -641,6 +641,7 @@ async fn async_main() -> Result<()> {
             std::collections::HashMap::new(),
         )),
         activity_log: std::sync::OnceLock::new(),
+        activity_log_tx: tokio::sync::Mutex::new(None),
         telemetry,
         skill_registry_cache: parking_lot::Mutex::new(None),
         active_loops: tokio::sync::RwLock::new(std::collections::HashMap::new()),
@@ -761,6 +762,11 @@ async fn async_main() -> Result<()> {
             match ragent_agent::storage::ActivityLog::open(&alog_path) {
                 Ok(log) => {
                     sp.set_activity_log(Arc::new(log));
+                    // PERF-040: start the single background writer that batches
+                    // all activity-log appends from every session.
+                    let rt = tokio::runtime::Handle::current();
+                    let sp_writer = Arc::clone(&sp);
+                    rt.spawn(async move { sp_writer.start_activity_writer().await });
                     tracing::info!(
                         path = %alog_path.display(),
                         "Activity log store initialized"

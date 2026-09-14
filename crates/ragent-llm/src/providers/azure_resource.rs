@@ -415,7 +415,9 @@ impl LlmClient for AzureAnthropicClient {
         let stream = response.bytes_stream();
 
         let event_stream = async_stream::stream! {
-            let mut buffer = String::new();
+            // PERF-063: pre-size the SSE accumulation buffer so a long stream does
+            // not repeatedly realloc/copy as it grows.
+            let mut buffer = String::with_capacity(8 * 1024);
             let mut current_event_type = String::new();
             // F5: open tool_use blocks keyed by the SSE content-block index;
             // `.last()` on a HashMap attributed deltas to an arbitrary open

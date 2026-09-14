@@ -1826,6 +1826,12 @@ impl ResearchSession {
         if let Err(e) = lock.log_event(&record) {
             tracing::warn!(error = %e, event, "research: run log write failed");
         }
+        // PERF-049: per-record appends are buffered; flush run-log markers so
+        // post-mortem tooling sees a completed run without waiting for the
+        // buffer to fill or the process to exit.
+        if let Err(e) = lock.flush() {
+            tracing::warn!(error = %e, event, "research: run log flush failed");
+        }
     }
 
     /// Run a complete research session end-to-end. The flow is:
@@ -3492,11 +3498,11 @@ pub struct RunOutcome {
 /// 1-based References Index position of each web source in `sources`, so
 /// filename-style citations (`web-NN`) emitted by the concept-extraction LLM
 /// can be rewritten to `[#N]` markers that resolve against `RESEARCH.md`.
-fn build_web_index_map(sources: &[Source]) -> std::collections::HashMap<usize, usize> {
+fn build_web_index_map(sources: &[Source]) -> rustc_hash::FxHashMap<usize, usize> {
     static WEB_FILE_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let web_file_re =
         WEB_FILE_RE.get_or_init(|| regex::Regex::new(r"web-(\d+)\.md$").expect("valid regex"));
-    let mut map = std::collections::HashMap::new();
+    let mut map = rustc_hash::FxHashMap::default();
     for (i, src) in sources.iter().enumerate() {
         if let Source::Web { body_path, .. } = src {
             let path_str = body_path.to_string_lossy();
@@ -3770,7 +3776,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: body256("body"),
+                        body: Arc::from(body256("body")),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -3860,7 +3866,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: body256("b"),
+                    body: Arc::from(body256("b")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -3963,7 +3969,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: "Example".into(),
-                    body: body256("body"),
+                    body: Arc::from(body256("body")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -4327,7 +4333,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: "Fetched Page Title".into(),
-                    body: body256("body text"),
+                    body: Arc::from(body256("body text")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -4944,7 +4950,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: body256("web body"),
+                        body: Arc::from(body256("web body")),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -5111,7 +5117,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: body256("web body"),
+                        body: Arc::from(body256("web body")),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -5232,7 +5238,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: body256("web body"),
+                        body: Arc::from(body256("web body")),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -5351,7 +5357,7 @@ mod tests {
                         published_at: None,
                         url: url.to_string(),
                         title: "Extra Page".into(),
-                        body: body256("Extra page body."),
+                        body: Arc::from(body256("Extra page body.")),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -5902,7 +5908,9 @@ mod tests {
                     published_at: None,
                     url: _url.to_string(),
                     title: "Rust async runtime slow mirror".into(),
-                    body: "slow body with query terms Rust async runtime Tokio. ".repeat(10),
+                    body: Arc::from(
+                        "slow body with query terms Rust async runtime Tokio. ".repeat(10),
+                    ),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -6104,7 +6112,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: "t".into(),
-                    body: body256("b"),
+                    body: Arc::from(body256("b")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -6180,7 +6188,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: format!("Title for {url}"),
-                    body: body256("competitive analysis body"),
+                    body: Arc::from(body256("competitive analysis body")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -6346,7 +6354,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: format!("Title for {url}"),
-                    body: body256("competitive analysis body"),
+                    body: Arc::from(body256("competitive analysis body")),
                     content_type: None,
                     page_type: None,
                     language: None,

@@ -766,7 +766,7 @@ mod tests {
             Ok(WebFetchedPage {
                 url: url.to_string(),
                 title: format!("Title for {url}"),
-                body,
+                body: body.into(),
                 published_at: None,
                 content_type: None,
                 page_type: None,

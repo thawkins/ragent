@@ -8,6 +8,7 @@
 
 use crate::llm::ToolDefinition;
 use crate::session::loop_state::LoopSpec;
+use std::fmt::Write as _;
 
 /// Universal tool-calling guidance injected into every session's system prompt.
 ///
@@ -38,54 +39,63 @@ pub const TOOL_CALLING_GUIDANCE: &str = "\n## Tool Use — Critical Instructions
 /// only the success state and the active budget knobs.
 #[must_use]
 pub fn build_goal_loop_section(spec: &LoopSpec) -> String {
-    let mut section = String::new();
+    // PERF-039: build with `write!` into one buffer instead of `push_str(&format!(..))`
+    // for every field, which allocates a temporary `String` per line.
+    let mut section = String::with_capacity(512);
     section.push_str("\n## Goal Loop\n\n");
-    section.push_str(&format!(
+    let _ = write!(
+        section,
         "You are executing a **goal-driven loop** as the `{}` agent.\n\n\
          ### Success state\n\n\
          The loop ends successfully when this is true: {}\n\n",
         spec.agent, spec.goal
-    ));
+    );
     if let Some(cmd) = &spec.verify_cmd {
-        section.push_str(&format!(
+        let _ = write!(
+            section,
             "When you respond without tool calls, the verification command `{cmd}` \
              runs automatically. The loop completes only if it exits successfully; \
              a failing run appends its output as your next observation, so treat \
              it as the authoritative progress signal.\n\n"
-        ));
+        );
     }
     if spec.has_scope() {
-        section.push_str(&format!(
+        let _ = write!(
+            section,
             "### Scope boundaries\n\n\
              File operations must stay inside these patterns: {}\n\n",
             spec.scope.join(", ")
-        ));
+        );
     }
     if !spec.read_only.is_empty() {
-        section.push_str(&format!(
+        let _ = write!(
+            section,
             "### Read-only constraints\n\n\
              These patterns are read-only. Writes are denied and returned as \
              observations — never satisfy the goal by modifying them: {}\n\n",
             spec.read_only.join(", ")
-        ));
+        );
     }
     if spec.has_tool_set() {
-        section.push_str(&format!(
+        let _ = write!(
+            section,
             "### Tool set\n\n\
              Only these tools (plus mandatory safety tools) are available: {}\n\n",
             spec.tool_set.join(", ")
-        ));
+        );
     }
     if let Some(steps) = spec.max_steps {
-        section.push_str(&format!(
+        let _ = write!(
+            section,
             "### Budget\n\n\
              - Step budget: at most {steps} loop iterations.\n"
-        ));
+        );
     }
     if let Some(cost) = spec.cost_limit {
-        section.push_str(&format!(
-            "- Cost budget: at most {cost} accumulated tokens across the run.\n"
-        ));
+        let _ = writeln!(
+            section,
+            "- Cost budget: at most {cost} accumulated tokens across the run."
+        );
     }
     section.push_str(
         "Iterate plan-act-observe: act with a tool, read the observation, and \

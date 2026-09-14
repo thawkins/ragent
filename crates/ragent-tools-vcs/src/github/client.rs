@@ -96,7 +96,7 @@ impl GitHubClient {
             .context("No GitHub token found. Run /github login to authenticate.")?;
         Ok(Self {
             token,
-            client: reqwest::Client::new(),
+            client: crate::http_client::shared_client(),
             base_url: "https://api.github.com".to_string(),
         })
     }
@@ -106,7 +106,7 @@ impl GitHubClient {
     pub fn with_token(token: String) -> Self {
         Self {
             token,
-            client: reqwest::Client::new(),
+            client: crate::http_client::shared_client(),
             base_url: "https://api.github.com".to_string(),
         }
     }
@@ -118,7 +118,7 @@ impl GitHubClient {
     pub fn with_base_url(base_url: String, token: String) -> Self {
         Self {
             token,
-            client: reqwest::Client::new(),
+            client: crate::http_client::shared_client(),
             base_url: base_url.trim_end_matches('/').to_string(),
         }
     }

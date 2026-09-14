@@ -15,7 +15,8 @@
 use crate::polarity::source_body_text;
 use crate::source::Source;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+// PERF-080: FxHash for the short non-adversarial term keys.
+use rustc_hash::FxHashMap as HashMap;
 
 /// The keyword is matched case-insensitively against source bodies; the label is
 /// rendered in the report.
@@ -134,7 +135,7 @@ pub fn analyze_loci(sources: &[Source]) -> LocusSet {
         return LocusSet::empty();
     }
 
-    let mut hits: HashMap<&str, Vec<(usize, String)>> = HashMap::new();
+    let mut hits: HashMap<&str, Vec<(usize, String)>> = HashMap::default();
 
     for (idx, src) in sources.iter().enumerate() {
         let body = source_body_text(src);

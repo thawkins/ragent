@@ -252,8 +252,7 @@ pub fn build_corpus_critic(
     }
 
     // Isolated sources that only support one dimension.
-    let mut source_to_loci: std::collections::HashMap<usize, usize> =
-        std::collections::HashMap::new();
+    let mut source_to_loci: rustc_hash::FxHashMap<usize, usize> = rustc_hash::FxHashMap::default();
     for locus in &loci.loci {
         for idx in &locus.source_indices {
             *source_to_loci.entry(*idx).or_default() += 1;

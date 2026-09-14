@@ -1273,13 +1273,11 @@ impl EventBus {
             return;
         }
 
-        match self.sender.send(event.clone()) {
-            Ok(n) => {
-                // n = number of receivers that got the event
-                if n == 0 {
-                    self.warn_no_subscribers(&event);
-                }
-            }
+        match self.sender.send(event) {
+            // `broadcast::Sender::send` returns `Ok` only when at least one
+            // receiver accepted the event, so there is no `n == 0` case to
+            // handle here.
+            Ok(_) => {}
             Err(broadcast::error::SendError(ev)) => {
                 // Buffer overflow — some receivers are lagging. (SendError is
                 // also returned when a subscriber unsubscribes between the

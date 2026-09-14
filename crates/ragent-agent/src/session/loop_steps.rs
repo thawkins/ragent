@@ -705,7 +705,7 @@ impl SessionProcessor {
         model_ref: &crate::agent::ModelRef,
         _session_config: &ragent_config::Config,
         profiler: &Arc<crate::session::profiler::AgentLoopProfiler>,
-    ) -> Result<(Vec<ChatMessage>, u64, usize)> {
+    ) -> Result<(Arc<Vec<ChatMessage>>, u64, usize)> {
         let history = {
             let _scope = profiler.scope("history.load");
             // P-1: route `get_messages` through `storage_op` so the SQLite
@@ -746,8 +746,12 @@ impl SessionProcessor {
             .filter(|w| *w > 0)
             .unwrap_or(128_000);
 
+        // PERF-032/PERF-033: cache hits and stores are refcount operations on
+        // the shared `Arc<Vec<ChatMessage>>`; a pure append (the history grew
+        // and its cached prefix is unchanged) converts only the appended tail
+        // and appends it, instead of rebuilding the whole transcript.
         let history_version = history_version_of(&history);
-        let cached: Option<Vec<ChatMessage>> = {
+        let cached = {
             let session_state_lock = self
                 .session_manager
                 .as_ref()
@@ -755,21 +759,42 @@ impl SessionProcessor {
             let mut state_guard = session_state_lock
                 .lock()
                 .map_err(|_| anyhow::anyhow!("session_state cache lock poisoned"))?;
-            state_guard
-                .cached_chat_messages_for_version(history_version)
-                .map(|c| c.to_vec())
+            state_guard.cached_chat_messages_for_version(history_version)
         };
         let chat_messages = match cached {
             Some(messages) => messages,
             None => {
-                let built = history_to_chat_messages(&history).await;
+                // Try the append fast path before falling back to a full rebuild.
+                let append = {
+                    let session_state_lock = self
+                        .session_manager
+                        .as_ref()
+                        .session_state_cache(session_id);
+                    match session_state_lock.lock() {
+                        Ok(mut state_guard) => state_guard.take_cached_for_append(&history),
+                        Err(_) => None,
+                    }
+                };
+                let built = match append {
+                    Some((base, base_len)) => {
+                        // `take_cached_for_append` moved the Arc out of the
+                        // cache, so this unwrap never clones the whole vector.
+                        let mut rebuilt =
+                            Arc::try_unwrap(base).unwrap_or_else(|arc| (*arc).clone());
+                        let tail = history_to_chat_messages(&history[base_len..]).await;
+                        rebuilt.extend(tail);
+                        Arc::new(rebuilt)
+                    }
+                    None => Arc::new(history_to_chat_messages(&history).await),
+                };
                 let session_state_lock = self
                     .session_manager
                     .as_ref()
                     .session_state_cache(session_id);
                 match session_state_lock.lock() {
                     Ok(mut state_guard) => {
-                        state_guard.store_chat_messages(built.clone(), None);
+                        state_guard.store_chat_messages(Arc::clone(&built), None);
+                        state_guard.record_history_base(&history);
                     }
                     Err(_) => {
                         tracing::warn!(session_id, "session_state cache lock poisoned");

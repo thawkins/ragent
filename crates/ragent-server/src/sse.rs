@@ -9,7 +9,7 @@
 
 use axum::response::sse::Event as SseEvent;
 use ragent_agent::event::{Event, FinishReason};
-use ragent_agent::sanitize::redact_secrets;
+use ragent_agent::sanitize::redact_secrets_cow;
 use serde::Serialize;
 
 // ── Payload structs ──────────────────────────────────────────────────────
@@ -609,14 +609,10 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             input_tokens,
             output_tokens,
         } => {
-            let redacted = redact_secrets(text);
+            // PERF-055: borrow the payload unchanged when it contains no secret.
             to_data(&ModelResponseP {
                 session_id,
-                text: if redacted == *text {
-                    std::borrow::Cow::Borrowed(text)
-                } else {
-                    std::borrow::Cow::Owned(redacted)
-                },
+                text: redact_secrets_cow(text),
                 elapsed_ms: *elapsed_ms,
                 input_tokens: *input_tokens,
                 output_tokens: *output_tokens,
@@ -644,16 +640,12 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             metadata,
             success,
         } => {
-            let redacted = redact_secrets(content);
+            // PERF-055: borrow the payload unchanged when it contains no secret.
             to_data(&ToolResultP {
                 session_id,
                 call_id,
                 tool,
-                content: if redacted == *content {
-                    std::borrow::Cow::Borrowed(content)
-                } else {
-                    std::borrow::Cow::Owned(redacted)
-                },
+                content: redact_secrets_cow(content),
                 content_line_count: *content_line_count,
                 metadata,
                 success: *success,

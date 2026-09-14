@@ -15,9 +15,11 @@
 //!   pricing", "Y pricing"); the cache turns the second and subsequent
 //!   identical query into a free lookup instead of another provider call.
 
-use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+// PERF-080: FxHash for the short, non-adversarial normalised-query cache key.
+use rustc_hash::FxHashMap as HashMap;
 
 /// Hard cap on the number of web-search calls a research run may issue.
 ///
@@ -89,7 +91,10 @@ impl SearchBudget {
 /// identical query hits the cache.
 #[derive(Debug)]
 pub struct SharedQueryCache {
-    entries: Mutex<HashMap<String, Vec<crate::web_gatherer::WebSearchHit>>>,
+    /// PERF-077: each cached hit list is shared behind an `Arc<[WebSearchHit]>`
+    /// so `insert` stores the caller's `Arc` (no deep clone) and `get` returns
+    /// a refcount bump rather than a full vector copy.
+    entries: Mutex<HashMap<String, std::sync::Arc<[crate::web_gatherer::WebSearchHit]>>>,
 }
 
 impl SharedQueryCache {
@@ -97,7 +102,7 @@ impl SharedQueryCache {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            entries: Mutex::new(HashMap::new()),
+            entries: Mutex::new(HashMap::default()),
         }
     }
 
@@ -112,9 +117,9 @@ impl SharedQueryCache {
             .to_lowercase()
     }
 
-    /// Look up cached hits for `query`. Returns a clone so callers cannot
-    /// mutate the shared entry.
-    pub fn get(&self, query: &str) -> Option<Vec<crate::web_gatherer::WebSearchHit>> {
+    /// Look up cached hits for `query`. Returns a shared handle so callers
+    /// cannot mutate the shared entry and no deep copy is made (PERF-077).
+    pub fn get(&self, query: &str) -> Option<std::sync::Arc<[crate::web_gatherer::WebSearchHit]>> {
         let key = Self::normalize(query);
         let map = self
             .entries
@@ -124,7 +129,10 @@ impl SharedQueryCache {
     }
 
     /// Store successful hits for `query`, replacing any previous entry.
-    pub fn insert(&self, query: &str, hits: Vec<crate::web_gatherer::WebSearchHit>) {
+    ///
+    /// PERF-077: takes the caller's `Arc<[WebSearchHit]>` so this is a refcount
+    /// hand-off, not a deep clone of every hit.
+    pub fn insert(&self, query: &str, hits: std::sync::Arc<[crate::web_gatherer::WebSearchHit]>) {
         if hits.is_empty() {
             // An empty result is not worth caching: a later identical query
             // may succeed against a recovered engine.

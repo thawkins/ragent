@@ -85,16 +85,18 @@ impl Tool for GlobTool {
             .with_context(|| format!("Invalid glob pattern: {pattern}"))?;
         let matcher = glob.compile_matcher();
 
-        let mut match_results = Vec::new();
         const MAX_MATCHES: usize = 1000;
 
-        collect_matches(
-            &base_dir,
-            &base_dir,
-            &matcher,
-            &mut match_results,
-            MAX_MATCHES,
-        )?;
+        // PERF-052: the recursive walk is filesystem-bound; run it on the
+        // blocking pool so a large tree does not pin an async worker.
+        let walk_root = base_dir.clone();
+        let mut match_results = tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
+            let mut results = Vec::new();
+            collect_matches(&walk_root, &walk_root, &matcher, &mut results, MAX_MATCHES)?;
+            Ok(results)
+        })
+        .await
+        .context("glob walk task failed")??;
 
         match_results.sort();
 

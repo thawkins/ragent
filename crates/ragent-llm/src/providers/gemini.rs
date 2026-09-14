@@ -547,7 +547,9 @@ impl LlmClient for GeminiClient {
         let stream = response.bytes_stream();
 
         let event_stream = async_stream::stream! {
-            let mut buffer = String::new();
+            // PERF-063: pre-size the SSE accumulation buffer so a long stream does
+            // not repeatedly realloc/copy as it grows.
+            let mut buffer = String::with_capacity(8 * 1024);
             let mut pending_tool_calls: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
             // Stream-scoped call counter: ids must stay unique for the whole
             // stream even though the pending buffer is drained at each

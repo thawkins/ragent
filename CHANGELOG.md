@@ -1,5 +1,337 @@
 # Changelog
 
+## Version: 1.0.103
+
+- **M1 agent per-turn hot path -- PERF-032..040 + PERF-048 complete** -- the
+  per-turn allocation and clone load in the agent loop is removed:
+
+  * **PERF-032** -- `session/cache.rs` holds the cached provider-facing
+    transcript as an `Arc<Vec<ChatMessage>>`; `cached_chat_messages_for_version`
+    and `store_chat_messages` now hand out and store the `Arc` (O(1) refcount)
+    instead of deep-cloning the whole vector on every turn.
+  * **PERF-033** -- `SessionState` records the internal-history prefix length
+    and its version when the transcript was built (`record_history_base`), and
+    `take_cached_for_append` lets the loop detect a pure append, convert only
+    the newly-appended tail, and extend the retained vector instead of
+    rebuilding the whole transcript. `session/history.rs` still provides
+    `history_version_of` for the prefix check.
+  * **PERF-034** -- the subagent wire surface (tool definitions with
+    interactive tools removed) is cached behind the tool-registry version
+    (`get_subagent_tool_definitions`), so repeated sub-agent steps share one
+    immutable filtered vector instead of rebuilding it per step.
+  * **PERF-035** -- `LoopTracker` is now `Copy` (every field is `Copy`), so the
+    per-loop-step `active_loops.get(..).cloned()` save/restore and
+    `persist_loop_tracker` round-trips are bitwise copies instead of heap
+    clones.
+  * **PERF-036** -- new `RequestTokenTracker` (`compaction/estimator.rs`)
+    memoises the estimated cost of each provider-facing message by position and
+    folds in the system prompt and tool definitions, so the per-step pre-send
+    compaction check recomputes only the message that changed rather than
+    re-summing the whole history every step.
+  * **PERF-037** -- `compaction/convert.rs` pairs each `ToolResult` with its
+    `ToolUse` through a single-pass `call_id -> (message, part)` index instead
+    of a backward linear scan (O(n*m) -> O(n)).
+  * **PERF-038** -- `build_prompt` assembles the compaction prompt into one
+    pre-sized buffer via `write!`/`push_str` instead of building a `Vec<String>`
+    of clones and joining it (two full copies of the largest prompt the agent
+    builds); the serializer and runner stop duplicating the full-history clones.
+  * **PERF-039** -- `build_memory_prompt_section` memoises a rendered memory
+    entry's token cost by row id against a content/category/confidence
+    fingerprint, and the prompt builders use `write!` into one buffer instead of
+    `push_str(&format!(..))` per field.
+  * **PERF-040** -- the activity log is written by one background writer task
+    per process (`SessionProcessor::start_activity_writer`, wired in
+    `src/main.rs`) fed by a bounded queue, replacing the per-event
+    `spawn_blocking` dispatch and the per-run event-bus subscriber; new
+    `tests/test_activity_writer.rs` pins the batched contract.
+  * **PERF-048** -- the TUI viewers (`/research open`, Alt+M full-memory,
+    output view) retain a single copy of their rendered wrapped rows and the
+    status bar measures each span set once per frame.
+
+  New benches: `cargo bench -p ragent-agent --bench turn_loop` (per-turn
+  history conversion, token estimator, compaction `select`) and
+  `--bench m3_hot_paths`; new guard test
+  `ragent-agent/tests/test_no_percall_regex.rs`. `docs/agentorch.md` gained the
+  PERF-032..082 remediation register and `docs/PERFPLAN.md` records the M1
+  completion notes. **Security**: `rustls` bumped 0.23.43 -> 0.23.45
+  (RUSTSEC-2026-0285, TLS 1.3 handshake boundary confusion).
+
+- **M6 data layer -- PERF-069..077 complete** -- the storage, code-index, MCP,
+  and research-gatherer data paths no longer copy or serialise work on hot
+  paths:
+
+  * **PERF-069** -- `ragent-storage` now opens a dedicated read-only `SQLite`
+    connection (`Storage::reader`) alongside the writer connection. Read-only
+    query methods acquire it through a new `lock_conn_read!` macro, so a long
+    write transaction (or the startup FTS warm-up) no longer serialises reads
+    behind it. In-memory storage keeps sharing the single connection. New
+    `tests/test_reader_concurrency.rs` asserts a read completes while a
+    `BEGIN IMMEDIATE` write tx is held open on the same handle and that the
+    reader observes committed writes.
+  * **PERF-070** -- `IncrementalSnapshot::to_full` now consumes the delta and
+    base snapshot by value, moving the base file map and each added file's bytes
+    instead of cloning them (`mem::take`-style). `tests/test_snapshot_expand.rs`
+    covers diff application, additions, removals, and a restore round-trip.
+  * **PERF-071** -- the session `SELECT` bodies are hoisted to `const &str`
+    (no per-call `String`), and the activity-log run-list / run-range reads use
+    `prepare_cached` with two static SQL statements instead of a rebuilt
+    `String`.
+  * **PERF-072** -- `IndexStore::get_stale_files` no longer loads the entire
+    `indexed_files` table into a `HashMap`; it builds an O(scanned) path index
+    and streams the stored rows once, so a stale check with zero changes is
+    cheap regardless of index size.
+  * **PERF-073** -- the symbol-name filter is now an anchored, escaped prefix
+    match (`name COLLATE NOCASE LIKE 'prefix%' ESCAPE '\'`) served by a new
+    `idx_symbols_name_nocase` index (schema v4), instead of a leading-wildcard
+    `LIKE` that scanned the whole `symbols` table. Interior-only substrings no
+    longer match; the filter docs and tool schema were updated accordingly.
+  * **PERF-074** -- `upsert_file` and `upsert_symbols` use
+    `INSERT ... RETURNING id` (dropping the follow-up `SELECT id` /
+    `last_insert_rowid()`), `apply_diff` prepares its batch statements once, the
+    standalone `upsert_symbols` / `upsert_imports` / `upsert_refs` delete+insert
+    pairs are wrapped in a transaction (skipped when the caller already opened
+    one), and reference queries push their `LIMIT` into SQL
+    (`find_references_limited`).
+  * **PERF-075** -- `FtsIndex` holds one long-lived Tantivy `IndexWriter`
+    behind a `Mutex<Option<..>>`, created lazily on first use and reused by
+    every batch, instead of rebuilding the writer (and its heap) per commit.
+  * **PERF-076** -- `McpClient` maintains a `tool_name -> server_id` index,
+    rebuilt on connect / refresh / refresh-for-server / disconnect, so
+    `call_tool_by_name` is an O(1) map lookup rather than a nested
+    `servers x tools` scan. `tests/test_mcp_tool_index.rs` pins the contract.
+  * **PERF-077** -- the research web gatherer shares the sub-query text across
+    its hits as an `Arc<str>`, the shared query cache stores
+    `Arc<[WebSearchHit]>` (insert and get are refcount operations), and
+    `WebFetchedPage::body` is an `Arc<str>` so the CPU-bound
+    language-detection `spawn_blocking` closure clones a refcount instead of a
+    page-sized body buffer.
+
+  Verified by `cargo test -p ragent-storage`, `-p ragent-codeindex`,
+  `-p ragent-research`, `-p ragent-agent`, `-p ragent-server`, and `-p
+  ragent-tui` (all suites green) plus `cargo fmt --check` and `cargo clippy
+  --all-targets` clean.
+
+- **M5 regex hoisting — PERF-064..068 complete** — every regex on a per-page,
+  per-candidate, or per-plan path is now compiled once per process behind a
+  `OnceLock`/`LazyLock` static instead of on every invocation:
+
+  * **PERF-064** — `masterfetch/metadata.rs` no longer compiles ~12 regexes per
+    HTML page parse. All 12 (`<meta>` tag/key, double- and single-quoted
+    `content`, `<title>`, `<link>`, `rel="canonical"`, double- and single-quoted
+    `href`, `<html>`, `lang`, and the JSON-LD `<script>` block) are hoisted to
+    `LazyLock` statics, and `masterfetch/youtube.rs`'s `<title>` fallback moves
+    its function-local regex to a `LazyLock` static. New guard test
+    `ragent-tools-extended/tests/test_no_percall_regex.rs` fails if a direct
+    `Regex::new` reappears in the metadata or YouTube modules.
+  * **PERF-065** — all seven `ragent-research/src/web_date.rs` patterns
+    (JSON-LD script, JSON date key, `<meta>`, `content`, `<time datetime>`, ISO
+    `YYYY-MM-DD`, and long-form `Month D, YYYY`) are hoisted to `LazyLock`
+    statics instead of being compiled per invocation.
+  * **PERF-066** — per-call compiles are hoisted in `clarify.rs` (concrete-id
+    detector), `planner.rs` (JSON code fence), and the already-correct
+    `cluster.rs` / `session/topic.rs` / `document.rs` sites are covered by the
+    new hot-path guard test.
+  * **PERF-067** — the template-placeholder regex in
+    `ragent-agent/src/template/mod.rs` was compiled **inside a loop** on every
+    iteration of `extract_placeholders`; it is now one `LazyLock` static. New
+    guard test `ragent-agent/tests/test_no_percall_regex.rs`.
+  * **PERF-068** — relevance scoring no longer rebuilds query-side state for
+    every candidate. New `PreparedQuery` (in `web_gatherer/relevance.rs`)
+    normalises the query, strips stopwords, and derives every term's
+    morphological variants **once per sub-query**; `WebGatherer` memoises it in
+    a per-gather map shared by the pre-fetch and post-fetch filters, and
+    `compute_relevance_label` is now a thin wrapper (`PreparedQuery::new(q).label(..)`)
+    for the one-shot callers. Candidate fields are lowercased through a
+    `Cow`-returning helper that borrows when no uppercase character is present
+    (the common case for URLs), and the former `format!("{title} {snippet} {url}")`
+    haystack allocation is gone — the three fields are tested separately, which
+    is equivalent because normalised terms never contain whitespace. A/B bench
+    (`cargo bench -p ragent-research --bench relevance_bench`) over four
+    candidates: **7.55 us -> 1.45 us (5.2x)**. New equivalence tests in
+    `test_web_gatherer_helpers.rs` assert the prepared path returns identical
+    labels and retention to the one-shot wrapper, including the empty-query and
+    uppercase-URL paths.
+
+  New guard test `ragent-research/tests/test_no_percall_regex.rs` scans eleven
+  research hot-path modules for un-hoisted `Regex::new` calls.
+
+- **M3 async runtime hygiene — PERF-049..056 complete (blocking I/O, event-bus
+  and SSE allocations)** — the release-blocking M3 set is landed:
+
+  * **PERF-049/050** — the research gather-log (`GatherLog`) now opens its JSONL
+    file once, lazily on the first append, and appends through a 64 KiB
+    `BufWriter` (flushed on a `gather_summary` marker, on any session run-log
+    marker, and on drop) instead of `open` + two `write_all` + `flush` per
+    record. A/B measurement of the raw write path: **1140 ns/record -> 44 ns/record
+    (25.6x)**. Per-URL records are also serialised from a borrowed
+    `#[derive(Serialize)]` struct (`UrlRecord` + `FlattenDetail` + a
+    `collect_str` timestamp) rather than a `serde_json::Value` tree, so a record
+    no longer allocates a `Value` map or clones every detail key/value. JSONL
+    bytes are unchanged.
+  * **PERF-051** — `@fuzzy` reference resolution no longer runs the recursive
+    filesystem walk on the async worker: new `collect_project_files_async` wraps
+    the existing sync walk in `spawn_blocking` and `resolve_fuzzy` uses it. The
+    project-file cache keyed by canonical working directory is now an
+    `FxHashMap`.
+  * **PERF-052** — the `glob` tool wraps its recursive `collect_matches` walk in
+    `spawn_blocking` so a large tree no longer pins a tokio worker.
+  * **PERF-053** — the `read` tool's duplicate `std::fs::metadata` is gone:
+    `cached_read` now returns the mtime it already fetched asynchronously and
+    passes it to `record_read_timestamp` (one async metadata syscall per read).
+  * **PERF-054** — `EventBus::publish` moves the event into the broadcast
+    channel (`sender.send(event)`) instead of `send(event.clone())`, removing a
+    whole-event deep clone on the per-token path; the dropped-event log reads
+    from the `SendError(ev)` payload.
+  * **PERF-055** — new `redact_secrets_cow(&str) -> Cow<str>` returns
+    `Cow::Borrowed` without allocating when the secret registry is empty and the
+    secret regex does not match (the common case for streamed payloads); the
+    registry is a longest-first `Vec` kept sorted on insert instead of a
+    `HashSet` collected and sorted per call. This also **fixes a latent
+    correctness bug**: `ragent-agent` carried a second, byte-identical copy of
+    the sanitize module with its own private secret registry, so credentials
+    registered through `ragent_agent::sanitize` (`src/main.rs`, the session
+    processor) or `ragent_storage`'s re-export were invisible to
+    `ragent_server::sse::redact_secrets`, and vice versa. The agent-local module
+    is now a `pub use ragent_types::sanitize::*` facade, so one registry serves
+    every subsystem.
+  * **PERF-056** — the session SSE stream clones the session id once per
+    connection instead of once per streamed event, and the `Event::ModelResponse`
+    / `Event::ToolResult` arms feed `redact_secrets_cow` straight into the
+    `Cow`-typed payload (removing the extra `String` + `==` comparison per
+    event). Both SSE streams now count and warn on `Lagged` drops instead of
+    silently discarding them.
+
+  New benches/tests: `cargo bench -p ragent-research --bench gather_log_bench`
+  (append throughput), `tests/test_sanitize_redact.rs` (Cow borrow/own +
+  longest-secret ordering), `tests/test_event_publish_move.rs` (payload reaches
+  every subscriber intact), plus new unit tests for lazy log-file creation, the
+  summary flush, and the async walk wrapper.
+
+- **M4 network and resource reuse — PERF-057..063 complete (git spawn, HTTP
+  clients, request bodies)** — every network/resource-reuse finding from the
+  audit is fixed:
+
+  * **PERF-057** — `run_git_or_error` no longer spawns `git` twice (once for
+    output, once for the exit status). A new `run_git_output` helper performs a
+    single spawn and returns a `GitOutput { stdout, stderr, success }`; both
+    `run_git` and `run_git_or_error` derive their views from it, so every local
+    git tool runs the subprocess exactly once. This removes a real correctness
+    hazard: mutating subcommands (`commit`, `push`, `merge`, ...) previously
+    executed their side effects twice. New integration test
+    `tests/test_git_single_spawn.rs` records `git` invocations through a PATH
+    shim and asserts one spawn per tool call.
+  * **PERF-058** — new `ragent_tools_vcs::http_client::shared_client()` returns a
+    clone of a process-wide `OnceLock<reqwest::Client>` (connection-pool limits,
+    connect/request timeouts, TCP keep-alive). Every `reqwest::Client::new()` in
+    the GitHub/GitLab clients, both auth modules, and the CI job-trace path now
+    uses it, so a tool call no longer builds a fresh TLS pool and handshake.
+    `tests/test_shared_http_client.rs` fails if a `reqwest::Client::new()`
+    reappears outside the helper.
+  * **PERF-059** — resolved VCS tokens are cached instead of re-read on every
+    request: the GitHub token read is cached against the token file's mtime
+    (re-read only when the file changes, so a changed `HOME` is still honoured),
+    and the GitLab PAT — encrypted at rest and decrypted on read — is cached per
+    storage handle. `save_token`/`delete_token` invalidate the cache. The
+    GitLab CI job-trace path now reuses the client's already-resolved token via
+    the new `GitLabClient::token()` instead of decrypting it a second time.
+  * **PERF-060** — the Copilot device-flow poll used `reqwest::Client::new()`
+    per poll; it now uses the cached streaming `create_http_client()`.
+  * **PERF-061** — the Azure AI Foundry retry loop no longer clones the whole
+    serialised request body per attempt: the body is converted once to a
+    reference-counted `bytes::Bytes`, so each of the up-to-5 retry attempts
+    clones only the refcount.
+  * **PERF-062** — Ollama Cloud serialises the request body exactly once (the
+    800-char debug preview and the done-frame log are now borrowed slices of the
+    serialised bytes and are only built when the corresponding trace level is
+    enabled), removing both the duplicate serialisation and the per-completed-
+    message `to_string`.
+  * **PERF-063** — the SSE accumulation buffer in all 12 streaming providers is
+    pre-sized to 8 KiB (`String::with_capacity(8 * 1024)`), removing the
+    realloc/copy cliff on long streams.
+
+- **M2 TUI render loop — PERF-041/042/043/047 (message-window caches)** — the
+  message timeline no longer re-renders, re-parses, re-wraps, or re-allocates
+  unchanged rows on every frame:
+
+  * **PERF-041** — the flat plain-text copy buffer (`message_content_lines`) is
+    no longer rebuilt on every idle frame by cloning every wrapped `String` of
+    the whole transcript. `App::message_content_lines_dirty` is set only when a
+    group was re-rendered, re-wrapped at a new width, or the cache length
+    changed; copy paths (`/clip`, keyboard/right-click select-copy) call
+    `App::ensure_copy_content_lines()` to refresh on demand from the per-message
+    cache.
+  * **PERF-042** — a streamed reply is no longer re-parsed, re-wrapped, and
+    re-stringified on every token (O(n^2) over the reply). A group already
+    rendered may refresh at most once per `MESSAGE_STREAM_MIN_INTERVAL` (33 ms);
+    the dirty watermark keeps it pending and `compute_next_deadline` schedules a
+    wake at the end of the window so the tail is never left stale.
+  * **PERF-043** — the per-frame staleness scan starts at
+    `App::message_cache_dirty_from`, a watermark lowered by
+    `App::mark_message_dirty()` at every in-place mutation site, so an idle
+    frame does O(1) staleness work instead of comparing `edit_seq` over the
+    whole transcript.
+  * **PERF-047** — continuation-line indentation is emitted as its own borrowed
+    `Span::raw(&INDENT_SPACES[..indent])` instead of
+    `format!("{}{}", " ".repeat(indent), line)`, saving two allocations per
+    continuation line in `message_widget::to_lines` and the mirror site in
+    `layout`.
+
+  New integration test `tests/test_perf_message_cache.rs` (7 tests) pins the
+  watermark scan, the streaming throttle, and the lazy copy-buffer rebuild.
+
+- **M2 TUI render loop — PERF-044/045/046 (TUI idle-CPU and per-frame work)** —
+  the remaining M2 tasks close the render loop's remaining hot paths:
+
+  * **PERF-044** — the 2 s idle safety wake no longer repaints an unchanged
+    frame. `should_render()` paints only when `App::needs_redraw` is set, or
+    when the safety interval elapsed *and* a wall-clock-driven display is live
+    (`App::needs_periodic_redraw`): a permission countdown, a web-phase
+    countdown, a visible Agents/Teams panel whose elapsed column ticks (or a
+    running background-shell row), or a spinner/progress latch. A fully idle
+    TUI now paints nothing at rest instead of 0.5 frames/sec.
+  * **PERF-045** — the ~18 cheap `poll_*`/`refresh_*` jobs are collapsed
+    behind one `App::run_housekeeping_if_due()` gate
+    (`HOUSEKEEPING_INTERVAL`, 200 ms). A wake that merely drained a keystroke
+    or a single streamed token skips the whole pass; each job keeps its own
+    internal cadence and `compute_next_deadline` still wakes the loop at the
+    end of the window so nothing is starved. `housekeeping_runs` exposes the
+    pass count.
+  * **PERF-046** — the chat input is re-wrapped and its height and cursor
+    re-measured only when one of `(input text, cursor, keyboard selection,
+    inner width)` changes. `InputRenderCache` holds the wrapped rows, height,
+    and cursor position; an idle or non-typing frame performs no wrapping or
+    measurement work. The now-unused `char_wrap`/`input_widget_lines` helpers
+    were removed in favour of the cached rows plus an allocation-free
+    `input_widget_height` row-count.
+
+  Benches: `bench_panels` gained `idle_should_render` (the O(1) idle decision)
+  and `idle_full_frame` (warm full-frame render at 100/500 messages), and
+  `bench_markdown` gained `wrap_line_styled` (the single wrapping helper the
+  streaming cache relies on). New integration test
+  `tests/test_perf_render_idle.rs` (11 tests) pins the idle-decision policy,
+  the housekeeping gate + deadline, and the input render cache. `cargo bench
+  -p ragent-tui` green: `idle_should_render/idle_500` ~20 ns; warm full-frame
+  at 500 messages ~1.1 ms.
+
+- **PERF-048: single-copy rendered lines in the TUI viewers** — the
+  `/research open`, Alt+M full-memory, and output-view overlays no longer keep
+  two copies of their rendered rows. `OutputViewLineCache` dropped its
+  un-wrapped `lines` field: the pre-wrapped `wrapped_lines` is now the single
+  retained copy of the rendered document (the old
+  `wrapped_lines = lines.clone()` duplicated the whole document on every
+  rebuild). The output view now re-derives its lines from the source messages
+  only when the source generation or terminal width changes, wrapping them
+  in place. The status bar measures each span set exactly once per frame
+  (`spans_width` helper replacing the repeated
+  `iter().map(|s| s.width() as u16).sum()` passes in `build_line1` /
+  `build_line2`) and builds the `HEALTHY <name> v<version>` prefix span once.
+  The Agents/Teams side buttons build their labels once per frame and share
+  them between the width pass and both button renders instead of reallocating
+  them (was ~6 label allocations per frame). New integration test
+  `tests/test_perf_single_copy_lines.rs` drives the real render path for all
+  three viewers and asserts `wrapped_count`/`content_lines` stay in lockstep
+  with the retained rows and that a same-width frame re-renders nothing.
+
 ## Version: 1.0.102
 
 - **Simplify/quality pass across the search, research, agent, and TUI

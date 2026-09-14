@@ -82,3 +82,11 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 [[bench]]
 name = "agent_loop"
 harness = false
+
+[[bench]]
+name = "turn_loop"
+harness = false
+
+[[bench]]
+name = "m3_hot_paths"
+harness = false

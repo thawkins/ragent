@@ -84,17 +84,30 @@ Rules:
 ///   turns plus the head of the conversation to summarise).
 #[must_use]
 pub fn build_prompt(previous_summary: Option<&str>, context: &[&str]) -> String {
-    let instruction = if let Some(prev) = previous_summary {
-        format!(
-            "Update the anchored summary below using the conversation history above.\n\
-             Preserve still-true details, remove stale details, and merge in the new facts.\n\
-             <previous-summary>\n{prev}\n</previous-summary>"
-        )
-    } else {
-        "Create a new anchored summary from the conversation history.".to_string()
-    };
-
-    let mut parts = vec![instruction, SUMMARY_TEMPLATE.to_string()];
-    parts.extend(context.iter().map(|s| s.to_string()));
-    parts.join("\n\n")
+    // PERF-038: assemble into one pre-sized buffer instead of building a
+    // `Vec<String>` of clones and joining it (two full copies of the whole
+    // prompt). `build_prompt` runs once per compaction, on the largest prompt
+    // the agent ever builds.
+    let mut out = String::with_capacity(SUMMARY_TEMPLATE.len() + 256);
+    match previous_summary {
+        Some(prev) => {
+            out.push_str(
+                "Update the anchored summary below using the conversation history above.\n\
+                 Preserve still-true details, remove stale details, and merge in the new facts.\n\
+                 <previous-summary>\n",
+            );
+            out.push_str(prev);
+            out.push_str("\n</previous-summary>");
+        }
+        None => {
+            out.push_str("Create a new anchored summary from the conversation history.");
+        }
+    }
+    out.push_str("\n\n");
+    out.push_str(SUMMARY_TEMPLATE);
+    for ctx in context {
+        out.push_str("\n\n");
+        out.push_str(ctx);
+    }
+    out
 }

@@ -22,8 +22,75 @@
 //! pages (NFR-003).
 
 use regex::Regex;
+use std::sync::LazyLock;
 
 use super::PageMetadata;
+
+// ---------------------------------------------------------------------------
+// Hoisted regexes (PERF-064)
+//
+// A single HTML page parse previously compiled ~12 `Regex` values. Each
+// pattern below is compiled once per process and shared across every page
+// parse, matching the hoisting convention already used in `title.rs` and
+// `session/topic.rs`.
+// ---------------------------------------------------------------------------
+
+/// Opening `<meta ...>` tag (attribute block captured in group 1).
+static META_TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)<meta\s+([^>]*)/?>").expect("meta tag regex is valid"));
+
+/// `property=` / `name=` attribute value inside a `<meta>` tag.
+static META_KEY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)(?:property|name)\s*=\s*["']?([^"'\s>]+)["']?"#)
+        .expect("meta key regex is valid")
+});
+
+/// Double-quoted `content="..."` attribute.
+static CONTENT_DQ_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\bcontent\s*=\s*"([^"]*)""#).expect("content regex is valid")
+});
+
+/// Single-quoted `content='...'` attribute.
+static CONTENT_SQ_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bcontent\s*=\s*'([^']*)'").expect("content single-quote regex is valid")
+});
+
+/// `<title>...</title>` element.
+static TITLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?si)<title[^>]*>(.*?)</title>").expect("title regex is valid"));
+
+/// Opening `<link ...>` tag (attribute block captured in group 1).
+static LINK_TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)<link\s+([^>]*)>").expect("link regex is valid"));
+
+/// `rel="canonical"` attribute.
+static REL_CANONICAL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\brel\s*=\s*["']?canonical["']?"#).expect("rel regex is valid")
+});
+
+/// Double-quoted `href="..."` attribute.
+static HREF_DQ_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)\bhref\s*=\s*"([^"]*)""#).expect("href regex is valid"));
+
+/// Single-quoted `href='...'` attribute.
+static HREF_SQ_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bhref\s*=\s*'([^']*)'").expect("href single-quote regex is valid")
+});
+
+/// Opening `<html ...>` tag (attribute block captured in group 1).
+static HTML_TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)<html\s+([^>]*)>").expect("html tag regex is valid"));
+
+/// `lang="..."` attribute.
+static LANG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\blang\s*=\s*["']([^"']+)["']"#).expect("lang regex is valid")
+});
+
+/// `<script type="application/ld+json">...</script>` block (body in group 1).
+static JSONLD_SCRIPT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?si)<script\s+[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script>"#)
+        .expect("json-ld script regex is valid")
+});
 
 /// Meta name keys checked for Dublin Core creator information, in priority
 /// order. Multiple authors are concatenated with `", "`.
@@ -183,29 +250,18 @@ pub fn extract_metadata(html: &str) -> PageMetadata {
 /// Meta tags with no content attribute are skipped. Attribute names are
 /// matched case-insensitively (`PROPERTY` and `property` both work).
 fn collect_meta_tags(html: &str) -> Vec<(String, String)> {
-    let re = Regex::new(r"(?i)<meta\s+([^>]*)/?>").expect("meta tag regex is valid");
-
-    let key_re = Regex::new(r#"(?i)(?:property|name)\s*=\s*["']?([^"'\s>]+)["']?"#)
-        .expect("meta key regex is valid");
-
-    let content_re =
-        Regex::new(r#"(?i)\bcontent\s*=\s*"([^"]*)""#).expect("meta content regex is valid");
-
-    let content_single_re = Regex::new(r"(?i)\bcontent\s*=\s*'([^']*)'")
-        .expect("meta content single-quote regex is valid");
-
     let mut metas = Vec::new();
-    for cap in re.captures_iter(html) {
+    for cap in META_TAG_RE.captures_iter(html) {
         let attrs = cap.get(1).map_or("", |m| m.as_str());
-        if let Some(key_cap) = key_re.captures(attrs) {
+        if let Some(key_cap) = META_KEY_RE.captures(attrs) {
             let key = key_cap.get(1).map_or("", |m| m.as_str());
             if key.is_empty() {
                 continue;
             }
             // Try double-quoted content first, then single-quoted.
-            let content = content_re
+            let content = CONTENT_DQ_RE
                 .captures(attrs)
-                .or_else(|| content_single_re.captures(attrs))
+                .or_else(|| CONTENT_SQ_RE.captures(attrs))
                 .and_then(|c| c.get(1))
                 .map_or("", |m| m.as_str());
             if !content.trim().is_empty() {
@@ -230,8 +286,7 @@ fn meta_value(metas: &[(String, String)], key: &str) -> Option<String> {
 
 /// Extract the text content of the first `<title>` tag.
 fn extract_title_tag(html: &str) -> Option<String> {
-    let re = Regex::new(r"(?si)<title[^>]*>(.*?)</title>").expect("title regex is valid");
-    let cap = re.captures(html)?;
+    let cap = TITLE_RE.captures(html)?;
     let title = cap.get(1)?.as_str().trim().to_string();
     if title.is_empty() { None } else { Some(title) }
 }
@@ -242,18 +297,12 @@ fn extract_title_tag(html: &str) -> Option<String> {
 
 /// Extract the `href` attribute from `<link rel="canonical" href="...">`.
 fn extract_canonical(html: &str) -> Option<String> {
-    let link_re = Regex::new(r"(?i)<link\s+([^>]*)>").expect("link regex is valid");
-    let rel_re = Regex::new(r#"(?i)\brel\s*=\s*["']?canonical["']?"#).expect("rel regex is valid");
-    let href_re = Regex::new(r#"(?i)\bhref\s*=\s*"([^"]*)""#).expect("href regex is valid");
-    let href_single_re =
-        Regex::new(r"(?i)\bhref\s*=\s*'([^']*)'").expect("href single-quote regex is valid");
-
-    for cap in link_re.captures_iter(html) {
+    for cap in LINK_TAG_RE.captures_iter(html) {
         let attrs = cap.get(1).map_or("", |m| m.as_str());
-        if rel_re.is_match(attrs) {
-            let href = href_re
+        if REL_CANONICAL_RE.is_match(attrs) {
+            let href = HREF_DQ_RE
                 .captures(attrs)
-                .or_else(|| href_single_re.captures(attrs))
+                .or_else(|| HREF_SQ_RE.captures(attrs))
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str())?;
             if !href.is_empty() {
@@ -270,12 +319,9 @@ fn extract_canonical(html: &str) -> Option<String> {
 
 /// Extract the `lang` attribute from the opening `<html>` tag.
 fn extract_html_lang(html: &str) -> Option<String> {
-    let re = Regex::new(r"(?i)<html\s+([^>]*)>").expect("html tag regex is valid");
-    let lang_re = Regex::new(r#"(?i)\blang\s*=\s*["']([^"']+)["']"#).expect("lang regex is valid");
-
-    let cap = re.captures(html)?;
+    let cap = HTML_TAG_RE.captures(html)?;
     let attrs = cap.get(1)?.as_str();
-    let lang_cap = lang_re.captures(attrs)?;
+    let lang_cap = LANG_RE.captures(attrs)?;
     let lang = lang_cap.get(1)?.as_str().to_string();
     if lang.is_empty() { None } else { Some(lang) }
 }
@@ -302,14 +348,9 @@ struct JsonLdFields {
 /// to parse are silently skipped. Both single objects and arrays of objects
 /// are supported.
 fn extract_jsonld(html: &str) -> JsonLdFields {
-    let re = Regex::new(
-        r#"(?si)<script\s+[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script>"#,
-    )
-    .expect("json-ld script regex is valid");
-
     let mut fields = JsonLdFields::default();
 
-    for cap in re.captures_iter(html) {
+    for cap in JSONLD_SCRIPT_RE.captures_iter(html) {
         let raw = cap.get(1).map_or("", |m| m.as_str()).trim();
         if raw.is_empty() {
             continue;

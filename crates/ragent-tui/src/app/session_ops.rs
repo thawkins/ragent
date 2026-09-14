@@ -1861,7 +1861,7 @@ impl App {
         self.messages = messages;
         // Structural change: restored messages replace the current timeline,
         // so the per-message render cache must be rebuilt from scratch.
-        self.message_line_cache.clear();
+        self.reset_message_cache();
         self.current_screen = ScreenMode::Chat;
         self.status = format!("resumed ({} messages)", msg_count);
 
@@ -2619,7 +2619,49 @@ impl App {
             // with their messages (both vectors drop from the front).
             let drop_cache = drop_count.min(self.message_line_cache.len());
             self.message_line_cache.drain(0..drop_cache);
+            // PERF-043: the cache shifted left by `drop_cache`; the watermark
+            // addresses the new (post-drain) indices, so subtract as well.
+            self.message_cache_dirty_from =
+                self.message_cache_dirty_from.saturating_sub(drop_cache);
         }
+    }
+
+    /// PERF-043: record that the message at `index` was mutated in place.
+    ///
+    /// Lowers [`App::message_cache_dirty_from`] to `index` so the next
+    /// `render_messages` re-renders only the cache groups from there on,
+    /// instead of scanning the whole transcript for staleness every frame.
+    /// Call this immediately after `Message::touch()` on a message that was
+    /// mutated through `self.messages`.
+    pub fn mark_message_dirty(&mut self, index: usize) {
+        if index < self.message_cache_dirty_from {
+            self.message_cache_dirty_from = index;
+        }
+    }
+
+    /// PERF-041: prepare the plain-text rows of the message window for a copy.
+    ///
+    /// Copy paths (`/clip`, `/copy`, keyboard/right-click copy of the Messages
+    /// pane) call this instead of reading `message_content_lines` directly.
+    /// Any cache group that is still behind its message (a streaming group
+    /// waiting out its throttle window) is rendered first, then the flat
+    /// buffer is rebuilt from the per-message cache — so a copy always reads
+    /// fresh rows even mid-stream.
+    pub fn ensure_copy_content_lines(&mut self) {
+        crate::layout::ensure_message_copy_lines(self);
+    }
+
+    /// PERF-043/PERF-041: reset the per-message cache and its staleness
+    /// watermark.
+    ///
+    /// Called by every site that structurally replaces the message list
+    /// (session resume, compaction, `/clear`) so the next render rebuilds the
+    /// cache from index 0 instead of trusting a stale watermark that may point
+    /// past the new, shorter cache.
+    pub fn reset_message_cache(&mut self) {
+        self.message_line_cache.clear();
+        self.message_cache_dirty_from = 0;
+        self.message_content_lines.clear();
     }
 
     /// R-11: Trim `log_entries` and `log_line_cache` to `MAX_LOG_ENTRIES`
@@ -2684,7 +2726,6 @@ impl App {
             scroll_offset: 0,
             max_scroll: 0,
             line_cache: crate::app::OutputViewLineCache {
-                lines: Vec::new(),
                 wrapped_lines: Vec::new(),
                 content_lines: Vec::new(),
                 wrapped_count: 0,

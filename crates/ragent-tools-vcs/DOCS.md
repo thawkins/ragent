@@ -12,7 +12,7 @@ parser for the `/reverse` command.
 
 ## External Dependencies
 
-- tokio, async-trait, serde, serde_json, anyhow, reqwest, dirs, zip
+- tokio, async-trait, serde, serde_json, anyhow, tracing, reqwest, dirs, zip
 
 Dev-dependencies: tempfile, wiremock.
 
@@ -24,6 +24,10 @@ Dev-dependencies: tempfile, wiremock.
 - **ToolRegistry** (struct) — Thread-safe registry; methods: `new`, `register`, `get`, `list`, `set_hidden`, `definitions`.
 - **create_vcs_registry** (fn) — Creates a `ToolRegistry` and registers all 39 VCS tools.
 
+## Module: http_client
+
+- **shared_client** (fn) — Returns a clone of the process-wide `OnceLock<reqwest::Client>` used by every GitHub/GitLab API call (PERF-058).
+
 ## Module: storage
 
 - **StorageBackend** (trait) — Storage backend abstraction for provider auth and settings.
@@ -34,6 +38,8 @@ Dev-dependencies: tempfile, wiremock.
 Local git workspace tools — execute the `git` CLI in the agent's working directory.
 
 - Tools: `GitAddTool`, `GitBranchTool`, `GitCheckoutTool`, `GitCherryPickTool`, `GitCloneTool`, `GitCommitTool`, `GitDiffTool`, `GitFetchTool`, `GitLogTool`, `GitMergeTool`, `GitPullTool`, `GitPushTool`, `GitRemoteTool`, `GitResetTool`, `GitShowTool`, `GitStashTool`, `GitStatusTool`, `GitTagTool`.
+- **GitOutput** (struct) — `{ stdout, stderr, success }` captured from one spawn.
+- **run_git_output** (fn) — Spawns `git` once and returns a `GitOutput`; the single spawn point for every git tool.
 - **run_git** (fn) — Runs a git command, returns `(stdout, stderr)`.
 - **run_git_or_error** (fn) — Runs a git command, returns stdout only.
 
@@ -51,7 +57,7 @@ Local git workspace tools — execute the `git` CLI in the agent's working direc
 ## Module: gitlab
 
 - Auth: **GitLabConfig** (struct), **load_token**, **save_token**, **delete_token**, **load_config**, **save_config**, **delete_config**, **migrate_legacy_files** (fns).
-- **GitLabClient** (struct) — Authenticated GitLab API client; methods: `new`, `with_credentials`, `get`, `post`, `put`, `detect_project`, `instance_url`, `fetch_project_metadata`, `fetch_repository_tree`, `fetch_repository_tree_recursive`, `fetch_readme`.
+- **GitLabClient** (struct) — Authenticated GitLab API client; methods: `new`, `with_credentials`, `get`, `post`, `put`, `detect_project`, `instance_url`, `token`, `fetch_project_metadata`, `fetch_repository_tree`, `fetch_repository_tree_recursive`, `fetch_readme`.
 - Tools: `GitlabListIssuesTool`, `GitlabGetIssueTool`, `GitlabCreateIssueTool`, `GitlabCommentIssueTool`, `GitlabCloseIssueTool`, `GitlabListMrsTool`, `GitlabGetMrTool`, `GitlabCreateMrTool`, `GitlabMergeMrTool`, `GitlabApproveMrTool`, `GitlabListPipelinesTool`, `GitlabGetPipelineTool`, `GitlabListJobsTool`, `GitlabGetJobTool`, `GitlabGetJobLogTool`, `GitlabRetryJobTool`, `GitlabCancelJobTool`, `GitlabRetryPipelineTool`, `GitlabCancelPipelineTool`.
 
 ## Module: vcs_provider

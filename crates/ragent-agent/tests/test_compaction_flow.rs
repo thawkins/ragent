@@ -267,7 +267,7 @@ fn test_select_keeps_last_message_even_when_it_exceeds_keep_budget() {
         },
         ..Default::default()
     };
-    let split = select(&messages, &config, 100_000);
+    let split = select(messages.clone(), &config, 100_000);
     assert!(split.head_messages.is_empty(), "head must be empty");
     assert_eq!(
         split.recent_messages.len(),
@@ -289,7 +289,7 @@ fn test_select_single_long_turn_with_zero_budget() {
         keep: KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
-    let split = select(&messages, &config, 100_000);
+    let split = select(messages.clone(), &config, 100_000);
     assert!(split.head_messages.is_empty());
     assert_eq!(split.recent_messages.len(), 1);
 }

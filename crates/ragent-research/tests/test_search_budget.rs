@@ -54,7 +54,7 @@ fn test_shared_query_cache_roundtrip_and_normalization() {
     assert!(c.get("rust lifetimes").is_none());
     c.insert(
         "Rust   LIFETIMES",
-        vec![sample_hit("https://example.com", "rust")],
+        Arc::from(vec![sample_hit("https://example.com", "rust")]),
     );
     // Different casing/whitespace normalizes to the same key.
     let cached = c.get("rust lifetimes").expect("cache hit expected");
@@ -65,6 +65,6 @@ fn test_shared_query_cache_roundtrip_and_normalization() {
 #[test]
 fn test_shared_query_cache_skips_empty_results() {
     let c = SharedQueryCache::new();
-    c.insert("empty query", Vec::new());
+    c.insert("empty query", Arc::from(Vec::new()));
     assert!(c.get("empty query").is_none());
 }

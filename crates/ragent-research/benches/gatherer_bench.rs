@@ -117,7 +117,9 @@ fn fake_pages(n: usize) -> HashMap<String, WebFetchedPage> {
                     published_at: None,
                     url: format!("https://example.com/{i}"),
                     title: format!("Page {i}"),
-                    body: "Rust async runtime design and performance. ".repeat(40),
+                    body: "Rust async runtime design and performance. "
+                        .repeat(40)
+                        .into(),
                     content_type: None,
                     page_type: None,
                     language: None,

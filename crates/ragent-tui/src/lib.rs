@@ -132,10 +132,11 @@ use tracing_layer::TuiLogReceiver;
 ///
 /// The primary redraw trigger is `App::needs_redraw`, set by input handlers
 /// and event handlers. This cap only guards against a missed flag leaving a
-/// stale screen: when idle the loop wakes at most every 2 seconds and skips
-/// the render entirely unless something changed. The previous 250 ms value
-/// caused an unconditional full-frame render 4x/second, which re-wrapped the
-/// entire transcript through unicode segmentation each frame and burned
+/// stale screen: when idle the loop wakes at most every 2 seconds and, per
+/// PERF-044, skips the render entirely unless a wall-clock-driven display is
+/// actually advancing (`App::needs_periodic_redraw`). The previous 250 ms
+/// value caused an unconditional full-frame render 4x/second, which re-wrapped
+/// the entire transcript through unicode segmentation each frame and burned
 /// 10-15% of a core while idle.
 const IDLE_REDRAW_INTERVAL_MS: u64 = 2000;
 
@@ -761,56 +762,65 @@ pub async fn run_tui(
             app.needs_redraw = true;
         }
 
-        // Stream /new scaffold progress and surface the finished summary.
-        app.poll_newproj_result();
+        // PERF-045: run the cheap periodic polls/refreshes at most once per
+        // `HOUSEKEEPING_INTERVAL`.  A wake that merely drained one keystroke
+        // or one streamed token no longer re-probes every job; each job keeps
+        // its own internal cadence, and `compute_next_deadline` keeps a wake
+        // scheduled for the end of the interval so a quiet period is still
+        // polled (stat refreshes, expiry transitions, spinner reaping).
+        if app.run_housekeeping_if_due() {
+            // Stream /new scaffold progress and surface the finished summary.
+            app.poll_newproj_result();
 
-        // Check for completed off-thread codeindex graph builds / reindexes.
-        app.poll_codeindex_bg_result();
+            // Check for completed off-thread codeindex graph builds / reindexes.
+            app.poll_codeindex_bg_result();
 
-        // Surface the loop-rollback outcome (status + message window).
-        app.poll_rollback_result();
+            // Surface the loop-rollback outcome (status + message window).
+            app.poll_rollback_result();
 
-        // Surface the /websearch test engine-diagnostic outcome.
-        app.poll_websearch_test_result();
+            // Surface the /websearch test engine-diagnostic outcome.
+            app.poll_websearch_test_result();
 
-        // Check for completed compaction runs.
-        app.poll_compaction_result();
+            // Check for completed compaction runs.
+            app.poll_compaction_result();
 
-        // Adopt background Context panel snapshot refreshes (T-013/FR-015).
-        app.poll_context_snapshot_refresh();
+            // Adopt background Context panel snapshot refreshes (T-013/FR-015).
+            app.poll_context_snapshot_refresh();
 
-        // Check for completed /swarm LLM decomposition results.
-        app.poll_pending_swarm();
+            // Check for completed /swarm LLM decomposition results.
+            app.poll_pending_swarm();
 
-        // Check for completed /bench background runs.
-        app.poll_pending_bench();
+            // Check for completed /bench background runs.
+            app.poll_pending_bench();
 
-        // Reap spinner latches that outlived their staleness caps (dropped
-        // `*Finished` events after a broadcast Lagged burst).
-        app.poll_stale_spinners();
+            // Reap spinner latches that outlived their staleness caps (dropped
+            // `*Finished` events after a broadcast Lagged burst).
+            app.poll_stale_spinners();
 
-        // Re-sync the Agents panel with the task registry after a broadcast
-        // lag burst (dropped SubagentStart/Complete events).
-        app.poll_active_tasks_reconcile();
+            // Re-sync the Agents panel with the task registry after a broadcast
+            // lag burst (dropped SubagentStart/Complete events).
+            app.poll_active_tasks_reconcile();
 
-        // Transition slash-command statuses to "ready" after a grace period.
-        app.poll_status_expiry();
+            // Transition slash-command statuses to "ready" after a grace period.
+            app.poll_status_expiry();
 
-        // Auto-dismiss the run-cost banner after 15 seconds.
-        app.poll_run_cost_banner_expiry();
+            // Auto-dismiss the run-cost banner after 15 seconds.
+            app.poll_run_cost_banner_expiry();
 
-        // Unblock swarm tasks whose dependencies are satisfied.
-        app.poll_swarm_unblock();
+            // Unblock swarm tasks whose dependencies are satisfied.
+            app.poll_swarm_unblock();
 
-        // Check if active swarm has completed all tasks.
-        app.poll_swarm_completion();
+            // Check if active swarm has completed all tasks.
+            app.poll_swarm_completion();
 
-        // Fire any pending autopilot continuation.
-        app.poll_autopilot_continue();
+            // Fire any pending autopilot continuation.
+            app.poll_autopilot_continue();
 
-        // Refresh cached stats on their throttled intervals.
-        app.refresh_code_index_stats();
-        app.refresh_memory_stats();
+            // Refresh cached stats on their throttled intervals.
+            app.refresh_code_index_stats();
+            app.refresh_memory_stats();
+        }
+
         // Copy the latest off-thread memory count into the status bar cache
         // so it stays visible even when no events are arriving.
         app.memory_entry_count = app
@@ -820,12 +830,11 @@ pub async fn run_tui(
         // Flush dirty history to disk (non-blocking, debounced).
         app.flush_history_if_due();
 
-        // Render only when the UI is dirty. The elapsed fallback is a
-        // stale-render safety net (see IDLE_REDRAW_INTERVAL_MS); when idle
-        // this branch is skipped entirely, cutting idle renders from 4/sec
-        // to at most 0.5/sec.
-        if app.needs_redraw || last_draw.elapsed() >= Duration::from_millis(IDLE_REDRAW_INTERVAL_MS)
-        {
+        // Render only when the UI is dirty, or when a wall-clock-driven
+        // display (countdown/spinner/countdown bar) is live.  PERF-044: the
+        // periodic safety wake no longer repaints an unchanged frame, so a
+        // fully idle TUI paints nothing at rest instead of 0.5 frames/sec.
+        if should_render(&app, last_draw) {
             terminal.draw(|frame| layout::render(frame, &mut app))?;
             app.needs_redraw = false;
             last_draw = Instant::now();
@@ -997,17 +1006,9 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
     // bridge drop the single `*Finished` event that clears a spinner latch
     // (same failure shape as the old reindex busy-latch). Once a latch
     // outlives its cap it no longer contributes to `animate`, and
-    // `poll_stale_spinners` (called each loop wake) clears it.
-    let animate =
-        app.model_loading_state.as_ref().is_some_and(|s| {
-            s.started_at.elapsed() < Duration::from_secs(MODEL_LOADING_STALE_SECS)
-        }) || app.model_download_state.as_ref().is_some_and(|s| {
-            s.started_at.elapsed() < Duration::from_secs(MODEL_DOWNLOAD_STALE_SECS)
-        }) || (app.active_bench_task_id.is_some() && !app.bench_stale())
-            || app.code_index_busy
-            || app.code_index_graph_busy
-            || (app.autopilot_enabled && app.autopilot_pending_continue.is_some());
-    if animate {
+    // `poll_stale_spinners` (called each loop wake) clears it.  PERF-044
+    // shares the predicate with `App::needs_periodic_redraw`.
+    if app.periodic_animation_active() {
         deadline = deadline.min(now + Duration::from_millis(250));
     }
 
@@ -1041,6 +1042,23 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
     deadline =
         deadline.min(app.active_tasks_reconcile_last + crate::app::AGENTS_RECONCILE_INTERVAL);
 
+    // PERF-045: the periodic polls/refreshes are gated behind
+    // `HOUSEKEEPING_INTERVAL`; wake at the end of the current window so a
+    // quiet period is still polled even when no event or deadline shortens
+    // the sleep.
+    deadline = deadline.min(app.housekeeping_due_at());
+
+    // PERF-042: a streamed message group waiting out its throttle window must
+    // be re-rendered at the end of that window, otherwise its tail could stay
+    // stale until the next unrelated wake.
+    if app.message_cache_dirty_from < app.messages.len() {
+        let ready_at = app
+            .message_stream_throttle_at
+            .map(|t| t + crate::layout::MESSAGE_STREAM_MIN_INTERVAL)
+            .unwrap_or(now);
+        deadline = deadline.min(ready_at);
+    }
+
     // Cap at the idle redraw interval so that any missed needs_redraw still
     // renders within a reasonable window.
     deadline = deadline.min(last_draw + Duration::from_millis(IDLE_REDRAW_INTERVAL_MS));
@@ -1053,4 +1071,17 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
 /// visibility.
 pub fn compute_next_deadline_test(app: &App, last_draw: std::time::Instant) -> std::time::Instant {
     compute_next_deadline(app, last_draw)
+}
+
+/// PERF-044: decide whether the current wake must paint a frame.
+///
+/// A frame is painted when the UI is dirty, or when the periodic safety
+/// interval has elapsed *and* a wall-clock-driven display is live
+/// (`App::needs_periodic_redraw`).  A fully idle TUI therefore paints nothing
+/// at rest, and the safety interval only guards against a missed
+/// `needs_redraw` while a countdown or spinner is actually advancing.
+pub fn should_render(app: &App, last_draw: std::time::Instant) -> bool {
+    app.needs_redraw
+        || (last_draw.elapsed() >= Duration::from_millis(IDLE_REDRAW_INTERVAL_MS)
+            && app.needs_periodic_redraw())
 }

@@ -582,7 +582,9 @@ impl LlmClient for BedrockAnthropicClient {
 
         // Parse the Anthropic SSE stream — same format as direct Anthropic API
         let event_stream = async_stream::stream! {
-            let mut buffer = String::new();
+            // PERF-063: pre-size the SSE accumulation buffer so a long stream does
+            // not repeatedly realloc/copy as it grows.
+            let mut buffer = String::with_capacity(8 * 1024);
             let mut current_event_type = String::new();
             let mut tool_call_args: HashMap<String, String> = HashMap::new();
 
@@ -939,7 +941,9 @@ impl LlmClient for BedrockConverseClient {
         // Parse the Converse API event stream
         // The Converse API uses a different event format than Anthropic Messages
         let event_stream = async_stream::stream! {
-            let mut buffer = String::new();
+            // PERF-063: pre-size the SSE accumulation buffer so a long stream does
+            // not repeatedly realloc/copy as it grows.
+            let mut buffer = String::with_capacity(8 * 1024);
             let mut current_event_type = String::new();
             let mut active_tool_call_id = String::new();
 

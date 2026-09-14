@@ -6116,7 +6116,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "1.0.102"
+version = "1.0.103"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6143,7 +6143,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.102"
+version = "1.0.103"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6196,7 +6196,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.102"
+version = "1.0.103"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6220,7 +6220,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.102"
+version = "1.0.103"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6298,7 +6298,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.102"
+version = "1.0.103"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6315,6 +6315,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "tempfile",
@@ -6327,7 +6328,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.102"
+version = "1.0.103"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6376,6 +6377,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -6384,7 +6386,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "1.0.102"
+version = "1.0.103"
 dependencies = [
  "anyhow",
  "parking_lot",
@@ -6476,6 +6478,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "spreadsheet-ods",
@@ -6507,13 +6510,14 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
  "wiremock",
  "zip 7.2.0",
 ]
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.102"
+version = "1.0.103"
 dependencies = [
  "anyhow",
  "arboard",
@@ -7249,9 +7253,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.43"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "once_cell",
  "ring",
@@ -7285,9 +7289,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -8165,7 +8169,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",

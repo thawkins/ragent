@@ -235,8 +235,8 @@ fn edge_to_connection(
 /// definitions; identical ranks fall back to the lowest symbol ID so the
 /// result is deterministic.
 ///
-/// Why this exists: `query_symbols` does a case-insensitive substring match
-/// ordered by name, so for `SessionProcessor` it returned the
+/// Why this exists: `query_symbols` does a case-insensitive leading-fragment
+/// match ordered by name, so for `SessionProcessor` it returned the
 /// `CachedSessionProcessor` trait and for `EventBus` the `Default for EventBus`
 /// impl — both near-zero-edge nodes that made `codeindex_path` report
 /// "No path found" for well-connected symbols.
@@ -289,8 +289,8 @@ fn find_symbol(store: &IndexStore, name: &str) -> Result<Option<crate::types::Sy
     if let Some(sym) = store.get_symbol_by_exact_name(name)? {
         return Ok(Some(sym));
     }
-    // query_symbols is a case-insensitive substring match, so a single query
-    // yields the wider (non-exact) candidates for the ranked fallback.
+    // query_symbols is a case-insensitive leading-fragment match, so a single
+    // query yields the wider (non-exact) candidates for the ranked fallback.
     let candidates = store.query_symbols(&crate::types::SymbolFilter {
         name: Some(name.to_string()),
         ..Default::default()

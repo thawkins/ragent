@@ -41,7 +41,7 @@ fn test_select_keeps_recent_tail_within_budget() {
         user_msg("eeee"),
     ];
     let config = CompactionConfig::default();
-    let split = select(&messages, &config, 100_000);
+    let split = select(messages.clone(), &config, 100_000);
     // The oldest message is forced into the head.
     assert_eq!(split.head_messages.len(), 1);
     assert_eq!(split.head_messages[0].text_content(), "aaaa");
@@ -57,7 +57,7 @@ fn test_select_splits_when_budget_exceeded() {
         keep: ragent_config::compaction::KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
-    let split = select(&messages, &config, 100_000);
+    let split = select(messages.clone(), &config, 100_000);
     // With a zero budget, only the last message is kept verbatim.
     assert_eq!(split.recent_messages.len(), 1);
     assert_eq!(split.recent_messages[0].text_content(), "cccc");
@@ -70,7 +70,7 @@ fn test_select_drops_compaction_messages() {
     // Insert a compaction message in the middle; select should ignore it.
     messages.insert(1, build_compaction_message("sess", "old summary"));
     let config = CompactionConfig::default();
-    let split = select(&messages, &config, 100_000);
+    let split = select(messages.clone(), &config, 100_000);
     // The compaction message is dropped from both head and recent.
     assert!(
         split
@@ -92,7 +92,7 @@ fn test_select_drops_compaction_messages() {
 #[test]
 fn test_select_empty_history() {
     let config = CompactionConfig::default();
-    let split = select(&[], &config, 100_000);
+    let split = select(Vec::new(), &config, 100_000);
     assert!(split.head_messages.is_empty());
     assert!(split.recent_messages.is_empty());
     assert_eq!(split.recent_tokens, 0);
@@ -108,7 +108,7 @@ fn test_select_respects_fraction_on_small_window() {
         user_msg("c".repeat(400).as_str()),
     ];
     let config = CompactionConfig::default();
-    let split = select(&messages, &config, 1_000);
+    let split = select(messages.clone(), &config, 1_000);
     assert_eq!(split.recent_messages.len(), 1);
     assert_eq!(split.head_messages.len(), 2);
 }

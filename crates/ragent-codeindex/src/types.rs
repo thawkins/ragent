@@ -369,7 +369,10 @@ impl fmt::Display for GraphStatus {
 /// Filter criteria for querying symbols from the index.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SymbolFilter {
-    /// Filter by symbol name (substring match, case-insensitive).
+    /// Filter by symbol name: a case-insensitive **leading fragment** match
+    /// (PERF-073). The name must start with the filter (e.g. `Server` matches
+    /// `Server` and `ServerProcessor`); interior-only substrings no longer
+    /// match, so SQLite can serve the query from the NOCASE name index.
     pub name: Option<String>,
     /// Filter by exact symbol kind.
     pub kind: Option<SymbolKind>,

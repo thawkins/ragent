@@ -31,9 +31,10 @@ use crate::state::{ResearchState, SubQuestionStatus};
 use crate::status::ResearchStatus;
 use chrono::{DateTime, Utc};
 use ragent_types::strutil::truncate_bytes;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+// PERF-080: FxHash for the short non-adversarial item-path/key sets.
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -237,7 +238,7 @@ pub struct ResearchManager {
     /// disk reads and YAML re-parsing on repeated `show()`/`list()` calls
     /// (PERF-MGR-02). Entries are invalidated when the file's mtime changes.
     /// Wrapped in `Arc` so `ResearchManager` remains `Clone`.
-    item_cache: Arc<Mutex<HashMap<PathBuf, (SystemTime, ResearchItem)>>>,
+    item_cache: Arc<Mutex<FxHashMap<PathBuf, (SystemTime, ResearchItem)>>>,
 }
 
 impl ResearchManager {
@@ -245,7 +246,7 @@ impl ResearchManager {
     pub fn new(research_root: impl Into<PathBuf>) -> Self {
         Self {
             research_root: research_root.into(),
-            item_cache: Arc::new(Mutex::new(HashMap::new())),
+            item_cache: Arc::new(Mutex::new(FxHashMap::default())),
         }
     }
 
@@ -502,7 +503,7 @@ impl ResearchManager {
         // Staleness check (G-003): compare cache entry names against the
         // actual set of research item directories on disk. If the sets differ
         // (item added/deleted/renamed), the cache is stale.
-        let mut disk_names: HashSet<String> = HashSet::new();
+        let mut disk_names: FxHashSet<String> = FxHashSet::default();
         let read_dir = match tokio::fs::read_dir(&self.research_root).await {
             Ok(d) => d,
             Err(_) => return Ok(None),
@@ -544,7 +545,7 @@ impl ResearchManager {
                 }
             }
         }
-        let cache_names: HashSet<String> = cache.entries.iter().map(|e| e.name.clone()).collect();
+        let cache_names: FxHashSet<String> = cache.entries.iter().map(|e| e.name.clone()).collect();
         if cache_names != disk_names {
             tracing::debug!("research: .index.json stale (item set mismatch), falling back");
             return Ok(None);

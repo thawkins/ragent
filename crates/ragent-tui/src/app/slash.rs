@@ -3050,7 +3050,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             },
             "clear" => {
                 self.messages.clear();
-                self.message_line_cache.clear();
+                self.reset_message_cache();
                 self.scroll_offset = 0;
                 self.tool_step_map.clear();
                 self.last_step_per_session.clear();
@@ -3325,7 +3325,9 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 // the system clipboard. Uses the plain-text rows the Messages
                 // pane last rendered (the same buffer text-selection copy
                 // reads), so what lands on the clipboard is exactly what the
-                // user sees.
+                // user sees.  PERF-041: refresh that buffer on demand rather
+                // than rebuilding it on every idle frame.
+                self.ensure_copy_content_lines();
                 if self.message_content_lines.is_empty() {
                     self.append_assistant_text(
                         "From: /clip\nNo rendered message content to copy yet.",

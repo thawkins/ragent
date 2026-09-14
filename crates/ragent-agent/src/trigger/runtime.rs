@@ -16,12 +16,12 @@
 //!
 //! See `specs/piegap/SPEC.md` FR-002 and FR-003 for the full specification.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use ragent_types::trigger::{TriggerEnvelope, TriggerFired, TriggerRule, TriggerRuleId};
+use rustc_hash::FxHashMap as HashMap;
 use tracing::{debug, warn};
 
 /// Configuration for the trigger runtime.
@@ -86,9 +86,9 @@ impl TriggerRuntime {
     pub fn new(config: TriggerRuntimeConfig) -> Self {
         Self {
             inner: Arc::new(Mutex::new(TriggerRuntimeInner {
-                rules: HashMap::new(),
-                dedup_cache: HashMap::new(),
-                cycles: HashMap::new(),
+                rules: HashMap::default(),
+                dedup_cache: HashMap::default(),
+                cycles: HashMap::default(),
             })),
             config,
         }

@@ -684,7 +684,9 @@ impl WebFetchTool for AgentWebFetchTool {
         Ok(WebFetchedPage {
             url: url.to_string(),
             title,
-            body,
+            // PERF-077: `WebFetchedPage::body` is an `Arc<str>` so the
+            // language-detection worker gets a refcount clone, not a copy.
+            body: body.into(),
             published_at,
             content_type,
             page_type,
@@ -1495,7 +1497,7 @@ mod tests {
         assert_eq!(page.title, "A Video Title");
         assert_eq!(page.page_type.as_deref(), Some("youtube"));
         assert_eq!(page.content_type.as_deref(), Some("text/plain"));
-        assert_eq!(page.body, "Transcript line one\nTranscript line two");
+        assert_eq!(&*page.body, "Transcript line one\nTranscript line two");
     }
 
     #[test]

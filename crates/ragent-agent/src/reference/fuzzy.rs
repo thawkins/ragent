@@ -2,11 +2,16 @@
 //!
 //! Walks the project tree to collect candidate files, then scores them
 //! against a query string using a simple multi-tier matching algorithm.
+//!
+//! PERF-051: the walk is filesystem-bound, so async callers use
+//! [`collect_project_files_async`], which runs it on the blocking pool. The
+//! project-file cache uses `FxHashMap` rather than the default hasher.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
+
+use rustc_hash::FxHashMap;
 
 /// Maximum number of project files to index for autocomplete.
 const MAX_PROJECT_FILES: usize = 10_000;
@@ -27,12 +32,12 @@ struct ProjectFileCacheEntry {
 }
 
 /// Process-wide cache of project file lists keyed by canonical working directory.
-static PROJECT_FILE_CACHE: OnceLock<Mutex<HashMap<PathBuf, ProjectFileCacheEntry>>> =
+static PROJECT_FILE_CACHE: OnceLock<Mutex<FxHashMap<PathBuf, ProjectFileCacheEntry>>> =
     OnceLock::new();
 
 /// Return the global project-file cache map.
-fn project_file_cache() -> &'static Mutex<HashMap<PathBuf, ProjectFileCacheEntry>> {
-    PROJECT_FILE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn project_file_cache() -> &'static Mutex<FxHashMap<PathBuf, ProjectFileCacheEntry>> {
+    PROJECT_FILE_CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
 }
 
 /// Directories to skip during project file collection.
@@ -62,6 +67,9 @@ pub struct FuzzyMatch {
 ///
 /// Skips hidden files/directories and well-known generated directories.
 /// Returns at most `MAX_PROJECT_FILES` relative paths.
+///
+/// This is a blocking function; async callers should use
+/// [`collect_project_files_async`] so the walk does not pin a runtime worker.
 ///
 /// # Errors
 ///
@@ -119,6 +127,24 @@ pub fn collect_project_files(working_dir: &Path, max: usize) -> Vec<PathBuf> {
     }
 
     result
+}
+
+/// Async wrapper around [`collect_project_files`] (PERF-051).
+///
+/// Runs the recursive filesystem walk on the blocking thread pool so an
+/// `@fuzzy` reference does not stall a tokio worker.
+///
+/// # Errors
+///
+/// Returns an error only when the blocking task itself is cancelled or panics.
+pub async fn collect_project_files_async(
+    working_dir: &Path,
+    max: usize,
+) -> std::io::Result<Vec<PathBuf>> {
+    let working_dir = working_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || collect_project_files(&working_dir, max))
+        .await
+        .map_err(std::io::Error::other)
 }
 
 fn walk_dir(root: &Path, dir: &Path, files: &mut Vec<PathBuf>, max: usize) {

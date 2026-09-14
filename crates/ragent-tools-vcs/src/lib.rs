@@ -6,6 +6,7 @@
 pub mod git;
 pub mod github;
 pub mod gitlab;
+pub mod http_client;
 pub mod registry;
 pub mod vcs_provider;
 

@@ -4,6 +4,22 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.103)
+
+- **Faster agent turns (M1 performance pass)** — the agent loop no longer
+  deep-clones its transcript or re-sums the whole history on every step. The
+  provider-facing transcript is shared behind an `Arc`, a pure append converts
+  only the new tail, the compaction token estimate is incremental, and the
+  activity log is written by one background task per process. TUI-side, the
+  `/research open`, Alt+M full-memory, and output-view overlays now retain a
+  single copy of their rendered rows (PERF-048) and the status bar measures
+  each span set once per frame. No user-visible behaviour change.
+- **Second `/simplify` sweep (v1.0.101/v1.0.102)** — the API-key `mf_search`
+  engines share preflight/finish/mask helpers, engine-merge output is
+  deterministic, and the research web-gatherer volume policy is one helper.
+- **`rustls` security bump** — rustls 0.23.43 -> 0.23.45 (RUSTSEC-2026-0285,
+  a TLS 1.3 handshake boundary issue).
+
 ## Highlights (v1.0.96)
 
 - **`/prompt` system-prompt inspector** — a new read-only slash command renders

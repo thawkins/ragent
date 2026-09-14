@@ -176,7 +176,11 @@ impl StopCondition {
 /// The tracker is the single source of truth for "has the loop stopped?" —
 /// once [`LoopTracker::stop`] is set, no further stage may run (FR-017:
 /// no iteration after a stop condition).
-#[derive(Debug, Clone)]
+///
+/// PERF-035: every field is `Copy`, so `LoopTracker` is `Copy` and the per-loop-
+/// step `active_loops.get(...).cloned()` / `persist_loop_tracker` round-trips are
+/// bitwise copies rather than heap clones.
+#[derive(Debug, Clone, Copy)]
 pub struct LoopTracker {
     /// Number of completed iterations.
     steps: u32,

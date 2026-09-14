@@ -31,6 +31,7 @@ tracing = "0.1"
 
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "stream"] }
+bytes = "1"
 futures = "0.3"
 async-stream = { workspace = true }
 
@@ -43,7 +44,6 @@ hex = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.14"
-bytes = "1"
 
 [lints]
 workspace = true

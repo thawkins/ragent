@@ -348,14 +348,13 @@ impl CodeIndex {
         Ok(Some(store.query_symbols(filter)?))
     }
 
-    /// Find all references to a symbol by name.
+    /// Find references to a symbol by name.
+    ///
+    /// PERF-074: `limit` is pushed into the SQL `LIMIT` so the store does not
+    /// materialise (and then discard) every reference row.
     pub fn references(&self, symbol_name: &str, limit: usize) -> Result<Vec<SymbolRef>> {
         let store = self.store_guard();
-        let mut refs = store.find_references(symbol_name)?;
-        if limit > 0 {
-            refs.truncate(limit);
-        }
-        Ok(refs)
+        store.find_references_limited(symbol_name, limit)
     }
 
     /// Non-blocking variant of [`references()`].
@@ -370,11 +369,7 @@ impl CodeIndex {
             Ok(g) => g,
             Err(_) => return Ok(None),
         };
-        let mut refs = store.find_references(symbol_name)?;
-        if limit > 0 {
-            refs.truncate(limit);
-        }
-        Ok(Some(refs))
+        Ok(Some(store.find_references_limited(symbol_name, limit)?))
     }
 
     /// Get file dependencies in the given direction.

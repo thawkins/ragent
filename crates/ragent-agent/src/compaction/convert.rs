@@ -5,9 +5,13 @@
 //! loop's pre-send / emergency-overflow compaction paths.
 
 use chrono::Utc;
+use std::collections::HashMap;
 
 use crate::llm::{ChatContent, ChatMessage as LlmChatMessage, ContentPart};
 use crate::message::{ImageData, Message, MessagePart, Role, ToolCallState, ToolCallStatus};
+
+/// A location of an assistant [`MessagePart::ToolCall`] awaiting its result.
+type PendingToolUse = (usize, usize);
 
 /// Convert provider-facing [`ChatMessage`]s into the internal [`Message`]
 /// representation used by the compaction runner.
@@ -15,8 +19,15 @@ use crate::message::{ImageData, Message, MessagePart, Role, ToolCallState, ToolC
 /// Tool-use / tool-result content parts are paired back into assistant
 /// [`MessagePart::ToolCall`] parts so the serialiser can render them in the
 /// summarisation prompt.
+///
+/// PERF-037: pairing is done with a single `call_id -> (message, part)` index
+/// built as messages are appended, so the conversion is O(messages x parts)
+/// rather than O(messages^2) — the previous implementation scanned the whole
+/// prior message list backwards for every `ToolResult`.
 pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec<Message> {
     let mut messages: Vec<Message> = Vec::new();
+    // Index of assistant `ToolCall` parts that have not yet received a result.
+    let mut pending: HashMap<&str, PendingToolUse> = HashMap::new();
     let now = Utc::now();
     for msg in chat_messages {
         let role = match msg.role.as_str() {
@@ -26,6 +37,7 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
             "system" | "tool" => continue,
             _ => Role::User,
         };
+        let msg_idx = messages.len();
         let mut parts: Vec<MessagePart> = Vec::new();
         match &msg.content {
             ChatContent::Text(text) => {
@@ -38,6 +50,9 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
                             parts.push(MessagePart::Text { text: text.clone() });
                         }
                         ContentPart::ToolUse { id, name, input } => {
+                            if role == Role::Assistant {
+                                pending.insert(id.as_str(), (msg_idx, parts.len()));
+                            }
                             parts.push(MessagePart::ToolCall {
                                 tool: name.clone(),
                                 call_id: id.clone(),
@@ -54,29 +69,28 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
                             tool_use_id,
                             content,
                         } => {
-                            // Pair with the most recent assistant ToolUse that
-                            // has not yet received a result.
-                            let mut paired = false;
-                            for prev in messages.iter_mut().rev() {
-                                if prev.role != Role::Assistant {
-                                    break;
-                                }
-                                for p in &mut prev.parts {
-                                    if let MessagePart::ToolCall { call_id, state, .. } = p {
-                                        if call_id == tool_use_id && state.output.is_none() {
+                            // Pair with the recorded assistant ToolUse for this
+                            // id (single hash lookup; PERF-037). A part that
+                            // already received a result is not re-paired, so a
+                            // duplicate result still surfaces as a text part.
+                            let paired =
+                                pending
+                                    .get(tool_use_id.as_str())
+                                    .copied()
+                                    .and_then(|(mi, pi)| {
+                                        let target = messages.get_mut(mi)?;
+                                        if let Some(MessagePart::ToolCall { state, .. }) =
+                                            target.parts.get_mut(pi)
+                                            && state.output.is_none()
+                                        {
                                             state.output = Some(serde_json::Value::String(
                                                 content.to_string(),
                                             ));
-                                            paired = true;
-                                            break;
+                                            return Some(());
                                         }
-                                    }
-                                }
-                                if paired {
-                                    break;
-                                }
-                            }
-                            if !paired {
+                                        None
+                                    });
+                            if paired.is_none() {
                                 parts.push(MessagePart::Text {
                                     text: format!("[tool result {tool_use_id}]: {content}"),
                                 });

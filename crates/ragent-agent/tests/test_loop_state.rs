@@ -273,3 +273,23 @@ fn test_loop_spec_serde_round_trip() {
     let back: LoopSpec = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back, spec);
 }
+
+// --- PERF-035: LoopTracker is Copy ------------------------------------------
+
+/// PERF-035: the tracker must be `Copy` so the per-loop-step save/restore
+/// round-trip is a bitwise copy, not a deep clone.
+#[test]
+fn test_loop_tracker_is_copy() {
+    fn assert_copy<T: Copy>() {}
+    assert_copy::<LoopTracker>();
+
+    let mut tracker = LoopTracker::new(&LoopSpec::new("coder", "goal"));
+    tracker.record_tokens(10, 20);
+    tracker.record_tool_calls(3);
+    // A `Copy` value can be duplicated without a clone call; both copies are
+    // independent afterwards.
+    let snapshot = tracker;
+    tracker.record_tokens(1, 1);
+    assert_eq!(snapshot.tokens(), 30);
+    assert_eq!(tracker.tokens(), 32);
+}

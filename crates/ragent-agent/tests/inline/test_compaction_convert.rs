@@ -199,3 +199,50 @@ fn test_empty_input_yields_empty_output() {
     assert!(chat_messages_to_messages(&[]).is_empty());
     assert!(messages_to_chat_messages(&[]).is_empty());
 }
+
+// --- PERF-037: O(n) tool pairing --------------------------------------------
+
+/// PERF-037: 200 tool-use/result pairs must all pair correctly in one pass.
+/// The previous O(n^2) backward scan produced identical output; this pins the
+/// pairing behaviour for a large batch.
+#[test]
+fn test_many_tool_calls_pair_in_one_pass() {
+    let mut chat: Vec<ChatMessage> = Vec::new();
+    for i in 0..200 {
+        chat.push(assistant_tool_use(
+            &format!("call-{i}"),
+            "read",
+            serde_json::json!({"path": format!("file-{i}.rs")}),
+        ));
+        chat.push(ChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Parts(vec![ContentPart::ToolResult {
+                tool_use_id: format!("call-{i}"),
+                content: format!("contents of file {i}").into(),
+            }]),
+        });
+    }
+
+    let messages = chat_messages_to_messages(&chat);
+    // One assistant message per pair (the user result messages contribute no
+    // standalone message: each result pairs into the preceding assistant part).
+    let tool_calls: Vec<_> = messages
+        .iter()
+        .flat_map(|m| m.parts.iter())
+        .filter_map(|p| match p {
+            MessagePart::ToolCall { call_id, state, .. } => {
+                Some((call_id.clone(), state.output.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(tool_calls.len(), 200);
+    for (i, (call_id, output)) in tool_calls.iter().enumerate() {
+        assert_eq!(call_id, &format!("call-{i}"));
+        assert_eq!(
+            output.as_ref().and_then(|v| v.as_str()),
+            Some(format!("contents of file {i}").as_str())
+        );
+    }
+}

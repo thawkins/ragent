@@ -14,7 +14,8 @@
 use crate::polarity::source_body_text;
 use crate::source::Source;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+// PERF-080: FxHash for dimension/token and small integer-pair keys.
+use rustc_hash::FxHashMap as HashMap;
 
 /// A single claim extracted from a source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -321,7 +322,7 @@ pub fn build_contradiction_graph_with(
         return ContradictionGraph::empty();
     }
 
-    let mut dimension_claims: DimensionClaims<'_> = HashMap::new();
+    let mut dimension_claims: DimensionClaims<'_> = HashMap::default();
 
     for (idx, body, src) in &lowercased_bodies {
         for dim in &config.dimensions {
@@ -351,7 +352,7 @@ pub fn build_contradiction_graph_with(
     }
 
     let mut graph = ContradictionGraph::empty();
-    let mut seen_pairs: HashMap<(usize, usize), usize> = HashMap::new();
+    let mut seen_pairs: HashMap<(usize, usize), usize> = HashMap::default();
 
     for (dimension, (positives, negatives)) in &dimension_claims {
         if positives.is_empty() || negatives.is_empty() {
@@ -392,7 +393,7 @@ pub fn build_contradiction_graph_with(
 
     // Deduplicate: keep the strongest edge for each unique pair.
     let mut deduped = ContradictionGraph::empty();
-    let mut best_by_pair: HashMap<(usize, usize), ContradictionEdge> = HashMap::new();
+    let mut best_by_pair: HashMap<(usize, usize), ContradictionEdge> = HashMap::default();
     for edge in &graph.edges {
         let key = if edge.claim_a.source_index <= edge.claim_b.source_index {
             (edge.claim_a.source_index, edge.claim_b.source_index)

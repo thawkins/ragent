@@ -3,6 +3,8 @@
 //!
 //! These helpers were previously inline in `web_gatherer.rs`.
 
+use std::borrow::Cow;
+
 #[allow(dead_code)]
 // reason: only consumed inside this crate - `pub` here never escapes the crate.
 #[allow(unreachable_pub)]
@@ -12,61 +14,113 @@ pub fn compute_relevance_label(
     snippet: &str,
     url: &str,
 ) -> (String, bool) {
-    let query_terms = normalize_query_terms(query);
-    if query_terms.is_empty() {
-        return ("Match score unavailable".into(), true);
+    PreparedQuery::new(query).label(title, snippet, url)
+}
+
+/// A query pre-normalised once and scored against many candidates.
+///
+/// Building this is O(query terms); scoring a candidate against it performs no
+/// query-side allocations (the terms, their morphological variants, and the
+/// lowercased query are all computed once). The per-candidate loop only
+/// lowercases the three candidate fields, and borrows them unchanged when they
+/// already contain no uppercase characters (PERF-068).
+#[derive(Debug)]
+pub struct PreparedQuery {
+    /// Lowercased query text, used for the exact-title comparison.
+    lower: String,
+    /// Deduplicated, stopword-stripped terms paired with their morphological
+    /// variants, derived once at construction.
+    terms: Vec<(String, Vec<String>)>,
+}
+
+impl PreparedQuery {
+    /// Build a prepared query from raw query text.
+    #[must_use]
+    pub fn new(query: &str) -> Self {
+        let lower = query.to_lowercase();
+        let terms = normalize_query_terms(query)
+            .into_iter()
+            .map(|term| {
+                let variants = morph_variants(&term);
+                (term, variants)
+            })
+            .collect();
+        Self { lower, terms }
     }
 
-    let title_lc = title.to_lowercase();
-    let snippet_lc = snippet.to_lowercase();
-    let url_lc = url.to_lowercase();
-    let hay = format!("{} {} {}", title_lc, snippet_lc, url_lc);
+    /// Compute the relevance label for a candidate and whether it is retained.
+    ///
+    /// Equivalent to [`compute_relevance_label`] for the query this was built
+    /// from, but without the per-candidate query normalisation.
+    #[must_use]
+    pub fn label(&self, title: &str, snippet: &str, url: &str) -> (String, bool) {
+        if self.terms.is_empty() {
+            return ("Match score unavailable".into(), true);
+        }
 
-    let mut hits = 0usize;
-    let mut title_hits = 0usize;
-    let mut snippet_hits = 0usize;
-    for term in &query_terms {
-        // Derive the morphological variants once per term, then reuse them
-        // against the combined haystack, title, and snippet.
-        let variants = morph_variants(term);
-        if contains_term(term, &variants, &hay) {
-            hits += 1;
-            if contains_term(term, &variants, &title_lc) {
-                title_hits += 1;
-            }
-            if contains_term(term, &variants, &snippet_lc) {
-                snippet_hits += 1;
+        let title_lc = lowercase_cow(title);
+        let snippet_lc = lowercase_cow(snippet);
+        let url_lc = lowercase_cow(url);
+
+        let mut hits = 0usize;
+        let mut title_hits = 0usize;
+        let mut snippet_hits = 0usize;
+        for (term, variants) in &self.terms {
+            // Derive the morphological variants once per term (at build time),
+            // then reuse them against the title, snippet, and URL separately.
+            // Splitting the former `title snippet url` haystack is equivalent
+            // because normalised terms never contain whitespace.
+            let in_title = contains_term(term, variants, &title_lc);
+            let in_snippet = contains_term(term, variants, &snippet_lc);
+            if in_title || in_snippet || contains_term(term, variants, &url_lc) {
+                hits += 1;
+                if in_title {
+                    title_hits += 1;
+                }
+                if in_snippet {
+                    snippet_hits += 1;
+                }
             }
         }
+        let ratio = hits as f64 / self.terms.len() as f64;
+
+        let label = if !title.is_empty() && title_lc.as_ref() == self.lower.as_str() {
+            "Very high — exact title match"
+        } else if ratio >= 0.75 && title_hits > 0 && snippet_hits > 0 {
+            "High — title + snippet match query"
+        } else if ratio >= 0.6 && title_hits > 0 {
+            "High — title matches query"
+        } else if ratio >= 0.6 && snippet_hits > 0 {
+            "Medium-high — snippet matches query"
+        } else if ratio >= 0.25 && title_hits >= 2 {
+            // Title-signal rescue: decomposed sub-queries are often verbose
+            // ("how to write goals and configure AI agent loops" — 6 terms), so
+            // an on-topic title like "Designing agentic loops" only matches 2 of
+            // them (ratio 0.33) and would fall below the Medium floor. Two or
+            // more distinct query terms in the *title* is a strong topical
+            // signal on its own; retain it.
+            "Medium — multiple title terms match query"
+        } else if ratio >= 0.35 {
+            "Medium — partial query match"
+        } else if ratio >= 0.2 {
+            "Low — weak query match"
+        } else {
+            "Very low — no clear query match"
+        };
+
+        let retained = !label.starts_with("Low") && !label.starts_with("Very low");
+        (label.into(), retained)
     }
-    let ratio = hits as f64 / query_terms.len() as f64;
+}
 
-    let label = if !title.is_empty() && title_lc == query.to_lowercase() {
-        "Very high — exact title match"
-    } else if ratio >= 0.75 && title_hits > 0 && snippet_hits > 0 {
-        "High — title + snippet match query"
-    } else if ratio >= 0.6 && title_hits > 0 {
-        "High — title matches query"
-    } else if ratio >= 0.6 && snippet_hits > 0 {
-        "Medium-high — snippet matches query"
-    } else if ratio >= 0.25 && title_hits >= 2 {
-        // Title-signal rescue: decomposed sub-queries are often verbose
-        // ("how to write goals and configure AI agent loops" — 6 terms), so
-        // an on-topic title like "Designing agentic loops" only matches 2 of
-        // them (ratio 0.33) and would fall below the Medium floor. Two or
-        // more distinct query terms in the *title* is a strong topical
-        // signal on its own; retain it.
-        "Medium — multiple title terms match query"
-    } else if ratio >= 0.35 {
-        "Medium — partial query match"
-    } else if ratio >= 0.2 {
-        "Low — weak query match"
+/// Lowercase `s`, borrowing it unchanged when it already contains no uppercase
+/// characters (common for URLs), so the common case allocates nothing.
+fn lowercase_cow(s: &str) -> Cow<'_, str> {
+    if s.chars().any(char::is_uppercase) {
+        Cow::Owned(s.to_lowercase())
     } else {
-        "Very low — no clear query match"
-    };
-
-    let retained = !label.starts_with("Low") && !label.starts_with("Very low");
-    (label.into(), retained)
+        Cow::Borrowed(s)
+    }
 }
 
 /// Case-insensitive morphological term matching.

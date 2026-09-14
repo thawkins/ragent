@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::sync::Mutex;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::{
@@ -87,7 +88,18 @@ pub struct FtsIndex {
     index: Index,
     reader: IndexReader,
     fields: FtsFields,
+    /// PERF-075: one long-lived `IndexWriter` per process, created lazily on
+    /// first use and reused for every batch.  Rebuilding the writer per batch
+    /// re-allocated its 15 MB heap, re-acquired the underlying lock file, and
+    /// re-opened the segments on every commit.  The `FtsIndex` is itself only
+    /// reached through the `Index`-level `Mutex`, so a plain `Mutex` here is
+    /// sufficient to serialise writer access.
+    writer: Mutex<Option<IndexWriter>>,
 }
+
+/// PERF-075: the writer's heap budget.  Small but sufficient for incremental
+/// updates, and allocated once per process now rather than per batch.
+const WRITER_HEAP_BYTES: usize = 15_000_000;
 
 impl FtsIndex {
     /// Open (or create) a tantivy index on disk.
@@ -135,21 +147,23 @@ impl FtsIndex {
     ///
     /// Call `commit()` afterwards to make them searchable.
     pub fn add_symbols(&self, symbols: &[FtsSymbol<'_>]) -> Result<()> {
-        let mut writer = self.writer()?;
-        for sym in symbols {
-            writer.add_document(self.document_from_symbol(sym))?;
-        }
-        writer.commit()?;
-        Ok(())
+        self.with_writer(|writer| {
+            for sym in symbols {
+                writer.add_document(self.document_from_symbol(sym))?;
+            }
+            writer.commit()?;
+            Ok(())
+        })
     }
 
     /// Remove all entries for a given file path.
     pub fn remove_file(&self, file_path: &str) -> Result<()> {
-        let mut writer = self.writer()?;
-        let term = tantivy::Term::from_field_text(self.fields.file_path, file_path);
-        writer.delete_term(term);
-        writer.commit()?;
-        Ok(())
+        self.with_writer(|writer| {
+            let term = tantivy::Term::from_field_text(self.fields.file_path, file_path);
+            writer.delete_term(term);
+            writer.commit()?;
+            Ok(())
+        })
     }
 
     /// Batch-update the FTS index: remove old entries for the given files,
@@ -158,27 +172,28 @@ impl FtsIndex {
     /// Much faster than calling `remove_file()` + `add_symbols()` per file
     /// because it avoids per-file writer allocation and commit overhead.
     pub fn batch_update(&self, remove_paths: &[&str], symbols: &[FtsSymbol<'_>]) -> Result<()> {
-        let mut writer = self.writer()?;
+        self.with_writer(|writer| {
+            for path in remove_paths {
+                let term = tantivy::Term::from_field_text(self.fields.file_path, path);
+                writer.delete_term(term);
+            }
 
-        for path in remove_paths {
-            let term = tantivy::Term::from_field_text(self.fields.file_path, path);
-            writer.delete_term(term);
-        }
+            for sym in symbols {
+                writer.add_document(self.document_from_symbol(sym))?;
+            }
 
-        for sym in symbols {
-            writer.add_document(self.document_from_symbol(sym))?;
-        }
-
-        writer.commit()?;
-        Ok(())
+            writer.commit()?;
+            Ok(())
+        })
     }
 
     /// Delete all documents from the FTS index.
     pub fn clear(&self) -> Result<()> {
-        let mut writer = self.writer()?;
-        writer.delete_all_documents()?;
-        writer.commit()?;
-        Ok(())
+        self.with_writer(|writer| {
+            writer.delete_all_documents()?;
+            writer.commit()?;
+            Ok(())
+        })
     }
 
     /// Search the FTS index with the given query string.
@@ -437,14 +452,27 @@ impl FtsIndex {
             index,
             reader,
             fields,
+            writer: Mutex::new(None),
         })
     }
 
-    fn writer(&self) -> Result<IndexWriter> {
-        // 15 MB heap for the writer — small but sufficient for incremental updates
-        self.index
-            .writer(15_000_000)
-            .context("cannot create index writer")
+    /// PERF-075: runs `f` against the single long-lived `IndexWriter`,
+    /// creating it on first use.  Reusing one writer avoids re-allocating its
+    /// heap and re-opening the segment set on every batch.
+    fn with_writer<T>(&self, f: impl FnOnce(&mut IndexWriter) -> Result<T>) -> Result<T> {
+        let mut guard = self
+            .writer
+            .lock()
+            .map_err(|e| anyhow::anyhow!("fts writer lock poisoned: {e}"))?;
+        if guard.is_none() {
+            *guard = Some(
+                self.index
+                    .writer(WRITER_HEAP_BYTES)
+                    .context("cannot create index writer")?,
+            );
+        }
+        let writer = guard.as_mut().expect("writer initialised above");
+        f(writer)
     }
 
     fn get_text(&self, doc: &TantivyDocument, field: Field) -> String {

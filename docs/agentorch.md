@@ -514,3 +514,81 @@ lives in `team/` and `task/` and routes through `SessionProcessor`'s
 | Trigger decision | `compaction/estimator.rs:236` |
 | Coordinator | `orchestrator/coordinator.rs:120` |
 | Agent registry | `orchestrator/registry.rs:57` |
+
+---
+
+## 10. Performance remediation register (PERF-032..082)
+
+The workspace-wide performance audit and its remediation backlog live in
+[`docs/PERFPLAN.md`](PERFPLAN.md). This table tracks which `PERF-NNN` items have
+landed and where the code lives. Items marked *shipped* have their acceptance
+test in the crate's `tests/` directory (or a bench) behind them.
+
+| ID | Milestone | Area | Location | Status |
+| -- | --------- | ---- | -------- | ------ |
+| PERF-032 | M1 | Agent per-turn hot path | `session/loop_steps.rs`, `session/cache.rs` | shipped |
+| PERF-033 | M1 | Agent per-turn hot path | `session/cache.rs`, `session/loop_steps.rs` | shipped |
+| PERF-034 | M1 | Agent per-turn hot path | `session/cache.rs`, `session/processor.rs` | shipped |
+| PERF-035 | M1 | Agent per-turn hot path | `session/loop_state.rs` | shipped |
+| PERF-036 | M1 | Agent per-turn hot path | `compaction/runner.rs`, `compaction/estimator.rs` | shipped |
+| PERF-037 | M1 | Agent per-turn hot path | `compaction/convert.rs` | shipped |
+| PERF-038 | M1 | Agent per-turn hot path | `compaction/runner.rs`, `compaction/serializer.rs`, `compaction/prompt.rs` | shipped |
+| PERF-039 | M1 | Agent per-turn hot path | `agent/mod.rs`, `session/prompt_builders.rs` | shipped |
+| PERF-040 | M1 | Agent per-turn hot path | `session/processor.rs`, `src/main.rs` | shipped |
+| PERF-041 | M2 | TUI render loop | `ragent-tui/src/layout.rs` | shipped |
+| PERF-042 | M2 | TUI render loop | `ragent-tui/src/layout.rs` | shipped |
+| PERF-043 | M2 | TUI render loop | `ragent-tui/src/layout.rs` | shipped |
+| PERF-044 | M2 | TUI render loop | `ragent-tui/src/lib.rs` | shipped |
+| PERF-045 | M2 | TUI render loop | `ragent-tui/src/lib.rs` | shipped |
+| PERF-046 | M2 | TUI render loop | `ragent-tui/src/layout.rs` | shipped |
+| PERF-047 | M2 | TUI render loop | `ragent-tui/src/widgets/message_widget.rs` | shipped |
+| PERF-048 | M2 | TUI render loop | `layout.rs`, `layout_statusbar.rs` | shipped |
+| PERF-049 | M3 | Async runtime hygiene | `ragent-research/src/gather_log.rs` | shipped |
+| PERF-050 | M3 | Async runtime hygiene | `ragent-research/src/gather_log.rs` | shipped |
+| PERF-051 | M3 | Async runtime hygiene | `ragent-agent/src/reference/fuzzy.rs` | shipped |
+| PERF-052 | M3 | Async runtime hygiene | `ragent-tools-core/src/glob.rs` | shipped |
+| PERF-053 | M3 | Async runtime hygiene | `ragent-tools-core/src/read.rs` | shipped |
+| PERF-054 | M3 | Async runtime hygiene | `ragent-types/src/event/mod.rs` | shipped |
+| PERF-055 | M3 | Async runtime hygiene | `ragent-types/src/sanitize.rs` | shipped |
+| PERF-056 | M3 | Async runtime hygiene | `ragent-server/src/routes/mod.rs` | shipped |
+| PERF-057 | M4 | Network & resource reuse | `ragent-tools-vcs/src/git/mod.rs` | shipped |
+| PERF-058 | M4 | Network & resource reuse | `github/client.rs`, `gitlab/client.rs`, auth modules | shipped |
+| PERF-059 | M4 | Network & resource reuse | `github/auth.rs`, `gitlab/client.rs` | shipped |
+| PERF-060 | M4 | Network & resource reuse | `ragent-llm/src/providers/copilot.rs` | shipped |
+| PERF-061 | M4 | Network & resource reuse | `ragent-llm/src/providers/azure_foundry.rs` | shipped |
+| PERF-062 | M4 | Network & resource reuse | `ragent-llm/src/providers/ollama_cloud.rs` | shipped |
+| PERF-063 | M4 | Network & resource reuse | 12 streaming providers (Appendix B) | shipped |
+| PERF-064 | M5 | Regex hoisting | `masterfetch/metadata.rs`, `masterfetch/youtube.rs` | shipped |
+| PERF-065 | M5 | Regex hoisting | `ragent-research/src/web_date.rs` | shipped |
+| PERF-066 | M5 | Regex hoisting | `clarify.rs`, `planner.rs`, `cluster.rs`, `topic.rs`, `document.rs` | shipped |
+| PERF-067 | M5 | Regex hoisting | `ragent-agent/src/template/mod.rs` | shipped |
+| PERF-068 | M5 | Regex hoisting | `web_gatherer/relevance.rs` | shipped |
+| PERF-069 | M6 | Data layer | `ragent-storage/src/storage.rs` | shipped |
+| PERF-070 | M6 | Data layer | `ragent-storage/src/snapshot.rs` | shipped |
+| PERF-071 | M6 | Data layer | `activity_log.rs`, `storage.rs` | shipped |
+| PERF-072 | M6 | Data layer | `ragent-codeindex/src/store.rs` | shipped |
+| PERF-073 | M6 | Data layer | `ragent-codeindex/src/store.rs` | shipped |
+| PERF-074 | M6 | Data layer | `ragent-codeindex/src/store.rs` | shipped |
+| PERF-075 | M6 | Data layer | `ragent-codeindex/src/search.rs` | shipped |
+| PERF-076 | M6 | Data layer | `ragent-agent/src/mcp/mod.rs` | shipped |
+| PERF-077 | M6 | Data layer | `ragent-research/src/web_gatherer.rs` | shipped |
+| PERF-078 | M7 | Guardrails | `scripts/check-perf-regression.sh` | shipped |
+| PERF-079 | M7 | Guardrails | `crates/*/benches/` | shipped |
+| PERF-080 | M7 | Guardrails | hasher policy (Appendix C sites) | shipped |
+| PERF-081 | M7 | Guardrails | `docs/agentorch.md` (this table) | shipped |
+| PERF-082 | M7 | Guardrails | `agent/mod.rs`, `compaction/prompt.rs` | shipped |
+
+Notes:
+
+- **PERF-036/038** landed with M6; the estimator tracker and the single-buffer
+  prompt builder are described in §5.1 and §5.3 above.
+- **PERF-032..040 + PERF-048** landed in the M1 pass; the per-turn `Arc`
+  transcript, the pure-append fast path, the cached subagent tool surface, the
+  `Copy` `LoopTracker`, the incremental `RequestTokenTracker`, the single-pass
+  tool pairing, the single-buffer compaction prompt, the memoised memory-entry
+  token costs, the background activity-log writer, and the single-copy TUI
+  viewers are all described in §5.1 and §5.3 above.
+- **PERF-078/079** are the guardrail pair: the regression gate in
+  `scripts/check-perf-regression.sh` runs the crate baselines, and the benches
+  under `crates/ragent-agent/benches/` cover the M1 turn-loop targets
+  (`turn_loop`, `hot_paths`, `m3_hot_paths`, `agent_loop`).
