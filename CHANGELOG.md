@@ -1,5 +1,33 @@
 # Changelog
 
+## Version: 1.0.102
+
+- **Simplify/quality pass across the search, research, agent, and TUI
+  crates** — second `/simplify` sweep. In `masterfetch::search` the API-key
+  engines (`tavily`, `perplexity`, `exa`, `serper`, `langsearch`) now share
+  four helpers on `engine.rs` (`engine_http_client`, `api_engine_preflight`,
+  `finish_json_search`, `mask_api_key`) plus `truncate_snippet` /
+  `truncate_query_to`, removing ~150 duplicated lines; `strip_disallowed_quotes`
+  became a single allocation; `search_with_retry` caps the backoff shift at 31
+  to avoid an out-of-range-shift panic; and `diversity_truncate` now takes and
+  returns owned vectors, renumbers positions in surviving order, and re-syncs
+  `total_merged_results`. `MfSearchTool::engine_status` derives all three
+  flags from `in_use` and `resolve_search_keys` uses one `pick` closure. In
+  `ragent-research` the web-gatherer volume policy (per-query search allowance
+  + fetch budget) is resolved by one `volume_policy()` helper, the capture
+  stat is credited before the `search_engine` field is moved, and the vestigial
+  `deadline_fired` flag was removed (the fetch stage is deadline-neutral);
+  `SimpleCritic` lowercases source titles/paths once instead of per
+  sub-question; `provider_stats` routes its lock through `lock_by_tool`;
+  `relevance.rs` precomputes morphological variants once per term and guards
+  the doubled-consonant stem against a non-char-boundary slice. In
+  `ragent-agent` `history.rs` extracts a shared `assistant_tool_results`
+  helper and `compaction/convert.rs` parses `data:` URIs to the real MIME type
+  and matches a single-text part by slice. In `ragent-tui` the research
+  clarification retry is extracted into `run_with_clarification`, the
+  websearch render spawn is guarded against a panic leaving the status line
+  stuck, and orphaned comments/formatter duplication were removed.
+
 ## Version: 1.0.101
 
 - **Simplify pass over four crates** - code-quality fixes from a review

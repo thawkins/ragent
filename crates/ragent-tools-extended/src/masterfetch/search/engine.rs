@@ -556,16 +556,28 @@ pub fn normalise_result_url(url: &str) -> String {
 /// gracefully instead of silently losing engines.
 #[must_use]
 pub fn strip_disallowed_quotes(query: &str) -> String {
-    query
-        .replace(
-            [
-                '"', '\'', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{00AB}', '\u{00BB}',
-            ],
-            "",
-        )
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    const DISALLOWED: [char; 8] = [
+        '"', '\'', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{00AB}', '\u{00BB}',
+    ];
+    // Single pass, one allocation: drop disallowed quote characters and
+    // collapse whitespace runs, trimming leading/trailing whitespace.
+    let mut out = String::with_capacity(query.len());
+    let mut pending_space = false;
+    for ch in query.chars() {
+        if ch.is_whitespace() {
+            pending_space = !out.is_empty();
+            continue;
+        }
+        if DISALLOWED.contains(&ch) {
+            continue;
+        }
+        if pending_space {
+            out.push(' ');
+            pending_space = false;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 /// Remove duplicate results by normalised URL, preserving first occurrence.
@@ -805,8 +817,10 @@ pub async fn search_with_retry(
             return report;
         }
         attempt += 1;
-        // Exponential backoff: retry_delay, 2*retry_delay, 4*retry_delay, …
-        let delay = retry_delay.saturating_mul(1u32 << (attempt - 1));
+        // Exponential backoff: retry_delay, 2*retry_delay, 4*retry_delay, ....
+        // The exponent is capped at 31 so an out-of-range `max_retries` cannot
+        // overflow the shift (which would panic in debug builds).
+        let delay = retry_delay.saturating_mul(1u32 << (attempt - 1).min(31));
         tracing::warn!(
             engine = %report.engine,
             attempt,
@@ -816,6 +830,130 @@ pub async fn search_with_retry(
         );
         tokio::time::sleep(delay).await;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Shared API-engine helpers
+// ---------------------------------------------------------------------------
+
+/// Maximum number of characters [`truncate_snippet`] keeps before appending an
+/// ellipsis.
+pub const SNIPPET_MAX_CHARS: usize = 200;
+
+/// Resolve an engine's HTTP client, falling back to the shared masterfetch
+/// default client when none was injected via `with_client`.
+///
+/// Every API-key-backed engine stores an optional client for mock-server tests;
+/// centralising the fallback keeps the adapters from drifting apart.
+pub(crate) fn engine_http_client(
+    client: &Option<reqwest::Client>,
+) -> Result<reqwest::Client, String> {
+    if let Some(c) = client {
+        return Ok(c.clone());
+    }
+    crate::masterfetch::http::build_default_client()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))
+}
+
+/// Truncate a query to at most `max` characters, respecting UTF-8 character
+/// boundaries.
+#[must_use]
+pub fn truncate_query_to(query: &str, max: usize) -> String {
+    if query.chars().count() <= max {
+        query.to_string()
+    } else {
+        query.chars().take(max).collect()
+    }
+}
+
+/// Truncate a snippet to [`SNIPPET_MAX_CHARS`] characters, appending an
+/// ellipsis when the input was longer.
+#[must_use]
+pub fn truncate_snippet(snippet: &str) -> String {
+    let mut chars = snippet.chars();
+    let truncated: String = chars.by_ref().take(SNIPPET_MAX_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+/// Mask a sensitive API key for display.
+///
+/// Keeps the first two and last two characters; everything in between is
+/// replaced with `*`. Strings of six characters or fewer are fully masked.
+#[must_use]
+pub fn mask_api_key(key: &str) -> String {
+    let len = key.chars().count();
+    if len <= 6 {
+        return "*".repeat(len);
+    }
+    let first: String = key.chars().take(2).collect();
+    let last: String = key.chars().skip(len - 2).collect();
+    format!("{first}*{}*{last}", "*".repeat(len.saturating_sub(6)))
+}
+
+/// Common pre-flight guard shared by the API-key-backed engines.
+///
+/// Returns `Some(report)` when the call must be short-circuited (empty query or
+/// missing key) and `None` when the engine should proceed.
+pub(crate) fn api_engine_preflight(
+    engine: &str,
+    query: &str,
+    api_key: &str,
+    missing_key_msg: &str,
+) -> Option<EngineReport> {
+    if query.trim().is_empty() {
+        return Some(EngineReport::error(
+            engine,
+            "search query must not be empty",
+        ));
+    }
+    if api_key.is_empty() {
+        return Some(EngineReport::blocked(engine, missing_key_msg));
+    }
+    None
+}
+
+/// Shared post-response tail for the JSON API engines.
+///
+/// Maps a finished HTTP response into an [`EngineReport`]: status check, body
+/// read, JSON parse, dedup, truncation to `max_results`, and duration stamping.
+/// `on_error` supplies the blocked message for a non-success status so each
+/// engine keeps its provider-specific wording.
+pub(crate) async fn finish_json_search(
+    engine: &str,
+    started: std::time::Instant,
+    response: reqwest::Response,
+    max_results: usize,
+    parse: impl FnOnce(&serde_json::Value) -> Vec<RawResult>,
+    on_error: impl FnOnce(reqwest::StatusCode) -> String,
+) -> EngineReport {
+    let status = response.status();
+    if !status.is_success() {
+        tracing::warn!(status = %status, engine = engine, "api returned error status");
+        return EngineReport::blocked(engine, on_error(status));
+    }
+    let text = match response.text().await {
+        Ok(t) => t,
+        Err(e) => {
+            return EngineReport::error(engine, format!("failed to read response body: {e}"));
+        }
+    };
+    let value: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            return EngineReport::error(engine, format!("failed to parse response JSON: {e}"));
+        }
+    };
+    let mut results = parse(&value);
+    results = dedup_results_by_url(&results);
+    results.truncate(max_results);
+    let elapsed = started.elapsed().as_millis() as u64;
+    let mut report = EngineReport::ok(engine, results);
+    report.duration_ms = elapsed;
+    report
 }
 
 // ---------------------------------------------------------------------------

@@ -526,12 +526,9 @@ pub fn merge_and_rank_with_cap(
     max_results: usize,
 ) -> MergeOutput {
     let mut output = merge_and_rank(reports, query);
-    output.results = diversity_truncate(&output.results, max_results);
-    // Re-sync metadata and positions after truncation.
+    output.results = diversity_truncate(std::mem::take(&mut output.results), max_results);
+    // `diversity_truncate` renumbers positions; re-sync the merged total.
     output.total_merged_results = output.results.len();
-    for (i, r) in output.results.iter_mut().enumerate() {
-        r.position = i + 1;
-    }
     output
 }
 
@@ -544,6 +541,12 @@ fn per_engine_share_limit(max_results: usize) -> usize {
     (max_results.div_ceil(2)).max(2)
 }
 
+/// Split a consensus `source` field (comma-separated engine CSV) into engine
+/// names, dropping blank entries.
+fn source_engines(source: &str) -> impl Iterator<Item = &str> {
+    source.split(',').map(str::trim).filter(|e| !e.is_empty())
+}
+
 /// Count how many results each engine contributes across a result list.
 ///
 /// The `source` field is a comma-separated engine list for consensus URLs
@@ -553,12 +556,7 @@ fn per_engine_share_limit(max_results: usize) -> usize {
 fn count_engines<'a>(results: impl Iterator<Item = &'a ConsensusResult>) -> HashMap<String, usize> {
     let mut counts: HashMap<String, usize> = HashMap::new();
     for result in results {
-        for engine in result
-            .source
-            .split(',')
-            .map(str::trim)
-            .filter(|e| !e.is_empty())
-        {
+        for engine in source_engines(&result.source) {
             *counts.entry(engine.to_string()).or_insert(0) += 1;
         }
     }
@@ -572,33 +570,29 @@ fn count_engines<'a>(results: impl Iterator<Item = &'a ConsensusResult>) -> Hash
 /// Pass 1 keeps results whose every contributing engine is still under the
 /// share limit. Pass 2 fills any remaining slots with the highest-scoring
 /// skipped results regardless of engine, so a merge fed by engines with few
-/// candidates still returns the full budget.
-fn diversity_truncate(results: &[ConsensusResult], max_results: usize) -> Vec<ConsensusResult> {
+/// candidates still returns the full budget. Positions are renumbered in the
+/// surviving order.
+fn diversity_truncate(results: Vec<ConsensusResult>, max_results: usize) -> Vec<ConsensusResult> {
     if results.len() <= max_results {
-        return results.to_vec();
+        return results;
     }
 
-    // One contributing engine → plain truncation keeps full fidelity.
+    // One contributing engine -> plain truncation keeps full fidelity.
     let engine_counts = count_engines(results.iter());
     if engine_counts.len() <= 1 {
-        return results[..max_results].to_vec();
+        return results.into_iter().take(max_results).collect();
     }
 
     let limit = per_engine_share_limit(max_results);
     let mut kept: Vec<ConsensusResult> = Vec::with_capacity(max_results);
-    let mut held = count_engines(std::iter::empty());
-    let mut skipped: Vec<&ConsensusResult> = Vec::new();
+    let mut held: HashMap<String, usize> = HashMap::new();
+    let mut skipped: Vec<ConsensusResult> = Vec::new();
 
     for result in results {
         if kept.len() == max_results {
             break;
         }
-        let engines: Vec<&str> = result
-            .source
-            .split(',')
-            .map(str::trim)
-            .filter(|e| !e.is_empty())
-            .collect();
+        let engines: Vec<&str> = source_engines(&result.source).collect();
         let under_limit = engines
             .iter()
             .all(|e| held.get(*e).copied().unwrap_or(0) < limit);
@@ -606,7 +600,7 @@ fn diversity_truncate(results: &[ConsensusResult], max_results: usize) -> Vec<Co
             for e in &engines {
                 *held.entry((*e).to_string()).or_insert(0) += 1;
             }
-            kept.push(result.clone());
+            kept.push(result);
         } else {
             skipped.push(result);
         }
@@ -618,8 +612,11 @@ fn diversity_truncate(results: &[ConsensusResult], max_results: usize) -> Vec<Co
         if kept.len() == max_results {
             break;
         }
-        kept.push(result.clone());
+        kept.push(result);
     }
 
+    for (i, r) in kept.iter_mut().enumerate() {
+        r.position = i + 1;
+    }
     kept
 }

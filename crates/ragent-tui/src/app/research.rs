@@ -56,8 +56,8 @@ async fn ask_user_clarification(
 }
 
 /// Returns `true` when the user supplied a usable clarification answer.
-fn clarification_answered(answer: Option<&str>) -> bool {
-    matches!(answer, Some(a) if !a.trim().is_empty() && a.trim() != QUESTION_DISMISSED_MARKER)
+fn clarification_answered(answer: &str) -> bool {
+    !answer.trim().is_empty() && answer.trim() != QUESTION_DISMISSED_MARKER
 }
 
 /// Format a `provider_tool_calls` list as a human-readable suffix like
@@ -68,13 +68,45 @@ fn format_provider_calls(calls: &[(String, usize)]) -> String {
     if calls.is_empty() {
         return String::new();
     }
+    let total: usize = calls.iter().map(|(_, count)| count).sum();
     let per_tool = calls
         .iter()
         .map(|(tool, count)| format!("{tool}: {count}"))
         .collect::<Vec<_>>()
         .join(", ");
-    let total: usize = calls.iter().map(|(_, count)| count).sum();
     format!(", {total} search request(s) ({per_tool})")
+}
+
+/// Run a research session, routing a `NeedsClarification` result through the
+/// TUI question dialog and re-running once with the clarified topic.
+///
+/// Shared by the `/research create` and `/research update` spawns so the
+/// clarification retry policy lives in one place.
+async fn run_with_clarification(
+    session: &ragent_research::ResearchSession,
+    name: &str,
+    title: &str,
+    config: &ragent_research::SessionConfig,
+    observer: Arc<dyn ragent_research::SessionObserver>,
+    event_bus: &Arc<EventBus>,
+    session_id: &str,
+) -> Result<ragent_research::RunOutcome, String> {
+    match session.run(name, title, config, observer.clone()).await {
+        Ok(outcome) => Ok(outcome),
+        Err(ragent_research::ResearchError::NeedsClarification { question }) => {
+            let answer = ask_user_clarification(event_bus, session_id, &question).await;
+            let Some(answer) = answer.filter(|a| clarification_answered(a)) else {
+                return Err("clarification cancelled".to_string());
+            };
+            let mut clarified = config.clone();
+            clarified.input.topic = format!("{} (clarification: {answer})", clarified.input.topic);
+            session
+                .run(name, title, &clarified, observer)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// Run concept-extraction for a `/research cluster` command end-to-end.
@@ -360,47 +392,15 @@ impl App {
                 let event_bus_for_spawn = self.event_bus.clone();
                 let session_id_for_spawn = self.session_id.clone().unwrap_or_default();
                 tokio::spawn(async move {
-                    let outcome: Result<ragent_research::RunOutcome, String> = async {
-                        match session
-                            .run(&name_for_spawn, &title, &config, observer_clone.clone())
-                            .await
-                        {
-                            Ok(o) => Ok(o),
-                            Err(ragent_research::ResearchError::NeedsClarification {
-                                question,
-                            }) => {
-                                // Route the clarifying question through the
-                                // TUI question dialog (ask_user) and re-run
-                                // the session with the clarified topic.
-                                let answer = ask_user_clarification(
-                                    &event_bus_for_spawn,
-                                    &session_id_for_spawn,
-                                    &question,
-                                )
-                                .await;
-                                if clarification_answered(answer.as_deref()) {
-                                    let mut config = config.clone();
-                                    config.input.topic = format!(
-                                        "{} (clarification: {})",
-                                        config.input.topic,
-                                        answer.unwrap_or_default()
-                                    );
-                                    session
-                                        .run(
-                                            &name_for_spawn,
-                                            &title,
-                                            &config,
-                                            observer_clone.clone(),
-                                        )
-                                        .await
-                                        .map_err(|e| e.to_string())
-                                } else {
-                                    Err("clarification cancelled".to_string())
-                                }
-                            }
-                            Err(e) => Err(e.to_string()),
-                        }
-                    }
+                    let outcome = run_with_clarification(
+                        &session,
+                        &name_for_spawn,
+                        &title,
+                        &config,
+                        observer_clone,
+                        &event_bus_for_spawn,
+                        &session_id_for_spawn,
+                    )
                     .await;
                     match outcome {
                         Ok(o) => {
@@ -752,42 +752,16 @@ impl App {
                                 "research: updating `{name}` — replaying `{recorded}`"
                             ),
                         });
-                        match session
-                            .run(&name, &item.title, &config, observer_for_spawn.clone())
-                            .await
-                        {
-                            Ok(o) => Ok(o),
-                            Err(ragent_research::ResearchError::NeedsClarification {
-                                question,
-                            }) => {
-                                // Route the clarifying question through the
-                                // TUI question dialog (ask_user) and re-run
-                                // with the clarified topic when answered.
-                                let answer =
-                                    ask_user_clarification(&event_bus, &session_id, &question)
-                                        .await;
-                                if clarification_answered(answer.as_deref()) {
-                                    let mut config = config.clone();
-                                    config.input.topic = format!(
-                                        "{} (clarification: {})",
-                                        config.input.topic,
-                                        answer.unwrap_or_default()
-                                    );
-                                    session
-                                        .run(
-                                            &name,
-                                            &item.title,
-                                            &config,
-                                            observer_for_spawn.clone(),
-                                        )
-                                        .await
-                                        .map_err(|e| e.to_string())
-                                } else {
-                                    Err("clarification cancelled".to_string())
-                                }
-                            }
-                            Err(e) => Err(e.to_string()),
-                        }
+                        run_with_clarification(
+                            &session,
+                            &name,
+                            &item.title,
+                            &config,
+                            observer_for_spawn,
+                            &event_bus,
+                            &session_id,
+                        )
+                        .await
                     }
                     .await;
                     match run_result {
@@ -894,7 +868,12 @@ impl App {
                         let provider_registry = self.provider_registry.clone();
                         let storage = Some(self.storage.clone());
                         let event_bus = self.event_bus.clone();
-                        let session_id = self.session_id.clone().unwrap_or_default();
+                        // Fail fast rather than publishing events with an empty
+                        // session id, which would not route to this session.
+                        let Some(session_id) = self.session_id.clone() else {
+                            self.status = "research: no active session".to_string();
+                            return;
+                        };
 
                         tokio::spawn(async move {
                             match run_cluster_extraction(

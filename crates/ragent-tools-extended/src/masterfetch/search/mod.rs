@@ -108,7 +108,6 @@ pub async fn run_engine_with_resilience(
     if stagger_index > 0 {
         tokio::time::sleep(ENGINE_STAGGER * stagger_index as u32).await;
     }
-    let name = engine.name().to_string();
     match tokio::time::timeout(
         ENGINE_TIMEOUT,
         search_with_retry(
@@ -123,6 +122,8 @@ pub async fn run_engine_with_resilience(
     {
         Ok(report) => report,
         Err(_) => {
+            // Only the error path needs the owned engine name.
+            let name = engine.name().to_string();
             tracing::warn!(
                 engine = %name,
                 timeout_secs = ENGINE_TIMEOUT.as_secs(),

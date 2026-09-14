@@ -110,6 +110,24 @@ const UNCAPTED_MAX_RESULTS: usize = 500;
 /// unbounded, so every retained candidate is fetched.
 const UNCAPTED_FETCH_BUDGET: usize = usize::MAX;
 
+/// Resolve the volume policy for a sweep into
+/// `(per_query_search_allowance, fetch_budget)`.
+///
+/// Uncapped runs (the default — tiered/supervisor) ask each search for
+/// engine-max results and fetch every retained candidate. Capped (competitive)
+/// runs restrict each sub-query to `cap` hits and scale the fetch budget by the
+/// sub-query count, so the cap bounds per-query volume rather than the whole
+/// sweep. Keeping both allowances in one place stops them from drifting apart.
+fn volume_policy(volume_cap: Option<usize>, sub_query_count: usize) -> (usize, usize) {
+    match volume_cap {
+        Some(cap) => (
+            cap.max(1),
+            cap.saturating_mul(sub_query_count.max(1)).max(cap),
+        ),
+        None => (UNCAPTED_MAX_RESULTS, UNCAPTED_FETCH_BUDGET),
+    }
+}
+
 /// Minimum extracted content length (in characters) for a fetched page to be
 /// accepted as a web source. Pages whose cleaned body is shorter than this are
 /// rejected so near-empty extractions (paywalls, JS-only renders, soft 404s)
@@ -1431,15 +1449,6 @@ impl WebGatherer {
         // fetch start is gated on the deadline and in-flight fetches are
         // never cancelled.
         let mut truncated = false;
-        // True once the configured deadline has passed during this pass. The
-        // flag starts true when the deadline is already in the past at phase
-        // start; macro/inline timeout sites set it when their wait expires,
-        // and the terminal diagnostic also treats the deadline's own state as
-        // ground truth (the unbounded fetch stage can outlive the deadline
-        // without any bounded wait expiring).
-        let mut deadline_fired = deadline
-            .map(|d| d <= std::time::Instant::now())
-            .unwrap_or(false);
         let remaining = || {
             deadline.map_or_else(
                 || std::time::Duration::from_secs(u64::MAX / 2),
@@ -1466,7 +1475,6 @@ impl WebGatherer {
                     Err(_) => {
                         if deadline.is_some() {
                             truncated = true;
-                            deadline_fired = true;
                         }
                         None
                     }
@@ -1475,8 +1483,7 @@ impl WebGatherer {
         }
         // Single terminal emission site (FR-004): called once after the
         // gather loops unwind, with the final captured count. Interim
-        // truncation sites set `truncated`/`deadline_fired` and break without
-        // emitting.
+        // truncation sites set `truncated` and break without emitting.
         let emit_deadline_event = |observer: Option<&dyn GatherObserver>, captured: usize| {
             if let Some(obs) = observer {
                 obs.on_event(GatherEvent::PhaseTimedOut {
@@ -1589,7 +1596,6 @@ impl WebGatherer {
                         Err(_) => {
                             if deadline.is_some() {
                                 truncated = true;
-                                deadline_fired = true;
                             }
                             Vec::new()
                         }
@@ -1626,9 +1632,11 @@ impl WebGatherer {
         let max_retries = self.search_max_retries;
         let base_delay_ms = self.search_retry_base_delay_ms;
         // Volume policy: uncapped runs (tiered/supervisor default) ask each
-        // search for engine-max results; competitive runs with a volume cap
-        // restrict every sub-query to `cap` hits.
-        let per_query_allowance = self.volume_cap.unwrap_or(UNCAPTED_MAX_RESULTS).max(1);
+        // search for engine-max results and fetch every retained candidate;
+        // competitive runs with a volume cap restrict every sub-query to `cap`
+        // hits and scale the fetch budget by the sub-query count. Resolved once
+        // and reused by the search and fetch stages below.
+        let (per_query_allowance, fetch_budget) = volume_policy(self.volume_cap, queries.len());
         let search_budget = self.search_budget.clone();
         let query_cache = self.query_cache.clone();
         let provider_stats = self.provider_stats.clone();
@@ -2039,10 +2047,8 @@ impl WebGatherer {
         // (observed: 42 retained / 35 capped / 7 captured on a 7-query
         // sweep). Capped (competitive) runs scale the per-query allowance by
         // the sub-query count so the cap bounds per-query volume, not the
-        // whole sweep.
-        let fetch_budget = self.volume_cap.map_or(UNCAPTED_FETCH_BUDGET, |cap| {
-            cap.saturating_mul(queries.len().max(1)).max(cap)
-        });
+        // whole sweep. `fetch_budget` is resolved once alongside the search
+        // allowance above.
         let candidate_total = hits_by_url.len();
         let capped_count = candidate_total.saturating_sub(fetch_budget);
         let fetch_futures = hits_by_url
@@ -2389,6 +2395,9 @@ impl WebGatherer {
                             );
                         }
                     }
+                    // Credit the capture before `hit.search_engine` is moved
+                    // into the source below, so no clone is needed.
+                    bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.captured += 1);
                     collected.push((
                         index,
                         Some(Source::Web {
@@ -2400,7 +2409,7 @@ impl WebGatherer {
                             body: body_for_source,
                             relevance,
                             search_tool: hit.search_tool,
-                            search_engine: hit.search_engine.clone(),
+                            search_engine: hit.search_engine,
                             content_type: page.content_type.clone(),
                             page_type: page.page_type.clone(),
                             media_type: media_type.clone(),
@@ -2409,7 +2418,6 @@ impl WebGatherer {
                             oa_recovery,
                         }),
                     ));
-                    bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.captured += 1);
                 }
                 Ok(Err(e)) => {
                     if let Some(obs) = observer {
@@ -2494,16 +2502,11 @@ impl WebGatherer {
             truncated,
             "research: web-gathering phase complete"
         );
-        // Emit the timeout diagnostic when the configured deadline actually
-        // passed during the pass. A bounded-wait expiry sets the flag; when
-        // every bounded wait resolved before expiring (common once the fetch
-        // stage is unbounded — the pass outlives the deadline in the fetch
-        // loop instead) the deadline's own state is the ground truth.
-        if deadline_fired
-            || deadline
-                .map(|d| d <= std::time::Instant::now())
-                .unwrap_or(false)
-        {
+        // Emit the timeout diagnostic when the configured deadline has passed
+        // by the end of the pass. The deadline's own state is the ground
+        // truth: the unbounded fetch stage can outlive it without any
+        // bounded wait expiring.
+        if deadline.is_some_and(|d| d <= std::time::Instant::now()) {
             emit_deadline_event(observer, sources.len());
         }
         // Cancellation accounting (T-006): the fetch stage never cancels
@@ -2513,6 +2516,7 @@ impl WebGatherer {
         // holds if a future truncation site is added to the fetch stage.
         let cancelled_count =
             considered_count.saturating_sub(sources.len() + excluded_count + capped_count);
+        let per_engine_stats: Vec<EngineSweepStat> = per_engine.into_values().collect();
         if let Some(log) = &self.gather_log
             && let Err(e) =
                 log.lock()
@@ -2525,13 +2529,12 @@ impl WebGatherer {
                         "rejected": excluded_count,
                         "capped": capped_count,
                         "cancelled": cancelled_count,
-                        "per_engine": per_engine.values().cloned().collect::<Vec<_>>(),
+                        "per_engine": per_engine_stats,
                     }))
         {
             tracing::warn!(error = %e, "research: failed to write gather summary to web URL log");
         }
         if let Some(obs) = observer {
-            let per_engine_stats: Vec<EngineSweepStat> = per_engine.values().cloned().collect();
             obs.on_event(GatherEvent::WidthSweepSummary {
                 queries: queries.clone(),
                 engines: engines.clone(),

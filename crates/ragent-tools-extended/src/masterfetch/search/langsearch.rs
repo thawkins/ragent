@@ -38,8 +38,8 @@ use std::time::Instant;
 use serde_json::json;
 
 use super::engine::{
-    EngineReport, Freshness, RawResult, SearchEngine, SearchOptions, dedup_results_by_url,
-    strip_disallowed_quotes,
+    EngineReport, Freshness, RawResult, SearchEngine, SearchOptions, api_engine_preflight,
+    engine_http_client, finish_json_search, strip_disallowed_quotes,
 };
 
 // ---------------------------------------------------------------------------
@@ -115,11 +115,7 @@ impl LangSearchEngine {
 
     /// Return the HTTP client to use for this engine.
     fn get_client(&self) -> Result<reqwest::Client, String> {
-        if let Some(ref c) = self.client {
-            return Ok(c.clone());
-        }
-        crate::masterfetch::http::build_default_client()
-            .map_err(|e| format!("failed to build HTTP client: {e}"))
+        engine_http_client(&self.client)
     }
 
     /// Return a reference to the stored API key (for building the `Authorization`
@@ -150,12 +146,13 @@ impl SearchEngine for LangSearchEngine {
     async fn search(&self, query: &str, opts: &SearchOptions) -> EngineReport {
         let start = Instant::now();
 
-        if query.trim().is_empty() {
-            return EngineReport::error(ENGINE_NAME, "search query must not be empty");
-        }
-
-        if self.api_key().is_empty() {
-            return EngineReport::blocked(ENGINE_NAME, "missing LangSearch API key");
+        if let Some(report) = api_engine_preflight(
+            ENGINE_NAME,
+            query,
+            self.api_key(),
+            "missing LangSearch API key",
+        ) {
+            return report;
         }
 
         let client = match self.get_client() {
@@ -186,44 +183,15 @@ impl SearchEngine for LangSearchEngine {
             }
         };
 
-        let status = response.status();
-
-        if !status.is_success() {
-            tracing::warn!(status = %status, "langsearch: API returned error status");
-            return EngineReport::blocked(
-                ENGINE_NAME,
-                format!("LangSearch API returned HTTP {status}"),
-            );
-        }
-
-        let text = match response.text().await {
-            Ok(t) => t,
-            Err(e) => {
-                return EngineReport::error(
-                    ENGINE_NAME,
-                    format!("failed to read response body: {e}"),
-                );
-            }
-        };
-
-        let value: serde_json::Value = match serde_json::from_str(&text) {
-            Ok(v) => v,
-            Err(e) => {
-                return EngineReport::error(
-                    ENGINE_NAME,
-                    format!("failed to parse response JSON: {e}"),
-                );
-            }
-        };
-
-        let mut results = parse_response_json(&value);
-        results = dedup_results_by_url(&results);
-        results.truncate(opts.max_results);
-
-        let elapsed = start.elapsed().as_millis() as u64;
-        let mut report = EngineReport::ok(ENGINE_NAME, results);
-        report.duration_ms = elapsed;
-        report
+        finish_json_search(
+            ENGINE_NAME,
+            start,
+            response,
+            opts.max_results,
+            parse_response_json,
+            |status| format!("LangSearch API returned HTTP {status}"),
+        )
+        .await
     }
 }
 
@@ -316,22 +284,9 @@ pub fn parse_response_json(value: &serde_json::Value) -> Vec<RawResult> {
 
 /// Mask a sensitive API key for display.
 ///
-/// Keeps the first two and last two characters; everything in between is
-/// replaced with `*`. Strings shorter than six characters are fully masked.
+/// Delegates to the shared [`super::engine::mask_api_key`] helper so every
+/// backend masks keys identically.
 #[must_use]
 pub fn mask_key(key: &str) -> String {
-    let len = key.chars().count();
-    if len <= 6 {
-        return "*".repeat(len);
-    }
-    let first: String = key.chars().take(2).collect();
-    let last: String = key
-        .chars()
-        .rev()
-        .take(2)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    format!("{first}*{}*{last}", "*".repeat(len.saturating_sub(6)))
+    super::engine::mask_api_key(key)
 }

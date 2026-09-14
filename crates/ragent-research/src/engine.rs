@@ -104,15 +104,22 @@ impl Critic for SimpleCritic {
         let source_bonus = state.sources.len() * 5;
         let score = ((answered * 50) / total + source_bonus).min(100) as u32;
 
+        // Lowercase each source title/path once rather than once per
+        // sub-question, so the gap scan stays O(sub_questions + sources)
+        // allocations instead of O(sub_questions x sources).
+        let lowered_sources: Vec<(String, String)> = state
+            .sources
+            .iter()
+            .filter(|s| s.has_body())
+            .map(|s| (s.title().to_lowercase(), s.path_or_url().to_lowercase()))
+            .collect();
         let mut gaps = Vec::new();
         for sq in &state.plan.sub_questions {
-            let has_source = state.sources.iter().any(|s| {
-                s.has_body()
-                    && sq.question.to_lowercase().split_whitespace().any(|w| {
-                        s.title().to_lowercase().contains(w)
-                            || s.path_or_url().to_lowercase().contains(w)
-                    })
-            });
+            let question_lower = sq.question.to_lowercase();
+            let words: Vec<&str> = question_lower.split_whitespace().collect();
+            let has_source = lowered_sources
+                .iter()
+                .any(|(title, path)| words.iter().any(|w| title.contains(w) || path.contains(w)));
             if !has_source {
                 gaps.push(EvidenceGap {
                     id: format!("gap-{}", sq.id),

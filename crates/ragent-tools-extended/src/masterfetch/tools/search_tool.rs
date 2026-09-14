@@ -171,38 +171,29 @@ impl MfSearchTool {
         Option<String>,
         Option<String>,
     ) {
-        let langsearch_key = ctx
-            .config
-            .as_ref()
-            .and_then(|cfg| cfg.langsearch_api_key.as_deref());
-        let tavily_key = std::env::var("TAVILY_API_KEY")
-            .ok()
-            .or_else(|| {
-                ctx.config
-                    .as_ref()
-                    .and_then(|cfg| cfg.tavily_api_key.clone())
-            })
-            .filter(|k| !k.is_empty());
-        let perplexity_key = std::env::var("PERPLEXITY_API_KEY")
-            .ok()
-            .or_else(|| {
-                ctx.config
-                    .as_ref()
-                    .and_then(|cfg| cfg.perplexity_api_key.clone())
-            })
-            .filter(|k| !k.is_empty());
-        let exa_key = std::env::var("EXA_API_KEY")
-            .ok()
-            .or_else(|| ctx.config.as_ref().and_then(|cfg| cfg.exa_api_key.clone()))
-            .filter(|k| !k.is_empty());
-        let serper_key = std::env::var("SERPER_API_KEY")
-            .ok()
-            .or_else(|| {
-                ctx.config
-                    .as_ref()
-                    .and_then(|cfg| cfg.serper_api_key.clone())
-            })
-            .filter(|k| !k.is_empty());
+        let cfg = ctx.config.as_ref();
+        // Env var wins; fall back to the config field; an empty value counts as
+        // unset.
+        let pick = |env_var: &str, cfg_key: Option<&String>| {
+            std::env::var(env_var)
+                .ok()
+                .or_else(|| cfg_key.cloned())
+                .filter(|k| !k.is_empty())
+        };
+        let langsearch_key = cfg.and_then(|cfg| cfg.langsearch_api_key.as_deref());
+        let tavily_key = pick(
+            "TAVILY_API_KEY",
+            cfg.and_then(|c| c.tavily_api_key.as_ref()),
+        );
+        let perplexity_key = pick(
+            "PERPLEXITY_API_KEY",
+            cfg.and_then(|c| c.perplexity_api_key.as_ref()),
+        );
+        let exa_key = pick("EXA_API_KEY", cfg.and_then(|c| c.exa_api_key.as_ref()));
+        let serper_key = pick(
+            "SERPER_API_KEY",
+            cfg.and_then(|c| c.serper_api_key.as_ref()),
+        );
         (
             langsearch_key,
             tavily_key,
@@ -238,53 +229,27 @@ impl MfSearchTool {
     /// supplied [`ToolContext`].
     #[must_use]
     pub fn engine_status(ctx: &ToolContext) -> Vec<EngineStatus> {
-        let (langsearch_key, tavily_key, perplexity_key, exa_key, serper_key) =
-            Self::resolve_search_keys(ctx);
         let orchestrator = Self::build_orchestrator(ctx);
         let in_use: HashSet<&str> = orchestrator.engine_names().into_iter().collect();
+        // An engine is wired in iff its key was present and non-empty, so the
+        // three flags are all derivable from `in_use`.
+        let row = |name: &'static str, id: &str| {
+            let on = in_use.contains(id);
+            EngineStatus {
+                name,
+                enabled: on,
+                in_use: on,
+                failed: !on,
+            }
+        };
         vec![
-            EngineStatus {
-                name: "OpenAlex",
-                enabled: true,
-                in_use: in_use.contains("openalex"),
-                failed: false,
-            },
-            EngineStatus {
-                name: "Wikipedia",
-                enabled: true,
-                in_use: in_use.contains("wikipedia"),
-                failed: false,
-            },
-            EngineStatus {
-                name: "LangSearch",
-                enabled: langsearch_key.is_some_and(|k| !k.is_empty()),
-                in_use: in_use.contains("langsearch"),
-                failed: langsearch_key.is_none_or(|k| k.is_empty()),
-            },
-            EngineStatus {
-                name: "Tavily",
-                enabled: tavily_key.is_some(),
-                in_use: in_use.contains("tavily"),
-                failed: tavily_key.is_none(),
-            },
-            EngineStatus {
-                name: "Perplexity",
-                enabled: perplexity_key.is_some(),
-                in_use: in_use.contains("perplexity"),
-                failed: perplexity_key.is_none(),
-            },
-            EngineStatus {
-                name: "Exa",
-                enabled: exa_key.is_some(),
-                in_use: in_use.contains("exa"),
-                failed: exa_key.is_none(),
-            },
-            EngineStatus {
-                name: "Serper",
-                enabled: serper_key.is_some(),
-                in_use: in_use.contains("serper"),
-                failed: serper_key.is_none(),
-            },
+            row("OpenAlex", "openalex"),
+            row("Wikipedia", "wikipedia"),
+            row("LangSearch", "langsearch"),
+            row("Tavily", "tavily"),
+            row("Perplexity", "perplexity"),
+            row("Exa", "exa"),
+            row("Serper", "serper"),
         ]
     }
 

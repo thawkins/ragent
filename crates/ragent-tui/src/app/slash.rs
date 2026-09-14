@@ -89,6 +89,32 @@ async fn websearch_diag_and_render() -> String {
     output
 }
 
+/// Run a panicking websearch render future off the UI thread and deposit the
+/// rendered string into `slot` for `poll_websearch_test_result` to drain.
+///
+/// A task that dies before its normal `Ok`/`Err` paths would otherwise leave
+/// the slot unwritten and the status line stuck forever, so a panic is caught
+/// and replaced with `fallback`.
+fn spawn_websearch_render<F>(
+    slot: Arc<std::sync::Mutex<Option<String>>>,
+    fallback: &'static str,
+    fut: F,
+) where
+    F: std::future::Future<Output = String> + Send + 'static,
+{
+    tokio::spawn(async move {
+        let rendered = match std::panic::AssertUnwindSafe(fut).catch_unwind().await {
+            Ok(rendered) => rendered,
+            Err(_) => fallback.to_string(),
+        };
+        if let Ok(mut guard) = slot.lock() {
+            *guard = Some(rendered);
+        } else {
+            tracing::error!("websearch_test_result mutex poisoned, result dropped");
+        }
+    });
+}
+
 /// Run the user-supplied `query` through the MasterFetch search stack and
 /// render the `/websearch search` report.
 async fn websearch_search_query(query: &str) -> String {
@@ -125,17 +151,13 @@ async fn websearch_search_query(query: &str) -> String {
         }
     }
 
-    // Per-engine summary: count only rows where the CSV lists the engine
-    // alone so a consensus hit is credited once, under its combined CSV.
+    // Per-engine summary: count every distinct `source` value, then report
+    // single-engine rows under their engine name and consensus rows (comma
+    // CSV) as their own combined entry.
     out.push_str("\nResults per engine:\n");
-    let mut singles: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-    let mut combos: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
     for r in &merge.results {
-        if r.source.contains(',') {
-            *combos.entry(r.source.as_str()).or_insert(0) += 1;
-        } else {
-            *singles.entry(r.source.as_str()).or_insert(0) += 1;
-        }
+        *counts.entry(r.source.as_str()).or_insert(0) += 1;
     }
     let mut engine_rows: Vec<(String, usize)> = output
         .engines_used
@@ -143,12 +165,14 @@ async fn websearch_search_query(query: &str) -> String {
         .map(|name| {
             (
                 name.clone(),
-                singles.get(name.as_str()).copied().unwrap_or(0),
+                counts.get(name.as_str()).copied().unwrap_or(0),
             )
         })
         .collect();
-    for (csv, n) in combos {
-        engine_rows.push((csv.to_string(), n));
+    for (csv, n) in &counts {
+        if csv.contains(',') {
+            engine_rows.push(((*csv).to_string(), *n));
+        }
     }
     engine_rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     for (name, count) in &engine_rows {
@@ -8909,29 +8933,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         // round-trips complete, so the rendered table is
                         // deposited into `websearch_test_result` and drained by
                         // `poll_websearch_test_result` on a later frame.
-                        let websearch_result = Arc::clone(&self.websearch_test_result);
-                        tokio::spawn(async move {
-                            // Deposit even on panic: a task that dies before
-                            // the normal Ok/Err paths would leave the slot
-                            // unwritten and the status line stuck at
-                            // "testing engines..." forever.
-                            let outcome = std::panic::AssertUnwindSafe(websearch_diag_and_render())
-                                .catch_unwind()
-                                .await;
-                            let rendered = match outcome {
-                                Ok(rendered) => rendered,
-                                Err(_) => "From: /websearch test\n\n\
-                                           [err] engine test task panicked — see the application log"
-                                    .to_string(),
-                            };
-                            if let Ok(mut guard) = websearch_result.lock() {
-                                *guard = Some(rendered);
-                            } else {
-                                tracing::error!(
-                                    "websearch_test_result mutex poisoned, result dropped"
-                                );
-                            }
-                        });
+                        spawn_websearch_render(
+                            Arc::clone(&self.websearch_test_result),
+                            "From: /websearch test\n\n\
+                             [err] engine test task panicked — see the application log",
+                            websearch_diag_and_render(),
+                        );
                     }
                     "search" => {
                         let query = args.split_once(char::is_whitespace).map(|(_, q)| q.trim());
@@ -8950,28 +8957,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         // Same off-UI-thread pattern as the `test` arm above:
                         // deposit the rendered report into
                         // `websearch_test_result` for `poll_websearch_test_result`.
-                        let websearch_result = Arc::clone(&self.websearch_test_result);
                         let query_owned = query.to_string();
-                        tokio::spawn(async move {
-                            let outcome = std::panic::AssertUnwindSafe(async {
-                                websearch_search_query(&query_owned).await
-                            })
-                            .catch_unwind()
-                            .await;
-                            let rendered = match outcome {
-                                Ok(rendered) => rendered,
-                                Err(_) => "From: /websearch search\n\n\
-                                           [err] search task panicked — see the application log"
-                                    .to_string(),
-                            };
-                            if let Ok(mut guard) = websearch_result.lock() {
-                                *guard = Some(rendered);
-                            } else {
-                                tracing::error!(
-                                    "websearch_test_result mutex poisoned, result dropped"
-                                );
-                            }
-                        });
+                        spawn_websearch_render(
+                            Arc::clone(&self.websearch_test_result),
+                            "From: /websearch search\n\n\
+                             [err] search task panicked — see the application log",
+                            async move { websearch_search_query(&query_owned).await },
+                        );
                     }
                     "show" | "" => {
                         let ctx = websearch_diag_ctx();

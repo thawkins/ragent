@@ -40,8 +40,8 @@
 //! integration tests with a mock server.
 
 use super::engine::{
-    EngineReport, RawResult, SearchEngine, SearchOptions, dedup_results_by_url,
-    strip_disallowed_quotes,
+    EngineReport, RawResult, SearchEngine, SearchOptions, api_engine_preflight, engine_http_client,
+    finish_json_search, strip_disallowed_quotes,
 };
 
 // ---------------------------------------------------------------------------
@@ -124,11 +124,7 @@ impl ExaEngine {
 
     /// Return the HTTP client to use for this engine.
     fn get_client(&self) -> Result<reqwest::Client, String> {
-        if let Some(ref c) = self.client {
-            return Ok(c.clone());
-        }
-        crate::masterfetch::http::build_default_client()
-            .map_err(|e| format!("failed to build HTTP client: {e}"))
+        engine_http_client(&self.client)
     }
 
     /// Return a reference to the stored API key (for building the `x-api-key`
@@ -150,24 +146,11 @@ impl Default for ExaEngine {
 
 /// Mask a sensitive API key for display.
 ///
-/// Keeps the first two and last two characters; everything in between is
-/// replaced with `*`. Strings shorter than six characters are fully masked.
+/// Delegates to the shared [`super::engine::mask_api_key`] helper so every
+/// backend masks keys identically.
 #[must_use]
 pub fn mask_key(key: &str) -> String {
-    let len = key.chars().count();
-    if len <= 6 {
-        return "*".repeat(len);
-    }
-    let first: String = key.chars().take(2).collect();
-    let last: String = key
-        .chars()
-        .rev()
-        .take(2)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    format!("{first}*{}*{last}", "*".repeat(len.saturating_sub(6)))
+    super::engine::mask_api_key(key)
 }
 
 // ---------------------------------------------------------------------------
@@ -188,12 +171,10 @@ impl SearchEngine for ExaEngine {
     async fn search(&self, query: &str, opts: &SearchOptions) -> EngineReport {
         let start = std::time::Instant::now();
 
-        if query.trim().is_empty() {
-            return EngineReport::error(ENGINE_NAME, "search query must not be empty");
-        }
-
-        if self.api_key().is_empty() {
-            return EngineReport::blocked(ENGINE_NAME, "missing Exa API key");
+        if let Some(report) =
+            api_engine_preflight(ENGINE_NAME, query, self.api_key(), "missing Exa API key")
+        {
+            return report;
         }
 
         let client = match self.get_client() {
@@ -224,48 +205,23 @@ impl SearchEngine for ExaEngine {
             }
         };
 
-        let status = response.status();
-
-        if !status.is_success() {
-            tracing::warn!(status = %status, "exa: API returned error status");
-            let report = if status.as_u16() == 429 {
-                EngineReport::blocked(ENGINE_NAME, "rate-limited")
-            } else if status.as_u16() == 401 || status.as_u16() == 403 {
-                EngineReport::blocked(ENGINE_NAME, format!("Exa API auth failed: HTTP {status}"))
-            } else {
-                EngineReport::blocked(ENGINE_NAME, format!("Exa API returned HTTP {status}"))
-            };
-            return report;
-        }
-
-        let text = match response.text().await {
-            Ok(t) => t,
-            Err(e) => {
-                return EngineReport::error(
-                    ENGINE_NAME,
-                    format!("failed to read response body: {e}"),
-                );
-            }
-        };
-
-        let value: serde_json::Value = match serde_json::from_str(&text) {
-            Ok(v) => v,
-            Err(e) => {
-                return EngineReport::error(
-                    ENGINE_NAME,
-                    format!("failed to parse response JSON: {e}"),
-                );
-            }
-        };
-
-        let mut results = parse_response_json(&value);
-        results = dedup_results_by_url(&results);
-        results.truncate(opts.max_results);
-
-        let elapsed = start.elapsed().as_millis() as u64;
-        let mut report = EngineReport::ok(ENGINE_NAME, results);
-        report.duration_ms = elapsed;
-        report
+        finish_json_search(
+            ENGINE_NAME,
+            start,
+            response,
+            opts.max_results,
+            parse_response_json,
+            |status| {
+                if status.as_u16() == 429 {
+                    "rate-limited".to_string()
+                } else if status.as_u16() == 401 || status.as_u16() == 403 {
+                    format!("Exa API auth failed: HTTP {status}")
+                } else {
+                    format!("Exa API returned HTTP {status}")
+                }
+            },
+        )
+        .await
     }
 }
 
@@ -323,10 +279,7 @@ pub fn build_request_body(query: &str, opts: &SearchOptions) -> serde_json::Valu
 /// Truncate a query to the maximum allowed character length.
 #[must_use]
 pub fn truncate_query(query: &str) -> String {
-    if query.chars().count() <= MAX_QUERY_CHARS {
-        return query.to_string();
-    }
-    query.chars().take(MAX_QUERY_CHARS).collect()
+    super::engine::truncate_query_to(query, MAX_QUERY_CHARS)
 }
 
 /// Map a [`Freshness`] filter to an Exa `startPublishedDate` value.
@@ -481,16 +434,9 @@ fn build_snippet(item: &serde_json::Value) -> String {
     truncate_snippet(&parts.join(" "))
 }
 
-/// Truncate a snippet to the maximum allowed character length.
-///
-/// If the snippet exceeds [`MAX_SNIPPET_CHARS`] characters, it is truncated
-/// to that length and an ellipsis (`…`) is appended so callers know content
-/// was elided.
+/// Truncate a snippet to [`MAX_SNIPPET_CHARS`] characters, respecting UTF-8
+/// character boundaries and appending an ellipsis when truncated.
 #[must_use]
 pub fn truncate_snippet(snippet: &str) -> String {
-    if snippet.chars().count() <= MAX_SNIPPET_CHARS {
-        return snippet.to_string();
-    }
-    let truncated: String = snippet.chars().take(MAX_SNIPPET_CHARS).collect();
-    format!("{truncated}…")
+    super::engine::truncate_snippet(snippet)
 }

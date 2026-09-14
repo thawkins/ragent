@@ -83,18 +83,14 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
                             }
                         }
                         ContentPart::ImageUrl { url } => {
-                            // Parse data URIs to preserve mime type and strip
-                            // the scheme prefix; plain https URLs pass through
-                            // with a generic image mime type.
-                            let (mime_type, path) = if let Some(rest) = url.strip_prefix("data:") {
-                                if let Some((mime, _)) = rest.split_once(';') {
-                                    (mime.to_string(), std::path::PathBuf::from(url))
-                                } else {
-                                    ("image/png".to_string(), std::path::PathBuf::from(url))
-                                }
-                            } else {
-                                ("image/png".to_string(), std::path::PathBuf::from(url))
-                            };
+                            // Parse the mime type from a `data:` URI; plain
+                            // https URLs fall back to a generic image mime type.
+                            let mime_type = url
+                                .strip_prefix("data:")
+                                .and_then(|rest| rest.split_once(';'))
+                                .map(|(mime, _)| mime.to_string())
+                                .unwrap_or_else(|| "image/png".to_string());
+                            let path = std::path::PathBuf::from(url);
                             parts.push(MessagePart::Image(Box::new(ImageData { mime_type, path })));
                         }
                     }
@@ -172,14 +168,9 @@ pub(crate) fn messages_to_chat_messages(messages: &[Message]) -> Vec<LlmChatMess
                 }
             }
         }
-        let content = if parts.len() == 1 {
-            if let Some(ContentPart::Text { text }) = parts.first() {
-                ChatContent::Text(text.clone())
-            } else {
-                ChatContent::Parts(parts)
-            }
-        } else {
-            ChatContent::Parts(parts)
+        let content = match parts.as_slice() {
+            [ContentPart::Text { text }] => ChatContent::Text(text.clone()),
+            _ => ChatContent::Parts(parts),
         };
         chat_messages.push(LlmChatMessage { role, content });
         if !tool_results.is_empty() && msg.role == Role::Assistant {

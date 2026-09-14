@@ -26,12 +26,15 @@ pub fn compute_relevance_label(
     let mut title_hits = 0usize;
     let mut snippet_hits = 0usize;
     for term in &query_terms {
-        if term_matches(term, &hay) {
+        // Derive the morphological variants once per term, then reuse them
+        // against the combined haystack, title, and snippet.
+        let variants = morph_variants(term);
+        if contains_term(term, &variants, &hay) {
             hits += 1;
-            if term_matches(term, &title_lc) {
+            if contains_term(term, &variants, &title_lc) {
                 title_hits += 1;
             }
-            if term_matches(term, &snippet_lc) {
+            if contains_term(term, &variants, &snippet_lc) {
                 snippet_hits += 1;
             }
         }
@@ -76,13 +79,17 @@ pub fn compute_relevance_label(
 ///
 /// This is intentionally exposed at module scope so benchmarks and unit tests
 /// can measure it in isolation (Milestone B-003).
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
+// reason: retained for the `tests/` integration suite; the lib itself scores
+// through `contains_term` with precomputed variants.
+#[allow(dead_code)]
 #[allow(unreachable_pub)]
 pub fn term_matches(term: &str, hay: &str) -> bool {
-    if hay.contains(term) {
-        return true;
-    }
-    morph_variants(term).into_iter().any(|v| hay.contains(&v))
+    contains_term(term, &morph_variants(term), hay)
+}
+
+/// Test whether `term` (or any of its precomputed `variants`) appears in `hay`.
+fn contains_term(term: &str, variants: &[String], hay: &str) -> bool {
+    hay.contains(term) || variants.iter().any(|v| hay.contains(v))
 }
 
 /// Derive the morphological variants of an already-lowercased term.
@@ -124,6 +131,7 @@ fn morph_variants(term: &str) -> Vec<String> {
                     let bytes = stem.as_bytes();
                     if bytes[bytes.len() - 1] == bytes[bytes.len() - 2]
                         && !stem.ends_with(['a', 'e', 'i', 'o', 'u'])
+                        && stem.is_char_boundary(stem.len() - 1)
                     {
                         variants.push(stem[..stem.len() - 1].to_string());
                     }

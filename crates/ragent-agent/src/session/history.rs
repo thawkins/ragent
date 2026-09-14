@@ -162,42 +162,7 @@ pub async fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> 
         // user message with the corresponding tool results so the LLM sees
         // matching tool_use / tool_result pairs.
         if msg.role == Role::Assistant {
-            let tool_results: Vec<ContentPart> = msg
-                .parts
-                .iter()
-                .filter_map(|part| match part {
-                    MessagePart::ToolCall {
-                        tool,
-                        call_id,
-                        state,
-                    } => {
-                        let result_text = state
-                            .output
-                            .as_ref()
-                            .and_then(|v| {
-                                v.as_str()
-                                    .map(std::string::ToString::to_string)
-                                    .or_else(|| {
-                                        v.get("content")
-                                            .and_then(Value::as_str)
-                                            .map(std::string::ToString::to_string)
-                                    })
-                            })
-                            .or_else(|| state.error.clone())
-                            .unwrap_or_default();
-                        Some(ContentPart::ToolResult {
-                            tool_use_id: call_id.clone(),
-                            content: tool_result_content_for_llm(
-                                tool,
-                                &result_text,
-                                state.output.as_ref(),
-                            ),
-                        })
-                    }
-                    _ => None,
-                })
-                .collect();
-
+            let tool_results = assistant_tool_results(msg);
             if !tool_results.is_empty() {
                 chat_messages.push(ChatMessage {
                     role: "user".to_string(),
@@ -229,42 +194,7 @@ fn history_to_chat_messages_sync(messages: &[Message]) -> Vec<ChatMessage> {
         });
 
         if msg.role == Role::Assistant {
-            let tool_results: Vec<ContentPart> = msg
-                .parts
-                .iter()
-                .filter_map(|part| match part {
-                    MessagePart::ToolCall {
-                        tool,
-                        call_id,
-                        state,
-                    } => {
-                        let result_text = state
-                            .output
-                            .as_ref()
-                            .and_then(|v| {
-                                v.as_str()
-                                    .map(std::string::ToString::to_string)
-                                    .or_else(|| {
-                                        v.get("content")
-                                            .and_then(Value::as_str)
-                                            .map(std::string::ToString::to_string)
-                                    })
-                            })
-                            .or_else(|| state.error.clone())
-                            .unwrap_or_default();
-                        Some(ContentPart::ToolResult {
-                            tool_use_id: call_id.clone(),
-                            content: tool_result_content_for_llm(
-                                tool,
-                                &result_text,
-                                state.output.as_ref(),
-                            ),
-                        })
-                    }
-                    _ => None,
-                })
-                .collect();
-
+            let tool_results = assistant_tool_results(msg);
             if !tool_results.is_empty() {
                 chat_messages.push(ChatMessage {
                     role: "user".to_string(),
@@ -275,6 +205,44 @@ fn history_to_chat_messages_sync(messages: &[Message]) -> Vec<ChatMessage> {
     }
 
     chat_messages
+}
+
+/// Build the provider-facing [`ContentPart::ToolResult`] parts for an
+/// assistant message's tool calls.
+///
+/// Shared by the async and sync history converters so the tool-result
+/// extraction and truncation policy lives in exactly one place.
+fn assistant_tool_results(msg: &Message) -> Vec<ContentPart> {
+    msg.parts
+        .iter()
+        .filter_map(|part| match part {
+            MessagePart::ToolCall {
+                tool,
+                call_id,
+                state,
+            } => {
+                let result_text = state
+                    .output
+                    .as_ref()
+                    .and_then(|v| {
+                        v.as_str()
+                            .map(std::string::ToString::to_string)
+                            .or_else(|| {
+                                v.get("content")
+                                    .and_then(Value::as_str)
+                                    .map(std::string::ToString::to_string)
+                            })
+                    })
+                    .or_else(|| state.error.clone())
+                    .unwrap_or_default();
+                Some(ContentPart::ToolResult {
+                    tool_use_id: call_id.clone(),
+                    content: tool_result_content_for_llm(tool, &result_text, state.output.as_ref()),
+                })
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn truncate_at_char_boundary(text: &str, max_chars: usize) -> &str {

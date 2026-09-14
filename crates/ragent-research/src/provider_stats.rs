@@ -36,8 +36,13 @@ impl ProviderCallStats {
     /// hits and budget skips are never recorded by the gatherer).
     pub fn record(&self, tool: &str) {
         self.total.fetch_add(1, Ordering::Relaxed);
-        let mut by_tool = self.by_tool.lock().unwrap_or_else(|p| p.into_inner());
+        let mut by_tool = self.lock_by_tool();
         *by_tool.entry(tool.to_string()).or_insert(0) += 1;
+    }
+
+    /// Lock `by_tool`, recovering the guard if a previous holder panicked.
+    fn lock_by_tool(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, usize>> {
+        self.by_tool.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     /// Total number of logical search calls issued this run.
@@ -49,7 +54,7 @@ impl ProviderCallStats {
     /// Snapshot of `(search tool, call count)` pairs, sorted by tool name.
     #[must_use]
     pub fn by_tool(&self) -> Vec<(String, usize)> {
-        let by_tool = self.by_tool.lock().unwrap_or_else(|p| p.into_inner());
+        let by_tool = self.lock_by_tool();
         by_tool.iter().map(|(k, v)| (k.clone(), *v)).collect()
     }
 }

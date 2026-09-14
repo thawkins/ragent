@@ -377,7 +377,11 @@ impl ResearchCliCommand {
                             "--max-local-sources" => max_local_sources = v.parse().ok(),
                             "--max-synthesis-sources" => max_synthesis_sources = v.parse().ok(),
                             "--brief" => brief = Some((*v).to_string()),
-                            _ => unreachable!(),
+                            _ => {
+                                // Unreachable: the outer guard covers every flag
+                                // reaching here. Treated as a consumed value
+                                // rather than panicking if the two lists diverge.
+                            }
                         }
                     }
                 }
@@ -449,14 +453,15 @@ impl ResearchCliCommand {
     /// Return the value of the first positional argument, skipping consumed
     /// flag-value pairs.
     ///
-    /// `flag_names` lists flags whose *next* token is a value (not a
+    /// `value_flags` lists flags whose *next* token is a value (not a
     /// positional). Without this, a flag value like `--message hello` would
-    /// swallow `"hello"` as the item name.
-    fn first_positional_skipping_flags(rest: &[&str], flag_names: &[&str]) -> Option<String> {
+    /// swallow `"hello"` as the item name. Pass an empty slice when no value
+    /// flags are expected.
+    fn first_positional(rest: &[&str], value_flags: &[&str]) -> Option<String> {
         let mut i = 0;
         while i < rest.len() {
             let arg = rest[i];
-            if flag_names.contains(&arg) {
+            if value_flags.contains(&arg) {
                 // Skip both the flag and its value.
                 i += 2;
                 continue;
@@ -469,12 +474,6 @@ impl ResearchCliCommand {
         None
     }
 
-    fn first_positional(rest: &[&str]) -> Option<String> {
-        rest.iter()
-            .find(|a| !Self::is_flag(a))
-            .map(std::string::ToString::to_string)
-    }
-
     fn parse_list(rest: &[&str]) -> Self {
         Self::List {
             all: rest.contains(&"--all"),
@@ -484,7 +483,7 @@ impl ResearchCliCommand {
 
     fn parse_show(rest: &[&str]) -> Self {
         Self::Show {
-            name: Self::first_positional(rest).unwrap_or_default(),
+            name: Self::first_positional(rest, &[]).unwrap_or_default(),
             json: rest.contains(&"--json"),
         }
     }
@@ -504,26 +503,26 @@ impl ResearchCliCommand {
 
     fn parse_open(rest: &[&str]) -> Self {
         Self::Open {
-            name: Self::first_positional(rest).unwrap_or_default(),
+            name: Self::first_positional(rest, &[]).unwrap_or_default(),
         }
     }
 
     fn parse_delete(rest: &[&str]) -> Self {
         Self::Delete {
-            name: Self::first_positional(rest).unwrap_or_default(),
+            name: Self::first_positional(rest, &[]).unwrap_or_default(),
             yes: rest.contains(&"--yes"),
         }
     }
 
     fn parse_archive(rest: &[&str]) -> Self {
         Self::Archive {
-            name: Self::first_positional(rest).unwrap_or_default(),
+            name: Self::first_positional(rest, &[]).unwrap_or_default(),
         }
     }
 
     fn parse_resume(rest: &[&str]) -> Self {
         Self::Resume {
-            name: Self::first_positional(rest).unwrap_or_default(),
+            name: Self::first_positional(rest, &[]).unwrap_or_default(),
         }
     }
 
@@ -540,7 +539,7 @@ impl ResearchCliCommand {
             i += 1;
         }
         Self::Continue {
-            name: Self::first_positional_skipping_flags(rest, &["--message"]).unwrap_or_default(),
+            name: Self::first_positional(rest, &["--message"]).unwrap_or_default(),
             message,
         }
     }
@@ -549,13 +548,13 @@ impl ResearchCliCommand {
     /// the recorded CLI/TUI/HTTP invocation forms replay unchanged.
     fn parse_update(rest: &[&str]) -> Self {
         Self::Update {
-            name: Self::first_positional(rest).unwrap_or_default(),
+            name: Self::first_positional(rest, &[]).unwrap_or_default(),
         }
     }
 
     fn parse_cluster(rest: &[&str]) -> Self {
         Self::Cluster {
-            name: Self::first_positional(rest).unwrap_or_default(),
+            name: Self::first_positional(rest, &[]).unwrap_or_default(),
             force: rest.contains(&"--force"),
         }
     }
@@ -573,7 +572,7 @@ impl ResearchCliCommand {
             i += 1;
         }
         Self::Export {
-            name: Self::first_positional_skipping_flags(rest, &["--output"]).unwrap_or_default(),
+            name: Self::first_positional(rest, &["--output"]).unwrap_or_default(),
             output,
         }
     }
@@ -591,7 +590,7 @@ impl ResearchCliCommand {
             i += 1;
         }
         Self::Import {
-            path: Self::first_positional_skipping_flags(rest, &["--name"]).unwrap_or_default(),
+            path: Self::first_positional(rest, &["--name"]).unwrap_or_default(),
             name,
         }
     }
@@ -644,7 +643,8 @@ Common create flags:
   --max-local-sources N                              Local source cap
   --max-synthesis-sources N                          Sources admitted into synthesis
   --brief <TEXT>                                     Explicit research brief (skips clarification)
-  --clarify | --no-clarify                           Clarification stage; --no-clarify is the default
+  --clarify                                          Ask a clarifying question (off by default)
+  --no-clarify                                       Deprecated no-op; clarification is already off
   --use-local                                        Include local file sources
   --use-specs                                        Include spec documents as sources
   --use-low-relevance                                Keep low-relevance web hits
@@ -861,18 +861,19 @@ pub fn session_event_json(event: &crate::session::SessionEvent) -> String {
             language,
             oa_recovery,
             media_type,
-        } => {
-            let mut payload = serde_json::Map::new();
-            payload.insert("url".into(), serde_json::json!(url));
-            payload.insert("title".into(), serde_json::json!(title));
-            payload.insert("search_tool".into(), serde_json::json!(search_tool));
-            payload.insert("search_engine".into(), serde_json::json!(search_engine));
-            payload.insert("body_preview".into(), serde_json::json!(body_preview));
-            payload.insert("language".into(), serde_json::json!(language));
-            payload.insert("oa_recovery".into(), serde_json::json!(oa_recovery));
-            payload.insert("media_type".into(), serde_json::json!(media_type));
-            ("web_captured", serde_json::Value::Object(payload))
-        }
+        } => (
+            "web_captured",
+            serde_json::json!({
+                "url": url,
+                "title": title,
+                "search_tool": search_tool,
+                "search_engine": search_engine,
+                "body_preview": body_preview,
+                "language": language,
+                "oa_recovery": oa_recovery,
+                "media_type": media_type,
+            }),
+        ),
         SessionEvent::WebSearchFailed { error } => {
             ("web_search_failed", serde_json::json!({ "error": error }))
         }

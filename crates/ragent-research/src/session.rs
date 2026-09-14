@@ -57,7 +57,7 @@ struct GatherEventForwarder {
 /// truncation site ever makes it non-zero.
 fn format_width_sweep_detail(
     query_count: usize,
-    engines: &str,
+    engines: &[String],
     considered: usize,
     captured: usize,
     excluded: usize,
@@ -65,6 +65,7 @@ fn format_width_sweep_detail(
     capped: usize,
     cancelled: usize,
 ) -> String {
+    let engines = engines.join(", ");
     let mut out = format!(
         "queries={query_count}, engines=[{engines}], considered={considered}, \
          captured={captured}, excluded={excluded}"
@@ -171,7 +172,7 @@ impl GatherObserver for GatherEventForwarder {
             } => {
                 let detail = format_width_sweep_detail(
                     queries.len(),
-                    &engines.join(", "),
+                    &engines,
                     considered,
                     captured,
                     excluded,
