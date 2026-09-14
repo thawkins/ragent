@@ -19,10 +19,12 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
     let mut messages: Vec<Message> = Vec::new();
     let now = Utc::now();
     for msg in chat_messages {
-        let role = if msg.role == "assistant" {
-            Role::Assistant
-        } else {
-            Role::User
+        let role = match msg.role.as_str() {
+            "assistant" => Role::Assistant,
+            // System and tool-role messages have no place in the internal
+            // compaction history; skip them rather than silently re-roling.
+            "system" | "tool" => continue,
+            _ => Role::User,
         };
         let mut parts: Vec<MessagePart> = Vec::new();
         match &msg.content {
@@ -81,10 +83,19 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
                             }
                         }
                         ContentPart::ImageUrl { url } => {
-                            parts.push(MessagePart::Image(Box::new(ImageData {
-                                mime_type: "image/png".to_string(),
-                                path: std::path::PathBuf::from(url),
-                            })));
+                            // Parse data URIs to preserve mime type and strip
+                            // the scheme prefix; plain https URLs pass through
+                            // with a generic image mime type.
+                            let (mime_type, path) = if let Some(rest) = url.strip_prefix("data:") {
+                                if let Some((mime, _)) = rest.split_once(';') {
+                                    (mime.to_string(), std::path::PathBuf::from(url))
+                                } else {
+                                    ("image/png".to_string(), std::path::PathBuf::from(url))
+                                }
+                            } else {
+                                ("image/png".to_string(), std::path::PathBuf::from(url))
+                            };
+                            parts.push(MessagePart::Image(Box::new(ImageData { mime_type, path })));
                         }
                     }
                 }

@@ -446,6 +446,29 @@ impl ResearchCliCommand {
         arg.starts_with('-')
     }
 
+    /// Return the value of the first positional argument, skipping consumed
+    /// flag-value pairs.
+    ///
+    /// `flag_names` lists flags whose *next* token is a value (not a
+    /// positional). Without this, a flag value like `--message hello` would
+    /// swallow `"hello"` as the item name.
+    fn first_positional_skipping_flags(rest: &[&str], flag_names: &[&str]) -> Option<String> {
+        let mut i = 0;
+        while i < rest.len() {
+            let arg = rest[i];
+            if flag_names.contains(&arg) {
+                // Skip both the flag and its value.
+                i += 2;
+                continue;
+            }
+            if !Self::is_flag(arg) {
+                return Some(arg.to_string());
+            }
+            i += 1;
+        }
+        None
+    }
+
     fn first_positional(rest: &[&str]) -> Option<String> {
         rest.iter()
             .find(|a| !Self::is_flag(a))
@@ -517,7 +540,7 @@ impl ResearchCliCommand {
             i += 1;
         }
         Self::Continue {
-            name: Self::first_positional(rest).unwrap_or_default(),
+            name: Self::first_positional_skipping_flags(rest, &["--message"]).unwrap_or_default(),
             message,
         }
     }
@@ -550,7 +573,7 @@ impl ResearchCliCommand {
             i += 1;
         }
         Self::Export {
-            name: Self::first_positional(rest).unwrap_or_default(),
+            name: Self::first_positional_skipping_flags(rest, &["--output"]).unwrap_or_default(),
             output,
         }
     }
@@ -568,7 +591,7 @@ impl ResearchCliCommand {
             i += 1;
         }
         Self::Import {
-            path: Self::first_positional(rest).unwrap_or_default(),
+            path: Self::first_positional_skipping_flags(rest, &["--name"]).unwrap_or_default(),
             name,
         }
     }

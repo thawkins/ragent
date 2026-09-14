@@ -2,13 +2,15 @@
 //!
 //! Implements **FR-008** and **NFR-003** (T-012).
 //!
-//! This module defines the core abstractions for the keyless multi-engine
-//! search pipeline:
+//! This module defines the core abstractions for the multi-engine search
+//! pipeline. Two of the seven registered backends (OpenAlex, Wikipedia) are
+//! keyless; the remaining five (Tavily, Exa, Serper, Perplexity, LangSearch)
+//! are API-key-backed services:
 //!
 //! - [`SearchEngine`] — an `async` trait implemented by each search backend
-//!   adapter (OpenAlex, Wikipedia, …). Backends are keyless: they do not
-//!   search-engine HTML result pages and parse the results. No API keys,
-//!   tokens, or accounts are required (FR-023).
+//!   adapter (OpenAlex, Wikipedia, Tavily, Exa, Serper, Perplexity,
+//!   LangSearch). Each adapter returns results from its respective API; some
+//!   are keyless (OpenAlex, Wikipedia), others require an API key (FR-023).
 //! - [`RawResult`] — a single search result as returned by one engine, before
 //!   merging / dedup / ranking. Carries the engine name (`source`) and an
 //!   optional relevance `score` (0.0–1.0) if the engine provides one.
@@ -415,7 +417,7 @@ pub enum SearchEngineError {
     #[error("search query must not be empty")]
     EmptyQuery,
 
-    /// `max_results` is out of range (must be 1–50).
+    /// `max_results` is out of range (must be 1–500).
     #[error("max_results out of range: {0} (must be 1–{1})")]
     MaxResultsOutOfRange(usize, usize),
 
@@ -440,11 +442,11 @@ pub enum SearchEngineError {
 // SearchEngine trait (FR-008)
 // ---------------------------------------------------------------------------
 
-/// Trait implemented by each keyless search-engine backend adapter.
+/// Trait implemented by each search-engine backend adapter (OpenAlex,
+/// Wikipedia, Tavily, Exa, Serper, Perplexity, LangSearch).
 ///
-/// Backends are **keyless**: they scrape public search-engine HTML result
-/// pages and parse the results. No API keys, tokens, or accounts are required
-/// (FR-023).
+/// Adapters query their respective backend API (keyless or API-key-backed)
+/// and return results as [`EngineReport`]s.
 ///
 /// Each adapter (OpenAlex, Wikipedia, …) implements this trait and is queried
 /// in parallel by the `mf_search` consensus merger. The merger collects
@@ -682,6 +684,17 @@ pub fn count_total_results(reports: &[EngineReport]) -> usize {
     reports.iter().map(|r| r.result_count).sum()
 }
 
+/// Returns `true` if this report represents a failed engine call: either
+/// explicitly blocked, or errored with no results.
+///
+/// This is the source-of-truth predicate for the "blocked-or-errored"
+/// concept. Used by both the engine module's `blocked_engine_names` and
+/// the consensus merger's inline filter (see consensus.rs).
+#[must_use]
+pub const fn report_is_failed(r: &EngineReport) -> bool {
+    r.engine_blocked || (!r.error.is_empty() && !r.has_results())
+}
+
 /// Return the names of engines that were blocked or errored.
 ///
 /// # Examples
@@ -705,7 +718,7 @@ pub fn count_total_results(reports: &[EngineReport]) -> usize {
 pub fn blocked_engine_names(reports: &[EngineReport]) -> Vec<&str> {
     reports
         .iter()
-        .filter(|r| r.engine_blocked || (!r.error.is_empty() && !r.has_results()))
+        .filter(|r| report_is_failed(r))
         .map(|r| r.engine.as_str())
         .collect()
 }

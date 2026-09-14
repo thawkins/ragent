@@ -1,5 +1,28 @@
 # Changelog
 
+## Version: 1.0.101
+
+- **Simplify pass over four crates** - code-quality fixes from a review
+  sweep: in `masterfetch::search` (`consensus.rs`, `engine.rs`, `mod.rs`)
+  engine-merge output is now deterministic (sorted `source` strings),
+  `total_merged_results` is re-synced after truncation with merge positions
+  renumbered 1..N, four mutex `.expect()` calls became poison-tolerant
+  `.unwrap_or_else(|p| p.into_inner())`, cache inserts purge expired
+  entries, dead constants and a duplicate stopword were removed,
+  `partial_cmp` was replaced with `total_cmp`, the failed-engine predicate
+  was extracted into a shared `report_is_failed()` helper, and stale doc
+  comments were corrected. In `ragent-research` (`cli.rs`) the
+  `parse_continue`/`parse_export`/`parse_import` parsers now skip consumed
+  flag values so `--message hello my-item` no longer resolves the item name
+  from the flag value. In `ragent-tui` (`app/research.rs`) three orphaned
+  comments were removed, the twice-duplicated provider-call formatter was
+  extracted into `format_provider_calls()`, and the cluster session-ID
+  fallback was aligned with the other arms. In `ragent-agent`
+  (`compaction/convert.rs`) `"system"`/`"tool"` roles are skipped instead
+  of silently coerced to user messages, and `ImageUrl` parts now parse the
+  `data:` URI to extract the real MIME type instead of hardcoding
+  `image/png`.
+
 ## Version: 1.0.100
 
 - **mf_search engine-level resilience (T-016)** - transient engine failures

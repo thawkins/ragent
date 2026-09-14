@@ -82,7 +82,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::engine::{EngineReport, RawResult, collect_all_results, normalise_result_url};
+use super::engine::{
+    EngineReport, RawResult, collect_all_results, normalise_result_url, report_is_failed,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -104,14 +106,6 @@ const MAX_RELATED_QUERIES: usize = 10;
 /// Minimum term length for related-query mining (shorter terms are noise).
 const MIN_TERM_LEN: usize = 3;
 
-/// Maximum number of results to return by default.
-///
-/// The consensus module returns all available ranked results; the caller
-/// slices as needed. This constant is retained as a documented default so
-/// future callers do not need to hard-code 20.
-#[allow(dead_code)]
-const DEFAULT_MAX_RESULTS: usize = 20;
-
 /// Stopwords excluded from related-query mining.
 const STOPWORDS: &[&str] = &[
     "the", "and", "for", "are", "but", "not", "you", "all", "any", "can", "had", "her", "was",
@@ -120,7 +114,7 @@ const STOPWORDS: &[&str] = &[
     "they", "will", "what", "about", "which", "when", "your", "here", "there", "their", "would",
     "could", "other", "more", "some", "such", "only", "into", "than", "them", "also", "been",
     "were", "over", "very", "much", "most", "many", "like", "just", "make", "made", "page", "site",
-    "search", "results", "best", "top", "list", "guide", "how",
+    "search", "results", "best", "top", "list", "guide",
 ];
 
 // ---------------------------------------------------------------------------
@@ -236,7 +230,7 @@ pub fn merge_and_rank(reports: &[EngineReport], query: &str) -> MergeOutput {
     // without forcing them into tracing logs (FR-008).
     let blocked_engines: Vec<String> = reports
         .iter()
-        .filter(|r| r.engine_blocked || (!r.error.is_empty() && !r.has_results()))
+        .filter(|r| report_is_failed(r))
         .map(|r| {
             if r.error.is_empty() {
                 r.engine.clone()
@@ -258,12 +252,7 @@ pub fn merge_and_rank(reports: &[EngineReport], query: &str) -> MergeOutput {
         .map(|(norm_url, entries)| score_group(&norm_url, &entries, total_engines))
         .collect();
 
-    // Sort by score descending.
-    scored.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    scored.sort_by(|a, b| b.score.total_cmp(&a.score));
 
     // Build ConsensusResult with positions.
     let results: Vec<ConsensusResult> = scored
@@ -382,12 +371,11 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
     // Use the first entry's title, URL, and snippet.
     let first = entries.first().expect("group must have at least one entry");
 
-    // Build source string: comma-separated engine names.
-    let source = distinct_engines
-        .iter()
-        .copied()
-        .collect::<Vec<_>>()
-        .join(", ");
+    // Build source string: comma-separated engine names (sorted for
+    // deterministic output — HashSet iteration order is random).
+    let mut engine_names: Vec<&str> = distinct_engines.iter().copied().collect();
+    engine_names.sort_unstable();
+    let source = engine_names.join(", ");
 
     ScoredResult {
         title: first.result.title.clone(),
@@ -403,7 +391,7 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
 
 /// Compute a positional score from a 0-based rank index.
 ///
-/// Uses an exponential decay: `score = 1.0 / (1.0 + rank * 0.15)`.
+/// Uses a rational decay: `score = 1.0 / (1.0 + rank * 0.15)`.
 ///
 /// The smoothing constant `0.15` prevents division by zero and ensures that even
 /// the lowest-ranked results retain a non-zero score. This value was chosen to
@@ -539,6 +527,11 @@ pub fn merge_and_rank_with_cap(
 ) -> MergeOutput {
     let mut output = merge_and_rank(reports, query);
     output.results = diversity_truncate(&output.results, max_results);
+    // Re-sync metadata and positions after truncation.
+    output.total_merged_results = output.results.len();
+    for (i, r) in output.results.iter_mut().enumerate() {
+        r.position = i + 1;
+    }
     output
 }
 

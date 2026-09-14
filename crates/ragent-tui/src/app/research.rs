@@ -9,14 +9,7 @@ use std::sync::Arc;
 
 use crate::research_adapter::TuiResearchObserver;
 
-// Prompt optimization templates
-
-// State types from app/state.rs
 use crate::app::state::{App, LogLevel};
-
-// Helpers
-
-// Re-export status types from theme
 
 /// Marker the TUI question dialog returns when the user dismisses the prompt
 /// with Esc (see the free-text question key handling in `src/input.rs`).
@@ -65,6 +58,23 @@ async fn ask_user_clarification(
 /// Returns `true` when the user supplied a usable clarification answer.
 fn clarification_answered(answer: Option<&str>) -> bool {
     matches!(answer, Some(a) if !a.trim().is_empty() && a.trim() != QUESTION_DISMISSED_MARKER)
+}
+
+/// Format a `provider_tool_calls` list as a human-readable suffix like
+/// `", 12 search request(s) (web_search: 8, mf_search: 4)"`.
+///
+/// Returns an empty string when the list is empty.
+fn format_provider_calls(calls: &[(String, usize)]) -> String {
+    if calls.is_empty() {
+        return String::new();
+    }
+    let per_tool = calls
+        .iter()
+        .map(|(tool, count)| format!("{tool}: {count}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let total: usize = calls.iter().map(|(_, count)| count).sum();
+    format!(", {total} search request(s) ({per_tool})")
 }
 
 /// Run concept-extraction for a `/research cluster` command end-to-end.
@@ -199,10 +209,12 @@ impl App {
         if !self.ensure_session() {
             return;
         }
+        // Session id: ensure_session() guarantees this is Some.
+        let session_id = self.session_id.clone().unwrap_or_default();
         let config_arc = ragent_agent::Config::load().ok().map(Arc::new);
         let observer = Arc::new(TuiResearchObserver {
             app_event_bus: self.event_bus.clone(),
-            session_id: self.session_id.clone().unwrap_or_default(),
+            session_id: session_id.clone(),
             name: String::new(),
             topic: String::new(),
         });
@@ -392,19 +404,7 @@ impl App {
                     .await;
                     match outcome {
                         Ok(o) => {
-                            let provider_calls = if o.provider_tool_calls.is_empty() {
-                                String::new()
-                            } else {
-                                let per_tool = o
-                                    .provider_tool_calls
-                                    .iter()
-                                    .map(|(tool, count)| format!("{tool}: {count}"))
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                let total: usize =
-                                    o.provider_tool_calls.iter().map(|(_, count)| count).sum();
-                                format!(", {} search request(s) ({})", total, per_tool)
-                            };
+                            let provider_calls = format_provider_calls(&o.provider_tool_calls);
                             event_bus_for_spawn.publish(Event::AgentNotice {
                                 session_id: session_id_for_spawn.clone(),
                                 message: format!(
@@ -792,19 +792,7 @@ impl App {
                     .await;
                     match run_result {
                         Ok(o) => {
-                            let provider_calls = if o.provider_tool_calls.is_empty() {
-                                String::new()
-                            } else {
-                                let per_tool = o
-                                    .provider_tool_calls
-                                    .iter()
-                                    .map(|(tool, count)| format!("{tool}: {count}"))
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                let total: usize =
-                                    o.provider_tool_calls.iter().map(|(_, count)| count).sum();
-                                format!(" {total} search request(s) ({per_tool})")
-                            };
+                            let provider_calls = format_provider_calls(&o.provider_tool_calls);
                             event_bus.publish(Event::TextDelta {
                                 session_id: session_id.clone(),
                                 text: format!(
@@ -906,10 +894,7 @@ impl App {
                         let provider_registry = self.provider_registry.clone();
                         let storage = Some(self.storage.clone());
                         let event_bus = self.event_bus.clone();
-                        let session_id = self
-                            .session_id
-                            .clone()
-                            .unwrap_or_else(|| "cluster".to_string());
+                        let session_id = self.session_id.clone().unwrap_or_default();
 
                         tokio::spawn(async move {
                             match run_cluster_extraction(

@@ -304,7 +304,7 @@ impl SearchOrchestrator {
                 merge: MergeOutput::default(),
                 cached: false,
                 duration_ms: 0,
-                engines_used: self.engine_names().into_iter().map(String::from).collect(),
+                engines_used: Vec::new(), // no engines were queried
                 options: opts.clone(),
             };
         }
@@ -404,25 +404,30 @@ impl SearchOrchestrator {
         futures::future::join_all(futures).await
     }
 
+    /// Lock the search cache, recovering from mutex poisoning.
+    ///
+    /// The cache contains only plain data (no invariants to violate), so
+    /// poisoning recovery is always safe.
+    fn cache_lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, CacheEntry>> {
+        self.cache.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     /// Clear the search-result cache.
     pub fn clear_cache(&self) {
-        let mut cache = self.cache.lock().expect("search cache mutex poisoned");
+        let mut cache = self.cache_lock();
         cache.clear();
     }
 
     /// Return the number of entries in the search cache.
     #[must_use]
     pub fn cache_size(&self) -> usize {
-        self.cache
-            .lock()
-            .expect("search cache mutex poisoned")
-            .len()
+        self.cache_lock().len()
     }
 
     /// Check the cache for a fresh entry. Returns `Some(output)` if the cache
     /// has a fresh entry for the key, `None` otherwise.
     fn check_cache(&self, key: &str) -> Option<SearchOutput> {
-        let mut cache = self.cache.lock().expect("search cache mutex poisoned");
+        let mut cache = self.cache_lock();
         if let Some(entry) = cache.get(key) {
             if entry.inserted_at.elapsed() < SEARCH_CACHE_TTL {
                 let mut output = entry.output.clone();
@@ -435,9 +440,13 @@ impl SearchOrchestrator {
         None
     }
 
-    /// Store a search output in the cache.
+    /// Store a search output in the cache, evicting expired entries to
+    /// prevent unbounded memory growth in long-running sessions.
     fn store_cache(&self, key: String, output: SearchOutput) {
-        let mut cache = self.cache.lock().expect("search cache mutex poisoned");
+        let mut cache = self.cache_lock();
+        // Purge expired entries before inserting so the cache does not
+        // grow unboundedly with single-use queries.
+        cache.retain(|_, e| e.inserted_at.elapsed() < SEARCH_CACHE_TTL);
         cache.insert(
             key,
             CacheEntry {
