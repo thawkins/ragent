@@ -252,7 +252,12 @@ impl App {
         });
 
         match cmd {
-            ResearchCliCommand::Help => unreachable!(),
+            // FUNC-043: `Help` is handled above; a no-op here avoids the
+            // `unreachable!()` panic if the early-return ever changes.
+            ResearchCliCommand::Help => {
+                self.append_assistant_text(&ResearchCliCommand::build_help_message());
+                self.status = "research: help".to_string();
+            }
             ResearchCliCommand::Create {
                 name,
                 topic,

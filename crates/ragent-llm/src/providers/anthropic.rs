@@ -422,6 +422,10 @@ impl LlmClient for AnthropicClient {
             // PERF-063: pre-size the SSE accumulation buffer so a long stream does
             // not repeatedly realloc/copy as it grows.
             let mut buffer = String::with_capacity(8 * 1024);
+            // FUNC-033: hold an incomplete trailing multibyte character from the
+            // previous chunk so a UTF-8 sequence split across TCP chunks is not
+            // corrupted.
+            let mut pending_utf8: Vec<u8> = Vec::new();
             let mut current_event_type = String::new();
             // F5: open tool_use blocks keyed by the SSE content-block index.
             // A HashMap iterated with `.last()` attributed `input_json_delta`
@@ -462,7 +466,7 @@ impl LlmClient for AnthropicClient {
                     }
                 };
 
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
 
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
@@ -484,7 +488,17 @@ impl LlmClient for AnthropicClient {
 
                         let parsed: Value = match serde_json::from_str(data) {
                             Ok(v) => v,
-                            Err(_) => continue,
+                            Err(e) => {
+                                // FUNC-032: a corrupt frame must be logged, not
+                                // silently dropped — it can carry tool-call
+                                // deltas.
+                                tracing::warn!(
+                                    error = %e,
+                                    frame = %data,
+                                    "Anthropic: dropping malformed SSE data frame"
+                                );
+                                continue;
+                            }
                         };
 
                         match current_event_type.as_str() {

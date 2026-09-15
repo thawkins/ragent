@@ -739,17 +739,35 @@ impl ResearchManager {
         let mut cache_entries = Vec::with_capacity(items.len());
         for i in &items {
             let research_md = ResearchIo::research_md_path(&self.research_root, &i.name);
-            let body = tokio::fs::read_to_string(&research_md)
-                .await
-                .unwrap_or_default();
+            // FUNC-028: an unreadable RESEARCH.md must not become a blank index
+            // entry that is silently unsearchable. Log the failure and still
+            // emit the entry, but with a clear summary note rather than empty
+            // content, so the omission is traceable.
+            let (body, readable) = match tokio::fs::read_to_string(&research_md).await {
+                Ok(body) => (body, true),
+                Err(e) => {
+                    tracing::warn!(
+                        name = %i.name,
+                        path = %research_md.display(),
+                        error = %e,
+                        "failed to read RESEARCH.md while building search index; entry will lack full text"
+                    );
+                    (String::new(), false)
+                }
+            };
             let (_, body_after_fm) = ResearchIo::split_frontmatter(&body);
+            let summary = if readable {
+                extract_one_line_summary(&body_after_fm)
+            } else {
+                format!("[unreadable: {}]", research_md.display())
+            };
             cache_entries.push(SearchIndexEntry {
                 name: i.name.to_string(),
                 title: i.title.clone(),
                 topic: i.topic.clone(),
                 status: i.status.as_str().to_string(),
                 tags: Vec::new(),
-                summary: extract_one_line_summary(&body_after_fm),
+                summary,
                 created_at: i.created_at,
                 modified_at: i.modified_at,
                 search_text: body_after_fm,

@@ -45,6 +45,13 @@ pub struct WorkerStats {
     pub batches_processed: u64,
     /// Whether the worker is currently processing a batch.
     pub is_busy: bool,
+    /// Whether the worker thread terminated via a panic. A panicked worker is
+    /// recorded here so the frozen index is observable rather than silent
+    /// (FUNC-018).
+    pub worker_panicked: bool,
+    /// Number of internal full-reindex attempts that failed. Non-zero means the
+    /// index may be stale after a queue-overflow or manual reindex (FUNC-018).
+    pub reindex_failures: u64,
 }
 
 /// Handle to control the background indexing worker.
@@ -65,6 +72,8 @@ struct SharedStats {
     files_removed: AtomicU64,
     batches_processed: AtomicU64,
     is_busy: AtomicBool,
+    worker_panicked: AtomicBool,
+    reindex_failures: AtomicU64,
 }
 
 impl SharedStats {
@@ -74,6 +83,8 @@ impl SharedStats {
             files_removed: AtomicU64::new(0),
             batches_processed: AtomicU64::new(0),
             is_busy: AtomicBool::new(false),
+            worker_panicked: AtomicBool::new(false),
+            reindex_failures: AtomicU64::new(0),
         }
     }
 
@@ -83,6 +94,8 @@ impl SharedStats {
             files_removed: self.files_removed.load(Ordering::Relaxed),
             batches_processed: self.batches_processed.load(Ordering::Relaxed),
             is_busy: self.is_busy.load(Ordering::Relaxed),
+            worker_panicked: self.worker_panicked.load(Ordering::Relaxed),
+            reindex_failures: self.reindex_failures.load(Ordering::Relaxed),
         }
     }
 }
@@ -152,7 +165,13 @@ impl EventBatch {
 pub struct IndexWorker;
 
 impl IndexWorker {
-    /// Start the background worker. Returns a handle for control and stats.
+    /// Start the background worker.
+    ///
+    /// Returns a handle for control and stats. The handle carries a `None`
+    /// thread when the OS refused to spawn the worker thread (e.g. thread
+    /// exhaustion): the worker is then simply not running, and `queue_*` calls
+    /// report the failure instead of aborting the process with `expect`
+    /// (FUNC-018).
     pub fn start(
         index: Arc<CodeIndex>,
         event_rx: mpsc::Receiver<WatchEvent>,
@@ -162,21 +181,26 @@ impl IndexWorker {
         let stats = Arc::new(SharedStats::new());
         let (manual_tx, manual_rx) = mpsc::channel();
 
-        let handle = {
+        let thread = {
             let stop = Arc::clone(&stop_flag);
             let st = Arc::clone(&stats);
             let cfg = config;
-            std::thread::Builder::new()
+            match std::thread::Builder::new()
                 .name("codeindex-worker".into())
                 .spawn(move || {
                     worker_loop(index, event_rx, manual_rx, cfg, stop, st);
-                })
-                .expect("failed to spawn index worker thread")
+                }) {
+                Ok(handle) => Some(handle),
+                Err(e) => {
+                    warn!("failed to spawn index worker thread: {e}");
+                    None
+                }
+            }
         };
 
         IndexWorkerHandle {
             stop_flag,
-            thread: Some(handle),
+            thread,
             stats,
             manual_tx,
         }
@@ -184,22 +208,56 @@ impl IndexWorker {
 }
 
 impl IndexWorkerHandle {
+    /// Whether the background worker thread is currently running.
+    ///
+    /// `false` means the thread terminated (panic) or never started (spawn
+    /// failure); background indexing is not happening (FUNC-018).
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        self.thread.is_some()
+    }
+
     /// Stop the worker gracefully, waiting for it to finish.
+    ///
+    /// A panicked worker thread is logged and recorded in [`WorkerStats`]
+    /// rather than silently swallowed, so a frozen index surfaces in the status
+    /// bar instead of looking healthy (FUNC-018).
     pub fn stop(&mut self) {
         self.stop_flag.store(true, Ordering::SeqCst);
         if let Some(handle) = self.thread.take() {
-            let _ = handle.join();
+            if handle.join().is_err() {
+                self.stats.worker_panicked.store(true, Ordering::Relaxed);
+                warn!("index worker thread panicked; background indexing has stopped");
+            }
         }
     }
 
     /// Manually queue a single file for re-indexing.
-    pub fn queue_reindex(&self, path: PathBuf) {
-        let _ = self.manual_tx.send(ManualCommand::ReindexFile(path));
+    ///
+    /// Returns `false` when the worker is no longer running (the command could
+    /// not be delivered), so callers are not misled into thinking the file will
+    /// be reindexed (FUNC-018).
+    pub fn queue_reindex(&self, path: PathBuf) -> bool {
+        match self.manual_tx.send(ManualCommand::ReindexFile(path)) {
+            Ok(()) => true,
+            Err(e) => {
+                warn!(error = %e, "index worker not running; reindex request dropped");
+                false
+            }
+        }
     }
 
     /// Manually trigger a full reindex.
-    pub fn queue_full_reindex(&self) {
-        let _ = self.manual_tx.send(ManualCommand::FullReindex);
+    ///
+    /// Returns `false` when the worker is no longer running (FUNC-018).
+    pub fn queue_full_reindex(&self) -> bool {
+        match self.manual_tx.send(ManualCommand::FullReindex) {
+            Ok(()) => true,
+            Err(e) => {
+                warn!(error = %e, "index worker not running; full reindex request dropped");
+                false
+            }
+        }
     }
 
     /// Get current worker statistics.
@@ -267,7 +325,10 @@ fn worker_loop(
                                 .fetch_add(result.files_removed as u64, Ordering::Relaxed);
                             stats.batches_processed.fetch_add(1, Ordering::Relaxed);
                         }
-                        Err(e) => warn!("full reindex failed: {e}"),
+                        Err(e) => {
+                            stats.reindex_failures.fetch_add(1, Ordering::Relaxed);
+                            warn!("full reindex failed: {e}");
+                        }
                     }
                     stats.is_busy.store(false, Ordering::Relaxed);
                     batch.clear();
@@ -303,7 +364,10 @@ fn worker_loop(
                         "event queue exceeded max_queue_size, clearing batch and triggering full reindex"
                     );
                     batch.clear();
-                    let _ = index.full_reindex();
+                    if let Err(e) = index.full_reindex() {
+                        stats.reindex_failures.fetch_add(1, Ordering::Relaxed);
+                        warn!("queue-overflow full reindex failed: {e}");
+                    }
                     last_event_time = None;
                 }
             }

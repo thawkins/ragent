@@ -190,9 +190,9 @@ impl WeightConfig {
 
     /// Returns the weight for a dimension by its 0-based index (0–14).
     ///
-    /// # Panics
-    ///
-    /// Panics if `index >= 15`.
+    /// Returns `0.0` for an out-of-range index instead of panicking: the index
+    /// can be derived from classifier output, so a malformed value must not
+    /// abort the process (FUNC-005).
     pub fn weight_by_index(&self, index: usize) -> f64 {
         match index {
             0 => self.token_count,
@@ -210,15 +210,14 @@ impl WeightConfig {
             12 => self.code_complexity,
             13 => self.mathematical_complexity,
             14 => self.image_attachment,
-            _ => panic!("weight_by_index: index {index} out of range (0..15)"),
+            _ => 0.0,
         }
     }
 
     /// Returns the dimension name by its 0-based index (0–14).
     ///
-    /// # Panics
-    ///
-    /// Panics if `index >= 15`.
+    /// Returns `"unknown"` for an out-of-range index instead of panicking
+    /// (FUNC-005).
     pub fn dimension_name(index: usize) -> &'static str {
         match index {
             0 => "token_count",
@@ -236,7 +235,7 @@ impl WeightConfig {
             12 => "code_complexity",
             13 => "mathematical_complexity",
             14 => "image_attachment",
-            _ => panic!("dimension_name: index {index} out of range (0..15)"),
+            _ => "unknown",
         }
     }
 

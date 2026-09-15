@@ -550,6 +550,10 @@ impl LlmClient for GeminiClient {
             // PERF-063: pre-size the SSE accumulation buffer so a long stream does
             // not repeatedly realloc/copy as it grows.
             let mut buffer = String::with_capacity(8 * 1024);
+            // FUNC-033: hold an incomplete trailing multibyte character from the
+            // previous chunk so a UTF-8 sequence split across TCP chunks is not
+            // corrupted.
+            let mut pending_utf8: Vec<u8> = Vec::new();
             let mut pending_tool_calls: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
             // Stream-scoped call counter: ids must stay unique for the whole
             // stream even though the pending buffer is drained at each
@@ -596,7 +600,7 @@ impl LlmClient for GeminiClient {
                 };
 
                 // Gemini streams JSON objects, not SSE
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
 
                 // Try to parse complete JSON objects from buffer
                 // Gemini returns a stream of JSON objects, each on its own line or as NDJSON

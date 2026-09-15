@@ -196,8 +196,12 @@ fn execute_verification_script(
         if waited >= VERIFICATION_TIMEOUT {
             let _ = child.kill();
             let _ = child.wait();
-            let stdout = stdout_handle.join().unwrap_or_default();
-            let stderr = stderr_handle.join().unwrap_or_default();
+            let stdout = stdout_handle
+                .join()
+                .unwrap_or_else(|_| "(output capture failed)".to_string());
+            let stderr = stderr_handle
+                .join()
+                .unwrap_or_else(|_| "(output capture failed)".to_string());
             let captured = truncate_head_tail(
                 format!("{stdout}{stderr}").trim(),
                 VERIFICATION_HEAD_CHARS,

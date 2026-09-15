@@ -18,6 +18,7 @@ pub use github_issues::{
 };
 pub use github_prs::{
     GithubCreatePrTool, GithubGetPrTool, GithubListPrsTool, GithubMergePrTool, GithubReviewPrTool,
+    parse_merge_method,
 };
 
 pub use crate::{Tool, ToolContext, ToolOutput};

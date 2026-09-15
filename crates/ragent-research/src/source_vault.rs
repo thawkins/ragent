@@ -109,6 +109,11 @@ impl NewVaultSource {
 }
 
 /// Persistent, searchable source vault for a single research run.
+///
+/// The store methods are synchronous and take a blocking `std::sync::Mutex`
+/// around the SQLite connection plus blocking filesystem I/O. Async callers
+/// must not call them directly on a tokio worker — use the `*_async` wrappers,
+/// which move the work to the blocking pool (FUNC-017).
 #[derive(Clone)]
 pub struct SourceVault {
     vault_root: PathBuf,
@@ -432,6 +437,121 @@ impl SourceVault {
         let _ = conn.execute("ALTER TABLE vault_sources ADD COLUMN summary_text TEXT", []);
         Ok(())
     }
+
+    // ── Async wrappers (FUNC-017) ───────────────────────────────────────
+    //
+    // The synchronous methods above take a blocking `std::sync::Mutex` and do
+    // blocking SQLite + filesystem I/O. Calling them from an async task parks a
+    // tokio worker (and can deadlock the executor under contention). These
+    // wrappers move the work to the blocking pool; each call runs its own query
+    // against the shared connection, so concurrency is bounded only by SQLite's
+    // own locking, not by a runtime worker.
+
+    /// Async [`Self::search`]: off-loads the blocking vault query to the
+    /// blocking pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the blocking task panics or the vault query fails.
+    pub async fn search_async(&self, query: &str, limit: usize) -> Result<Vec<VaultSource>> {
+        let vault = self.clone();
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || vault.search(&query, limit))
+            .await
+            .map_err(|e| {
+                SourceVaultError::InvalidRunTag(format!("vault search task panicked: {e}"))
+            })?
+    }
+
+    /// Async [`Self::find_by_url`]: off-loads the blocking vault query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the blocking task panics or the vault query fails.
+    pub async fn find_by_url_async(&self, url: &str) -> Result<Option<VaultSource>> {
+        let vault = self.clone();
+        let url = url.to_string();
+        tokio::task::spawn_blocking(move || vault.find_by_url(&url))
+            .await
+            .map_err(|e| {
+                SourceVaultError::InvalidRunTag(format!("vault find_by_url task panicked: {e}"))
+            })?
+    }
+
+    /// Async [`Self::store`]: off-loads the blocking write + file I/O.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the blocking task panics or the vault write fails.
+    pub async fn store_async(&self, source: &NewVaultSource) -> Result<VaultSource> {
+        let vault = self.clone();
+        let source = source.clone();
+        tokio::task::spawn_blocking(move || vault.store(&source))
+            .await
+            .map_err(|e| {
+                SourceVaultError::InvalidRunTag(format!("vault store task panicked: {e}"))
+            })?
+    }
+
+    /// Async [`Self::read_content`]: off-loads the blocking read.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the blocking task panics or the read fails.
+    pub async fn read_content_async(&self, source_id: &str) -> Result<String> {
+        let vault = self.clone();
+        let source_id = source_id.to_string();
+        tokio::task::spawn_blocking(move || vault.read_content(&source_id))
+            .await
+            .map_err(|e| {
+                SourceVaultError::InvalidRunTag(format!("vault read_content task panicked: {e}"))
+            })?
+    }
+
+    /// Async [`Self::read_summary`]: off-loads the blocking vault query
+    /// (FUNC-052 — the sync method holds a `Mutex<Connection>` and must not be
+    /// called directly from an async task).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the blocking task panics or the query fails.
+    pub async fn read_summary_async(&self, source_id: &str) -> Result<Option<String>> {
+        let vault = self.clone();
+        let source_id = source_id.to_string();
+        tokio::task::spawn_blocking(move || vault.read_summary(&source_id))
+            .await
+            .map_err(|e| {
+                SourceVaultError::InvalidRunTag(format!("vault read_summary task panicked: {e}"))
+            })?
+    }
+
+    /// Async [`Self::list`]: off-loads the blocking vault query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the blocking task panics or the vault query fails.
+    pub async fn list_async(&self, limit: usize) -> Result<Vec<VaultSource>> {
+        let vault = self.clone();
+        tokio::task::spawn_blocking(move || vault.list(limit))
+            .await
+            .map_err(|e| {
+                SourceVaultError::InvalidRunTag(format!("vault list task panicked: {e}"))
+            })?
+    }
+
+    /// Async [`Self::count`]: off-loads the blocking vault query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the blocking task panics or the vault query fails.
+    pub async fn count_async(&self) -> Result<usize> {
+        let vault = self.clone();
+        tokio::task::spawn_blocking(move || vault.count())
+            .await
+            .map_err(|e| {
+                SourceVaultError::InvalidRunTag(format!("vault count task panicked: {e}"))
+            })?
+    }
 }
 
 fn row_to_source(row: &rusqlite::Row<'_>) -> Result<VaultSource> {
@@ -486,6 +606,10 @@ fn media_extension(media_type: &str) -> String {
 }
 
 /// Write `content` to `path` atomically (temp file + rename).
+///
+/// FUNC-052: a failed rename now logs the temp-file cleanup result rather than
+/// silently discarding it, so a leaked `.tmp` file (e.g. a permission error) is
+/// visible in the logs instead of accumulating unnoticed.
 fn atomic_write_file(path: &Path, content: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -495,7 +619,13 @@ fn atomic_write_file(path: &Path, content: &[u8]) -> Result<()> {
     match fs::rename(&tmp, path) {
         Ok(()) => Ok(()),
         Err(e) => {
-            let _ = fs::remove_file(&tmp);
+            if let Err(cleanup_err) = fs::remove_file(&tmp) {
+                tracing::warn!(
+                    tmp = %tmp.display(),
+                    error = %cleanup_err,
+                    "research vault: failed to clean up temp file after rename failure"
+                );
+            }
             Err(e.into())
         }
     }

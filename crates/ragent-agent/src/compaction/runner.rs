@@ -200,8 +200,10 @@ pub fn select(
         };
     }
 
-    // Always keep at least the last message verbatim.
-    let mut total = conv.last().expect("non-empty conv").1;
+    // Always keep at least the last message verbatim. `conv` is non-empty
+    // here (the empty case returned above), so `last()` is Some; fall back to a
+    // zero cost rather than panicking (FUNC-043).
+    let mut total = conv.last().map_or(0, |(_, cost, _)| *cost);
     let mut split_idx = conv.len() - 1;
     for (idx, &(_, cost, _)) in conv.iter().enumerate().rev().skip(1) {
         if total + cost > keep_tokens {
@@ -247,9 +249,16 @@ pub fn select(
     let mut head_messages: Vec<Message> = Vec::with_capacity(head_count);
     let mut recent_messages: Vec<Message> = Vec::with_capacity(conv.len() - head_count);
     for (k, (idx, _, _)) in conv.iter().enumerate() {
-        let message = slots[*idx]
-            .take()
-            .expect("each retained message is taken exactly once");
+        // Each retained message occupies a distinct slot, so take() is Some;
+        // skip defensively rather than panicking on an index invariant
+        // violation (FUNC-043).
+        let Some(message) = slots[*idx].take() else {
+            tracing::warn!(
+                index = *idx,
+                "compaction: retained message slot was already taken"
+            );
+            continue;
+        };
         if k < head_count {
             head_messages.push(message);
         } else {

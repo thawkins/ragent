@@ -3,7 +3,6 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::git::run_git;
 use crate::{Tool, ToolContext, ToolOutput};
 
 /// Tool that lists branches.
@@ -57,7 +56,9 @@ impl Tool for GitBranchTool {
             args.push("-a");
         }
 
-        let (stdout, stderr) = run_git(&args, &ctx.working_dir)?;
+        let args: Vec<String> = args.into_iter().map(ToString::to_string).collect();
+
+        let (stdout, stderr) = crate::git::run_git_async(args, ctx.working_dir.clone()).await?;
 
         if !stderr.is_empty() && stdout.trim().is_empty() {
             return Ok(ToolOutput {

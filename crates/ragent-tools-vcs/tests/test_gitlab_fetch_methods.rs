@@ -403,3 +403,70 @@ async fn test_fetch_readme_500_propagates_error() {
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("500"));
 }
+
+// ---------------------------------------------------------------------------
+// FUNC-053: pagination + 429 Retry-After handling
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn func053_get_paged_returns_next_page_cursor() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Fproject/jobs"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("x-next-page", "2")
+                .set_body_json(serde_json::json!([{"id": 1}])),
+        )
+        .mount(&server)
+        .await;
+
+    let client = client(&server);
+    let (value, next) = client
+        .get_paged("/projects/group%2Fproject/jobs")
+        .await
+        .unwrap();
+    assert!(value.is_array());
+    assert_eq!(next, Some(2));
+}
+
+#[tokio::test]
+async fn func053_get_paged_no_header_is_last_page() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Fproject/jobs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let client = client(&server);
+    let (_value, next) = client
+        .get_paged("/projects/group%2Fproject/jobs")
+        .await
+        .unwrap();
+    assert_eq!(next, None);
+}
+
+#[tokio::test]
+async fn func053_get_paged_retries_429_then_fails() {
+    // Every response is 429 with Retry-After: 0 so retries are immediate.
+    // The call must fail (after bounded retries) rather than hang or succeed.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Fproject/jobs"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .append_header("retry-after", "0")
+                .set_body_string("rate limited"),
+        )
+        .mount(&server)
+        .await;
+
+    let client = client(&server);
+    let result = client.get_paged("/projects/group%2Fproject/jobs").await;
+    assert!(result.is_err(), "exhausted 429 retries must fail");
+    assert!(
+        result.unwrap_err().to_string().contains("rate limit"),
+        "error should mention the rate limit"
+    );
+}

@@ -3,7 +3,6 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::git::run_git;
 use crate::{Tool, ToolContext, ToolOutput};
 
 /// Tool that merges branches.
@@ -83,8 +82,7 @@ impl Tool for GitMergeTool {
 
         args.push(branch.to_string());
 
-        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
-        let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
+        let (stdout, stderr) = crate::git::run_git_async(args, ctx.working_dir.clone()).await?;
 
         let combined = format!("{stdout}\n{stderr}").trim().to_string();
 

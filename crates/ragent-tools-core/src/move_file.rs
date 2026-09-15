@@ -55,19 +55,48 @@ impl Tool for MoveFileTool {
         let src = resolve_path(&ctx.working_dir, src_str);
         let dst = resolve_path(&ctx.working_dir, dst_str);
 
-        super::check_path_within_root_cached(&src, &ctx.working_dir, &ctx.canonical_cache)?;
-        super::check_path_within_root_cached(&dst, &ctx.working_dir, &ctx.canonical_cache)?;
+        super::check_path_within_allowed_roots_cached(
+            &src,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
+        super::check_path_within_allowed_roots_cached(
+            &dst,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
 
-        // Create destination parent directory if needed
-        if let Some(parent) = dst.parent() {
-            tokio::fs::create_dir_all(parent).await.with_context(|| {
-                format!("Failed to create parent directory: {}", parent.display())
-            })?;
+        // FUNC-061: verify the source exists before touching the destination
+        // side, so a failed move never creates orphan destination directories.
+        if !src.exists() {
+            anyhow::bail!("Source not found: {}", src.display());
         }
 
-        tokio::fs::rename(&src, &dst).await.with_context(|| {
-            format!("Failed to move '{}' to '{}'", src.display(), dst.display())
-        })?;
+        // FUNC-061: rename first, and only create the destination's parent
+        // directory when the *destination* parent is what is missing (the
+        // rename failed because the target directory does not exist yet). This
+        // keeps a genuine failure from leaving orphan directories behind.
+        match tokio::fs::rename(&src, &dst).await {
+            Ok(()) => {}
+            Err(first_err) => {
+                let parent_missing = dst.parent().is_some_and(|p| !p.exists());
+                if !parent_missing {
+                    return Err(first_err).with_context(|| {
+                        format!("Failed to move '{}' to '{}'", src.display(), dst.display())
+                    });
+                }
+                if let Some(parent) = dst.parent() {
+                    tokio::fs::create_dir_all(parent).await.with_context(|| {
+                        format!("Failed to create parent directory: {}", parent.display())
+                    })?;
+                }
+                tokio::fs::rename(&src, &dst).await.with_context(|| {
+                    format!("Failed to move '{}' to '{}'", src.display(), dst.display())
+                })?;
+            }
+        }
 
         Ok(ToolOutput {
             content: format!("Moved '{}' → '{}'", src.display(), dst.display()),

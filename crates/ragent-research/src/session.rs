@@ -230,11 +230,13 @@ impl GatherObserver for GatherEventForwarder {
                 });
             }
             GatherEvent::SearchBudgetExhausted { used, limit } => {
+                let limit_desc =
+                    limit.map_or_else(|| "unlimited".to_string(), |l| format!("{l} calls"));
                 self.observer.on_event(SessionEvent::RunStep {
                     step: "search_budget".to_string(),
                     status: crate::run_manifest::StepStatus::Skipped.as_str().to_string(),
                     detail: Some(format!(
-                        "run search budget of {limit} calls exhausted after {used}; proceeding with sources gathered so far"
+                        "run search budget of {limit_desc} exhausted after {used}; proceeding with sources gathered so far"
                     )),
                 });
             }
@@ -256,6 +258,35 @@ impl GatherObserver for GatherEventForwarder {
                         .as_str()
                         .to_string(),
                     detail: Some(detail),
+                });
+            }
+            GatherEvent::SearchPartiallyFailed {
+                failed,
+                total,
+                error,
+            } => {
+                // FUNC-030: a partially-failed sweep is not a clean run.
+                self.observer.on_event(SessionEvent::RunStep {
+                    step: "search_partial_failure".to_string(),
+                    status: crate::run_manifest::StepStatus::Skipped
+                        .as_str()
+                        .to_string(),
+                    detail: Some(format!(
+                        "{failed} of {total} sub-query searches failed; coverage is incomplete (last error: {error})"
+                    )),
+                });
+            }
+            GatherEvent::VaultStoreFailed { url, error } => {
+                // FUNC-030: the source is captured but not persisted; surface
+                // the divergence instead of counting it silently.
+                self.observer.on_event(SessionEvent::RunStep {
+                    step: "vault_store_failed".to_string(),
+                    status: crate::run_manifest::StepStatus::Skipped
+                        .as_str()
+                        .to_string(),
+                    detail: Some(format!(
+                        "failed to persist source to vault ({url}): {error}"
+                    )),
                 });
             }
         }

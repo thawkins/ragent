@@ -16,6 +16,22 @@ fn detect(ctx: &ToolContext) -> Result<(GitHubClient, String, String)> {
     Ok((client, owner, repo))
 }
 
+/// Validate the optional `method` parameter for `github_merge_pr`.
+///
+/// Returns the canonical static method string, defaulting to `"merge"` when the
+/// parameter is absent. Any value outside `{merge, squash, rebase}` is rejected
+/// so an unrecognised input can never silently perform a real merge.
+pub fn parse_merge_method(value: Option<&str>) -> Result<&'static str> {
+    match value {
+        None | Some("merge") => Ok("merge"),
+        Some("squash") => Ok("squash"),
+        Some("rebase") => Ok("rebase"),
+        Some(other) => {
+            anyhow::bail!("Invalid merge method '{other}'. Expected one of: merge, squash, rebase.")
+        }
+    }
+}
+
 // ── GithubListPrsTool ─────────────────────────────────────────────────────────
 
 /// Tool that lists pull requests in a GitHub repository.
@@ -69,7 +85,10 @@ impl Tool for GithubListPrsTool {
 
         let mut path = format!("/repos/{owner}/{repo}/pulls?state={state}&per_page={limit}");
         if let Some(base) = input["base"].as_str() {
-            path.push_str(&format!("&base={base}"));
+            // FUNC-063: percent-encode the branch name — a branch containing
+            // `&`, `=`, `#`, or a non-ASCII character would otherwise inject
+            // extra query parameters or an invalid fragment.
+            path.push_str(&format!("&base={}", crate::percent::encode_component(base)));
         }
 
         let prs = client.get(&path).await?;
@@ -255,12 +274,18 @@ impl Tool for GithubCreatePrTool {
         let head = if let Some(h) = input["head"].as_str() {
             h.to_string()
         } else {
-            let out = std::process::Command::new("git")
-                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .current_dir(&ctx.working_dir)
-                .output()
-                .context("Failed to run git rev-parse")?;
-            String::from_utf8(out.stdout)
+            // FUNC-050: timeout-bounded git runner off the async runtime.
+            let out = crate::git::run_git_async(
+                vec![
+                    "rev-parse".to_string(),
+                    "--abbrev-ref".to_string(),
+                    "HEAD".to_string(),
+                ],
+                ctx.working_dir.clone(),
+            )
+            .await
+            .context("Failed to run git rev-parse")?;
+            String::from_utf8(out.0.into_bytes())
                 .context("Non-UTF8 branch name")?
                 .trim()
                 .to_string()
@@ -346,7 +371,7 @@ impl Tool for GithubMergePrTool {
         let number = input["number"]
             .as_u64()
             .context("Missing required 'number' parameter")?;
-        let method = input["method"].as_str().unwrap_or("merge");
+        let method = parse_merge_method(input["method"].as_str())?;
 
         let mut body = json!({"merge_method": method});
         if let Some(msg) = input["message"].as_str() {

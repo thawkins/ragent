@@ -131,13 +131,23 @@ impl GitHubClient {
             .unwrap_or_else(|_| GITHUB_CLIENT_ID_DEFAULT.to_string())
     }
 
-    /// GET request to the GitHub API.
-    pub async fn get(&self, path: &str) -> Result<Value> {
-        let url = if path.starts_with("https://") {
+    /// Resolve a request URL against the configured `base_url`.
+    ///
+    /// FUNC-062: `post`/`put`/`patch` previously hardcoded `api.github.com`,
+    /// silently bypassing a configured GitHub Enterprise host. All verbs now
+    /// route through this helper so `with_base_url` (and mock servers) apply
+    /// consistently. An absolute `https://` path is used verbatim.
+    fn resolve_url(&self, path: &str) -> String {
+        if path.starts_with("https://") {
             path.to_string()
         } else {
             format!("{}{path}", self.base_url)
-        };
+        }
+    }
+
+    /// GET request to the GitHub API.
+    pub async fn get(&self, path: &str) -> Result<Value> {
+        let url = self.resolve_url(path);
 
         let resp = self
             .client
@@ -154,7 +164,7 @@ impl GitHubClient {
 
     /// POST request to the GitHub API.
     pub async fn post(&self, path: &str, body: &Value) -> Result<Value> {
-        let url = format!("https://api.github.com{path}");
+        let url = self.resolve_url(path);
         let resp = self
             .client
             .post(&url)
@@ -171,7 +181,7 @@ impl GitHubClient {
 
     /// PUT request to the GitHub API.
     pub async fn put(&self, path: &str, body: &Value) -> Result<Value> {
-        let url = format!("https://api.github.com{path}");
+        let url = self.resolve_url(path);
         let resp = self
             .client
             .put(&url)
@@ -188,7 +198,7 @@ impl GitHubClient {
 
     /// PATCH request to the GitHub API.
     pub async fn patch(&self, path: &str, body: &Value) -> Result<Value> {
-        let url = format!("https://api.github.com{path}");
+        let url = self.resolve_url(path);
         let resp = self
             .client
             .patch(&url)
@@ -270,13 +280,11 @@ impl GitHubClient {
     /// Detect the GitHub owner/repo from the current git repository remote.
     #[must_use]
     pub fn detect_repo(working_dir: &std::path::Path) -> Option<(String, String)> {
-        let output = std::process::Command::new("git")
-            .args(["remote", "get-url", "origin"])
-            .current_dir(working_dir)
-            .output()
-            .ok()?;
-
-        if !output.status.success() {
+        // FUNC-050: use the timeout-bounded git runner so a hung
+        // credential/network prompt cannot block the caller indefinitely.
+        let output =
+            crate::git::run_git_output(&["remote", "get-url", "origin"], working_dir).ok()?;
+        if !output.success {
             return None;
         }
         let url = String::from_utf8(output.stdout).ok()?;

@@ -369,7 +369,7 @@ impl ToolRegistry {
     pub fn register(&self, tool: Arc<dyn Tool>) {
         self.tools
             .write()
-            .expect("tool registry lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(tool.name().to_string(), tool);
     }
 
@@ -378,7 +378,7 @@ impl ToolRegistry {
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools
             .read()
-            .expect("tool registry lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(name)
             .cloned()
     }
@@ -388,21 +388,30 @@ impl ToolRegistry {
     pub fn contains(&self, name: &str) -> bool {
         self.tools
             .read()
-            .expect("tool registry lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains_key(name)
     }
 
     /// Replace the set of hidden (invisible) tool names.
     pub fn set_hidden(&self, names: &[String]) {
-        let mut hidden = self.hidden.write().expect("tool hidden lock poisoned");
+        let mut hidden = self
+            .hidden
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *hidden = names.iter().cloned().collect();
     }
 
     /// Return the definitions of all registered, non-hidden tools.
     #[must_use]
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        let tools = self.tools.read().expect("tool registry lock poisoned");
-        let hidden = self.hidden.read().expect("tool hidden lock poisoned");
+        let tools = self
+            .tools
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let hidden = self
+            .hidden
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut defs: Vec<ToolDefinition> = tools
             .values()
             .filter(|tool| !hidden.contains(tool.name()))

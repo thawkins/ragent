@@ -54,8 +54,32 @@ impl Tool for CopyFileTool {
         let src = resolve_path(&ctx.working_dir, src_str);
         let dst = resolve_path(&ctx.working_dir, dst_str);
 
-        super::check_path_within_root_cached(&src, &ctx.working_dir, &ctx.canonical_cache)?;
-        super::check_path_within_root_cached(&dst, &ctx.working_dir, &ctx.canonical_cache)?;
+        super::check_path_within_allowed_roots_cached(
+            &src,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
+        super::check_path_within_allowed_roots_cached(
+            &dst,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
+
+        // FUNC-061: refuse a self-copy — copying a file onto itself would
+        // truncate it (the destination is opened for write while the source is
+        // read). Compare canonical forms so path aliases are caught too.
+        if let (Ok(canon_src), Ok(canon_dst)) = (
+            tokio::fs::canonicalize(&src).await,
+            tokio::fs::canonicalize(&dst).await,
+        ) && canon_src == canon_dst
+        {
+            anyhow::bail!(
+                "Source and destination are the same file: {}",
+                src.display()
+            );
+        }
 
         if let Some(parent) = dst.parent() {
             tokio::fs::create_dir_all(parent).await.with_context(|| {

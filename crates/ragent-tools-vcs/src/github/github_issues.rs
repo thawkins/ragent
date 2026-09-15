@@ -468,14 +468,10 @@ impl Tool for GithubCloseIssueTool {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Percent-encode a query-parameter value (FUNC-063).
+///
+/// Delegates to the shared byte-wise encoder so non-ASCII labels encode as
+/// UTF-8 (e.g. `é` -> `%C3%A9`) rather than as a single wrong `%XX`.
 fn urlencoded(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| {
-            if c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '~' | ',') {
-                vec![c]
-            } else {
-                format!("%{:02X}", c as u32).chars().collect()
-            }
-        })
-        .collect()
+    crate::percent::encode_component(s)
 }

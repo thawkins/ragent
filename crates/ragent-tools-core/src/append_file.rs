@@ -55,7 +55,12 @@ impl Tool for AppendFileTool {
             .context("Missing required 'content' parameter")?;
 
         let path = resolve_path(&ctx.working_dir, path_str);
-        super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+        super::check_path_within_allowed_roots_cached(
+            &path,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
 
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -73,6 +78,13 @@ impl Tool for AppendFileTool {
         file.write_all(content.as_bytes())
             .await
             .with_context(|| format!("Failed to append to file: {}", path.display()))?;
+
+        // FUNC-061: flush explicitly so the appended bytes are durable and the
+        // caller (and any subsequent read) observes them, rather than relying on
+        // the drop of the buffered handle to flush best-effort.
+        file.flush()
+            .await
+            .with_context(|| format!("Failed to flush appended file: {}", path.display()))?;
 
         let bytes = content.len();
         let lines = content.lines().count();

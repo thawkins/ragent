@@ -683,7 +683,31 @@ pub async fn write_concepts_md(
     content: &str,
 ) -> Result<PathBuf, ResearchIoError> {
     let path = ResearchIo::concepts_md_path(research_root, name);
-    let sources = load_web_source_metadata(research_root, name).unwrap_or_default();
+    // FUNC-052: `load_web_source_metadata` does blocking `read_dir` +
+    // `read_to_string` per file; run it on the blocking pool rather than the
+    // async worker. A read failure is logged and degrades to no source list
+    // instead of being silently discarded by `unwrap_or_default`.
+    let sources = {
+        let root = research_root.to_path_buf();
+        let name = name.clone();
+        match tokio::task::spawn_blocking(move || load_web_source_metadata(&root, &name)).await {
+            Ok(Ok(sources)) => sources,
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    error = %e,
+                    "research: could not load web source metadata for CONCEPTS.md"
+                );
+                Vec::new()
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "research: web source metadata task failed for CONCEPTS.md"
+                );
+                Vec::new()
+            }
+        }
+    };
     let formatted = format_concepts_md_with_sources(content, &sources);
     ResearchIo::atomic_write(&path, &formatted).await?;
     Ok(path)

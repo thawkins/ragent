@@ -418,6 +418,10 @@ impl LlmClient for AzureAnthropicClient {
             // PERF-063: pre-size the SSE accumulation buffer so a long stream does
             // not repeatedly realloc/copy as it grows.
             let mut buffer = String::with_capacity(8 * 1024);
+            // FUNC-033: hold an incomplete trailing multibyte character from the
+            // previous chunk so a UTF-8 sequence split across TCP chunks is not
+            // corrupted.
+            let mut pending_utf8: Vec<u8> = Vec::new();
             let mut current_event_type = String::new();
             // F5: open tool_use blocks keyed by the SSE content-block index;
             // `.last()` on a HashMap attributed deltas to an arbitrary open
@@ -457,7 +461,7 @@ impl LlmClient for AzureAnthropicClient {
                     }
                 };
 
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
 
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();

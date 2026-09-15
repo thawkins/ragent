@@ -3,7 +3,6 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::git::run_git;
 use crate::{Tool, ToolContext, ToolOutput};
 
 /// Tool that manages git tags.
@@ -63,13 +62,21 @@ impl Tool for GitTagTool {
 
         let (stdout, stderr) = match action {
             "list" => {
-                let (out, err) = run_git(&["tag", "-l"], &ctx.working_dir)?;
+                let (out, err) = crate::git::run_git_async(
+                    vec!["tag".to_string(), "-l".to_string()],
+                    ctx.working_dir.clone(),
+                )
+                .await?;
                 (out, err)
             }
             "show" => {
                 let tag_name =
                     name.ok_or_else(|| anyhow::anyhow!("Tag name is required for 'show'"))?;
-                let (out, err) = run_git(&["show", tag_name], &ctx.working_dir)?;
+                let (out, err) = crate::git::run_git_async(
+                    vec!["show".to_string(), tag_name.to_string()],
+                    ctx.working_dir.clone(),
+                )
+                .await?;
                 (out, err)
             }
             "create" => {
@@ -85,13 +92,21 @@ impl Tool for GitTagTool {
                     args.push(tag_name);
                 }
                 args.push(git_ref);
-                let (out, err) = run_git(&args, &ctx.working_dir)?;
+                let (out, err) = crate::git::run_git_async(
+                    args.into_iter().map(ToString::to_string).collect(),
+                    ctx.working_dir.clone(),
+                )
+                .await?;
                 (out, err)
             }
             "delete" => {
                 let tag_name =
                     name.ok_or_else(|| anyhow::anyhow!("Tag name is required for 'delete'"))?;
-                let (out, err) = run_git(&["tag", "-d", tag_name], &ctx.working_dir)?;
+                let (out, err) = crate::git::run_git_async(
+                    vec!["tag".to_string(), "-d".to_string(), tag_name.to_string()],
+                    ctx.working_dir.clone(),
+                )
+                .await?;
                 (out, err)
             }
             other => {

@@ -189,3 +189,70 @@ fn vault_content_path_defaults_to_markdown_for_page_media() {
     let path: PathBuf = vault.content_path("abc-123", "page");
     assert_eq!(path.extension().and_then(|s| s.to_str()), Some("md"));
 }
+
+// ── FUNC-017: async wrappers must not park a tokio worker ───────────────
+
+/// FUNC-017: concurrent vault calls issued from async tasks must all complete
+/// without starving the runtime. Before the async wrappers existed these calls
+/// ran blocking SQLite + filesystem I/O directly on tokio workers.
+#[tokio::test]
+async fn concurrent_vault_calls_complete_from_async_tasks() {
+    let temp = TempDir::new().unwrap();
+    let vault = open_vault(&temp, "run-func017");
+
+    // Seed a handful of sources through the async store path.
+    for i in 0..16 {
+        let source = sample_source(
+            &format!("https://example.com/func017/{i}"),
+            &format!("Source {i}"),
+            "body text about agentic loops",
+        );
+        vault.store_async(&source).await.expect("store_async");
+    }
+
+    // Fire reads, searches and counts concurrently.
+    let reads = (0..8).map(|_| {
+        let vault = vault.clone();
+        async move { vault.list_async(50).await }
+    });
+    let searches = futures::future::join_all(reads).await;
+    for result in searches {
+        assert_eq!(result.expect("list_async").len(), 16);
+    }
+
+    assert_eq!(vault.count_async().await.expect("count_async"), 16);
+}
+
+/// FUNC-017: the async store/search wrappers round-trip through the blocking
+/// pool and return the same data the synchronous API does.
+#[tokio::test]
+async fn async_wrappers_round_trip() {
+    let temp = TempDir::new().unwrap();
+    let vault = open_vault(&temp, "run-func017b");
+
+    let source = sample_source(
+        "https://example.com/func017b",
+        "Async Source",
+        "unique-needle-func017b",
+    );
+    let stored = vault.store_async(&source).await.expect("store_async");
+
+    let found = vault
+        .find_by_url_async("https://example.com/func017b")
+        .await
+        .expect("find_by_url_async")
+        .expect("present");
+    assert_eq!(found.source_id, stored.source_id);
+
+    let hits = vault
+        .search_async("unique-needle-func017b", 10)
+        .await
+        .expect("search_async");
+    assert_eq!(hits.len(), 1);
+
+    let body = vault
+        .read_content_async(&stored.source_id)
+        .await
+        .expect("read_content_async");
+    assert!(body.contains("unique-needle-func017b"));
+}

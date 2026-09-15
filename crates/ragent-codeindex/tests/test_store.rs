@@ -417,3 +417,63 @@ fn test_get_file_id() {
     let id = store.get_file_id("src/lib.rs").unwrap();
     assert!(id.is_some());
 }
+
+#[test]
+fn func064_multi_level_nesting_child_before_parent() {
+    // FUNC-064: a grandchild whose parent is itself a child must resolve even
+    // when the child appears *after* its own child in the parse order (the
+    // single-pass mapper silently produced `parent_id = None` here).
+    let store = IndexStore::open_in_memory().unwrap();
+    let file_id = store
+        .upsert_file(&make_entry("src/nested.rs", "def"))
+        .unwrap();
+
+    // temp ids: 0 = A (root), 1 = B (child of A), 2 = C (child of B).
+    // Deliberately ordered grandchild-first so the old two-pass code lost C.
+    let symbols = vec![
+        make_symbol("C", SymbolKind::Function, Some(1), 2),
+        make_symbol("B", SymbolKind::Method, Some(0), 1),
+        make_symbol("A", SymbolKind::Struct, None, 0),
+    ];
+
+    store.upsert_symbols(file_id, &symbols).unwrap();
+
+    let all = store.query_symbols(&SymbolFilter::default()).unwrap();
+    let a = all.iter().find(|s| s.name == "A").unwrap();
+    let b = all.iter().find(|s| s.name == "B").unwrap();
+    let c = all.iter().find(|s| s.name == "C").unwrap();
+
+    assert_eq!(a.parent_id, None);
+    assert_eq!(b.parent_id, Some(a.id), "B must resolve to A");
+    assert_eq!(
+        c.parent_id,
+        Some(b.id),
+        "C must resolve to B (3-level chain)"
+    );
+}
+
+#[test]
+fn func064_multi_level_nesting_parent_before_child() {
+    // The natural ordering must also resolve, for parity.
+    let store = IndexStore::open_in_memory().unwrap();
+    let file_id = store
+        .upsert_file(&make_entry("src/nested2.rs", "def2"))
+        .unwrap();
+
+    let symbols = vec![
+        make_symbol("A", SymbolKind::Struct, None, 0),
+        make_symbol("B", SymbolKind::Method, Some(0), 1),
+        make_symbol("C", SymbolKind::Function, Some(1), 2),
+    ];
+
+    store.upsert_symbols(file_id, &symbols).unwrap();
+
+    let all = store.query_symbols(&SymbolFilter::default()).unwrap();
+    let a = all.iter().find(|s| s.name == "A").unwrap();
+    let b = all.iter().find(|s| s.name == "B").unwrap();
+    let c = all.iter().find(|s| s.name == "C").unwrap();
+
+    assert_eq!(a.parent_id, None);
+    assert_eq!(b.parent_id, Some(a.id));
+    assert_eq!(c.parent_id, Some(b.id));
+}

@@ -716,7 +716,11 @@ impl App {
             SelectionPane::Memory => self.memory_area,
             SelectionPane::Telemetry => self.telemetry_area,
             SelectionPane::ContextPanel => self.context_panel_area,
-            _ => unreachable!(),
+            // FUNC-043: unknown/input pane has no text-selection area; skip the
+            // selection rather than panicking.
+            _ => {
+                return;
+            }
         };
         // Inner area (accounting for borders)
         let inner_x = if sel.pane == SelectionPane::Messages {

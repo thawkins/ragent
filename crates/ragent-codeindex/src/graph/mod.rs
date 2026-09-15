@@ -214,7 +214,12 @@ impl<'a> SymbolGraph<'a> {
         let sym_lookup: std::collections::HashMap<i64, (String, String)> = all_symbols
             .iter()
             .map(|s| {
-                let file = file_paths.get(&s.file_id).cloned().unwrap_or_default();
+                // FUNC-031: mark a missing file row instead of emitting an
+                // empty `source_file` string.
+                let file = file_paths
+                    .get(&s.file_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("<missing-file:{}>", s.file_id));
                 (s.id, (s.name.clone(), file))
             })
             .collect();

@@ -35,7 +35,7 @@ pub async fn wait_for_min_interval(config: Option<&ragent_config::finance::Finan
     let wait = {
         let mut guard = NEXT_ALLOWED_CALL
             .lock()
-            .expect("finance throttle lock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = Instant::now();
         let next_allowed = guard.unwrap_or(now);
         let wait = if next_allowed > now {
@@ -59,7 +59,7 @@ pub async fn wait_for_min_interval(config: Option<&ragent_config::finance::Finan
 pub fn reset_throttle_state() {
     let mut guard = NEXT_ALLOWED_CALL
         .lock()
-        .expect("finance throttle lock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = None;
 }
 

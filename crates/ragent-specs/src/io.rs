@@ -57,10 +57,10 @@ impl SpecIo {
         let temp_path = path.with_file_name(format!(".{file_name}.{seq}.tmp"));
         fs::write(&temp_path, content).await?;
         // Sync the temp file before the rename so a crash cannot leave a
-        // renamed-but-unflushed file behind.
-        if let Ok(file) = fs::File::open(&temp_path).await {
-            let _ = file.sync_all().await;
-        }
+        // renamed-but-unflushed file behind. The sync failure is propagated:
+        // swallowing it would silently void the crash-durability guarantee
+        // while still performing the rename (FUNC-025).
+        fs::File::open(&temp_path).await?.sync_all().await?;
         fs::rename(&temp_path, path).await?;
         Ok(())
     }
@@ -316,93 +316,42 @@ impl SpecIo {
 
     /// Parse tasks from PLAN.md content.
     ///
-    /// Extracts task table rows with columns:
-    /// ID, Title, Requirement, Effort, Priority, Status, Dependencies.
+    /// Delegates to the validated [`crate::plan_parser::PlanParser`] and maps
+    /// its typed tasks onto [`crate::spec::Task`], so SPEC.md task display uses
+    /// the same parser as TASKS.md generation and cannot disagree about what a
+    /// row means (FUNC-026). The previous hand-rolled duplicate parser is
+    /// removed.
     fn parse_tasks(plan_md: &str) -> Vec<crate::spec::Task> {
-        let mut tasks = Vec::new();
-        let mut in_task_section = false;
-        for line in plan_md.lines() {
-            let trimmed = line.trim();
-            if trimmed.eq_ignore_ascii_case("## Tasks") || trimmed.eq_ignore_ascii_case("### Tasks")
-            {
-                in_task_section = true;
-                continue;
-            }
-            if in_task_section && trimmed.starts_with("## ") && !trimmed.starts_with("### ") {
-                break;
-            }
-            if !in_task_section {
-                continue;
-            }
-            // Parse table rows: | ID | Title | Req | Effort | Priority | Status | Dependencies |
-            let cells: Vec<&str> = trimmed
-                .split('|')
-                .map(str::trim)
-                .filter(|c| !c.is_empty())
-                .collect();
-            // Skip header rows (contain "ID" as a cell value, not as a substring in a title)
-            // and separator rows (all dashes/colons)
-            if cells.iter().any(|c| c.eq_ignore_ascii_case("ID")) {
-                continue;
-            }
-            if cells
-                .iter()
-                .all(|c| c.is_empty() || c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' '))
-            {
-                continue;
-            }
-            if cells.len() >= 6 {
-                let id = cells[0].to_string();
-                if id.starts_with("T-") {
-                    let title = cells.get(1).copied().unwrap_or("").to_string();
-                    let req = cells.get(2).copied().unwrap_or("").to_string();
-                    let effort = cells.get(3).copied().unwrap_or("").to_string();
-                    let priority = cells.get(4).copied().unwrap_or("").to_string();
-                    // Status is column 5 if 7+ columns, otherwise fallback to Pending
-                    let status_str = cells.get(5).copied().unwrap_or("");
-                    let status = if cells.len() >= 7 {
-                        match crate::spec::TaskStatus::parse(status_str) {
-                            Some(s) => s,
-                            None => {
-                                tracing::warn!(
-                                    "Task {id}: unrecognized status '{}', defaulting to Pending",
-                                    status_str
-                                );
-                                crate::spec::TaskStatus::Pending
-                            }
-                        }
-                    } else {
-                        crate::spec::TaskStatus::Pending
-                    };
-                    let deps = cells
-                        .get(if cells.len() >= 7 { 6 } else { 5 })
-                        .map(|d| {
-                            if *d == "—" || *d == "-" || d.is_empty() {
-                                Vec::new()
-                            } else {
-                                d.split(',').map(|s| s.trim().to_string()).collect()
-                            }
-                        })
-                        .unwrap_or_default();
-                    tasks.push(crate::spec::Task {
-                        id: id.clone(),
-                        title,
-                        description: String::new(),
-                        linked_requirements: if req.is_empty() || req == "—" || req == "-" {
-                            Vec::new()
-                        } else {
-                            vec![req]
-                        },
-                        status,
-                        effort,
-                        priority,
-                        dependencies: deps,
-                        completed_at: None, // Round-tripped from file; actual timestamp not preserved
-                    });
-                }
-            }
-        }
-        tasks
+        let Ok(plan_tasks) = crate::plan_parser::PlanParser::parse(plan_md) else {
+            return Vec::new();
+        };
+        plan_tasks
+            .into_iter()
+            .map(|task| crate::spec::Task {
+                id: task.id,
+                title: task.title,
+                description: String::new(),
+                linked_requirements: if task.requirement.is_empty()
+                    || task.requirement == "—"
+                    || task.requirement == "-"
+                {
+                    Vec::new()
+                } else {
+                    // The parser preserves the raw cell (which may list several
+                    // comma-separated requirement ids).
+                    task.requirement
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                },
+                status: task.status,
+                effort: task.effort.as_str().to_string(),
+                priority: task.priority.as_str().to_string(),
+                dependencies: task.dependencies,
+                completed_at: None, // Round-tripped from file; actual timestamp not preserved
+            })
+            .collect()
     }
 
     /// Build the [`Requirement`] list for a spec from its SPEC.md content and parsed tasks.

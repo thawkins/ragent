@@ -41,8 +41,14 @@ pub use git_stash::GitStashTool;
 pub use git_status::GitStatusTool;
 pub use git_tag::GitTagTool;
 
-use anyhow::{Context, Result};
-use std::process::Command;
+use anyhow::{Context, Result, bail};
+use std::process::{Command, Stdio};
+use std::time::Duration;
+
+/// Wall-clock budget for a single local `git` invocation. An interactive
+/// credential prompt or a hung network operation would otherwise block a tokio
+/// worker forever (FUNC-050).
+pub const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Captured result of a single `git` subprocess invocation.
 pub struct GitOutput {
@@ -62,21 +68,81 @@ pub struct GitOutput {
 /// (PERF-057).
 ///
 /// Sets `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS=false` to prevent interactive
-/// credential prompts from hanging in non-TTY environments.
+/// credential prompts from hanging in non-TTY environments, and enforces
+/// [`GIT_TIMEOUT`]: a git that overruns is killed and reported as an error, so
+/// a hung credential prompt or network fetch cannot block indefinitely
+/// (FUNC-050).
 pub fn run_git_output(args: &[&str], cwd: &std::path::Path) -> Result<GitOutput> {
-    let output = Command::new("git")
+    let mut child = Command::new("git")
         .args(args)
         .current_dir(cwd)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "false")
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .context("failed to execute `git` — is git installed?")?;
+
+    let deadline = std::time::Instant::now() + GIT_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    bail!(
+                        "`git {}` timed out after {}s and was killed",
+                        args.join(" "),
+                        GIT_TIMEOUT.as_secs()
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(e) => return Err(anyhow::Error::from(e).context("git wait failed")),
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .context("failed to collect git output")?;
 
     Ok(GitOutput {
         stdout: output.stdout,
         stderr: output.stderr,
         success: output.status.success(),
     })
+}
+
+/// Timeout-bounded `git` invocation off the async runtime.
+///
+/// Runs the blocking, timeout-bounded [`run_git_output`] on the blocking pool
+/// so a slow git cannot park a tokio worker (FUNC-050).
+///
+/// # Errors
+///
+/// Returns an error if the git process fails to spawn, times out, or the
+/// blocking task panics.
+pub async fn run_git_output_async(args: Vec<String>, cwd: std::path::PathBuf) -> Result<GitOutput> {
+    tokio::task::spawn_blocking(move || {
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_git_output(&arg_refs, &cwd)
+    })
+    .await
+    .context("git task panicked")?
+}
+
+/// Async wrapper around [`run_git`] for use inside async tool `execute` bodies.
+///
+/// # Errors
+///
+/// As [`run_git`].
+pub async fn run_git_async(args: Vec<String>, cwd: std::path::PathBuf) -> Result<(String, String)> {
+    let output = run_git_output_async(args, cwd).await?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    Ok((stdout, stderr))
 }
 
 /// Run a git command in the given working directory and return stdout and stderr.

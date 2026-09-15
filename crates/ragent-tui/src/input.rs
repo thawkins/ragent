@@ -316,19 +316,26 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 }
                 KeyCode::Enter => {
                     if let Some(req) = app.question_queue.front().cloned() {
-                        let response = req
-                            .options
-                            .get(app.question_selected_index)
-                            .cloned()
-                            .unwrap_or_default();
-                        app.event_bus
-                            .publish(ragent_agent::event::Event::QuestionAnswered {
-                                session_id: req.session_id.clone(),
-                                request_id: req.id.clone(),
-                                response,
-                            });
-                        app.question_queue.pop_front();
-                        app.question_selected_index = 0;
+                        // FUNC-060: clamp the selection to the current option
+                        // set. A stale index (e.g. the queue advanced while the
+                        // selection was mid-flight) must never submit a blank
+                        // answer to the agent. The Up/Down handlers keep the
+                        // index in range, so an out-of-range value here means
+                        // the option list shrank; treat it as "no selection"
+                        // and keep the dialog open rather than answering empty.
+                        let selected = app
+                            .question_selected_index
+                            .min(req.options.len().saturating_sub(1));
+                        if let Some(response) = req.options.get(selected).cloned() {
+                            app.event_bus
+                                .publish(ragent_agent::event::Event::QuestionAnswered {
+                                    session_id: req.session_id.clone(),
+                                    request_id: req.id.clone(),
+                                    response,
+                                });
+                            app.question_queue.pop_front();
+                            app.question_selected_index = 0;
+                        }
                     }
                     None
                 }
@@ -1302,17 +1309,43 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                           ),
                       });
                 } else {
-                    let _ = app.storage.set_provider_auth(&provider_id, &trimmed);
+                    // FUNC-027: a failed credential write must be surfaced, not
+                    // silently dropped while the dialog advances as if the key
+                    // had been saved.
+                    if let Err(e) = app.storage.set_provider_auth(&provider_id, &trimmed) {
+                        app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                            provider_id,
+                            provider_name,
+                            key_field,
+                            endpoint_field,
+                            active_field,
+                            error: Some(format!(
+                                "Failed to save API key: {e}. Check the credential store and retry."
+                            )),
+                        });
+                        return;
+                    }
                     if provider_id == "generic_openai" || provider_id == "azure_foundry" {
                         let endpoint = endpoint_field.text().trim();
-                        if endpoint.is_empty() {
-                            let _ = app
-                                .storage
-                                .delete_setting(&format!("{provider_id}_api_base"));
+                        let endpoint_result = if endpoint.is_empty() {
+                            app.storage
+                                .delete_setting(&format!("{provider_id}_api_base"))
                         } else {
-                            let _ = app
-                                .storage
-                                .set_setting(&format!("{provider_id}_api_base"), endpoint);
+                            app.storage
+                                .set_setting(&format!("{provider_id}_api_base"), endpoint)
+                        };
+                        if let Err(e) = endpoint_result {
+                            app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                                provider_id,
+                                provider_name,
+                                key_field,
+                                endpoint_field,
+                                active_field,
+                                error: Some(format!(
+                                    "Failed to save endpoint: {e}. Check the credential store and retry."
+                                )),
+                            });
+                            return;
                         }
                     }
                     let _ = app
@@ -1519,23 +1552,36 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         "api_key_env": entry.api_key_env,
                         "api_type": entry.api_type,
                     });
-                    let _ = app
-                        .storage
-                        .set_setting("azure_resource_last_selection", &payload.to_string());
-                    // Set active provider to azure_resource with the entry's endpoint and model id
-                    let _ = app
-                        .storage
-                        .set_setting("preferred_provider", "azure_resource");
-                    let _ = app
-                        .storage
-                        .set_setting("azure_resource_api_base", &entry.endpoint);
-                    let model_value = format!("azure_resource/{}", entry.id);
-                    let _ = app.storage.set_setting("selected_model", &model_value);
-                    let _ = app.storage.set_setting(
-                        "selected_model_ctx_window",
-                        &entry.context_window.unwrap_or(128_000).to_string(),
-                    );
-                    app.selected_model = Some(model_value);
+                    // FUNC-027: persist the Azure Resource selection explicitly
+                    // and surface a storage failure instead of silently dropping
+                    // it while advancing to Done as if the choice was saved.
+                    let mut persist_err: Option<anyhow::Error> = None;
+                    for (key, value) in [
+                        ("azure_resource_last_selection", payload.to_string()),
+                        ("preferred_provider", "azure_resource".to_string()),
+                        ("azure_resource_api_base", entry.endpoint.clone()),
+                        ("selected_model", format!("azure_resource/{}", entry.id)),
+                        (
+                            "selected_model_ctx_window",
+                            entry.context_window.unwrap_or(128_000).to_string(),
+                        ),
+                    ] {
+                        if let Err(e) = app.storage.set_setting(key, &value) {
+                            tracing::warn!(key, error = %e, "failed to persist azure_resource selection");
+                            persist_err = Some(e);
+                        }
+                    }
+                    if let Some(e) = persist_err {
+                        app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
+                            entries,
+                            selected,
+                            error: Some(format!(
+                                "Failed to save selection: {e}. Check the credential store and retry."
+                            )),
+                        });
+                        return;
+                    }
+                    app.selected_model = Some(format!("azure_resource/{}", entry.id));
                     app.selected_model_ctx_window = Some(entry.context_window.unwrap_or(128_000));
                     app.configured_provider = Some(ConfiguredProvider {
                         id: "azure_resource".to_string(),
@@ -2001,6 +2047,23 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             error: _,
         } => {
             let is_text_field = active_field != 1;
+            // FUNC-043: resolve the active text field by index, returning
+            // None for the protocol (non-text) field instead of panicking.
+            fn telemetry_field<'a>(
+                idx: u8,
+                endpoint: &'a mut crate::input_field::InputField,
+                interval: &'a mut crate::input_field::InputField,
+                timeout: &'a mut crate::input_field::InputField,
+                port: &'a mut crate::input_field::InputField,
+            ) -> Option<&'a mut crate::input_field::InputField> {
+                match idx {
+                    0 => Some(endpoint),
+                    2 => Some(interval),
+                    3 => Some(timeout),
+                    4 => Some(port),
+                    _ => None,
+                }
+            }
             match key.code {
                 KeyCode::Tab => {
                     active_field = (active_field + 1) % 5;
@@ -2100,62 +2163,80 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     return;
                 }
                 KeyCode::Char(c) if is_text_field => {
-                    let target = match active_field {
-                        0 => &mut endpoint_field,
-                        2 => &mut interval_field,
-                        3 => &mut timeout_field,
-                        4 => &mut port_field,
-                        _ => unreachable!(),
+                    let Some(target) = telemetry_field(
+                        active_field,
+                        &mut endpoint_field,
+                        &mut interval_field,
+                        &mut timeout_field,
+                        &mut port_field,
+                    ) else {
+                        // Not a text field (protocol); no-op rather than panic.
+                        return;
                     };
                     target.insert_char(c);
                 }
                 KeyCode::Backspace if is_text_field => {
-                    let target = match active_field {
-                        0 => &mut endpoint_field,
-                        2 => &mut interval_field,
-                        3 => &mut timeout_field,
-                        4 => &mut port_field,
-                        _ => unreachable!(),
+                    let Some(target) = telemetry_field(
+                        active_field,
+                        &mut endpoint_field,
+                        &mut interval_field,
+                        &mut timeout_field,
+                        &mut port_field,
+                    ) else {
+                        // Not a text field (protocol); no-op rather than panic.
+                        return;
                     };
                     target.backspace();
                 }
                 KeyCode::Left if is_text_field => {
-                    let target = match active_field {
-                        0 => &mut endpoint_field,
-                        2 => &mut interval_field,
-                        3 => &mut timeout_field,
-                        4 => &mut port_field,
-                        _ => unreachable!(),
+                    let Some(target) = telemetry_field(
+                        active_field,
+                        &mut endpoint_field,
+                        &mut interval_field,
+                        &mut timeout_field,
+                        &mut port_field,
+                    ) else {
+                        // Not a text field (protocol); no-op rather than panic.
+                        return;
                     };
                     target.move_left();
                 }
                 KeyCode::Right if is_text_field => {
-                    let target = match active_field {
-                        0 => &mut endpoint_field,
-                        2 => &mut interval_field,
-                        3 => &mut timeout_field,
-                        4 => &mut port_field,
-                        _ => unreachable!(),
+                    let Some(target) = telemetry_field(
+                        active_field,
+                        &mut endpoint_field,
+                        &mut interval_field,
+                        &mut timeout_field,
+                        &mut port_field,
+                    ) else {
+                        // Not a text field (protocol); no-op rather than panic.
+                        return;
                     };
                     target.move_right();
                 }
                 KeyCode::Home if is_text_field => {
-                    let target = match active_field {
-                        0 => &mut endpoint_field,
-                        2 => &mut interval_field,
-                        3 => &mut timeout_field,
-                        4 => &mut port_field,
-                        _ => unreachable!(),
+                    let Some(target) = telemetry_field(
+                        active_field,
+                        &mut endpoint_field,
+                        &mut interval_field,
+                        &mut timeout_field,
+                        &mut port_field,
+                    ) else {
+                        // Not a text field (protocol); no-op rather than panic.
+                        return;
                     };
                     target.move_home();
                 }
                 KeyCode::End if is_text_field => {
-                    let target = match active_field {
-                        0 => &mut endpoint_field,
-                        2 => &mut interval_field,
-                        3 => &mut timeout_field,
-                        4 => &mut port_field,
-                        _ => unreachable!(),
+                    let Some(target) = telemetry_field(
+                        active_field,
+                        &mut endpoint_field,
+                        &mut interval_field,
+                        &mut timeout_field,
+                        &mut port_field,
+                    ) else {
+                        // Not a text field (protocol); no-op rather than panic.
+                        return;
                     };
                     target.move_end();
                 }

@@ -25,19 +25,27 @@ impl Throttle {
     fn from_rpm(rpm: u32) -> Self {
         let rpm = rpm.max(1);
         let min_interval = Duration::from_secs_f64(60.0 / f64::from(rpm));
+        let now = Instant::now();
         Self {
             min_interval,
-            last_request: std::sync::Mutex::new(Instant::now().checked_sub(min_interval).unwrap()),
+            // `checked_sub` avoids the `unwrap()` panic when `now` is near the
+            // monotonic epoch, falling back to "no prior request" (FUNC-004).
+            last_request: std::sync::Mutex::new(now.checked_sub(min_interval).unwrap_or(now)),
         }
     }
 
     /// Async wait until at least `min_interval` has passed since the last request.
     async fn wait(&self) {
         let wait = {
-            let last = *self.last_request.lock().expect("throttle lock poisoned");
+            let last = *self
+                .last_request
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let elapsed = Instant::now().saturating_duration_since(last);
             if elapsed < self.min_interval {
-                self.min_interval.checked_sub(elapsed).unwrap()
+                // `saturating_sub` never panics; the branch guard guarantees the
+                // result is non-zero (FUNC-004).
+                self.min_interval.saturating_sub(elapsed)
             } else {
                 Duration::ZERO
             }
@@ -45,7 +53,10 @@ impl Throttle {
         if wait > Duration::ZERO {
             tokio::time::sleep(wait).await;
         }
-        *self.last_request.lock().expect("throttle lock poisoned") = Instant::now();
+        *self
+            .last_request
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Instant::now();
     }
 }
 

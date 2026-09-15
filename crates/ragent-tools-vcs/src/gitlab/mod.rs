@@ -7,8 +7,8 @@ pub mod gitlab_mrs;
 pub mod gitlab_pipelines;
 
 pub use auth::{
-    GitLabConfig, delete_config, delete_token, load_config, load_token, migrate_legacy_files,
-    save_config, save_token,
+    GitLabConfig, delete_config, delete_token, load_config, load_token, load_token_checked,
+    migrate_legacy_files, save_config, save_token,
 };
 pub use client::GitLabClient;
 pub use gitlab_issues::{

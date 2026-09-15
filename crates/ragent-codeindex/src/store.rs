@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
 use std::path::Path;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// PERF-073: builds a `LIKE` prefix pattern for `name`, escaping the `LIKE`
 /// metacharacters (`\\`, `%`, `_`) so a name containing them is matched
@@ -33,6 +33,26 @@ fn like_prefix_pattern(name: &str) -> String {
     }
     out.push('%');
     out
+}
+
+/// Read the nullable `source_module` column as a `String`.
+///
+/// FUNC-045: SQL `NULL` and the empty string are distinct states — an import
+/// with no source module is stored as `NULL`, whereas an empty module is stored
+/// as `""`. Mapping `NULL` to `""` is the intended contract (callers treat both
+/// as "no module"), but the collapse must be explicit and logged with the
+/// owning file id so a NULL does not vanish silently behind `unwrap_or_default`.
+fn read_source_module(row: &rusqlite::Row<'_>, file_id: i64) -> rusqlite::Result<String> {
+    match row.get::<_, Option<String>>(2)? {
+        Some(module) => Ok(module),
+        None => {
+            debug!(
+                file_id,
+                "codeindex: import row has NULL source_module; treating as empty"
+            );
+            Ok(String::new())
+        }
+    }
 }
 
 /// Current schema version — bump when migrating.
@@ -670,63 +690,86 @@ impl IndexStore {
              RETURNING id",
         )?;
 
-        // Build a map from temporary IDs to real (SQLite-assigned) IDs.
+        // Build a map from temporary (parser) IDs to real (SQLite-assigned) IDs.
         let mut id_map: HashMap<i64, i64> = HashMap::new();
         let mut count = 0;
 
-        // First pass: insert symbols without parent_id.
+        // Insert a single symbol, returning its real row id.
+        let mut insert_symbol = |sym: &Symbol, parent: Option<i64>| -> Result<i64> {
+            let real_id: i64 = stmt.query_row(
+                params![
+                    file_id,
+                    sym.name,
+                    sym.qualified_name,
+                    sym.kind.to_string(),
+                    sym.visibility.to_string(),
+                    i64::from(sym.start_line),
+                    i64::from(sym.end_line),
+                    i64::from(sym.start_col),
+                    i64::from(sym.end_col),
+                    parent,
+                    sym.signature,
+                    sym.doc_comment,
+                    sym.body_hash,
+                ],
+                |row| row.get(0),
+            )?;
+            Ok(real_id)
+        };
+
+        // First pass: insert every symbol with a NULL parent so all row ids
+        // exist before any parent link is resolved.
         for sym in symbols {
             if sym.parent_id.is_some() {
                 continue;
             }
-            let real_id: i64 = stmt.query_row(
-                params![
-                    file_id,
-                    sym.name,
-                    sym.qualified_name,
-                    sym.kind.to_string(),
-                    sym.visibility.to_string(),
-                    i64::from(sym.start_line),
-                    i64::from(sym.end_line),
-                    i64::from(sym.start_col),
-                    i64::from(sym.end_col),
-                    Option::<i64>::None,
-                    sym.signature,
-                    sym.doc_comment,
-                    sym.body_hash,
-                ],
-                |row| row.get(0),
-            )?;
+            let real_id = insert_symbol(sym, None)?;
             id_map.insert(sym.id, real_id);
             count += 1;
         }
 
-        // Second pass: insert symbols that have parents.
-        for sym in symbols {
-            if sym.parent_id.is_none() {
-                continue;
+        // Second pass: resolve children. FUNC-064: a single pass only resolves a
+        // symbol whose parent was inserted in the *first* pass, so a
+        // grandchild whose parent is itself a child is silently lost whenever
+        // the child appears after its own child in the parse order. Iterate to a
+        // fixpoint so multi-level nesting resolves in any order.
+        let mut pending: Vec<&Symbol> = symbols.iter().filter(|s| s.parent_id.is_some()).collect();
+        loop {
+            let mut progressed = false;
+            let mut still_pending: Vec<&Symbol> = Vec::new();
+            for sym in pending {
+                let Some(real_parent_id) = sym.parent_id.and_then(|pid| id_map.get(&pid).copied())
+                else {
+                    // Parent not inserted yet — try again on the next sweep.
+                    still_pending.push(sym);
+                    continue;
+                };
+                let real_id = insert_symbol(sym, Some(real_parent_id))?;
+                id_map.insert(sym.id, real_id);
+                count += 1;
+                progressed = true;
             }
-            let real_parent_id = sym.parent_id.and_then(|pid| id_map.get(&pid).copied());
-            let real_id: i64 = stmt.query_row(
-                params![
-                    file_id,
-                    sym.name,
-                    sym.qualified_name,
-                    sym.kind.to_string(),
-                    sym.visibility.to_string(),
-                    i64::from(sym.start_line),
-                    i64::from(sym.end_line),
-                    i64::from(sym.start_col),
-                    i64::from(sym.end_col),
-                    real_parent_id,
-                    sym.signature,
-                    sym.doc_comment,
-                    sym.body_hash,
-                ],
-                |row| row.get(0),
-            )?;
-            id_map.insert(sym.id, real_id);
-            count += 1;
+            if still_pending.is_empty() {
+                break;
+            }
+            if !progressed {
+                // A cycle or a dangling parent reference. Insert the remainder
+                // with a NULL parent so nesting is merely truncated, never lost
+                // silently — log each so the parser defect is visible.
+                for sym in still_pending {
+                    warn!(
+                        file_id,
+                        symbol = %sym.name,
+                        parent = ?sym.parent_id,
+                        "codeindex: symbol parent unresolved (cycle or missing parent); inserting with NULL parent"
+                    );
+                    let real_id = insert_symbol(sym, None)?;
+                    id_map.insert(sym.id, real_id);
+                    count += 1;
+                }
+                break;
+            }
+            pending = still_pending;
         }
 
         Ok(count)
@@ -933,10 +976,11 @@ impl IndexStore {
         )?;
 
         let rows = stmt.query_map([file_id], |row| {
+            let owning_file: i64 = row.get(0)?;
             Ok(ImportEntry {
-                file_id: row.get(0)?,
+                file_id: owning_file,
                 imported_name: row.get(1)?,
-                source_module: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                source_module: read_source_module(row, owning_file)?,
                 alias: row.get(3)?,
                 line: row.get::<_, i64>(4)? as u32,
                 kind: row.get(5)?,
@@ -962,12 +1006,13 @@ impl IndexStore {
         )?;
 
         let rows = stmt.query_map([], |row| {
+            let owning_file: i64 = row.get(0)?;
             Ok((
-                row.get::<_, i64>(0)?,
+                owning_file,
                 ImportEntry {
-                    file_id: row.get(0)?,
+                    file_id: owning_file,
                     imported_name: row.get(1)?,
-                    source_module: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    source_module: read_source_module(row, owning_file)?,
                     alias: row.get(3)?,
                     line: row.get::<_, i64>(4)? as u32,
                     kind: row.get(5)?,
@@ -992,10 +1037,11 @@ impl IndexStore {
         )?;
 
         let rows = stmt.query_map([name_substring], |row| {
+            let owning_file: i64 = row.get(0)?;
             Ok(ImportEntry {
-                file_id: row.get(0)?,
+                file_id: owning_file,
                 imported_name: row.get(1)?,
-                source_module: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                source_module: read_source_module(row, owning_file)?,
                 alias: row.get(3)?,
                 line: row.get::<_, i64>(4)? as u32,
                 kind: row.get(5)?,

@@ -84,9 +84,53 @@ pub fn truncate_bytes_no_ellipsis(s: &str, max_bytes: usize) -> String {
     s[..end].to_string()
 }
 
+/// Round `index` down to the nearest UTF-8 char boundary in `s` (clamped to
+/// `s.len()`).
+///
+/// Byte offsets derived from arithmetic (a reserved-suffix budget) or from a
+/// byte-length limit are not guaranteed to sit between characters; slicing a
+/// string at such an offset panics. Use this to make `&s[..index]` safe
+/// (FUNC-003).
+///
+/// # Examples
+///
+/// ```
+/// use ragent_types::strutil::floor_char_boundary;
+///
+/// // "é" is 2 bytes (offsets 3-4); byte index 4 lands inside it and steps back.
+/// assert_eq!(floor_char_boundary("café", 4), 3);
+/// assert_eq!(floor_char_boundary("a—b", 3), 1);
+/// assert_eq!(floor_char_boundary("abc", 99), 3);
+/// ```
+#[must_use]
+pub fn floor_char_boundary(s: &str, index: usize) -> usize {
+    let mut end = index.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    end
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floor_char_boundary_snaps_to_character_start() {
+        // "é" is 2 bytes (offsets 3 and 4): index 3 is the char start, index 4
+        // is inside the character and steps back to 3. Index 5 is the end.
+        assert_eq!(floor_char_boundary("café", 3), 3);
+        assert_eq!(floor_char_boundary("café", 4), 3);
+        assert_eq!(floor_char_boundary("café", 5), 5);
+        // "—" (em dash) is 3 bytes starting at offset 1: any cut inside steps to 1.
+        assert_eq!(floor_char_boundary("a—b", 1), 1);
+        assert_eq!(floor_char_boundary("a—b", 2), 1);
+        assert_eq!(floor_char_boundary("a—b", 3), 1);
+        assert_eq!(floor_char_boundary("a—b", 4), 4);
+        // Out-of-range clamps to the length.
+        assert_eq!(floor_char_boundary("abc", 99), 3);
+        assert_eq!(floor_char_boundary("", 5), 0);
+    }
 
     #[test]
     fn truncate_bytes_no_ellipsis_keeps_short_strings() {

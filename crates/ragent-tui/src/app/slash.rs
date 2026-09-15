@@ -1571,6 +1571,9 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 // common case; the wrapped section also covers SkillRegistry's
                 // directory walk below.
                 let config = self.session_processor.load_config_cached();
+                // FUNC-015: the block_on runs inside block_in_place, which is
+                // what keeps the TUI runtime's other tasks live while this
+                // cached context read completes.
                 let (git_status, readme, agents_md, file_tree) = tokio::runtime::Handle::current()
                     .block_on(async { collect_prompt_context(&working_dir).await });
                 (config, git_status, readme, agents_md, file_tree)
@@ -6964,13 +6967,18 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             Ok(spec) => {
                                 self.active_spec = Some(spec_id.clone());
                                 self.spec_manager = Some(Arc::new(mgr));
-                                // Also set on the session processor so auto-updates work
-                                let _ = rt.block_on(async {
-                                    self.session_processor
-                                        .active_spec
-                                        .write()
-                                        .await
-                                        .replace(spec_id.clone())
+                                // Also set on the session processor so auto-updates work.
+                                // Wrap the nested `block_on` in `block_in_place` so it
+                                // releases the current worker instead of deadlocking on
+                                // the UI runtime (FUNC-015).
+                                let _ = tokio::task::block_in_place(|| {
+                                    rt.block_on(async {
+                                        self.session_processor
+                                            .active_spec
+                                            .write()
+                                            .await
+                                            .replace(spec_id.clone())
+                                    })
                                 });
                                 // P-24: invalidate the cached spec section so the
                                 // next turn re-reads the newly-activated spec.
@@ -7012,8 +7020,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             let prev = self.active_spec.take().unwrap();
                             self.spec_manager = None;
                             let rt = tokio::runtime::Handle::current();
-                            let _ = rt.block_on(async {
-                                self.session_processor.active_spec.write().await.take()
+                            // `block_in_place` keeps the nested `block_on` off the
+                            // UI runtime's worker, avoiding the deadlock in
+                            // FUNC-015.
+                            let _ = tokio::task::block_in_place(|| {
+                                rt.block_on(async {
+                                    self.session_processor.active_spec.write().await.take()
+                                })
                             });
                             self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                  "From: /spec deactivate\n\n[ok] Spec **{}** deactivated. Agent prompts will no longer include spec context.",
                                                                                                                                                                                                                                                                                                                                                                                   prev
@@ -7858,16 +7871,26 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             return;
                         }
 
-                        // Generate TASKS.md content from the task table
+                        // Generate TASKS.md content from the task table. A
+                        // malformed table is reported as a parse error rather
+                        // than silently treated as "no tasks" (FUNC-024).
                         let tasks_md = match SpecCommand::build_tasks_md(&spec_id, &title, &plan_md)
                         {
-                            Some(md) => md,
-                            None => {
+                            Ok(Some(md)) => md,
+                            Ok(None) => {
                                 self.status =
                                     format!("spec: no tasks found in PLAN.md for {}", spec_id);
                                 self.append_assistant_text(
                                     &SpecCommand::build_tasks_no_tasks_error(&spec_id),
                                 );
+                                return;
+                            }
+                            Err(e) => {
+                                self.status = format!("spec: PLAN.md parse error for {}", spec_id);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec tasks\n\n**Error:** failed to parse \
+                                     `specs/{spec_id}/PLAN.md`: {e}"
+                                ));
                                 return;
                             }
                         };

@@ -668,8 +668,7 @@ impl TaskStore {
             ));
         }
 
-        if task.assigned_to.is_some() {
-            let assigned_to = task.assigned_to.as_ref().unwrap();
+        if let Some(assigned_to) = task.assigned_to.clone() {
             drop(lock);
             return Err(anyhow!(
                 "task '{task_id}' is already assigned to {assigned_to}"

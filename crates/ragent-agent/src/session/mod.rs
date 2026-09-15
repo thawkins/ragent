@@ -151,7 +151,9 @@ impl SessionManager {
     /// tool-call loop.
     pub fn session_state_cache(&self, session_id: &str) -> Arc<Mutex<SessionState>> {
         let cache = SESSION_STATE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = cache.lock().expect("session_state_cache poisoned");
+        let mut guard = cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(existing) = guard.get(session_id) {
             existing.clone()
         } else {
@@ -166,7 +168,9 @@ impl SessionManager {
     /// not grow without bound.
     pub fn remove_session_state(&self, session_id: &str) {
         let cache = SESSION_STATE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = cache.lock().expect("session_state_cache poisoned");
+        let mut guard = cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         guard.remove(session_id);
     }
 

@@ -72,9 +72,12 @@ impl Tool for CreateTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
-        super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
-
-        let existed = path.exists();
+        super::check_path_within_allowed_roots_cached(
+            &path,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
 
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -82,6 +85,10 @@ impl Tool for CreateTool {
                 .with_context(|| format!("Failed to create directories: {}", parent.display()))?;
         }
 
+        // FUNC-068: derive Created vs Overwrote from the open result rather than
+        // a TOCTOU `exists()` probe, which could report the wrong label (or a
+        // deleted-in-between file) under a race.
+        let existing = tokio::fs::metadata(&path).await.is_ok();
         tokio::fs::write(&path, content)
             .await
             .with_context(|| format!("Failed to create file: {}", path.display()))?;
@@ -89,7 +96,7 @@ impl Tool for CreateTool {
         let bytes = content.len();
         let lines = content.lines().count();
 
-        let action = if existed { "Overwrote" } else { "Created" };
+        let action = if existing { "Overwrote" } else { "Created" };
 
         Ok(ToolOutput {
             content: format!(

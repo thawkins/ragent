@@ -11,8 +11,10 @@ use regex::Regex;
 /// - `ghp_` / `gho_` / `ghs_` / `ghu_` / `ghr_` GitHub tokens
 /// - `xoxb-` / `xoxp-` Slack tokens
 /// - `AKIA` AWS access key IDs
-/// - Generic long base64-like tokens following `token=`, `apikey=`, `api_key=`,
-///   `secret=`, or `password=`
+/// - Generic long base64-like tokens following a `token` / `apikey` / `api_key` /
+///   `secret` / `password` key. This group is case-insensitive and accepts an
+///   optional quote and either `=` or `:`, so `API_KEY=…`, `"token": "…"` and
+///   `token: …` all match (FUNC-007).
 static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::expect_used)]
     Regex::new(concat!(
@@ -35,8 +37,11 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         // AWS access key IDs (start with AKIA)
         r"AKIA[A-Z0-9]{16,}",
         r"|",
-        // Generic token/apikey/secret/password assignments in URLs or configs
-        r"(?:token|apikey|api_key|secret|password)=[a-zA-Z0-9_\-\.]{16,}",
+        // Generic token/apikey/secret/password assignments in URLs and configs.
+        // Case-insensitive, with an optional quote around the key and value and
+        // either `=` or `:` as the separator, so `API_KEY=…`, `"token": "…"` and
+        // `token: …` all match. The 16-char value floor keeps innocuous prose out.
+        r#"(?i:(?:api[_-]?key|token|secret|password)["']?\s*[:=]\s*["']?[a-zA-Z0-9_\-\.]{16,})"#,
         r")",
     ))
     .expect("valid regex pattern")
@@ -88,16 +93,12 @@ pub fn register_secret(secret: &str) {
 /// assert_eq!(result, "temp-secret");
 /// ```
 pub fn unregister_secret(secret: &str) {
-    if let Ok(mut registry) = SECRET_REGISTRY.write() {
-        registry.retain(|s| s != secret);
-    }
+    registry_write().retain(|s| s != secret);
 }
 
 /// Clears all secrets from the exact-match redaction registry.
 pub fn clear_secret_registry() {
-    if let Ok(mut registry) = SECRET_REGISTRY.write() {
-        registry.clear();
-    }
+    registry_write().clear();
 }
 
 /// Seeds the secret registry with multiple values at once.
@@ -105,20 +106,33 @@ pub fn clear_secret_registry() {
 /// Useful at startup to bulk-load secrets from the database or
 /// environment variables.
 pub fn seed_secrets(secrets: impl IntoIterator<Item = String>) {
-    if let Ok(mut registry) = SECRET_REGISTRY.write() {
-        for s in secrets {
-            if !s.is_empty() {
-                registry.push(s);
-            }
+    let mut registry = registry_write();
+    for s in secrets {
+        if !s.is_empty() {
+            registry.push(s);
         }
-        sort_by_len_desc(&mut registry);
     }
+    sort_by_len_desc(&mut registry);
 }
 
 /// Acquire a write guard on the registry, recovering from poison.
+///
+/// A panic while a writer held the lock poisons it; recovering the inner value
+/// keeps the registry usable instead of turning every later write into a silent
+/// no-op (FUNC-008).
 fn registry_write() -> std::sync::RwLockWriteGuard<'static, Vec<String>> {
     SECRET_REGISTRY
         .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Acquire a read guard on the registry, recovering from poison.
+///
+/// Recovers the inner value on poison so exact-match redaction still consults
+/// the registered secrets — failing closed instead of leaking them (FUNC-006).
+fn registry_read() -> std::sync::RwLockReadGuard<'static, Vec<String>> {
+    SECRET_REGISTRY
+        .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
@@ -177,10 +191,10 @@ pub fn redact_secrets(msg: &str) -> String {
 /// assert!(matches!(clean, Cow::Borrowed(_)));
 /// ```
 pub fn redact_secrets_cow(msg: &str) -> Cow<'_, str> {
-    let registry_empty = SECRET_REGISTRY
-        .read()
-        .map(|registry| registry.is_empty())
-        .unwrap_or(true);
+    // Fail closed: a poisoned lock still holds intact data, so recover the
+    // guard rather than treating the registry as empty (which would skip the
+    // exact-match layer and leak registered secrets) (FUNC-006).
+    let registry_empty = registry_read().is_empty();
 
     if registry_empty && !SECRET_PATTERN.is_match(msg) {
         return Cow::Borrowed(msg);
@@ -194,7 +208,8 @@ fn redact_secrets_owned(msg: &str, registry_empty: bool) -> String {
     let mut result: Cow<'_, str> = Cow::Borrowed(msg);
 
     // Layer 1: exact-match registered secrets, already longest-first.
-    if !registry_empty && let Ok(registry) = SECRET_REGISTRY.read() {
+    if !registry_empty {
+        let registry = registry_read();
         for secret in registry.iter() {
             if result.contains(secret.as_str()) {
                 let replaced = match result {

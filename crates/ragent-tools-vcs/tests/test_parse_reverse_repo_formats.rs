@@ -551,3 +551,72 @@ fn routing_github_prefix_to_github() {
         VcsProvider::GitHub { .. }
     ));
 }
+
+// ===========================================================================
+// FUNC-067: provider classification must key off the parsed host, not a
+// substring of the whole input.
+// ===========================================================================
+
+#[test]
+fn func067_gitlab_url_with_github_in_path_stays_gitlab() {
+    // `github.com` appears only in the project path, not the host.
+    let p = parse_reverse_repo("https://gitlab.com/x/github.com/y").unwrap();
+    match p {
+        VcsProvider::GitLab {
+            host, project_path, ..
+        } => {
+            assert_eq!(host, Some("https://gitlab.com".to_string()));
+            assert_eq!(project_path, "x/github.com/y");
+        }
+        other => panic!("expected GitLab provider, got {other:?}"),
+    }
+}
+
+#[test]
+fn func067_lookalike_github_host_is_not_github() {
+    // A host that merely *contains* `github.com` must not route to GitHub; it is
+    // an HTTPS URL, so it is treated as a self-hosted GitLab instance.
+    let p = parse_reverse_repo("https://github.com.evil.example/owner/repo").unwrap();
+    match p {
+        VcsProvider::GitLab { host, .. } => {
+            assert_eq!(host, Some("https://github.com.evil.example".to_string()));
+        }
+        other => panic!("expected GitLab provider for lookalike host, got {other:?}"),
+    }
+}
+
+#[test]
+fn func067_real_github_https_still_routes_to_github() {
+    let p = parse_reverse_repo("https://github.com/octocat/Hello-World").unwrap();
+    assert_eq!(
+        p,
+        VcsProvider::GitHub {
+            owner: "octocat".into(),
+            repo: "Hello-World".into()
+        }
+    );
+}
+
+#[test]
+fn func067_github_ssh_url_still_routes_to_github() {
+    let p = parse_reverse_repo("git@github.com:octocat/Hello-World.git").unwrap();
+    assert_eq!(
+        p,
+        VcsProvider::GitHub {
+            owner: "octocat".into(),
+            repo: "Hello-World".into()
+        }
+    );
+}
+
+#[test]
+fn func067_www_github_host_routes_to_github() {
+    let p = parse_reverse_repo("https://www.github.com/octocat/Hello-World").unwrap();
+    assert_eq!(
+        p,
+        VcsProvider::GitHub {
+            owner: "octocat".into(),
+            repo: "Hello-World".into()
+        }
+    );
+}

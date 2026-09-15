@@ -102,6 +102,10 @@ bash "$(dirname "$0")/scripts/check-inline-tests.sh" || print_failure "Inline te
 print_step "Dead-code reason guard..."
 bash "$(dirname "$0")/scripts/check-dead-code-reasons.sh" || print_failure "Dead-code reason guard failed"
 
+# Poisoning-panic lock guard (FUNC-080)
+print_step "Poison-lock guard..."
+bash "$(dirname "$0")/scripts/check-poison-locks.sh" || print_failure "Poison-lock guard failed"
+
 # VCS tool duplication guard (DUPPLAN.md Milestone A)
 print_step "VCS tool duplication guard..."
 bash "$(dirname "$0")/scripts/check-vcs-duplication.sh" || print_failure "VCS tool duplication guard failed"

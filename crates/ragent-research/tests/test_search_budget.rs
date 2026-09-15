@@ -68,3 +68,43 @@ fn test_shared_query_cache_skips_empty_results() {
     c.insert("empty query", Arc::from(Vec::new()));
     assert!(c.get("empty query").is_none());
 }
+
+#[test]
+fn func082_rejected_attempts_do_not_increment_used() {
+    // FUNC-082: `used()` documents that rejected attempts do not count. After
+    // exhausting a 2-call budget, further rejected attempts must leave `used`
+    // at exactly 2.
+    let b = SearchBudget::new(Some(2));
+    assert!(b.try_acquire());
+    assert!(b.try_acquire());
+    assert!(!b.try_acquire());
+    assert!(!b.try_acquire());
+    assert!(!b.try_acquire());
+    assert_eq!(
+        b.used(),
+        2,
+        "rejected attempts must not count toward used()"
+    );
+    assert_eq!(b.limit(), Some(2));
+}
+
+#[test]
+fn func082_unlimited_budget_reports_used_count() {
+    // An unlimited budget reports the true consumed count (not clamped to 0).
+    let b = SearchBudget::new(None);
+    for _ in 0..5 {
+        assert!(b.try_acquire());
+    }
+    assert_eq!(b.used(), 5);
+    assert_eq!(b.limit(), None);
+    assert!(!b.exhausted());
+}
+
+#[test]
+fn func082_used_never_exceeds_limit() {
+    let b = SearchBudget::new(Some(3));
+    for _ in 0..10 {
+        b.try_acquire();
+    }
+    assert_eq!(b.used(), 3);
+}

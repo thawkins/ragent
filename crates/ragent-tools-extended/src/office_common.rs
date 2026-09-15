@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use anyhow::{Result, bail};
-use ragent_types::strutil::truncate_bytes_no_ellipsis;
+use ragent_types::strutil::{floor_char_boundary, truncate_bytes_no_ellipsis};
 
 /// Supported Office document formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +102,9 @@ pub fn truncate_output(text: String) -> String {
         if boundary > max_body {
             boundary = max_body;
         }
+        // `max_body` is a byte budget and can land inside a multibyte character;
+        // snap back to a char boundary before slicing (FUNC-003).
+        boundary = floor_char_boundary(&truncated, boundary);
         format!("{}{}", &truncated[..boundary], suffix)
     }
 }

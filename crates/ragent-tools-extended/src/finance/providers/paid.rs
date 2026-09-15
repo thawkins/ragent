@@ -51,7 +51,7 @@ fn get_or_create_yahoo_provider(
 
     let mut guard = YAHOO_PROVIDERS
         .lock()
-        .expect("yahoo provider cache poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let map = guard.get_or_insert_with(HashMap::new);
     if let Some(provider) = map.get(&key) {
         return provider.clone();

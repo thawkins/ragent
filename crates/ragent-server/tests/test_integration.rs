@@ -165,7 +165,7 @@ async fn test_rate_limiter_allows_under_limit() {
         .body(Body::from(r#"{"content":"hi"}"#))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    // 60th request should still be allowed (limit is >60).
+    // 59 prior requests, so this (the 60th) is still within the 60/min limit.
     assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
@@ -347,4 +347,77 @@ async fn test_create_session_success() {
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
+}
+
+// ── FUNC-066: token comparison + rate-limit boundary ────────────────────────
+
+#[tokio::test]
+async fn func066_auth_accepts_token_of_any_length_and_rejects_others() {
+    // The constant-time comparison hashes both sides, so tokens of differing
+    // lengths are still correctly compared.
+    let app = router(test_state("a-much-longer-correct-token-value"));
+
+    let req_ok = Request::builder()
+        .uri("/sessions")
+        .header("Authorization", "Bearer a-much-longer-correct-token-value")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(req_ok).await.unwrap().status(),
+        StatusCode::OK
+    );
+
+    // A same-prefix token of different length must be rejected.
+    let req_bad = Request::builder()
+        .uri("/sessions")
+        .header("Authorization", "Bearer a-much-longer-correct-token-valu")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.oneshot(req_bad).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn func066_rate_limiter_enforces_exactly_60() {
+    // 59 prior requests → the 60th is allowed.
+    let state = test_state("tok");
+    state.storage.create_session("s1", "/tmp").unwrap();
+    {
+        let mut lim = state.rate_limiter.lock().await;
+        lim.insert("s1".to_string(), (59, std::time::Instant::now()));
+    }
+    let app = router(state);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/sessions/s1/messages")
+        .header("Authorization", "Bearer tok")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"content":"hi"}"#))
+        .unwrap();
+    assert_ne!(
+        app.oneshot(req).await.unwrap().status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+
+    // 60 prior requests → the next (61st) is rejected.
+    let state = test_state("tok");
+    state.storage.create_session("s1", "/tmp").unwrap();
+    {
+        let mut lim = state.rate_limiter.lock().await;
+        lim.insert("s1".to_string(), (60, std::time::Instant::now()));
+    }
+    let app = router(state);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/sessions/s1/messages")
+        .header("Authorization", "Bearer tok")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"content":"hi"}"#))
+        .unwrap();
+    assert_eq!(
+        app.oneshot(req).await.unwrap().status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
 }

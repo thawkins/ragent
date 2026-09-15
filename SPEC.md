@@ -98,15 +98,32 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.103). The core architecture, tool system,
+Ragent is in **beta** (v1.0.104). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.44 → v1.0.103):**
+**Current Release Highlights (v1.0.44 → v1.0.104):**
 
+- **Functional anti-pattern remediation (FUNC-038..069, 080..082)** — the
+  FUNCPLAN.md second pass closes the plan's M1 tail and all of M2-M5:
+  `mf_search` keyless engines surface a dead engine as an error instead of a
+  zero-result success; `github_merge_pr` rejects an unknown merge method
+  (extracted `parse_merge_method`) instead of silently merging; the last three
+  production poison-lock panics recover via `PoisonError::into_inner`; GitLab
+  GETs retry `429` honouring `Retry-After` with bounded request/entry budgets
+  and full pagination; research `GatherLog` append/flush run through
+  `block_in_place`; `move_file` renames first (no orphan dirs), `copy_file`
+  refuses a self-copy, `append_file` flushes; GitHub `post`/`put`/`patch`
+  honour `base_url`; percent-encoding is byte-wise (UTF-8 correct) across
+  GitHub/GitLab; codeindex `parent_id` resolves multi-level nesting to a
+  fixpoint; the keyword verifier no longer reports an empty/uncited analysis
+  as `passed`; the server auth comparison hashes fixed-length digests and the
+  rate limiter enforces exactly 60/min; and a new
+  `scripts/check-poison-locks.sh` guard (with `--self-test`) is wired into
+  `pre-flight.sh` and CI.
 - **Agent per-turn hot path (PERF-032..040 + PERF-048)** — the
   per-turn allocation and clone load in the agent loop is removed: the
   provider-facing transcript is held and handed out behind an
@@ -2819,6 +2836,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.104 | 2026-09-14 | Functional anti-pattern remediation (FUNC-038..069, 080..082): the FUNCPLAN.md second pass closes the plan's M1 tail and all of M2-M5 -- `mf_search` keyless engines surface a dead engine as an error instead of a zero-result success (FUNC-035), `github_merge_pr` rejects an unknown merge method (FUNC-038), the last three production poison-lock panics recover via `PoisonError::into_inner` (FUNC-040/041/042), no production `unreachable!`/poison-expect remains (FUNC-043/044/045), GitLab GETs retry 429 honouring `Retry-After` with bounded request/entry budgets and full pagination and research blocking reads move behind `block_in_place` (FUNC-050/052/053), and the TUI/tools/VCS/codeindex/server/research correctness fixes (FUNC-060..069) plus a new `scripts/check-poison-locks.sh` guard wired into `pre-flight.sh` and CI (FUNC-080/081/082). |
 | v1.0.103 | 2026-09-14 | M1 agent per-turn hot path (PERF-032..040 + PERF-048): the provider-facing transcript is held behind an `Arc<Vec<ChatMessage>>` (no per-turn deep clone, PERF-032), a pure history append converts only the new tail (`take_cached_for_append` + `record_history_base`, PERF-033), the subagent tool surface is cached behind the tool-registry version (PERF-034), `LoopTracker` is `Copy` (PERF-035), the new `RequestTokenTracker` makes the per-step pre-send token estimate O(changed message) instead of O(history) (PERF-036), tool/result pairing is a single pass (PERF-037), the compaction prompt is assembled into one buffer (PERF-038), memory-entry token costs are memoised (PERF-039), the activity log is written by one background task per process (PERF-040), and the TUI viewers retain a single copy of their rendered rows (PERF-048). New benches `turn_loop`/`m3_hot_paths`; new guards `test_activity_writer`/`test_no_percall_regex`. Security: `rustls` 0.23.43 -> 0.23.45 (RUSTSEC-2026-0285). |
 | v1.0.102 | 2026-09-14 | Second `/simplify` sweep across the search, research, agent, and TUI crates: the API-key `mf_search` engines (tavily/perplexity/exa/serper/langsearch) share `engine_http_client`/`api_engine_preflight`/`finish_json_search`/`mask_api_key` plus `truncate_snippet`/`truncate_query_to` (~150 dup lines removed), `strip_disallowed_quotes` is a single allocation, `search_with_retry` caps the backoff shift at 31, and `diversity_truncate` takes/returns owned vectors and re-syncs `total_merged_results`; the research web-gatherer volume policy is one `volume_policy()` helper and the vestigial `deadline_fired` flag is gone. |
 | v1.0.101 | 2026-09-13 | Simplify pass over four crates: deterministic engine-merge output (sorted `source` strings) with positions renumbered after truncation, poison-tolerant mutexes in `masterfetch::search`, and further deduplication in `ragent-research`. |

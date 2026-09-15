@@ -264,12 +264,18 @@ impl Tool for GitlabCreateMrTool {
         let source_branch = if let Some(s) = input["source_branch"].as_str() {
             s.to_string()
         } else {
-            let out = std::process::Command::new("git")
-                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .current_dir(&ctx.working_dir)
-                .output()
-                .context("Failed to run git rev-parse")?;
-            String::from_utf8(out.stdout)
+            // FUNC-050: timeout-bounded git runner off the async runtime.
+            let out = crate::git::run_git_async(
+                vec![
+                    "rev-parse".to_string(),
+                    "--abbrev-ref".to_string(),
+                    "HEAD".to_string(),
+                ],
+                ctx.working_dir.clone(),
+            )
+            .await
+            .context("Failed to run git rev-parse")?;
+            String::from_utf8(out.0.into_bytes())
                 .context("Non-UTF8 branch name")?
                 .trim()
                 .to_string()

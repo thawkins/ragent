@@ -48,12 +48,29 @@ impl SearchBudget {
     ///
     /// A reservation covers one logical search including its retries; the
     /// gatherer acquires once per sub-query before entering its retry loop.
+    ///
+    /// FUNC-082: the counter is incremented *only* when the call is accepted,
+    /// so `used()` reports the number of consumed calls and matches its
+    /// documented contract. A rejected attempt leaves the counter untouched.
     pub fn try_acquire(&self) -> bool {
-        match self.limit {
-            None => true,
-            Some(limit) => {
-                let n = self.used.fetch_add(1, Ordering::Relaxed);
-                n < limit
+        let Some(limit) = self.limit else {
+            // Unlimited: still record usage so `used()` reports the real count.
+            self.used.fetch_add(1, Ordering::Relaxed);
+            return true;
+        };
+        let mut current = self.used.load(Ordering::Relaxed);
+        loop {
+            if current >= limit {
+                return false;
+            }
+            match self.used.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return true,
+                Err(observed) => current = observed,
             }
         }
     }
@@ -62,8 +79,7 @@ impl SearchBudget {
     /// (rejected) attempts do not count, so this never exceeds the limit.
     #[must_use]
     pub fn used(&self) -> usize {
-        let used = self.used.load(Ordering::Relaxed);
-        used.min(self.limit.unwrap_or(usize::MAX))
+        self.used.load(Ordering::Relaxed)
     }
 
     /// Configured limit, if any.

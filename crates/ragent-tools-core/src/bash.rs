@@ -859,7 +859,12 @@ async fn validate_bash_syntax(cmd: &str) -> Result<()> {
             path.as_os_str(),
             vec![OsStr::new("-n"), OsStr::new("-c"), OsStr::new(cmd)],
         ),
-        ShellType::PowerShell(_) => unreachable!("PowerShell handled above"),
+        // FUNC-043: the caller already returned for non-POSIX shells above;
+        // validate with `bash` rather than panicking if that ever changes.
+        ShellType::PowerShell(_) => (
+            OsStr::new("bash"),
+            vec![OsStr::new("-n"), OsStr::new("-c"), OsStr::new(cmd)],
+        ),
     };
 
     let result = tokio::time::timeout(
@@ -1073,7 +1078,9 @@ fn build_shell_command(shell: &ShellType, wrapper: &str, working_dir: &std::path
             let program: &std::ffi::OsStr = match shell {
                 ShellType::Bash => "bash".as_ref(),
                 ShellType::GitBash(path) => path.as_os_str(),
-                ShellType::PowerShell(_) => unreachable!("handled above"),
+                // FUNC-043: PowerShell is handled by the outer match arm;
+                // fall back to bash rather than panicking if that ever changes.
+                ShellType::PowerShell(_) => "bash".as_ref(),
             };
             let mut cmd = Command::new(program);
             cmd.arg("-c").arg(wrapper);
@@ -1104,11 +1111,22 @@ fn build_shell_command(shell: &ShellType, wrapper: &str, working_dir: &std::path
 /// write-ends and is stuck holding a mutex — are terminated too, not just the
 /// direct `bash`. Returns an error if the group no longer exists (it may
 /// already have exited by the time the timeout fires).
+///
+/// A `pgid` of `0` or a negative value is treated as "not armed": `killpg(0,
+/// SIGKILL)` signals ragent's *own* process group, which would kill the agent
+/// (FUNC-014). Both are refused without sending a signal.
 #[cfg(unix)]
 #[allow(unsafe_code)] // approved: killpg has no safe std alternative (see AGENTS-RUST.md)
 fn kill_process_group(pgid: i32) -> std::io::Result<()> {
+    if pgid <= 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("refusing to killpg with pgid {pgid} (own process group)"),
+        ));
+    }
     // SAFETY: libc::killpg takes a plain C int and has no pointer arguments; no
-    // invariants are required of the caller beyond a valid process-group id.
+    // invariants are required of the caller beyond a valid process-group id,
+    // which the guard above enforces.
     let ret = unsafe { libc::killpg(pgid, libc::SIGKILL) };
     if ret == 0 {
         Ok(())

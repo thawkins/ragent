@@ -3,7 +3,6 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::git::run_git;
 use crate::{Tool, ToolContext, ToolOutput};
 
 /// Tool that manages and inspects git remotes.
@@ -57,7 +56,11 @@ impl Tool for GitRemoteTool {
 
         let (stdout, stderr) = match action {
             "list" => {
-                let (out, err) = run_git(&["remote", "-v"], &ctx.working_dir)?;
+                let (out, err) = crate::git::run_git_async(
+                    vec!["remote".to_string(), "-v".to_string()],
+                    ctx.working_dir.clone(),
+                )
+                .await?;
                 (out, err)
             }
             "add" => {
@@ -65,16 +68,30 @@ impl Tool for GitRemoteTool {
                     name.ok_or_else(|| anyhow::anyhow!("Remote name is required for 'add'"))?;
                 let remote_url =
                     url.ok_or_else(|| anyhow::anyhow!("Remote URL is required for 'add'"))?;
-                let (out, err) = run_git(
-                    &["remote", "add", remote_name, remote_url],
-                    &ctx.working_dir,
-                )?;
+                let (out, err) = crate::git::run_git_async(
+                    vec![
+                        "remote".to_string(),
+                        "add".to_string(),
+                        remote_name.to_string(),
+                        remote_url.to_string(),
+                    ],
+                    ctx.working_dir.clone(),
+                )
+                .await?;
                 (out, err)
             }
             "remove" => {
                 let remote_name =
                     name.ok_or_else(|| anyhow::anyhow!("Remote name is required for 'remove'"))?;
-                let (out, err) = run_git(&["remote", "remove", remote_name], &ctx.working_dir)?;
+                let (out, err) = crate::git::run_git_async(
+                    vec![
+                        "remote".to_string(),
+                        "remove".to_string(),
+                        remote_name.to_string(),
+                    ],
+                    ctx.working_dir.clone(),
+                )
+                .await?;
                 (out, err)
             }
             "set-url" => {
@@ -82,10 +99,16 @@ impl Tool for GitRemoteTool {
                     name.ok_or_else(|| anyhow::anyhow!("Remote name is required for 'set-url'"))?;
                 let remote_url =
                     url.ok_or_else(|| anyhow::anyhow!("Remote URL is required for 'set-url'"))?;
-                let (out, err) = run_git(
-                    &["remote", "set-url", remote_name, remote_url],
-                    &ctx.working_dir,
-                )?;
+                let (out, err) = crate::git::run_git_async(
+                    vec![
+                        "remote".to_string(),
+                        "set-url".to_string(),
+                        remote_name.to_string(),
+                        remote_url.to_string(),
+                    ],
+                    ctx.working_dir.clone(),
+                )
+                .await?;
                 (out, err)
             }
             other => {

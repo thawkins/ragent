@@ -1295,6 +1295,7 @@ fn test_build_tasks_md_extracts_task_table() {
 ## Details
 ";
     let md = SpecCommand::build_tasks_md("myspec", "My Spec", plan_md)
+        .expect("valid PLAN.md should not error")
         .expect("should extract tasks from valid PLAN.md");
     assert!(md.contains("# Tasks"), "TASKS.md should have a title: {md}");
     assert!(
@@ -1338,6 +1339,7 @@ fn test_build_tasks_md_with_status_column() {
 | T-002 | Build parser | FR-004 | M | High | in_progress | T-001 |
 ";
     let md = SpecCommand::build_tasks_md("myspec", "", plan_md)
+        .expect("valid PLAN.md should not error")
         .expect("should extract tasks with status column");
     assert!(
         md.contains("completed"),
@@ -1354,8 +1356,8 @@ fn test_build_tasks_md_returns_none_for_empty_plan() {
     let plan_md = "# Plan\n\nNo tasks here.\n";
     let result = SpecCommand::build_tasks_md("myspec", "My Spec", plan_md);
     assert!(
-        result.is_none(),
-        "should return None when no task table exists"
+        matches!(result, Ok(None)),
+        "should return Ok(None) when no task table exists"
     );
 }
 
@@ -1363,8 +1365,8 @@ fn test_build_tasks_md_returns_none_for_empty_plan() {
 fn test_build_tasks_md_returns_none_for_empty_string() {
     let result = SpecCommand::build_tasks_md("myspec", "My Spec", "");
     assert!(
-        result.is_none(),
-        "should return None for empty PLAN.md content"
+        matches!(result, Ok(None)),
+        "should return Ok(None) for empty PLAN.md content"
     );
 }
 
@@ -1377,8 +1379,9 @@ fn test_build_tasks_md_includes_footer() {
 |---|---|---|---|---|---|
 | T-001 | Task one | FR-001 | S | High | — |
 ";
-    let md =
-        SpecCommand::build_tasks_md("myspec", "My Spec", plan_md).expect("should extract tasks");
+    let md = SpecCommand::build_tasks_md("myspec", "My Spec", plan_md)
+        .expect("valid PLAN.md should not error")
+        .expect("should extract tasks");
     assert!(
         md.contains("/spec tasks"),
         "TASKS.md footer should mention /spec tasks: {md}"
@@ -1400,8 +1403,9 @@ fn test_build_tasks_md_handles_dependencies() {
 | T-002 | Second | FR-002 | M | Medium | T-001 |
 | T-003 | Third | FR-003 | L | Low | T-001, T-002 |
 ";
-    let md =
-        SpecCommand::build_tasks_md("myspec", "My Spec", plan_md).expect("should extract tasks");
+    let md = SpecCommand::build_tasks_md("myspec", "My Spec", plan_md)
+        .expect("valid PLAN.md should not error")
+        .expect("should extract tasks");
     assert!(
         md.contains("T-001, T-002"),
         "TASKS.md should join multiple dependencies: {md}"
@@ -1422,6 +1426,7 @@ fn test_build_tasks_md_without_title() {
 | T-001 | Task one | FR-001 | S | High | — |
 ";
     let md = SpecCommand::build_tasks_md("myspec", "", plan_md)
+        .expect("valid PLAN.md should not error")
         .expect("should extract tasks even without title");
     assert!(
         !md.contains("**Spec:**"),

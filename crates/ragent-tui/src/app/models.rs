@@ -498,16 +498,27 @@ impl App {
         thinking_level: ThinkingLevel,
     ) -> String {
         let model_value = format!("{}/{}", provider_id, entry.id);
-        let _ = self.storage.set_setting("selected_model", &model_value);
-        let _ = self.storage.set_setting("preferred_provider", &provider_id);
-        let _ = self.storage.set_setting(
+        // FUNC-027: persist the model selection explicitly. A storage failure
+        // is logged (the picker has already applied the in-memory selection, so
+        // the user is told the choice will not survive a restart) instead of
+        // being silently dropped.
+        let mut persist = |key: &str, value: &str| {
+            if let Err(e) = self.storage.set_setting(key, value) {
+                tracing::warn!(key, error = %e, "failed to persist model selection");
+                self.push_log_no_agent(
+                    LogLevel::Warn,
+                    format!("Selecting model: failed to save '{key}': {e}"),
+                );
+            }
+        };
+        persist("selected_model", &model_value);
+        persist("preferred_provider", &provider_id);
+        persist(
             "selected_model_ctx_window",
             &entry.context_window.to_string(),
         );
         // Persist the chosen model per-provider so it can be restored later (FR-003).
-        let _ = self
-            .storage
-            .set_setting(&format!("provider_{}_last_model", provider_id), &entry.id);
+        persist(&format!("provider_{}_last_model", provider_id), &entry.id);
         self.selected_model = Some(model_value);
         self.selected_model_ctx_window = Some(entry.context_window);
         self.persist_selected_thinking_level(thinking_level);

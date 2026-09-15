@@ -171,7 +171,22 @@ impl App {
                         member.model_override = teammate_model.clone();
                         member.status = initial_status;
                         store.config.members.push(member.clone());
-                        let _ = store.save();
+                        // FUNC-027: surface a failed team-state save rather than
+                        // silently dropping it while the swarm reports success.
+                        if let Err(e) = store.save() {
+                            tracing::warn!(
+                                team = %team_name,
+                                teammate = %teammate_name,
+                                error = %e,
+                                "failed to persist swarm teammate to team store"
+                            );
+                            self.push_log_no_agent(
+                                LogLevel::Warn,
+                                format!(
+                                    "Swarm teammate '{teammate_name}': failed to save team state: {e}"
+                                ),
+                            );
+                        }
 
                         // Add to local state
                         self.team_members.push(member);

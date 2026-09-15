@@ -299,10 +299,21 @@ impl Tool for GitlabCreateIssueTool {
             payload["labels"] = json!(labels);
         }
         if let Some(assignee_ids) = input["assignee_ids"].as_str() {
-            let ids: Vec<u64> = assignee_ids
-                .split(',')
-                .filter_map(|s| s.trim().parse().ok())
-                .collect();
+            // FUNC-069: a non-numeric token must surface an error naming the
+            // bad id rather than being silently dropped — a partial assignee
+            // set is misleading (the issue is created without the requested
+            // assignee and no failure is reported).
+            let mut ids: Vec<u64> = Vec::new();
+            for raw in assignee_ids.split(',') {
+                let token = raw.trim();
+                if token.is_empty() {
+                    continue;
+                }
+                let id: u64 = token.parse().with_context(|| {
+                    format!("Invalid assignee id '{token}'; expected a numeric GitLab user id")
+                })?;
+                ids.push(id);
+            }
             if !ids.is_empty() {
                 payload["assignee_ids"] = json!(ids);
             }

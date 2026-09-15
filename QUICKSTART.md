@@ -1689,6 +1689,26 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.104
+
+- **Functional anti-pattern remediation (FUNC-038..069, 080..082)** — the
+  FUNCPLAN.md second pass closes the plan's M1 tail and all of M2-M5:
+  `mf_search` keyless engines surface a dead engine as an error instead of a
+  zero-result success; `github_merge_pr` rejects an unknown merge method
+  instead of silently performing a real merge; the last three production
+  poison-lock panics recover via `PoisonError::into_inner`; GitLab GETs retry
+  `429` honouring `Retry-After` with bounded request/entry budgets and follow
+  pagination; `move_file` renames first (no orphan dirs), `copy_file` refuses
+  a self-copy, `append_file` flushes; GitHub `post`/`put`/`patch` honour
+  `base_url`; percent-encoding is byte-wise (UTF-8 correct) across
+  GitHub/GitLab; codeindex `parent_id` resolves multi-level nesting to a
+  fixpoint; the keyword verifier no longer reports an empty/uncited analysis
+  as `passed`; the server auth comparison hashes fixed-length digests and the
+  rate limiter enforces exactly 60/min; and a new
+  `scripts/check-poison-locks.sh` guard (with `--self-test`) is wired into
+  `pre-flight.sh` and CI. No user-visible behaviour change beyond the bug
+  fixes.
+
 ## Version 1.0.103
 
 - **Agent per-turn hot path (M1 performance pass, PERF-032..040 + PERF-048)**

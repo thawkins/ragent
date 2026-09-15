@@ -22,6 +22,7 @@ tower-http = { workspace = true, features = ["fs", "cors"] }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
 uuid = { workspace = true }
+blake3 = { workspace = true }
 
 [dev-dependencies]
 criterion = "0.5"

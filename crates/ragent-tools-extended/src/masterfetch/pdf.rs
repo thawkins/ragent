@@ -84,9 +84,22 @@ pub fn extract_pdf_text(bytes: &[u8]) -> Result<String> {
 /// Extract document metadata title from a PDF byte slice.
 ///
 /// Uses `lopdf` to read the document's `/Info` dictionary. Returns `None` when
-/// the PDF has no title entry or when parsing fails.
+/// the PDF has no title entry.
+///
+/// FUNC-035: a parse failure is logged and still yields `None` (a title is
+/// optional metadata), but corrupt input is now distinguishable in the logs
+/// from a document that genuinely has no title.
 pub fn extract_pdf_title(bytes: &[u8]) -> Option<String> {
-    let doc = lopdf::Document::load_mem(bytes).ok()?;
+    let doc = match lopdf::Document::load_mem(bytes) {
+        Ok(doc) => doc,
+        Err(e) => {
+            tracing::debug!(
+                error = %e,
+                "masterfetch: could not parse PDF metadata (title unavailable)"
+            );
+            return None;
+        }
+    };
     doc.trailer
         .get(b"Info")
         .ok()

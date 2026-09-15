@@ -404,7 +404,11 @@ impl GmailTool {
             }
             return resp.json().await.context("Invalid Gmail API response");
         }
-        unreachable!("loop performs at most 2 iterations and returns inside")
+        // The loop above always returns within its two iterations; fall through
+        // to an error rather than panicking (FUNC-043).
+        Err(anyhow::anyhow!(
+            "Gmail request loop exhausted without a response"
+        ))
     }
 
     /// Extract envelope headers (`from`, `to`, `cc`, `subject`, `date`).

@@ -123,10 +123,11 @@ pub fn explain(store: &IndexStore, name: &str) -> Result<Option<ExplainResult>> 
     };
 
     // ── Look up the source file path ────────────────────────────────────
+    // FUNC-031: mark a missing file row instead of a blank `source_file`.
     let source_file = store
         .get_file_by_id(symbol.file_id)?
         .map(|f| f.path)
-        .unwrap_or_default();
+        .unwrap_or_else(|| format!("<missing-file:{}>", symbol.file_id));
 
     // ── Look up community assignment ────────────────────────────────────
     let community = store
@@ -214,7 +215,12 @@ fn edge_to_connection(
 
     let (symbol_name, source_file) = match sym_lookup.get(&other_id) {
         Some(s) => {
-            let file = file_paths.get(&s.file_id).cloned().unwrap_or_default();
+            // FUNC-031: mark a missing file row instead of emitting an empty
+            // `source_file` string.
+            let file = file_paths
+                .get(&s.file_id)
+                .cloned()
+                .unwrap_or_else(|| format!("<missing-file:{}>", s.file_id));
             (s.name.clone(), file)
         }
         None => (format!("sym#{other_id}"), String::new()),

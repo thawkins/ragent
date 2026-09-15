@@ -613,7 +613,15 @@ fn advance_repeating_event(
                 event_id = %event.id,
                 "advance_next_due returned None for a repeating event; disabling",
             );
-            let _ = storage.set_cron_event_enabled(&event.id, false);
+            // FUNC-027: surface a failed disable instead of swallowing it — a
+            // silent failure means the event is re-evaluated on every tick.
+            if let Err(e) = storage.set_cron_event_enabled(&event.id, false) {
+                tracing::warn!(
+                    event_id = %event.id,
+                    error = %e,
+                    "failed to disable cron event after advance_next_due returned None"
+                );
+            }
         }
     }
 }
@@ -682,11 +690,18 @@ fn skip_disabled_event(
         // Set next_due to far future so this disabled one-shot event is not
         // returned by list_disabled_due_cron_events on every tick.
         if let Ok(far_future) = chrono::DateTime::parse_from_rfc3339("9999-12-31T23:59:59Z") {
-            let _ = storage.update_cron_event_next_due(
-                &event.id,
-                &far_future.with_timezone(&Utc),
-                None,
-            );
+            // FUNC-027: surface a failed advance instead of swallowing it — a
+            // silent failure means this disabled one-shot is re-listed every
+            // tick.
+            if let Err(e) =
+                storage.update_cron_event_next_due(&event.id, &far_future.with_timezone(&Utc), None)
+            {
+                tracing::warn!(
+                    event_id = %event.id,
+                    error = %e,
+                    "failed to advance next_due for disabled one-shot cron event"
+                );
+            }
         }
     }
 }

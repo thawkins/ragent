@@ -1381,7 +1381,10 @@ impl TeamManager {
                         .filter_map(|entry| {
                             let id = entry.key().clone();
                             let h = entry.value();
-                            let lp = *h.last_progress.lock().unwrap();
+                            let lp = *h
+                                .last_progress
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             if now.duration_since(lp) > timeout {
                                 Some((id, lp))
                             } else {
@@ -1410,7 +1413,10 @@ impl TeamManager {
                     if !still_active {
                         // Mark progress so we don't re-flag it next tick.
                         if let Some(h) = manager.handles.get(&agent_id) {
-                            *h.last_progress.lock().unwrap() = std::time::Instant::now();
+                            *h.last_progress
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                                std::time::Instant::now();
                         }
                         continue;
                     }
@@ -1634,7 +1640,9 @@ impl TeamManager {
         // async read lock, so this method remains sync (matching its
         // pre-DashMap contract).
         if let Some(h) = self.handles.get(agent_id) {
-            *h.last_progress.lock().unwrap() = std::time::Instant::now();
+            *h.last_progress
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = std::time::Instant::now();
         }
     }
 

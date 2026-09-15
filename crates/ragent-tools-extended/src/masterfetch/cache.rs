@@ -321,7 +321,10 @@ impl ContentCache {
     ///
     /// Returns an error if the `SQLite` query fails.
     pub fn get_cached(&self, key: &CacheKey) -> Result<Option<CachedEntry>> {
-        let conn = self.conn.lock().expect("cache mutex poisoned");
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = unix_now();
 
         // Lazily delete the entry if it exists but has expired.
@@ -345,6 +348,7 @@ impl ContentCache {
             return Ok(None);
         }
 
+        let mut corrupt_metadata = false;
         let row = conn
             .query_row(
                 "SELECT content, content_ok, status_code, content_type, metadata_json,
@@ -362,8 +366,24 @@ impl ContentCache {
                 ],
                 |row| {
                     let metadata_json: Option<String> = row.get(4)?;
-                    let metadata = metadata_json
-                        .and_then(|json| serde_json::from_str::<PageMetadata>(&json).ok());
+                    // FUNC-035: a corrupt stored metadata blob must be treated
+                    // as a cache miss (so the caller re-fetches), not silently
+                    // degraded to `None` — otherwise a corrupt entry is served
+                    // as a hit with missing metadata.
+                    let metadata = match metadata_json {
+                        Some(json) => match serde_json::from_str::<PageMetadata>(&json) {
+                            Ok(m) => Some(m),
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "masterfetch: corrupt cached metadata; treating entry as a miss"
+                                );
+                                corrupt_metadata = true;
+                                None
+                            }
+                        },
+                        None => None,
+                    };
                     Ok(CachedEntry {
                         content: row.get(0)?,
                         content_ok: row.get::<_, i64>(1)? != 0,
@@ -379,6 +399,9 @@ impl ContentCache {
             )
             .optional()?;
 
+        if corrupt_metadata {
+            return Ok(None);
+        }
         Ok(row)
     }
 
@@ -481,7 +504,10 @@ impl ContentCache {
             return Ok(());
         }
 
-        let conn = self.conn.lock().expect("cache mutex poisoned");
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = unix_now();
         let expires_at = now.saturating_add(ttl_seconds);
         let size_bytes = content.len() as i64;
@@ -525,7 +551,10 @@ impl ContentCache {
     ///
     /// Returns an error if the `SQLite` delete fails.
     pub fn clear_expired(&self) -> Result<usize> {
-        let conn = self.conn.lock().expect("cache mutex poisoned");
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = unix_now();
         let purged = conn.execute(
             "DELETE FROM fetch_cache WHERE expires_at <= ?1",
@@ -542,7 +571,10 @@ impl ContentCache {
     ///
     /// Returns an error if the `SQLite` delete fails.
     pub fn clear_all(&self) -> Result<usize> {
-        let conn = self.conn.lock().expect("cache mutex poisoned");
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let purged = conn.execute("DELETE FROM fetch_cache", [])?;
         Ok(purged)
     }
@@ -554,7 +586,10 @@ impl ContentCache {
     ///
     /// Returns an error if the `SQLite` query fails.
     pub fn entry_count(&self) -> Result<usize> {
-        let conn = self.conn.lock().expect("cache mutex poisoned");
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM fetch_cache", [], |r| r.get(0))?;
         Ok(count as usize)
     }
@@ -565,7 +600,10 @@ impl ContentCache {
     ///
     /// Returns an error if the `SQLite` query fails.
     pub fn total_bytes(&self) -> Result<usize> {
-        let conn = self.conn.lock().expect("cache mutex poisoned");
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let total: i64 = conn.query_row(
             "SELECT COALESCE(SUM(size_bytes), 0) FROM fetch_cache",
             [],
@@ -583,7 +621,10 @@ impl ContentCache {
     ///
     /// Returns an error if the pragma query fails.
     pub fn journal_mode(&self) -> Result<String> {
-        let conn = self.conn.lock().expect("cache mutex poisoned");
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mode: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
         Ok(mode)
     }

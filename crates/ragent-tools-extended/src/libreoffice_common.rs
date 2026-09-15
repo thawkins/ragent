@@ -14,7 +14,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
-use ragent_types::strutil::truncate_bytes_no_ellipsis;
+use ragent_types::strutil::{floor_char_boundary, truncate_bytes_no_ellipsis};
 
 /// Supported `LibreOffice` / `OpenDocument` formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +75,11 @@ pub fn truncate_output(text: String) -> String {
         text
     } else {
         let truncated = truncate_bytes_no_ellipsis(&text, MAX_OUTPUT_BYTES);
-        let boundary = truncated.rfind('\n').unwrap_or(truncated.len());
+        // Clamp to a char boundary: a newline-free body gives `truncated.len()`,
+        // which is always safe, but a future byte-budget cut would not be
+        // (FUNC-003).
+        let boundary =
+            floor_char_boundary(&truncated, truncated.rfind('\n').unwrap_or(truncated.len()));
         format!(
             "{}\n\n... [Output truncated at {}KB.]",
             &truncated[..boundary],

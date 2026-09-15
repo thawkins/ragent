@@ -869,3 +869,45 @@ fn test_config_custom_max_bytes() {
     let config = ContentCacheConfig { max_bytes: 1024 };
     assert_eq!(config.max_bytes, 1024);
 }
+
+// ===========================================================================
+// FUNC-035: a corrupt stored metadata blob must be treated as a cache miss
+// (so the caller re-fetches), not silently served as a hit with missing data.
+// ===========================================================================
+
+#[test]
+fn func035_corrupt_cached_metadata_is_a_miss() {
+    let dir = TempDir::new();
+    let path = dir.join("corrupt-metadata.db");
+    let cache = ContentCache::open(&path).expect("open");
+    let k = key(99);
+
+    cache
+        .set_cached_with_metadata(
+            &k,
+            "body",
+            true,
+            200,
+            "text/markdown",
+            3600,
+            Some("static"),
+            None,
+        )
+        .expect("set");
+
+    // Corrupt the stored metadata blob directly through a second connection.
+    {
+        let conn = rusqlite::Connection::open(&path).expect("raw open");
+        conn.execute(
+            "UPDATE fetch_cache SET metadata_json = ?1 WHERE url = ?2",
+            rusqlite::params!["{ this is not json", k.url],
+        )
+        .expect("corrupting metadata");
+    }
+
+    let got = cache.get_cached(&k).expect("get should not error");
+    assert!(
+        got.is_none(),
+        "corrupt metadata must be treated as a cache miss, got: {got:?}"
+    );
+}

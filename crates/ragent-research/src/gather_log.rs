@@ -93,14 +93,16 @@ impl GatherLog {
     ///
     /// Returns an error when the underlying write fails.
     pub fn flush(&self) -> anyhow::Result<()> {
-        let mut guard = self
-            .writer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(writer) = guard.as_mut() {
-            writer.flush()?;
-        }
-        Ok(())
+        Self::run_blocking(|| {
+            let mut guard = self
+                .writer
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(writer) = guard.as_mut() {
+                writer.flush()?;
+            }
+            Ok(())
+        })
     }
 
     /// Append a raw JSON event (used for `gather_start`,
@@ -163,15 +165,41 @@ impl GatherLog {
         self.append_line(&serde_json::to_string(&record)?)
     }
 
-    /// Append one already-serialised JSON line.
+    /// Run `f`, yielding the async worker to a blocking thread first when
+    /// called from inside a multi-thread tokio runtime (FUNC-051).
+    ///
+    /// The log's synchronous entry points do blocking file I/O (a one-time
+    /// `create_dir_all` + `open`, then buffered writes). Calling them directly
+    /// from an async task occupies a tokio worker for the duration of the
+    /// syscall. Inside a multi-thread runtime we use `block_in_place`, which
+    /// hands the worker's other tasks to a sibling thread and runs `f` on a
+    /// dedicated blocking thread; outside a runtime (or on a current-thread
+    /// runtime, where `block_in_place` is illegal) we call `f` directly.
+    fn run_blocking<T>(f: impl FnOnce() -> T) -> T {
+        use tokio::runtime::RuntimeFlavor;
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(f)
+            }
+            _ => f(),
+        }
+    }
+
+    /// Append one already-serialised JSON line (FUNC-051).
+    ///
+    /// The whole lock-guarded write runs inside [`Self::run_blocking`] so a
+    /// caller on the async runtime never blocks a worker thread on the
+    /// first-use `open` or a buffer flush.
     fn append_line(&self, line: &str) -> anyhow::Result<()> {
-        let mut guard = self.open_writer()?;
-        let writer = guard
-            .as_mut()
-            .expect("open_writer always leaves a writer in place");
-        writer.write_all(line.as_bytes())?;
-        writer.write_all(b"\n")?;
-        Ok(())
+        Self::run_blocking(|| {
+            let mut guard = self.open_writer()?;
+            let writer = guard
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("gather log writer not initialised"))?;
+            writer.write_all(line.as_bytes())?;
+            writer.write_all(b"\n")?;
+            Ok(())
+        })
     }
 
     /// Lock the writer, opening the log file on first use.

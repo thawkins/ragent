@@ -414,11 +414,27 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.103** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.104** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **Functional anti-pattern remediation — FUNCPLAN.md (FUNC-038..069,
+  080..082) complete (v1.0.104)** — the second pass closes the plan's M1 tail
+  and all of M2-M5: `mf_search` keyless engines now surface a dead engine as
+  an error instead of a zero-result success; `github_merge_pr` rejects an
+  unknown merge method instead of silently merging; the last three production
+  poison-lock panics recover via `PoisonError::into_inner`; GitLab GETs retry
+  `429` honouring `Retry-After` with bounded request/entry budgets and full
+  pagination; `move_file` renames first (no orphan dirs), `copy_file` refuses
+  a self-copy, `append_file` flushes; GitHub `post`/`put`/`patch` honour
+  `base_url`; percent-encoding is byte-wise (UTF-8 correct) across
+  GitHub/GitLab; codeindex `parent_id` resolves multi-level nesting to a
+  fixpoint; the keyword verifier no longer passes an empty/uncited analysis;
+  the server auth comparison hashes fixed-length digests and the rate limiter
+  enforces exactly 60/min; and a new `scripts/check-poison-locks.sh` guard is
+  wired into `pre-flight.sh` and CI.
 
 - **M1 agent per-turn hot path — PERF-032..040 + PERF-048 complete
   (v1.0.103)** — the per-turn allocation and clone load in the agent loop is

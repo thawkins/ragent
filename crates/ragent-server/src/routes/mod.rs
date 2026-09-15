@@ -152,13 +152,18 @@ async fn auth_middleware(
     request: Request,
     next: middleware::Next,
 ) -> Response {
-    // Local constant-time equality function to avoid timing attacks on token comparison.
+    // FUNC-066: compare fixed-length digests rather than the raw tokens. The
+    // previous length-early-return leaked the token length via timing, and its
+    // byte loop stopped at the shorter slice. Hashing both sides to a fixed
+    // 32-byte BLAKE3 digest means the comparison length is constant regardless
+    // of input length, and the byte loop always runs the full digest.
     fn constant_time_eq(a: &str, b: &str) -> bool {
-        if a.len() != b.len() {
-            return false;
-        }
+        let da = blake3::hash(a.as_bytes());
+        let db = blake3::hash(b.as_bytes());
+        let da = da.as_bytes();
+        let db = db.as_bytes();
         let mut res: u8 = 0;
-        for (x, y) in a.as_bytes().iter().zip(b.as_bytes().iter()) {
+        for (x, y) in da.iter().zip(db.iter()) {
             res |= x ^ y;
         }
         res == 0
@@ -361,18 +366,24 @@ async fn send_message(
             limiter.retain(|_, (_, ts)| now.duration_since(*ts).as_secs() < EVICTION_WINDOW_SECS);
         }
 
+        // FUNC-066: enforce exactly 60 requests per rolling minute. The previous
+        // code incremented *then* rejected on `> 60`, so the 61st request was
+        // the first rejection on a warmed window but the count had already been
+        // bumped — an off-by-one against the advertised 60. Check before
+        // incrementing so the boundary matches the message.
         let entry = limiter.entry(id.clone()).or_insert((0, now));
         if now.duration_since(entry.1).as_secs() >= 60 {
             *entry = (1, now);
+        } else if entry.0 >= 60 {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(
+                    serde_json::json!({ "error": "rate limit exceeded: 60 requests per minute per session" }),
+                ),
+            )
+                .into_response();
         } else {
             entry.0 += 1;
-            if entry.0 > 60 {
-                return (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    Json(serde_json::json!({ "error": "rate limit exceeded: 60 requests per minute per session" })),
-                )
-                    .into_response();
-            }
         }
     }
 

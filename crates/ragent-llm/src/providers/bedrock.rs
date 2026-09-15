@@ -585,6 +585,10 @@ impl LlmClient for BedrockAnthropicClient {
             // PERF-063: pre-size the SSE accumulation buffer so a long stream does
             // not repeatedly realloc/copy as it grows.
             let mut buffer = String::with_capacity(8 * 1024);
+            // FUNC-033: hold an incomplete trailing multibyte character from the
+            // previous chunk so a UTF-8 sequence split across TCP chunks is not
+            // corrupted.
+            let mut pending_utf8: Vec<u8> = Vec::new();
             let mut current_event_type = String::new();
             let mut tool_call_args: HashMap<String, String> = HashMap::new();
 
@@ -616,7 +620,7 @@ impl LlmClient for BedrockAnthropicClient {
                     }
                 };
 
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
 
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
@@ -944,6 +948,10 @@ impl LlmClient for BedrockConverseClient {
             // PERF-063: pre-size the SSE accumulation buffer so a long stream does
             // not repeatedly realloc/copy as it grows.
             let mut buffer = String::with_capacity(8 * 1024);
+            // FUNC-033: hold an incomplete trailing multibyte character from the
+            // previous chunk so a UTF-8 sequence split across TCP chunks is not
+            // corrupted.
+            let mut pending_utf8: Vec<u8> = Vec::new();
             let mut current_event_type = String::new();
             let mut active_tool_call_id = String::new();
 
@@ -975,7 +983,7 @@ impl LlmClient for BedrockConverseClient {
                     }
                 };
 
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
 
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();

@@ -305,6 +305,50 @@ fn test_script_file_path_gitbash_extension() {
 
 // ── run_with_output: grandchild-holds-pipe regression test ──────────────
 
+/// FUNC-014: `kill_process_group` must refuse a `pgid` of `0` (or any
+/// non-positive value) rather than signalling ragent's own process group. A
+/// `killpg(0, SIGKILL)` would terminate the agent itself.
+#[cfg(unix)]
+#[test]
+fn test_kill_process_group_refuses_own_group() {
+    let zero = kill_process_group(0).expect_err("pgid 0 must be refused, not signalled");
+    assert_eq!(zero.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        zero.to_string().contains("refusing to killpg"),
+        "unexpected message: {zero}"
+    );
+
+    let negative = kill_process_group(-1).expect_err("negative pgid must be refused");
+    assert_eq!(negative.kind(), std::io::ErrorKind::InvalidInput);
+}
+
+/// FUNC-014: the process-group id must be recorded atomically before the
+/// timeout handler can read it, and a spawn that yields no pid leaves the
+/// `OnceLock` unarmed (so the timeout path never sees a `pgid` of `0`).
+#[tokio::test]
+async fn test_run_with_output_records_pgid_before_returning() {
+    let mut cmd = Command::new("bash");
+    cmd.arg("-c")
+        .arg("true")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    cmd.process_group(0);
+
+    let capture = SharedCapture::new();
+    let _ = run_with_output(cmd, Arc::clone(&capture))
+        .await
+        .expect("run_with_output io error");
+
+    let pgid = capture.pgid.get().copied().expect("pgid must be recorded");
+    assert!(
+        pgid > 0,
+        "direct child PID (process-group id) must be positive, got {pgid}"
+    );
+}
+
 /// A direct child that exits while a grandchild still holds the stdout pipe
 /// write-end open must not hang the tool. `Command::output()` would block
 /// forever waiting for EOF; `run_with_output` must return promptly with the

@@ -51,8 +51,27 @@ pub fn to_json(store: &IndexStore) -> Result<String> {
     let mut file_paths: HashMap<i64, String> = HashMap::new();
     for sym in &symbols {
         if let std::collections::hash_map::Entry::Vacant(e) = file_paths.entry(sym.file_id) {
-            if let Ok(Some(file)) = store.get_file_by_id(sym.file_id) {
-                e.insert(file.path);
+            match store.get_file_by_id(sym.file_id) {
+                Ok(Some(file)) => {
+                    e.insert(file.path);
+                }
+                Ok(None) => {
+                    // FUNC-031: a symbol whose file row is gone must not emit a
+                    // blank `source_file`; mark it so the gap is explicit.
+                    tracing::warn!(
+                        file_id = sym.file_id,
+                        "graph export: symbol references a missing file row"
+                    );
+                    e.insert(format!("<missing-file:{}>", sym.file_id));
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        file_id = sym.file_id,
+                        error = %err,
+                        "graph export: failed to resolve file path for symbol"
+                    );
+                    e.insert(format!("<missing-file:{}>", sym.file_id));
+                }
             }
         }
     }

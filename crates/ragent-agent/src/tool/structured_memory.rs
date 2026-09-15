@@ -428,7 +428,11 @@ impl Tool for MemoryForgetTool {
         {
             (older_than_days, max_confidence, category, tags)
         } else {
-            unreachable!("ForgetFilter::Id handled above")
+            // FUNC-043: the `ForgetFilter::Id` case is handled above; return a
+            // clear error instead of panicking if that ever changes.
+            return Err(anyhow::anyhow!(
+                "memory_forget: ForgetFilter::Id must be handled before this point"
+            ));
         };
 
         let _ = ctx.event_bus.publish(Event::MemoryForgotten {

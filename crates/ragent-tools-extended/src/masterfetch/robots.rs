@@ -915,7 +915,10 @@ impl RobotsChecker {
 
         // Check cache first.
         {
-            let cache = self.cache.lock().expect("robots cache lock poisoned");
+            let cache = self
+                .cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(rules) = cache.get(&domain) {
                 return Ok(rules.is_allowed(user_agent, &path));
             }
@@ -930,7 +933,10 @@ impl RobotsChecker {
         // Cache the result (even if fetch failed → cache empty rules to
         // avoid refetching within TTL).
         {
-            let mut cache = self.cache.lock().expect("robots cache lock poisoned");
+            let mut cache = self
+                .cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             cache.insert(&domain, rules.clone());
         }
 
@@ -1000,14 +1006,20 @@ impl RobotsChecker {
 
     /// Clear all cached `robots.txt` rules.
     pub fn clear_cache(&self) {
-        let mut cache = self.cache.lock().expect("robots cache lock poisoned");
+        let mut cache = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         cache.clear();
     }
 
     /// Return the number of cached domains (including expired entries).
     #[must_use]
     pub fn cache_len(&self) -> usize {
-        self.cache.lock().expect("robots cache lock poisoned").len()
+        self.cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 }
 

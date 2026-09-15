@@ -216,7 +216,44 @@ pub fn decrypt_key(encoded: &str) -> String {
             }
         }
     } else {
-        // Legacy v1 format: repeating-key XOR
+        // Legacy v1 format: repeating-key XOR. A corrupt key is logged rather
+        // than silently returning "" (FUNC-013).
+        match deobfuscate_key_v1(encoded) {
+            Ok(s) => s,
+            Err(reason) => {
+                tracing::warn!(reason, "decrypt_key: legacy v1 key is corrupt");
+                String::new()
+            }
+        }
+    }
+}
+
+/// Decrypt a stored credential, distinguishing a corrupt value from an absent
+/// one.
+///
+/// [`decrypt_key`] maps every failure to an empty string, which makes a corrupt
+/// key look absent. Callers that must not silently drop a secret it cannot
+/// decode (e.g. the redaction-registry seed) use this instead (FUNC-013).
+fn decrypt_key_checked(encoded: &str) -> std::result::Result<String, &'static str> {
+    if let Some(v2_data) = encoded.strip_prefix(ENCRYPT_V2_PREFIX) {
+        let payload = STANDARD
+            .decode(v2_data)
+            .map_err(|_| "base64 decode failed for v2-encrypted key")?;
+        if payload.len() < NONCE_LEN {
+            return Err("v2 payload too short");
+        }
+        let (nonce, ciphertext) = payload.split_at(NONCE_LEN);
+        let keystream = generate_keystream(
+            nonce.try_into().unwrap_or(&[0u8; NONCE_LEN]),
+            ciphertext.len(),
+        );
+        let plaintext: Vec<u8> = ciphertext
+            .iter()
+            .zip(keystream.iter())
+            .map(|(c, k)| c ^ k)
+            .collect();
+        String::from_utf8(plaintext).map_err(|_| "decrypted bytes are not valid UTF-8")
+    } else {
         deobfuscate_key_v1(encoded)
     }
 }
@@ -232,16 +269,20 @@ fn generate_keystream(nonce: &[u8; NONCE_LEN], len: usize) -> Vec<u8> {
 }
 
 /// Legacy v1 obfuscation — kept for reading old database entries.
-fn deobfuscate_key_v1(encoded: &str) -> String {
+///
+/// Returns `Err` when the encoded value cannot be decoded or does not decode to
+/// valid UTF-8, so a corrupt key is distinguishable from an absent one instead
+/// of both mapping to an empty string (FUNC-013).
+fn deobfuscate_key_v1(encoded: &str) -> std::result::Result<String, &'static str> {
     let Ok(xored) = STANDARD.decode(encoded) else {
-        return String::new();
+        return Err("base64 decode failed");
     };
     let bytes: Vec<u8> = xored
         .iter()
         .enumerate()
         .map(|(i, b)| b ^ OBFUSCATION_KEY[i % OBFUSCATION_KEY.len()])
         .collect();
-    String::from_utf8(bytes).unwrap_or_default()
+    String::from_utf8(bytes).map_err(|_| "decoded bytes are not valid UTF-8")
 }
 
 /// Obfuscates an API key using repeating-key XOR and base64 encoding.
@@ -535,8 +576,14 @@ impl Storage {
             return Ok(());
         }
 
-        // Slow path: run the full migration batch.
-        conn.execute_batch(
+        // Slow path: run the full migration batch atomically. The DDL batch and
+        // the `schema_version` upsert below must commit together: if the batch
+        // applied but the version write were lost, the next open would re-run
+        // migrations against a schema it already believes is old, and a
+        // concurrent open could observe a half-applied schema (FUNC-019).
+        let tx = conn.unchecked_transaction()?;
+
+        tx.execute_batch(
             "
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -798,7 +845,7 @@ impl Storage {
             ("sessions", "format_version"),
             ("cron_events", "stateful"),
         ] {
-            let has_col: bool = conn
+            let has_col: bool = tx
                 .prepare_cached(&format!(
                     "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{col}'"
                 ))?
@@ -813,7 +860,7 @@ impl Storage {
                 } else {
                     &format!("ALTER TABLE {table} ADD COLUMN {col} BLOB;")
                 };
-                conn.execute_batch(sql)?;
+                tx.execute_batch(sql)?;
             } else if *table == "sessions" && *col == "format_version" {
                 // PERF-004: cache the column existence so get_session /
                 // list_sessions can skip the pragma round-trip on every
@@ -838,7 +885,7 @@ impl Storage {
             ("metadata", "'{}'"),
             ("blocked_by", "'[]'"),
         ] {
-            let has_col: bool = conn
+            let has_col: bool = tx
                 .prepare_cached(&format!(
                     "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name='{col}'"
                 ))?
@@ -848,17 +895,20 @@ impl Storage {
             if !has_col {
                 let sql =
                     format!("ALTER TABLE todos ADD COLUMN {col} TEXT DEFAULT {default_expr};");
-                conn.execute_batch(&sql)?;
+                tx.execute_batch(&sql)?;
             }
         }
 
         // Record the schema version so the next `Storage::open` (including
-        // the background FTS warmup connection) hits the fast path.
+        // the background FTS warmup connection) hits the fast path. Written via
+        // the transaction (not `conn`) so it commits atomically with the DDL
+        // above (FUNC-019).
         let now = Utc::now().to_rfc3339();
-        conn.execute(
+        tx.execute(
             "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('schema_version', ?1, ?2)",
             params![SCHEMA_VERSION.to_string(), now],
         )?;
+        tx.commit()?;
 
         Ok(())
     }
@@ -1179,7 +1229,19 @@ impl Storage {
                 "compaction" => Role::Compaction,
                 _ => Role::Assistant,
             };
-            let parts: Vec<MessagePart> = serde_json::from_str(&parts_json).unwrap_or_default();
+            let parts: Vec<MessagePart> = match serde_json::from_str(&parts_json) {
+                Ok(parts) => parts,
+                Err(e) => {
+                    // A corrupt row must not be silently turned into an empty
+                    // message with no trace (FUNC-020). Skip it explicitly.
+                    tracing::warn!(
+                        message_id = %id,
+                        error = %e,
+                        "skipping message with corrupt parts JSON"
+                    );
+                    continue;
+                }
+            };
             let created_at = DateTime::parse_from_rfc3339(&created_str)
                 .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc));
             let updated_at = DateTime::parse_from_rfc3339(&updated_str)
@@ -1495,17 +1557,31 @@ impl Storage {
         match encoded {
             Some(ref enc) if !enc.starts_with(ENCRYPT_V2_PREFIX) => {
                 // Auto-migrate legacy v1 to v2 encryption.
-                let plaintext = deobfuscate_key_v1(enc);
-                if !plaintext.is_empty() {
-                    let v2 = encrypt_key(&plaintext);
-                    let now = Utc::now().to_rfc3339();
-                    let _ = conn.execute(
-                        "UPDATE provider_auth SET api_key = ?1, updated_at = ?2 \
-                         WHERE provider_id = ?3",
-                        params![v2, now, provider_id],
-                    );
+                match deobfuscate_key_v1(enc) {
+                    Ok(plaintext) => {
+                        if !plaintext.is_empty() {
+                            let v2 = encrypt_key(&plaintext);
+                            let now = Utc::now().to_rfc3339();
+                            let _ = conn.execute(
+                                "UPDATE provider_auth SET api_key = ?1, updated_at = ?2 \
+                                 WHERE provider_id = ?3",
+                                params![v2, now, provider_id],
+                            );
+                        }
+                        Ok(Some(plaintext))
+                    }
+                    Err(reason) => {
+                        // A corrupt stored key must not masquerade as "no key".
+                        tracing::warn!(
+                            provider_id,
+                            reason,
+                            "get_provider_auth: stored credential is corrupt"
+                        );
+                        anyhow::bail!(
+                            "stored credential for provider '{provider_id}' is corrupt: {reason}"
+                        );
+                    }
                 }
-                Ok(Some(plaintext))
             }
             Some(enc) => Ok(Some(decrypt_key(&enc))),
             None => Ok(None),
@@ -1517,19 +1593,49 @@ impl Storage {
     /// Call this once at startup so that [`crate::sanitize::redact_secrets`]
     /// can perform exact-match redaction on known secrets.
     ///
+    /// A row whose credential cannot be decrypted is logged and skipped: it
+    /// cannot be added to the registry, but silently dropping it would leave the
+    /// key escaping redaction with no trace (FUNC-013).
+    ///
     /// # Errors
     ///
     /// Returns an error if the database query fails.
     pub fn seed_secret_registry(&self) -> Result<()> {
-        let keys: Vec<String> = {
+        let rows: Vec<(String, String)> = {
             let conn = lock_conn_read!(self)?;
-            let mut stmt = conn.prepare_cached("SELECT api_key FROM provider_auth")?;
-            stmt.query_map([], |row| row.get::<_, String>(0))?
-                .filter_map(std::result::Result::ok)
-                .map(|encoded| deobfuscate_key(&encoded))
-                .filter(|k| !k.is_empty())
-                .collect()
+            let mut stmt = conn.prepare_cached("SELECT provider_id, api_key FROM provider_auth")?;
+            stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?
         };
+
+        let mut keys = Vec::with_capacity(rows.len());
+        let mut skipped = 0usize;
+        for (provider_id, encoded) in rows {
+            match decrypt_key_checked(&encoded) {
+                Ok(key) if !key.is_empty() => keys.push(key),
+                // A decryptable-but-empty value is a genuinely absent credential.
+                Ok(_) => {}
+                Err(reason) => {
+                    skipped += 1;
+                    tracing::warn!(
+                        provider_id,
+                        reason,
+                        "seed_secret_registry: skipping undecryptable credential (it will not be redacted)"
+                    );
+                }
+            }
+        }
+
+        if skipped > 0 {
+            tracing::warn!(
+                skipped,
+                total = keys.len() + skipped,
+                "seed_secret_registry: some credentials could not be decoded and are not redacted"
+            );
+        }
+
         crate::sanitize::seed_secrets(keys);
         Ok(())
     }
@@ -1719,37 +1825,24 @@ impl Storage {
     ) -> Result<bool> {
         let conn = lock_conn!(self)?;
         let now = chrono::Utc::now().to_rfc3339();
-        let mut sets = vec!["updated_at = ?1"];
+        let mut sets: Vec<String> = vec!["updated_at = ?1".to_string()];
         let mut idx = 2u32;
         let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now)];
 
         if let Some(t) = title {
-            sets.push(if idx == 2 {
-                "title = ?2"
-            } else {
-                unreachable!()
-            });
+            // FUNC-043: the placeholder index is deterministic; build it from
+            // `idx` instead of an `unreachable!()` on the only branch.
+            sets.push(format!("title = ?{idx}"));
             vals.push(Box::new(t.to_string()));
             idx += 1;
         }
         if let Some(s) = status {
-            let placeholder = match idx {
-                2 => "status = ?2",
-                3 => "status = ?3",
-                _ => unreachable!(),
-            };
-            sets.push(placeholder);
+            sets.push(format!("status = ?{idx}"));
             vals.push(Box::new(s.to_string()));
             idx += 1;
         }
         if let Some(d) = description {
-            let placeholder = match idx {
-                2 => "description = ?2",
-                3 => "description = ?3",
-                4 => "description = ?4",
-                _ => unreachable!(),
-            };
-            sets.push(placeholder);
+            sets.push(format!("description = ?{idx}"));
             vals.push(Box::new(d.to_string()));
             idx += 1;
         }
@@ -2797,11 +2890,13 @@ impl Storage {
 
         let count = ids.len();
         for id in &ids {
-            let _ = conn.execute(
+            // Propagate failures and count only rows actually deleted, so the
+            // caller never reports a deletion that did not happen (FUNC-021).
+            conn.execute(
                 "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?1)",
                 params![id],
-            );
-            let _ = conn.execute("DELETE FROM memories WHERE id = ?1", params![id]);
+            )?;
+            conn.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
         }
 
         Ok(count)
@@ -3082,22 +3177,34 @@ impl Storage {
     {
         let embeddings = self.list_memory_embeddings()?;
         let mut results: Vec<EmbeddingMatch> = Vec::new();
+        let mut skipped = 0usize;
 
         for (row_id, blob) in &embeddings {
             // Attempt to deserialise the blob into a `dimensions`-length
             // `f32` slice.  Blobs that fail to deserialise or have the wrong
-            // dimensionality are silently skipped — they correspond to
-            // memories embedded with a different model/dimensionality and
-            // cannot be compared against this query.
-            if let Ok(stored) = Self::deserialise_embedding_owned(blob, dimensions) {
-                let score = similarity(query_embedding, &stored);
-                if score >= min_similarity {
-                    results.push(EmbeddingMatch {
-                        row_id: *row_id,
-                        score,
-                    });
+            // dimensionality cannot be compared against this query. They are
+            // skipped, but the skip count is logged so a corrupt blob is not
+            // invisible (FUNC-023).
+            match Self::deserialise_embedding_owned(blob, dimensions) {
+                Ok(stored) => {
+                    let score = similarity(query_embedding, &stored);
+                    if score >= min_similarity {
+                        results.push(EmbeddingMatch {
+                            row_id: *row_id,
+                            score,
+                        });
+                    }
                 }
+                Err(_) => skipped += 1,
             }
+        }
+
+        if skipped > 0 {
+            tracing::warn!(
+                skipped,
+                dimensions,
+                "search_memories_by_embedding: skipped undecodable embedding blobs"
+            );
         }
 
         // Sort by similarity descending.
@@ -3215,16 +3322,29 @@ impl Storage {
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
         let mut results = Vec::new();
+        let mut skipped = 0usize;
         for (message_id, blob) in &rows {
-            if let Ok(stored) = Self::deserialise_embedding_owned(blob, dimensions) {
-                let score = similarity(query_embedding, &stored);
-                if score >= min_similarity {
-                    results.push(MessageEmbeddingMatch {
-                        message_id: message_id.clone(),
-                        score,
-                    });
+            // Same undecodable-blob handling as the memory path: skip, but
+            // count and log so the corruption is visible (FUNC-023).
+            match Self::deserialise_embedding_owned(blob, dimensions) {
+                Ok(stored) => {
+                    let score = similarity(query_embedding, &stored);
+                    if score >= min_similarity {
+                        results.push(MessageEmbeddingMatch {
+                            message_id: message_id.clone(),
+                            score,
+                        });
+                    }
                 }
+                Err(_) => skipped += 1,
             }
+        }
+        if skipped > 0 {
+            tracing::warn!(
+                skipped,
+                dimensions,
+                "search_messages_by_embedding: skipped undecodable embedding blobs"
+            );
         }
         results.sort_by(|a, b| {
             b.score
@@ -3777,7 +3897,7 @@ impl Storage {
 
         let mut stmt = conn.prepare_cached(
             "SELECT f.message_id, f.session_id, f.role, f.content,
-                    m.created_at, s.title, s.directory, f.rank
+                    m.created_at, s.title, s.directory, f.rank AS rank
              FROM messages_fts f
              INNER JOIN messages m ON m.id = f.message_id
              LEFT JOIN sessions s ON s.id = f.session_id
@@ -3786,17 +3906,19 @@ impl Storage {
              LIMIT ?3",
         )?;
 
+        // FUNC-044: bind by column name so a schema/column-order shift surfaces
+        // an error instead of silently zeroing the rank.
         let rows = stmt
             .query_map(params![safe_query, session_id, limit as i64], |row| {
                 Ok(MessageSearchResult {
-                    message_id: row.get(0)?,
-                    session_id: row.get(1)?,
-                    role: row.get(2)?,
-                    content: row.get(3)?,
-                    created_at: row.get(4)?,
-                    session_title: row.get(5)?,
-                    session_directory: row.get(6)?,
-                    rank: row.get::<_, f64>(7).unwrap_or(0.0),
+                    message_id: row.get("message_id")?,
+                    session_id: row.get("session_id")?,
+                    role: row.get("role")?,
+                    content: row.get("content")?,
+                    created_at: row.get("created_at")?,
+                    session_title: row.get("title")?,
+                    session_directory: row.get("directory")?,
+                    rank: row.get("rank")?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -3902,7 +4024,7 @@ impl Storage {
             format!(
                 "WITH ranked AS (
                     SELECT f.message_id, f.session_id, f.role, f.content,
-                           m.created_at, s.title, s.directory, f.rank,
+                           m.created_at, s.title, s.directory, f.rank AS rank,
                            ROW_NUMBER() OVER (PARTITION BY f.session_id ORDER BY f.rank) AS rn
                     FROM messages_fts f
                     INNER JOIN messages m ON m.id = f.message_id
@@ -3910,7 +4032,7 @@ impl Storage {
                     WHERE {where_sql}
                 )
                 SELECT message_id, session_id, role, content,
-                       created_at, title, directory, rank
+                       created_at, title, directory, rank AS rank
                 FROM ranked
                 WHERE rn <= ?{param_idx}
                 ORDER BY rank
@@ -3920,7 +4042,7 @@ impl Storage {
         } else {
             format!(
                 "SELECT f.message_id, f.session_id, f.role, f.content,
-                        m.created_at, s.title, s.directory, f.rank
+                        m.created_at, s.title, s.directory, f.rank AS rank
                  FROM messages_fts f
                  INNER JOIN messages m ON m.id = f.message_id
                  LEFT JOIN sessions s ON s.id = f.session_id
@@ -3938,17 +4060,19 @@ impl Storage {
             sql_params.iter().map(std::convert::AsRef::as_ref).collect();
 
         let mut stmt = conn.prepare_cached(&sql)?;
+        // FUNC-044: bind by column name so a schema/column-order shift surfaces
+        // an error instead of silently zeroing the rank.
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
                 Ok(MessageSearchResult {
-                    message_id: row.get(0)?,
-                    session_id: row.get(1)?,
-                    role: row.get(2)?,
-                    content: row.get(3)?,
-                    created_at: row.get(4)?,
-                    session_title: row.get(5)?,
-                    session_directory: row.get(6)?,
-                    rank: row.get::<_, f64>(7).unwrap_or(0.0),
+                    message_id: row.get("message_id")?,
+                    session_id: row.get("session_id")?,
+                    role: row.get("role")?,
+                    content: row.get("content")?,
+                    created_at: row.get("created_at")?,
+                    session_title: row.get("title")?,
+                    session_directory: row.get("directory")?,
+                    rank: row.get("rank")?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -4085,7 +4209,17 @@ impl Storage {
 
         let tx = conn.transaction()?;
         for (id, session_id, role, parts_json) in &missing {
-            let parts: Vec<MessagePart> = serde_json::from_str(parts_json).unwrap_or_default();
+            let parts: Vec<MessagePart> = match serde_json::from_str(parts_json) {
+                Ok(parts) => parts,
+                Err(e) => {
+                    tracing::warn!(
+                        message_id = %id,
+                        error = %e,
+                        "skipping FTS backfill for message with corrupt parts JSON"
+                    );
+                    continue;
+                }
+            };
             let content = extract_message_text(&parts);
             tx.execute(
                 "INSERT INTO messages_fts (message_id, session_id, role, content) \
@@ -4204,30 +4338,66 @@ pub struct InitiativeRow {
 impl InitiativeRow {
     /// Decode `milestones_json` into a structured milestone list.
     ///
-    /// Falls back to an empty vector on malformed JSON (should never happen
-    /// for rows written through [`Storage::create_initiative`]).
+    /// A malformed value is logged and reported as an empty list rather than
+    /// silently blanked (FUNC-022).
     #[must_use]
     pub fn milestones(&self) -> Vec<InitiativeMilestone> {
-        serde_json::from_str(&self.milestones_json).unwrap_or_default()
+        match serde_json::from_str(&self.milestones_json) {
+            Ok(milestones) => milestones,
+            Err(e) => {
+                tracing::warn!(
+                    initiative_id = %self.id,
+                    error = %e,
+                    "corrupt milestones_json; treating initiative milestones as empty"
+                );
+                Vec::new()
+            }
+        }
     }
 }
 
 /// Row-mapping helper for `initiatives` queries.
 fn initiative_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InitiativeRow> {
     let progress_i: i64 = row.get(5)?;
+    let id: String = row.get(0)?;
+    let progress = initiative_progress(progress_i, &id);
     Ok(InitiativeRow {
-        id: row.get(0)?,
+        id,
         title: row.get(1)?,
         description: row.get(2)?,
         status: row.get(3)?,
         milestones_json: row.get(4)?,
-        progress: u32::try_from(progress_i).unwrap_or(0),
+        progress,
         project: row.get(6)?,
         session_id: row.get(7)?,
         created_at: row.get(8)?,
         updated_at: row.get(9)?,
         closed_at: row.get(10)?,
     })
+}
+
+/// Clamp a stored initiative `progress` value into `0..=100`, logging an
+/// out-of-range value instead of silently coercing it to `0` (FUNC-022).
+fn initiative_progress(value: i64, initiative_id: &str) -> u32 {
+    match u32::try_from(value) {
+        Ok(v) if v <= 100 => v,
+        Ok(v) => {
+            tracing::warn!(
+                initiative_id,
+                progress = v,
+                "initiative progress above 100; clamping"
+            );
+            100
+        }
+        Err(_) => {
+            tracing::warn!(
+                initiative_id,
+                progress = value,
+                "invalid initiative progress; treating as 0"
+            );
+            0
+        }
+    }
 }
 
 /// Row representation of a TODO item.
@@ -4552,8 +4722,22 @@ pub fn detect_cycle(tasks: &[TaskRow], source: &str, target: &str) -> Result<(),
 fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRow> {
     let metadata_str: String = row.get(9)?;
     let blocked_by_str: String = row.get(10)?;
+    let id: String = row.get(0)?;
+    // A corrupt blocker list is logged with the task id rather than silently
+    // blanked (FUNC-022).
+    let blocked_by: Vec<String> = match serde_json::from_str(&blocked_by_str) {
+        Ok(list) => list,
+        Err(e) => {
+            tracing::warn!(
+                task_id = %id,
+                error = %e,
+                "corrupt blocked_by JSON; treating task blockers as empty"
+            );
+            Vec::new()
+        }
+    };
     Ok(TaskRow {
-        id: row.get(0)?,
+        id,
         session_id: row.get(1)?,
         title: row.get(2)?,
         status: row.get(3)?,
@@ -4563,7 +4747,7 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRow> {
         active_form: row.get(7)?,
         owner: row.get(8)?,
         metadata: metadata_str,
-        blocked_by: serde_json::from_str(&blocked_by_str).unwrap_or_default(),
+        blocked_by,
     })
 }
 
@@ -4826,10 +5010,12 @@ pub struct CronEventRow {
 
 /// Row-mapping helper for `cron_events` queries.
 fn cron_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronEventRow> {
-    let enabled_i: i64 = row.get(7)?;
-    // The `stateful` column was added via migration; handle the case where
-    // it doesn't exist yet by defaulting to `false`.
-    let stateful_i: i64 = row.get(11).unwrap_or(0);
+    // FUNC-044: bind by column name, not position. A schema reorder (or a new
+    // column inserted before `enabled`/`stateful`) must surface an error rather
+    // than silently zeroing the flag. Every SELECT that feeds this mapper lists
+    // `enabled` and `stateful` explicitly, so the named binds resolve.
+    let enabled_i: i64 = row.get("enabled")?;
+    let stateful_i: i64 = row.get("stateful")?;
     Ok(CronEventRow {
         id: row.get("id")?,
         agent_type: row.get("agent_type")?,

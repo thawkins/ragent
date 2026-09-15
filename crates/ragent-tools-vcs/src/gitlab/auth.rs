@@ -67,19 +67,49 @@ pub struct GitLabConfig {
 // Resolved credential loading (layered: env > ragent.json > database)
 // ---------------------------------------------------------------------------
 
-/// Resolve the GitLab PAT.
+/// Resolve the GitLab PAT, best-effort.
 ///
 /// Priority: `GITLAB_TOKEN` env → `ragent.json` → encrypted database.
 /// The database lookup is cached per storage handle (PERF-059) so repeat calls
 /// do not re-decrypt the credential; [`save_token`] and [`delete_token`] clear
 /// the cache.
+///
+/// This wrapper is for display/status paths: a credential-store read failure is
+/// logged and reported as "no token". Callers that must distinguish a failed
+/// read from genuinely-unconfigured credentials should use
+/// [`load_token_checked`] (FUNC-011).
 #[must_use]
 pub fn load_token(storage: &Storage) -> Option<String> {
+    match load_token_checked(storage) {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "failed to read GitLab token from credential store; reporting as unconfigured"
+            );
+            None
+        }
+    }
+}
+
+/// Resolve the GitLab PAT, propagating credential-store read failures.
+///
+/// Priority: `GITLAB_TOKEN` env → `ragent.json` → encrypted database.
+///
+/// Returns `Ok(None)` only when no layer supplies a token. A database read
+/// *error* is returned as `Err` so callers never mistake a broken store for
+/// "not configured" (FUNC-011).
+///
+/// # Errors
+///
+/// Returns the underlying storage error when the credential store cannot be
+/// read.
+pub fn load_token_checked(storage: &Storage) -> Result<Option<String>> {
     // 1. Environment variable
     if let Ok(token) = std::env::var("GITLAB_TOKEN")
         && !token.is_empty()
     {
-        return Some(token);
+        return Ok(Some(token));
     }
 
     // 2. ragent.json (already parsed/cached by `Config::load`)
@@ -87,7 +117,7 @@ pub fn load_token(storage: &Storage) -> Option<String> {
         && let Some(ref t) = cfg.gitlab.token
         && !t.is_empty()
     {
-        return Some(t.clone());
+        return Ok(Some(t.clone()));
     }
 
     // 3. Encrypted database, cached by storage handle identity
@@ -99,17 +129,17 @@ pub fn load_token(storage: &Storage) -> Option<String> {
         if let Some((cached_key, token)) = cache.as_ref()
             && *cached_key == key
         {
-            return Some(token.clone());
+            return Ok(Some(token.clone()));
         }
     }
 
-    let token = storage.get_provider_auth(DB_PROVIDER_ID).ok().flatten();
+    let token = storage.get_provider_auth(DB_PROVIDER_ID)?;
     if let Some(ref value) = token {
         *TOKEN_CACHE
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((key, value.clone()));
     }
-    token
+    Ok(token)
 }
 
 /// Resolve the GitLab configuration (instance URL + username).

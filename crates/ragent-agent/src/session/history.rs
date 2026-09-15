@@ -234,7 +234,9 @@ fn assistant_tool_results(msg: &Message) -> Vec<ContentPart> {
                             })
                     })
                     .or_else(|| state.error.clone())
-                    .unwrap_or_default();
+                    // FUNC-036: emit an explicit "(no output)" marker so a
+                    // missing tool result is not silently rendered as "".
+                    .unwrap_or_else(|| "(no output)".to_string());
                 Some(ContentPart::ToolResult {
                     tool_use_id: call_id.clone(),
                     content: tool_result_content_for_llm(tool, &result_text, state.output.as_ref()),
@@ -754,7 +756,12 @@ fn parts_to_chat_content_sync(parts: &[MessagePart]) -> ChatContent {
                 // Reasoning is not forwarded to the provider.
             }
             MessagePart::Image { .. } => {
-                unreachable!("parts_to_chat_content_sync must not be called for image sessions")
+                // FUNC-043: never panic on a data-driven part. Image parts
+                // reaching this sync path are dropped with a warning rather
+                // than aborting the process.
+                tracing::warn!(
+                    "parts_to_chat_content_sync: dropping image part on a non-image path"
+                );
             }
         }
     }

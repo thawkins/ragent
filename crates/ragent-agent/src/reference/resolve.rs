@@ -242,7 +242,10 @@ async fn try_read_binary(abs_path: &Path, raw: &str) -> Result<Option<String>> {
                     "docx" => office_read::read_docx(&path, "markdown"),
                     "xlsx" => office_read::read_xlsx(&path, None, None, "markdown"),
                     "pptx" => office_read::read_pptx(&path, None, "markdown"),
-                    _ => unreachable!(),
+                    // FUNC-043: the outer match already restricts `ext_owned`
+                    // to these three arms; return an error instead of
+                    // panicking if a future refactor breaks that invariant.
+                    other => Err(anyhow::anyhow!("unsupported office extension: {other}")),
                 }
             })
             .await

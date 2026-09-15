@@ -1276,7 +1276,7 @@ impl ToolRegistry {
         let mut guard = self
             .definitions_cache
             .write()
-            .expect("definitions cache lock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = None;
         self.version
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1297,7 +1297,10 @@ impl ToolRegistry {
     ///
     /// Call this once after constructing the registry, before the first session.
     pub fn set_hidden(&self, names: &[String]) {
-        let mut hidden = self.hidden.write().expect("tool hidden lock poisoned");
+        let mut hidden = self
+            .hidden
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *hidden = names.iter().cloned().collect();
         // PERF-012: the hidden set participates in `definitions()` filtering,
         // so a change here must invalidate the sorted-definition cache.
@@ -1318,7 +1321,10 @@ impl ToolRegistry {
     /// assert_eq!(registry.list().len(), 1);
     /// ```
     pub fn register(&self, tool: Arc<dyn Tool>) {
-        let mut tools = self.tools.write().expect("tool registry lock poisoned");
+        let mut tools = self
+            .tools
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         tools.insert(tool.name().to_string(), tool);
         // PERF-012: invalidate the sorted-definition cache so the next
         // `definitions()` call rebuilds it with the newly registered tool.
@@ -1338,7 +1344,10 @@ impl ToolRegistry {
     /// assert!(registry.get("nonexistent").is_none());
     /// ```
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        let tools = self.tools.read().expect("tool registry lock poisoned");
+        let tools = self
+            .tools
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         tools.get(name).cloned()
     }
 
@@ -1355,7 +1364,10 @@ impl ToolRegistry {
     /// assert!(names.contains(&"bash".to_string()));
     /// ```
     pub fn list(&self) -> Vec<String> {
-        let tools = self.tools.read().expect("tool registry lock poisoned");
+        let tools = self
+            .tools
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut names: Vec<String> = tools.keys().cloned().collect();
         names.sort();
         names
@@ -1387,13 +1399,19 @@ impl ToolRegistry {
             let guard = self
                 .definitions_cache
                 .read()
-                .expect("definitions cache lock poisoned");
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(ref cached) = *guard {
                 return cached.clone();
             }
         }
-        let tools = self.tools.read().expect("tool registry lock poisoned");
-        let hidden = self.hidden.read().expect("tool hidden lock poisoned");
+        let tools = self
+            .tools
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let hidden = self
+            .hidden
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut defs: Vec<ToolDefinition> = tools
             .values()
             .filter(|t| !hidden.contains(t.name()))
@@ -1410,7 +1428,7 @@ impl ToolRegistry {
             let mut guard = self
                 .definitions_cache
                 .write()
-                .expect("definitions cache lock poisoned");
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             *guard = Some(defs.clone());
         }
         defs

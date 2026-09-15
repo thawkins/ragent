@@ -53,7 +53,9 @@ pub use permission::PermissionDecision;
 pub use startup::StartupTimings;
 pub use thinking::{ThinkingConfig, ThinkingDisplay, ThinkingLevel};
 // Re-export string utilities for convenient access
-pub use strutil::{truncate_bytes, truncate_bytes_no_ellipsis, truncate_chars};
+pub use strutil::{
+    floor_char_boundary, truncate_bytes, truncate_bytes_no_ellipsis, truncate_chars,
+};
 pub use trigger::{
     TriggerActionKind, TriggerEnvelope, TriggerFired, TriggerRule, TriggerRuleId,
     TriggerRuleStatus, TriggerSourceKind,

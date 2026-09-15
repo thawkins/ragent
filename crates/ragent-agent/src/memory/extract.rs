@@ -664,7 +664,9 @@ impl ExtractionEngine {
                         debug!(
                             "Skipping duplicate candidate (overlap {:.0}%): {}",
                             overlap * 100.0,
-                            &content[..content.len().min(60)]
+                            // Char-boundary-safe prefix: raw byte slicing panics
+                            // on multibyte input (FUNC-002).
+                            ragent_types::strutil::truncate_bytes_no_ellipsis(content, 60)
                         );
                         return true;
                     }
@@ -738,7 +740,9 @@ impl ExtractionEngine {
                 confidence = candidate.confidence,
                 source = candidate.source,
                 "Memory candidate extracted (awaiting confirmation): {}",
-                &candidate.content[..candidate.content.len().min(80)]
+                // Char-boundary-safe prefix: raw byte slicing panics on
+                // multibyte input (FUNC-002).
+                ragent_types::strutil::truncate_bytes_no_ellipsis(&candidate.content, 80)
             );
             event_bus.publish(Event::MemoryCandidateExtracted {
                 session_id: session_id.to_string(),

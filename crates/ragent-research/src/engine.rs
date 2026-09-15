@@ -15,7 +15,7 @@
 //! resume state across turns (T-012, T-013).
 
 use crate::analysis::{AnalysisEngine, AnalysisResult, build_source_bodies};
-use crate::session::{SessionEvent, SessionObserver, SynthesisEvent};
+use crate::session::{SessionEvent, SessionObserver, SynthesisEvent, SynthesizeOutcome};
 use crate::source::Source;
 use crate::state::{EvidenceGap, ResearchState, SubQuestionStatus};
 use crate::verify::Verifier;
@@ -199,12 +199,14 @@ impl GatherObserver for StateGatherForwarder {
             }
             GatherEvent::SearchReturnedNoHits
             | GatherEvent::SearchRetrying { .. }
+            | GatherEvent::SearchPartiallyFailed { .. }
+            | GatherEvent::VaultStoreFailed { .. }
             | GatherEvent::SearchBudgetExhausted { .. }
             | GatherEvent::ProviderCallsSummary { .. }
             | GatherEvent::WidthSweepSummary { .. } => {
-                // Retry diagnostics and the summary are surfaced by
-                // the session-level forwarder; the engine only needs the
-                // sources delivered via SourceCaptured.
+                // Retry/partial-failure diagnostics and the summary are
+                // surfaced by the session-level forwarder; the engine only
+                // needs the sources delivered via SourceCaptured.
             }
             GatherEvent::VaultSufficient { .. } => {
                 // Vault-only short-circuit: forwarded as a diagnostic in the
@@ -336,8 +338,20 @@ impl IterativeEngine {
             let result = self.run_iteration(&mut state, observer.clone()).await?;
             state.increment_iteration();
 
-            // Evaluate and update gaps.
-            let analysis = self.synthesize(&state).await.ok();
+            // Evaluate and update gaps. A synthesis failure is surfaced through
+            // the observer rather than being silently dropped by `.ok()`
+            // (FUNC-029), so the critic runs against a clearly-absence result.
+            let analysis = match self.synthesize(&state).await {
+                Ok(analysis) => Some(analysis),
+                Err(e) => {
+                    tracing::warn!(error = %e, "iterative engine: synthesis failed");
+                    observer.on_event(SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult {
+                        outcome: SynthesizeOutcome::FallbackError,
+                        detail: Some(format!("synthesis failed: {e}")),
+                    }));
+                    None
+                }
+            };
             let critic_result = self.critic.evaluate(&state, analysis.as_ref()).await;
             state.set_evaluation_score(critic_result.score.unwrap_or(0));
             for gap in critic_result.gaps {

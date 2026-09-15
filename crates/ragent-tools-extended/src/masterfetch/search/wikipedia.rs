@@ -291,15 +291,26 @@ impl SearchEngine for WikipediaEngine {
                 }
             })
             .collect::<Vec<_>>();
-        let summary_results: Vec<Option<RawResult>> = stream::iter(summary_futs)
+        let summary_results: Vec<Result<Option<RawResult>, String>> = stream::iter(summary_futs)
             .buffer_unordered(SUMMARY_FETCH_CONCURRENCY)
             .collect()
             .await;
 
-        let mut results: Vec<RawResult> = summary_results.into_iter().flatten().collect();
+        // FUNC-035: distinguish a legitimately-empty summary from a failed
+        // fetch. If every summary fetch failed, report an error rather than a
+        // silent zero-result success.
+        let results = match partition_summary_outcomes(summary_results) {
+            Ok(results) => results,
+            Err(message) => {
+                let elapsed = start.elapsed().as_millis() as u64;
+                let mut report = EngineReport::error(ENGINE_NAME, message);
+                report.duration_ms = elapsed;
+                return report;
+            }
+        };
 
         // Dedup by normalised URL and truncate to max_results (FR-009).
-        results = dedup_results_by_url(&results);
+        let mut results = dedup_results_by_url(&results);
         results.truncate(opts.max_results);
 
         let elapsed = start.elapsed().as_millis() as u64;
@@ -632,24 +643,73 @@ fn url_encode_path(input: &str) -> String {
     out
 }
 
+/// Partition per-title summary fetch outcomes into results, or an error when
+/// every fetch failed.
+///
+/// FUNC-035: `Ok(Vec<RawResult>)` is returned when at least one fetch succeeded
+/// (possibly with zero parseable summaries — a legitimately empty result).
+/// `Err(message)` is returned when there were failures and *no* successful
+/// fetch at all, so a fully dead engine is reported as an error rather than a
+/// silent zero-result success.
+#[must_use = "the partition result must be inspected"]
+pub fn partition_summary_outcomes(
+    outcomes: Vec<Result<Option<RawResult>, String>>,
+) -> Result<Vec<RawResult>, String> {
+    let mut results: Vec<RawResult> = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
+    let mut any_success = false;
+    for outcome in outcomes {
+        match outcome {
+            Ok(Some(r)) => {
+                any_success = true;
+                results.push(r);
+            }
+            Ok(None) => any_success = true,
+            Err(e) => failures.push(e),
+        }
+    }
+
+    if !any_success && !failures.is_empty() {
+        return Err(format!(
+            "all {} summary fetches failed (e.g. {})",
+            failures.len(),
+            failures[0]
+        ));
+    }
+    Ok(results)
+}
+
 /// Fetch a page/summary for a single title.
 ///
-/// Returns `None` on any error (network, non-2xx, parse failure) so one
-/// failed summary does not discard the others.
-async fn fetch_summary(client: reqwest::Client, title: String) -> Option<RawResult> {
+/// FUNC-035: returns `Err(message)` on a transport/parse failure so the caller
+/// can tell a *dead* engine (every fetch failed) from a legitimately *empty*
+/// summary (`Ok(None)`). The previous `Option` collapsed both to `None`, so a
+/// fully rate-limited engine reported success with zero results.
+async fn fetch_summary(
+    client: reqwest::Client,
+    title: String,
+) -> Result<Option<RawResult>, String> {
     let url = build_summary_url(&title);
 
     tracing::trace!(url = %url, "wikipedia: fetching summary");
 
-    let response = client.get(&url).send().await.ok()?;
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request failed: {e}"))?;
 
     let status = response.status();
     if !status.is_success() {
         tracing::debug!(status = %status, url = %url, "wikipedia: summary fetch failed");
-        return None;
+        return Err(format!("summary HTTP {status}"));
     }
 
-    let text = response.text().await.ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    parse_summary_response(&value)
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("failed to read response body: {e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("failed to parse response JSON: {e}"))?;
+    Ok(parse_summary_response(&value))
 }

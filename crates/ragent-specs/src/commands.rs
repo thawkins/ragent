@@ -1049,13 +1049,35 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
     ///
     /// # Returns
     ///
-    /// `Some(tasks_md)` if tasks were found and formatted, or `None` if the
-    /// PLAN.md contains no parseable task table.
-    #[must_use]
-    pub fn build_tasks_md(spec_id: &str, title: &str, plan_md: &str) -> Option<String> {
-        let tasks = crate::plan_parser::PlanParser::parse(plan_md).ok()?;
+    /// `Ok(Some(tasks_md))` if tasks were found and formatted; `Ok(None)` if the
+    /// PLAN.md legitimately contains no task table; `Err` if a task table is
+    /// present but malformed, so a parse error is distinguishable from "no
+    /// tasks" (FUNC-024).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SpecError::PlanParse`] when the `## Tasks` table exists but
+    /// cannot be parsed.
+    pub fn build_tasks_md(
+        spec_id: &str,
+        title: &str,
+        plan_md: &str,
+    ) -> std::result::Result<Option<String>, crate::error::SpecError> {
+        let tasks = match crate::plan_parser::PlanParser::parse(plan_md) {
+            Ok(tasks) => tasks,
+            Err(e) => {
+                // `parse` returns an error both for "zero rows in a present
+                // table" and for a genuinely absent section. Only the latter is
+                // "no tasks" — surface the former so a malformed PLAN.md is not
+                // silently treated as having no tasks (FUNC-024).
+                if plan_md.contains("## Tasks") || plan_md.contains("### Tasks") {
+                    return Err(e);
+                }
+                return Ok(None);
+            }
+        };
         if tasks.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         let mut md = String::new();
@@ -1081,7 +1103,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
                       re-run `/spec tasks` to update.*\n",
         );
 
-        Some(md)
+        Ok(Some(md))
     }
 
     /// Generate the standalone `quickstart.md` containing key validation

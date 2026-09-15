@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+## Version: 1.0.104
+
+- **Functional anti-pattern remediation -- FUNCPLAN.md (FUNC-038..069, 080..082)**
+  second pass completes the plan's M1 tail and the whole of M2-M5:
+
+  * **FUNC-035** -- `mf_search` keyless engines surface a dead engine as an
+    error instead of a zero-result success: `wikipedia::fetch_summary` returns
+    `Result<Option<RawResult>, String>`, the new `partition_summary_outcomes`
+    reports `EngineReport::error` when every summary fetch failed, and a
+    corrupt cached metadata blob (`masterfetch/cache.rs`) is now treated as a
+    cache miss so the caller re-fetches. A corrupt PDF title parse is logged.
+  * **FUNC-038** -- `github_merge_pr` rejects a `method` outside
+    `{merge, squash, rebase}` (extracted `parse_merge_method`) instead of
+    silently performing a real merge.
+  * **FUNC-040/041/042** -- the last three production poison-lock panics
+    (`ragent-agent/team/manager.rs` watchdog `last_progress`) recover via
+    `PoisonError::into_inner`; a workspace inventory confirms zero remaining.
+  * **FUNC-043/044/045** -- no production `unreachable!`/poison-expect remains;
+    `storage.rs` cron/rank row maps bind by column name; codeindex
+    `with_writer` uses `ok_or_else`; the nullable `source_module` collapse is a
+    documented, logged helper.
+  * **FUNC-050/052/053** -- GitLab GETs retry 429 honouring `Retry-After`
+    (bounded), the recursive tree fetch has request/entry budgets, the jobs
+    list follows pagination (>100 jobs no longer truncated); research
+    `GatherLog` append/flush run through `block_in_place`, `SourceVault`
+    gained `read_summary_async`, `write_concepts_md` offloads its blocking
+    source-metadata read.
+  * **FUNC-060/061/062/063/064/065/066/067/068/069** -- the TUI question Enter
+    clamps its selection (never submits a blank answer); `move_file` renames
+    first (no orphan dirs), `copy_file` refuses a self-copy, `append_file`
+    flushes; GitHub `post`/`put`/`patch` honour `base_url`; percent-encoding is
+    byte-wise (UTF-8 correct) across GitHub/GitLab; codeindex `parent_id`
+    resolves multi-level nesting to a fixpoint; the keyword verifier no longer
+    reports an empty/uncited analysis as `passed` and unknown contradiction
+    dimensions are neutral; the server auth comparison hashes fixed-length
+    digests, the rate limiter enforces exactly 60/min, and a dropped research
+    SSE event is logged; provider classification keys off the parsed host.
+  * **FUNC-080/081/082** -- new `scripts/check-poison-locks.sh` (with
+    `--self-test`) wired into `pre-flight.sh` and CI; regression tests added
+    across tools-core, tools-vcs, codeindex, storage, research, server, tui;
+    `SearchBudget::try_acquire` increments only on acceptance so `used()`
+    matches its contract and the budget-exhausted event reports an unlimited
+    limit as `None`, not a misleading `0`.
+
 ## Version: 1.0.103
 
 - **M1 agent per-turn hot path -- PERF-032..040 + PERF-048 complete** -- the

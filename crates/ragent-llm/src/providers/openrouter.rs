@@ -605,6 +605,10 @@ impl OpenRouterClient {
             // PERF-063: pre-size the SSE accumulation buffer so a long stream does
             // not repeatedly realloc/copy as it grows.
             let mut buffer = String::with_capacity(8 * 1024);
+            // FUNC-033: hold an incomplete trailing multibyte character from the
+            // previous chunk so a UTF-8 sequence split across TCP chunks is not
+            // corrupted.
+            let mut pending_utf8: Vec<u8> = Vec::new();
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
             let mut in_reasoning_block = false;
             let mut yielded_event = false;
@@ -664,7 +668,7 @@ impl OpenRouterClient {
                     }
                 };
 
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
 
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
@@ -889,10 +893,12 @@ impl LlmClient for OpenRouterClient {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_default();
             const MAX_ERR_LEN: usize = 4096;
+            // Clamp to a char boundary: slicing at a raw byte offset panics when
+            // it lands inside a multibyte UTF-8 character (FUNC-001).
             let error_body = if error_body.len() > MAX_ERR_LEN {
                 format!(
                     "{}...[truncated {} bytes]",
-                    &error_body[..MAX_ERR_LEN],
+                    ragent_types::strutil::truncate_bytes_no_ellipsis(&error_body, MAX_ERR_LEN),
                     error_body.len() - MAX_ERR_LEN
                 )
             } else {

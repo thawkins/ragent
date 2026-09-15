@@ -471,7 +471,9 @@ impl FtsIndex {
                     .context("cannot create index writer")?,
             );
         }
-        let writer = guard.as_mut().expect("writer initialised above");
+        let writer = guard
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("fts writer not initialised after creation"))?;
         f(writer)
     }
 

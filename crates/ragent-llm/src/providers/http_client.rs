@@ -31,6 +31,47 @@ const REQUEST_TIMEOUT_SECS: u64 = 120;
 /// the stream is already producing data.
 pub const STREAM_CHUNK_IDLE_TIMEOUT_SECS: u64 = 120;
 
+/// Number of leading bytes of `buf` that are a valid UTF-8 prefix.
+///
+/// Returns `buf.len()` when the whole slice is valid UTF-8; otherwise returns
+/// the length of the longest valid prefix ending on a character boundary.
+/// A trailing incomplete multibyte sequence is not counted, so callers can
+/// hold those bytes back and prepend them to the next chunk (FUNC-033).
+fn utf8_prefix_len(buf: &[u8]) -> usize {
+    match std::str::from_utf8(buf) {
+        Ok(_) => buf.len(),
+        Err(e) => e.valid_up_to(),
+    }
+}
+
+/// Decode a stream chunk onto a growing `String`, buffering any incomplete
+/// trailing multibyte character so it can be completed by the next chunk.
+///
+/// Decoding each TCP chunk independently with `from_utf8_lossy` corrupts any
+/// multibyte character split across a chunk boundary by substituting U+FFFD
+/// (FUNC-033). This keeps the incomplete tail in `pending` (a byte buffer) and
+/// only appends the valid prefix to `out`.
+pub fn append_stream_chunk(out: &mut String, pending: &mut Vec<u8>, chunk: &[u8]) {
+    pending.extend_from_slice(chunk);
+    let valid = utf8_prefix_len(pending);
+    if valid > 0 {
+        // The valid prefix is guaranteed to be valid UTF-8, so this cannot
+        // fail; fall back to lossy decoding only if a caller violated that.
+        match std::str::from_utf8(&pending[..valid]) {
+            Ok(s) => out.push_str(s),
+            Err(_) => out.push_str(&String::from_utf8_lossy(&pending[..valid])),
+        }
+        pending.drain(..valid);
+    }
+    // A complete-but-over-long pending buffer can only mean the upstream sent
+    // an invalid sequence longer than a character; flush it lossily so we do
+    // not stall forever. 4 bytes is the maximum UTF-8 sequence length.
+    if pending.len() >= 4 {
+        out.push_str(&String::from_utf8_lossy(pending));
+        pending.clear();
+    }
+}
+
 /// Yield one complete line (without the trailing `\n`) from an SSE / NDJSON
 /// accumulation `buffer`, consuming it in place.
 ///
@@ -173,7 +214,12 @@ where
 
                 // Check if we should retry based on status code
                 if status.is_server_error() && attempt < max_retries {
-                    let body = response.text().await.unwrap_or_default();
+                    // FUNC-034: include a body-read failure in the diagnostic
+                    // instead of discarding it.
+                    let body = match response.text().await {
+                        Ok(body) => body,
+                        Err(e) => format!("<body read failed: {e}>"),
+                    };
                     last_error = Some(anyhow::anyhow!(
                         "HTTP {} (attempt {}): {}",
                         status,
@@ -196,7 +242,11 @@ where
                 // Special-case 429 Too Many Requests as retryable
                 if status == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < max_retries {
                     let retry_after = parse_retry_after(response.headers());
-                    let body = response.text().await.unwrap_or_default();
+                    // FUNC-034: include a body-read failure in the diagnostic.
+                    let body = match response.text().await {
+                        Ok(body) => body,
+                        Err(e) => format!("<body read failed: {e}>"),
+                    };
                     last_error = Some(anyhow::anyhow!(
                         "HTTP 429 Rate limited (attempt {}): {}",
                         attempt + 1,
@@ -216,7 +266,11 @@ where
 
                 // For other client errors, don't retry
                 if status.is_client_error() {
-                    let body = response.text().await.unwrap_or_default();
+                    // FUNC-034: include a body-read failure in the diagnostic.
+                    let body = match response.text().await {
+                        Ok(body) => body,
+                        Err(e) => format!("<body read failed: {e}>"),
+                    };
                     return Err(anyhow::anyhow!("HTTP {} (not retryable): {}", status, body));
                 }
 

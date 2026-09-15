@@ -1812,7 +1812,7 @@ mod tests {
                 .to_string();
             self.requested_urls
                 .lock()
-                .expect("poisoned requested_urls lock")
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(url);
             Ok(ToolOutput {
                 content: "raw file body".to_string(),

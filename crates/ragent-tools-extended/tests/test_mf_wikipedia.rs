@@ -355,3 +355,50 @@ fn test_truncate_query_unicode_boundaries() {
         assert_eq!(c, 'é');
     }
 }
+
+// ---------------------------------------------------------------------------
+// FUNC-035: partition_summary_outcomes — a fully dead engine must surface an
+// error, not a silent zero-result success.
+// ---------------------------------------------------------------------------
+
+use ragent_tools_extended::masterfetch::search::{
+    RawResult, wikipedia::partition_summary_outcomes,
+};
+
+#[test]
+fn func035_all_failures_produce_an_error() {
+    let outcomes = vec![
+        Err("summary HTTP 429".to_string()),
+        Err("HTTP request failed: timeout".to_string()),
+    ];
+    let result = partition_summary_outcomes(outcomes);
+    assert!(result.is_err(), "all-failed fetches must report an error");
+    let msg = result.expect_err("error");
+    assert!(msg.contains("2 summary fetches failed"), "got: {msg}");
+}
+
+#[test]
+fn func035_some_successes_are_kept() {
+    let ok = RawResult::new("T", "https://en.wikipedia.org/wiki/T", "s", ENGINE_NAME);
+    let outcomes = vec![Ok(Some(ok)), Err("summary HTTP 500".to_string())];
+    let result = partition_summary_outcomes(outcomes).expect("partial success is ok");
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn func035_empty_success_is_not_an_error() {
+    // All fetches succeeded but yielded no parseable summary — a legitimately
+    // empty result, not a dead engine.
+    let outcomes = vec![Ok(None), Ok(None)];
+    let result = partition_summary_outcomes(outcomes).expect("empty success is ok");
+    assert!(result.is_empty());
+}
+
+#[test]
+fn func035_all_failures_but_one_empty_success_is_ok() {
+    // One fetch returned a parseable-but-empty summary; that counts as a
+    // successful fetch, so the engine is not "dead".
+    let outcomes = vec![Ok(None), Err("summary HTTP 429".to_string())];
+    let result = partition_summary_outcomes(outcomes).expect("one success is enough");
+    assert!(result.is_empty());
+}

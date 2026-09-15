@@ -951,7 +951,17 @@ impl CodeIndex {
                             mtime_ns,
                             line_count,
                         };
-                        let _ = store.upsert_file(&entry);
+                        // FUNC-031: a failure here leaves the new (stale) hash
+                        // in the store permanently, so log it explicitly rather
+                        // than swallowing the error silently.
+                        if let Err(e) = store.upsert_file(&entry) {
+                            warn!(
+                                path = %rel_path,
+                                error = %e,
+                                "index_file: failed to restore previous content hash for self-heal; \
+                                 file may stay stale until the next change"
+                            );
+                        }
                     }
                 }
             }
@@ -1343,14 +1353,28 @@ impl WatchSession {
         self.worker_handle.is_stopped()
     }
 
+    /// Whether the background worker thread is still running.
+    ///
+    /// `false` indicates the worker panicked or never started, so no further
+    /// automatic indexing will happen (FUNC-018).
+    #[must_use]
+    pub fn is_worker_running(&self) -> bool {
+        self.worker_handle.is_running()
+    }
+
     /// Manually queue a single file for re-indexing.
-    pub fn queue_reindex(&self, path: PathBuf) {
-        self.worker_handle.queue_reindex(path);
+    ///
+    /// Returns `false` when the worker is not running and the request was
+    /// dropped (FUNC-018).
+    pub fn queue_reindex(&self, path: PathBuf) -> bool {
+        self.worker_handle.queue_reindex(path)
     }
 
     /// Manually trigger a full reindex.
-    pub fn queue_full_reindex(&self) {
-        self.worker_handle.queue_full_reindex();
+    ///
+    /// Returns `false` when the worker is not running (FUNC-018).
+    pub fn queue_full_reindex(&self) -> bool {
+        self.worker_handle.queue_full_reindex()
     }
 }
 

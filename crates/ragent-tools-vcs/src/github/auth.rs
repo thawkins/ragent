@@ -58,20 +58,57 @@ pub fn load_token() -> Option<String> {
 }
 
 /// Save a GitHub token to `~/.ragent/github_token`.
+///
+/// The file is created with mode `0o600` *at creation time* (unix) so it is
+/// never momentarily world- or group-readable, closing the write-then-chmod
+/// race window. The write is atomic: a temporary file in the same directory is
+/// written, permissioned, and renamed over the destination, so a reader never
+/// observes a partial token (FUNC-012).
 pub fn save_token(token: &str) -> Result<()> {
     let path = token_file_path().context("Cannot determine home directory")?;
-    std::fs::create_dir_all(path.parent().unwrap())?;
-    std::fs::write(&path, token)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    let dir = path
+        .parent()
+        .context("token file path has no parent directory")?;
+    std::fs::create_dir_all(dir)?;
+
+    let tmp_path = dir.join(format!(".github_token.{}.tmp", std::process::id()));
+    write_private_file(&tmp_path, token)?;
+    std::fs::rename(&tmp_path, &path).inspect_err(|_| {
+        // Best-effort cleanup so a failed rename does not leave the temp file.
+        let _ = std::fs::remove_file(&tmp_path);
+    })?;
+
     // Invalidate the mtime-keyed read cache so the new token is visible even
     // if the write lands inside the filesystem's mtime granularity.
     *TOKEN_FILE_CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    Ok(())
+}
+
+/// Write `contents` to `path`, creating it owner-only (`0o600`) on unix.
+///
+/// On unix the mode is applied by the `open(2)` call itself, so the file is
+/// never observable with looser permissions.
+fn write_private_file(path: &Path, contents: &str) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .with_context(|| format!("cannot create token file {}", path.display()))?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, contents)?;
+    }
     Ok(())
 }
 

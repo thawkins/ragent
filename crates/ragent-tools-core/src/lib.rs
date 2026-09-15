@@ -367,6 +367,32 @@ pub fn check_path_within_root_cached(
     check_path_within_any_root_cached(path, &[root], cache)
 }
 
+/// Validate that `path` resolves within the configured allowed roots (FUNC-068).
+///
+/// This is the single entry point every file-mutating tool must call: when
+/// `allowed_roots` is empty the check falls back to `working_dir` alone;
+/// otherwise the path may resolve to any configured root. Previously only
+/// `write` honoured `allowed_roots`, so a whitelisted destination was writable
+/// by `write` yet wrongly rejected by `create`, `append_to_file`, `copy_file`,
+/// `move_file`, `make_directory`, and `rm`.
+///
+/// # Errors
+///
+/// Returns an error if the path escapes every allowed root.
+pub fn check_path_within_allowed_roots_cached(
+    path: &Path,
+    working_dir: &Path,
+    allowed_roots: &[PathBuf],
+    cache: &CanonicalPathCache,
+) -> anyhow::Result<()> {
+    if allowed_roots.is_empty() {
+        check_path_within_root_cached(path, working_dir, cache)
+    } else {
+        let root_refs: Vec<&Path> = allowed_roots.iter().map(PathBuf::as_path).collect();
+        check_path_within_any_root_cached(path, &root_refs, cache)
+    }
+}
+
 /// Returns true when `child` is `root` or a descendant of `root`, using path
 /// components rather than string prefixing.
 fn is_path_within(child: &Path, root: &Path) -> bool {
@@ -479,7 +505,7 @@ impl ToolRegistry {
     pub fn register(&self, tool: Arc<dyn Tool>) {
         self.tools
             .write()
-            .expect("tool registry lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(tool.name().to_string(), tool);
     }
 
@@ -488,7 +514,7 @@ impl ToolRegistry {
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools
             .read()
-            .expect("tool registry lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(name)
             .cloned()
     }
@@ -499,7 +525,7 @@ impl ToolRegistry {
         let mut names: Vec<String> = self
             .tools
             .read()
-            .expect("tool registry lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .keys()
             .cloned()
             .collect();
@@ -512,7 +538,7 @@ impl ToolRegistry {
     pub fn contains(&self, name: &str) -> bool {
         self.tools
             .read()
-            .expect("tool registry lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains_key(name)
     }
 
@@ -520,7 +546,7 @@ impl ToolRegistry {
     pub fn remove(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools
             .write()
-            .expect("tool registry lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(name)
     }
 
@@ -528,21 +554,30 @@ impl ToolRegistry {
     pub fn clear(&self) {
         self.tools
             .write()
-            .expect("tool registry lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
     }
 
     /// Hide tools from advertised tool definitions while keeping them executable.
     pub fn set_hidden(&self, names: &[String]) {
-        let mut hidden = self.hidden.write().expect("tool hidden lock poisoned");
+        let mut hidden = self
+            .hidden
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *hidden = names.iter().cloned().collect();
     }
 
     /// Export visible tools as LLM tool definitions.
     #[must_use]
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        let tools = self.tools.read().expect("tool registry lock poisoned");
-        let hidden = self.hidden.read().expect("tool hidden lock poisoned");
+        let tools = self
+            .tools
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let hidden = self
+            .hidden
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut defs: Vec<ToolDefinition> = tools
             .values()
             .filter(|tool| !hidden.contains(tool.name()))

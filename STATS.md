@@ -1,6 +1,6 @@
 # Project Statistics
 
-**Version:** 1.0.103
+**Version:** 1.0.104
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
@@ -19,7 +19,7 @@
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 16 |
 | Authors | 1 |
-| Version | 1.0.103 |
+| Version | 1.0.104 |
 
 ---
 
@@ -168,4 +168,4 @@ Notes:
 
 ---
 
-_Generated 2026-09-14 (v1.0.103)._
+_Generated 2026-09-14 (v1.0.104)._

@@ -266,17 +266,36 @@ impl Tool for GitlabListJobsTool {
             .as_u64()
             .context("pipeline_id is required")?;
 
-        let mut path = format!("/projects/{project}/pipelines/{pipeline_id}/jobs?per_page=100");
+        // FUNC-053: follow pagination so a pipeline with more than one page of
+        // jobs (>100) is not silently truncated. FUNC-063: percent-encode the
+        // scope value rather than interpolating it raw.
+        let mut base = format!("/projects/{project}/pipelines/{pipeline_id}/jobs?per_page=100");
         if let Some(scope) = input["scope"].as_str() {
-            path.push_str(&format!("&scope[]={scope}"));
+            base.push_str(&format!(
+                "&scope[]={}",
+                crate::percent::encode_component(scope)
+            ));
         }
 
-        let jobs = client.get(&path).await?;
-        let arr = jobs
-            .as_array()
-            .context("Expected array from GitLab jobs endpoint")?;
+        let mut jobs: Vec<Value> = Vec::new();
+        let mut next_page: Option<u32> = None;
+        loop {
+            let path = match next_page {
+                Some(page) => format!("{base}&page={page}"),
+                None => base.clone(),
+            };
+            let (value, cursor) = client.get_paged(&path).await?;
+            let arr = value
+                .as_array()
+                .context("Expected array from GitLab jobs endpoint")?;
+            jobs.extend(arr.iter().cloned());
+            match cursor {
+                Some(page) => next_page = Some(page),
+                None => break,
+            }
+        }
 
-        if arr.is_empty() {
+        if jobs.is_empty() {
             return Ok(ToolOutput {
                 content: format!("No jobs found for pipeline #{pipeline_id}."),
                 metadata: None,
@@ -284,7 +303,7 @@ impl Tool for GitlabListJobsTool {
         }
 
         let mut lines = vec![format!("Jobs for pipeline #{pipeline_id}:\n")];
-        for job in arr {
+        for job in &jobs {
             let id = job["id"].as_u64().unwrap_or(0);
             let name = job["name"].as_str().unwrap_or("?");
             let stage = job["stage"].as_str().unwrap_or("?");
@@ -301,7 +320,7 @@ impl Tool for GitlabListJobsTool {
 
         Ok(ToolOutput {
             content: lines.join("\n"),
-            metadata: Some(json!({"count": arr.len(), "pipeline_id": pipeline_id})),
+            metadata: Some(json!({"count": jobs.len(), "pipeline_id": pipeline_id})),
         })
     }
 }

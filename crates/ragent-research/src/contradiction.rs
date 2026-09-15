@@ -415,6 +415,10 @@ pub fn build_contradiction_graph_with(
 }
 
 /// Human-readable positive direction label for a dimension.
+///
+/// FUNC-065: an unknown dimension must produce a *neutral* label that does not
+/// assert a direction it cannot know — the previous catch-all returned
+/// "positive"/"negative", which mislabelled any dimension outside the known set.
 fn positive_label(dimension: &str) -> &'static str {
     match dimension {
         "effect" => "benefit / risk reduction",
@@ -423,11 +427,14 @@ fn positive_label(dimension: &str) -> &'static str {
         "cost" => "lower cost",
         "adoption" => "higher adoption",
         "safety" => "safer",
-        _ => "positive",
+        _ => "an unspecified position",
     }
 }
 
 /// Human-readable negative direction label for a dimension.
+///
+/// FUNC-065: as for [`positive_label`], an unknown dimension yields a neutral
+/// label rather than an asserted "negative" direction.
 fn negative_label(dimension: &str) -> &'static str {
     match dimension {
         "effect" => "harm / risk increase",
@@ -436,6 +443,6 @@ fn negative_label(dimension: &str) -> &'static str {
         "cost" => "higher cost",
         "adoption" => "lower adoption",
         "safety" => "less safe",
-        _ => "negative",
+        _ => "an opposing unspecified position",
     }
 }

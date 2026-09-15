@@ -1,7 +1,7 @@
 //! File removal tool.
 //!
-//! Provides [`RmTool`], which deletes a single specified file.
-//! Wildcards and glob patterns are rejected. Returns success or failure status.
+//! Provides [`RmTool`], which deletes a single specified file. No glob
+//! expansion is performed; returns success or failure status.
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -59,15 +59,18 @@ impl Tool for RmTool {
             .as_str()
             .context("Missing required 'path' parameter")?;
 
-        if path_str.contains('*') || path_str.contains('?') || path_str.contains('[') {
-            bail!(
-                "Wildcards and glob patterns are not allowed in file paths. Specify a single file to delete: {path_str}"
-            );
-        }
-
+        // FUNC-068: `rm` deletes exactly one file (no glob expansion happens),
+        // so a literal filename containing `[`, `*`, or `?` is a valid
+        // single-file target and must not be rejected by a glob heuristic. The
+        // "one file" guarantee is enforced by the is_dir / exists checks below.
         let path = resolve_path(&ctx.working_dir, path_str);
 
-        super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+        super::check_path_within_allowed_roots_cached(
+            &path,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
 
         if !path.exists() {
             bail!("File not found: {}", path.display());

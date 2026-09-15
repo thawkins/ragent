@@ -3,7 +3,6 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::git::run_git;
 use crate::{Tool, ToolContext, ToolOutput};
 
 /// Tool that shows the working tree status.
@@ -61,7 +60,9 @@ impl Tool for GitStatusTool {
             args.push("--porcelain=v2");
         }
 
-        let (stdout, stderr) = run_git(&args, &ctx.working_dir)?;
+        let args: Vec<String> = args.into_iter().map(ToString::to_string).collect();
+
+        let (stdout, stderr) = crate::git::run_git_async(args, ctx.working_dir.clone()).await?;
 
         if stdout.trim().is_empty() && !stderr.is_empty() {
             return Ok(ToolOutput {

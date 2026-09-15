@@ -114,8 +114,10 @@ pub fn parse_reverse_repo(input: &str) -> Result<VcsProvider, String> {
 
     // --- Full URL / SSH URL formats (FR-004, FR-006) ---
 
-    // GitHub HTTPS/SSH URLs.
-    if input.contains("github.com") {
+    // GitHub HTTPS/SSH URLs. FUNC-067: classify by the parsed *host*, not by a
+    // substring of the whole input — a GitLab URL whose path merely contains
+    // "github.com" (e.g. `https://gitlab.com/x/github.com/y`) must stay GitLab.
+    if extract_host(input).is_some_and(is_github_host) {
         return GitHubClient::parse_repo_url(input)
             .map(|(owner, repo)| VcsProvider::GitHub { owner, repo })
             .ok_or_else(usage_error);
@@ -273,6 +275,31 @@ fn parse_gitlab_ssh_url(input: &str) -> Result<VcsProvider, String> {
 /// colon)?
 fn looks_like_host(segment: &str) -> bool {
     segment.contains('.') || segment.contains(':')
+}
+
+/// Extract the host from an HTTPS/HTTP URL or an SSH `git@host:path` input
+/// (FUNC-067). Returns `None` for bare `owner/repo` shorthand, which carries no
+/// host and is routed by its `/` separator later.
+fn extract_host(input: &str) -> Option<&str> {
+    if let Some(rest) = input
+        .strip_prefix("https://")
+        .or_else(|| input.strip_prefix("http://"))
+    {
+        return Some(rest.split('/').next().unwrap_or(rest));
+    }
+    if let Some(rest) = input.strip_prefix("git@") {
+        return Some(rest.split(':').next().unwrap_or(rest));
+    }
+    None
+}
+
+/// True when `host` is exactly a GitHub host (FUNC-067). Any userinfo and port
+/// are stripped before comparison; a substring match is deliberately avoided so
+/// `github.com.evil.example` does not misroute to GitHub.
+fn is_github_host(host: &str) -> bool {
+    let host = host.rsplit('@').next().unwrap_or(host);
+    let host = host.split(':').next().unwrap_or(host);
+    host.eq_ignore_ascii_case("github.com") || host.eq_ignore_ascii_case("www.github.com")
 }
 
 /// Build the human-readable error message listing all accepted formats

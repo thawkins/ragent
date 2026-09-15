@@ -643,8 +643,10 @@ pub enum GatherEvent {
     SearchBudgetExhausted {
         /// Search calls consumed by this run when the budget ran out.
         used: usize,
-        /// Configured budget limit.
-        limit: usize,
+        /// Configured budget limit. FUNC-082: `None` means an unlimited budget
+        /// (this variant is not normally emitted then); it is never reported as
+        /// a misleading `0`.
+        limit: Option<usize>,
     },
     /// End-of-pass summary of the search-provider request counts recorded by
     /// the attached [`ProviderCallStats`] counter. Emitted once per gather
@@ -652,6 +654,27 @@ pub enum GatherEvent {
     ProviderCallsSummary {
         /// `(search tool, call count)` pairs, sorted by tool name.
         tool_calls: Vec<(String, usize)>,
+    },
+    /// One or more sub-query searches failed while others succeeded, so the
+    /// gather pass completed with only partial coverage. Without this signal a
+    /// partially-failed sweep is indistinguishable from a complete one
+    /// (FUNC-030).
+    SearchPartiallyFailed {
+        /// Number of sub-queries that failed after retries.
+        failed: usize,
+        /// Total sub-queries issued.
+        total: usize,
+        /// The last failure, for diagnosis.
+        error: String,
+    },
+    /// A captured source could not be written to the vault (FR-016). The source
+    /// is still counted as captured, but the persistence failure is surfaced so
+    /// the vault divergence is visible (FUNC-030).
+    VaultStoreFailed {
+        /// URL that failed to persist.
+        url: String,
+        /// Error from the vault store.
+        error: String,
     },
 }
 
@@ -1172,7 +1195,9 @@ impl WebGatherer {
                 body_text: body.clone(),
                 summary_text: summary_text.clone(),
             };
-            if let Err(e) = vault.store(&new_source) {
+            // Off-load the blocking vault write to the blocking pool so a slow
+            // disk does not park a tokio worker (FUNC-017).
+            if let Err(e) = vault.store_async(&new_source).await {
                 tracing::warn!(
                     error = %e,
                     url = %page.url,
@@ -1731,6 +1756,10 @@ impl WebGatherer {
             std::collections::HashMap::new();
         let mut seen_urls: HashSet<String> = HashSet::new();
         let mut any_search_error: Option<String> = None;
+        // FUNC-030: count sub-query search failures so a partially-failed sweep
+        // is distinguishable from a complete one, not only when every
+        // sub-query fails.
+        let mut failed_sub_queries = 0usize;
         let mut excluded_count = 0usize;
         let mut considered_count = 0usize;
         // Per-engine accounting (T-006). All bump sites run on the gather
@@ -1966,6 +1995,7 @@ impl WebGatherer {
                         "research: sub-query search failed after retries"
                     );
                     any_search_error = Some(format!("{query}: {error}"));
+                    failed_sub_queries += 1;
                 }
                 SearchCallOutcome::BudgetExhausted => {
                     // The run-scoped search budget ran out before this
@@ -1976,7 +2006,7 @@ impl WebGatherer {
                             if let Some(obs) = observer {
                                 obs.on_event(GatherEvent::SearchBudgetExhausted {
                                     used: budget.used(),
-                                    limit: budget.limit().unwrap_or(0),
+                                    limit: budget.limit(),
                                 });
                             }
                         }
@@ -1987,6 +2017,21 @@ impl WebGatherer {
                     }
                 }
             }
+        }
+
+        // FUNC-030: surface a partial search-failure even when some hits were
+        // collected, so the caller knows coverage is incomplete.
+        if failed_sub_queries > 0
+            && !hits_by_url.is_empty()
+            && let Some(obs) = observer
+        {
+            obs.on_event(GatherEvent::SearchPartiallyFailed {
+                failed: failed_sub_queries,
+                total: queries.len(),
+                error: any_search_error
+                    .clone()
+                    .unwrap_or_else(|| "sub-query search failed".to_string()),
+            });
         }
 
         if hits_by_url.is_empty() {
@@ -2419,12 +2464,23 @@ impl WebGatherer {
                             body_text: body.clone(),
                             summary_text: summary_text.clone(),
                         };
-                        if let Err(e) = vault.store(&new_source) {
+                        // Off-load the blocking vault write to the blocking pool
+                        // so a slow disk does not park a tokio worker (FUNC-017).
+                        if let Err(e) = vault.store_async(&new_source).await {
                             tracing::warn!(
                                 error = %e,
                                 url = %page.url,
                                 "research: failed to store source in vault"
                             );
+                            // FUNC-030: surface the persistence failure so a
+                            // captured-but-unstored source is not silently
+                            // counted as fully captured.
+                            if let Some(obs) = observer {
+                                obs.on_event(GatherEvent::VaultStoreFailed {
+                                    url: page.url.clone(),
+                                    error: e.to_string(),
+                                });
+                            }
                         }
                     }
                     // Credit the capture before `hit.search_engine` is moved

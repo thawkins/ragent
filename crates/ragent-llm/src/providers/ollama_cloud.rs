@@ -418,14 +418,17 @@ impl OllamaCloudClient {
                         // and there is no top-level `id` or `type` wrapper.
                         let tool_calls: Vec<Value> = tool_uses
                             .iter()
-                            .map(|p| match p {
-                                ContentPart::ToolUse { name, input, .. } => json!({
+                            .filter_map(|p| match p {
+                                ContentPart::ToolUse { name, input, .. } => Some(json!({
                                     "function": {
                                         "name": name,
                                         "arguments": input
                                     }
-                                }),
-                                _ => unreachable!(),
+                                })),
+                                // FUNC-043: the filter above guarantees only
+                                // ToolUse parts reach here; skip (do not panic)
+                                // if that invariant changes.
+                                _ => None,
                             })
                             .collect();
                         messages.push(json!({
@@ -572,6 +575,10 @@ impl LlmClient for OllamaCloudClient {
             // PERF-063: pre-size the SSE accumulation buffer so a long stream does
             // not repeatedly realloc/copy as it grows.
             let mut buffer = String::with_capacity(8 * 1024);
+            // FUNC-033: hold an incomplete trailing multibyte character from the
+            // previous chunk so a UTF-8 sequence split across TCP chunks is not
+            // corrupted.
+            let mut pending_utf8: Vec<u8> = Vec::new();
             // F6: set once any tool call is seen in the stream; later content
             // deltas are suppressed as duplicate narration.
             let mut tool_calls_seen = false;
@@ -610,7 +617,7 @@ impl LlmClient for OllamaCloudClient {
                     }
                 };
 
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
 
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();

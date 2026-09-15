@@ -155,8 +155,11 @@ impl Verifier for KeywordVerifier {
     ) -> VerificationResult {
         let findings = analysis.map(|a| a.findings.as_slice()).unwrap_or(&[]);
         if findings.is_empty() {
+            // FUNC-065: an empty analysis is NOT a verification pass. Reporting
+            // `passed: true` for "no findings" makes an empty/failed synthesis
+            // indistinguishable from a fully verified report.
             return VerificationResult {
-                passed: true,
+                passed: false,
                 issues: vec!["no findings to verify".to_string()],
                 claims_checked: 0,
                 claims_supported: 0,
@@ -164,6 +167,9 @@ impl Verifier for KeywordVerifier {
         }
 
         let mut issues = Vec::new();
+        // FUNC-065: every finding counts as checked. An uncited finding is
+        // checked-but-not-supported, so a report that lists citation failures
+        // can never still be marked `passed`.
         let mut checked = 0usize;
         let mut supported = 0usize;
 
@@ -175,12 +181,13 @@ impl Verifier for KeywordVerifier {
         // (finding x citation) lookup.
         let mut source_words_cache: HashMap<usize, Option<HashSet<String>>> = HashMap::new();
         for (idx, finding) in findings.iter().enumerate() {
+            checked += 1;
             let indices = cited_indices(finding);
             if indices.is_empty() {
                 issues.push(format!("Finding {} has no citations", idx + 1));
+                // Uncited finding: checked but not supported.
                 continue;
             }
-            checked += 1;
             let finding_words = Self::words(finding);
             let mut finding_supported = true;
             for n in indices {

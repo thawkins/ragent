@@ -439,20 +439,20 @@ async fn create_research(
     // Subscribers to GET /research/{name}/events will receive events through
     // this channel. The registry entry doubles as an in-flight guard: a
     // concurrent POST with the same name is rejected here (the disk-based
-    // duplicate check above only sees completed items).
-    let observer = {
-        let runs = state.research_runs.lock().await;
-        if runs.contains_key(&req.name) {
-            drop(runs);
-            return error_response(
-                StatusCode::CONFLICT,
-                format!("research run '{}' is already in progress", req.name),
-            )
-            .into_response();
-        }
-        drop(runs);
-        BroadcastObserver::register(&state.research_runs, req.name.clone()).await
-    };
+    // duplicate check above only sees completed items). The check and insert
+    // run atomically so two concurrent requests cannot both register
+    // (FUNC-016).
+    let observer =
+        match BroadcastObserver::register_if_absent(&state.research_runs, req.name.clone()).await {
+            Some(observer) => observer,
+            None => {
+                return error_response(
+                    StatusCode::CONFLICT,
+                    format!("research run '{}' is already in progress", req.name),
+                )
+                .into_response();
+            }
+        };
 
     // Wire the tool registry from the shared session processor.
     let project_root = research_root()
@@ -504,12 +504,21 @@ async fn create_research(
                     "research: background run failed"
                 );
                 // Surface the failure to any SSE subscriber so the stream
-                // ends with an explicit terminal event.
-                let _ = err_tx.send(SessionEvent::RunStep {
-                    step: "run".to_string(),
-                    status: "failed".to_string(),
-                    detail: Some(e.to_string()),
-                });
+                // ends with an explicit terminal event. FUNC-037: a dropped
+                // terminal send is logged, not silently ignored.
+                if err_tx
+                    .send(SessionEvent::RunStep {
+                        step: "run".to_string(),
+                        status: "failed".to_string(),
+                        detail: Some(e.to_string()),
+                    })
+                    .is_err()
+                {
+                    tracing::warn!(
+                        name = %name_clone,
+                        "research: no SSE subscriber received the failure event"
+                    );
+                }
             }
         }
         // Clean up the run registry entry.
@@ -541,20 +550,25 @@ async fn create_research(
 struct BroadcastObserver(tokio::sync::broadcast::Sender<SessionEvent>);
 
 impl BroadcastObserver {
-    /// Register a fresh broadcast channel in the run registry.
+    /// Register a fresh broadcast channel in the run registry, atomically.
     ///
-    /// The registry entry doubles as an in-flight guard — callers must check
-    /// `research_runs` for the name before invoking this.
-    async fn register(
+    /// The check for an existing entry and the insert happen under a single
+    /// lock acquisition, so two concurrent requests for the same name cannot
+    /// both register (which would orphan one SSE channel and defeat the 409)
+    /// (FUNC-016). Returns `None` when the name is already in flight.
+    async fn register_if_absent(
         runs: &tokio::sync::Mutex<
             std::collections::HashMap<String, tokio::sync::broadcast::Sender<SessionEvent>>,
         >,
         name: String,
-    ) -> Self {
+    ) -> Option<Self> {
         let mut runs = runs.lock().await;
+        if runs.contains_key(&name) {
+            return None;
+        }
         let (tx, _rx) = tokio::sync::broadcast::channel::<SessionEvent>(256);
         runs.insert(name, tx.clone());
-        Self(tx)
+        Some(Self(tx))
     }
 }
 
@@ -563,7 +577,11 @@ impl SessionObserver for BroadcastObserver {
         // Best-effort send; if there are no subscribers the event is
         // simply dropped (this is expected — the channel has no
         // receivers when nobody is listening to the SSE stream).
-        let _ = self.0.send(event);
+        // FUNC-066: log the drop so a lost terminal/failure event is visible
+        // rather than silently invisible when a client disconnects.
+        if let Err(e) = self.0.send(event) {
+            tracing::debug!(error = %e, "research SSE event dropped (no subscribers)");
+        }
     }
 }
 
@@ -628,20 +646,19 @@ async fn update_research(
     run_req.name = name.clone();
     run_req.title = Some(item.title.clone());
 
-    // In-flight guard + SSE broadcast channel (shared with POST /research).
-    let observer = {
-        let runs = state.research_runs.lock().await;
-        if runs.contains_key(&name) {
-            drop(runs);
-            return error_response(
-                StatusCode::CONFLICT,
-                format!("research run '{name}' is already in progress"),
-            )
-            .into_response();
-        }
-        drop(runs);
-        BroadcastObserver::register(&state.research_runs, name.clone()).await
-    };
+    // In-flight guard + SSE broadcast channel (shared with POST /research),
+    // registered atomically to close the check-then-insert race (FUNC-016).
+    let observer =
+        match BroadcastObserver::register_if_absent(&state.research_runs, name.clone()).await {
+            Some(observer) => observer,
+            None => {
+                return error_response(
+                    StatusCode::CONFLICT,
+                    format!("research run '{name}' is already in progress"),
+                )
+                .into_response();
+            }
+        };
 
     let cfg = state.config.read().await.clone();
     let config = ragent_research::build_session_config(&run_req, Some(&cfg));
@@ -693,11 +710,20 @@ async fn update_research(
                     error = %e,
                     "research: background replay failed"
                 );
-                let _ = err_tx.send(SessionEvent::RunStep {
-                    step: "update".to_string(),
-                    status: "failed".to_string(),
-                    detail: Some(e.to_string()),
-                });
+                // FUNC-037: log a dropped terminal send instead of ignoring it.
+                if err_tx
+                    .send(SessionEvent::RunStep {
+                        step: "update".to_string(),
+                        status: "failed".to_string(),
+                        detail: Some(e.to_string()),
+                    })
+                    .is_err()
+                {
+                    tracing::warn!(
+                        name = %name_clone,
+                        "research: no SSE subscriber received the replay failure event"
+                    );
+                }
             }
         }
         let mut runs = runs_registry.lock().await;
@@ -742,9 +768,19 @@ async fn show_research(
     match manager.show(&name).await {
         Ok(item) => {
             // Search before building the row so `item.title` can be moved
-            // into the row instead of cloned.
-            let search_hits: Vec<SearchHit> =
-                manager.search(&item.title, 5).await.unwrap_or_default();
+            // into the row instead of cloned. FUNC-037: a search failure is
+            // logged rather than silently conflated with "no hits".
+            let search_hits: Vec<SearchHit> = match manager.search(&item.title, 5).await {
+                Ok(hits) => hits,
+                Err(e) => {
+                    tracing::warn!(
+                        name = %name,
+                        error = %e,
+                        "related-research search failed"
+                    );
+                    Vec::new()
+                }
+            };
             let row = ResearchItemRow::from_item(item, q.full);
             (
                 StatusCode::OK,

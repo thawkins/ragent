@@ -399,6 +399,10 @@ impl OpenAiClient {
             // PERF-063: pre-size the SSE accumulation buffer so a long stream does
             // not repeatedly realloc/copy as it grows.
             let mut buffer = String::with_capacity(8 * 1024);
+            // FUNC-033: hold an incomplete trailing multibyte character from the
+            // previous chunk so a UTF-8 sequence split across TCP chunks is not
+            // corrupted.
+            let mut pending_utf8: Vec<u8> = Vec::new();
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
             let mut yielded_event = false;
             // A2: indices whose ToolCallStart has already been emitted, so a
@@ -471,7 +475,7 @@ impl OpenAiClient {
                     }
                 };
 
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
 
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
@@ -491,7 +495,16 @@ impl OpenAiClient {
 
                     let parsed: Value = match serde_json::from_str(data) {
                         Ok(v) => v,
-                        Err(_) => continue,
+                        Err(e) => {
+                            // FUNC-032: a corrupt frame must be logged, not
+                            // silently dropped — it can carry tool-call deltas.
+                            tracing::warn!(
+                                error = %e,
+                                frame = %data,
+                                "OpenAI: dropping malformed SSE data frame"
+                            );
+                            continue;
+                        }
                     };
 
                     // Handle usage info (sent with stream_options.include_usage)
@@ -524,7 +537,16 @@ impl OpenAiClient {
                         // Tool calls
                         if let Some(tool_calls) = delta["tool_calls"].as_array() {
                             for tc in tool_calls {
-                                let index = tc["index"].as_u64().unwrap_or(0);
+                                // FUNC-032: require an explicit `index`. The old
+                                // `unwrap_or(0)` mapped every missing index onto
+                                // stream 0, merging distinct parallel tool calls.
+                                let Some(index) = tc["index"].as_u64() else {
+                                    tracing::warn!(
+                                        frame = %parsed,
+                                        "OpenAI: tool_call delta without an index; skipping frame"
+                                    );
+                                    continue;
+                                };
 
                                 if let Some(id) = tc["id"].as_str() {
                                     tool_call_ids.insert(index, id.to_string());
