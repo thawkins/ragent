@@ -125,6 +125,116 @@ fn test_cycle_detection_in_plan() {
 }
 
 #[test]
+fn test_dependency_range_schedules_verify_task_last() {
+    // Reproduces the `/spec impl` jump-to-last-task bug: a final verification
+    // task depending on the whole plan via a range must run last, not second.
+    let mut md = String::from(
+        "## Tasks\n\n\
+         | ID | Title | Requirement | Effort | Priority | Status | Dependencies |\n\
+         |---|---|---|---|---|---|---|\n",
+    );
+    for n in 1..=14 {
+        md.push_str(&format!(
+            "| T-{n:03} | Task {n} | FR-{n:03} | S | High | pending | — |\n"
+        ));
+    }
+    md.push_str("| T-015 | Verify | NFR-002 | M | High | pending | T-001\u{2013}T-014 |\n");
+
+    let tasks = PlanParser::parse(&md).unwrap();
+    assert_eq!(tasks.len(), 15);
+
+    // The en-dash range expands to every spanned ID, not one unknown ID.
+    assert_eq!(tasks[14].dependencies.len(), 14);
+    assert_eq!(tasks[14].dependencies[0], "T-001");
+    assert_eq!(tasks[14].dependencies[13], "T-014");
+
+    let order = resolve_execution_order(&tasks).unwrap();
+    let verify_pos = order.iter().position(|&i| tasks[i].id == "T-015").unwrap();
+    assert_eq!(
+        verify_pos,
+        order.len() - 1,
+        "T-015 must be scheduled last once its range dependency expands"
+    );
+}
+
+#[test]
+fn test_dependency_range_dash_variants_and_commas() {
+    let md = r"
+## Tasks
+
+| ID | Title | Requirement | Effort | Priority | Dependencies |
+|---|---|---|---|---|---|
+| T-001 | A | FR-001 | S | High | — |
+| T-002 | B | FR-002 | S | High | T-001 |
+| T-003 | C | FR-003 | S | High | T-001 |
+| T-004 | D | FR-004 | S | High | T-001–T-003, T-002 |
+";
+    let tasks = PlanParser::parse(md).unwrap();
+    // En dash, ASCII hyphen, and em dash all expand identically.
+    assert_eq!(
+        tasks[3].dependencies,
+        vec!["T-001", "T-002", "T-003", "T-002"]
+    );
+
+    let md_hyphen = md.replace('\u{2013}', "-");
+    let md_em = md.replace('\u{2013}', "\u{2014}");
+    for variant in [md_hyphen, md_em] {
+        let parsed = PlanParser::parse(&variant).unwrap();
+        assert_eq!(
+            parsed[3].dependencies.first().map(String::as_str),
+            Some("T-001")
+        );
+        assert_eq!(parsed[3].dependencies.len(), 4);
+    }
+}
+
+#[test]
+fn test_dependency_range_descending_and_malformed_pass_through() {
+    let md = r"
+## Tasks
+
+| ID | Title | Requirement | Effort | Priority | Dependencies |
+|---|---|---|---|---|---|
+| T-001 | A | FR-001 | S | High | — |
+| T-002 | B | FR-002 | S | High | T-001 |
+| T-003 | C | FR-003 | S | High | T-005–T-002 |
+| T-004 | D | FR-004 | S | High | T-001, not-an-id |
+";
+    let tasks = PlanParser::parse(md).unwrap();
+    // A descending range keeps both endpoints rather than expanding.
+    assert_eq!(tasks[2].dependencies, vec!["T-005", "T-002"]);
+    // A non-range token is preserved verbatim so the sorter can warn.
+    assert_eq!(tasks[3].dependencies, vec!["T-001", "not-an-id"]);
+
+    // Unknown dependencies are warnings, not errors.
+    let order = resolve_execution_order(&tasks).unwrap();
+    assert_eq!(order.len(), 4);
+}
+
+#[test]
+fn test_dependency_range_word_forms() {
+    // "through" and "to" ranges appear in existing PLAN.md files alongside the
+    // dash forms; all must expand rather than collapse to one unknown ID.
+    let md = r"
+## Tasks
+
+| ID | Title | Requirement | Effort | Priority | Dependencies |
+|---|---|---|---|---|---|
+| T-001 | A | FR-001 | S | High | — |
+| T-002 | B | FR-002 | S | High | T-001 |
+| T-003 | C | FR-003 | S | High | T-001 through T-002 |
+| T-004 | D | FR-004 | S | High | T-002 to T-003 |
+";
+    let tasks = PlanParser::parse(md).unwrap();
+    assert_eq!(tasks[2].dependencies, vec!["T-001", "T-002"]);
+    assert_eq!(tasks[3].dependencies, vec!["T-002", "T-003"]);
+
+    let order = resolve_execution_order(&tasks).unwrap();
+    let last = order.iter().position(|&i| tasks[i].id == "T-004").unwrap();
+    assert_eq!(last, order.len() - 1);
+}
+
+#[test]
 fn test_parse_impl_args_all_variants() {
     // Basic
     let (name, opts) = parse_impl_args("myspec").unwrap();

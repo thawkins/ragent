@@ -438,6 +438,25 @@ fn test_description_mentions_engine_parameter() {
     );
 }
 
+#[test]
+fn test_parameters_schema_includes_exclude_engines_array() {
+    let tool = MfSearchTool;
+    let schema = tool.parameters_schema();
+    let exclude = &schema["properties"]["exclude_engines"];
+    assert_eq!(exclude["type"], "array");
+    assert_eq!(exclude["items"]["type"], "string");
+}
+
+#[test]
+fn test_description_mentions_exclude_engines_parameter() {
+    let tool = MfSearchTool;
+    let desc = tool.description();
+    assert!(
+        desc.contains("exclude_engines"),
+        "description should mention the exclude_engines parameter"
+    );
+}
+
 #[tokio::test]
 async fn test_execute_rejects_empty_query() {
     let tool = MfSearchTool;
@@ -455,6 +474,43 @@ async fn test_execute_rejects_missing_query() {
     let tool = MfSearchTool;
     let result = tool.execute(json!({}), &ctx()).await;
     assert!(result.is_err(), "missing query should error");
+}
+
+#[tokio::test]
+async fn test_execute_all_engines_excluded_returns_explicit_result() {
+    // The keyless orchestrator wires OpenAlex + Wikipedia. Excluding both
+    // removes every engine: the tool must return an explicit result with no
+    // network dispatch and no panic (FR-014, NFR-004).
+    let tool = MfSearchTool;
+    let result = tool
+        .execute(
+            json!({"query": "rust lifetimes", "exclude_engines": ["openalex", "wikipedia"]}),
+            &ctx(),
+        )
+        .await
+        .expect("all-excluded should be Ok, not an error");
+
+    assert!(
+        result.content.contains("No engines available"),
+        "content should state all engines were excluded: {}",
+        result.content
+    );
+    let metadata = result.metadata.expect("metadata should be present");
+    assert_eq!(metadata["total_engines"], 0);
+    assert_eq!(metadata["engines_used"].as_array().unwrap().len(), 0);
+    assert_eq!(metadata["total_results"], 0);
+    assert_eq!(
+        metadata["error"], "all engines excluded by exclude_engines",
+        "metadata error should flag the all-excluded state"
+    );
+    let configured: Vec<&str> = metadata["configured_engines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(configured.contains(&"openalex"));
+    assert!(configured.contains(&"wikipedia"));
 }
 
 #[test]

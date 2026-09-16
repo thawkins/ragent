@@ -84,11 +84,13 @@ topic can be quoted as one argument.
 | `--max-search-calls N` | Search-call cap. |
 | `--max-local-sources N` | Local source cap. |
 | `--max-synthesis-sources N` | Sources admitted into synthesis. |
+| `--max-concepts N` | Output cap on the `## Concepts` list (default 5; `0` = unbounded). Per-run override of `research.max_concepts`. |
+| `--max-findings N` | Output cap on the `## Findings` list (default 20; `0` = unbounded). Per-run override of `research.max_findings`. |
 | `--brief <text>` | Provide the brief up front, skipping clarification. |
 | `--use-local` | Include local file sources. |
 | `--use-specs` | Include spec documents as sources. |
 | `--use-low-relevance` | Keep low-relevance hits. |
-| `--no-papers` | Exclude scholarly-paper engines. |
+| `--no-papers` | Exclude scholarly-paper engines (OpenAlex) before any search request. Alias: `--no-scholarly`. |
 | `--use-pdf` | Enable PDF extraction. |
 | `--clarify` / `--no-clarify` | Force on or off the clarification stage. Off by default. |
 | `--evaluate` | Enable evaluation scoring of findings. |
@@ -119,6 +121,16 @@ Cross-references local crates and spec documents.
 /research create fast "tokio broadcast channels" --tier light --fetch-concurrently 20 --web-phase-timeout-secs 240
 ```
 A light run with a raised fetch concurrency and web budget.
+
+```
+/research create brief "vector databases" --max-concepts 3 --max-findings 10
+```
+Caps the report to 3 concepts and 10 findings (most-relevant-first).
+
+```
+/research create exhaustive "multi-agent orchestration" --max-concepts 0 --max-findings 0
+```
+Disables both output caps (`0` means unbounded).
 
 ```
 /research create rerun "existing project" --summarization-model ollama:qwen2.5:1.5b

@@ -927,6 +927,41 @@ fn renumber_findings(findings: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Order findings most-relevant-first and cap them to `max_findings`
+/// (spec researchmax; FR-003, FR-010, FR-020, FR-022).
+///
+/// Findings are ranked with the shared reverse-relevance helper (highest cited
+/// [`Source::relevance_rank`] first; ties break to cited count, then the
+/// model's original order). The retained findings are truncated to
+/// `max_findings` and renumbered contiguously from 1 with the existing
+/// [`renumber_findings`] pass so `Finding N` labels stay sequential.
+///
+/// `max_findings == 0` means "unbounded" (FR-016) and applies no truncation. At
+/// least one finding is always retained when any were supplied (FR-020), and
+/// the list is never padded when fewer are available (FR-022).
+#[must_use]
+pub fn cap_findings_to_limit(
+    findings: Vec<String>,
+    max_findings: usize,
+    sources: &[Source],
+) -> Vec<String> {
+    if findings.is_empty() {
+        return findings;
+    }
+    let mut ordered = crate::limits::rank_entries_by_reverse_relevance(
+        findings,
+        String::as_str,
+        crate::limits::source_rank_lookup(sources),
+    );
+    if max_findings > 0 {
+        // The `> 0` guard implements FR-020: a positive limit truncates to at
+        // least one entry (never zero) when findings exist, and FR-016 treats
+        // `0` as unbounded so no truncation is applied.
+        ordered.truncate(max_findings);
+    }
+    renumber_findings(&ordered)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::assert_is_empty)]

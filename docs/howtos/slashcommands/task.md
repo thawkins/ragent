@@ -79,6 +79,10 @@ renders the task table with status icons `[wait]` pending, `[sync]` in
 progress, `[ok]` completed. The add/update/get forms show the tool's result
 in the message window.
 
+The TASKS side panel renders one row per session task as
+`[STATUS] <id> title`, so the task identifier is visible without opening
+`/task get`. The panel takes 50% of the window width.
+
 ## Related
 
 - `task_create`, `task_update`, `task_get`, `task_list` tools

@@ -1,6 +1,119 @@
 # Changelog
 
-## Unreleased
+## Version: 1.0.105
+
+Research output limits (spec `researchmax`), scholarly-engine exclusion (spec
+`researchnoacc`), per-run open-access toggles, a progress table that breaks
+exclusions and fetch failures down by reason/cause, `/spec impl` task-range
+expansion, and TUI panel layout/identifier changes. 33 tracked files changed
+(3,260 insertions, 190 deletions) plus 11 new files.
+
+### Added
+
+- **Concept and finding output limits (spec `researchmax`)** -- `/research create`
+  now caps its `## Concepts` and `## Findings` lists at 5 concepts and 20
+  findings by default. Both lists are reordered most-relevant-first before
+  truncation (an entry's relevance is the highest `[#N]` source rank it cites;
+  ties break by cited count, then by original model order), so the cap always
+  discards the least-relevant entries and surviving headings/findings are
+  renumbered contiguously. The limits are settable per run with
+  `--max-concepts N` / `--max-findings N` on the root CLI (`ragent research
+  create`), the TUI slash command, and `POST /research` (new `max_concepts` /
+  `max_findings` fields, round-tripped through the invocation summary), or
+  persistently via the `research.max_concepts` / `research.max_findings` config
+  keys (per-run flags take precedence). A value of `0` means unbounded.
+  Non-integer values are rejected with a clear error. Documented in
+  `docs/howtos/research.md`, `docs/howtos/slashcommands/research.md`,
+  `docs/howtos/config.md`, and the `/research help` output.
+
+- **`research.max_concepts` / `research.max_findings` config keys (spec
+  `researchmax` FR-008/FR-017)** -- `ResearchConfig` gained two output-limit
+  keys, defaulting to 5 concepts and 20 findings, settable in `ragent.json`.
+  Both follow the existing `research` merge semantics (overlay wins when set
+  away from the default) and are omitted from serialized output at their
+  defaults; the per-run `--max-concepts` / `--max-findings` flags take
+  precedence, and `0` means unbounded.
+
+- **Width-sweep table now breaks fetch failures down by cause** -- the
+  `/research` per-engine progress table's single `fetch` column is split into
+  seven fine-grained columns (`t/o` timeout, `net` network, `blk` SSRF/robots
+  block, `http` server error status, `wall` paywall/auth wall, `js`
+  JavaScript shell, `extr` extraction failure). `EngineSweepStat` carries a
+  `failed_by_kind` map (new `FetchFailureKind` enum) whose counts sum to the
+  engine's `fetch` count, the `WidthSweepSummary` gather event and its
+  web-URL log record carry a global `failed_by_kind` tally, and the totals row
+  repeats the breakdown. Fetch adapters attach a typed `FetchFailure`
+  (downcast by the gatherer); untyped errors fall back to a message heuristic,
+  so test doubles and the legacy `webfetch` path keep working.
+
+- **Per-engine research progress table now breaks exclusions out by reason** --
+  the `/research` width-sweep progress table gained five reason columns
+  (`papers`, `pdf`, `relev`, `short`, `fetch`) in addition to
+  `considered/captured/excluded`, so each backend engine's row shows *why*
+  candidates were dropped. `EngineSweepStat` carries an
+  `excluded_by_reason` map (new `ExclusionReason` enum), the
+  `WidthSweepSummary` gather event and its web-URL log record carry a global
+  per-reason tally that sums to `excluded`, and the table is now separated
+  from the summary line above and the trailing diagnostics below by a blank
+  line.
+
+- **`mf_search` engine exclusion + research `--no-papers` (spec `researchnoacc`)**
+  -- `mf_search` gained an optional `exclude_engines` array that removes named
+  backends from the orchestrator *before* any request is dispatched, so excluded
+  engines are never queried (unknown names are ignored). A new
+  `SearchOrchestrator::exclude_engines` method backs it, the academic engine
+  vocabulary (`ACADEMIC_ENGINES`, `ENGINE_OPENALEX`, `ENGINE_WIKIPEDIA`) is
+  defined once in `masterfetch::search` and reused by research hit
+  classification, and an explicit "all engines excluded" result is returned when
+  the exclusion list names every configured engine. Research `--no-papers` now
+  routes through this exclusion (via a new `WebSearchTool` exclusion parameter)
+  instead of a post-search per-hit filter, so OpenAlex consumes no search budget
+  and cannot shadow general-web URLs in dedup. New
+  `research.exclude_academic_engines` config value (OR-merged) makes the
+  exclusion persistent, with the per-run flag taking precedence. `POST /research`
+  gained a `no_scholarly` field. Docs updated in `docs/howtos/research.md`,
+  `docs/howtos/config.md`, and `docs/howtos/slashcommands/research.md`.
+
+- **`--oa-enable` / `--no-oa` research flags** -- open-access recovery can now
+  be toggled per run on every front-end (`ragent research create`,
+  `/research create`, `POST /research`) without editing `ragent.json`.
+  Precedence is: explicit flag wins, otherwise `research.open_access_recovery`
+  from config, otherwise off. The `ResearchRunRequest` gained an
+  `open_access_recovery: Option<bool>` override and `build_session_config`
+  resolves the three-way precedence.
+
+### Changed
+
+- **TASKS panel now shows the task ID after the status** -- the Alt+T tasks
+  panel previously rendered only `[STATUS] title`; each row now reads
+  `[STATUS] <id> title` so the task identifier is visible without opening
+  `/task get`.
+
+- **Right-hand side panels now take 50% of the window width** -- every
+  toggled side panel (Alt+M memory, Alt+T tasks, Alt+P profile, Alt+O
+  telemetry, Alt+C context, and the log panel) previously used a
+  breakpoint-dependent split (21-32% of the width). `log_split` now returns a
+  flat `(50, 50)` split, so the side column is half the application width at
+  every terminal size.
+
+### Fixed
+
+- **`/spec impl` task-range dependencies now expand** -- a Dependencies cell
+  such as `T-001–T-014` was parsed as a single unknown task ID, so the dependency
+  was dropped and the final verification task was scheduled *first* (right after
+  T-001) instead of last, then failed as blocked because its prerequisites were
+  unimplemented. `PlanParser::parse_dependencies` now expands an inclusive range
+  into every spanned ID, accepting an en dash, an em dash, an ASCII hyphen, or
+  the words `to` / `through` between well-formed endpoints, with zero-padding
+  preserved from the range's start ID. This affected 16 specs that used a range
+  for their whole-plan verification task (researchmax, researchnoacc, wikisearch,
+  openalex, tavmove, exasearch, reqeng, agentloop, openharness, compact, ...).
+
+- **`--no-papers` / `--no-scholarly` flag spelling** -- the root CLI exposed
+  only `--no-scholarly` while the research hand parser, TUI, and every doc used
+  `--no-papers`. `--no-papers` is now the canonical spelling on every entry
+  point with `--no-scholarly` retained as a visible alias, and the
+  `POST /research` invocation summary emits the canonical `--no-papers`.
 
 ## Version: 1.0.104
 

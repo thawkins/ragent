@@ -620,13 +620,21 @@ The `PLAN.md` task table uses these columns:
 | Effort | Size estimate: S, M, or L |
 | Priority | Critical, High, Medium, or Low |
 | Status | Task status: Pending, in_progress, completed, or blocked (initially Pending) |
-| Dependencies | Task IDs that must complete first |
+| Dependencies | Task IDs that must complete first (an inclusive range such as `T-001–T-014` expands to every spanned ID) |
 
 ### Dependency ordering
 
 The implementation runner (`/spec impl`) resolves dependencies topologically
 and executes tasks in order. Tasks with no dependencies run first; tasks
 blocked by incomplete dependencies are deferred.
+
+A Dependencies cell may list individual IDs (`T-001, T-003`), an inclusive
+range (`T-001–T-014`), or a mix. A range is expanded into every spanned ID,
+accepting an en dash (`–`), an em dash (`—`), an ASCII hyphen (`-`), or the
+words `to` / `through` between well-formed endpoints, with zero-padding
+preserved from the range's start ID. Before range expansion a cell like
+`T-001–T-014` was read as a single unknown ID, so the dependency was dropped
+and the final verification task was scheduled first instead of last.
 
 ### Session tracker tasks (`spec_task_update`)
 

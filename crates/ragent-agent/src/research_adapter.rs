@@ -27,9 +27,9 @@ use crate::{
     tool::{Tool as AgentTool, ToolContext as AgentToolContext, ToolRegistry},
 };
 use ragent_research::{
-    AnalysisEngine, Critic, GrepMatch, HeuristicPlanner, HeuristicQueryDecomposer,
-    LlmAnalysisEngine, LlmPlanner, LlmQueryDecomposer, LocalGatherer, LocalTool,
-    NoopAnalysisEngine, Planner, ProviderCallStats, QueryDecomposer, ResearchManager,
+    AnalysisEngine, Critic, FetchFailure, FetchFailureKind, GrepMatch, HeuristicPlanner,
+    HeuristicQueryDecomposer, LlmAnalysisEngine, LlmPlanner, LlmQueryDecomposer, LocalGatherer,
+    LocalTool, NoopAnalysisEngine, Planner, ProviderCallStats, QueryDecomposer, ResearchManager,
     ResearchSession, SimpleCritic, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit,
     WebSearchTool,
 };
@@ -292,6 +292,11 @@ fn build_web_gatherer(
         .get("mf_fetch")
         .or_else(|| registry.get("webfetch"))?;
     let search_tool_name = search.name().to_string();
+    // Only `mf_search` accepts an `exclude_engines` parameter; the legacy
+    // `websearch` schema is `additionalProperties: false`, so sending it there
+    // would be rejected. Steer engine choice only when the richer tool backs
+    // the trait (FR-004, FR-006).
+    let search_supports_exclusions = search_tool_name == "mf_search";
     let ctx = build_tool_context(
         session_id,
         working_dir,
@@ -326,6 +331,7 @@ fn build_web_gatherer(
                 tool: search,
                 ctx: ctx.clone(),
                 tool_name: search_tool_name,
+                supports_exclusions: search_supports_exclusions,
             }),
             Arc::new(AgentWebFetchTool {
                 tool: fetch,
@@ -369,61 +375,116 @@ struct AgentWebSearchTool {
     tool: Arc<dyn AgentTool>,
     ctx: AgentToolContext,
     tool_name: String,
+    /// `true` when the backing tool is `mf_search`, which accepts the
+    /// `exclude_engines` parameter. `false` for the legacy `websearch`
+    /// wrapper, whose schema rejects unknown properties.
+    supports_exclusions: bool,
+}
+
+/// Invoke the backing search tool with the given engine exclusions.
+///
+/// Shared by [`AgentWebSearchTool::search`] (no exclusions) and
+/// [`AgentWebSearchTool::search_with_exclusions`] (FR-004). The
+/// `exclude_engines` argument is only added when the backing tool supports it
+/// and the list is non-empty, so the call shape is byte-for-byte identical to
+/// the pre-exclusion behaviour when nothing is excluded (FR-011).
+async fn run_agent_search(
+    tool: &Arc<dyn AgentTool>,
+    ctx: &AgentToolContext,
+    query: &str,
+    max_results: usize,
+    exclude_engines: &[&str],
+    tool_name: &str,
+    supports_exclusions: bool,
+) -> Result<Vec<WebSearchHit>> {
+    let mut input = serde_json::json!({
+        "query": query,
+        "max_results": max_results,
+    });
+    if supports_exclusions && !exclude_engines.is_empty() {
+        input["exclude_engines"] = serde_json::json!(exclude_engines);
+    }
+    let output = tool.execute(input, ctx).await?;
+
+    // Prefer the structured JSON metadata emitted by the underlying
+    // search tool. `mf_search` populates a `results` array with engine
+    // provenance; legacy `websearch` populates a Tavily-only `results`
+    // array. Fall back to parsing the human-readable text.
+    if let Some(ref metadata) = output.metadata {
+        let from_json: Vec<WebSearchHit> =
+            ragent_tools_extended::websearch::hits_from_metadata(metadata)
+                .into_iter()
+                .map(|r| WebSearchHit {
+                    title: r.title,
+                    url: r.url,
+                    snippet: r.snippet,
+                    matched_query: String::new(),
+                    search_tool: if r.search_tool.is_empty() {
+                        tool_name.to_string()
+                    } else {
+                        r.search_tool
+                    },
+                    search_engine: if r.search_engine.is_empty() {
+                        tool_name.to_string()
+                    } else {
+                        r.search_engine
+                    },
+                    author: r.author,
+                })
+                .collect();
+        if !from_json.is_empty() {
+            return Ok(from_json);
+        }
+
+        // Try the `mf_search`-specific metadata shape if the legacy
+        // `results` key was absent or empty.
+        let from_mf = parse_mf_search_metadata(metadata, tool_name);
+        if !from_mf.is_empty() {
+            return Ok(from_mf);
+        }
+    }
+
+    // Legacy websearch plain-text fallback.
+    let mut hits = parse_websearch_output(&output.content);
+    for hit in &mut hits {
+        hit.search_tool = tool_name.to_string();
+    }
+    Ok(hits)
 }
 
 #[async_trait]
 impl WebSearchTool for AgentWebSearchTool {
     async fn search(&self, query: &str, max_results: usize) -> Result<Vec<WebSearchHit>> {
-        let input = serde_json::json!({
-            "query": query,
-            "max_results": max_results,
-        });
-        let output = self.tool.execute(input, &self.ctx).await?;
+        run_agent_search(
+            &self.tool,
+            &self.ctx,
+            query,
+            max_results,
+            &[],
+            &self.tool_name,
+            self.supports_exclusions,
+        )
+        .await
+    }
 
-        // Prefer the structured JSON metadata emitted by the underlying
-        // search tool. `mf_search` populates a `results` array with engine
-        // provenance; legacy `websearch` populates a Tavily-only `results`
-        // array. Fall back to parsing the human-readable text.
-        if let Some(ref metadata) = output.metadata {
-            let from_json: Vec<WebSearchHit> =
-                ragent_tools_extended::websearch::hits_from_metadata(metadata)
-                    .into_iter()
-                    .map(|r| WebSearchHit {
-                        title: r.title,
-                        url: r.url,
-                        snippet: r.snippet,
-                        matched_query: String::new(),
-                        search_tool: if r.search_tool.is_empty() {
-                            self.tool_name.clone()
-                        } else {
-                            r.search_tool
-                        },
-                        search_engine: if r.search_engine.is_empty() {
-                            self.tool_name.clone()
-                        } else {
-                            r.search_engine
-                        },
-                        author: r.author,
-                    })
-                    .collect();
-            if !from_json.is_empty() {
-                return Ok(from_json);
-            }
-
-            // Try the `mf_search`-specific metadata shape if the legacy
-            // `results` key was absent or empty.
-            let from_mf = parse_mf_search_metadata(metadata, &self.tool_name);
-            if !from_mf.is_empty() {
-                return Ok(from_mf);
-            }
-        }
-
-        // Legacy websearch plain-text fallback.
-        let mut hits = parse_websearch_output(&output.content);
-        for hit in &mut hits {
-            hit.search_tool = self.tool_name.clone();
-        }
-        Ok(hits)
+    async fn search_with_exclusions(
+        &self,
+        query: &str,
+        max_results: usize,
+        exclude_engines: &[&str],
+    ) -> Result<Vec<WebSearchHit>> {
+        // FR-004/FR-006: forward the academic engine names to the underlying
+        // `mf_search` tool so an excluded engine is never queried.
+        run_agent_search(
+            &self.tool,
+            &self.ctx,
+            query,
+            max_results,
+            exclude_engines,
+            &self.tool_name,
+            self.supports_exclusions,
+        )
+        .await
     }
 }
 
@@ -607,7 +668,13 @@ impl WebFetchTool for AgentWebFetchTool {
                     })
                 });
             if let Some(error) = fetch_error {
-                anyhow::bail!("mf_fetch failed for {url}: {error}");
+                return Err(fetch_failure(
+                    metadata
+                        .get("page_type")
+                        .and_then(serde_json::Value::as_str),
+                    &error,
+                )
+                .into());
             }
         }
 
@@ -655,11 +722,15 @@ impl WebFetchTool for AgentWebFetchTool {
                 verify_readability_on_raw_html(&self.tool, &self.ctx, &url).await
             };
             if !readability_used {
-                anyhow::bail!(
-                    "readability extraction failed for {url}; \
-                     page rejected because the research web-gather phase requires \
-                     readability-rs-extracted content (fallback extraction is not accepted)"
-                );
+                return Err(FetchFailure::new(
+                    FetchFailureKind::Extraction,
+                    format!(
+                        "readability extraction failed for {url}; \
+                         page rejected because the research web-gather phase requires \
+                         readability-rs-extracted content (fallback extraction is not accepted)"
+                    ),
+                )
+                .into());
             }
         }
 
@@ -694,6 +765,53 @@ impl WebFetchTool for AgentWebFetchTool {
             author,
         })
     }
+}
+
+/// Classify an `mf_fetch` tool-level failure into a fine-grained
+/// [`FetchFailureKind`] so the research gatherer can break its per-engine
+/// fetch-failure columns down by cause.
+///
+/// `mf_fetch` reports failures as `ToolOutput` metadata (`error` plus a
+/// `page_type`) rather than by aborting the call, so the classification is
+/// derived from those two signals. `page_type` carries the strongest signal
+/// (`paywall`, `auth_wall`, `js_shell`); otherwise the error text is inspected
+/// for HTTP status codes, SSRF/robots blocks, extraction failures, and
+/// timeouts.
+fn fetch_failure(page_type: Option<&str>, error: &str) -> FetchFailure {
+    let kind = match page_type {
+        Some("paywall") | Some("auth_wall") => FetchFailureKind::AuthWall,
+        Some("js_shell") => FetchFailureKind::JsShell,
+        _ => {
+            let m = error.to_ascii_lowercase();
+            if m.contains("timed out") || m.contains("timeout") {
+                FetchFailureKind::Timeout
+            } else if m.contains("ssrf") || m.contains("robots.txt") {
+                FetchFailureKind::SecurityBlocked
+            } else if m.contains("extraction") || m.contains("content_ok") {
+                FetchFailureKind::Extraction
+            } else if let Some(status) = first_http_status(&m)
+                && status >= 400
+            {
+                FetchFailureKind::HttpStatus
+            } else {
+                FetchFailureKind::Network
+            }
+        }
+    };
+    FetchFailure::new(kind, error.to_string())
+}
+
+/// Find the first 3-digit HTTP status code (100..=599) in a lowercased message.
+fn first_http_status(message: &str) -> Option<u16> {
+    for token in message.split(|c: char| !c.is_ascii_digit()) {
+        if token.len() == 3
+            && let Ok(code) = token.parse::<u16>()
+            && (100..=599).contains(&code)
+        {
+            return Some(code);
+        }
+    }
+    None
 }
 
 /// Re-verify readability extraction for the legacy `webfetch` tool path.
@@ -1864,6 +1982,49 @@ mod tests {
             err.to_string().contains("readability extraction failed"),
             "error should explain the readability requirement: {err}"
         );
+        // The typed failure carries the fine-grained cause so the research
+        // gatherer can break it out into the `extr` column.
+        assert_eq!(
+            err.downcast_ref::<FetchFailure>().map(|f| f.kind),
+            Some(FetchFailureKind::Extraction),
+            "readability rejection must be an Extraction FetchFailure: {err}"
+        );
+    }
+
+    #[test]
+    fn test_fetch_failure_classifies_by_page_type_and_message() {
+        assert_eq!(
+            fetch_failure(Some("paywall"), "content_ok = false").kind,
+            FetchFailureKind::AuthWall
+        );
+        assert_eq!(
+            fetch_failure(Some("auth_wall"), "login required").kind,
+            FetchFailureKind::AuthWall
+        );
+        assert_eq!(
+            fetch_failure(Some("js_shell"), "no static content").kind,
+            FetchFailureKind::JsShell
+        );
+        assert_eq!(
+            fetch_failure(None, "request timed out after 30s").kind,
+            FetchFailureKind::Timeout
+        );
+        assert_eq!(
+            fetch_failure(None, "URL rejected by SSRF security check").kind,
+            FetchFailureKind::SecurityBlocked
+        );
+        assert_eq!(
+            fetch_failure(None, "HTTP status 404 not found").kind,
+            FetchFailureKind::HttpStatus
+        );
+        assert_eq!(
+            fetch_failure(None, "pdf extraction produced no text").kind,
+            FetchFailureKind::Extraction
+        );
+        assert_eq!(
+            fetch_failure(None, "connection reset by peer").kind,
+            FetchFailureKind::Network
+        );
     }
 
     #[test]
@@ -2098,6 +2259,168 @@ mod tests {
             debug.contains("has_local: true"),
             "default registry should provide glob/grep/read/list tools: {debug}"
         );
+    }
+
+    // ── Engine-exclusion adapter tests (spec researchnoacc, T-007) ─────────
+
+    /// A fake search tool that records the JSON input it was invoked with and
+    /// emits a `results` array shaped like `mf_search` metadata.
+    struct RecordingSearchTool {
+        tool_name: &'static str,
+        inputs: std::sync::Mutex<Vec<serde_json::Value>>,
+    }
+
+    #[async_trait::async_trait]
+    impl AgentTool for RecordingSearchTool {
+        fn name(&self) -> &'static str {
+            self.tool_name
+        }
+        fn description(&self) -> &'static str {
+            "fake search"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        fn permission_category(&self) -> &'static str {
+            "web"
+        }
+        async fn execute(
+            &self,
+            input: serde_json::Value,
+            _ctx: &AgentToolContext,
+        ) -> Result<ToolOutput> {
+            self.inputs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(input);
+            Ok(ToolOutput {
+                content: "mf_search: \"q\"\nResults: 1\n".to_string(),
+                metadata: Some(serde_json::json!({
+                    "results": [{
+                        "title": "T",
+                        "url": "https://example.com",
+                        "snippet": "s",
+                        "source": "wikipedia",
+                        "search_engine": "wikipedia",
+                    }],
+                })),
+            })
+        }
+    }
+
+    fn recording_search_adapter(
+        tool_name: &'static str,
+    ) -> (Arc<dyn AgentTool>, Arc<RecordingSearchTool>) {
+        let concrete = Arc::new(RecordingSearchTool {
+            tool_name,
+            inputs: std::sync::Mutex::new(Vec::new()),
+        });
+        let as_dyn: Arc<dyn AgentTool> = concrete.clone();
+        (as_dyn, concrete)
+    }
+
+    #[test]
+    fn test_adapter_forwards_exclusions_to_mf_search() {
+        // FR-004/FR-006: the academic engine names must reach the underlying
+        // `mf_search` call as its `exclude_engines` parameter.
+        let (as_dyn, concrete) = recording_search_adapter("mf_search");
+        let adapter = AgentWebSearchTool {
+            tool: as_dyn,
+            ctx: test_tool_context(),
+            tool_name: "mf_search".to_string(),
+            supports_exclusions: true,
+        };
+
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
+        let hits = rt
+            .block_on(adapter.search_with_exclusions("rust", 7, &["openalex"]))
+            .expect("search should succeed");
+        assert_eq!(hits.len(), 1);
+
+        let inputs = concrete
+            .inputs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(
+            inputs[0]["exclude_engines"],
+            serde_json::json!(["openalex"])
+        );
+        assert_eq!(inputs[0]["query"], "rust");
+        assert_eq!(inputs[0]["max_results"], 7);
+    }
+
+    #[test]
+    fn test_adapter_omits_exclusions_when_no_engines_named() {
+        // FR-011: an empty exclusion list produces the original call shape.
+        let (as_dyn, concrete) = recording_search_adapter("mf_search");
+        let adapter = AgentWebSearchTool {
+            tool: as_dyn,
+            ctx: test_tool_context(),
+            tool_name: "mf_search".to_string(),
+            supports_exclusions: true,
+        };
+
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
+        rt.block_on(adapter.search_with_exclusions("rust", 5, &[]))
+            .expect("search should succeed");
+
+        let inputs = concrete
+            .inputs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(
+            inputs[0].get("exclude_engines").is_none(),
+            "no exclusion parameter should be sent when nothing is excluded"
+        );
+    }
+
+    #[test]
+    fn test_adapter_omits_exclusions_for_legacy_websearch() {
+        // The legacy `websearch` schema is `additionalProperties: false`, so
+        // the exclusion parameter must never be sent to it (FR-004, FR-011).
+        let (as_dyn, concrete) = recording_search_adapter("websearch");
+        let adapter = AgentWebSearchTool {
+            tool: as_dyn,
+            ctx: test_tool_context(),
+            tool_name: "websearch".to_string(),
+            supports_exclusions: false,
+        };
+
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
+        rt.block_on(adapter.search_with_exclusions("rust", 5, &["openalex"]))
+            .expect("search should succeed");
+
+        let inputs = concrete
+            .inputs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(
+            inputs[0].get("exclude_engines").is_none(),
+            "legacy websearch must not receive the exclusion parameter"
+        );
+    }
+
+    #[test]
+    fn test_adapter_base_search_never_sends_exclusions() {
+        // The base `search` path (no exclusions) keeps the pre-change shape.
+        let (as_dyn, concrete) = recording_search_adapter("mf_search");
+        let adapter = AgentWebSearchTool {
+            tool: as_dyn,
+            ctx: test_tool_context(),
+            tool_name: "mf_search".to_string(),
+            supports_exclusions: true,
+        };
+
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
+        rt.block_on(adapter.search("rust", 5))
+            .expect("search should succeed");
+
+        let inputs = concrete
+            .inputs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(inputs[0].get("exclude_engines").is_none());
     }
 }
 

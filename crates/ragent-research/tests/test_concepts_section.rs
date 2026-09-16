@@ -3,11 +3,34 @@
 //! normalizer, and the `## Concepts` placement above Findings in both
 //! document layouts.
 
+use ragent_research::source::Source;
 use ragent_research::{
     ResearchDocument, ResearchItem, ResearchName, SourceBody, assemble_document,
     build_concepts_payload_from_bodies, concepts_section_for_research,
 };
 use std::collections::HashMap;
+use std::path::PathBuf;
+
+/// A web source whose relevance label drives [`Source::relevance_rank`].
+fn source(label: &str) -> Source {
+    Source::Web {
+        url: "https://example.invalid".to_string(),
+        title: "Source".to_string(),
+        captured_at: chrono::Utc::now(),
+        published_at: None,
+        body_path: PathBuf::new(),
+        body: String::new(),
+        relevance: label.to_string(),
+        search_tool: "mf_search".to_string(),
+        search_engine: "openalex".to_string(),
+        content_type: None,
+        page_type: None,
+        media_type: "page".to_string(),
+        language: None,
+        oa_recovery: None,
+        author: None,
+    }
+}
 
 fn body(index: usize, title: &str, text: &str) -> SourceBody {
     SourceBody {
@@ -51,7 +74,8 @@ fn test_build_concepts_payload_from_bodies_truncates_to_budget() {
 #[test]
 fn test_concepts_section_for_research_strips_h1_and_demotes_headings() {
     let raw = "# Concepts\n\n## 1. Semantic Search\n\n**Definition:** retrieval over corpora.\n\n## 2. Retrieval Quality\n\n**Definition:** measured by recall.\n";
-    let section = concepts_section_for_research(raw, &HashMap::new()).expect("sections exist");
+    let section =
+        concepts_section_for_research(raw, &HashMap::new(), &[], 0).expect("sections exist");
     assert!(!section.contains("# Concepts"), "{section}");
     assert!(section.contains("### 1. Semantic Search"), "{section}");
     assert!(section.contains("### 2. Retrieval Quality"), "{section}");
@@ -63,7 +87,7 @@ fn test_concepts_section_for_research_rewrites_web_refs_via_map() {
     let mut map = HashMap::new();
     map.insert(1usize, 5usize);
     let raw = "# Concepts\n\n## 1. Theme\n\n- evidence here (web-01) and ([#7])\n";
-    let section = concepts_section_for_research(raw, &map).expect("sections exist");
+    let section = concepts_section_for_research(raw, &map, &[], 0).expect("sections exist");
     assert!(
         section.contains("- evidence here ([#5]) and ([#7])"),
         "{section}"
@@ -73,9 +97,10 @@ fn test_concepts_section_for_research_rewrites_web_refs_via_map() {
 
 #[test]
 fn test_concepts_section_for_research_none_when_no_sections() {
-    assert!(concepts_section_for_research("", &HashMap::new()).is_none());
+    assert!(concepts_section_for_research("", &HashMap::new(), &[], 0).is_none());
     assert!(
-        concepts_section_for_research("# Concepts\n\nno sections here", &HashMap::new()).is_none()
+        concepts_section_for_research("# Concepts\n\nno sections here", &HashMap::new(), &[], 0)
+            .is_none()
     );
 }
 
@@ -169,4 +194,62 @@ fn test_imrad_layout_omits_concepts_when_none() {
     doc.output_format = ragent_research::run_config::OutputFormat::Imrad;
     let assembled = assemble_document(&doc);
     assert!(!assembled.body.contains("### Concepts"));
+}
+
+// ── T-004: concept ordering, cap, and contiguous renumbering ────────────────
+
+#[test]
+fn test_concepts_section_orders_and_caps_by_reverse_relevance() {
+    // Source 1 = Very high (8), 2 = Very low (1), 3 = Low (3).
+    let sources = vec![source("Very high"), source("Very low"), source("Low")];
+    let raw = "# Concepts\n\n\
+        ## 1. Weak\n\n**Definition:** weak.\n\n**Key Evidence:** ([#2])\n\n\
+        ## 2. Strong\n\n**Definition:** strong.\n\n**Key Evidence:** ([#1])\n\n\
+        ## 3. Middling\n\n**Definition:** middling.\n\n**Key Evidence:** ([#3])\n";
+    let section =
+        concepts_section_for_research(raw, &HashMap::new(), &sources, 2).expect("sections exist");
+    // Rank 8 (Strong) then rank 3 (Middling) survive; rank 1 (Weak) is dropped
+    // and the survivors are renumbered contiguously from 1.
+    assert!(section.contains("### 1. Strong"), "{section}");
+    assert!(section.contains("### 2. Middling"), "{section}");
+    assert!(!section.contains("Weak"), "{section}");
+    assert!(!section.contains("### 3."), "{section}");
+}
+
+#[test]
+fn test_concepts_section_zero_limit_is_unbounded_but_still_ordered() {
+    let sources = vec![source("Very high"), source("Very low")];
+    let raw = "# Concepts\n\n\
+        ## 1. Weak\n\n**Definition:** weak.\n\n**Key Evidence:** ([#2])\n\n\
+        ## 2. Strong\n\n**Definition:** strong.\n\n**Key Evidence:** ([#1])\n";
+    let section =
+        concepts_section_for_research(raw, &HashMap::new(), &sources, 0).expect("sections exist");
+    // No truncation, but the strongest concept leads and numbering is
+    // contiguous from 1.
+    assert!(section.contains("### 1. Strong"), "{section}");
+    assert!(section.contains("### 2. Weak"), "{section}");
+}
+
+#[test]
+fn test_concepts_section_never_pads_when_fewer_than_limit() {
+    let sources = vec![source("High")];
+    let raw = "# Concepts\n\n## 1. Only\n\n**Definition:** only.\n\n**Key Evidence:** ([#1])\n";
+    let section =
+        concepts_section_for_research(raw, &HashMap::new(), &sources, 50).expect("sections exist");
+    assert_eq!(section.matches("### ").count(), 1, "{section}");
+    assert!(section.contains("### 1. Only"), "{section}");
+}
+
+#[test]
+fn test_concepts_section_preserves_paragraph_breaks_between_bullets() {
+    // The model emits a blank line between the Definition and Key Evidence
+    // blocks; the section must keep that interior break.
+    let raw = "# Concepts\n\n## 1. Theme\n\n**Definition:** first.\n\n**Key Evidence:**\n- one ([#1])\n- two ([#2])\n";
+    let section =
+        concepts_section_for_research(raw, &HashMap::new(), &[], 0).expect("sections exist");
+    assert!(
+        section.contains("**Definition:** first.\n\n**Key Evidence:**"),
+        "{section}"
+    );
+    assert!(section.contains("- one ([#1])\n- two ([#2])"), "{section}");
 }

@@ -23,9 +23,13 @@ pub const BYTES_PER_TOKEN_GUESS: usize = 4;
 
 /// Fixed concept-extraction prompt template used by `/research cluster`.
 ///
-/// The placeholder `[INSERT_DOCUMENTS_HERE]` is replaced with the assembled
-/// source payload by [`build_concept_extraction_prompt`] before the prompt is
-/// dispatched to the active LLM (FR-005, FR-006, FR-014).
+/// Two placeholders are replaced before the prompt is dispatched to the active
+/// LLM (FR-005, FR-006, FR-014): `[INSERT_DOCUMENTS_HERE]` with the assembled
+/// source payload, and [`CONCEPT_COUNT_INSTRUCTION_PLACEHOLDER`] with the
+/// concept-count sentence derived from the effective `--max-concepts` limit
+/// (spec `researchmax`; FR-001, FR-015). [`build_concept_extraction_prompt`]
+/// substitutes the built-in default limit; callers with an explicit limit use
+/// [`build_concept_extraction_prompt_for_limit`].
 ///
 /// The prompt explicitly asks for a predictable markdown structure so the
 /// resulting `CONCEPTS.md` can be lightly normalized by
@@ -37,7 +41,7 @@ pub const CONCEPT_EXTRACTION_PROMPT_TEMPLATE: &str = "You are an expert data ana
     Instructions:\n\
     \n\
     1. Read all documents to understand the overall context.\n\
-    2. Identify up to 20 core concepts that appear frequently, carry significant weight, or tie the documents together. Avoid overlapping or repetitive concepts.\n\
+    2. [CONCEPT_COUNT_INSTRUCTION] Avoid overlapping or repetitive concepts.\n\
     3. For each concept, produce a markdown section with:\n\
     \n\
        - A level-2 heading (`## N. Concept Name`) with a concise label (2-4 words), where N is the concept's sequential number starting at 1.\n\
@@ -55,6 +59,11 @@ pub const CONCEPT_EXTRACTION_PROMPT_TEMPLATE: &str = "You are an expert data ana
     Here are the documents:\n\
     \n\
     [INSERT_DOCUMENTS_HERE]\n";
+
+/// Placeholder in [`CONCEPT_EXTRACTION_PROMPT_TEMPLATE`] replaced with the
+/// concept-count instruction derived from the effective `--max-concepts` limit
+/// (spec `researchmax`; FR-001, FR-015).
+pub const CONCEPT_COUNT_INSTRUCTION_PLACEHOLDER: &str = "[CONCEPT_COUNT_INSTRUCTION]";
 
 /// Lightweight post-processor that normalizes an LLM-generated concept-extraction
 /// response into a consistent `CONCEPTS.md` layout (FR-014).
@@ -536,13 +545,51 @@ pub async fn build_cluster_payload(
         })?
 }
 
-/// Build the full concept-extraction prompt by inserting the assembled source
-/// payload into the fixed [`CONCEPT_EXTRACTION_PROMPT_TEMPLATE`].
+/// The concept-count sentence injected into the prompt for `max_concepts`.
 ///
-/// The returned string is ready to be dispatched to the active LLM for T-005.
+/// A positive value asks for "up to N core concepts"; `0` means "unbounded"
+/// (FR-016) and asks for every core concept rather than a capped number.
+#[must_use]
+fn concept_count_instruction(max_concepts: usize) -> String {
+    if max_concepts == 0 {
+        "Identify every core concept that appears frequently, carries significant \
+         weight, or ties the documents together."
+            .to_string()
+    } else {
+        format!(
+            "Identify up to {max_concepts} core concepts that appear frequently, carry \
+             significant weight, or tie the documents together."
+        )
+    }
+}
+
+/// Build the concept-extraction prompt for an explicit `max_concepts` limit.
+///
+/// Substitutes [`CONCEPT_COUNT_INSTRUCTION_PLACEHOLDER`] with the instruction
+/// for `max_concepts` (0 = unbounded) and `[INSERT_DOCUMENTS_HERE]` with the
+/// assembled source payload. The returned string is ready to be dispatched to
+/// the active LLM (FR-001, FR-015).
+#[must_use]
+pub fn build_concept_extraction_prompt_for_limit(
+    payload_text: &str,
+    max_concepts: usize,
+) -> String {
+    CONCEPT_EXTRACTION_PROMPT_TEMPLATE
+        .replace(
+            CONCEPT_COUNT_INSTRUCTION_PLACEHOLDER,
+            &concept_count_instruction(max_concepts),
+        )
+        .replace("[INSERT_DOCUMENTS_HERE]", payload_text)
+}
+
+/// Build the full concept-extraction prompt by inserting the assembled source
+/// payload into the fixed [`CONCEPT_EXTRACTION_PROMPT_TEMPLATE`], using the
+/// built-in default concept limit.
+///
+/// The returned string is ready to be dispatched to the active LLM.
 #[must_use]
 pub fn build_concept_extraction_prompt(payload: &ClusterPayload) -> String {
-    CONCEPT_EXTRACTION_PROMPT_TEMPLATE.replace("[INSERT_DOCUMENTS_HERE]", &payload.text)
+    build_concept_extraction_prompt_for_limit(&payload.text, crate::limits::DEFAULT_MAX_CONCEPTS)
 }
 
 /// Assemble an in-memory concept-extraction payload from the gathered source
@@ -600,27 +647,38 @@ pub fn build_concepts_payload_from_bodies(
 ///   (supporting-file number to 1-based combined index). `[#N]` citations are
 ///   kept verbatim.
 ///
+/// After demotion the surviving concept sections are ordered most-relevant-first
+/// with the shared reverse-relevance helper (highest cited source
+/// [`crate::source::Source::relevance_rank`] first; ties break to cited count,
+/// then the model's original order) and truncated to `max_concepts` (spec
+/// researchmax; FR-004, FR-011). The surviving `### N.` headings are renumbered
+/// contiguously from 1.
+///
+/// `max_concepts == 0` means "unbounded" (FR-016) and applies no truncation;
+/// when fewer concepts are available than the limit the list is never padded
+/// (FR-022). `sources` supplies the citation-to-rank lookup (`[#N]`/`web-NN`
+/// citations resolve against the combined References Index order).
+///
 /// Returns `None` when the response contains no concept sections, so callers
-/// can omit the parent section entirely.
+/// can omit the parent section entirely (FR-018).
 #[must_use]
 pub fn concepts_section_for_research<S: std::hash::BuildHasher>(
     raw: &str,
     web_index_map: &std::collections::HashMap<usize, usize, S>,
+    sources: &[crate::source::Source],
+    max_concepts: usize,
 ) -> Option<String> {
     static WEB_REF_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let web_ref_re =
         WEB_REF_RE.get_or_init(|| regex::Regex::new(r"\bweb-(\d+)\b").expect("valid regex"));
 
-    let mut out = String::with_capacity(raw.len() + 64);
-    let mut sections = 0usize;
+    // Split the demoted output into one body per `### ` concept section,
+    // rewriting inline `web-NN` citations to `[#M]` as we go. A single interior
+    // blank line is preserved; leading and runs of blank lines are dropped.
+    let mut sections: Vec<Vec<String>> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
     for line in raw.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() {
-            if !out.ends_with("\n\n") && !out.is_empty() {
-                out.push('\n');
-            }
-            continue;
-        }
         // Drop the level-1 heading the prompt asks for.
         if trimmed.starts_with("# ") && !trimmed.starts_with("## ") {
             continue;
@@ -644,20 +702,77 @@ pub fn concepts_section_for_research<S: std::hash::BuildHasher>(
             })
             .into_owned();
         if line.starts_with("### ") {
-            if sections > 0 {
-                out.push('\n');
+            if !current.is_empty() {
+                sections.push(std::mem::take(&mut current));
             }
-            sections += 1;
+            current.push(line);
+        } else if line.is_empty() {
+            // Keep at most one interior blank line, never a leading one.
+            if current.last().is_some_and(|l| !l.is_empty()) {
+                current.push(String::new());
+            }
+        } else {
+            current.push(line);
         }
-        out.push_str(&line);
-        out.push('\n');
     }
-    let out = out.trim().to_string();
-    if sections == 0 || out.is_empty() {
-        None
-    } else {
-        Some(out)
+    if !current.is_empty() {
+        sections.push(current);
     }
+    // Trim trailing blank lines and discard any section that is not a concept
+    // (stray text before the first `### ` heading).
+    for section in &mut sections {
+        while section.last().is_some_and(|l| l.is_empty()) {
+            section.pop();
+        }
+    }
+    sections.retain(|s| s.first().is_some_and(|l| l.starts_with("### ")));
+    if sections.is_empty() {
+        return None;
+    }
+
+    // Order most-relevant-first and cap to the effective concept limit. Each
+    // section is ranked on its full text (the heading alone carries no citation).
+    let bodies: Vec<String> = sections
+        .into_iter()
+        .map(|section| section.join("\n"))
+        .collect();
+    let mut ordered = crate::limits::rank_entries_by_reverse_relevance(
+        bodies,
+        String::as_str,
+        crate::limits::source_rank_lookup(sources),
+    );
+    if max_concepts > 0 {
+        ordered.truncate(max_concepts);
+    }
+
+    let joined = ordered.join("\n\n");
+    let out = renumber_concept_headings(joined.trim());
+    if out.is_empty() { None } else { Some(out) }
+}
+
+/// Renumber every `### ` concept heading contiguously from 1, preserving any
+/// existing heading text (spec researchmax; FR-011).
+fn renumber_concept_headings(body: &str) -> String {
+    static NUM_PREFIX_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let num_prefix_re = NUM_PREFIX_RE.get_or_init(|| {
+        regex::Regex::new(r"^\d+\s*[.):\-\u{2013}\u{2014}]\s*").expect("valid regex")
+    });
+    let mut out = String::with_capacity(body.len() + 32);
+    let mut concept_no = 0usize;
+    for line in body.lines() {
+        if let Some(rest) = line.strip_prefix("### ") {
+            concept_no += 1;
+            let label = num_prefix_re.replace(rest, "").trim().to_string();
+            out.push_str(&format!("### {concept_no}. {label}\n"));
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if !out.is_empty() {
+        out.pop();
+    }
+    out
 }
 
 /// Write the LLM-generated concept extraction response as `CONCEPTS.md` in the
@@ -846,8 +961,11 @@ mod tests {
             "prompt should ask for a top-level Concepts heading"
         );
         assert!(
-            prompt.contains("up to 20 core concepts"),
-            "prompt should cap the output at 20 concepts"
+            prompt.contains(&format!(
+                "up to {} core concepts",
+                crate::limits::DEFAULT_MAX_CONCEPTS
+            )),
+            "prompt should inject the default concept cap"
         );
         assert!(
             !prompt.contains("[INSERT_DOCUMENTS_HERE]"),
@@ -918,6 +1036,50 @@ mod tests {
             1,
             "payload inserted exactly once"
         );
+    }
+
+    #[test]
+    fn build_concept_extraction_prompt_for_limit_injects_the_limit() {
+        let prompt = build_concept_extraction_prompt_for_limit("body", 3);
+        assert!(
+            prompt.contains("up to 3 core concepts"),
+            "explicit limit must be injected"
+        );
+        assert!(
+            !prompt.contains(CONCEPT_COUNT_INSTRUCTION_PLACEHOLDER),
+            "count placeholder must be replaced"
+        );
+        assert!(!prompt.contains("[INSERT_DOCUMENTS_HERE]"));
+        assert!(prompt.contains("body"));
+    }
+
+    #[test]
+    fn build_concept_extraction_prompt_for_zero_limit_is_unbounded() {
+        let prompt = build_concept_extraction_prompt_for_limit("body", 0);
+        assert!(
+            prompt.contains("Identify every core concept"),
+            "zero limit must ask for every concept"
+        );
+        assert!(
+            !prompt.contains("up to 0 core concepts"),
+            "zero must not be rendered as a numeric cap"
+        );
+    }
+
+    #[test]
+    fn build_concept_extraction_prompt_uses_the_default_limit() {
+        let payload = ClusterPayload {
+            text: "payload".to_string(),
+            files: vec![],
+            total_bytes: 0,
+            max_bytes: 0,
+            truncated: false,
+        };
+        let prompt = build_concept_extraction_prompt(&payload);
+        assert!(prompt.contains(&format!(
+            "up to {} core concepts",
+            crate::limits::DEFAULT_MAX_CONCEPTS
+        )));
     }
 
     #[tokio::test]

@@ -4303,6 +4303,7 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                     format!("[{status_upper}] "),
                     Style::default().fg(line_color).add_modifier(Modifier::BOLD),
                 ),
+                Span::styled(format!("{} ", row.id), Style::default().fg(Color::DarkGray)),
                 Span::styled(row.title.clone(), Style::default().fg(line_color)),
             ];
 

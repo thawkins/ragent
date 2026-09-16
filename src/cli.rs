@@ -119,12 +119,23 @@ pub enum ResearchCommands {
         #[arg(long)]
         use_low_relevance: bool,
         /// Disable scholarly search engines (e.g. OpenAlex) during web gathering.
-        #[arg(long)]
+        ///
+        /// Canonical spelling is `--no-papers` (matching the TUI and docs);
+        /// `--no-scholarly` is kept as a backward-compatible alias (FR-005).
+        #[arg(long = "no-papers", visible_alias = "no-scholarly")]
         no_scholarly: bool,
         /// Allow PDF documents from web search or --from-url to be captured
         /// as sources. By default PDF web sources are skipped.
         #[arg(long)]
         use_pdf: bool,
+        /// Force open-access recovery on for this run. Overrides
+        /// `research.open_access_recovery` in ragent.json.
+        #[arg(long, overrides_with = "no_oa")]
+        oa_enable: bool,
+        /// Force open-access recovery off for this run, overriding
+        /// `research.open_access_recovery` in ragent.json.
+        #[arg(long, overrides_with = "oa_enable")]
+        no_oa: bool,
         /// Override the maximum number of local scoring/spec-scan tasks that run
         /// in parallel during the local-gathering phase (default 8).
         #[arg(long, value_name = "N")]
@@ -156,6 +167,16 @@ pub enum ResearchCommands {
         /// so far instead of failing. Omit for no cap.
         #[arg(long, value_name = "N")]
         max_search_calls: Option<usize>,
+        /// Maximum number of concepts rendered in the research report
+        /// (default 5, or `research.max_concepts` from ragent.json). `0` means
+        /// unbounded.
+        #[arg(long, value_name = "N")]
+        max_concepts: Option<usize>,
+        /// Maximum number of findings rendered in the research report
+        /// (default 20, or `research.max_findings` from ragent.json). `0`
+        /// means unbounded.
+        #[arg(long, value_name = "N")]
+        max_findings: Option<usize>,
         /// Deprecated no-op: clarification is off by default. Use --clarify
         /// to ask a single clarifying question for ambiguous topics.
         #[arg(long, overrides_with = "clarify")]
@@ -322,6 +343,8 @@ pub async fn handle_research_command(
             use_low_relevance,
             no_scholarly,
             use_pdf,
+            oa_enable,
+            no_oa,
             local_concurrently,
             fetch_timeout_secs,
             web_phase_timeout_secs,
@@ -329,6 +352,8 @@ pub async fn handle_research_command(
             search_max_retries,
             search_retry_base_delay_ms,
             max_search_calls,
+            max_concepts,
+            max_findings,
             no_clarify: _,
             clarify,
         } => {
@@ -365,6 +390,11 @@ pub async fn handle_research_command(
                 use_low_relevance,
                 no_papers: no_scholarly,
                 use_pdf,
+                oa_recovery: match (oa_enable, no_oa) {
+                    (true, _) => Some(true),
+                    (_, true) => Some(false),
+                    _ => None,
+                },
                 local_concurrency: local_concurrently,
                 fetch_timeout_secs,
                 web_phase_timeout_secs,
@@ -375,6 +405,8 @@ pub async fn handle_research_command(
                 max_web_results: None,
                 max_local_sources: None,
                 max_synthesis_sources: None,
+                max_concepts,
+                max_findings,
                 brief: None,
                 evaluate: false,
             }
@@ -966,6 +998,10 @@ pub async fn handle_research_command(
         ResearchCliCommand::Import { path, .. } => {
             println!("ragent-research: import '{path}' is not implemented in the CLI.");
         }
+        ResearchCliCommand::Invalid(arg) => {
+            eprintln!("ragent-research: {arg}. Try `ragent research help`.");
+            std::process::exit(2);
+        }
         ResearchCliCommand::Unknown(sub) => {
             eprintln!("ragent-research: unknown subcommand '{sub}'. Try `ragent research help`.");
             std::process::exit(2);
@@ -1262,5 +1298,168 @@ mod tests {
             } => assert_eq!(web_phase_timeout_secs, Some(120)),
             other => panic!("expected Create, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn oa_flags_parse_independently() {
+        // Neither flag leaves the per-run override unset.
+        let cli = TestCli::parse_from(["research", "create", "my-name", "my topic"]);
+        match cli.command {
+            ResearchCommands::Create {
+                oa_enable, no_oa, ..
+            } => {
+                assert!(!oa_enable);
+                assert!(!no_oa);
+            }
+            other => panic!("expected Create, got {other:?}"),
+        }
+
+        let cli = TestCli::parse_from(["research", "create", "--oa-enable", "my-name", "my topic"]);
+        match cli.command {
+            ResearchCommands::Create {
+                oa_enable, no_oa, ..
+            } => {
+                assert!(oa_enable);
+                assert!(!no_oa);
+            }
+            other => panic!("expected Create, got {other:?}"),
+        }
+
+        let cli = TestCli::parse_from(["research", "create", "--no-oa", "my-name", "my topic"]);
+        match cli.command {
+            ResearchCommands::Create {
+                oa_enable, no_oa, ..
+            } => {
+                assert!(!oa_enable);
+                assert!(no_oa);
+            }
+            other => panic!("expected Create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_papers_flag_and_legacy_alias_both_parse() {
+        // FR-005: `--no-papers` is the canonical spelling; `--no-scholarly`
+        // is a backward-compatible alias mapping to the same field.
+        let cli = TestCli::parse_from(["research", "create", "--no-papers", "my-name", "my topic"]);
+        match cli.command {
+            ResearchCommands::Create { no_scholarly, .. } => assert!(no_scholarly),
+            other => panic!("expected Create, got {other:?}"),
+        }
+
+        let cli = TestCli::parse_from([
+            "research",
+            "create",
+            "--no-scholarly",
+            "my-name",
+            "my topic",
+        ]);
+        match cli.command {
+            ResearchCommands::Create { no_scholarly, .. } => assert!(no_scholarly),
+            other => panic!("expected Create, got {other:?}"),
+        }
+
+        let cli = TestCli::parse_from(["research", "create", "my-name", "my topic"]);
+        match cli.command {
+            ResearchCommands::Create { no_scholarly, .. } => assert!(!no_scholarly),
+            other => panic!("expected Create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn output_limit_flags_parse_and_default_to_none() {
+        // FR-006 / FR-007: both limits are optional; omitting them leaves the
+        // decision to the config/default resolution downstream.
+        let cli = TestCli::parse_from(["research", "create", "my-name", "my topic"]);
+        match cli.command {
+            ResearchCommands::Create {
+                max_concepts,
+                max_findings,
+                ..
+            } => {
+                assert_eq!(max_concepts, None);
+                assert_eq!(max_findings, None);
+            }
+            other => panic!("expected Create, got {other:?}"),
+        }
+
+        let cli = TestCli::parse_from([
+            "research",
+            "create",
+            "--max-concepts",
+            "3",
+            "--max-findings",
+            "9",
+            "my-name",
+            "my topic",
+        ]);
+        match cli.command {
+            ResearchCommands::Create {
+                max_concepts,
+                max_findings,
+                ..
+            } => {
+                assert_eq!(max_concepts, Some(3));
+                assert_eq!(max_findings, Some(9));
+            }
+            other => panic!("expected Create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn output_limit_zero_is_preserved_as_unbounded() {
+        // FR-016: `0` is a meaningful "unbounded" sentinel, so it must parse
+        // as `Some(0)` rather than collapsing to `None`.
+        let cli = TestCli::parse_from([
+            "research",
+            "create",
+            "--max-concepts",
+            "0",
+            "--max-findings",
+            "0",
+            "my-name",
+            "my topic",
+        ]);
+        match cli.command {
+            ResearchCommands::Create {
+                max_concepts,
+                max_findings,
+                ..
+            } => {
+                assert_eq!(max_concepts, Some(0));
+                assert_eq!(max_findings, Some(0));
+            }
+            other => panic!("expected Create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn output_limit_rejects_non_numeric_value() {
+        // FR-019: a malformed value is rejected by clap rather than silently
+        // defaulting.
+        let err = TestCli::try_parse_from([
+            "research",
+            "create",
+            "--max-concepts",
+            "abc",
+            "my-name",
+            "my topic",
+        ])
+        .expect_err("non-numeric --max-concepts must be rejected");
+        assert!(
+            err.to_string().contains("max-concepts"),
+            "error should name the offending flag: {err}"
+        );
+    }
+
+    #[test]
+    fn output_limit_help_lists_both_flags() {
+        let mut command = <TestCli as clap::CommandFactory>::command();
+        let create = command
+            .find_subcommand_mut("create")
+            .expect("create subcommand exists");
+        let help = create.render_long_help().to_string();
+        assert!(help.contains("--max-concepts"), "{help}");
+        assert!(help.contains("--max-findings"), "{help}");
     }
 }

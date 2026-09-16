@@ -4,6 +4,29 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.105)
+
+- **Research output limits** — `/research create` caps its `## Concepts` and
+  `## Findings` lists at 5 and 20 by default, reordering most-relevant-first
+  before truncation. Set them per run with `--max-concepts N` /
+  `--max-findings N` (autocomplete and parameter hints updated; `0` =
+  unbounded) or persistently via `research.max_concepts` /
+  `research.max_findings`.
+- **Scholarly-engine exclusion** — `/research create --no-papers` (alias
+  `--no-scholarly`) excludes academically-classified backends (OpenAlex) before
+  any search request is dispatched; persist it with
+  `research.exclude_academic_engines`.
+- **Per-engine progress table detail** — the width-sweep table now shows *why*
+  candidates were dropped (five exclusion-reason columns) and *how* fetches
+  failed (seven failure-kind columns), with the totals row carrying the
+  breakdown.
+- **`/spec impl` task-range dependencies** — a Dependencies cell such as
+  `T-001–T-014` now expands into every spanned ID, so the final verification
+  task is scheduled last instead of first.
+- **Tasks panel and side panels** — the Alt+T tasks panel row now reads
+  `[STATUS] <id> title`, and every toggled side panel (Alt+M/T/P/O/C and the
+  log panel) takes 50% of the window width.
+
 ## Highlights (v1.0.103)
 
 - **Faster agent turns (M1 performance pass)** — the agent loop no longer

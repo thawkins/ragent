@@ -309,7 +309,9 @@ impl Tool for MfSearchTool {
                  individual engine returns before merge/dedup. Optional 'engine' restricts the \
                  search to a single backend (openalex, wikipedia, langsearch, \
                  tavily, perplexity, exa, serper); when omitted all configured engines run in parallel. \
-                 Each result carries relevance_score, fetch_relevance, and engines_consensus. \
+                  Optional 'exclude_engines' removes a set of named backends before any request \
+                  is dispatched (applied on top of 'engine' when both are given; unknown names are ignored). \
+                  Each result carries relevance_score, fetch_relevance, and engines_consensus. \
                  Engines that provide their own relevance score (e.g. OpenAlex) use it directly \
                  in ranking."
     }
@@ -350,6 +352,11 @@ impl Tool for MfSearchTool {
                 "engine": {
                     "type": "string",                      "enum": ["openalex", "wikipedia", "langsearch", "tavily", "perplexity", "exa", "serper"],
                     "description": "Restrict the search to a single backend. When omitted, all configured engines run in parallel"
+                },
+                "exclude_engines": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Engine names to exclude from the search. Applied before any request; excluded engines are never queried. Unknown names are ignored"
                 }
             },
             "required": ["query"],
@@ -429,13 +436,83 @@ impl Tool for MfSearchTool {
             orchestrator
         };
 
+        // Apply the `exclude_engines` parameter (FR-001, FR-007). Names that do
+        // not match a registered engine are ignored (FR-008).
+        let excluded: Vec<String> = input["exclude_engines"]
+            .as_array()
+            .map(|names| {
+                names
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .filter(|n| !n.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Capture the configured engine names before exclusion so the
+        // all-excluded result can report what was available (NFR-004).
+        let configured: Vec<String> = orchestrator
+            .engine_names()
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        let orchestrator = if excluded.is_empty() {
+            orchestrator
+        } else {
+            orchestrator.exclude_engines(&excluded)
+        };
+
+        // FR-014: if every configured engine was removed, dispatch no
+        // requests and return an explicit result rather than a silent
+        // zero-result success (NFR-004: reflected in logs and metadata).
+        if orchestrator.engine_count() == 0 {
+            tracing::warn!(
+                query = %query,
+                excluded = ?excluded,
+                "mf_search: all configured engines excluded; no search dispatched"
+            );
+            let content = format!(
+                "mf_search: \"{query}\"\nNo engines available: all {} configured \
+                 engine(s) were excluded by 'exclude_engines' ({}).\n",
+                configured.len(),
+                excluded.join(", "),
+            );
+            let metadata = json!({
+                "query": query,
+                "results": [],
+                "total_results": 0,
+                "total_raw_results": 0,
+                "engines_used": [],
+                "engine_blocked": [],
+                "engines_with_results": 0,
+                "total_engines": 0,
+                "configured_engines": configured,
+                "excluded_engines": excluded,
+                "cached": false,
+                "duration_ms": 0,
+                "related_queries": [],
+                "site": opts.site,
+                "exclude_sites": opts.exclude_sites,
+                "freshness": opts.freshness.to_string(),
+                "page": opts.page,
+                "error": "all engines excluded by exclude_engines",
+                "version": MASTERFETCH_VERSION,
+            });
+            return Ok(ToolOutput {
+                content,
+                metadata: Some(metadata),
+            });
+        }
+
         let output = orchestrator.search(query, &opts).await;
 
         // Format the text report.
         let content = format_search_report(&output.query, &output.merge, output.cached);
 
         // Build structured metadata (FR-009).
-        let metadata = build_search_metadata(&output);
+        let metadata = build_search_metadata(&output, &excluded);
 
         Ok(ToolOutput { content, metadata })
     }
@@ -519,7 +596,14 @@ fn format_search_report(query: &str, merge: &MergeOutput, cached: bool) -> Strin
 /// `{title, url, snippet, source, position, relevance_score,
 /// fetch_relevance, engines_consensus}`), `total_results`, `engines_used`,
 /// `engine_blocked`, `cached`, `duration_ms`, `related_queries`, `error`.
-fn build_search_metadata(output: &super::super::search::SearchOutput) -> Option<Value> {
+///
+/// `excluded_engines` carries the names removed by the `exclude_engines`
+/// parameter (empty when none) so operators can confirm what was skipped and
+/// why (NFR-004).
+fn build_search_metadata(
+    output: &super::super::search::SearchOutput,
+    excluded_engines: &[String],
+) -> Option<Value> {
     let results: Vec<Value> = output
         .merge
         .results
@@ -551,6 +635,7 @@ fn build_search_metadata(output: &super::super::search::SearchOutput) -> Option<
         "engine_blocked": output.merge.blocked_engines,
         "engines_with_results": output.merge.engines_with_results,
         "total_engines": output.merge.total_engines,
+        "excluded_engines": excluded_engines,
         "cached": output.cached,
         "duration_ms": output.duration_ms,
         "related_queries": output.merge.related_queries,

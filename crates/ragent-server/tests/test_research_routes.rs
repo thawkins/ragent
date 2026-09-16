@@ -378,6 +378,32 @@ async fn test_research_post_returns_202_with_location() {
 }
 
 #[tokio::test]
+async fn test_research_post_accepts_output_limit_fields() {
+    // researchmax FR-012: the new `max_concepts` / `max_findings` JSON fields
+    // must be accepted (not rejected as unknown) so a POST carrying them starts
+    // a run.
+    let _guard = FS_LOCK.lock().await;
+    let name = test_name();
+    let body =
+        format!(r#"{{"name":"{name}","topic":"test topic","max_concepts":2,"max_findings":3}}"#);
+    let app = router(test_state("tok"));
+    let resp = app
+        .oneshot(auth_post("tok", "/research", &body))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+    let body = body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(parsed["name"], name);
+    assert_eq!(parsed["status"], "accepted");
+
+    // Clean up — the background run may fail (no LLM), but the item exists.
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    delete_test_item(&name).await;
+}
+
+#[tokio::test]
 async fn test_research_post_duplicate_returns_conflict() {
     let _guard = FS_LOCK.lock().await;
     let name = test_name();
@@ -489,6 +515,34 @@ async fn test_research_update_accepts_recorded_invocation() {
 
     // Clean up — the background replay may fail (no LLM), but the item
     // exists on disk and the run registry must drain.
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    delete_test_item(&name).await;
+}
+
+#[tokio::test]
+async fn test_research_update_replays_recorded_output_limits() {
+    // researchmax FR-013: a recorded HTTP summary carrying the output-limit
+    // flags must replay through `from_invocation` (the run is accepted rather
+    // than rejected as unparseable).
+    let _guard = FS_LOCK.lock().await;
+    let name = test_name();
+    create_test_item_with_invocation(
+        &name,
+        &format!("POST /research {name} \"replay topic\" --max-concepts 2 --max-findings 3"),
+    )
+    .await;
+
+    let app = router(test_state("tok"));
+    let resp = app
+        .oneshot(auth_put("tok", &format!("/research/{name}")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+    let body = body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(parsed["status"], "accepted");
+
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     delete_test_item(&name).await;
 }

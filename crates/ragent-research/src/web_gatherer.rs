@@ -37,6 +37,9 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt;
 
 use ragent_tools_extended::masterfetch::language::detect_language_best_effort;
+use ragent_tools_extended::masterfetch::search::{
+    ACADEMIC_ENGINES, ENGINE_OPENALEX, ENGINE_WIKIPEDIA,
+};
 
 use crate::document::{MAX_SOURCE_BODY_BYTES, fence_source_body, truncate_body_to_bytes};
 use crate::gather_log::GatherLog;
@@ -185,7 +188,7 @@ fn is_sole_engine_hit(hit: &WebSearchHit, engine: &str) -> bool {
 /// research sub-query. Scholarly hits are therefore exempt from the lexical
 /// filter and from the URL fetch — their snippet is the evidence.
 fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
-    is_sole_engine_hit(hit, "openalex")
+    is_sole_engine_hit(hit, ENGINE_OPENALEX)
 }
 
 /// Returns `true` for encyclopedia search-engine hits that carry a page
@@ -201,7 +204,7 @@ fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
 /// and from the URL fetch — their snippet (the REST API page summary) is the
 /// evidence.
 fn is_encyclopedia_hit(hit: &WebSearchHit) -> bool {
-    is_sole_engine_hit(hit, "wikipedia")
+    is_sole_engine_hit(hit, ENGINE_WIKIPEDIA)
 }
 
 /// Collect the sorted, de-duplicated set of contributing search engines from
@@ -360,7 +363,144 @@ pub struct EngineSweepStat {
     /// URLs credited to this engine that were rejected by a gather filter or
     /// a fetch failure/timeout.
     pub excluded: usize,
+    /// Breakdown of `excluded` by reason; the counts sum to `excluded` for
+    /// this engine.
+    pub excluded_by_reason: std::collections::BTreeMap<ExclusionReason, usize>,
+    /// Breakdown of the `ExclusionReason::FetchFailed` bucket by fine-grained
+    /// fetch-failure cause; the counts sum to this engine's `fetch` reason
+    /// count.
+    pub failed_by_kind: std::collections::BTreeMap<FetchFailureKind, usize>,
 }
+
+/// Why a considered web candidate was excluded (T-006 progress table).
+///
+/// The variants group the individual gather-filter messages into the
+/// categories shown as columns of the per-engine summary table, so the
+/// progress detail reports *why* candidates were dropped rather than only how
+/// many.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExclusionReason {
+    /// Scholarly engine (e.g. OpenAlex) filtered out by `--no-papers`.
+    ScholarlyEngine,
+    /// PDF web source skipped because `--use-pdf` is off.
+    PdfDisabled,
+    /// Pre-fetch title/snippet or post-fetch relevance below the threshold.
+    LowRelevance,
+    /// Extracted content shorter than the minimum usable length.
+    ContentTooShort,
+    /// Page fetch failed or timed out.
+    FetchFailed,
+}
+
+impl ExclusionReason {
+    /// Every reason, in the column order used by the progress table.
+    pub const ALL: [Self; 5] = [
+        Self::ScholarlyEngine,
+        Self::PdfDisabled,
+        Self::LowRelevance,
+        Self::ContentTooShort,
+        Self::FetchFailed,
+    ];
+
+    /// Short fixed-width column label for the progress table header.
+    #[must_use]
+    pub const fn short_label(self) -> &'static str {
+        match self {
+            Self::ScholarlyEngine => "papers",
+            Self::PdfDisabled => "pdf",
+            Self::LowRelevance => "relev",
+            Self::ContentTooShort => "short",
+            Self::FetchFailed => "fetch",
+        }
+    }
+}
+
+/// Fine-grained cause of a page fetch failure (T-006 progress table).
+///
+/// Splits the single [`ExclusionReason::FetchFailed`] bucket into the distinct
+/// ways a fetch can fail, so the per-engine summary reports *why* the network
+/// stage dropped a candidate rather than only that it did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FetchFailureKind {
+    /// The per-fetch wall-clock timeout elapsed.
+    Timeout,
+    /// Transport/HTTP-layer error with no more specific classification.
+    Network,
+    /// The URL was rejected before any request (SSRF guard or robots.txt).
+    SecurityBlocked,
+    /// The server answered with an error status.
+    HttpStatus,
+    /// The page required authentication or was paywalled.
+    AuthWall,
+    /// The page was a JavaScript shell with no usable static content.
+    JsShell,
+    /// Content was retrieved but extraction failed (readability, empty PDF,
+    /// missing transcript, or a body below the minimum length).
+    Extraction,
+}
+
+impl FetchFailureKind {
+    /// Every kind, in the column order used by the progress table.
+    pub const ALL: [Self; 7] = [
+        Self::Timeout,
+        Self::Network,
+        Self::SecurityBlocked,
+        Self::HttpStatus,
+        Self::AuthWall,
+        Self::JsShell,
+        Self::Extraction,
+    ];
+
+    /// Short fixed-width column label for the progress table header.
+    #[must_use]
+    pub const fn short_label(self) -> &'static str {
+        match self {
+            Self::Timeout => "t/o",
+            Self::Network => "net",
+            Self::SecurityBlocked => "blk",
+            Self::HttpStatus => "http",
+            Self::AuthWall => "wall",
+            Self::JsShell => "js",
+            Self::Extraction => "extr",
+        }
+    }
+}
+
+/// Typed fetch-failure cause attached to a fetch error so the gatherer can
+/// classify it without parsing the message.
+///
+/// Fetch adapters return this (boxed through `anyhow`) in place of a bare
+/// string; the gatherer downcasts to it and falls back to
+/// [`FetchFailureKind::Network`] for untyped errors, so in-memory test doubles
+/// that return plain `anyhow` errors keep working unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchFailure {
+    /// Fine-grained cause of the failure.
+    pub kind: FetchFailureKind,
+    /// Human-readable detail (surfaced in events and the gather log).
+    pub detail: String,
+}
+
+impl FetchFailure {
+    /// Build a failure with `kind` and a human-readable `detail`.
+    #[must_use]
+    pub fn new(kind: FetchFailureKind, detail: impl Into<String>) -> Self {
+        Self {
+            kind,
+            detail: detail.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for FetchFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for FetchFailure {}
 
 /// Credit one URL outcome to every engine listed in a comma-separated engine
 /// CSV (consensus hits credit each contributing engine, so per-engine sums
@@ -382,9 +522,115 @@ fn bump_engine_stats(
                 considered: 0,
                 captured: 0,
                 excluded: 0,
+                excluded_by_reason: std::collections::BTreeMap::new(),
+                failed_by_kind: std::collections::BTreeMap::new(),
             });
         update(entry);
     }
+}
+
+/// Credit one excluded URL to every engine listed in a comma-separated engine
+/// CSV, incrementing each engine's `excluded` total, its per-reason bucket, and
+/// the global per-reason tally. Keeps every count in lockstep at each
+/// exclusion site so the progress table always balances.
+fn bump_engine_exclusions(
+    stats: &mut std::collections::BTreeMap<String, EngineSweepStat>,
+    global_by_reason: &mut std::collections::BTreeMap<ExclusionReason, usize>,
+    engines_csv: &str,
+    reason: ExclusionReason,
+) {
+    bump_engine_stats(stats, engines_csv, |s| {
+        s.excluded += 1;
+        *s.excluded_by_reason.entry(reason).or_insert(0) += 1;
+    });
+    *global_by_reason.entry(reason).or_insert(0) += 1;
+}
+
+/// Credit one fetch failure to every engine listed in a comma-separated engine
+/// CSV, alongside the [`ExclusionReason::FetchFailed`] exclusion itself.
+///
+/// `global_by_kind` tallies the cause once per failed candidate URL (one URL has
+/// one cause), while each engine's `failed_by_kind` repeats the cause for every
+/// engine credited with the hit, matching the consensus-crediting convention of
+/// [`bump_engine_exclusions`].
+fn bump_engine_fetch_failure(
+    stats: &mut std::collections::BTreeMap<String, EngineSweepStat>,
+    global_by_reason: &mut std::collections::BTreeMap<ExclusionReason, usize>,
+    global_by_kind: &mut std::collections::BTreeMap<FetchFailureKind, usize>,
+    engines_csv: &str,
+    kind: FetchFailureKind,
+) {
+    bump_engine_exclusions(
+        stats,
+        global_by_reason,
+        engines_csv,
+        ExclusionReason::FetchFailed,
+    );
+    bump_engine_stats(stats, engines_csv, |s| {
+        *s.failed_by_kind.entry(kind).or_insert(0) += 1;
+    });
+    *global_by_kind.entry(kind).or_insert(0) += 1;
+}
+
+/// Extract the fine-grained failure cause from a fetch error.
+///
+/// Returns the [`FetchFailure::kind`] when the adapter attached a typed
+/// [`FetchFailure`] (downcast through the `anyhow` chain), otherwise
+/// classifies the message text so the common HTTP-status and
+/// walled-page cases still land in the right column. Falls back to
+/// [`FetchFailureKind::Network`] for unclassified errors.
+fn classify_fetch_failure(err: &anyhow::Error) -> FetchFailureKind {
+    if let Some(failure) = err.downcast_ref::<FetchFailure>() {
+        return failure.kind;
+    }
+    classify_fetch_message(&err.to_string())
+}
+
+/// Heuristic classification of a fetch-error message string.
+///
+/// Used when the fetch adapter did not return a typed [`FetchFailure`] (e.g. a
+/// test double or the legacy `webfetch` path). Order matters: the walled-page
+/// and HTTP-status signals are checked before the generic network fallback.
+fn classify_fetch_message(message: &str) -> FetchFailureKind {
+    let m = message.to_ascii_lowercase();
+    if m.contains("timed out") || m.contains("timeout") || m.contains("elapsed") {
+        return FetchFailureKind::Timeout;
+    }
+    if m.contains("paywall") {
+        return FetchFailureKind::AuthWall;
+    }
+    if m.contains("auth_wall") || m.contains("requires login") || m.contains("authentication") {
+        return FetchFailureKind::AuthWall;
+    }
+    if m.contains("js_shell") || m.contains("javascript-rendered") {
+        return FetchFailureKind::JsShell;
+    }
+    if m.contains("ssrf") || m.contains("robots.txt") {
+        return FetchFailureKind::SecurityBlocked;
+    }
+    if m.contains("readability") || m.contains("content_ok = false") {
+        return FetchFailureKind::Extraction;
+    }
+    if let Some(status) = extract_http_status(&m)
+        && status >= 400
+    {
+        return FetchFailureKind::HttpStatus;
+    }
+    FetchFailureKind::Network
+}
+
+/// Find a 3-digit HTTP status code in a lowercased error message, preferring
+/// the first occurrence (e.g. `"http status 404"`).
+fn extract_http_status(message: &str) -> Option<u16> {
+    for token in message.split(|c: char| !c.is_ascii_digit()) {
+        if token.len() == 3
+            && let Ok(code) = token.parse::<u16>()
+            && (100..=599).contains(&code)
+        {
+            return Some(code);
+        }
+    }
+    None
 }
 
 /// Search-result row returned by a [`WebSearchTool`].
@@ -455,7 +701,33 @@ pub struct WebFetchedPage {
 #[async_trait]
 pub trait WebSearchTool: Send + Sync {
     /// Run a web search for `query` and return up to `max_results` hits.
+    ///
+    /// This is the base search without engine steering. Callers that need to
+    /// skip specific engines should use
+    /// [`WebSearchTool::search_with_exclusions`] instead.
     async fn search(&self, query: &str, max_results: usize) -> anyhow::Result<Vec<WebSearchHit>>;
+
+    /// Run a web search for `query` while excluding the named engines.
+    ///
+    /// `exclude_engines` carries engine names drawn from the `mf_search`
+    /// engine vocabulary (e.g. `"openalex"`, `"wikipedia"`) that must **not**
+    /// be queried. The default implementation ignores the exclusions and
+    /// delegates to [`WebSearchTool::search`], so implementations that cannot
+    /// steer engine selection (and in-memory test doubles) keep working
+    /// unchanged.
+    ///
+    /// Production implementations translate the names into `mf_search`'s
+    /// `exclude_engines` parameter, so an excluded engine is never queried and
+    /// consumes no search budget (FR-004, FR-006). Unknown names are ignored.
+    async fn search_with_exclusions(
+        &self,
+        query: &str,
+        max_results: usize,
+        exclude_engines: &[&str],
+    ) -> anyhow::Result<Vec<WebSearchHit>> {
+        let _ = exclude_engines;
+        self.search(query, max_results).await
+    }
 }
 
 /// Trait abstracting the existing `webfetch` tool.
@@ -596,6 +868,14 @@ pub enum GatherEvent {
         /// Consensus hits credit every engine in the source CSV, so
         /// per-engine sums may exceed the global unique-URL counts.
         per_engine: Vec<EngineSweepStat>,
+        /// Global exclusion tally by reason, summing to `excluded` (one entry
+        /// per excluded candidate URL, independent of consensus crediting).
+        /// Drives the reason columns on the summary totals row.
+        excluded_by_reason: std::collections::BTreeMap<ExclusionReason, usize>,
+        /// Global fetch-failure tally by fine-grained cause, summing to the
+        /// global `ExclusionReason::FetchFailed` count (one entry per failed
+        /// candidate URL). Drives the fetch-failure columns on the totals row.
+        failed_by_kind: std::collections::BTreeMap<FetchFailureKind, usize>,
         /// Unique URLs that passed pre-filtering but were dropped because the
         /// fetch budget (competitive runs only: the volume cap scaled by the
         /// sub-query count) was already full. Always 0 on uncapped runs.
@@ -1669,6 +1949,23 @@ impl WebGatherer {
         let search_budget = self.search_budget.clone();
         let query_cache = self.query_cache.clone();
         let provider_stats = self.provider_stats.clone();
+        // T-008 (FR-006, FR-010, NFR-001): when `--no-papers` is active, steer
+        // the search tool away from every academically-classified engine
+        // (OpenAlex) *before* any request is dispatched, so no search budget or
+        // metered backend call is spent on them. The names come from the single
+        // authoritative vocabulary in `masterfetch::search` (FR-003). The
+        // hit-level scholarly filter in the capture loop below is kept as
+        // defence in depth for tools that cannot steer engine selection
+        // (FR-015) — and to guarantee non-academic engines still run untouched.
+        let exclude_engines: Vec<&str> = if self.disable_scholarly {
+            tracing::info!(
+                engines = ?ACADEMIC_ENGINES,
+                "research: --no-papers excludes academic search engines from this sweep"
+            );
+            ACADEMIC_ENGINES.to_vec()
+        } else {
+            Vec::new()
+        };
         let search_futures: Vec<_> = queries
             .iter()
             .map(|q| {
@@ -1677,6 +1974,7 @@ impl WebGatherer {
                 let budget = search_budget.clone();
                 let cache = query_cache.clone();
                 let stats = provider_stats.clone();
+                let exclude = exclude_engines.clone();
                 async move {
                     // Run-scoped search budget: reserve one call before any
                     // provider request. Exhaustion skips the search entirely.
@@ -1686,9 +1984,17 @@ impl WebGatherer {
                         return SearchCallOutcome::BudgetExhausted;
                     }
                     // Shared query cache: an identical query already answered
-                    // this run is served without a provider call.
+                    // this run is served without a provider call. The exclusion
+                    // set is folded into the cache key so a `--no-papers` result
+                    // can never satisfy a later unfiltered query (or vice versa)
+                    // within the same run.
+                    let cache_key = if exclude.is_empty() {
+                        q.clone()
+                    } else {
+                        format!("{q}\u{1f}exclude={}", exclude.join(","))
+                    };
                     if let Some(cache) = &cache
-                        && let Some(hits) = cache.get(&q)
+                        && let Some(hits) = cache.get(&cache_key)
                     {
                         return SearchCallOutcome::Ok { hits };
                     }
@@ -1696,7 +2002,13 @@ impl WebGatherer {
                     let mut attempt: u32 = 0;
                     let mut last_error;
                     loop {
-                        match tool.search(&q, per_query_allowance).await {
+                        let search_result = if exclude.is_empty() {
+                            tool.search(&q, per_query_allowance).await
+                        } else {
+                            tool.search_with_exclusions(&q, per_query_allowance, &exclude)
+                                .await
+                        };
+                        match search_result {
                             Ok(hits) => {
                                 // Record one logical search call (retries
                                 // included) and memoise the result.
@@ -1708,7 +2020,7 @@ impl WebGatherer {
                                 // a deep clone of every hit.
                                 let hits: Arc<[WebSearchHit]> = hits.into();
                                 if let Some(cache) = &cache {
-                                    cache.insert(&q, Arc::clone(&hits));
+                                    cache.insert(&cache_key, Arc::clone(&hits));
                                 }
                                 return SearchCallOutcome::Ok { hits };
                             }
@@ -1766,6 +2078,16 @@ impl WebGatherer {
         // task itself (search loop + fetch dispatch loop), so a plain map
         // needs no locking.
         let mut per_engine: std::collections::BTreeMap<String, EngineSweepStat> =
+            std::collections::BTreeMap::new();
+        // Global per-reason exclusion tally for the summary totals row. Kept
+        // alongside the per-engine breakdown so the totals row reports the
+        // same reasons even when consensus crediting inflates engine sums.
+        let mut excluded_by_reason: std::collections::BTreeMap<ExclusionReason, usize> =
+            std::collections::BTreeMap::new();
+        // Global fetch-failure tally by fine-grained cause, so the `fetch`
+        // reason column on the totals row breaks down into the individual
+        // fetch failure modes.
+        let mut failed_by_kind: std::collections::BTreeMap<FetchFailureKind, usize> =
             std::collections::BTreeMap::new();
         let log_rejected = |url: &str,
                             query: &str,
@@ -1851,9 +2173,12 @@ impl WebGatherer {
                         // Filter out scholarly hits when --no-papers is set.
                         if self.disable_scholarly && is_scholarly {
                             excluded_count += 1;
-                            bump_engine_stats(&mut per_engine, &hit.search_engine, |s| {
-                                s.excluded += 1
-                            });
+                            bump_engine_exclusions(
+                                &mut per_engine,
+                                &mut excluded_by_reason,
+                                &hit.search_engine,
+                                ExclusionReason::ScholarlyEngine,
+                            );
                             let reason = "scholarly engine excluded by --no-papers";
                             tracing::info!(
                                 query = %query,
@@ -1876,9 +2201,12 @@ impl WebGatherer {
                             && classify_web_source(&hit.url, None) == WebSourceKind::Pdf
                         {
                             excluded_count += 1;
-                            bump_engine_stats(&mut per_engine, &hit.search_engine, |s| {
-                                s.excluded += 1
-                            });
+                            bump_engine_exclusions(
+                                &mut per_engine,
+                                &mut excluded_by_reason,
+                                &hit.search_engine,
+                                ExclusionReason::PdfDisabled,
+                            );
                             let reason = "PDF web source excluded; use --use-pdf to enable";
                             tracing::info!(
                                 query = %query,
@@ -1949,9 +2277,12 @@ impl WebGatherer {
                             hits_by_url.push((Arc::clone(&query), hit));
                         } else {
                             excluded_count += 1;
-                            bump_engine_stats(&mut per_engine, &hit.search_engine, |s| {
-                                s.excluded += 1
-                            });
+                            bump_engine_exclusions(
+                                &mut per_engine,
+                                &mut excluded_by_reason,
+                                &hit.search_engine,
+                                ExclusionReason::LowRelevance,
+                            );
                             let reason =
                                 format!("title/snippet relevance too low for query {query}");
                             tracing::info!(
@@ -2053,6 +2384,8 @@ impl WebGatherer {
                             "considered": considered_count,
                             "captured": 0,
                             "rejected": excluded_count,
+                            "excluded_by_reason": excluded_by_reason.clone(),
+                            "failed_by_kind": failed_by_kind.clone(),
                         }))
             {
                 tracing::warn!(error = %e, "research: failed to write gather summary to web URL log");
@@ -2065,6 +2398,8 @@ impl WebGatherer {
                     captured: 0,
                     excluded: excluded_count,
                     per_engine: Vec::new(),
+                    excluded_by_reason,
+                    failed_by_kind,
                     capped: 0,
                     cancelled: 0,
                 });
@@ -2220,7 +2555,12 @@ impl WebGatherer {
                     };
                     if !retained && !self.keep_low_relevance {
                         excluded_count += 1;
-                        bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.excluded += 1);
+                        bump_engine_exclusions(
+                            &mut per_engine,
+                            &mut excluded_by_reason,
+                            &hit.search_engine,
+                            ExclusionReason::LowRelevance,
+                        );
                         tracing::info!(
                             query = %query,
                             url = %page.url,
@@ -2353,7 +2693,12 @@ impl WebGatherer {
                     };
                     if content_chars < min_chars {
                         excluded_count += 1;
-                        bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.excluded += 1);
+                        bump_engine_exclusions(
+                            &mut per_engine,
+                            &mut excluded_by_reason,
+                            &hit.search_engine,
+                            ExclusionReason::ContentTooShort,
+                        );
                         let error = if scholarly {
                             format!(
                                 "scholarly abstract too short ({content_chars} < {min_chars} chars)"
@@ -2521,7 +2866,13 @@ impl WebGatherer {
                         "research: webfetch failed; skipping"
                     );
                     excluded_count += 1;
-                    bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.excluded += 1);
+                    bump_engine_fetch_failure(
+                        &mut per_engine,
+                        &mut excluded_by_reason,
+                        &mut failed_by_kind,
+                        &hit.search_engine,
+                        classify_fetch_failure(&e),
+                    );
                     log_rejected(
                         &hit.url,
                         &query,
@@ -2547,7 +2898,13 @@ impl WebGatherer {
                         "research: webfetch timed out; skipping"
                     );
                     excluded_count += 1;
-                    bump_engine_stats(&mut per_engine, &hit.search_engine, |s| s.excluded += 1);
+                    bump_engine_fetch_failure(
+                        &mut per_engine,
+                        &mut excluded_by_reason,
+                        &mut failed_by_kind,
+                        &hit.search_engine,
+                        FetchFailureKind::Timeout,
+                    );
                     log_rejected(
                         &hit.url,
                         &query,
@@ -2618,6 +2975,8 @@ impl WebGatherer {
                         "capped": capped_count,
                         "cancelled": cancelled_count,
                         "per_engine": per_engine_stats,
+                        "excluded_by_reason": excluded_by_reason.clone(),
+                        "failed_by_kind": failed_by_kind.clone(),
                     }))
         {
             tracing::warn!(error = %e, "research: failed to write gather summary to web URL log");
@@ -2630,6 +2989,8 @@ impl WebGatherer {
                 captured: sources.len(),
                 excluded: excluded_count,
                 per_engine: per_engine_stats,
+                excluded_by_reason,
+                failed_by_kind,
                 capped: capped_count,
                 cancelled: cancelled_count,
             });
@@ -2756,11 +3117,14 @@ mod tests {
     }
 
     /// In-memory `WebFetchTool` for tests. Each URL maps to an optional
-    /// `WebFetchedPage`; missing URLs produce an error.
+    /// `WebFetchedPage`; missing URLs produce an error. URLs listed in
+    /// `fail_urls` fail with an untyped (network-classified) error; URLs in
+    /// `fail_kinds` fail with a typed [`FetchFailure`] carrying the given cause.
     #[derive(Default)]
     struct FakeFetch {
         pages: std::collections::HashMap<String, WebFetchedPage>,
         fail_urls: Vec<String>,
+        fail_kinds: std::collections::HashMap<String, FetchFailureKind>,
         calls: Mutex<Vec<String>>,
     }
 
@@ -2768,6 +3132,11 @@ mod tests {
     impl WebFetchTool for FakeFetch {
         async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
             self.calls.lock().unwrap().push(url.to_string());
+            if let Some(kind) = self.fail_kinds.get(url) {
+                return Err(
+                    FetchFailure::new(*kind, format!("simulated fetch failure for {url}")).into(),
+                );
+            }
             if self.fail_urls.iter().any(|u| u == url) {
                 anyhow::bail!("simulated fetch failure for {url}");
             }
@@ -2813,6 +3182,7 @@ mod tests {
             pages,
             fail_urls,
             calls: Mutex::new(Vec::new()),
+            ..Default::default()
         });
         let g = WebGatherer::new(search.clone(), fetch.clone());
         (g, search, fetch)
@@ -4501,6 +4871,7 @@ mod tests {
             pages,
             fail_urls: Vec::new(),
             calls: Mutex::new(Vec::new()),
+            ..Default::default()
         });
         let g = WebGatherer::new(search, fetch)
             .with_search_max_retries(3)
@@ -4858,6 +5229,7 @@ mod tests {
                 pages,
                 fail_urls: Vec::new(),
                 calls: Mutex::new(Vec::new()),
+                ..Default::default()
             }),
         );
         let g = WebGatherer::new(search.clone(), fetch.clone()).with_vault(Arc::new(vault));
@@ -4985,6 +5357,7 @@ mod tests {
                 pages,
                 fail_urls: Vec::new(),
                 calls: Mutex::new(Vec::new()),
+                ..Default::default()
             }),
         );
         let g = WebGatherer::new(search.clone(), fetch.clone())
@@ -5131,6 +5504,7 @@ mod tests {
                 pages,
                 fail_urls: Vec::new(),
                 calls: Mutex::new(Vec::new()),
+                ..Default::default()
             }),
         );
         let summarizer: Arc<dyn crate::page_summarizer::PageSummarizer> = Arc::new(FakeSummarizer);
@@ -5236,6 +5610,7 @@ mod tests {
             pages,
             fail_urls: Vec::new(),
             calls: Mutex::new(Vec::new()),
+            ..Default::default()
         });
         let oa_client = Arc::new(FakeOaClient {
             recovered_url: "https://oa.example.com/full.pdf".into(),
@@ -5296,6 +5671,7 @@ mod tests {
             pages,
             fail_urls: Vec::new(),
             calls: Mutex::new(Vec::new()),
+            ..Default::default()
         });
         let oa_client = Arc::new(FakeOaClient {
             recovered_url: "https://oa.example.com/full.pdf".into(),
@@ -5348,6 +5724,7 @@ mod tests {
             pages,
             fail_urls: Vec::new(),
             calls: Mutex::new(Vec::new()),
+            ..Default::default()
         });
         let oa_client = Arc::new(FakeOaClient {
             recovered_url: "https://oa.example.com/full.pdf".into(),
@@ -5562,6 +5939,7 @@ mod tests {
             per_engine,
             capped,
             cancelled,
+            ..
         }) = summary
         {
             assert_eq!(queries, &["Rust async runtime".to_string()]);
@@ -5680,6 +6058,7 @@ mod tests {
             captured,
             excluded,
             per_engine,
+            excluded_by_reason,
             capped,
             cancelled,
             ..
@@ -5708,7 +6087,167 @@ mod tests {
         // tavily: consensus CSV credit for the shared captured page.
         assert_eq!(by_engine.get("tavily"), Some(&(1, 1, 0)));
         assert_eq!(by_engine.get("openalex"), Some(&(1, 1, 0)));
+        // Reason breakdown: one PDF-disabled and one low-relevance exclusion,
+        // both credited to langsearch, each also tallied globally.
+        let langsearch = per_engine
+            .iter()
+            .find(|s| s.engine == "langsearch")
+            .expect("langsearch row");
+        assert_eq!(
+            langsearch
+                .excluded_by_reason
+                .get(&ExclusionReason::PdfDisabled)
+                .copied(),
+            Some(1)
+        );
+        assert_eq!(
+            langsearch
+                .excluded_by_reason
+                .get(&ExclusionReason::LowRelevance)
+                .copied(),
+            Some(1)
+        );
+        assert_eq!(
+            excluded_by_reason
+                .get(&ExclusionReason::PdfDisabled)
+                .copied(),
+            Some(1)
+        );
+        assert_eq!(
+            excluded_by_reason
+                .get(&ExclusionReason::LowRelevance)
+                .copied(),
+            Some(1)
+        );
+        assert_eq!(
+            excluded_by_reason.values().sum::<usize>(),
+            *excluded,
+            "global reason tally must sum to excluded"
+        );
         assert_eq!(by_engine.get("wikipedia"), Some(&(1, 1, 0)));
+    }
+
+    /// T-006: the per-engine summary breaks the `fetch` exclusion count down by
+    /// fine-grained failure cause. A fetch that returns a typed [`FetchFailure`]
+    /// lands in its exact kind column; an untyped error falls back to `net`.
+    #[tokio::test]
+    async fn width_sweep_summary_breaks_fetch_failures_down_by_cause() {
+        let hits = vec![
+            WebSearchHit {
+                url: "https://blocked.example".into(),
+                title: "Blocked".into(),
+                snippet: "topic Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "langsearch".into(),
+                author: None,
+            },
+            WebSearchHit {
+                url: "https://plain-error.example".into(),
+                title: "Plain error".into(),
+                snippet: "topic Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "langsearch".into(),
+                author: None,
+            },
+        ];
+        let mut fetch = FakeFetch {
+            fail_kinds: std::iter::once((
+                "https://blocked.example".to_string(),
+                FetchFailureKind::SecurityBlocked,
+            ))
+            .collect(),
+            ..Default::default()
+        };
+        // The second URL fails with an untyped error, so it is classified as a
+        // generic network failure.
+        fetch
+            .fail_urls
+            .push("https://plain-error.example".to_string());
+        let search = Arc::new(FakeSearch {
+            hits,
+            calls: Mutex::new(Vec::new()),
+        });
+        let g = WebGatherer::new(search, Arc::new(fetch));
+
+        #[derive(Default)]
+        struct CollectEvents(Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        let obs = CollectEvents::default();
+        let result = g
+            .gather_with_observer("Rust async runtime", 10, Some(&obs))
+            .await
+            .unwrap();
+        assert_eq!(result.sources.len(), 0);
+        assert_eq!(result.excluded_count, 2);
+
+        let events = obs.0.lock().unwrap();
+        let summary = events.iter().find(
+            |e| matches!(e, GatherEvent::WidthSweepSummary { engines, .. } if !engines.is_empty()),
+        );
+        let Some(GatherEvent::WidthSweepSummary {
+            per_engine,
+            excluded_by_reason,
+            failed_by_kind,
+            ..
+        }) = summary
+        else {
+            panic!("expected WidthSweepSummary event, got {events:?}");
+        };
+        // Both failures are counted as `fetch` exclusions.
+        assert_eq!(
+            excluded_by_reason
+                .get(&ExclusionReason::FetchFailed)
+                .copied(),
+            Some(2)
+        );
+        assert_eq!(
+            failed_by_kind
+                .get(&FetchFailureKind::SecurityBlocked)
+                .copied(),
+            Some(1)
+        );
+        assert_eq!(
+            failed_by_kind.get(&FetchFailureKind::Network).copied(),
+            Some(1)
+        );
+        assert_eq!(
+            failed_by_kind.values().sum::<usize>(),
+            2,
+            "fetch-failure kinds must sum to the global fetch exclusion count"
+        );
+        let langsearch = per_engine
+            .iter()
+            .find(|s| s.engine == "langsearch")
+            .expect("langsearch row");
+        assert_eq!(
+            langsearch
+                .failed_by_kind
+                .get(&FetchFailureKind::SecurityBlocked)
+                .copied(),
+            Some(1)
+        );
+        assert_eq!(
+            langsearch
+                .failed_by_kind
+                .get(&FetchFailureKind::Network)
+                .copied(),
+            Some(1)
+        );
+        assert_eq!(
+            langsearch.failed_by_kind.values().sum::<usize>(),
+            langsearch
+                .excluded_by_reason
+                .get(&ExclusionReason::FetchFailed)
+                .copied()
+                .unwrap_or(0),
+            "per-engine fetch-failure kinds must sum to that engine's fetch count"
+        );
     }
 
     /// T-006: on a capped (competitive) run, hits beyond the fetch budget

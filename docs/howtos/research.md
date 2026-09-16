@@ -177,7 +177,9 @@ Run a research session and write `RESEARCH.md`. This is the primary command.
   [--web-time N] [--web-phase-timeout-secs N] [--local-phase-timeout-secs N]
   [--search-max-retries N] [--search-retry-base-delay-ms N]
   [--max-web-results N] [--max-search-calls N]
+  [--max-concepts N] [--max-findings N]
   [--use-local] [--use-specs] [--use-low-relevance] [--no-papers] [--use-pdf]
+  [--oa-enable] [--no-oa]
 ```
 
 `--mode competitive` runs the multi-researcher competitive pipeline and
@@ -356,6 +358,22 @@ exact keywords.
 when no LLM is configured, the extraction fails, or the model returns no
 concept sections; the step is visible in the progress output as a `concepts`
 step (started / completed / skipped / failed).
+
+**Concept and finding limits.** Both the `## Concepts` list and the
+`## Findings` list are capped by run-level limits: the concept limit defaults
+to **5** and the finding limit to **20**. Before the cap is applied, each list
+is reordered most-relevant-first (a finding's relevance is the highest
+`[#N]` source rank it cites; ties break by cited count, then by original model
+order) so truncation always discards the least-relevant entries. Override the
+limits per run with `--max-concepts N` and `--max-findings N`, or persistently
+with the `research.max_concepts` / `research.max_findings` keys in
+`ragent.json` (the per-run flags take precedence). A value of `0` means
+unbounded, matching the `0 disables the cap` convention used elsewhere.
+
+```text
+/research create brief "Vector databases" --max-concepts 3 --max-findings 10
+/research create exhaustive "Multi-agent orchestration" --max-concepts 0 --max-findings 0
+```
 
 ### 4.7 `/research cluster <name>`
 
@@ -688,9 +706,13 @@ These flags control the performance and resilience of the gathering phases.
 | `--search-retry-base-delay-ms N` | 200 | First retry delay in ms, doubled each retry (200, 400, 800...). |
 | `--max-search-calls N` | derived from `--depth` | Hard, run-scoped cap on total web-search calls, shared via `Arc` across every supervisor/competitive researcher and gather pass. A run-scoped query cache memoises identical sub-queries so parallel researchers reuse cached hits instead of re-issuing paid calls. |
 | `--max-web-results N` | derived from `--depth` (shallow 6 / standard 9 / deep 15) | Cap on the web-source budget. |
+| `--max-concepts N` | `research.max_concepts` (5) | Output cap on the `## Concepts` list. Entries are ordered most-relevant-first before truncation. `0` means unbounded. |
+| `--max-findings N` | `research.max_findings` (20) | Output cap on the `## Findings` list. Entries are ordered most-relevant-first before truncation. `0` means unbounded. |
 | `--use-low-relevance` | off | Keep sources that would normally be filtered out as low-relevance. The pre-fetch filter matches query terms morphologically (plurals, gerunds, and derived forms such as "agentic" matching "agent" or "loops" matching "loop") and retains hits scoring Medium (35%+ term overlap) or better. |
-| `--no-papers` | off | Disable scholarly backends (OpenAlex) so only general web results are captured. |
+| `--no-papers` | `research.exclude_academic_engines` (off) | Exclude academically-classified backends (OpenAlex) before any request is dispatched, so only general web results are captured. Alias: `--no-scholarly`. |
 | `--use-pdf` | off | Allow PDF documents from web search or `--from-url` to be captured as sources. |
+| `--oa-enable` | `research.open_access_recovery` (off) | Force open-access recovery on for this run, overriding `ragent.json`. |
+| `--no-oa` | `research.open_access_recovery` (off) | Force open-access recovery off for this run, overriding `ragent.json`. |
 
 GitHub `blob/` file-view URLs (`github.com/owner/repo/blob/...`) are
 rewritten to `raw.githubusercontent.com` before fetching and non-HTML
@@ -816,10 +838,22 @@ When a research session runs, the TUI shows progress in three places:
    live `web:M:SS` countdown from the phase deadline (see below).
 2. **Message window** — a pinned `Research Progress -- rust-async` log
    lists each phase (setup, web, local, specs, synthesize, assemble,
-   finalize) and audit results. Captured web sources are aggregated into a
-   per-engine summary table (counts by media type and per-language article
-   counts) instead of one line per URL, keeping the window compact while
-   sources stream in.
+   finalize) and audit results. The web phase ends with a per-engine
+   width-sweep table (separated from the surrounding lines by a blank line),
+   showing for each backend search engine how many candidates were
+   `considered`, `captured`, and `excluded`, plus a breakdown of the
+   exclusion reasons: `papers` (`--no-papers` scholarly-engine blocks), `pdf`
+   (disabled PDF sources), `relev` (low title/snippet or post-fetch
+   relevance), `short` (content below the minimum extractable length), and
+   `fetch` (page fetch failures/timeouts). The `fetch` column is broken down
+   further into the cause of each failed fetch: `t/o` (per-fetch timeout),
+   `net` (transport/network error), `blk` (blocked before the request by the
+   SSRF guard or robots.txt), `http` (server error status), `wall`
+   (paywall/auth wall), `js` (JavaScript-rendered shell), and `extr` (content
+   retrieved but extraction failed). Every per-engine row and the
+   `totals` row carry the reason columns and the fetch-failure columns; the
+   totals reasons sum back to the reported `excluded` count, and the totals
+   fetch-failure counts sum back to the totals `fetch` count.
 3. **Log panel** — every progress event is logged at `Info` level.
 
 Research runs in the background; you can continue typing or start other
@@ -897,9 +931,27 @@ Use the TUI diagnostics to check availability:
 /websearch test   # live probe each configured engine
 ```
 
-The `--no-papers` flag disables OpenAlex for runs where scholarly results
-are not wanted. This is useful when researching non-academic topics where
-scholarly papers would add noise.
+The `--no-papers` flag excludes academically-classified backends (OpenAlex)
+*before* any search request is dispatched, so scholarly results are neither
+queried nor merged. This is useful when researching non-academic topics where
+scholarly papers would add noise. Because the exclusion happens ahead of the
+search, OpenAlex consumes no search budget and its URLs never enter the dedup
+set. Non-academic engines (Wikipedia and any configured web engines) still run.
+`--no-scholarly` is accepted as an alias. Set
+`research.exclude_academic_engines: true` in `ragent.json` to make the
+exclusion persistent; a per-run `--no-papers` also enables it, and the flag
+wins when both are present.
+
+### Engine exclusion
+
+Under the hood `--no-papers` / `research.exclude_academic_engines` map onto the
+`mf_search` `exclude_engines` parameter (an array of engine names) and the
+research `WebSearchTool` exclusion argument. Exclusions are applied to the
+orchestrator *before* any request is dispatched, so excluded engines are never
+queried. Names that do not match a registered engine are ignored. When the
+exclusion list names every configured engine, `mf_search` returns an explicit
+"all engines excluded" result (with `excluded_engines` in the metadata) rather
+than a silent zero-result success.
 
 ### Merge diversity
 
@@ -972,6 +1024,11 @@ Enable it in `ragent.json`:
     }
 }
 ```
+
+Or turn it on for a single run with `--oa-enable` (and off with `--no-oa`)
+without editing the config. Precedence: an explicit `--oa-enable`/`--no-oa`
+wins, otherwise `research.open_access_recovery` decides, and when neither is
+set recovery is off.
 
 `contact_email` is required by Unpaywall's terms of service. When a source
 is recovered from an OA copy, the references index notes the source URL,
@@ -1117,6 +1174,8 @@ source count, and all session events as a JSON array.
     "local_concurrency": 8,
     "depth": "standard",
     "iterations": 3,
+    "max_concepts": 5,
+    "max_findings": 20,
     "format": "report"
 }
 ```
@@ -1244,6 +1303,7 @@ The same commands work outside the TUI:
 ```bash
 ragent research help
 ragent research create rust-async "Rust async patterns" --tier full --use-local
+ragent research create brief "Vector databases" --max-concepts 3 --max-findings 10
 ragent research create from-url --from-url https://example.com/article
 ragent research create from-doc --from-file docs/design.md --use-local
 ragent research create comp "vector db landscape" --mode competitive
@@ -1279,8 +1339,11 @@ Research-specific configuration lives under the `research` key in
 {
     "research": {
         "open_access_recovery": true,
+        "exclude_academic_engines": false,
         "contact_email": "you@example.com",
         "oa_min_full_text_chars": 1000,
+        "max_concepts": 5,
+        "max_findings": 20,
         "evaluate": {
             "enabled": true
         }
@@ -1291,8 +1354,11 @@ Research-specific configuration lives under the `research` key in
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `open_access_recovery` | bool | `false` | Enable OA recovery via Unpaywall and Europe PMC |
+| `exclude_academic_engines` | bool | `false` | Persistently exclude academically-classified engines (OpenAlex) from research runs. A per-run `--no-papers` takes precedence. |
 | `contact_email` | string? | `null` | Email required by Unpaywall's ToS |
 | `oa_min_full_text_chars` | usize | `1000` | Minimum body length that triggers OA recovery |
+| `max_concepts` | usize | `5` | Output cap on the `## Concepts` list. A per-run `--max-concepts` takes precedence; `0` means unbounded. |
+| `max_findings` | usize | `20` | Output cap on the `## Findings` list. A per-run `--max-findings` takes precedence; `0` means unbounded. |
 | `evaluate` | `ResearchEvaluateConfig` | `{"enabled": false}` | Self-evaluation scorecard settings (FR-015 of specs/opendeepresearch). When enabled, the pipeline appends a deterministic quality scorecard (quality, relevance, groundedness, completeness, structure) to the report. |
 
 Web search engine keys are top-level in `ragent.json`:
@@ -1366,8 +1432,8 @@ Web search engine keys are top-level in `ragent.json`:
 | Name rejected | Invalid research name | Use 3–64 lowercase ASCII letters/digits/hyphens starting with a letter |
 | `research/<name>` already exists | Duplicate create | Use `/research open <name>` or pick a new name |
 | Very slow run | Deep depth + full tier + many sources | Use `--depth standard` or `--tier light`; reduce `--fetch-concurrently` |
-| No scholarly sources | `--no-papers` is set or OpenAlex is down | Remove `--no-papers`; check `/websearch test` for OpenAlex status |
-| OA recovery not working | Not configured or `contact_email` missing | Set `research.open_access_recovery: true` and `contact_email` in `ragent.json` |
+| No scholarly sources | `--no-papers` or `research.exclude_academic_engines` is set, or OpenAlex is down | Remove the exclusion; check `/websearch test` for OpenAlex status |
+| OA recovery not working | Not enabled or `contact_email` missing | Pass `--oa-enable`, or set `research.open_access_recovery: true` (plus `contact_email`) in `ragent.json` |
 | PDFs skipped | `--use-pdf` not set | Add `--use-pdf` to allow PDF web sources |
 | Sources not reused on re-run | Vault threshold not met | The vault needs 3/8/15 sources (light/full/dissertation) before skipping web search |
 

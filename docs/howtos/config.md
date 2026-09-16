@@ -183,7 +183,7 @@ different merge strategies:
 | `compaction` | Overlay replaces base entirely. |
 | `yolo`, `edit_log` | OR semantics: if the overlay sets `true`, it wins. |
 | `sdd`, `piegap` | OR semantics: a flag enabled in either layer stays enabled. |
-| `research.open_access_recovery` | OR semantics. `contact_email` and `oa_min_full_text_chars`: overlay overrides when present. |
+| `research.open_access_recovery`, `research.exclude_academic_engines` | OR semantics. `contact_email`, `oa_min_full_text_chars`, `max_concepts`, and `max_findings`: overlay overrides when present (and different from the default). |
 | `telemetry` | If overlay enables telemetry, the whole overlay `otel` block replaces the base. Otherwise maps (`resource_attributes`, `metrics`) are unioned. |
 | `experimental` | `open_telemetry` and `parallel_tool_calls`: OR semantics. Other fields: overlay defaults. |
 
@@ -1464,8 +1464,11 @@ Research subsystem configuration.
 {
   "research": {
     "open_access_recovery": true,
+    "exclude_academic_engines": false,
     "contact_email": "user@example.com",
     "oa_min_full_text_chars": 1000,
+    "max_concepts": 5,
+    "max_findings": 20,
     "evaluate": {
       "enabled": true
     }
@@ -1478,8 +1481,11 @@ Research subsystem configuration.
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
 | `open_access_recovery` | `bool` | `false` | Enable open-access recovery via Unpaywall and Europe PMC for short scholarly sources (FR-011). |
+| `exclude_academic_engines` | `bool` | `false` | Persistently exclude academically-classified search engines (OpenAlex) from research runs (spec `researchnoacc` FR-012). A per-run `--no-papers` takes precedence. |
 | `contact_email` | `Option<String>` | `None` | Contact email required by Unpaywall's terms of service (FR-012). |
 | `oa_min_full_text_chars` | `usize` | `1000` | Minimum full-text length (chars) that triggers OA recovery. |
+| `max_concepts` | `usize` | `5` | Maximum number of concepts rendered in the report's `## Concepts` block (spec `researchmax` FR-008). A per-run `--max-concepts` takes precedence; `0` means unbounded. |
+| `max_findings` | `usize` | `20` | Maximum number of findings rendered in the report's `## Findings` block (spec `researchmax` FR-008). A per-run `--max-findings` takes precedence; `0` means unbounded. |
 | `evaluate` | `ResearchEvaluateConfig` | `{"enabled": false}` | Self-evaluation scorecard settings (FR-015 of specs/opendeepresearch). When `enabled`, the research pipeline appends a deterministic quality scorecard (quality, relevance, groundedness, completeness, structure) to the report. |
 
 As of v1.0.77, `evaluate` can be configured in `ragent.json` and is omitted from
@@ -1493,6 +1499,17 @@ so far. See [`docs/howtos/research.md`](research.md) for the full research workf
 `open_access_recovery` uses OR semantics on merge. `contact_email` and
 `oa_min_full_text_chars` override base when present. `is_empty()` returns
 `true` when at default values.
+
+`exclude_academic_engines` also uses OR semantics on merge and is omitted from
+serialized output when `false`. When enabled, research runs pass
+`exclude_engines = ["openalex"]` to `mf_search` so OpenAlex is never queried; a
+per-run `--no-papers` (alias `--no-scholarly`) takes precedence over the config
+value. See [`docs/howtos/research.md`](research.md).
+
+A per-run `--oa-enable` / `--no-oa` flag overrides
+`research.open_access_recovery`: the flag wins when set, otherwise the config
+value is used, and when neither is set recovery is off. See
+[`docs/howtos/research.md`](research.md).
 
 For the research system, see [`docs/howtos/research.md`](research.md).
 
@@ -1803,6 +1820,7 @@ need all of these — every section has defaults, so an empty `{}` is valid.
 
   "research": {
     "open_access_recovery": false,
+    "exclude_academic_engines": false,
     "contact_email": null,
     "oa_min_full_text_chars": 1000,
     "evaluate": {

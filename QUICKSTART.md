@@ -1168,6 +1168,8 @@ Run any of these from the TUI prompt:
 /research create fireworks "Compare Fireworks AI, Together.ai and Groq" --mode competitive   # --format comparison-table is implied
 /research create rust-async "async/await idioms" --mode supervisor --summarization-model ollama:phi4 --max-concurrent-research-units 3
 /research create rust-async "async/await idioms" --evaluate
+/research create brief "Vector databases" --max-concepts 3 --max-findings 10
+/research create local-only "Project error handling" --use-local --no-papers
 /spec create async-await Add async/await ergonomics --from-research rust-async
 /spec specify async-await Add async/await ergonomics --from-research rust-async
 /spec plan async-await "Rust 2024 edition, tokio runtime"
@@ -1222,6 +1224,8 @@ ragent research continue rust-async "focus on io_uring integration"
 ragent research create fireworks "Compare Fireworks AI, Together.ai and Groq" --mode competitive   # --format comparison-table is implied
 ragent research create rust-async "async/await idioms" --mode supervisor --summarization-model ollama:phi4 --max-concurrent-research-units 3
 ragent research create rust-async "async/await idioms" --evaluate
+ragent research create brief "Vector databases" --max-concepts 3 --max-findings 10
+ragent research create local-only "Project error handling" --use-local --no-papers
 ragent research list          # aligned table; add --json for machine-readable output
 ragent research open rust-async
 ragent research search "async"
@@ -1236,6 +1240,16 @@ The HTTP API exposes the same surface at `GET /research`, `POST /research`,
 `GET /research/<name>/events` (SSE stream of live research events).
 `GET /research/<name>` supports `?full=true` to include `topic`, `queries`,
 `output_format`, `model`, `mode`, `summarization_model`, `evaluate`, and `brief` metadata.
+
+A run caps its `## Concepts` and `## Findings` sections at 5 and 20 entries by
+default, ordering each most-relevant-first (highest cited source rank, then
+cited count) before truncation. Override per run with `--max-concepts N` /
+`--max-findings N` (also accepted as `max_concepts` / `max_findings` on
+`POST /research`) or persistently via the `research.max_concepts` /
+`research.max_findings` config keys; `0` means unbounded. `--no-papers` (alias
+`--no-scholarly`, config `research.exclude_academic_engines`) excludes
+academically-classified engines (OpenAlex) before any search request is issued,
+and `--oa-enable` / `--no-oa` toggle open-access recovery for the run.
 
 The `--tier` flag selects the analysis depth: `light` (minimal), `full`
 (default), or `dissertation` (extended with depth investigations and

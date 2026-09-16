@@ -130,7 +130,12 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   message window; also available as the `ragent new` CLI subcommand
 - **Research system** — `/research` slash command family and `ragent research` CLI for
   structured information gathering (web search + local file cross-referencing) with
-  self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints
+  self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints;
+  concept/finding output limits (`--max-concepts`/`--max-findings`, `research.max_concepts`/
+  `research.max_findings`), scholarly-engine exclusion (`--no-papers`, alias
+  `--no-scholarly`, `research.exclude_academic_engines`), open-access toggles
+  (`--oa-enable`/`--no-oa`), a per-engine progress table that breaks exclusions
+  and fetch failures out by reason/cause, and `mf_search` `exclude_engines`
 - **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
   prompts, and file context into agent sessions
 - **Teams & Swarms** — multi-agent coordination with named teammates, shared task lists,
@@ -414,11 +419,30 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.104** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.105** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **Research output limits, scholarly-engine exclusion, and progress-table
+  detail (v1.0.105)** — `/research create` caps its
+  `## Concepts` / `## Findings` lists at 5 / 20 by default, reordering
+  most-relevant-first (highest cited source rank, then cited count) before
+  truncation; the limits are set with `--max-concepts N` / `--max-findings N`
+  on the root CLI, TUI, and `POST /research` (`max_concepts` / `max_findings`
+  fields), or persistently via `research.max_concepts` / `research.max_findings`
+  (`0` = unbounded). `mf_search` gained an `exclude_engines` array that drops
+  named backends before any request is dispatched, and research `--no-papers`
+  (alias `--no-scholarly`, config `research.exclude_academic_engines`) routes
+  through it so OpenAlex consumes no search budget and cannot shadow general-web
+  URLs in dedup. `POST /research` gained `no_scholarly`; `--oa-enable`/`--no-oa`
+  toggle open-access recovery per run. The per-engine progress table now shows
+  *why* candidates were dropped (five exclusion-reason columns) and *how* fetches
+  failed (seven failure-kind columns). `/spec impl` now expands task-range
+  Dependencies cells (`T-001–T-014`) into every spanned ID, the TASKS panel shows
+  the task ID after the status, and every toggled right-hand side panel takes 50%
+  of the window width.
 
 - **Functional anti-pattern remediation — FUNCPLAN.md (FUNC-038..069,
   080..082) complete (v1.0.104)** — the second pass closes the plan's M1 tail

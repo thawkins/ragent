@@ -161,14 +161,19 @@ struct CreateResearchRequest {
     /// filtering them out.
     #[serde(default)]
     use_low_relevance: bool,
-    /// `--no-scholarly`: disable scholarly search engines (e.g. OpenAlex)
-    /// during web gathering.
+    /// `--no-papers` (alias `--no-scholarly`): disable scholarly search engines
+    /// (e.g. OpenAlex) during web gathering (spec `researchnoacc` FR-009).
     #[serde(default)]
     no_scholarly: bool,
     /// `--use-pdf`: allow PDF documents returned by web search or `--from-url`
     /// to be captured as sources. By default PDF web sources are skipped.
     #[serde(default)]
     use_pdf: bool,
+    /// `--oa-enable` / `--no-oa`: per-run open-access recovery override.
+    /// `Some(true)` forces it on, `Some(false)` forces it off, `None` defers to
+    /// `research.open_access_recovery` in `ragent.json`.
+    #[serde(default)]
+    oa_recovery: Option<bool>,
     /// Override the maximum number of candidate pages fetched in parallel
     /// during the web-gathering phase. When `None` the engine default
     /// (`ragent_research::DEFAULT_FETCH_CONCURRENCY`, 10) is used.
@@ -232,6 +237,16 @@ struct CreateResearchRequest {
     /// Maximum sources to send to the LLM synthesis engine.
     #[serde(default)]
     max_synthesis_sources: Option<usize>,
+    /// Maximum number of concepts rendered in the report's `## Concepts`
+    /// block. When `None`, `research.max_concepts` (default 5) is used; `0`
+    /// means "unbounded" (FR-012, FR-016).
+    #[serde(default)]
+    max_concepts: Option<usize>,
+    /// Maximum number of findings rendered in the report's `## Findings`
+    /// block. When `None`, `research.max_findings` (default 20) is used; `0`
+    /// means "unbounded" (FR-012, FR-016).
+    #[serde(default)]
+    max_findings: Option<usize>,
     /// Optional research brief generated from the user's prompt. When
     /// supplied, downstream agents use this as their mission statement.
     #[serde(default)]
@@ -299,10 +314,17 @@ impl CreateResearchRequest {
             parts.push("--use-low-relevance".to_string());
         }
         if self.no_scholarly {
-            parts.push("--no-scholarly".to_string());
+            // Emit the canonical spelling so a replayed invocation parses on
+            // the root CLI, the hand parser, and the TUI (FR-005, FR-009).
+            parts.push("--no-papers".to_string());
         }
         if self.use_pdf {
             parts.push("--use-pdf".to_string());
+        }
+        match self.oa_recovery {
+            Some(true) => parts.push("--oa-enable".to_string()),
+            Some(false) => parts.push("--no-oa".to_string()),
+            None => {}
         }
         if let Some(v) = self.fetch_concurrency {
             parts.push(format!("--fetch-concurrently {v}"));
@@ -336,6 +358,12 @@ impl CreateResearchRequest {
         }
         if let Some(v) = self.max_synthesis_sources {
             parts.push(format!("--max-synthesis-sources {v}"));
+        }
+        if let Some(v) = self.max_concepts {
+            parts.push(format!("--max-concepts {v}"));
+        }
+        if let Some(v) = self.max_findings {
+            parts.push(format!("--max-findings {v}"));
         }
         if let Some(v) = &self.summarization_model {
             parts.push(format!("--summarization-model {v}"));
@@ -382,6 +410,7 @@ impl CreateResearchRequest {
             use_low_relevance: self.use_low_relevance,
             no_scholarly: self.no_scholarly,
             use_pdf: self.use_pdf,
+            open_access_recovery: self.oa_recovery,
             fetch_concurrency: self.fetch_concurrency,
             local_concurrency: self.local_concurrency,
             fetch_timeout_secs: self.fetch_timeout_secs,
@@ -393,6 +422,8 @@ impl CreateResearchRequest {
             max_search_calls: self.max_search_calls,
             max_local_sources: self.max_local_sources,
             max_synthesis_sources: self.max_synthesis_sources,
+            max_concepts: self.max_concepts,
+            max_findings: self.max_findings,
             summarization_model: self.summarization_model.clone(),
             brief: self.brief.clone(),
             research_model: self.research_model.clone(),
@@ -939,6 +970,7 @@ mod tests {
             use_low_relevance: false,
             no_scholarly: false,
             use_pdf: false,
+            oa_recovery: None,
             fetch_concurrency: None,
             fetch_timeout_secs: None,
             local_concurrency: None,
@@ -956,6 +988,8 @@ mod tests {
             max_search_calls: None,
             max_local_sources: None,
             max_synthesis_sources: None,
+            max_concepts: None,
+            max_findings: None,
             brief: None,
             research_model: Some("anthropic:claude-sonnet-4".into()),
             compression_model: None,
@@ -989,6 +1023,7 @@ mod tests {
             use_low_relevance: false,
             no_scholarly: false,
             use_pdf: false,
+            oa_recovery: None,
             fetch_concurrency: None,
             fetch_timeout_secs: None,
             local_concurrency: None,
@@ -1006,6 +1041,8 @@ mod tests {
             max_search_calls: None,
             max_local_sources: None,
             max_synthesis_sources: None,
+            max_concepts: None,
+            max_findings: None,
             brief: None,
             research_model: None,
             compression_model: None,
@@ -1018,5 +1055,133 @@ mod tests {
         assert!(run.mode.is_none());
         assert!(run.summarization_model.is_none());
         assert_eq!(run.evaluate, Some(false));
+    }
+
+    /// Build a minimal request with every optional field defaulted, for the
+    /// scholarly-exclusion invocation tests (FR-009).
+    fn minimal_request(name: &str, no_scholarly: bool) -> CreateResearchRequest {
+        CreateResearchRequest {
+            name: name.into(),
+            topic: "Rust async".into(),
+            title: None,
+            sources_dir: None,
+            template: None,
+            from_urls: Vec::new(),
+            from_files: Vec::new(),
+            use_local: false,
+            use_specs: false,
+            use_low_relevance: false,
+            no_scholarly,
+            use_pdf: false,
+            oa_recovery: None,
+            fetch_concurrency: None,
+            fetch_timeout_secs: None,
+            local_concurrency: None,
+            depth: None,
+            iterations: None,
+            format: None,
+            mode: None,
+            summarization_model: None,
+            tier: None,
+            web_phase_timeout_secs: None,
+            local_phase_timeout_secs: None,
+            search_max_retries: None,
+            search_retry_base_delay_ms: None,
+            max_web_results: None,
+            max_search_calls: None,
+            max_local_sources: None,
+            max_synthesis_sources: None,
+            max_concepts: None,
+            max_findings: None,
+            brief: None,
+            research_model: None,
+            compression_model: None,
+            final_report_model: None,
+            max_concurrent_research_units: None,
+            evaluate: false,
+        }
+    }
+
+    #[test]
+    fn invocation_summary_emits_canonical_no_papers_spelling() {
+        // FR-005/FR-009: the server must emit the canonical `--no-papers`
+        // spelling so the recorded invocation replays on every front-end.
+        let req = minimal_request("excl-on", true);
+        let summary = req.invocation_summary();
+        assert!(
+            summary.contains("--no-papers"),
+            "summary should carry the canonical flag: {summary}"
+        );
+        assert!(
+            !summary.contains("--no-scholarly"),
+            "summary should not emit the legacy alias: {summary}"
+        );
+        // The recorded invocation must round-trip through the shared parser.
+        let replayed = ragent_research::ResearchRunRequest::from_invocation(&summary)
+            .expect("canonical summary must replay");
+        assert!(replayed.no_scholarly);
+    }
+
+    #[test]
+    fn invocation_summary_omits_flag_when_exclusion_off() {
+        let req = minimal_request("excl-off", false);
+        let summary = req.invocation_summary();
+        assert!(
+            !summary.contains("--no-papers"),
+            "summary should not carry the flag when disabled: {summary}"
+        );
+    }
+
+    #[test]
+    fn to_run_request_forwards_scholarly_exclusion() {
+        let req = minimal_request("forward", true);
+        let run = req.to_run_request();
+        assert!(run.no_scholarly);
+    }
+
+    #[test]
+    fn to_run_request_forwards_concept_and_finding_limits() {
+        // FR-012: the HTTP limits must reach the shared run request.
+        let req = CreateResearchRequest {
+            max_concepts: Some(2),
+            max_findings: Some(3),
+            ..minimal_request("limits", false)
+        };
+        let run = req.to_run_request();
+        assert_eq!(run.max_concepts, Some(2));
+        assert_eq!(run.max_findings, Some(3));
+    }
+
+    #[test]
+    fn invocation_summary_round_trips_concept_and_finding_limits() {
+        // FR-013: the summary emits the flags only when set, and the recorded
+        // invocation replays through the hand parser.
+        let req = CreateResearchRequest {
+            max_concepts: Some(2),
+            max_findings: Some(3),
+            ..minimal_request("limits-rt", false)
+        };
+        let summary = req.invocation_summary();
+        assert!(
+            summary.contains("--max-concepts 2"),
+            "summary missing concept limit: {summary}"
+        );
+        assert!(
+            summary.contains("--max-findings 3"),
+            "summary missing finding limit: {summary}"
+        );
+        let replayed = ragent_research::ResearchRunRequest::from_invocation(&summary)
+            .expect("summary with limits must replay");
+        assert_eq!(replayed.max_concepts, Some(2));
+        assert_eq!(replayed.max_findings, Some(3));
+    }
+
+    #[test]
+    fn invocation_summary_omits_limits_when_unset() {
+        let summary = minimal_request("limits-off", false).invocation_summary();
+        assert!(
+            !summary.contains("--max-concepts") && !summary.contains("--max-findings"),
+            "summary must omit the limits when unset: {summary}"
+        );
     }
 }

@@ -432,7 +432,11 @@ impl App {
                     "--use-low-relevance".to_string(),
                     "--use-pdf".to_string(),
                     "--no-papers".to_string(),
+                    "--oa-enable".to_string(),
+                    "--no-oa".to_string(),
                     "--web-time".to_string(),
+                    "--max-concepts".to_string(),
+                    "--max-findings".to_string(),
                 ]
             }
             "init" => {

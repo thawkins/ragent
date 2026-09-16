@@ -90,6 +90,36 @@ pub const ENGINE_TIMEOUT: Duration = Duration::from_secs(30);
 /// while spreading the first-request spikes.
 pub const ENGINE_STAGGER: Duration = Duration::from_millis(120);
 
+/// Canonical display name of the OpenAlex scholarly-works backend.
+///
+/// Aliases [`openalex::ENGINE_NAME`] so the string literal exists in exactly
+/// one place while cross-engine code can import it from the `search` module
+/// root.
+pub const ENGINE_OPENALEX: &str = openalex::ENGINE_NAME;
+
+/// Canonical display name of the Wikipedia encyclopedia backend.
+///
+/// Aliases [`wikipedia::ENGINE_NAME`].
+pub const ENGINE_WIKIPEDIA: &str = wikipedia::ENGINE_NAME;
+
+/// The set of academically-classified search engine names.
+///
+/// Today this is just OpenAlex (the scholarly-works catalog). Future scholarly
+/// backends (for example arXiv or Semantic Scholar) are added here so that
+/// research "no papers" engine exclusion and scholarly-hit classification pick
+/// them up automatically.
+pub const ACADEMIC_ENGINES: &[&str] = &[ENGINE_OPENALEX];
+
+/// Returns `true` when `name` is an academically-classified search engine.
+///
+/// Matching is exact (case-sensitive) against [`ACADEMIC_ENGINES`], mirroring
+/// the exact-match semantics of [`SearchEngine::name`] and the research-layer
+/// `is_scholarly_hit` check (FR-003).
+#[must_use]
+pub fn is_academic_engine(name: &str) -> bool {
+    ACADEMIC_ENGINES.contains(&name)
+}
+
 /// Run one [`SearchEngine`] with timeout, transient retry and staggered start.
 ///
 /// This is the single per-engine call path used by both
@@ -274,6 +304,30 @@ impl SearchOrchestrator {
             .iter()
             .find(|e| e.name() == name)
             .map(|e| Self::with_engines(vec![e.clone()]))
+    }
+
+    /// Return a new orchestrator containing every registered engine whose name
+    /// is **not** in `names`, leaving the receiver unchanged.
+    ///
+    /// The returned orchestrator has its own (empty) cache. This is the
+    /// complement of [`select_engine`](Self::select_engine) and is intended for
+    /// the `mf_search` `exclude_engines` parameter, which removes a set of
+    /// backends (for example the OpenAlex scholarly backend when the caller
+    /// requests no papers) before any request is dispatched.
+    ///
+    /// Unknown names are ignored: an exclusion that does not match a registered
+    /// engine simply excludes nothing. An empty `names` slice returns a copy
+    /// with every engine retained, so the default (no exclusions) behaves
+    /// exactly as the receiver.
+    #[must_use]
+    pub fn exclude_engines<S: AsRef<str>>(&self, names: &[S]) -> Self {
+        let kept = self
+            .engines
+            .iter()
+            .filter(|e| !names.iter().any(|n| n.as_ref() == e.name()))
+            .cloned()
+            .collect();
+        Self::with_engines(kept)
     }
 
     /// Execute a search query across all backends in parallel, merge the
@@ -798,6 +852,109 @@ mod tests {
         })];
         let orchestrator = SearchOrchestrator::with_engines(engines);
         assert!(orchestrator.select_engine("gamma").is_none());
+    }
+
+    #[test]
+    fn test_orchestrator_exclude_engines_removes_named() {
+        let engines: Vec<Arc<dyn SearchEngine>> = vec![
+            Arc::new(MockEngine {
+                name: "openalex",
+                results: vec![],
+            }),
+            Arc::new(MockEngine {
+                name: "wikipedia",
+                results: vec![],
+            }),
+            Arc::new(MockEngine {
+                name: "langsearch",
+                results: vec![],
+            }),
+        ];
+        let orchestrator = SearchOrchestrator::with_engines(engines);
+
+        let filtered = orchestrator.exclude_engines(&["openalex"]);
+
+        assert_eq!(filtered.engine_count(), 2);
+        assert_eq!(filtered.engine_names(), vec!["wikipedia", "langsearch"]);
+        // The receiver is unchanged.
+        assert_eq!(orchestrator.engine_count(), 3);
+    }
+
+    #[test]
+    fn test_orchestrator_exclude_engines_empty_is_identity() {
+        let engines: Vec<Arc<dyn SearchEngine>> = vec![
+            Arc::new(MockEngine {
+                name: "openalex",
+                results: vec![],
+            }),
+            Arc::new(MockEngine {
+                name: "wikipedia",
+                results: vec![],
+            }),
+        ];
+        let orchestrator = SearchOrchestrator::with_engines(engines);
+
+        let filtered = orchestrator.exclude_engines::<&str>(&[]);
+
+        assert_eq!(filtered.engine_names(), vec!["openalex", "wikipedia"]);
+    }
+
+    #[test]
+    fn test_orchestrator_exclude_engines_ignores_unknown_names() {
+        let engines: Vec<Arc<dyn SearchEngine>> = vec![
+            Arc::new(MockEngine {
+                name: "openalex",
+                results: vec![],
+            }),
+            Arc::new(MockEngine {
+                name: "wikipedia",
+                results: vec![],
+            }),
+        ];
+        let orchestrator = SearchOrchestrator::with_engines(engines);
+
+        let filtered = orchestrator.exclude_engines(&["openalex", "not_a_real_engine"]);
+
+        assert_eq!(filtered.engine_names(), vec!["wikipedia"]);
+    }
+
+    #[test]
+    fn test_orchestrator_exclude_engines_all_leaves_none() {
+        let engines: Vec<Arc<dyn SearchEngine>> = vec![
+            Arc::new(MockEngine {
+                name: "openalex",
+                results: vec![],
+            }),
+            Arc::new(MockEngine {
+                name: "wikipedia",
+                results: vec![],
+            }),
+        ];
+        let orchestrator = SearchOrchestrator::with_engines(engines);
+
+        let filtered = orchestrator.exclude_engines(&["openalex", "wikipedia"]);
+
+        assert_eq!(filtered.engine_count(), 0);
+    }
+
+    #[test]
+    fn test_orchestrator_exclude_engines_accepts_string_slices() {
+        let engines: Vec<Arc<dyn SearchEngine>> = vec![
+            Arc::new(MockEngine {
+                name: "openalex",
+                results: vec![],
+            }),
+            Arc::new(MockEngine {
+                name: "wikipedia",
+                results: vec![],
+            }),
+        ];
+        let orchestrator = SearchOrchestrator::with_engines(engines);
+        let names = vec!["openalex".to_string()];
+
+        let filtered = orchestrator.exclude_engines(&names);
+
+        assert_eq!(filtered.engine_names(), vec!["wikipedia"]);
     }
 
     #[tokio::test]

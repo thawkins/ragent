@@ -21,6 +21,8 @@
 //! - [`local_gatherer`] — the `LocalGatherer` that orchestrates local
 //!   cross-referencing and FR-019 `--sources-dir` scanning for FR-006,
 //!   FR-008, and FR-009.
+//! - [`limits`] — output-limit defaults and the shared reverse-relevance
+//!   ordering helper for the concept and finding lists (spec `researchmax`).
 //! - [`plan_dep`] — the parser for `research: <name>` dependency lines in
 //!   `specs/<id>/PLAN.md` for FR-015.
 //!
@@ -59,6 +61,7 @@ pub mod evaluation;
 pub mod gather_log;
 pub mod io;
 pub mod item;
+pub mod limits;
 pub mod local_gatherer;
 pub mod locus;
 pub mod manager;
@@ -93,8 +96,8 @@ pub mod web_gatherer;
 pub use adaptive::{AdaptiveStopper, StopDecision};
 pub use analysis::{
     AnalysisEngine, AnalysisOutcome, AnalysisResult, HeuristicSummarizer, LlmAnalysisEngine,
-    NoopAnalysisEngine, SourceBody, SourceSummarizer, build_source_bodies, chunk_source_bodies,
-    merge_chunk_results, summarize_source_bodies, total_body_chars,
+    NoopAnalysisEngine, SourceBody, SourceSummarizer, build_source_bodies, cap_findings_to_limit,
+    chunk_source_bodies, merge_chunk_results, summarize_source_bodies, total_body_chars,
 };
 pub use brief::generate_research_brief;
 pub use cite_checker::{CitationCheckResult, check_citations};
@@ -105,9 +108,10 @@ pub use cli::{
     render_show_output_json, session_event_json,
 };
 pub use cluster::{
-    CONCEPT_EXTRACTION_PROMPT_TEMPLATE, ClusterPayload, DEFAULT_CONTEXT_WINDOW_TOKENS,
-    WebSourceMeta, build_cluster_payload, build_cluster_payload_sync,
-    build_concept_extraction_prompt, build_concepts_payload_from_bodies,
+    CONCEPT_COUNT_INSTRUCTION_PLACEHOLDER, CONCEPT_EXTRACTION_PROMPT_TEMPLATE, ClusterPayload,
+    DEFAULT_CONTEXT_WINDOW_TOKENS, WebSourceMeta, build_cluster_payload,
+    build_cluster_payload_sync, build_concept_extraction_prompt,
+    build_concept_extraction_prompt_for_limit, build_concepts_payload_from_bodies,
     concepts_section_for_research, estimate_max_payload_bytes, format_concepts_md,
     format_concepts_md_with_sources, load_web_source_metadata, resolve_context_window_tokens,
     write_concepts_md,
@@ -137,6 +141,10 @@ pub use io::{IndexEntry, ResearchIo, ResearchIoError};
 pub use item::{
     DERIVED_TITLE_MAX_CHARS, ResearchItem, ResearchItemError, derive_title, derive_title_files,
     derive_title_full,
+};
+pub use limits::{
+    DEFAULT_ENTRY_RANK, DEFAULT_MAX_CONCEPTS, DEFAULT_MAX_FINDINGS, cited_source_indices,
+    cited_source_ranks, rank_entries_by_reverse_relevance, source_rank_lookup,
 };
 pub use local_gatherer::{
     DEFAULT_GLOBS, DEFAULT_LOCAL_CONCURRENCY, DEFAULT_MAX_LOCAL_SOURCES, GrepMatch,
@@ -199,7 +207,8 @@ pub use verify::{KeywordVerifier, VerificationResult, Verifier};
 pub use web_date::extract_published_at;
 pub use web_gatherer::{
     DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_MAX_WEB_RESULTS,
-    DEFAULT_SEARCH_MAX_RETRIES, DEFAULT_SEARCH_RETRY_BASE_DELAY_MS, GatherEvent, GatherResult,
-    HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer, WebFetchTool, WebFetchedPage,
-    WebGatherError, WebGatherer, WebSearchHit, WebSearchTool, WebSourceKind, classify_web_source,
+    DEFAULT_SEARCH_MAX_RETRIES, DEFAULT_SEARCH_RETRY_BASE_DELAY_MS, FetchFailure, FetchFailureKind,
+    GatherEvent, GatherResult, HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer,
+    WebFetchTool, WebFetchedPage, WebGatherError, WebGatherer, WebSearchHit, WebSearchTool,
+    WebSourceKind, classify_web_source,
 };

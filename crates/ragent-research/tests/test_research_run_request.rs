@@ -58,6 +58,15 @@ fn build_session_config_applies_defaults_with_no_overrides() {
     assert!(cfg.analysis.iterations.is_none());
     assert!(cfg.analysis.max_synthesis_sources.is_none());
     assert!(cfg.analysis.contradiction.is_none());
+    // Concept/finding limits fall back to the built-in defaults (FR-014).
+    assert_eq!(
+        cfg.analysis.max_concepts,
+        ragent_research::DEFAULT_MAX_CONCEPTS
+    );
+    assert_eq!(
+        cfg.analysis.max_findings,
+        ragent_research::DEFAULT_MAX_FINDINGS
+    );
 
     // Resilience
     assert!(cfg.resilience.search_max_retries > 0);
@@ -94,6 +103,7 @@ fn build_session_config_maps_all_explicit_fields() {
         use_low_relevance: true,
         no_scholarly: true,
         use_pdf: true,
+        open_access_recovery: Some(true),
         fetch_concurrency: Some(20),
         local_concurrency: Some(16),
         fetch_timeout_secs: Some(60),
@@ -105,6 +115,8 @@ fn build_session_config_maps_all_explicit_fields() {
         max_search_calls: Some(40),
         max_local_sources: Some(30),
         max_synthesis_sources: Some(15),
+        max_concepts: Some(7),
+        max_findings: Some(42),
         summarization_model: Some("openai:gpt-4.1-nano".to_string()),
         brief: Some("A generated research brief".to_string()),
         research_model: Some("openai:gpt-4.1".to_string()),
@@ -153,10 +165,14 @@ fn build_session_config_maps_all_explicit_fields() {
     assert_eq!(cfg.analysis.depth, Some(Depth::Deep));
     assert_eq!(cfg.analysis.iterations, Some(5));
     assert_eq!(cfg.analysis.max_synthesis_sources, Some(15));
+    assert_eq!(cfg.analysis.max_concepts, 7);
+    assert_eq!(cfg.analysis.max_findings, 42);
 
     // Resilience
     assert_eq!(cfg.resilience.search_max_retries, 4);
     assert_eq!(cfg.resilience.search_retry_base_delay_ms, 500);
+    // Explicit `--oa-enable` forces recovery on even with no app config.
+    assert!(cfg.resilience.open_access_recovery);
 
     // Engine
     assert_eq!(cfg.engine.tier, Tier::Dissertation);
@@ -183,6 +199,48 @@ fn build_session_config_maps_all_explicit_fields() {
 
     // Explicit clarification opt-in
     assert!(cfg.clarify);
+}
+
+// ── Concept/finding limits (spec researchmax FR-012, FR-014) ────────────
+
+#[test]
+fn build_session_config_uses_research_config_limits() {
+    let mut cfg = Config::default();
+    cfg.research.max_concepts = 12;
+    cfg.research.max_findings = 33;
+    let req = ResearchRunRequest::new("cfg-limits", "topic");
+    let session = build_session_config(&req, Some(&cfg));
+    assert_eq!(session.analysis.max_concepts, 12);
+    assert_eq!(session.analysis.max_findings, 33);
+}
+
+#[test]
+fn build_session_config_flag_overrides_research_config_limits() {
+    let mut cfg = Config::default();
+    cfg.research.max_concepts = 12;
+    cfg.research.max_findings = 33;
+    let req = ResearchRunRequest {
+        max_concepts: Some(3),
+        max_findings: Some(7),
+        ..ResearchRunRequest::new("flag-limits", "topic")
+    };
+    let session = build_session_config(&req, Some(&cfg));
+    assert_eq!(session.analysis.max_concepts, 3);
+    assert_eq!(session.analysis.max_findings, 7);
+}
+
+#[test]
+fn build_session_config_zero_limit_is_preserved_as_unbounded() {
+    // `0` is a meaningful "unbounded" sentinel, not "unset" (FR-016), so it
+    // must reach `AnalysisConfig` rather than collapse to the default.
+    let req = ResearchRunRequest {
+        max_concepts: Some(0),
+        max_findings: Some(0),
+        ..ResearchRunRequest::new("unbounded", "topic")
+    };
+    let session = build_session_config(&req, None);
+    assert_eq!(session.analysis.max_concepts, 0);
+    assert_eq!(session.analysis.max_findings, 0);
 }
 
 #[test]
@@ -386,6 +444,44 @@ fn build_session_config_oa_disabled_when_no_app_config() {
 }
 
 #[test]
+fn build_session_config_oa_flag_enable_overrides_config_off() {
+    let cfg = Config::default(); // research.open_access_recovery = false
+    let req = ResearchRunRequest {
+        open_access_recovery: Some(true),
+        ..ResearchRunRequest::new("oa-on", "topic")
+    };
+    let session = build_session_config(&req, Some(&cfg));
+    assert!(
+        session.resilience.open_access_recovery,
+        "--oa-enable must override a disabled config"
+    );
+}
+
+#[test]
+fn build_session_config_oa_flag_disable_overrides_config_on() {
+    let mut cfg = Config::default();
+    cfg.research.open_access_recovery = true;
+    let req = ResearchRunRequest {
+        open_access_recovery: Some(false),
+        ..ResearchRunRequest::new("oa-off", "topic")
+    };
+    let session = build_session_config(&req, Some(&cfg));
+    assert!(
+        !session.resilience.open_access_recovery,
+        "--no-oa must override an enabled config"
+    );
+}
+
+#[test]
+fn build_session_config_oa_defers_to_config_when_flag_absent() {
+    let mut cfg = Config::default();
+    cfg.research.open_access_recovery = true;
+    let req = ResearchRunRequest::new("oa-config", "topic");
+    let session = build_session_config(&req, Some(&cfg));
+    assert!(session.resilience.open_access_recovery);
+}
+
+#[test]
 fn session_event_json_returns_pure_json_without_prefix() {
     let json =
         ragent_research::cli::session_event_json(&ragent_research::session::SessionEvent::Phase {
@@ -484,4 +580,51 @@ fn build_session_config_no_mode_still_defaults_to_report() {
     let cfg = build_session_config(&req, None);
     assert_eq!(cfg.output.output_format, OutputFormat::Report);
     assert_eq!(cfg.engine.mode, ResearchMode::Tiered);
+}
+// ── `research.exclude_academic_engines` config precedence (FR-012) ──────
+
+#[test]
+fn build_session_config_exclude_academic_engines_from_app_config() {
+    // With no per-run flag, the configured value turns exclusion on.
+    let mut cfg = Config::default();
+    cfg.research.exclude_academic_engines = true;
+    let req = ResearchRunRequest::new("noacc-cfg", "topic");
+    let session = build_session_config(&req, Some(&cfg));
+    assert!(session.web.disable_scholarly);
+}
+
+#[test]
+fn build_session_config_exclude_academic_engines_off_by_default() {
+    // No config and no flag leaves scholarly engines enabled.
+    let req = ResearchRunRequest::new("noacc-off", "topic");
+    let session = build_session_config(&req, None);
+    assert!(!session.web.disable_scholarly);
+
+    let session = build_session_config(&req, Some(&Config::default()));
+    assert!(!session.web.disable_scholarly);
+}
+
+#[test]
+fn build_session_config_no_papers_flag_wins_over_config_off() {
+    // The per-run flag has no negative form, so OR expresses the precedence
+    // chain: flag on wins, config off cannot turn it back off.
+    let cfg = Config::default(); // exclude_academic_engines = false
+    let req = ResearchRunRequest {
+        no_scholarly: true,
+        ..ResearchRunRequest::new("noacc-flag", "topic")
+    };
+    let session = build_session_config(&req, Some(&cfg));
+    assert!(session.web.disable_scholarly);
+}
+
+#[test]
+fn build_session_config_no_papers_flag_and_config_on_stay_on() {
+    let mut cfg = Config::default();
+    cfg.research.exclude_academic_engines = true;
+    let req = ResearchRunRequest {
+        no_scholarly: true,
+        ..ResearchRunRequest::new("noacc-both", "topic")
+    };
+    let session = build_session_config(&req, Some(&cfg));
+    assert!(session.web.disable_scholarly);
 }

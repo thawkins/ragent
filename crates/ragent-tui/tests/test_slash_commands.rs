@@ -3330,6 +3330,81 @@ fn test_slash_config_subcommand_suggestions_include_save_and_list() {
 }
 
 #[test]
+fn test_research_completion_and_help_list_no_papers() {
+    // researchnoacc FR-005: `/research` autocomplete and the parameter hint
+    // must advertise the canonical `--no-papers` scholarly-exclusion flag.
+    let mut app = make_app();
+    app.input = "/research".to_string();
+    app.input_cursor = app.input.chars().count();
+
+    app.update_slash_menu();
+
+    let menu = app
+        .slash_menu
+        .as_ref()
+        .expect("typing /research should open the slash menu");
+    let entry = menu
+        .matches
+        .iter()
+        .find(|m| m.trigger == "research")
+        .expect("menu should contain a /research entry");
+
+    assert!(
+        entry.suggestions.contains(&"--no-papers".to_string()),
+        "research suggestions should include '--no-papers': {:?}",
+        entry.suggestions
+    );
+    let hint = entry
+        .parameter_hint
+        .as_deref()
+        .expect("research entry should carry a parameter hint");
+    assert!(
+        hint.contains("--no-papers"),
+        "research parameter hint should list '--no-papers': {hint}"
+    );
+}
+
+#[test]
+fn test_research_completion_and_help_list_output_limits() {
+    // researchmax FR-006/FR-007/NFR-003: `/research` autocomplete and the
+    // parameter hint must advertise the `--max-concepts` / `--max-findings`
+    // output-limit flags.
+    let mut app = make_app();
+    app.input = "/research".to_string();
+    app.input_cursor = app.input.chars().count();
+
+    app.update_slash_menu();
+
+    let menu = app
+        .slash_menu
+        .as_ref()
+        .expect("typing /research should open the slash menu");
+    let entry = menu
+        .matches
+        .iter()
+        .find(|m| m.trigger == "research")
+        .expect("menu should contain a /research entry");
+
+    for flag in ["--max-concepts", "--max-findings"] {
+        assert!(
+            entry.suggestions.contains(&flag.to_string()),
+            "research suggestions should include '{flag}': {:?}",
+            entry.suggestions
+        );
+    }
+    let hint = entry
+        .parameter_hint
+        .as_deref()
+        .expect("research entry should carry a parameter hint");
+    for flag in ["--max-concepts", "--max-findings"] {
+        assert!(
+            hint.contains(flag),
+            "research parameter hint should list '{flag}': {hint}"
+        );
+    }
+}
+
+#[test]
 fn test_config_save_picker_state_defaults_to_none() {
     // FR-007/FR-008: the App must carry an Option<ConfigSavePickerState> field
     // initialised to None so later tasks can open the picker overlay.

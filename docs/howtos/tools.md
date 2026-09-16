@@ -185,10 +185,19 @@ browser action="screenshot"
 **Use cases:** extracting article content, searching multiple engines,
 crawling a domain.
 
+`mf_search` runs DuckDuckGo, Brave, OpenAlex, and Wikipedia in parallel (plus
+optional LangSearch / Tavily / Perplexity / Exa / Serper engines when their
+keys are configured). An optional `exclude_engines` array removes named
+backends from the orchestrator *before* any request is dispatched, so excluded
+engines are never queried (unknown names are ignored); naming every configured
+engine returns an explicit "all engines excluded" result. An optional `engine`
+restricts the search to a single backend.
+
 **Example:**
 ```text
 mf_fetch url="https://example.com" format="markdown"
 mf_search query="rust async patterns" max_results=10
+mf_search query="rust async patterns" exclude_engines=["openalex"]
 ```
 
 ---

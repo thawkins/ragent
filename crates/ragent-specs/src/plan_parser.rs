@@ -6,7 +6,9 @@
 
 use crate::error::SpecError;
 use crate::spec::TaskStatus;
+use regex::Regex;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::OnceLock;
 
 // ── Effort ────────────────────────────────────────────────────────────────
 
@@ -628,17 +630,66 @@ impl PlanParser {
         }
     }
 
-    /// Parse a comma-separated dependency string.
+    /// Regex matching an inclusive task-ID range in a Dependencies cell.
+    ///
+    /// Endpoints are well-formed task IDs separated by an ASCII hyphen, an en
+    /// dash, an em dash, or the words `to` / `through` (all seen in existing
+    /// PLAN.md files), with optional surrounding spaces. Anchored so a bare
+    /// `T-003` (whose hyphen sits inside the ID) never matches.
+    fn dependency_range_re() -> &'static Regex {
+        static DEP_RANGE_RE: OnceLock<Regex> = OnceLock::new();
+        DEP_RANGE_RE.get_or_init(|| {
+            Regex::new(r"^(T-\d+)\s*(?:[-\u{2013}\u{2014}]|\bthrough\b|\bto\b)\s*(T-\d+)$")
+                .expect("valid dependency range regex")
+        })
+    }
+
+    /// Parse the Dependencies table column into a flat list of task IDs.
+    ///
+    /// Accepts a comma-separated list of IDs, or the empty markers `-` / `—`,
+    /// and expands an inclusive range such as `T-001–T-014` (or
+    /// `T-001 through T-014`) into every ID it spans. Without expansion a range
+    /// is a single unknown ID, so a final verification task that depends on the
+    /// whole plan is treated as having no dependencies and gets scheduled first
+    /// instead of last (FR-006).
+    ///
+    /// Range endpoints must be well-formed task IDs (`T-\d+`). A descending
+    /// range keeps both endpoints rather than expanding, and a token that is
+    /// not a range is returned verbatim so [`resolve_execution_order`] can warn
+    /// about an unknown dependency.
     fn parse_dependencies(deps_str: &str) -> Vec<String> {
         let trimmed = deps_str.trim();
         if trimmed.is_empty() || trimmed == "—" || trimmed == "-" {
             return Vec::new();
         }
-        trimmed
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+        let mut deps = Vec::new();
+        for part in trimmed.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let Some(caps) = Self::dependency_range_re().captures(part) else {
+                deps.push(part.to_string());
+                continue;
+            };
+            let (Some(first), Some(last)) = (
+                caps[1][2..].parse::<u32>().ok(),
+                caps[2][2..].parse::<u32>().ok(),
+            ) else {
+                deps.push(part.to_string());
+                continue;
+            };
+            if first <= last {
+                let width = caps[1].len().saturating_sub(2).max(1);
+                deps.extend((first..=last).map(|n| format!("T-{n:0width$}")));
+            } else {
+                // Descending range - keep both endpoints so neither dependency
+                // is silently dropped.
+                deps.push(caps[1].to_string());
+                deps.push(caps[2].to_string());
+            }
+        }
+        deps
     }
 }
 

@@ -1019,7 +1019,7 @@ impl App {
             "loop" => Some("[help | <agent> <goal text...>]".to_string()),
             "blueprints" => Some("[help|list|<name>]".to_string()),
             "research" => Some(
-                "[create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [--clarify|--no-clarify] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--tier light|full|dissertation] [--depth shallow|standard|deep] [--iterations N] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--use-pdf] [--no-papers] [--web-time N] <name> <topic...>] | [list|open|search|show|delete|archive|cluster]".to_string(),
+                "[create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [--clarify|--no-clarify] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--tier light|full|dissertation] [--depth shallow|standard|deep] [--iterations N] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--use-pdf] [--no-papers] [--oa-enable|--no-oa] [--web-time N] [--max-concepts N] [--max-findings N] <name> <topic...>] | [list|open|search|show|delete|archive|cluster]".to_string(),
             ),
             "help" => Some("[<command>]".to_string()),
             "quit" | "exit" => None,

@@ -593,7 +593,8 @@ See `docs/howtos/custom-agents.md` for the full schema.
 
 Log and Profile can coexist (Log above, Profile below). Other side panels
 are mutually exclusive. All support mouse scrolling and scrollbar
-dragging.
+dragging. Every toggled side panel (Log, Profile, TASKS, Memory, Telemetry,
+and Context) takes 50% of the application width.
 
 ---
 

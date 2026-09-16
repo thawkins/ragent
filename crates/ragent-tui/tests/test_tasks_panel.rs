@@ -179,7 +179,7 @@ fn test_tasks_panel_completed_status() {
 
     let text = render_app_to_string(&mut app, 120, 40);
     assert!(
-        text.contains("[COMPLETED] Completed task"),
+        text.contains("[COMPLETED] c1 Completed task"),
         "should render [COMPLETED] prefix; got:\n{text}"
     );
 }
@@ -206,7 +206,7 @@ fn test_tasks_panel_pending_status() {
 
     let text = render_app_to_string(&mut app, 120, 40);
     assert!(
-        text.contains("[PENDING] Pending task"),
+        text.contains("[PENDING] p1 Pending task"),
         "should render [PENDING] prefix; got:\n{text}"
     );
 }
@@ -233,7 +233,7 @@ fn test_tasks_panel_in_progress_status() {
 
     let text = render_app_to_string(&mut app, 120, 40);
     assert!(
-        text.contains("[IN_PROGRESS] Active task"),
+        text.contains("[IN_PROGRESS] ip1 Active task"),
         "should render [IN_PROGRESS] prefix; got:\n{text}"
     );
 }
@@ -632,9 +632,10 @@ fn test_tasks_panel_combined_owner_and_active_form() {
     );
 
     let text = render_app_to_string(&mut app, 120, 40);
+    let inner = tasks_panel_inner_text(&mut app, 120, 40);
     assert!(
-        text.contains("[IN_PROGRESS] Combined task"),
-        "should show status + subject; got:\n{text}"
+        buffer_contains_phrase(&inner, "[IN_PROGRESS] combo Combined task"),
+        "should show status + subject; got:\n{inner}"
     );
     assert!(
         text.contains("(agent-42)"),

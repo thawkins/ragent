@@ -2252,13 +2252,20 @@ impl Config {
 
         // Research settings: overlay takes precedence for explicitly set fields.
         // Contact email and OA threshold override base when present; the recovery
-        // flag uses OR semantics because it is opt-in.
+        // and academic-exclusion flags use OR semantics because they are opt-in.
         base.research.open_access_recovery |= overlay.research.open_access_recovery;
+        base.research.exclude_academic_engines |= overlay.research.exclude_academic_engines;
         if overlay.research.contact_email.is_some() {
             base.research.contact_email = overlay.research.contact_email;
         }
         if overlay.research.oa_min_full_text_chars != default_oa_min_full_text_chars() {
             base.research.oa_min_full_text_chars = overlay.research.oa_min_full_text_chars;
+        }
+        if overlay.research.max_concepts != default_max_concepts() {
+            base.research.max_concepts = overlay.research.max_concepts;
+        }
+        if overlay.research.max_findings != default_max_findings() {
+            base.research.max_findings = overlay.research.max_findings;
         }
         base.research.evaluate.merge(&overlay.research.evaluate);
         // Finance provider config: overlay takes precedence when it contains
@@ -3142,8 +3149,11 @@ impl PieGapConfig {
 /// {
 ///   "research": {
 ///     "open_access_recovery": true,
+///     "exclude_academic_engines": false,
 ///     "contact_email": "user@example.com",
-///     "oa_min_full_text_chars": 1000
+///     "oa_min_full_text_chars": 1000,
+///     "max_concepts": 5,
+///     "max_findings": 20
 ///   }
 /// }
 /// ```
@@ -3152,12 +3162,23 @@ impl PieGapConfig {
 /// required by Unpaywall's terms of service when OA recovery is enabled.
 /// `oa_min_full_text_chars` defaults to the value used by the open-access
 /// recovery layer (`ragent_research::open_access::DEFAULT_OA_MIN_FULL_TEXT_CHARS`).
+/// `exclude_academic_engines` defaults to `false`; when `true`, research runs
+/// exclude academically-classified search engines (OpenAlex) unless the
+/// per-run `--no-papers` flag overrides it.
+/// `max_concepts` (default 5) and `max_findings` (default 20) cap the report's
+/// `## Concepts` and `## Findings` blocks (spec `researchmax` FR-008/FR-017);
+/// the per-run `--max-concepts` / `--max-findings` flags take precedence.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResearchConfig {
     /// Enable open-access recovery via Unpaywall and Europe PMC for short
     /// scholarly sources (FR-011).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub open_access_recovery: bool,
+    /// Persistently exclude academically-classified search engines (OpenAlex)
+    /// from research runs (spec `researchnoacc` FR-012). The per-run
+    /// `--no-papers` flag takes precedence over this value.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exclude_academic_engines: bool,
     /// Contact email required by Unpaywall's terms of service (FR-012).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contact_email: Option<String>,
@@ -3167,6 +3188,16 @@ pub struct ResearchConfig {
     /// gatherer queries OA services for a legal full-text copy.
     #[serde(default = "default_oa_min_full_text_chars")]
     pub oa_min_full_text_chars: usize,
+    /// Maximum number of concepts rendered in the report's `## Concepts` block
+    /// (spec `researchmax` FR-008). Defaults to 5; a per-run `--max-concepts`
+    /// flag takes precedence. `0` means "unbounded".
+    #[serde(default = "default_max_concepts")]
+    pub max_concepts: usize,
+    /// Maximum number of findings rendered in the report's `## Findings` block
+    /// (spec `researchmax` FR-008). Defaults to 20; a per-run `--max-findings`
+    /// flag takes precedence. `0` means "unbounded".
+    #[serde(default = "default_max_findings")]
+    pub max_findings: usize,
     /// Model selection for multi-stage research pipelines (FR-013 of
     /// specs/opendeepresearch). Each field overrides the default model for a
     /// specific phase when set.
@@ -3266,14 +3297,27 @@ const fn default_oa_min_full_text_chars() -> usize {
     1000
 }
 
+/// Default concept limit (spec `researchmax` FR-008): 5 concepts.
+const fn default_max_concepts() -> usize {
+    5
+}
+
+/// Default finding limit (spec `researchmax` FR-008): 20 findings.
+const fn default_max_findings() -> usize {
+    20
+}
+
 impl ResearchConfig {
     /// Returns `true` when the research config contains only default values and
     /// can be omitted from the serialized `ragent.json`.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         !self.open_access_recovery
+            && !self.exclude_academic_engines
             && self.contact_email.is_none()
             && self.oa_min_full_text_chars == default_oa_min_full_text_chars()
+            && self.max_concepts == default_max_concepts()
+            && self.max_findings == default_max_findings()
             && self.models.is_empty()
             && self.supervisor.is_empty()
             && self.evaluate.is_empty()
@@ -3284,8 +3328,11 @@ impl Default for ResearchConfig {
     fn default() -> Self {
         Self {
             open_access_recovery: false,
+            exclude_academic_engines: false,
             contact_email: None,
             oa_min_full_text_chars: default_oa_min_full_text_chars(),
+            max_concepts: default_max_concepts(),
+            max_findings: default_max_findings(),
             models: ResearchModelsConfig::default(),
             supervisor: ResearchSupervisorConfig::default(),
             evaluate: ResearchEvaluateConfig::default(),

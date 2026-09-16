@@ -282,6 +282,7 @@ impl App {
                 use_low_relevance,
                 no_papers,
                 use_pdf,
+                oa_recovery,
                 fetch_timeout_secs,
                 local_concurrency,
                 web_phase_timeout_secs,
@@ -292,6 +293,8 @@ impl App {
                 max_search_calls,
                 max_local_sources,
                 max_synthesis_sources,
+                max_concepts,
+                max_findings,
                 brief,
                 evaluate,
             } => {
@@ -349,6 +352,7 @@ impl App {
                     use_low_relevance,
                     no_scholarly: no_papers,
                     use_pdf,
+                    open_access_recovery: oa_recovery,
                     fetch_concurrency,
                     local_concurrency,
                     fetch_timeout_secs,
@@ -360,6 +364,8 @@ impl App {
                     max_search_calls,
                     max_local_sources,
                     max_synthesis_sources,
+                    max_concepts,
+                    max_findings,
                     summarization_model,
                     clarify,
                     brief,
@@ -939,6 +945,11 @@ impl App {
             }
             ResearchCliCommand::Import { path, .. } => {
                 self.append_assistant_text(&format!("From: /research import\n\nImporting `{path}` is not yet implemented in the TUI."));
+            }
+            ResearchCliCommand::Invalid(arg) => {
+                self.append_assistant_text(&format!(
+                    "From: /research\n\n**Error:** {arg}. Try `/research help`."
+                ));
             }
             ResearchCliCommand::Unknown(sub) => {
                 self.append_assistant_text(&format!(

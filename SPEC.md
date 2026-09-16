@@ -1,9 +1,9 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.96</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.105</p>
         <p style="font-size: 1.1em;">
-          <strong>Date:</strong> 2026-09-08
+          <strong>Date:</strong> 2026-09-16
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -98,14 +98,37 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.104). The core architecture, tool system,
+Ragent is in **beta** (v1.0.105). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.44 → v1.0.104):**
+**Current Release Highlights (v1.0.44 → v1.0.105):**
+
+- **Research output limits, engine exclusion, and progress-table detail
+  (v1.0.105)** — `/research create` caps its `## Concepts`
+  and `## Findings` lists at 5 and 20 by default, reordering
+  most-relevant-first (an entry's relevance is the highest `[#N]` source rank
+  it cites; ties break by cited count, then original model order) before
+  truncation and renumbering the survivors contiguously (spec `researchmax`).
+  The limits are set per run with `--max-concepts N` / `--max-findings N` on
+  the root CLI, the TUI, and `POST /research` (new `max_concepts` /
+  `max_findings` fields, round-tripped through the invocation summary), or
+  persistently via `research.max_concepts` / `research.max_findings`; `0` means
+  unbounded and non-integers are rejected. `mf_search` gained an
+  `exclude_engines` array (spec `researchnoacc`) that removes named backends
+  before any request is dispatched; research `--no-papers` (alias
+  `--no-scholarly`, config `research.exclude_academic_engines`) routes through
+  it, so OpenAlex consumes no search budget and cannot shadow general-web URLs
+  in dedup, and `POST /research` gained a `no_scholarly` field. `--oa-enable` /
+  `--no-oa` toggle open-access recovery per run. The per-engine progress table
+  breaks exclusions out by reason (`papers`/`pdf`/`relev`/`short`/`fetch`) and
+  fetch failures out by cause (timeout/network/block/http/wall/js/extraction).
+  `/spec impl` expands a task-range Dependencies cell (`T-001–T-014`) into every
+  spanned ID; the TASKS panel row reads `[STATUS] <id> title`; every toggled
+  side panel takes 50% of the window width.
 
 - **Functional anti-pattern remediation (FUNC-038..069, 080..082)** — the
   FUNCPLAN.md second pass closes the plan's M1 tail and all of M2-M5:
@@ -310,7 +333,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
 | **Multi-provider** | 13 first-class LLM provider IDs with auto-discovery and health checks |
-| **Tool-rich** | ~150 registered tools across 18 categories |
+| **Tool-rich** | 168 registered tools across 25 categories |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -1266,7 +1289,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
-| `/research create\|list\|show\|search\|delete` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance` |
+| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
 | `/config list` | Interactive picker to restore a saved backup |
@@ -1895,6 +1918,10 @@ Every `RESEARCH.md` contains:
 | `/research create ... --compression-model <provider:model>` | Model used to compress intermediate findings |
 | `/research create ... --final-report-model <provider:model>` | Model used to write the final report |
 | `/research create ... --max-concurrent-research-units N` | Limit parallel researchers in supervisor/competitive modes |
+| `/research create ... --no-papers` | Exclude academically-classified backends (OpenAlex) before any search request (alias `--no-scholarly`; config `research.exclude_academic_engines`) |
+| `/research create ... --oa-enable` / `--no-oa` | Force open-access recovery on/off for the run, overriding `research.open_access_recovery` |
+| `/research create ... --max-concepts N` | Cap the `## Concepts` list (default 5; `0` = unbounded); entries are ordered most-relevant-first before truncation |
+| `/research create ... --max-findings N` | Cap the `## Findings` list (default 20; `0` = unbounded); entries are ordered most-relevant-first before truncation |
 | `/research create ... --evaluate` | Append a deterministic quality scorecard to `RESEARCH.md` |
 | `/research create ... --brief <TEXT>` | Provide an explicit research brief |
 | `/research create ... --clarify` | Ask the single clarifying question (disabled by default) |
@@ -1973,11 +2000,13 @@ The `POST /research` request body mirrors `ResearchRunRequest`:
 `template`, `depth`, `tier`, `iterations`, `format`, `mode`,
 `summarization_model`, `research_model`, `compression_model`,
 `final_report_model`, `max_concurrent_research_units`, `use_local`,
-`use_specs`, `use_low_relevance`, `no_scholarly`, `use_pdf`, `evaluate`,
+`use_specs`, `use_low_relevance`, `no_scholarly`, `exclude_academic_engines`,
+`open_access_recovery`, `use_pdf`, `evaluate`,
 `brief`, `clarify`, `fetch_concurrency`, `local_concurrency`,
 `fetch_timeout_secs`, `web_phase_timeout_secs`,
 `local_phase_timeout_secs`, `search_max_retries`, `search_retry_base_delay_ms`,
 `max_web_results`, `max_search_calls`,
+`max_concepts`, `max_findings`,
 `max_local_sources`,
 `max_synthesis_sources`. `web_phase_timeout_secs` (CLI `--web-time`) defaults
 to 180 seconds (`DEFAULT_WEB_PHASE_TIMEOUT_SECS`); a value of `0` disables the
@@ -2836,6 +2865,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.105 | 2026-09-16 | Research output limits (`research.max_concepts`/`research.max_findings`, `--max-concepts`/`--max-findings`, `POST /research` fields; defaults 5/20, `0` = unbounded, most-relevant-first reordering before truncation), scholarly-engine exclusion (`mf_search` `exclude_engines`, research `--no-papers`/`--no-scholarly`, `research.exclude_academic_engines`), per-run open-access toggles (`--oa-enable`/`--no-oa`), a progress table that breaks exclusions and fetch failures down by reason/cause, `/spec impl` task-range Dependencies expansion, and TUI panel changes (TASKS panel `[STATUS] <id> title` rows, 50%-width side panels). |
 | v1.0.104 | 2026-09-14 | Functional anti-pattern remediation (FUNC-038..069, 080..082): the FUNCPLAN.md second pass closes the plan's M1 tail and all of M2-M5 -- `mf_search` keyless engines surface a dead engine as an error instead of a zero-result success (FUNC-035), `github_merge_pr` rejects an unknown merge method (FUNC-038), the last three production poison-lock panics recover via `PoisonError::into_inner` (FUNC-040/041/042), no production `unreachable!`/poison-expect remains (FUNC-043/044/045), GitLab GETs retry 429 honouring `Retry-After` with bounded request/entry budgets and full pagination and research blocking reads move behind `block_in_place` (FUNC-050/052/053), and the TUI/tools/VCS/codeindex/server/research correctness fixes (FUNC-060..069) plus a new `scripts/check-poison-locks.sh` guard wired into `pre-flight.sh` and CI (FUNC-080/081/082). |
 | v1.0.103 | 2026-09-14 | M1 agent per-turn hot path (PERF-032..040 + PERF-048): the provider-facing transcript is held behind an `Arc<Vec<ChatMessage>>` (no per-turn deep clone, PERF-032), a pure history append converts only the new tail (`take_cached_for_append` + `record_history_base`, PERF-033), the subagent tool surface is cached behind the tool-registry version (PERF-034), `LoopTracker` is `Copy` (PERF-035), the new `RequestTokenTracker` makes the per-step pre-send token estimate O(changed message) instead of O(history) (PERF-036), tool/result pairing is a single pass (PERF-037), the compaction prompt is assembled into one buffer (PERF-038), memory-entry token costs are memoised (PERF-039), the activity log is written by one background task per process (PERF-040), and the TUI viewers retain a single copy of their rendered rows (PERF-048). New benches `turn_loop`/`m3_hot_paths`; new guards `test_activity_writer`/`test_no_percall_regex`. Security: `rustls` 0.23.43 -> 0.23.45 (RUSTSEC-2026-0285). |
 | v1.0.102 | 2026-09-14 | Second `/simplify` sweep across the search, research, agent, and TUI crates: the API-key `mf_search` engines (tavily/perplexity/exa/serper/langsearch) share `engine_http_client`/`api_engine_preflight`/`finish_json_search`/`mask_api_key` plus `truncate_snippet`/`truncate_query_to` (~150 dup lines removed), `strip_disallowed_quotes` is a single allocation, `search_with_retry` caps the backoff shift at 31, and `diversity_truncate` takes/returns owned vectors and re-syncs `total_merged_results`; the research web-gatherer volume policy is one `volume_policy()` helper and the vestigial `deadline_fired` flag is gone. |
@@ -3405,7 +3435,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
-| `/research create\|list\|show\|search\|delete` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance` |
+| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
 | `/config list` | Interactive picker to restore a saved backup |

@@ -35,7 +35,10 @@ use crate::run_manifest::RunStep;
 use crate::source::Source;
 use crate::source_vault::SourceVault;
 use crate::tier_router::{TierRouter, TierRouterObserver, TierRouterToSessionObserver};
-use crate::web_gatherer::{DEFAULT_FETCH_CONCURRENCY, GatherEvent, GatherObserver, WebGatherer};
+use crate::web_gatherer::{
+    DEFAULT_FETCH_CONCURRENCY, ExclusionReason, FetchFailureKind, GatherEvent, GatherObserver,
+    WebGatherer,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -49,12 +52,16 @@ struct GatherEventForwarder {
 }
 
 /// Build the width-sweep progress detail: a one-line summary followed by a
-/// per-engine `considered/captured/excluded` table (T-006). The balance
-/// `considered == captured + excluded + capped + cancelled` always holds,
-/// where `capped` URLs were dropped by the fetch budget. `cancelled` is
-/// structurally 0 — the fetch stage is not deadline-bounded and never
-/// cancels fetches on the phase deadline; it is rendered only if a future
-/// truncation site ever makes it non-zero.
+/// blank line, a per-engine `considered/captured/excluded` table with the
+/// exclusion reasons broken out by column (T-006), and a trailing blank line.
+/// The balance `considered == captured + excluded + capped + cancelled` always
+/// holds, where `capped` URLs were dropped by the fetch budget; the reason
+/// columns always sum back to `excluded`. The `fetch` reason column is
+/// additionally broken down by fine-grained fetch-failure cause so the cause of
+/// each network-stage drop is visible. `cancelled` is structurally 0 — the
+/// fetch stage is not deadline-bounded and never cancels fetches on the phase
+/// deadline; it is rendered only if a future truncation site ever makes it
+/// non-zero.
 fn format_width_sweep_detail(
     query_count: usize,
     engines: &[String],
@@ -62,6 +69,8 @@ fn format_width_sweep_detail(
     captured: usize,
     excluded: usize,
     per_engine: &[crate::web_gatherer::EngineSweepStat],
+    excluded_by_reason: &std::collections::BTreeMap<ExclusionReason, usize>,
+    failed_by_kind: &std::collections::BTreeMap<FetchFailureKind, usize>,
     capped: usize,
     cancelled: usize,
 ) -> String {
@@ -76,20 +85,83 @@ fn format_width_sweep_detail(
     if per_engine.is_empty() {
         return out;
     }
-    out.push_str("\nengine         considered captured excluded");
+    // Column order for the exclusion-reason breakdown, then the fetch-failure
+    // breakdown of the `fetch` column.
+    let reasons = ExclusionReason::ALL;
+    let kinds = FetchFailureKind::ALL;
+    let mut header = format!(
+        "{:<12} {:>10} {:>8} {:>8}",
+        "engine", "considered", "captured", "excluded"
+    );
+    for reason in reasons {
+        header.push_str(&format!(" {:>8}", reason.short_label()));
+    }
+    for kind in kinds {
+        header.push_str(&format!(" {:>6}", kind.short_label()));
+    }
+    let render_row = |label: &str,
+                      considered: usize,
+                      captured: usize,
+                      counts: &[usize],
+                      fail: &[usize]|
+     -> String {
+        let mut row = format!(
+            "{:<12} {:>10} {:>8} {:>8}",
+            label,
+            considered,
+            captured,
+            counts.iter().sum::<usize>()
+        );
+        for count in counts {
+            row.push_str(&format!(" {:>8}", count));
+        }
+        for count in fail {
+            row.push_str(&format!(" {:>6}", count));
+        }
+        row
+    };
+    // Blank line separating the summary line from the table.
+    out.push_str("\n\n");
+    out.push_str(&header);
     for stat in per_engine {
-        out.push_str(&format!(
-            "\n{: <12} {: >10} {: >8} {: >8}",
-            stat.engine, stat.considered, stat.captured, stat.excluded
+        let counts: Vec<usize> = reasons
+            .iter()
+            .map(|reason| stat.excluded_by_reason.get(reason).copied().unwrap_or(0))
+            .collect();
+        let fails: Vec<usize> = kinds
+            .iter()
+            .map(|kind| stat.failed_by_kind.get(kind).copied().unwrap_or(0))
+            .collect();
+        out.push('\n');
+        out.push_str(&render_row(
+            &stat.engine,
+            stat.considered,
+            stat.captured,
+            &counts,
+            &fails,
         ));
     }
-    out.push_str(&format!(
-        "\n{: <12} {: >10} {: >8} {: >8}",
-        "totals", considered, captured, excluded
+    let totals: Vec<usize> = reasons
+        .iter()
+        .map(|reason| excluded_by_reason.get(reason).copied().unwrap_or(0))
+        .collect();
+    let total_fails: Vec<usize> = kinds
+        .iter()
+        .map(|kind| failed_by_kind.get(kind).copied().unwrap_or(0))
+        .collect();
+    out.push('\n');
+    out.push_str(&render_row(
+        "totals",
+        considered,
+        captured,
+        &totals,
+        &total_fails,
     ));
+    // Blank line separating the table from any trailing diagnostics.
+    out.push_str("\n\n");
     if capped > 0 || cancelled > 0 {
         out.push_str(&format!(
-            "\n(unfetched: {capped} fetch-capped, {cancelled} deadline-cancelled)"
+            "(unfetched: {capped} fetch-capped, {cancelled} deadline-cancelled)"
         ));
     }
     out
@@ -167,6 +239,8 @@ impl GatherObserver for GatherEventForwarder {
                 captured,
                 excluded,
                 per_engine,
+                excluded_by_reason,
+                failed_by_kind,
                 capped,
                 cancelled,
             } => {
@@ -177,6 +251,8 @@ impl GatherObserver for GatherEventForwarder {
                     captured,
                     excluded,
                     &per_engine,
+                    &excluded_by_reason,
+                    &failed_by_kind,
                     capped,
                     cancelled,
                 );
@@ -460,7 +536,7 @@ pub struct LocalConfig {
 }
 
 /// Analysis and synthesis knobs for a research session.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AnalysisConfig {
     /// Depth preset selected via `--depth`. When `None`, the engine behaves as
     /// `Depth::Standard` for budget purposes and remains single-pass.
@@ -489,6 +565,33 @@ pub struct AnalysisConfig {
     /// dimensions are used. When `Some`, the supplied dimensions override the
     /// defaults, enabling contradiction detection for non-medical topics.
     pub contradiction: Option<crate::contradiction::ContradictionConfig>,
+    /// Maximum number of concept sections retained in the report's
+    /// `## Concepts` block (`--max-concepts`, FR-001..FR-008). Defaults to
+    /// [`crate::limits::DEFAULT_MAX_CONCEPTS`] (5). A value of `0` means
+    /// "unbounded" and applies no truncation (FR-016).
+    pub max_concepts: usize,
+    /// Maximum number of findings retained in the report's `## Findings`
+    /// block (`--max-findings`, FR-001..FR-008). Defaults to
+    /// [`crate::limits::DEFAULT_MAX_FINDINGS`] (20). A value of `0` means
+    /// "unbounded" and applies no truncation (FR-016).
+    pub max_findings: usize,
+}
+
+impl Default for AnalysisConfig {
+    /// Built-in analysis defaults, using the shared output limits so both
+    /// findings and concepts default to the same caps as a caller that sets
+    /// neither flag (FR-002, FR-014).
+    fn default() -> Self {
+        Self {
+            depth: None,
+            iterations: None,
+            max_synthesis_sources: None,
+            summarization_model: None,
+            contradiction: None,
+            max_concepts: crate::limits::DEFAULT_MAX_CONCEPTS,
+            max_findings: crate::limits::DEFAULT_MAX_FINDINGS,
+        }
+    }
 }
 
 /// Resilience, retry, and open-access recovery knobs.
@@ -1622,6 +1725,8 @@ impl ResearchSession {
                 comparison_table,
                 config.evaluate,
                 config.invocation.clone(),
+                config.analysis.max_concepts,
+                config.analysis.max_findings,
                 observer.clone(),
             )
             .await?;
@@ -1647,6 +1752,8 @@ impl ResearchSession {
         comparison_table: Option<String>,
         evaluate: bool,
         invocation: Option<String>,
+        max_concepts: usize,
+        max_findings: usize,
         observer: Arc<dyn SessionObserver>,
     ) -> Result<RunOutcome> {
         let llm_produced = synth_outcome == SynthesizeOutcome::Llm;
@@ -1668,8 +1775,15 @@ impl ResearchSession {
                 crate::session::fallback::default_top_implications(&analysis.findings, topic);
         }
 
+        // ── Finding cap (spec researchmax; FR-003, FR-010, FR-020, FR-022) ──
+        // Order the findings by reverse relevance and truncate to the effective
+        // limit before the document is assembled, so the retained count and
+        // `Finding N` numbering are contiguous and stable across modes.
+        analysis.findings =
+            crate::analysis::cap_findings_to_limit(analysis.findings, max_findings, &sources);
+
         let concepts_section = if let Some(engine) = &self.concepts_engine {
-            self.extract_concepts_inner(name, &sources, engine)
+            self.extract_concepts_inner(name, &sources, engine, max_concepts)
                 .await
                 .ok()
                 .flatten()
@@ -2589,13 +2703,29 @@ impl ResearchSession {
             readability_audit = ra;
         }
 
+        // ── Finding cap (spec researchmax; FR-003, FR-010, FR-020, FR-022) ──
+        // The patcher and polish steps above may reorder or rewrite findings,
+        // so the cap runs last: order by reverse relevance against the same
+        // sources the References Index uses, truncate to the effective limit,
+        // and renumber the survivors contiguously.
+        analysis.findings = crate::analysis::cap_findings_to_limit(
+            analysis.findings,
+            config.analysis.max_findings,
+            &synthesis_sources,
+        );
+
         // ── Concepts (spec researchcluster) ──────────────────────────────
         // Extract the cross-source concept list from the same gathered corpus
         // the synthesis step consumed. The section renders directly above
         // `## Findings` in `RESEARCH.md`. When no concepts engine is wired
         // (or the extraction fails), the section is omitted entirely.
         let concepts_section = self
-            .extract_concepts_section(&name, &synthesis_sources, &observer)
+            .extract_concepts_section(
+                &name,
+                &synthesis_sources,
+                &observer,
+                config.analysis.max_concepts,
+            )
             .await;
 
         // ── Assemble ─────────────────────────────────────────────────────
@@ -3407,6 +3537,7 @@ impl ResearchSession {
         name: &ResearchName,
         sources: &[Source],
         observer: &Arc<dyn SessionObserver>,
+        max_concepts: usize,
     ) -> Option<String> {
         let Some(engine) = &self.concepts_engine else {
             return None;
@@ -3416,7 +3547,9 @@ impl ResearchSession {
             status: "started".to_string(),
             detail: None,
         });
-        let result = self.extract_concepts_inner(name, sources, engine).await;
+        let result = self
+            .extract_concepts_inner(name, sources, engine, max_concepts)
+            .await;
         match result {
             Ok(Some(section)) => {
                 observer.on_event(SessionEvent::RunStep {
@@ -3456,16 +3589,24 @@ impl ResearchSession {
     /// Build the concept-extraction payload from `sources`, call the LLM, and
     /// normalize the response. Shared by [`Self::extract_concepts_section`] and
     /// the supervisor finalization path.
+    ///
+    /// `max_concepts` is the effective concept limit (0 = unbounded) and is
+    /// injected into the prompt so the model is asked for at most that many
+    /// concepts (FR-001, FR-015).
     pub(crate) async fn extract_concepts_inner(
         &self,
         name: &ResearchName,
         sources: &[Source],
         engine: &LlmAnalysisEngine,
+        max_concepts: usize,
     ) -> anyhow::Result<Option<String>> {
         let research_root = self.manager.root().to_path_buf();
         let name = name.clone();
         let sources = sources.to_vec();
         let web_index_map = build_web_index_map(&sources);
+        // Keep a copy for the post-extraction concept ordering (the `sources`
+        // binding is consumed by the blocking body loader below).
+        let rank_sources = sources.clone();
         let bodies = tokio::task::spawn_blocking(move || {
             build_source_bodies(&sources, |src| -> Option<String> {
                 read_source_body(&research_root, &name, src)
@@ -3478,8 +3619,8 @@ impl ResearchSession {
             crate::cluster::DEFAULT_CONTEXT_WINDOW_TOKENS,
         );
         let payload = crate::cluster::build_concepts_payload_from_bodies(&bodies, max_bytes);
-        let prompt = crate::cluster::CONCEPT_EXTRACTION_PROMPT_TEMPLATE
-            .replace("[INSERT_DOCUMENTS_HERE]", &payload);
+        let prompt =
+            crate::cluster::build_concept_extraction_prompt_for_limit(&payload, max_concepts);
         let raw = engine
             .complete_raw(
                 &prompt,
@@ -3494,6 +3635,8 @@ impl ResearchSession {
         Ok(crate::cluster::concepts_section_for_research(
             &raw,
             &web_index_map,
+            &rank_sources,
+            max_concepts,
         ))
     }
 }
@@ -3681,6 +3824,89 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
     use tempfile::TempDir;
+
+    /// The width-sweep detail must render the per-engine reason columns, the
+    /// fetch-failure breakdown columns, blank lines above and below the table,
+    /// and a totals row whose reason counts sum to the global exclusion tally.
+    #[test]
+    fn format_width_sweep_detail_renders_reason_columns_and_blank_lines() {
+        use crate::web_gatherer::{EngineSweepStat, FetchFailureKind};
+        let per_engine = vec![
+            EngineSweepStat {
+                engine: "langsearch".to_string(),
+                considered: 5,
+                captured: 2,
+                excluded: 3,
+                excluded_by_reason: [
+                    (ExclusionReason::PdfDisabled, 1usize),
+                    (ExclusionReason::LowRelevance, 1),
+                    (ExclusionReason::FetchFailed, 1),
+                ]
+                .into_iter()
+                .collect(),
+                failed_by_kind: std::iter::once((FetchFailureKind::Timeout, 1usize)).collect(),
+            },
+            EngineSweepStat {
+                engine: "openalex".to_string(),
+                considered: 2,
+                captured: 1,
+                excluded: 1,
+                excluded_by_reason: std::iter::once((ExclusionReason::ScholarlyEngine, 1usize))
+                    .collect(),
+                failed_by_kind: std::collections::BTreeMap::new(),
+            },
+        ];
+        let excluded_by_reason = [
+            (ExclusionReason::ScholarlyEngine, 1usize),
+            (ExclusionReason::PdfDisabled, 1),
+            (ExclusionReason::LowRelevance, 1),
+            (ExclusionReason::FetchFailed, 1),
+        ]
+        .into_iter()
+        .collect();
+        let failed_by_kind = std::iter::once((FetchFailureKind::Timeout, 1usize)).collect();
+        let detail = format_width_sweep_detail(
+            2,
+            &["langsearch".to_string(), "openalex".to_string()],
+            7,
+            3,
+            4,
+            &per_engine,
+            &excluded_by_reason,
+            &failed_by_kind,
+            0,
+            0,
+        );
+        // Blank line above and below the table (2 newlines each side).
+        assert!(
+            detail.contains("excluded=4\n\nengine"),
+            "table must be preceded by a blank line:\n{detail}"
+        );
+        assert!(
+            detail.ends_with(
+                "totals                7        3        4        1        1        1        0        1      1      0      0      0      0      0      0\n\n"
+            ),
+            "table must be followed by a blank line and the totals row must \
+             carry the reason and fetch-failure columns:\n{detail}"
+        );
+        // Reason columns use the short labels in ALL order, followed by the
+        // fetch-failure breakdown columns.
+        assert!(
+            detail.contains(
+                "excluded   papers      pdf    relev    short    fetch    t/o    net    blk   http   wall     js   extr"
+            ),
+            "header must carry the reason and fetch-failure columns:\n{detail}"
+        );
+        // Per-engine breakdown row.
+        assert!(
+            detail.contains("langsearch            5        2        3        0        1        1        0        1      1      0      0      0      0      0      0"),
+            "langsearch row must break exclusions out by reason:\n{detail}"
+        );
+        assert!(
+            detail.contains("openalex              2        1        1        1        0        0        0        0      0      0      0      0      0      0      0"),
+            "openalex row must break exclusions out by reason:\n{detail}"
+        );
+    }
 
     /// Generate a body string of at least [`MIN_EXTRACTABLE_CONTENT_CHARS`]
     /// characters so fake fetched pages pass the minimum-content-length guard.

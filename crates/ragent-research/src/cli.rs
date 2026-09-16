@@ -103,6 +103,11 @@ pub enum ResearchCliCommand {
         /// are skipped because they require extra extraction time and are often
         /// paywalled or large.
         use_pdf: bool,
+        /// `--oa-enable` / `--no-oa` — per-run open-access recovery override.
+        /// `Some(true)` forces OA recovery on, `Some(false)` forces it off, and
+        /// `None` defers to `research.open_access_recovery` in `ragent.json`
+        /// (which itself defaults to off).
+        oa_recovery: Option<bool>,
         /// `--fetch-timeout-secs N` — override the per-page fetch timeout.
         /// Pages that take longer than this are treated as a fetch failure so
         /// one slow URL cannot stall the whole gather pass. The default is
@@ -141,6 +146,16 @@ pub enum ResearchCliCommand {
         /// `--max-synthesis-sources N` — override the maximum number of sources
         /// sent to the LLM synthesis engine.
         max_synthesis_sources: Option<usize>,
+        /// `--max-concepts N` — maximum number of concepts rendered in the
+        /// report's `## Concepts` block. When `None` the configured
+        /// `research.max_concepts` value (default 5) is used; `0` means
+        /// "unbounded" (FR-006, FR-014, FR-016).
+        max_concepts: Option<usize>,
+        /// `--max-findings N` — maximum number of findings rendered in the
+        /// report's `## Findings` block. When `None` the configured
+        /// `research.max_findings` value (default 20) is used; `0` means
+        /// "unbounded" (FR-007, FR-014, FR-016).
+        max_findings: Option<usize>,
         /// `--brief <text>` — explicit research brief (FR-004 brief context).
         brief: Option<String>,
         /// `--evaluate` — run the deterministic self-evaluation scorecard and
@@ -228,6 +243,10 @@ pub enum ResearchCliCommand {
     Config,
     /// `ragent research help`
     Help,
+    /// `create` was given an invalid argument value (for example a
+    /// non-numeric `--max-concepts`). The payload is a human-readable
+    /// description of the offending argument (FR-019).
+    Invalid(String),
     /// Unknown/unsupported sub-command.
     Unknown(String),
 }
@@ -295,12 +314,19 @@ impl ResearchCliCommand {
         let mut use_low_relevance = false;
         let mut no_papers = false;
         let mut use_pdf = false;
+        let mut oa_recovery: Option<bool> = None;
         let mut max_web_results: Option<usize> = None;
         let mut max_search_calls: Option<usize> = None;
         let mut max_local_sources: Option<usize> = None;
         let mut max_synthesis_sources: Option<usize> = None;
+        let mut max_concepts: Option<usize> = None;
+        let mut max_findings: Option<usize> = None;
         let mut brief: Option<String> = None;
         let mut evaluate = false;
+        // Set when `--max-concepts` / `--max-findings` receives a value that is
+        // not a non-negative integer, so the run is rejected instead of the
+        // invalid argument being silently ignored (FR-019).
+        let mut invalid: Option<String> = None;
 
         while i < rest.len() {
             let arg = rest[i];
@@ -333,6 +359,8 @@ impl ResearchCliCommand {
                 | "--max-search-calls"
                 | "--max-local-sources"
                 | "--max-synthesis-sources"
+                | "--max-concepts"
+                | "--max-findings"
                 | "--brief" => {
                     i += 1;
                     if let Some(v) = rest.get(i) {
@@ -376,6 +404,14 @@ impl ResearchCliCommand {
                             "--max-search-calls" => max_search_calls = v.parse().ok(),
                             "--max-local-sources" => max_local_sources = v.parse().ok(),
                             "--max-synthesis-sources" => max_synthesis_sources = v.parse().ok(),
+                            "--max-concepts" => match v.parse() {
+                                Ok(n) => max_concepts = Some(n),
+                                Err(_) => invalid = Some(format!("--max-concepts {v}")),
+                            },
+                            "--max-findings" => match v.parse() {
+                                Ok(n) => max_findings = Some(n),
+                                Err(_) => invalid = Some(format!("--max-findings {v}")),
+                            },
                             "--brief" => brief = Some((*v).to_string()),
                             _ => {
                                 // Unreachable: the outer guard covers every flag
@@ -388,8 +424,10 @@ impl ResearchCliCommand {
                 "--use-local" => use_local = true,
                 "--use-specs" => use_specs = true,
                 "--use-low-relevance" => use_low_relevance = true,
-                "--no-papers" => no_papers = true,
+                "--no-papers" | "--no-scholarly" => no_papers = true,
                 "--use-pdf" => use_pdf = true,
+                "--oa-enable" => oa_recovery = Some(true),
+                "--no-oa" => oa_recovery = Some(false),
                 "--clarify" => clarify = Some(true),
                 "--no-clarify" => clarify = Some(false),
                 "--evaluate" => evaluate = true,
@@ -406,6 +444,9 @@ impl ResearchCliCommand {
         let Some(name) = name else {
             return Self::Unknown("create".to_string());
         };
+        if let Some(arg) = invalid {
+            return Self::Invalid(format!("invalid value for `{arg}`: expected an integer"));
+        }
         let topic = topic_words.join(" ");
         Self::Create {
             name,
@@ -431,6 +472,7 @@ impl ResearchCliCommand {
             use_low_relevance,
             no_papers,
             use_pdf,
+            oa_recovery,
             fetch_timeout_secs,
             local_concurrency,
             web_phase_timeout_secs,
@@ -441,6 +483,8 @@ impl ResearchCliCommand {
             max_search_calls,
             max_local_sources,
             max_synthesis_sources,
+            max_concepts,
+            max_findings,
             brief,
             evaluate,
         }
@@ -642,14 +686,18 @@ Common create flags:
   --max-search-calls N                               Total web-search call cap
   --max-local-sources N                              Local source cap
   --max-synthesis-sources N                          Sources admitted into synthesis
+  --max-concepts N                                   Concept cap (default 5; 0 = unbounded)
+  --max-findings N                                   Finding cap (default 20; 0 = unbounded)
   --brief <TEXT>                                     Explicit research brief (skips clarification)
   --clarify                                          Ask a clarifying question (off by default)
   --no-clarify                                       Deprecated no-op; clarification is already off
   --use-local                                        Include local file sources
   --use-specs                                        Include spec documents as sources
   --use-low-relevance                                Keep low-relevance web hits
-  --no-papers                                        Exclude scholarly-paper engines
+  --no-papers                                        Exclude scholarly-paper engines (alias --no-scholarly)
   --use-pdf                                          Enable PDF extraction
+  --oa-enable                                        Force open-access recovery on
+  --no-oa                                            Force open-access recovery off
   --evaluate                                         Append the self-evaluation scorecard
 "
         .to_string()
@@ -1283,6 +1331,43 @@ mod tests {
                 assert!(use_low_relevance);
                 assert!(no_papers);
                 assert!(use_pdf);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_accepts_no_scholarly_alias() {
+        // FR-005: the shared parser accepts both `--no-papers` (canonical) and
+        // `--no-scholarly` (legacy alias) so CLI, TUI and HTTP invocations all
+        // toggle the same flag.
+        for flag in ["--no-papers", "--no-scholarly"] {
+            let cmd = ResearchCliCommand::parse(&format!("create alias topic {flag}"));
+            match cmd {
+                ResearchCliCommand::Create { no_papers, .. } => {
+                    assert!(no_papers, "{flag} must set no_papers")
+                }
+                other => panic!("unexpected variant for {flag}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_create_with_oa_flags() {
+        // No flag defers to config.
+        match ResearchCliCommand::parse("create noflag topic") {
+            ResearchCliCommand::Create { oa_recovery, .. } => assert_eq!(oa_recovery, None),
+            other => panic!("unexpected variant: {other:?}"),
+        }
+        match ResearchCliCommand::parse("create on topic --oa-enable") {
+            ResearchCliCommand::Create { oa_recovery, .. } => {
+                assert_eq!(oa_recovery, Some(true));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+        match ResearchCliCommand::parse("create off topic --no-oa") {
+            ResearchCliCommand::Create { oa_recovery, .. } => {
+                assert_eq!(oa_recovery, Some(false));
             }
             other => panic!("unexpected variant: {other:?}"),
         }

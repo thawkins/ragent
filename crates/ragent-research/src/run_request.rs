@@ -70,10 +70,17 @@ pub struct ResearchRunRequest {
     pub use_specs: bool,
     /// `--use-low-relevance` — keep low-relevance web sources.
     pub use_low_relevance: bool,
-    /// `--no-scholarly` — disable scholarly search engines.
+    /// `--no-papers` (alias `--no-scholarly`) — disable scholarly search
+    /// engines.
     pub no_scholarly: bool,
     /// `--use-pdf` — allow PDF documents from web search/`--from-url`.
     pub use_pdf: bool,
+    /// `--oa-enable` / `--no-oa` — per-run open-access recovery override.
+    ///
+    /// `Some(true)` forces OA recovery on, `Some(false)` forces it off, and
+    /// `None` defers to `research.open_access_recovery` in the loaded
+    /// configuration (which itself defaults to off).
+    pub open_access_recovery: Option<bool>,
     /// `--fetch-concurrently N` — max parallel page fetches.
     pub fetch_concurrency: Option<usize>,
     /// `--local-concurrently N` — max parallel local scoring/spec-scan tasks.
@@ -98,6 +105,16 @@ pub struct ResearchRunRequest {
     pub max_local_sources: Option<usize>,
     /// Override the maximum number of sources sent to the LLM synthesis engine.
     pub max_synthesis_sources: Option<usize>,
+    /// `--max-concepts N` — maximum number of concepts rendered in the report's
+    /// `## Concepts` block. When `None`, the configured `research.max_concepts`
+    /// value is used, falling back to the built-in default (5). `0` means
+    /// "unbounded" (FR-012, FR-014, FR-016).
+    pub max_concepts: Option<usize>,
+    /// `--max-findings N` — maximum number of findings rendered in the report's
+    /// `## Findings` block. When `None`, the configured `research.max_findings`
+    /// value is used, falling back to the built-in default (20). `0` means
+    /// "unbounded" (FR-012, FR-014, FR-016).
+    pub max_findings: Option<usize>,
     /// `--summarization-model <provider:model>` override.
     pub summarization_model: Option<String>,
     /// `--mode tiered|supervisor|competitive` research execution strategy.
@@ -194,6 +211,7 @@ impl ResearchRunRequest {
                 use_low_relevance,
                 no_papers,
                 use_pdf,
+                oa_recovery,
                 fetch_timeout_secs,
                 local_concurrency,
                 web_phase_timeout_secs,
@@ -204,6 +222,8 @@ impl ResearchRunRequest {
                 max_search_calls,
                 max_local_sources,
                 max_synthesis_sources,
+                max_concepts,
+                max_findings,
                 brief,
                 evaluate,
             } => {
@@ -227,6 +247,7 @@ impl ResearchRunRequest {
                     use_low_relevance,
                     no_scholarly: no_papers,
                     use_pdf,
+                    open_access_recovery: oa_recovery,
                     fetch_concurrency,
                     local_concurrency,
                     fetch_timeout_secs,
@@ -238,6 +259,8 @@ impl ResearchRunRequest {
                     max_search_calls,
                     max_local_sources,
                     max_synthesis_sources,
+                    max_concepts,
+                    max_findings,
                     summarization_model,
                     mode,
                     max_concurrent_research_units,
@@ -338,6 +361,20 @@ pub fn build_session_config(
 ) -> SessionConfig {
     let cfg_research = app_config.map(|c| &c.research);
 
+    // Concept and finding limits: an explicit per-run flag wins; otherwise the
+    // configured `research.max_concepts` / `research.max_findings`; otherwise
+    // the built-in default (FR-012, FR-014, FR-017).
+    let max_concepts = req.max_concepts.unwrap_or_else(|| {
+        cfg_research
+            .map(|r| r.max_concepts)
+            .unwrap_or(crate::limits::DEFAULT_MAX_CONCEPTS)
+    });
+    let max_findings = req.max_findings.unwrap_or_else(|| {
+        cfg_research
+            .map(|r| r.max_findings)
+            .unwrap_or(crate::limits::DEFAULT_MAX_FINDINGS)
+    });
+
     let tier = req
         .tier
         .as_deref()
@@ -379,7 +416,14 @@ pub fn build_session_config(
                 .fetch_timeout_secs
                 .unwrap_or(DEFAULT_FETCH_TIMEOUT.as_secs()),
             use_low_relevance: req.use_low_relevance,
-            disable_scholarly: req.no_scholarly,
+            // Precedence: the per-run `--no-papers` flag wins; otherwise the
+            // configured `research.exclude_academic_engines`; otherwise off.
+            // The flag has no negative form, so OR expresses the chain exactly
+            // (a flag can only turn exclusion on).
+            disable_scholarly: req.no_scholarly
+                || cfg_research
+                    .map(|r| r.exclude_academic_engines)
+                    .unwrap_or(false),
             use_pdf_web_sources: req.use_pdf,
             web_phase_timeout_secs: req
                 .web_phase_timeout_secs
@@ -397,6 +441,8 @@ pub fn build_session_config(
             depth: req.depth.as_deref().and_then(Depth::parse),
             iterations: req.iterations,
             max_synthesis_sources: req.max_synthesis_sources,
+            max_concepts,
+            max_findings,
             summarization_model: req.summarization_model.clone(),
             contradiction: None,
         },
@@ -405,9 +451,13 @@ pub fn build_session_config(
             search_retry_base_delay_ms: req
                 .search_retry_base_delay_ms
                 .unwrap_or(DEFAULT_SEARCH_RETRY_BASE_DELAY_MS),
-            open_access_recovery: cfg_research
-                .map(|r| r.open_access_recovery)
-                .unwrap_or(false),
+            // Precedence: explicit `--oa-enable` / `--no-oa` wins; otherwise
+            // the configured `research.open_access_recovery`; otherwise off.
+            open_access_recovery: req.open_access_recovery.unwrap_or_else(|| {
+                cfg_research
+                    .map(|r| r.open_access_recovery)
+                    .unwrap_or(false)
+            }),
             contact_email: cfg_research.and_then(|r| r.contact_email.clone()),
             oa_min_full_text_chars: cfg_research
                 .map(|r| r.oa_min_full_text_chars)
