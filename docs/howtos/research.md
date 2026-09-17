@@ -179,7 +179,7 @@ Run a research session and write `RESEARCH.md`. This is the primary command.
   [--max-web-results N] [--max-search-calls N]
   [--max-concepts N] [--max-findings N]
   [--use-local] [--use-specs] [--use-low-relevance] [--no-papers] [--use-pdf]
-  [--oa-enable] [--no-oa]
+  [--oa-enable] [--no-oa] [--url-cloak]
 ```
 
 `--mode competitive` runs the multi-researcher competitive pipeline and
@@ -373,6 +373,21 @@ unbounded, matching the `0 disables the cap` convention used elsewhere.
 ```text
 /research create brief "Vector databases" --max-concepts 3 --max-findings 10
 /research create exhaustive "Multi-agent orchestration" --max-concepts 0 --max-findings 0
+```
+
+**Cloaking source URLs.** Pass `--url-cloak` to write the report's source
+URLs as defanged plain text instead of clickable links. The transformation
+rewrites the scheme (`https://` -> `hxxps://`, `http://` -> `hxxp://`),
+brackets every dot (`example.com` -> `example[.]com`), and wraps the result in
+a Markdown code span. It applies to the `**Sources:**` bullets under each
+finding and to the `References Index` table in `RESEARCH.md` (plus the
+`Sources Reference` table in `CORPA.md`); non-URL rows (local paths, spec ids)
+are untouched, and every other section is unchanged. Use it when the document
+is ingested by tooling that rejects or flags live URLs. The flag is off by
+default and is recorded in frontmatter so `/research update` replays it.
+
+```text
+/research create vendors "Managed vector database vendors" --url-cloak
 ```
 
 ### 4.7 `/research cluster <name>`
@@ -713,6 +728,7 @@ These flags control the performance and resilience of the gathering phases.
 | `--use-pdf` | off | Allow PDF documents from web search or `--from-url` to be captured as sources. |
 | `--oa-enable` | `research.open_access_recovery` (off) | Force open-access recovery on for this run, overriding `ragent.json`. |
 | `--no-oa` | `research.open_access_recovery` (off) | Force open-access recovery off for this run, overriding `ragent.json`. |
+| `--url-cloak` | off | Emit web source URLs as defanged plain text (`hxxps://host[.]tld/...` in a code span) in the `Sources` bullets and the `References Index` table, so automated URL scanners do not flag the document. Non-URL rows are unchanged. |
 
 GitHub `blob/` file-view URLs (`github.com/owner/repo/blob/...`) are
 rewritten to `raw.githubusercontent.com` before fetching and non-HTML
@@ -1176,6 +1192,7 @@ source count, and all session events as a JSON array.
     "iterations": 3,
     "max_concepts": 5,
     "max_findings": 20,
+    "url_cloak": false,
     "format": "report"
 }
 ```
@@ -1304,6 +1321,7 @@ The same commands work outside the TUI:
 ragent research help
 ragent research create rust-async "Rust async patterns" --tier full --use-local
 ragent research create brief "Vector databases" --max-concepts 3 --max-findings 10
+ragent research create vendors "Managed vector db vendors" --url-cloak
 ragent research create from-url --from-url https://example.com/article
 ragent research create from-doc --from-file docs/design.md --use-local
 ragent research create comp "vector db landscape" --mode competitive

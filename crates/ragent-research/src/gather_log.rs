@@ -187,40 +187,49 @@ impl GatherLog {
 
     /// Append one already-serialised JSON line (FUNC-051).
     ///
-    /// The whole lock-guarded write runs inside [`Self::run_blocking`] so a
-    /// caller on the async runtime never blocks a worker thread on the
-    /// first-use `open` or a buffer flush.
+    /// The lock-guarded buffered write runs directly: after PERF-049 this is
+    /// an in-memory `BufWriter` append with no syscall, so there is nothing to
+    /// offload. The first-use `open` and the explicit `flush` (the only
+    /// blocking syscalls on this path) are wrapped in [`Self::run_blocking`].
     fn append_line(&self, line: &str) -> anyhow::Result<()> {
-        Self::run_blocking(|| {
-            let mut guard = self.open_writer()?;
-            let writer = guard
-                .as_mut()
-                .ok_or_else(|| anyhow::anyhow!("gather log writer not initialised"))?;
-            writer.write_all(line.as_bytes())?;
-            writer.write_all(b"\n")?;
-            Ok(())
-        })
+        let mut guard = self.lock_writer();
+        self.ensure_open_blocking(&mut guard)?;
+        let writer = guard
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("gather log writer not initialised"))?;
+        writer.write_all(line.as_bytes())?;
+        writer.write_all(b"\n")?;
+        Ok(())
     }
 
-    /// Lock the writer, opening the log file on first use.
-    fn open_writer(&self) -> anyhow::Result<MutexGuard<'_, Option<BufWriter<File>>>> {
-        let mut guard = self
-            .writer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+    /// Lock the writer, opening the log file on first use (blocking).
+    ///
+    /// Only the first-use `create_dir_all` + `open` is offloaded to a blocking
+    /// thread via [`Self::run_blocking`]; subsequent calls return immediately.
+    fn ensure_open_blocking(
+        &self,
+        guard: &mut MutexGuard<'_, Option<BufWriter<File>>>,
+    ) -> anyhow::Result<()> {
         if guard.is_none() {
-            if let Some(parent) = self.path.parent()
-                && !parent.as_os_str().is_empty()
-            {
-                fs::create_dir_all(parent)?;
-            }
-            let file = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&self.path)?;
-            *guard = Some(BufWriter::with_capacity(WRITE_BUF_BYTES, file));
+            let path = self.path.clone();
+            let file = Self::run_blocking(move || {
+                if let Some(parent) = path.parent()
+                    && !parent.as_os_str().is_empty()
+                {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::OpenOptions::new().create(true).append(true).open(&path)
+            })?;
+            **guard = Some(BufWriter::with_capacity(WRITE_BUF_BYTES, file));
         }
-        Ok(guard)
+        Ok(())
+    }
+
+    /// Lock the writer without opening it.
+    fn lock_writer(&self) -> MutexGuard<'_, Option<BufWriter<File>>> {
+        self.writer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

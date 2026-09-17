@@ -268,6 +268,12 @@ struct CreateResearchRequest {
     /// append it to the assembled report (FR-008 / T-015).
     #[serde(default)]
     evaluate: bool,
+    /// `--url-cloak` — defang web URLs in the generated `RESEARCH.md`
+    /// (`Sources` bullets and the `References Index`) and `CORPA.md`
+    /// (`Sources Reference`) so they are written as plain text rather than
+    /// clickable links.
+    #[serde(default)]
+    url_cloak: bool,
 }
 
 impl CreateResearchRequest {
@@ -386,6 +392,9 @@ impl CreateResearchRequest {
         if self.evaluate {
             parts.push("--evaluate".to_string());
         }
+        if self.url_cloak {
+            parts.push("--url-cloak".to_string());
+        }
         parts.join(" ")
     }
 
@@ -431,6 +440,7 @@ impl CreateResearchRequest {
             final_report_model: self.final_report_model.clone(),
             max_concurrent_research_units: self.max_concurrent_research_units,
             evaluate: Some(self.evaluate),
+            url_cloak: self.url_cloak,
             invocation: Some(self.invocation_summary()),
         }
     }
@@ -958,44 +968,15 @@ mod tests {
     #[test]
     fn to_run_request_maps_new_mode_and_summarization_and_evaluate() {
         let req = CreateResearchRequest {
-            name: "compete".into(),
             topic: "Compare A and B".into(),
-            title: None,
-            sources_dir: None,
-            template: None,
-            from_urls: Vec::new(),
-            from_files: Vec::new(),
-            use_local: false,
-            use_specs: false,
-            use_low_relevance: false,
-            no_scholarly: false,
-            use_pdf: false,
-            oa_recovery: None,
-            fetch_concurrency: None,
-            fetch_timeout_secs: None,
-            local_concurrency: None,
-            depth: None,
-            iterations: None,
             format: Some("comparison-table".into()),
             mode: Some("competitive".into()),
             summarization_model: Some("ollama:phi4".into()),
             tier: Some("light".into()),
-            web_phase_timeout_secs: None,
-            local_phase_timeout_secs: None,
-            search_max_retries: None,
-            search_retry_base_delay_ms: None,
-            max_web_results: None,
-            max_search_calls: None,
-            max_local_sources: None,
-            max_synthesis_sources: None,
-            max_concepts: None,
-            max_findings: None,
-            brief: None,
             research_model: Some("anthropic:claude-sonnet-4".into()),
-            compression_model: None,
-            final_report_model: None,
             max_concurrent_research_units: Some(3),
             evaluate: true,
+            ..minimal_request("compete", false)
         };
 
         let run = req.to_run_request();
@@ -1011,44 +992,8 @@ mod tests {
     #[test]
     fn to_run_request_preserves_defaults_when_optional_fields_omitted() {
         let req = CreateResearchRequest {
-            name: "plain".into(),
             topic: "Rust".into(),
-            title: None,
-            sources_dir: None,
-            template: None,
-            from_urls: Vec::new(),
-            from_files: Vec::new(),
-            use_local: false,
-            use_specs: false,
-            use_low_relevance: false,
-            no_scholarly: false,
-            use_pdf: false,
-            oa_recovery: None,
-            fetch_concurrency: None,
-            fetch_timeout_secs: None,
-            local_concurrency: None,
-            depth: None,
-            iterations: None,
-            format: None,
-            mode: None,
-            summarization_model: None,
-            tier: None,
-            web_phase_timeout_secs: None,
-            local_phase_timeout_secs: None,
-            search_max_retries: None,
-            search_retry_base_delay_ms: None,
-            max_web_results: None,
-            max_search_calls: None,
-            max_local_sources: None,
-            max_synthesis_sources: None,
-            max_concepts: None,
-            max_findings: None,
-            brief: None,
-            research_model: None,
-            compression_model: None,
-            final_report_model: None,
-            max_concurrent_research_units: None,
-            evaluate: false,
+            ..minimal_request("plain", false)
         };
 
         let run = req.to_run_request();
@@ -1099,6 +1044,7 @@ mod tests {
             final_report_model: None,
             max_concurrent_research_units: None,
             evaluate: false,
+            url_cloak: false,
         }
     }
 

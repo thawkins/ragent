@@ -145,6 +145,14 @@ fn format_width_sweep_detail(
         .iter()
         .map(|reason| excluded_by_reason.get(reason).copied().unwrap_or(0))
         .collect();
+    // The reason columns must sum back to the authoritative `excluded`; guard
+    // the invariant so a future exclusion site that bumps `excluded` without a
+    // reason is caught in tests rather than silently mis-reported.
+    debug_assert_eq!(
+        totals.iter().sum::<usize>(),
+        excluded,
+        "per-reason exclusion counts must sum to `excluded`"
+    );
     let total_fails: Vec<usize> = kinds
         .iter()
         .map(|kind| failed_by_kind.get(kind).copied().unwrap_or(0))
@@ -450,6 +458,11 @@ pub struct OutputConfig {
     pub template: Option<String>,
     /// Output artifact selected via `--format`.
     pub output_format: OutputFormat,
+    /// `--url-cloak`: when `true`, web URLs emitted in the `Sources` bullets
+    /// and the `References Index` / `Sources Reference` tables are defanged
+    /// (`hxxps://` scheme + `[.]` dots, wrapped in a code span) so automated
+    /// URL scanners do not treat them as live links.
+    pub url_cloak: bool,
 }
 
 /// Web-gathering knobs for a research session.
@@ -713,6 +726,7 @@ impl Default for OutputConfig {
         Self {
             template: None,
             output_format: OutputFormat::Report,
+            url_cloak: false,
         }
     }
 }
@@ -1368,6 +1382,49 @@ impl ResearchSession {
     }
 }
 
+/// Inputs to [`ResearchSession::assemble_and_write`].
+///
+/// Grouped into a struct so the finalize call site stays readable and so new
+/// document options do not keep lengthening the parameter list.
+pub(crate) struct AssembleInput<'a> {
+    /// URL-safe research item name (for the manager's run bookkeeping).
+    pub name_str: &'a str,
+    /// Parsed research name.
+    pub name: &'a ResearchName,
+    /// Human-readable title.
+    pub title: &'a str,
+    /// Research topic.
+    pub topic: &'a str,
+    /// Base item carrying frontmatter; cloned and augmented before writing.
+    pub item: &'a ResearchItem,
+    /// Merged sources to reference.
+    pub sources: Vec<Source>,
+    /// Synthesis result, completed with deterministic fallbacks when empty.
+    pub analysis: AnalysisResult,
+    /// Provenance of the synthesis result.
+    pub synth_outcome: SynthesizeOutcome,
+    /// Optional research brief.
+    pub brief: Option<&'a str>,
+    /// Decomposed web queries.
+    pub queries: Vec<String>,
+    /// Output format for the assembled document.
+    pub output_format: OutputFormat,
+    /// Optional pre-rendered comparison table.
+    pub comparison_table: Option<String>,
+    /// Whether to emit the self-evaluation scorecard.
+    pub evaluate: bool,
+    /// Recorded invocation for frontmatter replay.
+    pub invocation: Option<String>,
+    /// Whether to defang web source URLs in the output.
+    pub url_cloak: bool,
+    /// Concept-list cap.
+    pub max_concepts: usize,
+    /// Finding-list cap.
+    pub max_findings: usize,
+    /// Progress observer.
+    pub observer: Arc<dyn SessionObserver>,
+}
+
 impl ResearchSession {
     /// Access the optional web gatherer.
     #[must_use]
@@ -1710,25 +1767,26 @@ impl ResearchSession {
             phase: SessionPhase::SupervisorFinalize,
         });
         let outcome = self
-            .assemble_and_write(
+            .assemble_and_write(AssembleInput {
                 name_str,
-                &name,
+                name: &name,
                 title,
                 topic,
                 item,
-                merged_sources,
+                sources: merged_sources,
                 analysis,
                 synth_outcome,
                 brief,
-                seed_queries,
-                config.output.output_format,
+                queries: seed_queries,
+                output_format: config.output.output_format,
                 comparison_table,
-                config.evaluate,
-                config.invocation.clone(),
-                config.analysis.max_concepts,
-                config.analysis.max_findings,
-                observer.clone(),
-            )
+                evaluate: config.evaluate,
+                invocation: config.invocation.clone(),
+                url_cloak: config.output.url_cloak,
+                max_concepts: config.analysis.max_concepts,
+                max_findings: config.analysis.max_findings,
+                observer: observer.clone(),
+            })
             .await?;
 
         router.complete_run(router_observer);
@@ -1736,26 +1794,27 @@ impl ResearchSession {
         Ok(outcome)
     }
 
-    pub(crate) async fn assemble_and_write(
-        &self,
-        name_str: &str,
-        name: &ResearchName,
-        title: &str,
-        topic: &str,
-        item: &ResearchItem,
-        sources: Vec<Source>,
-        mut analysis: AnalysisResult,
-        synth_outcome: SynthesizeOutcome,
-        brief: Option<&str>,
-        queries: Vec<String>,
-        output_format: OutputFormat,
-        comparison_table: Option<String>,
-        evaluate: bool,
-        invocation: Option<String>,
-        max_concepts: usize,
-        max_findings: usize,
-        observer: Arc<dyn SessionObserver>,
-    ) -> Result<RunOutcome> {
+    pub(crate) async fn assemble_and_write(&self, input: AssembleInput<'_>) -> Result<RunOutcome> {
+        let AssembleInput {
+            name_str,
+            name,
+            title,
+            topic,
+            item,
+            sources,
+            mut analysis,
+            synth_outcome,
+            brief,
+            queries,
+            output_format,
+            comparison_table,
+            evaluate,
+            invocation,
+            url_cloak,
+            max_concepts,
+            max_findings,
+            observer,
+        } = input;
         let llm_produced = synth_outcome == SynthesizeOutcome::Llm;
         if analysis.summary.is_empty() {
             analysis.summary = crate::session::fallback::default_summary(&sources, topic);
@@ -1805,6 +1864,7 @@ impl ResearchSession {
         if output_format != OutputFormat::Report {
             item_with_sources.output_format = Some(output_format.as_str().to_string());
         }
+        item_with_sources.url_cloak = url_cloak;
         item_with_sources.invocation = invocation.or_else(|| item.invocation.clone());
 
         // ── Self-Evaluation Scorecard (FR-008 / T-015) ───────────────────────
@@ -2744,6 +2804,7 @@ impl ResearchSession {
                 Some(config.output.output_format.as_str().to_string());
         }
         item_with_sources.open_access_recovery = config.resilience.open_access_recovery;
+        item_with_sources.url_cloak = config.output.url_cloak;
         item_with_sources.invocation = config.invocation.clone().or(stored_invocation);
         for s in &synthesis_sources {
             item_with_sources.add_source(s.clone());

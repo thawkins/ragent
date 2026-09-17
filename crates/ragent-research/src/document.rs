@@ -32,7 +32,7 @@
 
 use crate::contradiction::ContradictionGraph;
 use crate::digest::{EvidenceDigest, TripleDraft};
-use crate::io::ResearchIo;
+use crate::io::{ResearchIo, cloak_url};
 use crate::item::{ResearchItem, strip_control_chars};
 use crate::locus::{DepthInvestigation, LocusSet};
 use crate::reconcile::{CrossLocusReconcile, SourceTensions};
@@ -365,6 +365,7 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     corpa.push_str(&ResearchIo::render_references_index_table(
         &doc.item.sources,
         Utc::now(),
+        doc.item.url_cloak,
     ));
     let corpa = linkify_urls(&corpa);
 
@@ -1442,11 +1443,14 @@ mod layout {
             );
             return;
         }
+        let cloak_urls = doc.item.url_cloak;
         for (idx, finding) in doc.findings.iter().enumerate() {
             let n = idx + 1;
             let normalized = normalize_finding_labels(strip_control_chars(finding).trim());
             let (headline, mut remainder) = extract_headline(&normalized, n);
-            if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
+            if let Some(sources_list) =
+                render_finding_sources(&remainder, &doc.item.sources, cloak_urls)
+            {
                 remainder.push_str("\n\n");
                 remainder.push_str(&sources_list);
             }
@@ -1530,6 +1534,7 @@ mod layout {
         body.push_str(&ResearchIo::render_references_index(
             &doc.item.sources,
             Utc::now(),
+            doc.item.url_cloak,
         ));
     }
 }
@@ -1825,7 +1830,9 @@ fn assemble_comparison_table_body(doc: &ResearchDocument, topic: &str) -> String
             let n = idx + 1;
             let normalized = normalize_finding_labels(strip_control_chars(finding).trim());
             let (headline, mut remainder) = extract_headline(&normalized, n);
-            if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
+            if let Some(sources_list) =
+                render_finding_sources(&remainder, &doc.item.sources, doc.item.url_cloak)
+            {
                 remainder.push_str("\n\n");
                 remainder.push_str(&sources_list);
             }
@@ -1838,6 +1845,7 @@ fn assemble_comparison_table_body(doc: &ResearchDocument, topic: &str) -> String
     body.push_str(&ResearchIo::render_references_index(
         &doc.item.sources,
         Utc::now(),
+        doc.item.url_cloak,
     ));
 
     body
@@ -1957,7 +1965,11 @@ pub fn apply_template(template: &str, title: &str, topic: &str) -> String {
 /// the earliest and latest publication dates of the cited *web* sources, so
 /// the reader can judge the relative age of the evidence backing the finding.
 /// The line reads `—` when no cited web source exposes a publication date.
-fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
+///
+/// When `cloak_urls` is `true`, web sources have their URL defanged with
+/// [`cloak_url`] so the bullet emits it as plain text rather than a clickable
+/// link (`/research create --url-cloak`).
+fn render_finding_sources(finding: &str, sources: &[Source], cloak_urls: bool) -> Option<String> {
     // If the finding already contains a Sources paragraph (e.g. produced by
     // the LLM itself), don't append a duplicate list. Match the `**Sources:**`
     // literal in its three case variants directly to avoid allocating a full
@@ -1985,7 +1997,14 @@ fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
             if let Some(a) = author {
                 let _ = write!(out, " [{a}]");
             }
-            let _ = write!(out, " — {}", src.path_or_url());
+            // `--url-cloak`: defang web URLs so this bullet carries them as
+            // plain text rather than a clickable link.
+            let location = if cloak_urls && matches!(src, Source::Web { .. }) {
+                cloak_url(src.path_or_url())
+            } else {
+                src.path_or_url().to_string()
+            };
+            let _ = write!(out, " — {location}");
             if let Some(dt) = src.published_at() {
                 let _ = write!(out, " (published {})", dt.format("%Y-%m-%d"));
             }

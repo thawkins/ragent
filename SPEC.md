@@ -1,9 +1,9 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.105</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.106</p>
         <p style="font-size: 1.1em;">
-          <strong>Date:</strong> 2026-09-16
+          <strong>Date:</strong> 2026-09-17
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -98,14 +98,25 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.105). The core architecture, tool system,
+Ragent is in **beta** (v1.0.106). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.44 → v1.0.105):**
+**Current Release Highlights (v1.0.44 → v1.0.106):**
+
+- **`--url-cloak` research source defanging (v1.0.106)** —
+  `/research create` gained `--url-cloak`, which writes the report's web source
+  URLs as defanged plain text instead of clickable links (scheme rewritten
+  `https://` -> `hxxps://` / `http://` -> `hxxp://`, every dot bracketed
+  `example.com` -> `example[.]com`, wrapped in a Markdown code span). It applies
+  to the `**Sources:**` bullets under each finding and the `References Index`
+  table in `RESEARCH.md` (plus the `Sources Reference` table in `CORPA.md`),
+  leaving non-URL rows untouched. Available on the root CLI, the TUI, and
+  `POST /research` (`url_cloak`), recorded in frontmatter (`url_cloak: true`)
+  for `/research update` replay, and off by default.
 
 - **Research output limits, engine exclusion, and progress-table detail
   (v1.0.105)** — `/research create` caps its `## Concepts`
@@ -1289,7 +1300,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
-| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N` |
+| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
 | `/config list` | Interactive picker to restore a saved backup |
@@ -1922,6 +1933,7 @@ Every `RESEARCH.md` contains:
 | `/research create ... --oa-enable` / `--no-oa` | Force open-access recovery on/off for the run, overriding `research.open_access_recovery` |
 | `/research create ... --max-concepts N` | Cap the `## Concepts` list (default 5; `0` = unbounded); entries are ordered most-relevant-first before truncation |
 | `/research create ... --max-findings N` | Cap the `## Findings` list (default 20; `0` = unbounded); entries are ordered most-relevant-first before truncation |
+| `/research create ... --url-cloak` | Emit web source URLs in `Sources` bullets and the `References Index` (and `CORPA.md` `Sources Reference`) as defanged plain text (`hxxps://host[.]tld/…` in a code span) instead of clickable links |
 | `/research create ... --evaluate` | Append a deterministic quality scorecard to `RESEARCH.md` |
 | `/research create ... --brief <TEXT>` | Provide an explicit research brief |
 | `/research create ... --clarify` | Ask the single clarifying question (disabled by default) |
@@ -2865,6 +2877,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.106 | 2026-09-17 | `--url-cloak` research source defanging (`/research create --url-cloak`, TUI, `POST /research` `url_cloak`): web source URLs are written as defanged plain text (`https://` -> `hxxps://`, `http://` -> `hxxp://`, dots bracketed `example[.]com`, wrapped in a Markdown code span) in the `**Sources:**` bullets and `References Index` table of `RESEARCH.md` (plus the `Sources Reference` table in `CORPA.md`), leaving non-URL rows untouched; off by default and recorded in frontmatter (`url_cloak: true`) for `/research update` replay. Includes a `/simplify` code-quality pass over the change set (shared `SourceVault::run_blocking` helper + `TaskPanic` error, `AssembleInput` struct replacing an 18-parameter `assemble_and_write`, hardened `extract_http_status`/`lowercase_cow`/`cloak_url`, `Arc`-keyed query map, and test-literal collapse onto `minimal_request`). |
 | v1.0.105 | 2026-09-16 | Research output limits (`research.max_concepts`/`research.max_findings`, `--max-concepts`/`--max-findings`, `POST /research` fields; defaults 5/20, `0` = unbounded, most-relevant-first reordering before truncation), scholarly-engine exclusion (`mf_search` `exclude_engines`, research `--no-papers`/`--no-scholarly`, `research.exclude_academic_engines`), per-run open-access toggles (`--oa-enable`/`--no-oa`), a progress table that breaks exclusions and fetch failures down by reason/cause, `/spec impl` task-range Dependencies expansion, and TUI panel changes (TASKS panel `[STATUS] <id> title` rows, 50%-width side panels). |
 | v1.0.104 | 2026-09-14 | Functional anti-pattern remediation (FUNC-038..069, 080..082): the FUNCPLAN.md second pass closes the plan's M1 tail and all of M2-M5 -- `mf_search` keyless engines surface a dead engine as an error instead of a zero-result success (FUNC-035), `github_merge_pr` rejects an unknown merge method (FUNC-038), the last three production poison-lock panics recover via `PoisonError::into_inner` (FUNC-040/041/042), no production `unreachable!`/poison-expect remains (FUNC-043/044/045), GitLab GETs retry 429 honouring `Retry-After` with bounded request/entry budgets and full pagination and research blocking reads move behind `block_in_place` (FUNC-050/052/053), and the TUI/tools/VCS/codeindex/server/research correctness fixes (FUNC-060..069) plus a new `scripts/check-poison-locks.sh` guard wired into `pre-flight.sh` and CI (FUNC-080/081/082). |
 | v1.0.103 | 2026-09-14 | M1 agent per-turn hot path (PERF-032..040 + PERF-048): the provider-facing transcript is held behind an `Arc<Vec<ChatMessage>>` (no per-turn deep clone, PERF-032), a pure history append converts only the new tail (`take_cached_for_append` + `record_history_base`, PERF-033), the subagent tool surface is cached behind the tool-registry version (PERF-034), `LoopTracker` is `Copy` (PERF-035), the new `RequestTokenTracker` makes the per-step pre-send token estimate O(changed message) instead of O(history) (PERF-036), tool/result pairing is a single pass (PERF-037), the compaction prompt is assembled into one buffer (PERF-038), memory-entry token costs are memoised (PERF-039), the activity log is written by one background task per process (PERF-040), and the TUI viewers retain a single copy of their rendered rows (PERF-048). New benches `turn_loop`/`m3_hot_paths`; new guards `test_activity_writer`/`test_no_percall_regex`. Security: `rustls` 0.23.43 -> 0.23.45 (RUSTSEC-2026-0285). |
@@ -3435,7 +3448,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
-| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N` |
+| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
 | `/config list` | Interactive picker to restore a saved backup |

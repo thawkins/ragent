@@ -94,6 +94,7 @@ topic can be quoted as one argument.
 | `--use-pdf` | Enable PDF extraction. |
 | `--clarify` / `--no-clarify` | Force on or off the clarification stage. Off by default. |
 | `--evaluate` | Enable evaluation scoring of findings. |
+| `--url-cloak` | Emit web source URLs as defanged plain text (`hxxps://host[.]tld/...` in a code span) in the `Sources` bullets and `References Index` table. Off by default. |
 
 ## Examples
 
@@ -131,6 +132,12 @@ Caps the report to 3 concepts and 10 findings (most-relevant-first).
 /research create exhaustive "multi-agent orchestration" --max-concepts 0 --max-findings 0
 ```
 Disables both output caps (`0` means unbounded).
+
+```
+/research create vendors "managed vector database vendors" --url-cloak
+```
+Defangs web URLs in the report so automated scanners do not treat them as
+clickable links.
 
 ```
 /research create rerun "existing project" --summarization-model ollama:qwen2.5:1.5b

@@ -113,13 +113,19 @@ impl PreparedQuery {
     }
 }
 
-/// Lowercase `s`, borrowing it unchanged when it already contains no uppercase
-/// characters (common for URLs), so the common case allocates nothing.
+/// Lowercase `s`, borrowing it unchanged when lowercasing changes nothing
+/// (common for URLs), so the common case allocates nothing.
+///
+/// The gate compares the lowercased text against the original rather than
+/// testing `char::is_uppercase`: `is_uppercase` is `false` for titlecase code
+/// points (e.g. `'ǅ'`) that `to_lowercase` still changes, which would otherwise
+/// leave such titles un-normalised and miss an exact-title match.
 fn lowercase_cow(s: &str) -> Cow<'_, str> {
-    if s.chars().any(char::is_uppercase) {
-        Cow::Owned(s.to_lowercase())
-    } else {
+    let lowered = s.to_lowercase();
+    if lowered == s {
         Cow::Borrowed(s)
+    } else {
+        Cow::Owned(lowered)
     }
 }
 

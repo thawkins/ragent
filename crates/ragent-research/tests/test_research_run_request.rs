@@ -124,6 +124,7 @@ fn build_session_config_maps_all_explicit_fields() {
         final_report_model: Some("anthropic:claude-sonnet-4".to_string()),
         max_concurrent_research_units: Some(7),
         evaluate: Some(true),
+        url_cloak: true,
         invocation: Some("ragent research create --name full-test \"deep topic\"".to_string()),
     };
     let cfg = build_session_config(&req, None);
@@ -143,6 +144,7 @@ fn build_session_config_maps_all_explicit_fields() {
     // Output
     assert_eq!(cfg.output.output_format, OutputFormat::Imrad);
     assert_eq!(cfg.output.template.as_deref(), Some("imrad"));
+    assert!(cfg.output.url_cloak);
 
     // Web
     assert_eq!(cfg.web.max_web_results, 50);

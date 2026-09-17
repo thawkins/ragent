@@ -1,6 +1,6 @@
 # Project Statistics
 
-**Version:** 1.0.104
+**Version:** 1.0.106
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
@@ -9,17 +9,17 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 458598 (455570 in `crates/` + 3028 in root `src/`/`examples/`) |
-| Total Rust files | 1123 (workspace crates) + 5 (root `src/`/`examples/`) |
-| Tests defined | ~8601 (6912 external test-file tests + 1669 inline `#[cfg(test)]` + 20 root `tests/`/`src/`) |
-| Test files | 539 external + 131 inline-bearing |
-| Test binaries | ~572 (539 integration test files + 32 lib/bin targets + 1 root bin) |
+| Total Rust lines | 459058 (456019 in `crates/` + 3039 in root `src/`/`examples/`) |
+| Total Rust files | 1124 (workspace crates) + 5 (root `src/`/`examples/`) |
+| Tests defined | ~8634 (6943 external test-file tests + 1671 inline `#[cfg(test)]` + 20 root `tests/`/`src/`) |
+| Test files | 540 external + 131 inline-bearing |
+| Test binaries | ~573 (540 integration test files + 32 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 168 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 16 |
 | Authors | 1 |
-| Version | 1.0.105 |
+| Version | 1.0.106 |
 
 ---
 
@@ -36,8 +36,8 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-codeindex` | 69 | 23584 | 40 |
 | `ragent-config` | 40 | 10409 | 26 |
 | `ragent-llm` | 51 | 23454 | 22 |
-| `ragent-research` | 113 | 59583 | 47 |
-| `ragent-server` | 11 | 5908 | 5 |
+| `ragent-research` | 114 | 60083 | 48 |
+| `ragent-server` | 11 | 5854 | 5 |
 | `ragent-specs` | 26 | 17836 | 13 |
 | `ragent-storage` | 37 | 14746 | 32 |
 | `ragent-team` | 15 | 2770 | 14 |
@@ -45,7 +45,7 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-tools-core` | 56 | 17745 | 20 |
 | `ragent-tools-extended` | 186 | 69129 | 76 |
 | `ragent-tools-vcs` | 55 | 14573 | 19 |
-| `ragent-tui` | 154 | 89059 | 99 |
+| `ragent-tui` | 154 | 89062 | 99 |
 | `ragent-types` | 36 | 8639 | 18 |
 
 ---
@@ -53,10 +53,10 @@ shows the file count, line count, and test-file count for each crate (including
 ## Crate Size Distribution
 
 ```
-ragent-tui             ██████████████████████████████ 89,059 lines (19.5%)
+ragent-tui             ██████████████████████████████ 89,062 lines (19.5%)
 ragent-agent           ███████████████████████████ 79,434 lines (17.4%)
 ragent-tools-extended  ███████████████████████ 69,129 lines (15.2%)
-ragent-research        ████████████████████ 59,583 lines (13.1%)
+ragent-research        ████████████████████ 60,083 lines (13.2%)
 ragent-codeindex       ████████ 23,584 lines ( 5.2%)
 ragent-llm             ████████ 23,454 lines ( 5.1%)
 ragent-specs           ██████ 17,836 lines ( 3.9%)
@@ -66,8 +66,8 @@ ragent-tools-vcs       █████ 14,573 lines ( 3.2%)
 ragent-config          ███ 10,409 lines ( 2.3%)
 ragent-telemetry       ███ 10,265 lines ( 2.3%)
 ragent-types           ███ 8,639 lines ( 1.9%)
-ragent-bench           ███ 8,436 lines ( 1.9%)
-ragent-server          ██ 5,908 lines ( 1.3%)
+ragent-bench           ███ 8,436 lines ( 1.8%)
+ragent-server          ██ 5,854 lines ( 1.3%)
 ragent-team            █ 2,770 lines ( 0.6%)
 ```
 
@@ -78,11 +78,11 @@ ragent-team            █ 2,770 lines ( 0.6%)
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
 | `ragent-tools-extended` | 76 | ~1,783 |
-| `ragent-tui` | 99 | ~1,189 |
-| `ragent-agent` | 89 | ~777 |
+| `ragent-tui` | 99 | ~1,201 |
+| `ragent-agent` | 89 | ~781 |
 | `ragent-specs` | 13 | ~459 |
+| `ragent-research` | 48 | ~402 |
 | `ragent-codeindex` | 40 | ~395 |
-| `ragent-research` | 47 | ~387 |
 | `ragent-tools-vcs` | 19 | ~297 |
 | `ragent-storage` | 32 | ~285 |
 | `ragent-llm` | 22 | ~267 |
@@ -93,12 +93,12 @@ ragent-team            █ 2,770 lines ( 0.6%)
 | `ragent-server` | 5 | ~96 |
 | `ragent-team` | 14 | ~81 |
 | `ragent-bench` | 3 | ~49 |
-| **Total (external)** | **539** | **~6,912** |
+| **Total (external)** | **540** | **~6,943** |
 
 Inline `#[cfg(test)]` modules in library sources contribute a further
-1,669 test attributes (largest contributors: `ragent-research` 681,
+1,671 test attributes (largest contributors: `ragent-research` 683,
 `ragent-agent` 192, `ragent-tools-extended` 140, `ragent-tui` 139, `ragent-specs` 136),
-bringing the estimated total to ~8,601.
+bringing the estimated total to ~8,634.
 
 ---
 
@@ -159,13 +159,13 @@ Notes:
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 53 lines (8,601 tests / 458,598 lines)
-- Largest crate: `ragent-tui` (89,059 lines, 19.5%)
+- Test-to-code ratio: ~1 test per 53 lines (8,634 tests / 459,058 lines)
+- Largest crate: `ragent-tui` (89,062 lines, 19.5%)
 - Smallest crate: `ragent-team` (2,770 lines, 0.6%)
-- Median crate size: 16,146 lines (between `ragent-tools-core` and `ragent-tools-vcs`)
+- Median crate size: 16,246 lines (between `ragent-storage` and `ragent-tools-core`)
 - Crates over 10k lines: 12 of 16
 - Crates under 5k lines: 1 of 16 (team)
 
 ---
 
-_Generated 2026-09-16 (v1.0.105)._
+_Generated 2026-09-17 (v1.0.106)._

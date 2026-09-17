@@ -1,5 +1,71 @@
 # Changelog
 
+## Version: 1.0.106
+
+URL cloaking for `/research create`, plus a code-quality pass over the change set.
+
+### Added
+
+- **`--url-cloak` research source-URL defanging** -- `/research create` gained
+  `--url-cloak`, which writes the report's web source URLs as defanged plain
+  text instead of clickable links so automated URL scanners do not flag or
+  reject `RESEARCH.md`. The scheme is rewritten (`https://` -> `hxxps://`,
+  `http://` -> `hxxp://`), every dot is bracketed (`example.com` ->
+  `example[.]com`), and the result is wrapped in a Markdown code span. It
+  applies to the `**Sources:**` bullets under each finding and to the
+  `References Index` table in `RESEARCH.md` (plus the `Sources Reference`
+  table in `CORPA.md`); non-URL rows (local paths, spec ids, labels) are
+  unaffected. The flag is available on the root CLI (`ragent research
+  create`), the TUI slash command, and `POST /research` (new `url_cloak`
+  field, round-tripped through the invocation summary), is recorded in item
+  frontmatter (`url_cloak: true`) so `/research update` replays it, and is off
+  by default.
+
+### Changed
+
+- **Code-quality pass over the url-cloak change set (`/simplify`)** -- a
+  review of the uncommitted diff (plus the `HEAD~3` window) produced the
+  following changes; no user-visible behaviour change.
+
+  * `masterfetch/tools/search_tool.rs` -- removed three stray leading spaces
+    on the new `exclude_engines` doc-continuation lines that leaked a double
+    space into the JSON-schema tool description.
+  * `ragent-research/gather_log.rs` -- `append_line` no longer wraps the whole
+    lock-guarded buffered write in `block_in_place`; the first-use
+    `create_dir_all` + `open` is offloaded by a new `ensure_open_blocking`
+    (via `run_blocking`) and the lock is taken by a small `lock_writer`
+    helper. The now-unused `open_writer` was deleted.
+  * `ragent-research/source_vault.rs` -- added `SourceVaultError::TaskPanic`
+    and one generic `run_blocking<T, F>` helper; the seven async wrappers
+    (`search`, `find_by_url`, `store`, `read_content`, `read_summary`, `list`,
+    `count`) now share it, replacing the repeated
+    `spawn_blocking` + `InvalidRunTag` boilerplate and fixing a bug where a
+    join panic was reported as an invalid run tag.
+  * `ragent-research/session.rs` -- `format_width_sweep_detail` gained a
+    `debug_assert_eq!` guarding the reason-columns-sum-to-`excluded` invariant;
+    the 18-parameter `assemble_and_write` now takes a single
+    `AssembleInput<'_>` struct.
+  * `ragent-research/io.rs` -- `cloak_url` now returns `sanitize_inline(value)`
+    for the non-URL fallback instead of the raw value, so a scheme-less web
+    URL containing `|` or a newline cannot break a Markdown table row.
+  * `ragent-research/web_gatherer/relevance.rs` -- `lowercase_cow` now gates on
+    `to_lowercase() == s` rather than `chars().any(char::is_uppercase)`, so
+    titlecase code points (e.g. `ǅ`) are still lowercased.
+  * `ragent-research/web_gatherer.rs` -- `extract_http_status` only matches
+    digits after an explicit `status`/`http` marker (with an optional `code`
+    word), so "request took 500ms" or "read 404 bytes" no longer misclassify as
+    an HTTP status; `bump_engine_fetch_failure` folds its double engine-CSV walk
+    into one `bump_engine_stats` closure; `prepared_queries` is rekeyed
+    `HashMap<String, _>` -> `HashMap<Arc<str>, _>` and `exclude_engines` is
+    wrapped in `Arc<[&str]>` cloned once instead of per sub-query future.
+  * `ragent-server/routes/research.rs` tests -- the two exhaustive
+    `CreateResearchRequest` literals were reduced to their distinguishing fields
+    plus `..minimal_request(..)`.
+
+- **How-to PDFs regenerated** -- the `docs/howtos` and
+  `docs/howtos/slashcommands` Markdown manuals were rebuilt to PDF
+  (95 documents) so the published manuals carry the new `--url-cloak` entries.
+
 ## Version: 1.0.105
 
 Research output limits (spec `researchmax`), scholarly-engine exclusion (spec

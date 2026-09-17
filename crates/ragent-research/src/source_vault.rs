@@ -36,6 +36,9 @@ pub enum SourceVaultError {
     /// A requested source id was not found in the index.
     #[error("vault source '{0}' not found")]
     SourceNotFound(String),
+    /// A blocking-pool task for a vault operation panicked or was cancelled.
+    #[error("vault task panicked: {0}")]
+    TaskPanic(String),
 }
 
 /// Result alias for vault operations.
@@ -447,6 +450,21 @@ impl SourceVault {
     // against the shared connection, so concurrency is bounded only by SQLite's
     // own locking, not by a runtime worker.
 
+    /// Run a blocking vault closure on the blocking pool.
+    ///
+    /// Clones the shared vault handle into the task and maps a join failure
+    /// (panic or cancellation) to [`SourceVaultError::TaskPanic`].
+    async fn run_blocking<T, F>(&self, f: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Self) -> Result<T> + Send + 'static,
+    {
+        let vault = self.clone();
+        tokio::task::spawn_blocking(move || f(vault))
+            .await
+            .map_err(|e| SourceVaultError::TaskPanic(e.to_string()))?
+    }
+
     /// Async [`Self::search`]: off-loads the blocking vault query to the
     /// blocking pool.
     ///
@@ -454,13 +472,8 @@ impl SourceVault {
     ///
     /// Returns an error if the blocking task panics or the vault query fails.
     pub async fn search_async(&self, query: &str, limit: usize) -> Result<Vec<VaultSource>> {
-        let vault = self.clone();
         let query = query.to_string();
-        tokio::task::spawn_blocking(move || vault.search(&query, limit))
-            .await
-            .map_err(|e| {
-                SourceVaultError::InvalidRunTag(format!("vault search task panicked: {e}"))
-            })?
+        self.run_blocking(move |v| v.search(&query, limit)).await
     }
 
     /// Async [`Self::find_by_url`]: off-loads the blocking vault query.
@@ -469,13 +482,8 @@ impl SourceVault {
     ///
     /// Returns an error if the blocking task panics or the vault query fails.
     pub async fn find_by_url_async(&self, url: &str) -> Result<Option<VaultSource>> {
-        let vault = self.clone();
         let url = url.to_string();
-        tokio::task::spawn_blocking(move || vault.find_by_url(&url))
-            .await
-            .map_err(|e| {
-                SourceVaultError::InvalidRunTag(format!("vault find_by_url task panicked: {e}"))
-            })?
+        self.run_blocking(move |v| v.find_by_url(&url)).await
     }
 
     /// Async [`Self::store`]: off-loads the blocking write + file I/O.
@@ -484,13 +492,8 @@ impl SourceVault {
     ///
     /// Returns an error if the blocking task panics or the vault write fails.
     pub async fn store_async(&self, source: &NewVaultSource) -> Result<VaultSource> {
-        let vault = self.clone();
         let source = source.clone();
-        tokio::task::spawn_blocking(move || vault.store(&source))
-            .await
-            .map_err(|e| {
-                SourceVaultError::InvalidRunTag(format!("vault store task panicked: {e}"))
-            })?
+        self.run_blocking(move |v| v.store(&source)).await
     }
 
     /// Async [`Self::read_content`]: off-loads the blocking read.
@@ -499,13 +502,8 @@ impl SourceVault {
     ///
     /// Returns an error if the blocking task panics or the read fails.
     pub async fn read_content_async(&self, source_id: &str) -> Result<String> {
-        let vault = self.clone();
         let source_id = source_id.to_string();
-        tokio::task::spawn_blocking(move || vault.read_content(&source_id))
-            .await
-            .map_err(|e| {
-                SourceVaultError::InvalidRunTag(format!("vault read_content task panicked: {e}"))
-            })?
+        self.run_blocking(move |v| v.read_content(&source_id)).await
     }
 
     /// Async [`Self::read_summary`]: off-loads the blocking vault query
@@ -516,13 +514,8 @@ impl SourceVault {
     ///
     /// Returns an error if the blocking task panics or the query fails.
     pub async fn read_summary_async(&self, source_id: &str) -> Result<Option<String>> {
-        let vault = self.clone();
         let source_id = source_id.to_string();
-        tokio::task::spawn_blocking(move || vault.read_summary(&source_id))
-            .await
-            .map_err(|e| {
-                SourceVaultError::InvalidRunTag(format!("vault read_summary task panicked: {e}"))
-            })?
+        self.run_blocking(move |v| v.read_summary(&source_id)).await
     }
 
     /// Async [`Self::list`]: off-loads the blocking vault query.
@@ -531,12 +524,7 @@ impl SourceVault {
     ///
     /// Returns an error if the blocking task panics or the vault query fails.
     pub async fn list_async(&self, limit: usize) -> Result<Vec<VaultSource>> {
-        let vault = self.clone();
-        tokio::task::spawn_blocking(move || vault.list(limit))
-            .await
-            .map_err(|e| {
-                SourceVaultError::InvalidRunTag(format!("vault list task panicked: {e}"))
-            })?
+        self.run_blocking(move |v| v.list(limit)).await
     }
 
     /// Async [`Self::count`]: off-loads the blocking vault query.
@@ -545,12 +533,7 @@ impl SourceVault {
     ///
     /// Returns an error if the blocking task panics or the vault query fails.
     pub async fn count_async(&self) -> Result<usize> {
-        let vault = self.clone();
-        tokio::task::spawn_blocking(move || vault.count())
-            .await
-            .map_err(|e| {
-                SourceVaultError::InvalidRunTag(format!("vault count task panicked: {e}"))
-            })?
+        self.run_blocking(|v| v.count()).await
     }
 }
 

@@ -236,10 +236,22 @@ impl ResearchIo {
     ///
     /// `captured_at` is the timestamp shown for the "No sources captured"
     /// placeholder; pass `Utc::now()` when generating fresh output.
+    ///
+    /// When `cloak_urls` is `true` the `Path/URL` cell of every web source is
+    /// defanged with [`cloak_url`] so the emitted URL is plain text rather
+    /// than a clickable link (`/research create --url-cloak`).
     #[must_use]
-    pub fn render_references_index(sources: &[Source], captured_at: DateTime<Utc>) -> String {
+    pub fn render_references_index(
+        sources: &[Source],
+        captured_at: DateTime<Utc>,
+        cloak_urls: bool,
+    ) -> String {
         let mut out = String::from("## References Index\n\n");
-        out.push_str(&Self::render_references_index_table(sources, captured_at));
+        out.push_str(&Self::render_references_index_table(
+            sources,
+            captured_at,
+            cloak_urls,
+        ));
         out
     }
 
@@ -263,8 +275,15 @@ impl ResearchIo {
     ///   sources or when detection was inconclusive.
     /// - **Author** shows the author extracted from the page's embedded
     ///   metadata, and `—` for non-web sources or when no author was detected.
+    ///
+    /// When `cloak_urls` is `true`, web-source `Path/URL` values are defanged
+    /// via [`cloak_url`] so the table emits them as non-clickable text.
     #[must_use]
-    pub fn render_references_index_table(sources: &[Source], captured_at: DateTime<Utc>) -> String {
+    pub fn render_references_index_table(
+        sources: &[Source],
+        captured_at: DateTime<Utc>,
+        cloak_urls: bool,
+    ) -> String {
         if sources.is_empty() {
             return format!(
                 "| # | Type | Media | Language | Path/URL | Title | Author | Published | Relevance | Search tool | Engine | Captured |\n\
@@ -285,7 +304,11 @@ impl ResearchIo {
                 Some(l) if !l.is_empty() => sanitize_inline(l),
                 _ => "—".to_string(),
             };
-            let path = source.path_or_url();
+            let path = if cloak_urls && matches!(source, Source::Web { .. }) {
+                cloak_url(source.path_or_url())
+            } else {
+                sanitize_inline(source.path_or_url())
+            };
             let title = sanitize_inline(source.title());
             let author = match source.author() {
                 Some(a) if !a.is_empty() => format!("[{}]", sanitize_inline(a)),
@@ -374,6 +397,57 @@ pub struct IndexEntry {
     pub created_at: DateTime<Utc>,
     /// UTC timestamp of the most recent write.
     pub modified_at: DateTime<Utc>,
+}
+
+/// Defang a URL so automated URL scanners that read `RESEARCH.md` do not
+/// treat it as a live, clickable link, while keeping it human-readable.
+///
+/// The transformation is the classic "hxxp" obfuscation: the scheme is
+/// rewritten (`https://` -> `hxxps://`, `http://` -> `hxxp://`) and every dot
+/// in the authority/path is bracketed (`example.com` -> `example[.]com`).
+/// The result is wrapped in a Markdown code span so renderers show it as
+/// literal text rather than an auto-link.
+///
+/// Values that are not URLs (local file paths, spec ids, labels) are returned
+/// after [`sanitize_inline`] escaping so non-web rows in the References Index
+/// render exactly as before and a scheme-less value still cannot break a table
+/// row.
+///
+/// Used by the `/research create --url-cloak` output path for the `Sources`
+/// bullets and the `References Index` / `Sources Reference` tables.
+#[must_use]
+pub fn cloak_url(value: &str) -> String {
+    let body = match strip_scheme(value, "https://") {
+        Some(rest) => format!("hxxps://{rest}"),
+        None => match strip_scheme(value, "http://") {
+            Some(rest) => format!("hxxp://{rest}"),
+            None => return sanitize_inline(value),
+        },
+    };
+    let mut cloaked = String::with_capacity(body.len() + 16);
+    for ch in body.chars() {
+        match ch {
+            '.' => cloaked.push_str("[.]"),
+            // Escape table-cell separators so a cloaked URL embedded in the
+            // References Index table cannot break the row.
+            '|' => cloaked.push_str(r"\|"),
+            '\n' | '\r' => cloaked.push(' '),
+            _ => cloaked.push(ch),
+        }
+    }
+    format!("`{cloaked}`")
+}
+
+/// Case-insensitively strip `scheme` from the front of `url`, returning the
+/// remainder. Returns `None` when `url` does not start with `scheme` or the
+/// prefix is not a valid UTF-8 boundary.
+fn strip_scheme<'a>(url: &'a str, scheme: &str) -> Option<&'a str> {
+    let head = url.get(..scheme.len())?;
+    if head.eq_ignore_ascii_case(scheme) {
+        url.get(scheme.len()..)
+    } else {
+        None
+    }
 }
 
 /// Strip backticks and pipe characters from user-controlled strings before
@@ -511,7 +585,7 @@ mod tests {
 
     #[test]
     fn references_index_includes_placeholder_when_empty() {
-        let idx = ResearchIo::render_references_index(&[], Utc::now());
+        let idx = ResearchIo::render_references_index(&[], Utc::now(), false);
         assert!(idx.contains("No sources captured"));
     }
 
@@ -533,7 +607,7 @@ mod tests {
                 body: String::new(),
             },
         ];
-        let idx = ResearchIo::render_references_index(&sources, Utc::now());
+        let idx = ResearchIo::render_references_index(&sources, Utc::now(), false);
         assert!(idx.contains("| 1 | other"));
         assert!(idx.contains("| 2 | other"));
     }
@@ -546,7 +620,7 @@ mod tests {
             body_path: PathBuf::from("sources/other-01.md"),
             body: String::new(),
         }];
-        let idx = ResearchIo::render_references_index(&sources, Utc::now());
+        let idx = ResearchIo::render_references_index(&sources, Utc::now(), false);
         assert!(idx.contains(r"a\|b"), "pipe must be escaped: {idx}");
     }
 
@@ -592,7 +666,7 @@ mod tests {
                 author: None,
             },
         ];
-        let idx = ResearchIo::render_references_index(&sources, Utc::now());
+        let idx = ResearchIo::render_references_index(&sources, Utc::now(), false);
         assert!(
             idx.contains("Published"),
             "header row must include Published column: {idx}"

@@ -185,6 +185,13 @@ pub enum ResearchCommands {
         /// topic is ambiguous. Defaults to disabled; --clarify enables it.
         #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
         clarify: Option<bool>,
+        /// Defang web source URLs in the generated `RESEARCH.md`: emit them in
+        /// the `Sources` bullets and the `References Index` (and `CORPA.md`
+        /// `Sources Reference`) as `hxxps://host[.]tld/…` code-span text
+        /// instead of clickable links, so automated URL scanners do not flag
+        /// or reject the document.
+        #[arg(long)]
+        url_cloak: bool,
     },
     /// List research items
     List {
@@ -356,6 +363,7 @@ pub async fn handle_research_command(
             max_findings,
             no_clarify: _,
             clarify,
+            url_cloak,
         } => {
             let topic = topic.join(" ");
             // Clarification defaults to off; --clarify opts in.
@@ -409,6 +417,7 @@ pub async fn handle_research_command(
                 max_findings,
                 brief: None,
                 evaluate: false,
+                url_cloak,
             }
         }
         ResearchCommands::List { all, json } => ResearchCliCommand::List { all, json },
@@ -561,6 +570,7 @@ pub async fn handle_research_command(
             max_synthesis_sources,
             brief,
             evaluate,
+            url_cloak,
             ..
         } => {
             // Derive a human-readable item title that summarises the topic
@@ -609,6 +619,7 @@ pub async fn handle_research_command(
                 final_report_model,
                 max_concurrent_research_units,
                 evaluate: Some(evaluate),
+                url_cloak,
                 // Record the verbatim command line for frontmatter replay.
                 invocation: {
                     let argv: Vec<String> = std::env::args().collect();

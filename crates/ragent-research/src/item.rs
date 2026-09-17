@@ -53,6 +53,8 @@ use crate::status::ResearchStatus;
 /// - `output_format` — the output artifact requested via `--format` (FR-012).
 /// - `model` — the LLM model used to perform the analysis, when an
 ///   LLM-backed analysis engine was wired in.
+/// - `url_cloak` — whether source URLs were defanged in the rendered report
+///   (`/research create --url-cloak`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResearchItem {
     /// Validated URL-safe identifier; also the directory name under `research/`.
@@ -89,6 +91,14 @@ pub struct ResearchItem {
     /// read directly from the original paywalled URL (FR-015).
     #[serde(default)]
     pub open_access_recovery: bool,
+    /// Whether `--url-cloak` was enabled for this research run.
+    ///
+    /// When `true`, the `Sources` bullets and the `References Index` /
+    /// `Sources Reference` tables in `RESEARCH.md` and `CORPA.md` emit web
+    /// URLs defanged (`hxxps://` scheme + `[.]` dots, wrapped in a code span)
+    /// so automated URL scanners do not treat them as live links.
+    #[serde(default)]
+    pub url_cloak: bool,
     /// Verbatim front-end invocation (e.g. `ragent research create --name x
     /// "topic" --tier full`) recorded in frontmatter so a future
     /// `/research update` command can replay the run.
@@ -117,6 +127,7 @@ impl ResearchItem {
             output_format: None,
             model: None,
             open_access_recovery: false,
+            url_cloak: false,
             invocation: None,
         }
     }
@@ -243,6 +254,9 @@ impl ResearchItem {
         }
         if self.open_access_recovery {
             out.push_str("open_access_recovery: true\n");
+        }
+        if self.url_cloak {
+            out.push_str("url_cloak: true\n");
         }
         if let Some(inv) = &self.invocation {
             out.push_str(&format!(
@@ -388,6 +402,10 @@ impl ResearchItem {
             .remove("open_access_recovery")
             .map(|v| v.trim().eq_ignore_ascii_case("true"))
             .unwrap_or(false);
+        let url_cloak = fields
+            .remove("url_cloak")
+            .map(|v| v.trim().eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
         let invocation = fields.remove("invocation").map(|v| unquote_yaml_scalar(&v));
 
         Ok(Self {
@@ -402,6 +420,7 @@ impl ResearchItem {
             output_format,
             model,
             open_access_recovery,
+            url_cloak,
             invocation,
         })
     }

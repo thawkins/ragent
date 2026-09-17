@@ -136,6 +136,11 @@ pub struct ResearchRunRequest {
     pub final_report_model: Option<String>,
     /// `--evaluate` enables deterministic self-evaluation scorecard.
     pub evaluate: Option<bool>,
+    /// `--url-cloak` — defang web URLs in the `Sources` bullets and the
+    /// `References Index` / `Sources Reference` tables of the generated
+    /// `RESEARCH.md` and `CORPA.md` so automated URL scanners do not treat
+    /// them as live, clickable links. Defaults to off.
+    pub url_cloak: bool,
     /// Verbatim front-end invocation (e.g. `ragent research create --name x
     /// "topic" --tier full`) recorded in `RESEARCH.md` frontmatter so a future
     /// `/research update` command can replay the run.
@@ -226,6 +231,7 @@ impl ResearchRunRequest {
                 max_findings,
                 brief,
                 evaluate,
+                url_cloak,
             } => {
                 if name.is_empty() {
                     return Err(InvocationParseError::MissingName);
@@ -270,6 +276,7 @@ impl ResearchRunRequest {
                     compression_model,
                     final_report_model,
                     evaluate: Some(evaluate),
+                    url_cloak,
                     // Keep the recorded command verbatim so the replayed run
                     // re-stamps the original invocation in frontmatter.
                     invocation: Some(trimmed.to_string()),
@@ -405,6 +412,7 @@ pub fn build_session_config(
         output: OutputConfig {
             template: req.template.clone(),
             output_format,
+            url_cloak: req.url_cloak,
         },
         web: WebConfig {
             // 0 = derive the effective budget from the selected depth (see

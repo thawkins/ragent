@@ -297,6 +297,7 @@ impl App {
                 max_findings,
                 brief,
                 evaluate,
+                url_cloak,
             } => {
                 // Use the `[wait]` prefix so the status is treated as
                 // async-in-progress and NOT auto-expired to "ready" by
@@ -374,6 +375,7 @@ impl App {
                     final_report_model,
                     max_concurrent_research_units,
                     evaluate: Some(evaluate),
+                    url_cloak,
                     invocation: Some(invocation.clone()),
                 };
                 let config = ragent_research::build_session_config(&req, config_arc.as_deref());

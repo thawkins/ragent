@@ -309,9 +309,9 @@ impl Tool for MfSearchTool {
                  individual engine returns before merge/dedup. Optional 'engine' restricts the \
                  search to a single backend (openalex, wikipedia, langsearch, \
                  tavily, perplexity, exa, serper); when omitted all configured engines run in parallel. \
-                  Optional 'exclude_engines' removes a set of named backends before any request \
-                  is dispatched (applied on top of 'engine' when both are given; unknown names are ignored). \
-                  Each result carries relevance_score, fetch_relevance, and engines_consensus. \
+                 Optional 'exclude_engines' removes a set of named backends before any request \
+                 is dispatched (applied on top of 'engine' when both are given; unknown names are ignored). \
+                 Each result carries relevance_score, fetch_relevance, and engines_consensus. \
                  Engines that provide their own relevance score (e.g. OpenAlex) use it directly \
                  in ranking."
     }

@@ -161,6 +161,12 @@ pub enum ResearchCliCommand {
         /// `--evaluate` — run the deterministic self-evaluation scorecard and
         /// append it to the assembled report (FR-008 / T-015).
         evaluate: bool,
+        /// `--url-cloak` — defang web URLs emitted in the `Sources` bullets
+        /// and the `References Index` table of `RESEARCH.md` (and the
+        /// `Sources Reference` table of `CORPA.md`) so they are written as
+        /// plain text rather than clickable links. Used when the report is
+        /// consumed by tooling that rejects or flags live URLs.
+        url_cloak: bool,
     },
     /// `ragent research open <name>`
     Open {
@@ -323,6 +329,7 @@ impl ResearchCliCommand {
         let mut max_findings: Option<usize> = None;
         let mut brief: Option<String> = None;
         let mut evaluate = false;
+        let mut url_cloak = false;
         // Set when `--max-concepts` / `--max-findings` receives a value that is
         // not a non-negative integer, so the run is rejected instead of the
         // invalid argument being silently ignored (FR-019).
@@ -431,6 +438,7 @@ impl ResearchCliCommand {
                 "--clarify" => clarify = Some(true),
                 "--no-clarify" => clarify = Some(false),
                 "--evaluate" => evaluate = true,
+                "--url-cloak" => url_cloak = true,
                 _ => {
                     if name.is_none() {
                         name = Some(arg.to_string());
@@ -487,6 +495,7 @@ impl ResearchCliCommand {
             max_findings,
             brief,
             evaluate,
+            url_cloak,
         }
     }
 
@@ -698,6 +707,7 @@ Common create flags:
   --use-pdf                                          Enable PDF extraction
   --oa-enable                                        Force open-access recovery on
   --no-oa                                            Force open-access recovery off
+  --url-cloak                                        Emit source URLs as defanged plain text
   --evaluate                                         Append the self-evaluation scorecard
 "
         .to_string()
@@ -1689,6 +1699,32 @@ fn parse_create_evaluate_flag() {
             assert_eq!(topic, "topic");
             assert!(evaluate);
         }
+        other => panic!("unexpected variant: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_create_url_cloak_flag() {
+    let cmd = ResearchCliCommand::parse("create cloak-topic topic --url-cloak");
+    match cmd {
+        ResearchCliCommand::Create {
+            name,
+            topic,
+            url_cloak,
+            ..
+        } => {
+            assert_eq!(name, "cloak-topic");
+            assert_eq!(topic, "topic");
+            assert!(url_cloak);
+        }
+        other => panic!("unexpected variant: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_create_defaults_url_cloak_off() {
+    match ResearchCliCommand::parse("create plain topic") {
+        ResearchCliCommand::Create { url_cloak, .. } => assert!(!url_cloak),
         other => panic!("unexpected variant: {other:?}"),
     }
 }

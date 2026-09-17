@@ -560,15 +560,18 @@ fn bump_engine_fetch_failure(
     engines_csv: &str,
     kind: FetchFailureKind,
 ) {
-    bump_engine_exclusions(
-        stats,
-        global_by_reason,
-        engines_csv,
-        ExclusionReason::FetchFailed,
-    );
+    // One pass over the engine CSV bumps the exclusion, its reason bucket, and
+    // the fine-grained failure bucket together.
     bump_engine_stats(stats, engines_csv, |s| {
+        s.excluded += 1;
+        *s.excluded_by_reason
+            .entry(ExclusionReason::FetchFailed)
+            .or_insert(0) += 1;
         *s.failed_by_kind.entry(kind).or_insert(0) += 1;
     });
+    *global_by_reason
+        .entry(ExclusionReason::FetchFailed)
+        .or_insert(0) += 1;
     *global_by_kind.entry(kind).or_insert(0) += 1;
 }
 
@@ -619,15 +622,32 @@ fn classify_fetch_message(message: &str) -> FetchFailureKind {
     FetchFailureKind::Network
 }
 
-/// Find a 3-digit HTTP status code in a lowercased error message, preferring
-/// the first occurrence (e.g. `"http status 404"`).
+/// Find an HTTP status code in a lowercased error message.
+///
+/// Only tokens that directly follow an explicit `status` / `http` context are
+/// considered, so a bare 3-digit number elsewhere in the message (a byte count,
+/// a duration, a URL path segment) is not mistaken for a status code.
 fn extract_http_status(message: &str) -> Option<u16> {
-    for token in message.split(|c: char| !c.is_ascii_digit()) {
-        if token.len() == 3
-            && let Ok(code) = token.parse::<u16>()
-            && (100..=599).contains(&code)
-        {
-            return Some(code);
+    for marker in ["status", "http"] {
+        let mut search = message;
+        while let Some(pos) = search.find(marker) {
+            let after = &search[pos + marker.len()..];
+            let trimmed = after.trim_start();
+            // Allow an optional "code" word between the marker and the number.
+            let after_code = trimmed
+                .strip_prefix("code")
+                .map_or(trimmed, str::trim_start);
+            let digits: String = after_code
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if digits.len() == 3
+                && let Ok(code) = digits.parse::<u16>()
+                && (100..=599).contains(&code)
+            {
+                return Some(code);
+            }
+            search = &search[pos + marker.len()..];
         }
     }
     None
@@ -1966,6 +1986,9 @@ impl WebGatherer {
         } else {
             Vec::new()
         };
+        // Share the exclusion slice across every sub-query future so the set is
+        // cloned once rather than once per sub-query.
+        let exclude_engines: Arc<[&str]> = Arc::from(exclude_engines);
         let search_futures: Vec<_> = queries
             .iter()
             .map(|q| {
@@ -1974,7 +1997,7 @@ impl WebGatherer {
                 let budget = search_budget.clone();
                 let cache = query_cache.clone();
                 let stats = provider_stats.clone();
-                let exclude = exclude_engines.clone();
+                let exclude = Arc::clone(&exclude_engines);
                 async move {
                     // Run-scoped search budget: reserve one call before any
                     // provider request. Exhaustion skips the search entirely.
@@ -2064,7 +2087,7 @@ impl WebGatherer {
         // Per-sub-query prepared relevance query, built lazily on first use so
         // each query's normalisation and morphological variants are computed
         // exactly once per gather pass (PERF-068).
-        let mut prepared_queries: std::collections::HashMap<String, PreparedQuery> =
+        let mut prepared_queries: std::collections::HashMap<Arc<str>, PreparedQuery> =
             std::collections::HashMap::new();
         let mut seen_urls: HashSet<String> = HashSet::new();
         let mut any_search_error: Option<String> = None;
@@ -2261,7 +2284,7 @@ impl WebGatherer {
                         // normalised once per sub-query and reused for every
                         // hit under it (PERF-068).
                         let prepared = prepared_queries
-                            .entry(query.to_string())
+                            .entry(Arc::clone(&query))
                             .or_insert_with(|| PreparedQuery::new(&query));
                         if let Some((label, retained)) = self.filter_hit(prepared, &hit) {
                             if !retained {
@@ -2549,7 +2572,7 @@ impl WebGatherer {
                         // Post-fetch relevance, reusing the prepared query built
                         // by the pre-filter (PERF-068).
                         let prepared = prepared_queries
-                            .entry(query.to_string())
+                            .entry(Arc::clone(&query))
                             .or_insert_with(|| PreparedQuery::new(&query));
                         prepared.label(&title, &hit.snippet, &page.url)
                     };

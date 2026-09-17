@@ -1170,6 +1170,7 @@ Run any of these from the TUI prompt:
 /research create rust-async "async/await idioms" --evaluate
 /research create brief "Vector databases" --max-concepts 3 --max-findings 10
 /research create local-only "Project error handling" --use-local --no-papers
+/research create vendors "Managed vector db vendors" --url-cloak
 /spec create async-await Add async/await ergonomics --from-research rust-async
 /spec specify async-await Add async/await ergonomics --from-research rust-async
 /spec plan async-await "Rust 2024 edition, tokio runtime"
@@ -1226,6 +1227,7 @@ ragent research create rust-async "async/await idioms" --mode supervisor --summa
 ragent research create rust-async "async/await idioms" --evaluate
 ragent research create brief "Vector databases" --max-concepts 3 --max-findings 10
 ragent research create local-only "Project error handling" --use-local --no-papers
+ragent research create vendors "Managed vector db vendors" --url-cloak
 ragent research list          # aligned table; add --json for machine-readable output
 ragent research open rust-async
 ragent research search "async"
@@ -1250,6 +1252,11 @@ cited count) before truncation. Override per run with `--max-concepts N` /
 `--no-scholarly`, config `research.exclude_academic_engines`) excludes
 academically-classified engines (OpenAlex) before any search request is issued,
 and `--oa-enable` / `--no-oa` toggle open-access recovery for the run.
+
+Pass `--url-cloak` to write web source URLs as defanged plain text
+(`hxxps://host[.]tld/…` in a code span) in the `Sources` bullets and the
+`References Index` table instead of clickable links, so automated URL scanners
+do not flag or reject the document. Non-URL rows are unchanged.
 
 The `--tier` flag selects the analysis depth: `light` (minimal), `full`
 (default), or `dissertation` (extended with depth investigations and
@@ -1702,6 +1709,25 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.106
+
+- **`--url-cloak` research source defanging** (v1.0.106) —
+  `/research create` gained `--url-cloak`, which writes the report's web source
+  URLs as defanged plain text (`hxxps://host[.]tld/…` in a Markdown code span)
+  in the `**Sources:**` bullets and the `References Index` table instead of
+  clickable links, so automated URL scanners do not flag the document. Non-URL
+  rows are unchanged, the flag is off by default, and it is recorded in
+  frontmatter so `/research update` replays it.
+- **Research output limits, scholarly-engine exclusion, and progress-table
+  detail** — `/research create` caps its `## Concepts` and `## Findings` lists
+  at 5 and 20 by default, reordering most-relevant-first before truncation
+  (`--max-concepts N` / `--max-findings N`, or `research.max_concepts` /
+  `research.max_findings`; `0` = unbounded); `--no-papers` (alias
+  `--no-scholarly`) excludes academically-classified engines before any search
+  request is dispatched; `--oa-enable` / `--no-oa` toggle open-access recovery
+  per run; and the per-engine progress table breaks exclusions and fetch
+  failures down by reason/cause.
 
 ## Version 1.0.104
 

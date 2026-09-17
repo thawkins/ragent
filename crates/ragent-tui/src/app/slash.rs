@@ -437,6 +437,7 @@ impl App {
                     "--web-time".to_string(),
                     "--max-concepts".to_string(),
                     "--max-findings".to_string(),
+                    "--url-cloak".to_string(),
                 ]
             }
             "init" => {

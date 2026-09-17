@@ -134,7 +134,9 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   concept/finding output limits (`--max-concepts`/`--max-findings`, `research.max_concepts`/
   `research.max_findings`), scholarly-engine exclusion (`--no-papers`, alias
   `--no-scholarly`, `research.exclude_academic_engines`), open-access toggles
-  (`--oa-enable`/`--no-oa`), a per-engine progress table that breaks exclusions
+  (`--oa-enable`/`--no-oa`), URL cloaking (`--url-cloak`) that defangs web
+  source URLs in the `Sources` bullets and `References Index` so scanners do
+  not flag them, a per-engine progress table that breaks exclusions
   and fetch failures out by reason/cause, and `mf_search` `exclude_engines`
 - **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
   prompts, and file context into agent sessions
@@ -419,11 +421,29 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.105** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.106** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+
+- **`--url-cloak` research source defanging (v1.0.106)** —
+  `/research create` gained `--url-cloak`, which emits web source URLs as
+  defanged plain text rather than clickable links: the scheme is rewritten
+  (`https://` -> `hxxps://`, `http://` -> `hxxp://`), every dot is bracketed
+  (`example.com` -> `example[.]com`), and the result is wrapped in a Markdown
+  code span. It applies to the `**Sources:**` bullets under each finding and
+  the `References Index` table in `RESEARCH.md` (plus the `Sources Reference`
+  table in `CORPA.md`), leaving non-URL rows untouched, so automated URL
+  scanners do not flag the document. Available on the root CLI, the TUI slash
+  command, and `POST /research` (`url_cloak`), recorded in frontmatter
+  (`url_cloak: true`) for `/research update` replay, and off by default. A
+  follow-up `/simplify` pass over the change set tightened
+  `SourceVault`/`GatherLog` blocking offloads (shared `run_blocking` helper,
+  new `SourceVaultError::TaskPanic`), defanged the `cloak_url` non-URL fallback,
+  hardened `extract_http_status` against "500ms"/"404 bytes" false positives,
+  and folded `assemble_and_write`'s 18 parameters into one `AssembleInput`
+  struct; the how-to manuals were rebuilt to PDF.
 
 - **Research output limits, scholarly-engine exclusion, and progress-table
   detail (v1.0.105)** — `/research create` caps its

@@ -4,6 +4,15 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.106)
+
+- **`--url-cloak` research source defanging** — `/research create --url-cloak`
+  writes the report's web source URLs as defanged plain text (`hxxps://host[.]tld/…`
+  in a Markdown code span) in the `**Sources:**` bullets and the `References
+  Index` table instead of clickable links, so automated URL scanners do not
+  flag the document. Non-URL rows are unchanged; the flag is off by default
+  and is recorded in frontmatter so `/research update` replays it.
+
 ## Highlights (v1.0.105)
 
 - **Research output limits** — `/research create` caps its `## Concepts` and
