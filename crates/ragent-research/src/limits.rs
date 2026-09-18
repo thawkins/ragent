@@ -36,10 +36,26 @@ pub const DEFAULT_ENTRY_RANK: u8 = 5;
 ///
 /// Models trained on the older concept-extraction prompt still emit
 /// `web-NN` filename citations; they are accepted here so ordering works both
-/// before and after the rewrite to `[#N]`.
-fn web_ref_re() -> &'static Regex {
+/// before and after the rewrite to `[#N]`. Shared with `cluster`'s citation
+/// rewriter so the parse pattern stays identical across the crate.
+pub(crate) fn web_ref_re() -> &'static Regex {
     static WEB_REF_RE: OnceLock<Regex> = OnceLock::new();
     WEB_REF_RE.get_or_init(|| Regex::new(r"\bweb-(\d+)\b").expect("valid web-ref regex"))
+}
+
+/// The numeric prefix pattern used to strip leading counters from concept
+/// headings (`## N. label` / `### N. label`).
+///
+/// Matches a leading run of digits followed by a delimiter (`.`, `)`, `:`,
+/// `-`, en dash, em dash) and trailing whitespace, so `3. Topic`,
+/// `12) Topic`, and `7 — Topic` all strip to `Topic`. Shared with
+/// `cluster`'s heading renumbering so the parse pattern stays identical
+/// across the crate.
+pub(crate) fn num_prefix_re() -> &'static Regex {
+    static NUM_PREFIX_RE: OnceLock<Regex> = OnceLock::new();
+    NUM_PREFIX_RE.get_or_init(|| {
+        Regex::new(r"^\d+\s*[.):\-\u{2013}\u{2014}]\s*").expect("valid num-prefix regex")
+    })
 }
 
 /// Extract the distinct, 1-based source indices cited by `body`.

@@ -65,9 +65,11 @@ use title::clean_web_source_title;
 
 /// Maximum number of focused sub-queries the research decomposer will
 /// produce for a single topic. Increasing this raises the web-search
-/// parallelism and usually increases the number of distinct sources found,
-/// while staying within typical LLM output budgets for a JSON array.
-pub(crate) const MAX_DECOMPOSED_QUERIES: usize = 10;
+/// parallelism and usually increases the number of distinct sources found.
+/// 20 stays within what current models reliably emit as a JSON array of
+/// sub-queries while roughly doubling the achievable source fan-out over
+/// the earlier 10-sub-query cap on broad topics.
+pub(crate) const MAX_DECOMPOSED_QUERIES: usize = 20;
 
 /// Default maximum number of web sources to capture per research item
 /// (FR-011). The earlier 15-source cap was too restrictive for broad topics; a
@@ -745,7 +747,11 @@ pub trait WebSearchTool: Send + Sync {
         max_results: usize,
         exclude_engines: &[&str],
     ) -> anyhow::Result<Vec<WebSearchHit>> {
-        let _ = exclude_engines;
+        if !exclude_engines.is_empty() {
+            tracing::debug!(
+                "search tool does not support engine exclusions; falling back to plain search"
+            );
+        }
         self.search(query, max_results).await
     }
 }
@@ -1977,18 +1983,18 @@ impl WebGatherer {
         // hit-level scholarly filter in the capture loop below is kept as
         // defence in depth for tools that cannot steer engine selection
         // (FR-015) — and to guarantee non-academic engines still run untouched.
-        let exclude_engines: Vec<&str> = if self.disable_scholarly {
+        // Share the exclusion slice across every sub-query future so the set is
+        // cloned once rather than once per sub-query. Build the `Arc` slice
+        // directly — no intermediate `Vec` — via the same branch the log uses.
+        let exclude_engines: Arc<[&str]> = if self.disable_scholarly {
             tracing::info!(
                 engines = ?ACADEMIC_ENGINES,
                 "research: --no-papers excludes academic search engines from this sweep"
             );
-            ACADEMIC_ENGINES.to_vec()
+            Arc::from(ACADEMIC_ENGINES)
         } else {
-            Vec::new()
+            Arc::from(&[][..])
         };
-        // Share the exclusion slice across every sub-query future so the set is
-        // cloned once rather than once per sub-query.
-        let exclude_engines: Arc<[&str]> = Arc::from(exclude_engines);
         let search_futures: Vec<_> = queries
             .iter()
             .map(|q| {

@@ -245,11 +245,7 @@ impl GitHubClient {
     /// GET request returning raw bytes (follows redirects). Used for
     /// endpoints that serve binary blobs such as the Actions logs zip.
     pub async fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
-        let url = if path.starts_with("https://") || path.starts_with("http://") {
-            path.to_string()
-        } else {
-            format!("https://api.github.com{path}")
-        };
+        let url = self.resolve_url(path);
         let resp = self
             .client
             .get(&url)

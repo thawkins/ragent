@@ -91,16 +91,19 @@ For full OASF compatibility or when you need the structured envelope format.
 
 ## Discovery Paths
 
-ragent searches two directories at startup:
+ragent searches three directories at startup:
 
 | Priority | Directory | Scope |
 |----------|-----------|-------|
-| Lower | `~/.ragent/agents/` | All projects (user-global) |
-| Higher | `[PROJECT]/.ragent/agents/` | This project only |
+| Lowest | `~/.ragent/agents/` | All projects (user-global, legacy location) |
+| Middle | `~/.config/ragent/agents/` | All projects (XDG user-config) |
+| Highest | `[PROJECT]/.ragent/agents/` | This project only |
 
 The **project directory** is the nearest ancestor of the current working
-directory that contains a `.ragent/agents/` subdirectory. Project-local
-definitions override user-global definitions when both have the same `name`.
+directory that contains a `.ragent/agents/` subdirectory. When the same agent
+`name` appears in several directories, the definition from the
+higher-priority (closest) directory wins: project-local overrides
+`~/.config/ragent/agents/`, which overrides `~/.ragent/agents/`.
 
 Subdirectories are searched recursively. Both `.md` (profile) and `.json`
 (OASF) files are loaded.

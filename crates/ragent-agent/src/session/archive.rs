@@ -24,16 +24,17 @@ use ragent_storage::storage::{CronEventRow, Storage};
 use ragent_types::cron::{CronEvent, CronSchedule};
 use ragent_types::trigger::TriggerRule;
 
-/// Resolve the ragent data directory, failing loudly when the platform cannot
-/// provide one.
+/// Resolve the ragent global-state directory, failing loudly when the
+/// platform cannot provide one.
 ///
+/// Consolidates all ragent global state under `~/.config/ragent/` —
+/// supersedes the legacy `~/.local/share/ragent/` XDG-data location.
 /// Falling back to the current directory would make loop-state exports read
 /// from and imports write to a location no cron runner ever inspects, so the
-/// fallback was removed: the caller surfaces a real error instead.
+/// caller surfaces a real error rather than a silent wrong path.
 fn ragent_data_dir() -> Result<PathBuf> {
-    dirs::data_dir()
-        .map(|d| d.join("ragent"))
-        .context("cannot resolve system data directory for loop-state I/O")
+    ragent_config::user_dirs::global_state_dir()
+        .context("cannot resolve global config/state directory for loop-state I/O")
 }
 
 /// Manifest version for the archive format.

@@ -2129,8 +2129,9 @@ progress. The GitHub and GitLab flows share a
 Custom agents can be defined in JSON using the Open Agentic Schema Framework
 (OASF):
 
-- `~/.ragent/agents/` — user-global
-- `.ragent/agents/` — project-local (higher priority)
+- `~/.ragent/agents/` — user-global (legacy location)
+- `~/.config/ragent/agents/` — user-global (XDG config location, higher priority)
+- `.ragent/agents/` — project-local (highest priority)
 
 ### 11.2 Agent Schema
 
@@ -2280,7 +2281,8 @@ dependencies are completed.
 #### Blueprint Storage Locations
 
 - `~/.ragent/blueprints/teams/<name>/`
-- `.ragent/blueprints/teams/<name>/`
+- `~/.config/ragent/blueprints/teams/<name>/` (higher priority than the legacy location)
+- `.ragent/blueprints/teams/<name>/` (highest priority)
 
 #### Blueprint Directory Structure
 

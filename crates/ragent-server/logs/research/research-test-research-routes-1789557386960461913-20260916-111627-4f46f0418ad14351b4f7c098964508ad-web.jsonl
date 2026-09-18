@@ -1,3 +1,0 @@
-{"timestamp":"2026-09-16T11:16:27.082318686+00:00","event":"synthesize_start","payload":{"sources":0,"has_llm_engine":false}}
-{"timestamp":"2026-09-16T11:16:27.082754456+00:00","event":"synthesize_result","payload":{"outcome":"no-llm","detail":null,"sources":0}}
-{"timestamp":"2026-09-16T11:16:27.084027823+00:00","event":"synthesis_audit","payload":{"overall_score":62,"recommendation":"Proceed with caution — issues: No research dimensions (loci) were detected, so coverage cannot be judged.; No contradictions detected; no logic conflicts to resolve.; Finding 1 does not cite any source; Finding 1 contains a paragraph longer than 1200 characters.","sources_used":0,"critic_reports":4}}

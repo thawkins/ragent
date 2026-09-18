@@ -104,12 +104,10 @@ impl SqliteTokenStore {
     }
 
     /// Create a store over the shared ragent database
-    /// (`<data_dir>/ragent/ragent.db`).
+    /// (`~/.config/ragent/ragent.db`).
     pub fn shared() -> Self {
-        let db_path = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("ragent")
-            .join("ragent.db");
+        let db_path = ragent_config::user_dirs::global_db_path()
+            .unwrap_or_else(|| PathBuf::from(".").join("ragent").join("ragent.db"));
         Self::new(db_path)
     }
 

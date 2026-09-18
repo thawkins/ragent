@@ -65,10 +65,11 @@ Blueprints are pre-built team templates that define which teammates to spawn and
 
 ### Blueprint storage locations
 
-Blueprints are searched in priority order:
+Blueprints are searched in priority order (closest wins):
 
 1. **Project-local:** `[PROJECT]/.ragent/blueprints/teams/<name>/`
-2. **Global:** `~/.ragent/blueprints/teams/<name>/`
+2. **User-config (XDG):** `~/.config/ragent/blueprints/teams/<name>/`
+3. **User-global (legacy):** `~/.ragent/blueprints/teams/<name>/`
 
 ### Blueprint directory structure
 
@@ -754,7 +755,7 @@ With a default agent type:
 
 - Team guide: `docs/userdocs/TEAMS.md`
 - Quickstart: `QUICKSTART.md` (Teams section)
-- Blueprint location: `[PROJECT]/.ragent/blueprints/teams/` or `~/.ragent/blueprints/teams/`
+- Blueprint location: `[PROJECT]/.ragent/blueprints/teams/`, `~/.config/ragent/blueprints/teams/`, or `~/.ragent/blueprints/teams/`
 - Example bundles:
   - `examples/teams/code-review/`
   - `examples/teams/parallel-feature/`

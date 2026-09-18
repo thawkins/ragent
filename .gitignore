@@ -23,6 +23,9 @@ Thumbs.db
 
 # Temporary build artifacts
 target/temp/
+crates/*/target/
+crates/*/log/
+crates/*/logs/
 
 # Generated WiX installer sources
 /wix/
@@ -50,5 +53,6 @@ EOF
 .ragent/
 !.ragent/skills/
 !.ragent/blueprints/
+!.ragent/templates/
+!.ragent/agents/
 
-crates/ragent-tools-core/target/

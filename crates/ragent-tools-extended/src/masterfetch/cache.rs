@@ -404,7 +404,10 @@ impl ContentCache {
             // re-warn on the same corrupt blob, and so the next successful fetch
             // re-populates the entry cleanly. The connection lock is still held
             // for the whole function, so this is atomic with the read above.
-            let _ = conn.execute(
+            // The entry is dropped from the in-memory result regardless; a
+            // failed purge leaves the row on disk (the next poll re-parses and
+            // re-warns), which is worth surfacing rather than hiding.
+            if let Err(e) = conn.execute(
                 "DELETE FROM fetch_cache
                  WHERE url = ?1
                    AND extraction_type = ?2
@@ -416,7 +419,13 @@ impl ContentCache {
                     key.css_selector_component(),
                     key.pages_component(),
                 ],
-            );
+            ) {
+                tracing::warn!(
+                    url = %key.url,
+                    error = %e,
+                    "masterfetch: failed to purge corrupt fetch_cache row"
+                );
+            }
             return Ok(None);
         }
         Ok(row)

@@ -45,9 +45,9 @@ pub struct SkillgenResult {
     pub already_existed: bool,
 }
 
-/// Resolve the global personal skills directory: `~/.ragent/skills/`.
+/// Resolve the global personal skills directory: `~/.config/ragent/skills/`.
 fn global_skills_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".ragent").join("skills"))
+    ragent_config::user_dirs::global_skills_dir()
 }
 
 /// Write a file, creating parent directories as needed.

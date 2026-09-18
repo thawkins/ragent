@@ -19,6 +19,7 @@ pub mod permission;
 pub mod runtime_flag;
 pub mod telemetry;
 pub mod trigger;
+pub mod user_dirs;
 pub mod yolo;
 
 // Re-export commonly used types

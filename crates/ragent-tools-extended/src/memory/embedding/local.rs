@@ -138,11 +138,8 @@ impl LocalEmbeddingProvider {
     ///
     /// Uses `~/.ragent/models/all-MiniLM-L6-v2/`.
     fn model_dir() -> Result<PathBuf> {
-        let base = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join("ragent")
-            .join("models")
-            .join("all-MiniLM-L6-v2");
+        let base = ragent_config::user_dirs::global_embedding_model_dir()
+            .ok_or_else(|| anyhow::anyhow!("no config directory for embedding models"))?;
         Ok(base)
     }
 

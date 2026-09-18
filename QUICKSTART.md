@@ -592,8 +592,9 @@ They are loaded automatically at startup.
 
 | Directory | Scope |
 |-----------|-------|
-| `~/.ragent/agents/` | User-global — available in every project |
 | `.ragent/agents/` | Project-local — this project only (takes priority) |
+| `~/.config/ragent/agents/` | User-global — every project (XDG config; takes priority over `~/.ragent/agents/`) |
+| `~/.ragent/agents/` | User-global — every project (legacy location) |
 
 ### Create a minimal custom agent
 

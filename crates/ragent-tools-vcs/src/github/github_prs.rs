@@ -285,6 +285,9 @@ impl Tool for GithubCreatePrTool {
             )
             .await
             .context("Failed to run git rev-parse")?;
+            // `git rev-parse` output arrives as a String; a non-UTF-8 branch
+            // name would have failed upstream as an output-decoding error
+            // before reaching us, so `.trim()` is safe without re-validation.
             out.0.trim().to_string()
         };
 

@@ -134,8 +134,11 @@ impl ragent_tools_extended::archdoc::GovCreateStages for TuiGovCreateStages {
         // The prompt asks for the three files in one response; the runner
         // splits the sections when the model complies, and supplies a minimal
         // fallback body when it does not so FR-013 containment still gets a
-        // clean, non-panicking report instead of a half-written spec.
-        let (spec_md, plan_md, testplan_md) = split_authored_sections(&body);
+        // clean, non-panicking report instead of a half-written spec. The
+        // splitter is shared with the `ragent spec govcreate` CLI parity path
+        // so both surfaces produce the same sections from the same response.
+        let (spec_md, plan_md, testplan_md) =
+            ragent_tools_extended::archdoc::split_authored_sections(&body);
         Ok(AuthoredSpec {
             spec_md,
             plan_md,
@@ -160,113 +163,6 @@ impl ragent_tools_extended::archdoc::GovCreateStages for TuiGovCreateStages {
         .map(|_| ())
         .map_err(|e| ragent_tools_extended::archdoc::GovCreateRunError::Write(e.to_string()))
     }
-}
-
-/// Split a single LLM body into the three spec sections the authoring prompt
-/// demands (SPEC.md / PLAN.md / TESTPLAN.md).
-///
-/// The prompt asks for markdown headed "1. `{target}/specs/<id>/SPEC.md` …
-/// 2. PLAN.md … 3. TESTPLAN.md"; we split on the numbered headings so a
-/// well-formed response maps to the three files exactly, and we fall back to
-/// minimal placeholder sections (with a `<!-- generated-from: ... -->`
-/// marker on the two non-primary files) when the headings are absent so the
-/// runner's FR-013 report still names the failed stage rather than panicking.
-fn split_authored_sections(body: &str) -> (String, String, String) {
-    let mut spec_md = String::new();
-    let mut plan_md = String::new();
-    let mut testplan_md = String::new();
-
-    // Markers the prompt embeds: "1. `.../SPEC.md`", "2. `.../PLAN.md`",
-    // "3. `.../TESTPLAN.md`". Search case-sensitively first, then
-    // case-insensitively as a tolerance, so a model that writes "plan.md"
-    // still splits.
-    let markers: [(&str, usize); 3] = [("SPEC.md", 1), ("PLAN.md", 2), ("TESTPLAN.md", 3)];
-    let mut cuts: Vec<(usize, usize)> = Vec::new(); // (byte_idx, which)
-    for (name, which) in markers {
-        let lowered = body.to_lowercase();
-        let name_lower = name.to_lowercase();
-        if let Some(idx) = lowered.find(&name_lower) {
-            cuts.push((idx, which));
-        }
-    }
-    cuts.sort_by_key(|(idx, _)| *idx);
-    cuts.dedup_by_key(|(_, which)| *which);
-
-    match cuts.as_slice() {
-        [] => {
-            // No markers: fall back to treating the whole body as SPEC.md,
-            // with minimal placeholder bodies for the other two so the
-            // write stage always has three files.
-            spec_md = body.to_owned();
-            plan_md = "## Tasks\n\n(to be filled by /spec plan)\n".to_owned();
-            testplan_md = "## Test Cases\n\n(to be filled by manual review)\n".to_owned();
-        }
-        [(idx1, w1)] => {
-            let (a, b) = body.split_at(*idx1);
-            match w1 {
-                1 => {
-                    spec_md = b.to_owned();
-                    plan_md = "## Tasks\n\n(to be filled by /spec plan)\n".to_owned();
-                    testplan_md = "## Test Cases\n\n(to be filled by manual review)\n".to_owned();
-                }
-                2 => {
-                    spec_md = a.to_owned();
-                    plan_md = b.to_owned();
-                    testplan_md = "## Test Cases\n\n(to be filled by manual review)\n".to_owned();
-                }
-                _ => {
-                    spec_md = a.to_owned();
-                    plan_md = "## Tasks\n\n(to be filled by /spec plan)\n".to_owned();
-                    testplan_md = b.to_owned();
-                }
-            }
-        }
-        [(idx1, w1), (idx2, w2)] => {
-            let (first, rest) = body.split_at(*idx2);
-            let (a, b) = first.split_at(*idx1);
-            assign_two(
-                *w1,
-                a,
-                *w2,
-                b,
-                rest,
-                &mut spec_md,
-                &mut plan_md,
-                &mut testplan_md,
-            );
-        }
-        [first, second, third, ..] => {
-            let (spec, rest1) = body.split_at(first.0);
-            let (plan, rest2) = rest1.split_at(second.0 - first.0);
-            let testplan = &rest2[third.0 - second.0..];
-            spec_md = spec.to_owned();
-            plan_md = plan.to_owned();
-            testplan_md = testplan.to_owned();
-        }
-    }
-    (spec_md, plan_md, testplan_md)
-}
-
-/// Two-marker splitter helper: fills the three outputs from the two known
-/// sections plus the trailing tail.
-fn assign_two(
-    w1: usize,
-    a: &str,
-    w2: usize,
-    b: &str,
-    tail: &str,
-    spec_md: &mut String,
-    plan_md: &mut String,
-    testplan_md: &mut String,
-) {
-    let mut slots: [Option<&str>; 3] = [None, None, None];
-    slots[w1 - 1] = Some(a);
-    slots[w2 - 1] = Some(b);
-    // Whatever section is missing defaults to a minimal body; the tail (after
-    // the second marker) belongs to the second section, not the third.
-    *spec_md = slots[0].unwrap_or("").to_owned();
-    *plan_md = slots[1].unwrap_or("## Tasks\n").to_owned() + tail;
-    *testplan_md = slots[2].unwrap_or("## Test Cases\n").to_owned();
 }
 
 impl App {
@@ -423,11 +319,15 @@ impl App {
     /// message and render the terminal report once the worker deposits it
     /// (T-013, FR-015).
     pub fn poll_govcreate_result(&mut self) {
-        // Stream any fresh worker progress lines into the panel.
-        let drained: Vec<String> = match self.govcreate_progress.lock() {
-            Ok(mut lines) => std::mem::take(&mut *lines),
-            Err(_) => Vec::new(),
-        };
+        // Stream any fresh worker progress lines into the panel. A poisoned
+        // lock means the worker panicked mid-report — recover with
+        // `into_inner` so the panel still drains and the stall is visible.
+        let drained: Vec<String> = std::mem::take(
+            &mut *self
+                .govcreate_progress
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
         if !drained.is_empty() {
             let mut text = self
                 .govcreate_progress_text
@@ -467,8 +367,13 @@ impl App {
             self.push_log_no_agent(LogLevel::Warn, "govcreate: run failed".to_owned());
         }
         // T-014: drop the cancel handle so a stale run cannot be cancelled
-        // after its terminal report has already landed.
-        if let Ok(mut slot) = self.govcreate_cancel.lock() {
+        // after its terminal report has already landed. Recover a poisoned
+        // lock the same way as the drain above.
+        {
+            let mut slot = self
+                .govcreate_cancel
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             *slot = None;
         }
         self.govcreate_progress_text = None;
@@ -487,8 +392,8 @@ impl App {
         let token = self
             .govcreate_cancel
             .lock()
-            .ok()
-            .and_then(|mut slot| slot.take());
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
         let Some(token) = token else {
             return;
         };
@@ -1884,9 +1789,9 @@ Usage: `/telemetry help|on|off|setup|counters`",
         });
 
         let exists = alog_path.exists();
-        let data_dir = dirs::data_dir()
-            .map(|d| d.join("ragent").display().to_string())
-            .unwrap_or_else(|| "(platform data directory unavailable)".to_string());
+        let data_dir = ragent_config::user_dirs::global_state_dir()
+            .map(|d| d.display().to_string())
+            .unwrap_or_else(|| "(global state directory unavailable)".to_string());
 
         let exists_label = if exists { "yes" } else { "no" };
         let enabled = ragent_config::activity_log::is_enabled();
@@ -2919,7 +2824,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
                 if self.custom_agent_defs.is_empty() {
                     output.push_str(
-                                      "\n**Custom Agents**\n\n*(none — place .json or .md files in .ragent/agents/ or ~/.ragent/agents/)*\n",
+                                      "\n**Custom Agents**\n\n*(none — place .json or .md files in .ragent/agents/, ~/.config/ragent/agents/, or ~/.ragent/agents/)*\n",
                                   );
                 } else {
                     output.push_str("\n**Custom Agents**\n\n");
@@ -2988,9 +2893,9 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 }
                 "show" => {
                     let cwd = crate::app::helpers::current_working_dir();
-                    let home = dirs::home_dir().unwrap_or_default();
-                    let data_dir = dirs::data_dir().unwrap_or_default().join("ragent");
-                    let config_dir = dirs::config_dir().unwrap_or_default().join("ragent");
+                    let data_dir = ragent_config::user_dirs::global_state_dir().unwrap_or_default();
+                    let config_dir =
+                        ragent_config::user_dirs::global_state_dir().unwrap_or_default();
 
                     // Determine active config file paths
                     let project_config = cwd.join(".ragent").join("ragent.json");
@@ -3230,7 +3135,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
                     // Memory
                     let memory_dir = cwd.join(".ragent").join("memory");
-                    let global_memory = home.join(".ragent").join("memory");
+                    let global_memory = ragent_config::user_dirs::global_memory_dir();
                     output.push_str("\n🧠 **Memory**\n\n");
                     output.push_str(&format!(
                         "| {:<24} | {} {}\n",
@@ -3238,16 +3143,23 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         memory_dir.display(),
                         if memory_dir.exists() { "✓" } else { "✗" }
                     ));
-                    output.push_str(&format!(
-                        "| {:<24} | {} {}\n",
-                        "Global memory",
-                        global_memory.display(),
-                        if global_memory.exists() { "✓" } else { "✗" }
-                    ));
+                    match &global_memory {
+                        Some(dir) => {
+                            output.push_str(&format!(
+                                "| {:<24} | {} {}\n",
+                                "Global memory",
+                                dir.display(),
+                                if dir.exists() { "✓" } else { "✗" }
+                            ));
+                        }
+                        None => {
+                            output.push_str("| Global memory            | (unavailable) ✗\n");
+                        }
+                    }
 
                     // Agents
                     let project_agents = cwd.join(".ragent").join("agents");
-                    let global_agents = home.join(".ragent").join("agents");
+                    let global_agents = ragent_config::user_dirs::global_agents_dir();
                     output.push_str("\n🤖 **Custom Agents**\n\n");
                     output.push_str(&format!(
                         "| {:<24} | {} {}\n",
@@ -3259,12 +3171,19 @@ Usage: `/telemetry help|on|off|setup|counters`",
                             "✗"
                         }
                     ));
-                    output.push_str(&format!(
-                        "| {:<24} | {} {}\n",
-                        "Global agents",
-                        global_agents.display(),
-                        if global_agents.exists() { "✓" } else { "✗" }
-                    ));
+                    match &global_agents {
+                        Some(dir) => {
+                            output.push_str(&format!(
+                                "| {:<24} | {} {}\n",
+                                "Global agents",
+                                dir.display(),
+                                if dir.exists() { "✓" } else { "✗" }
+                            ));
+                        }
+                        None => {
+                            output.push_str("| Global agents            | (unavailable) ✗\n");
+                        }
+                    }
 
                     self.append_assistant_text(&output);
                     self.status = "config: show".to_string();
@@ -4473,7 +4392,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             "reload" => {
                 if is_help_args(args) {
                     self.append_assistant_text(
-                        "From: /reload help\n\n## /reload \u{2014} Reload customizations\n\n| Subcommand | Description |\n|---|---|\n| `/reload` or `/reload all` | Reload agents, config, MCP servers, and skills |\n| `/reload agents` | Re-scan custom agent definitions (`.ragent/agents/`, `~/.ragent/agents/`) |\n| `/reload config` | Re-read `ragent.json` from disk |\n| `/reload mcp` | Re-read the `mcp` section of the config |\n| `/reload skills` | Re-scan skill directories |\n| `/reload help` | Show this help |",
+                        "From: /reload help\n\n## /reload \u{2014} Reload customizations\n\n| Subcommand | Description |\n|---|---|\n| `/reload` or `/reload all` | Reload agents, config, MCP servers, and skills |\n| `/reload agents` | Re-scan custom agent definitions (`.ragent/agents/`, `~/.config/ragent/agents/`, `~/.ragent/agents/`) |\n| `/reload config` | Re-read `ragent.json` from disk |\n| `/reload mcp` | Re-read the `mcp` section of the config |\n| `/reload skills` | Re-scan skill directories |\n| `/reload help` | Show this help |",
                     );
                     self.status = "reload: help".to_string();
                     return;
@@ -9190,15 +9109,15 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
 
                     // Check memory dirs
-                    let memory_dir_ok = if let Some(home) = dirs::home_dir() {
-                        let p = home.join(".ragent").join("memory");
-                        std::fs::create_dir_all(&p).is_ok()
-                    } else {
-                        false
-                    };
+                    let memory_dir_ok = ragent_config::user_dirs::global_memory_dir()
+                        .and_then(|p| std::fs::create_dir_all(&p).ok());
                     lines.push(format!(
-                        "{} memory directory (~/.ragent/memory/)",
-                        if memory_dir_ok { "[ok]" } else { "[err]" }
+                        "{} memory directory (~/.config/ragent/memory/)",
+                        if memory_dir_ok.is_some() {
+                            "[ok]"
+                        } else {
+                            "[err]"
+                        }
                     ));
 
                     // Check memory system config

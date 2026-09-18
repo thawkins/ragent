@@ -1706,9 +1706,7 @@ pub fn collect_agents_md_content_with_discovery(
     use ignore::WalkBuilder;
 
     // Build discovery info
-    let global_dir = dirs::data_dir()
-        .map(|d| d.join("ragent"))
-        .filter(|d| d.is_dir());
+    let global_dir = ragent_config::user_dirs::global_state_dir().filter(|d| d.is_dir());
 
     // First, collect ALL local project files (for discovery display)
     let mut local_files: Vec<(usize, std::path::PathBuf)> = Vec::new();

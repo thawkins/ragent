@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+use ragent_config::user_dirs::global_github_token_path;
+
 /// PERF-059: last token read from disk, keyed by the file's modification time
 /// so a changed token file is re-read but an unchanged one is served from
 /// memory. Keying on mtime (rather than a bare process-global cache) keeps the
@@ -126,7 +128,7 @@ pub fn delete_token() -> Result<()> {
 }
 
 fn token_file_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".ragent").join("github_token"))
+    global_github_token_path()
 }
 
 /// State returned from initiating a GitHub device flow.

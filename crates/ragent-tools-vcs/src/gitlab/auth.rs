@@ -9,6 +9,7 @@
 //! 3. Encrypted database via [`Storage`]
 
 use anyhow::{Context, Result};
+use ragent_config::user_dirs::legacy_home_dir;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
@@ -317,10 +318,14 @@ pub fn migrate_legacy_files(storage: &Storage) {
     }
 }
 
+/// Legacy `~/.ragent/` GitLab token path — the only location the migration
+/// scans. New code must not read or write here.
 fn legacy_token_file_path() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|h| h.join(".ragent").join("gitlab_token"))
+    legacy_home_dir().map(|h| h.join("gitlab_token"))
 }
 
 fn legacy_config_file_path() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|h| h.join(".ragent").join("gitlab_config.json"))
+    // Legacy GitLab config path is intentionally untouched here; the
+    // migration below reads and then deletes it.
+    legacy_home_dir().map(|h| h.join("gitlab_config.json"))
 }

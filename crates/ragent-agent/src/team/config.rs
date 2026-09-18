@@ -48,10 +48,11 @@ pub fn resolve_memory_dir(
 ) -> Option<PathBuf> {
     match scope {
         MemoryScope::None => Option::None,
-        MemoryScope::User => {
-            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-            Some(home.join(".ragent").join("agent-memory").join(agent_name))
-        }
+        MemoryScope::User => Some(
+            ragent_config::user_dirs::global_agent_memory_dir()
+                .map(|d| d.join(agent_name))
+                .unwrap_or_else(|| PathBuf::from(".").join("agent-memory").join(agent_name)),
+        ),
         MemoryScope::Project => Some(
             working_dir
                 .join(".ragent")

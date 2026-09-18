@@ -1432,7 +1432,9 @@ impl SessionProcessor {
             for dir_name in [".agent", ".claude"] {
                 dirs.push(home.join(dir_name).join("skills"));
             }
-            dirs.push(home.join(".ragent").join("skills"));
+        }
+        if let Some(global_skills) = ragent_config::user_dirs::global_skills_dir() {
+            dirs.push(global_skills);
         }
         for dir in extra_dirs {
             dirs.push(PathBuf::from(dir));

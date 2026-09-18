@@ -118,7 +118,7 @@ pub fn load_github_token() -> Option<String> {
     {
         return Some(token.trim().to_owned());
     }
-    let path = dirs::home_dir()?.join(".ragent").join("github_token");
+    let path = ragent_config::user_dirs::global_github_token_path()?;
     let raw = std::fs::read_to_string(path).ok()?;
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -445,7 +445,7 @@ pub fn load_gitlab_token() -> Option<String> {
     {
         return Some(token.trim().to_owned());
     }
-    let path = dirs::home_dir()?.join(".ragent").join("gitlab_token");
+    let path = ragent_config::user_dirs::global_gitlab_token_path()?;
     let raw = std::fs::read_to_string(path).ok()?;
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -465,7 +465,7 @@ pub fn load_gitlab_base_url() -> String {
     {
         return url.trim().to_owned();
     }
-    if let Some(path) = dirs::home_dir().map(|h| h.join(".ragent").join("gitlab_config.json"))
+    if let Some(path) = ragent_config::user_dirs::global_gitlab_config_path()
         && let Ok(raw) = std::fs::read_to_string(path)
         && let Ok(value) = serde_json::from_str::<Value>(&raw)
         && let Some(url) = value.get("instance_url").and_then(Value::as_str)

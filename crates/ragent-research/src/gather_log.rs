@@ -187,10 +187,13 @@ impl GatherLog {
 
     /// Append one already-serialised JSON line (FUNC-051).
     ///
-    /// The lock-guarded buffered write runs directly: after PERF-049 this is
-    /// an in-memory `BufWriter` append with no syscall, so there is nothing to
-    /// offload. The first-use `open` and the explicit `flush` (the only
-    /// blocking syscalls on this path) are wrapped in [`Self::run_blocking`].
+    /// The lock-guarded buffered write runs directly: after PERF-049 the
+    /// first-use `open` and the explicit `flush` (the only blocking syscalls
+    /// on this path) are wrapped in [`Self::run_blocking`]. Per call, the
+    /// write is an in-memory [`BufWriter`] append *until the buffer fills* —
+    /// at that point `write_all` performs a bounded one-buffer flush while
+    /// still holding the lock. Because lines are short and the buffer is
+    /// 8 KiB, that flush is rare and amortised.
     fn append_line(&self, line: &str) -> anyhow::Result<()> {
         let mut guard = self.lock_writer();
         self.ensure_open_blocking(&mut guard)?;

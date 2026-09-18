@@ -25,7 +25,7 @@ pub fn encode_component(input: &str) -> String {
             }
             // write! into a String is infallible.
             _ => {
-                let _ = write!(out, "%{byte:02X}");
+                write!(out, "%{byte:02X}").expect("BUG: write to String is infallible");
             }
         }
     }

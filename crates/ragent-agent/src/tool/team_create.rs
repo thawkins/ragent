@@ -37,7 +37,7 @@ impl Tool for TeamCreateTool {
             "properties": {
                 "blueprint": {
                     "type": "string",
-                    "description": "Blueprint name to seed the team from [PROJECT]/.ragent/blueprints/teams/<name> or ~/.ragent/blueprints/teams/<name> (required)"
+                    "description": "Blueprint name to seed the team from [PROJECT]/.ragent/blueprints/teams/<name>, ~/.config/ragent/blueprints/teams/<name>, or ~/.ragent/blueprints/teams/<name> — closest wins (required)"
                 },
                 "context": {
                     "type": "string",
@@ -136,7 +136,10 @@ impl Tool for TeamCreateTool {
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            // Locate blueprint directory: project-local .ragent/blueprints/teams/<bp> or ~/.ragent/blueprints/teams/<bp>
+            // Locate blueprint directory, closest wins:
+            // 1. project-local [ancestor]/.ragent/blueprints/teams/<bp>
+            // 2. XDG ~/.config/ragent/blueprints/teams/<bp>
+            // 3. legacy global ~/.ragent/blueprints/teams/<bp>
             let mut blueprint_dir: Option<std::path::PathBuf> = None;
             // Walk up to find project .ragent (check the current dir, then parent, etc.)
             let mut cur_opt = Some(ctx.working_dir.as_path());
@@ -152,15 +155,21 @@ impl Tool for TeamCreateTool {
                 }
                 cur_opt = cur.parent();
             }
-            // Fallback to global
+            // XDG user-config middle layer.
             if blueprint_dir.is_none()
-                && let Some(home) = dirs::home_dir()
+                && let Some(bp_root) = ragent_config::user_dirs::global_blueprints_dir()
             {
-                let candidate = home
-                    .join(".ragent")
-                    .join("blueprints")
-                    .join("teams")
-                    .join(bp);
+                let candidate = bp_root.join("teams").join(bp);
+                if candidate.is_dir() {
+                    blueprint_dir = Some(candidate);
+                }
+            }
+            // Fallback to the legacy global ~/.ragent/blueprints/teams/<bp>.
+            if blueprint_dir.is_none()
+                && let Some(bp_root) =
+                    ragent_config::user_dirs::legacy_home_dir().map(|h| h.join("blueprints"))
+            {
+                let candidate = bp_root.join("teams").join(bp);
                 if candidate.is_dir() {
                     blueprint_dir = Some(candidate);
                 }

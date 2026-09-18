@@ -12,15 +12,24 @@ pub struct BlueprintInfo {
     pub name: String,
     /// Absolute path to the blueprint directory.
     pub path: PathBuf,
-    /// Where the blueprint was discovered: `"project"` or `"global"`.
+    /// Where the blueprint was discovered: `"project"`, `"config"`, or `"global"`.
     pub scope: String,
 }
 
 /// Discover all installed team blueprints.
 ///
-/// Searches project-local `.ragent/blueprints/teams/` first (walking up from
-/// `working_dir`), then falls back to `~/.ragent/blueprints/teams/`. Project-local
-/// blueprints take precedence over global blueprints with the same name.
+/// Searches the following directories from highest to lowest priority; the
+/// closest directory wins — the first directory that defines a blueprint name
+/// takes precedence over the others:
+///
+/// | Priority | Directory |
+/// |----------|-----------|
+/// | 1 (highest) | `[PROJECT]/.ragent/blueprints/teams/` |
+/// | 2        | `~/.config/ragent/blueprints/teams/` |
+/// | 3 (lowest) | `~/.ragent/blueprints/teams/` |
+///
+/// The project directory is the nearest ancestor of `working_dir` containing
+/// `.ragent/blueprints/teams/`.
 pub fn list_installed_blueprints(working_dir: &Path) -> Vec<BlueprintInfo> {
     let mut out: Vec<BlueprintInfo> = Vec::new();
     let mut seen_names: HashSet<String> = HashSet::new();
@@ -36,7 +45,15 @@ pub fn list_installed_blueprints(working_dir: &Path) -> Vec<BlueprintInfo> {
         cur_opt = cur.parent();
     }
 
-    // Global fallback
+    // XDG user-config: ~/.config/ragent/blueprints/teams/
+    if let Some(config) = ragent_config::user_dirs::global_blueprints_dir()
+        && let bp_root = config.join("teams")
+        && bp_root.is_dir()
+    {
+        collect_blueprints(&bp_root, "config", &mut seen_names, &mut out);
+    }
+
+    // Global fallback: legacy `~/.ragent/blueprints/teams/`.
     if let Some(home) = dirs::home_dir() {
         let bp_root = home.join(".ragent").join("blueprints").join("teams");
         if bp_root.is_dir() {
@@ -189,6 +206,7 @@ pub fn render_blueprint_list(blueprints: &[BlueprintInfo], command_label: &str) 
         output.push_str(
             "No blueprints found.\n\nInstall blueprints to:\n\
              - `[project]/.ragent/blueprints/teams/<name>/`\n\
+             - `~/.config/ragent/blueprints/teams/<name>/`\n\
              - `~/.ragent/blueprints/teams/<name>/`\n",
         );
         return output;

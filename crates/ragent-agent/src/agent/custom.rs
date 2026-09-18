@@ -1,13 +1,14 @@
 //! Discovery and loading of custom OASF agent definitions.
 //!
-//! Custom agents are stored as `.json` (OASF) or `.md` (profile) files in two
+//! Custom agents are stored as `.json` (OASF) or `.md` (profile) files in
 //! standard directories, searched in priority order (project-local wins over
-//! user-global):
+//! user-global; `~/.config/ragent/agents/` sits between the two):
 //!
 //! | Priority | Directory |
 //! |----------|-----------|
-//! | 1 (lower) | `~/.ragent/agents/` |
-//! | 2 (higher) | `[PROJECT]/.ragent/agents/` |
+//! | 1 (lowest) | `~/.ragent/agents/` |
+//! | 2        | `~/.config/ragent/agents/` |
+//! | 3 (highest) | `[PROJECT]/.ragent/agents/` |
 //!
 //! The project directory is discovered by walking up from `working_dir` until a
 //! `.ragent/` directory is found or the filesystem root is reached.
@@ -43,13 +44,14 @@ pub struct CustomAgentDef {
 
 /// Load all custom agents from the standard discovery directories.
 ///
-/// Scans `~/.ragent/agents/` first (lower priority) then
-/// `[PROJECT]/.ragent/agents/` (higher priority). When the same agent `name`
-/// appears in both directories the project-local definition replaces the
-/// global one.
+/// Scans `~/.ragent/agents/` first (lowest priority), then
+/// `~/.config/ragent/agents/` (middle priority), then
+/// `[PROJECT]/.ragent/agents/` (highest priority). When the same agent `name`
+/// appears in several directories the definition from the higher-priority
+/// directory replaces the others — the closest directory wins.
 ///
 /// H-002: the result is cached per working directory and invalidated when the
-/// mtime of either discovery directory changes, so the per-turn prompt build
+/// mtime of any discovery directory changes, so the per-turn prompt build
 /// does not re-walk the filesystem on every turn. The `OnceLock` also avoids
 /// the race where two threads populate the cache concurrently.
 ///
@@ -64,11 +66,9 @@ pub fn load_custom_agents(working_dir: &Path) -> (Vec<CustomAgentDef>, Vec<Strin
     let cache = CACHE.get_or_init(|| std::sync::RwLock::new(HashMap::new()));
 
     // Compute the discovery directories + their mtimes.
-    let global_dir = global_agents_dir();
-    let project_dir = find_project_agents_dir(working_dir);
-    let dir_mtimes: Vec<(PathBuf, SystemTime)> = [&global_dir, &project_dir]
-        .into_iter()
-        .flatten()
+    let dirs = discovery_dirs(working_dir);
+    let dir_mtimes: Vec<(PathBuf, SystemTime)> = dirs
+        .iter()
         .filter_map(|d| {
             std::fs::metadata(d)
                 .and_then(|m| m.modified())
@@ -96,14 +96,10 @@ pub fn load_custom_agents(working_dir: &Path) -> (Vec<CustomAgentDef>, Vec<Strin
     let mut agents: HashMap<String, CustomAgentDef> = HashMap::new();
     let mut diagnostics: Vec<String> = Vec::new();
 
-    // Load user-global agents first (lowest priority).
-    if let Some(global_dir) = global_dir {
-        scan_dir(&global_dir, false, &mut agents, &mut diagnostics);
-    }
-
-    // Load project-local agents (highest priority — overrides global).
-    if let Some(project_dir) = project_dir {
-        scan_dir(&project_dir, true, &mut agents, &mut diagnostics);
+    // Scan in ascending priority order: later (closer) directories win.
+    let n = dirs.len();
+    for (i, dir) in dirs.into_iter().enumerate() {
+        scan_dir(&dir, i == n - 1, &mut agents, &mut diagnostics);
     }
 
     // Return in a stable order (alphabetical by name).
@@ -142,12 +138,37 @@ struct CustomAgentCache {
     dir_mtimes: Vec<(PathBuf, std::time::SystemTime)>,
 }
 
-/// Return the user-global agents directory: `~/.ragent/agents/`.
+/// Return the user-global agents directory: `~/.config/ragent/agents/`.
 ///
 /// Returns `None` if the home directory cannot be determined.
 #[must_use]
 pub fn global_agents_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".ragent").join("agents"))
+    ragent_config::user_dirs::global_agents_dir()
+}
+
+/// Return the XDG user-config agents directory: `~/.config/ragent/agents/`
+/// (honours `$XDG_CONFIG_HOME` when set).
+///
+/// `global_agents_dir` and `config_agents_dir` now resolve to the same
+/// canonical path; the function is kept as a stable public entry point for
+/// callers that distinguish between "the canonical dir" and "the config
+/// dir". Custom-agent discovery uses a single canonical directory plus the
+/// project-local tier.
+#[must_use]
+pub fn config_agents_dir() -> Option<PathBuf> {
+    ragent_config::user_dirs::global_agents_dir()
+}
+
+/// The full discovery-directory list for `working_dir`, lowest priority first.
+///
+/// Order: `~/.config/ragent/agents/`, `[PROJECT]/.ragent/agents/`.
+/// Missing locations are omitted.
+#[must_use]
+fn discovery_dirs(working_dir: &Path) -> Vec<PathBuf> {
+    config_agents_dir()
+        .into_iter()
+        .chain(find_project_agents_dir(working_dir))
+        .collect()
 }
 
 /// Walk up from `working_dir` to find the nearest `.ragent/agents/` directory.

@@ -1791,6 +1791,24 @@ impl Config {
         dirs::config_dir().map(|d| d.join("ragent"))
     }
 
+    /// Resolve the canonical base directory for all ragent global state.
+    ///
+    /// All new global state should land under this root. ragent intentionally
+    /// folds data/ and state/ into the config directory (rather than XDG
+    /// `~/.local/share` and `~/.local/state`) so that one path holds
+    /// everything: `~/.config/ragent/`.
+    ///
+    /// Legacy locations that this supersedes:
+    /// - `~/.ragent/`            (legacy home-dir root; agents, skills, teams, tokens, memory, templates)
+    /// - `~/.local/share/ragent/` (XDG data root; loop-state, inbox, gmail, embeddings, history, DBs)
+    ///
+    /// Returns `None` when the platform config directory cannot be determined
+    /// (e.g. `XDG_CONFIG_HOME` unset on a headless Linux box).
+    #[must_use]
+    pub fn global_state_dir() -> Option<PathBuf> {
+        Self::global_config_dir()
+    }
+
     /// Resolve the path to the global `ragent.json` file.
     ///
     /// This is the canonical path used by [`Config::load`], [`Config::save`],

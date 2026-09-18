@@ -252,11 +252,13 @@ enum MemoryCommands {
     List,
 }
 
-/// Return the platform data directory for ragent (e.g. `~/.local/share/ragent`).
+/// Return the global-state directory for ragent (`~/.config/ragent/`).
+///
+/// All ragent global state — databases, logs, history, tokens — lives under
+/// this single root. Supersedes the legacy `~/.local/share/ragent/` location.
 fn data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("ragent")
+    ragent_config::user_dirs::global_state_dir()
+        .unwrap_or_else(|| PathBuf::from(".").join("ragent"))
 }
 
 /// Print the ragent ASCII art startup banner to stdout.

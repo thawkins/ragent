@@ -453,8 +453,10 @@ impl SourceVault {
     /// Run a blocking vault closure on the blocking pool.
     ///
     /// Clones the shared vault handle into the task and maps a join failure
-    /// (panic or cancellation) to [`SourceVaultError::TaskPanic`].
-    async fn run_blocking<T, F>(&self, f: F) -> Result<T>
+    /// (panic or cancellation) to [`SourceVaultError::TaskPanic`] annotated
+    /// with the operation name so a panic message identifies which vault op
+    /// failed.
+    async fn run_blocking<T, F>(&self, op: &'static str, f: F) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce(Self) -> Result<T> + Send + 'static,
@@ -462,7 +464,7 @@ impl SourceVault {
         let vault = self.clone();
         tokio::task::spawn_blocking(move || f(vault))
             .await
-            .map_err(|e| SourceVaultError::TaskPanic(e.to_string()))?
+            .map_err(|e| SourceVaultError::TaskPanic(format!("{op}: {e}")))?
     }
 
     /// Async [`Self::search`]: off-loads the blocking vault query to the
@@ -473,7 +475,8 @@ impl SourceVault {
     /// Returns an error if the blocking task panics or the vault query fails.
     pub async fn search_async(&self, query: &str, limit: usize) -> Result<Vec<VaultSource>> {
         let query = query.to_string();
-        self.run_blocking(move |v| v.search(&query, limit)).await
+        self.run_blocking("vault search", move |v| v.search(&query, limit))
+            .await
     }
 
     /// Async [`Self::find_by_url`]: off-loads the blocking vault query.
@@ -483,7 +486,8 @@ impl SourceVault {
     /// Returns an error if the blocking task panics or the vault query fails.
     pub async fn find_by_url_async(&self, url: &str) -> Result<Option<VaultSource>> {
         let url = url.to_string();
-        self.run_blocking(move |v| v.find_by_url(&url)).await
+        self.run_blocking("vault find_by_url", move |v| v.find_by_url(&url))
+            .await
     }
 
     /// Async [`Self::store`]: off-loads the blocking write + file I/O.
@@ -493,7 +497,8 @@ impl SourceVault {
     /// Returns an error if the blocking task panics or the vault write fails.
     pub async fn store_async(&self, source: &NewVaultSource) -> Result<VaultSource> {
         let source = source.clone();
-        self.run_blocking(move |v| v.store(&source)).await
+        self.run_blocking("vault store", move |v| v.store(&source))
+            .await
     }
 
     /// Async [`Self::read_content`]: off-loads the blocking read.
@@ -503,7 +508,8 @@ impl SourceVault {
     /// Returns an error if the blocking task panics or the read fails.
     pub async fn read_content_async(&self, source_id: &str) -> Result<String> {
         let source_id = source_id.to_string();
-        self.run_blocking(move |v| v.read_content(&source_id)).await
+        self.run_blocking("vault read_content", move |v| v.read_content(&source_id))
+            .await
     }
 
     /// Async [`Self::read_summary`]: off-loads the blocking vault query
@@ -515,7 +521,8 @@ impl SourceVault {
     /// Returns an error if the blocking task panics or the query fails.
     pub async fn read_summary_async(&self, source_id: &str) -> Result<Option<String>> {
         let source_id = source_id.to_string();
-        self.run_blocking(move |v| v.read_summary(&source_id)).await
+        self.run_blocking("vault read_summary", move |v| v.read_summary(&source_id))
+            .await
     }
 
     /// Async [`Self::list`]: off-loads the blocking vault query.
@@ -524,7 +531,8 @@ impl SourceVault {
     ///
     /// Returns an error if the blocking task panics or the vault query fails.
     pub async fn list_async(&self, limit: usize) -> Result<Vec<VaultSource>> {
-        self.run_blocking(move |v| v.list(limit)).await
+        self.run_blocking("vault list", move |v| v.list(limit))
+            .await
     }
 
     /// Async [`Self::count`]: off-loads the blocking vault query.
@@ -533,7 +541,7 @@ impl SourceVault {
     ///
     /// Returns an error if the blocking task panics or the vault query fails.
     pub async fn count_async(&self) -> Result<usize> {
-        self.run_blocking(|v| v.count()).await
+        self.run_blocking("vault count", |v| v.count()).await
     }
 }
 

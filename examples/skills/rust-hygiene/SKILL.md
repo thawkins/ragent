@@ -41,13 +41,13 @@ CRITICAL NOTE: the instruction is that ALL tests must pass, even if they are tes
 cargo check --workspace
 ```
 
-### 2. Cargo machete
+### 2. Cargo-machete
 
 ```
 cargo-machete --workspace
 ```
 
-Use a timeout of 1500 seconds. Ensure that all errors and warnings are resolved. Run cargo machete to determine which crates dependancies are not required, check and remove any unnecessary dependencies. Double-check that the project builds successfully after removing dependencies.
+Use a timeout of 1500 seconds. Ensure that all errors and warnings are resolved. Run cargo-machete to determine which crates dependancies are not required, check and remove any unnecessary dependencies. Double-check that the project builds successfully after removing dependencies.
 
 ### 3. cargo check --tests
 

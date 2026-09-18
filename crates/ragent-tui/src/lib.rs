@@ -441,10 +441,11 @@ pub async fn run_tui(
     // -- Input history --
     startup.record("Session create", t0.elapsed());
     let t0 = Instant::now();
-    let history_path = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("ragent")
-        .join("input_history.txt");
+    let history_path = ragent_config::user_dirs::global_history_path().unwrap_or_else(|| {
+        std::path::PathBuf::from(".")
+            .join("ragent")
+            .join("input_history.txt")
+    });
     app.set_history_file(history_path);
     if let Err(e) = app.load_history() {
         tracing::warn!("Failed to load input history: {}", e);

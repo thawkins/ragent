@@ -26,6 +26,7 @@
 //! `SpecCommand::write_govcreate_spec`) and consumes
 //! [`ArchitectureStructure`] plus the FR-018 invocation frontmatter.
 
+pub mod author_split;
 pub mod content_ref;
 pub mod extract;
 pub mod govcreate_run;
@@ -33,6 +34,7 @@ pub mod local_source;
 pub mod runner;
 pub mod url_source;
 
+pub use author_split::split_authored_sections;
 pub use content_ref::{
     ContentRef, ContentRefError, classify_content_ref, is_forced_overwrite, validate_local_path,
 };

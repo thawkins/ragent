@@ -270,6 +270,10 @@ pub fn acquire_local(path: &Path, budget: &LocalAcquisitionBudget) -> GatheredCo
     let mut excluded: Vec<ExcludedSource> = Vec::new();
     let mut seen_excluded: HashSet<String> = HashSet::new();
     let mut stats = LocalAcquisitionStats::default();
+    // Set only when the walk breaks out early under budget pressure; guards
+    // `local_budget_exhausted` against reporting cap-exhaustion for a walk
+    // that finished the candidate list naturally.
+    let mut stopped_early = false;
 
     // Collect the candidate files first so the walk order is deterministic:
     // a single-file reference is a one-element list, a directory reference
@@ -323,10 +327,15 @@ pub fn acquire_local(path: &Path, budget: &LocalAcquisitionBudget) -> GatheredCo
         // deadline at least the first supported file is still attempted so the
         // reason (Deadline) is reported rather than a bare empty corpus.
         if elapsed_now >= budget.deadline_ms && !sources.is_empty() {
+            stopped_early = true;
             break;
         }
         if stats.files_extracted >= budget.max_files || stats.total_chars >= budget.max_total_chars
         {
+            // `stopped_early` marks only a walk cut short by budget pressure —
+            // reaching the end of the candidate list is natural completion,
+            // not budget exhaustion.
+            stopped_early = true;
             break;
         }
 
@@ -366,11 +375,21 @@ pub fn acquire_local(path: &Path, budget: &LocalAcquisitionBudget) -> GatheredCo
         }
 
         let remaining = budget.max_total_chars.saturating_sub(stats.total_chars);
-        let mut content = content.to_owned();
-        if content.chars().count() > remaining {
-            content = content.chars().take(remaining).collect();
-        }
-        stats.total_chars += content.chars().count();
+        // Count characters once per document rather than scanning the
+        // (potentially ~200KB) body up to three times. Truncation slices at a
+        // char boundary via `char_indices` so no re-allocation is needed when
+        // the body fits.
+        let n_chars = content.chars().count();
+        let content: String = if n_chars > remaining {
+            let byte_end = content
+                .char_indices()
+                .nth(remaining)
+                .map_or(content.len(), |(byte_idx, _)| byte_idx);
+            content[..byte_end].to_owned()
+        } else {
+            content.to_owned()
+        };
+        stats.total_chars += n_chars.min(remaining);
 
         sources.push(GatheredSource {
             url: label.clone(),
@@ -381,15 +400,23 @@ pub fn acquire_local(path: &Path, budget: &LocalAcquisitionBudget) -> GatheredCo
             content,
         });
         stats.elapsed_ms = started.elapsed().as_millis() as u64;
-        // Label unused: see GatheredSource construction above.
 
         if stats.total_chars >= budget.max_total_chars {
+            stopped_early = true;
             break;
         }
     }
 
     stats.elapsed_ms = started.elapsed().as_millis() as u64;
-    let budget_reached = local_budget_exhausted(&stats, budget).map(|r| r.as_corpus_reason());
+    // Budget exhaustion is reported when the walk stopped under pressure
+    // (flagged at the break sites) or when the *measured* end-state hit the
+    // deadline — the zero-deadline case can finish the one-file corpus before
+    // the per-file guard sees another iteration, so it never sets the flag.
+    let budget_reached = if stopped_early || stats.elapsed_ms >= budget.deadline_ms {
+        local_budget_exhausted(&stats, budget).map(|r| r.as_corpus_reason())
+    } else {
+        None
+    };
 
     let corpus_stats = AcquisitionStats {
         pages_fetched: stats.files_extracted,
@@ -397,7 +424,7 @@ pub fn acquire_local(path: &Path, budget: &LocalAcquisitionBudget) -> GatheredCo
         elapsed_ms: stats.elapsed_ms,
     };
 
-    let text = join_local_text(&sources);
+    let text = super::url_source::join_text(&sources);
 
     GatheredCorpus {
         reference: path.display().to_string(),
@@ -425,15 +452,6 @@ fn push_local_excluded(
     }
 }
 
-/// Flatten the gathered local sources into one bounded text block (FR-005),
-/// matching the URL path's `## <summary> (<path>)` header convention.
-fn join_local_text(sources: &[GatheredSource]) -> String {
-    let mut out = String::new();
-    for source in sources {
-        out.push_str(&format!(
-            "## {}\n{}\n\n{}\n\n",
-            source.summary, source.url, source.content
-        ));
-    }
-    out
-}
+// (The FR-005 corpus text uses the URL path's shared flattener,
+// `super::url_source::join_text`, so both acquisition paths produce the
+// identical `## <summary>\n<url>\n\n<content>` shape.)

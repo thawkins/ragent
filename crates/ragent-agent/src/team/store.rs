@@ -21,10 +21,10 @@ use crate::team::task::{Task, TaskList, TaskStore};
 
 // ── Directory discovery ───────────────────────────────────────────────────────
 
-/// Return the user-global teams base directory: `~/.ragent/teams/`.
+/// Return the user-global teams base directory: `~/.config/ragent/teams/`.
 #[must_use]
 pub fn global_teams_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".ragent").join("teams"))
+    ragent_config::user_dirs::global_teams_dir()
 }
 
 /// Walk up from `working_dir` to find the nearest project `.ragent/` directory,

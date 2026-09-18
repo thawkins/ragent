@@ -675,13 +675,3 @@ fn cancelled(
     progress.emit(GovCreateProgress::Terminal(outcome.clone()));
     GovCreateRunReport { completed, outcome }
 }
-
-/// `true` when the spec already exists and `--force` was not supplied.
-///
-/// The runner itself does not use this (it delegates the decision to
-/// `write_spec`), but the dispatch surface and the CLI parity path need the
-/// pure predicate to refuse an existing spec *before* touching anything else.
-#[must_use]
-pub fn is_forced_overwrite(exists: bool, force: bool) -> bool {
-    crate::archdoc::content_ref::is_forced_overwrite(exists, force)
-}

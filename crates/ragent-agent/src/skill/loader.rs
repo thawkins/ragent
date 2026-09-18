@@ -24,6 +24,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+use ragent_config::user_dirs::global_skills_dir;
+
 use super::{SkillContext, SkillInfo, SkillScope};
 
 /// Intermediate representation of the YAML frontmatter in a `SKILL.md` file.
@@ -333,12 +335,11 @@ pub fn discover_skills(working_dir: &Path, extra_dirs: &[String]) -> Vec<SkillIn
         }
     }
 
-    // Personal skills: ~/.ragent/skills/*/SKILL.md
-    if let Some(home) = dirs::home_dir() {
-        let personal_dir = home.join(".ragent").join("skills");
-        if personal_dir.is_dir() {
-            load_skills_from_dir(&personal_dir, SkillScope::Personal, &mut skills);
-        }
+    // Personal skills: ~/.config/ragent/skills/*/SKILL.md
+    if let Some(personal_dir) = global_skills_dir()
+        && personal_dir.is_dir()
+    {
+        load_skills_from_dir(&personal_dir, SkillScope::Personal, &mut skills);
     }
 
     // Extra directories from config (treated as Personal scope so project

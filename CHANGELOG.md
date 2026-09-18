@@ -1,5 +1,55 @@
 # Changelog
 
+## [1.0.108] - 2026-09-18
+
+Config rules and fixes: code-quality pass over the v1.0.105..v1.0.107 window
+(user_dirs centralisation, FUNC-033 SSE coalescing, secret redaction, and the
+govcreate work) from five parallel explore reviews; no user-visible behaviour
+change.
+
+### Fixed
+
+- **`ragent-tools-vcs/gitlab/auth.rs`** -- `migrate_legacy_files` scanned the
+  NEW `~/.config/ragent` directory instead of the legacy `~/.ragent/` as its
+  source, making the self-token/config-file migration a silent no-op for
+  users with credentials still under `~/.ragent/`; the legacy-home helper is
+  restored and a regression test pins the scan root
+  (`tests/test_gitlab_legacy_migration.rs`).
+- **`ragent-tui/app/blueprints.rs` and `ragent-agent/tool/team_create.rs`** --
+  the "global" blueprint fallback had been re-pointed at the XDG
+  `blueprints/teams/` directory (a duplicate of the standard leg); the true
+  legacy `~/.ragent/blueprints(/teams)` fallback scan is restored under the
+  "global" scope so old installs keep working.
+- **`ragent-tui/app/slash.rs`** -- the four `/spec govcreate` mutex-lock sites
+  now uniformly recover poisoned locks via `unwrap_or_else(into_inner)` (was a
+  mix of `into_inner`, `.ok()` and `if let Ok`); `/config show` renders
+  unavailable global memory/agent dirs as "(unavailable) ✗" instead of
+  printing empty path rows.
+- **`ragent-tools-extended/archdoc/local_source.rs`** -- `acquire_local` no
+  longer misreports an exact-cap natural completion as budget exhaustion: a
+  `stopped_early` flag is set at each break site and OR-ed with
+  elapsed-vs-deadline at the tail (`test_zero_deadline_reports_deadline`
+  pinned).
+
+### Changed
+
+- **`ragent-llm/providers/http_client.rs`** -- `utf8_prefix_len` (the FUNC-033
+  SSE chunk-coalescing helper) is demoted from dead `pub fn` to a private
+  `#[cfg(test)]` item.
+- **Shared helpers deduplicated** -- the regex `NUM_PREFIX_RE` moved from
+  `ragent-research/src/cluster.rs` into `limits.rs::num_prefix_re()` beside
+  `web_ref_re()`; the verbatim `join_text` copies in `archdoc` collapsed to a
+  single `pub(crate)` helper in `url_source.rs` with `local_source.rs`
+  delegating.
+- **`ragent-agent/session/processor.rs`** -- the global skills directory is
+  pushed only when `Some`, dropping an empty `PathBuf` leg.
+- **`ragent-tools-vcs/percent.rs`** -- `let _ = write!` on an infallible
+  `String` sink replaced with `.expect("BUG: write to String is infallible")`.
+- **Documentation** -- trailing-whitespace/border fixes in the tools how-to
+  PDFs; `user_dirs::global_state_dir` documents its platform collision with
+  `data_dir`; `gather_log.append_line` comment corrected (bounded flush at
+  buffer-fill); `github_prs.rs` trimmed-branch comment pinned.
+
 ## [1.0.107] - 2026-09-18
 
 govcreate doc and help update.

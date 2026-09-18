@@ -150,9 +150,10 @@ pub fn preprocess_markdown_tables(markdown: &str) -> String {
     let mut in_table = false;
     let mut in_fence = false;
 
-    for line in markdown.lines() {
+    let mut lines = markdown.lines().peekable();
+    while let Some(line) = lines.next() {
         let trimmed = line.trim();
-        // Track fenced code blocks across lines: ``\`\`\` (or ````) opens a
+        // Track fenced code blocks across lines: ``` (or ````) opens a
         // fence and must close it again.  Fence contents are never scanned
         // for table rows.
         if trimmed.starts_with("```") {
@@ -167,14 +168,16 @@ pub fn preprocess_markdown_tables(markdown: &str) -> String {
             continue;
         }
 
-        // A table starts on any row whose *next* line is a separator.
+        // A table starts on any row whose *next* line is a separator. Peek at
+        // the following line from the iterator rather than rescanning the
+        // document: a re-scan is O(n) per line (O(n^2) overall) and lands on
+        // the *first* occurrence of a duplicate line, resolving the wrong
+        // "next" line for repeated rows.
         let is_row = is_table_row(line);
         let is_sep = is_table_separator(line);
-        let next_is_sep = markdown
-            .lines()
-            .skip_while(|l| *l != line)
-            .nth(1)
-            .map(is_table_separator)
+        let next_is_sep = lines
+            .peek()
+            .map(|next| is_table_separator(next))
             .unwrap_or(false);
 
         match (in_table, is_row, is_sep, next_is_sep) {

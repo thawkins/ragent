@@ -398,14 +398,8 @@ impl ResearchItem {
         let _ = fields.remove("sources");
         let output_format = fields.remove("requested_format");
         let model = fields.remove("model").map(|v| unquote_yaml_scalar(&v));
-        let open_access_recovery = fields
-            .remove("open_access_recovery")
-            .map(|v| v.trim().eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        let url_cloak = fields
-            .remove("url_cloak")
-            .map(|v| v.trim().eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+        let open_access_recovery = frontmatter_bool(&mut fields, "open_access_recovery");
+        let url_cloak = frontmatter_bool(&mut fields, "url_cloak");
         let invocation = fields.remove("invocation").map(|v| unquote_yaml_scalar(&v));
 
         Ok(Self {
@@ -510,6 +504,16 @@ fn unquote_yaml_scalar(value: &str) -> String {
         return inner.replace(r#"\""#, "\"").replace(r"\\", "\\");
     }
     trimmed.to_string()
+}
+
+/// Parse a boolean frontmatter field (`key: true`): missing or any value
+/// other than case-insensitive `"true"` counts as false. Shared by the
+/// boolean flags (`open_access_recovery`, `url_cloak`).
+fn frontmatter_bool(fields: &mut std::collections::HashMap<String, String>, key: &str) -> bool {
+    fields
+        .remove(key)
+        .map(|v| v.trim().eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }
 
 /// Render the `sources:` line as a comment-style count placeholder. The

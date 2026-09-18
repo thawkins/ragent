@@ -291,14 +291,9 @@ pub fn format_concepts_md_with_sources(raw: &str, sources: &[WebSourceMeta]) -> 
         return formatted;
     }
 
-    static NUM_PREFIX_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    static WEB_REF_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     static HASH_REF_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let num_prefix_re = NUM_PREFIX_RE.get_or_init(|| {
-        regex::Regex::new(r"^\d+\s*[.):\-\u{2013}\u{2014}]\s*").expect("valid regex")
-    });
-    let web_ref_re =
-        WEB_REF_RE.get_or_init(|| regex::Regex::new(r"\bweb-(\d+)\b").expect("valid regex"));
+    let num_prefix_re = crate::limits::num_prefix_re();
+    let web_ref_re = crate::limits::web_ref_re();
     let hash_ref_re =
         HASH_REF_RE.get_or_init(|| regex::Regex::new(r"\[#(\d+)\]").expect("valid regex"));
 
@@ -668,9 +663,7 @@ pub fn concepts_section_for_research<S: std::hash::BuildHasher>(
     sources: &[crate::source::Source],
     max_concepts: usize,
 ) -> Option<String> {
-    static WEB_REF_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let web_ref_re =
-        WEB_REF_RE.get_or_init(|| regex::Regex::new(r"\bweb-(\d+)\b").expect("valid regex"));
+    let web_ref_re = crate::limits::web_ref_re();
 
     // Split the demoted output into one body per `### ` concept section,
     // rewriting inline `web-NN` citations to `[#M]` as we go. A single interior
@@ -753,10 +746,7 @@ pub fn concepts_section_for_research<S: std::hash::BuildHasher>(
 /// Renumber every `### ` concept heading contiguously from 1, preserving any
 /// existing heading text (spec researchmax; FR-011).
 fn renumber_concept_headings(body: &str) -> String {
-    static NUM_PREFIX_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let num_prefix_re = NUM_PREFIX_RE.get_or_init(|| {
-        regex::Regex::new(r"^\d+\s*[.):\-\u{2013}\u{2014}]\s*").expect("valid regex")
-    });
+    let num_prefix_re = crate::limits::num_prefix_re();
     let mut out = String::with_capacity(body.len() + 32);
     let mut concept_no = 0usize;
     for line in body.lines() {

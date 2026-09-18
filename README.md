@@ -287,7 +287,9 @@ You can define your own agents as JSON files using the
 Place them in:
 
 - `~/.ragent/agents/` — user-global (all projects)
-- `.ragent/agents/` — project-local (this project, higher priority)
+- `~/.config/ragent/agents/` — user-global (all projects; XDG config location,
+  takes priority over `~/.ragent/agents/`)
+- `.ragent/agents/` — project-local (this project, highest priority)
 
 ragent loads them automatically at startup. Use `/agents` to list loaded agents
 and view diagnostics, or `/agent` to open the interactive picker (custom agents

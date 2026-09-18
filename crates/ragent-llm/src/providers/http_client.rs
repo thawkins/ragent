@@ -40,10 +40,10 @@ pub const STREAM_CHUNK_IDLE_TIMEOUT_SECS: u64 = 120;
 ///
 /// Note: `append_stream_chunk` no longer depends on this; it drives its flush
 /// from `Utf8Error::error_len` instead so an incomplete tail is never flushed
-/// lossily. Kept public because the FUNC-033 remediation contract is exported
-/// for downstream verification.
+/// lossily. Retained for FUNC-033 boundary verification.
+#[cfg(test)]
 #[must_use]
-pub fn utf8_prefix_len(buf: &[u8]) -> usize {
+fn utf8_prefix_len(buf: &[u8]) -> usize {
     match std::str::from_utf8(buf) {
         Ok(_) => buf.len(),
         Err(e) => e.valid_up_to(),
@@ -68,8 +68,11 @@ pub fn utf8_prefix_len(buf: &[u8]) -> usize {
 /// garbage.
 pub fn append_stream_chunk(out: &mut String, pending: &mut Vec<u8>, chunk: &[u8]) {
     pending.extend_from_slice(chunk);
+    // Prefix length of `pending` consumed so far. Draining once after the
+    // loop avoids an O(n) memmove per bad-byte sequence in a noisy stream.
+    let mut consumed = 0usize;
     loop {
-        match std::str::from_utf8(pending.as_slice()) {
+        match std::str::from_utf8(&pending[consumed..]) {
             Ok(s) => {
                 out.push_str(s);
                 pending.clear();
@@ -77,23 +80,28 @@ pub fn append_stream_chunk(out: &mut String, pending: &mut Vec<u8>, chunk: &[u8]
             }
             Err(e) => {
                 let valid = e.valid_up_to();
-                // Push the valid prefix.
+                // Push the valid prefix. It is guaranteed valid UTF-8 by the
+                // slice above, so push the `str` directly rather than routing
+                // through `String::from_utf8_lossy` (which allocates).
                 if valid > 0 {
-                    // The prefix is guaranteed valid UTF-8, so `expect`-free:
-                    // `from_utf8` just returned the split point for it.
-                    out.push_str(&String::from_utf8_lossy(&pending[..valid]));
+                    // SAFETY-free: the slice [consumed..consumed+valid] is
+                    // exactly the valid prefix `from_utf8` just measured.
+                    if let Ok(s) = std::str::from_utf8(&pending[consumed..consumed + valid]) {
+                        out.push_str(s);
+                    }
                 }
+                consumed += valid;
                 match e.error_len() {
                     // Ill-formed sequence of `bad` bytes following the valid
                     // prefix: emit one U+FFFD and skip the bad bytes, then
                     // re-check the remainder (it may contain another error).
                     Some(bad) => {
                         out.push('\u{FFFD}');
-                        pending.drain(..valid + bad);
+                        consumed += bad;
                     }
-                    // Incomplete tail: hold in `pending` for the next chunk.
+                    // Incomplete tail: hold it in `pending` for the next chunk.
                     None => {
-                        pending.drain(..valid);
+                        pending.drain(..consumed);
                         return;
                     }
                 }

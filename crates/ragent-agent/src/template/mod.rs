@@ -186,13 +186,12 @@ pub fn discover_templates(working_dir: &Path) -> HashMap<String, TemplateInfo> {
         }
     }
 
-    // Load personal templates from ~/.ragent/templates/
-    if let Some(home_dir) = dirs::home_dir() {
-        let personal_dir = home_dir.join(".ragent/templates");
-        if personal_dir.exists() {
-            for template in load_templates_from_dir(&personal_dir, TemplateScope::Personal) {
-                templates.insert(template.name.clone(), template);
-            }
+    // Load personal templates from ~/.config/ragent/templates/
+    if let Some(personal_dir) = ragent_config::user_dirs::global_templates_dir()
+        && personal_dir.exists()
+    {
+        for template in load_templates_from_dir(&personal_dir, TemplateScope::Personal) {
+            templates.insert(template.name.clone(), template);
         }
     }
 

@@ -457,7 +457,10 @@ fn push_excluded(
 }
 
 /// Flatten the gathered sources into one bounded text block (FR-004).
-fn join_text(sources: &[GatheredSource]) -> String {
+///
+/// This format is the shared corpus contract for both the URL and local
+/// paths (FR-005 calls it via [`crate::archdoc::local_source`]).
+pub(crate) fn join_text(sources: &[GatheredSource]) -> String {
     let mut out = String::new();
     for source in sources {
         out.push_str(&format!(
