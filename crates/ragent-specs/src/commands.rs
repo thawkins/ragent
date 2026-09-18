@@ -145,6 +145,31 @@ pub enum SpecCommand {
         /// Free-text feedback note (production metric, incident, user report).
         note: String,
     },
+
+    /// Create a project from a system architecture document (URL or local
+    /// file/folder): acquire the referenced content, extract the architecture
+    /// structure, author the spec, and scaffold the project (FR-001).
+    GovCreate {
+        /// Spec identifier (directory name under `<target-folder>/specs/`),
+        /// validated with the existing spec-ID rules (FR-002).
+        spec_id: String,
+        /// Content reference: an `http://`/`https://` URL or a local
+        /// file/folder path.
+        content_ref: String,
+        /// Target folder in which the new project is scaffolded.
+        target_folder: String,
+        /// Validated `/new` scaffold request produced by the shared
+        /// `project_scaffold::flags::parse_flags` parser (FR-002, FR-010).
+        scaffold: ragent_tools_extended::project_scaffold::ScaffoldRequest,
+        /// If true, overwrite the generated spec files on a re-run (FR-017).
+        force: bool,
+    },
+    /// A `/spec govcreate` invocation that was parseable but invalid: an
+    /// invalid spec ID or a `/new` flag validation failure (FR-002, FR-003).
+    ///
+    /// Carries the specific cause so the caller can print it alongside the
+    /// usage block; [`SpecCommand::is_usage_error`] reports `true` for it.
+    GovCreateUsage(String),
     /// Unknown subcommand (preserves the raw name for error messages).
     Unknown(String),
 }
@@ -188,12 +213,136 @@ fn extract_from_research(feature: &str) -> (String, Option<String>) {
     (before, name)
 }
 
+/// Split the raw `/spec govcreate` argument tail into shell-like tokens.
+///
+/// Whitespace separates tokens unless it appears inside a single- or
+/// double-quoted span, so a content reference or target folder that contains
+/// spaces can be quoted (assumption A3). The quote characters themselves are
+/// stripped; an unterminated quote runs to the end of the input.
+fn tokenize_govcreate_args(args: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut quote: Option<char> = None;
+
+    for ch in args.chars() {
+        match quote {
+            Some(opening) if ch == opening => {
+                // A closing quote that closes an empty token leaves the token
+                // closed (`""` produces no token); unquoted adjacent text keeps
+                // a non-empty token open.
+                if current.is_empty() {
+                    in_token = false;
+                }
+                quote = None;
+            }
+            Some(_) => current.push(ch),
+            None if ch == '\'' || ch == '"' => {
+                quote = Some(ch);
+                in_token = true;
+            }
+            None if ch.is_whitespace() => {
+                if in_token {
+                    tokens.push(std::mem::take(&mut current));
+                    in_token = false;
+                }
+            }
+            None => {
+                current.push(ch);
+                in_token = true;
+            }
+        }
+    }
+
+    if in_token {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Parse the `/spec govcreate` argument tail (FR-002).
+///
+/// The first three tokens are the positionals `specid`, `content-ref`, and
+/// `target-folder` (assumption A3); the first `--flag` token ends the
+/// positional run, and the remainder are `/new` scaffold flags, with an
+/// optional `--force` that is stripped before the shared `/new` flag parser
+/// validates the rest. The `specid` is validated with the existing spec rules
+/// before any other work, so a path-traversal name can never reach the
+/// filesystem. Missing positionals produce the usage-error
+/// `Unknown("govcreate")` form; an invalid spec ID or a `/new` flag validation
+/// failure produces [`SpecCommand::GovCreateUsage`] carrying the specific cause.
+fn parse_govcreate(rest: &str) -> SpecCommand {
+    let tokens = tokenize_govcreate_args(rest);
+
+    // Positionals run until the first flag token; a flag may not be consumed as
+    // the target folder (`govcreate arch ./docs --language rust` is a missing
+    // positional, not a target folder of `--language`).
+    let positional_count = tokens
+        .iter()
+        .take_while(|token| !token.starts_with("--"))
+        .count();
+    if positional_count < 3 {
+        return SpecCommand::Unknown("govcreate".to_string());
+    }
+
+    let spec_id = tokens[0].clone();
+    let content_ref = tokens[1].clone();
+    let target_folder = tokens[2].clone();
+
+    if crate::spec::SpecId::new(spec_id.as_str()).is_none() {
+        return SpecCommand::GovCreateUsage(format!(
+            "invalid spec id '{spec_id}': spec IDs must be alphanumeric with hyphens or \
+             underscores only"
+        ));
+    }
+
+    // FR-017: `--force` is a govcreate-level flag, not a `/new` flag; strip it
+    // before delegating so the scaffold parser never sees it.
+    let mut force = false;
+    let mut flags: Vec<String> = Vec::new();
+    for token in &tokens[positional_count..] {
+        if token == "--force" {
+            force = true;
+        } else {
+            flags.push(token.clone());
+        }
+    }
+
+    // FR-002 / FR-010: delegate flag validation to the shared `/new` parser so
+    // accepted values and error text cannot drift from the `/new` surface.
+    let flag_refs: Vec<&str> = flags.iter().map(String::as_str).collect();
+    match ragent_tools_extended::project_scaffold::parse_flags(&flag_refs) {
+        Ok(scaffold) => SpecCommand::GovCreate {
+            spec_id,
+            content_ref,
+            target_folder,
+            scaffold,
+            force,
+        },
+        Err(err) => SpecCommand::GovCreateUsage(err.to_string()),
+    }
+}
+
 /// Subcommands that signal missing-argument usage errors via
 /// `Self::Unknown(<name>)`. Kept in one place so [`SpecCommand::parse`]
 /// construction sites and [`SpecCommand::is_usage_error`] stay in sync.
 const USAGE_SUBCOMMANDS: &[&str] = &[
-    "create", "validate", "status", "task", "activate", "coverage", "impl", "add", "delete",
-    "jtbd", "update", "specify", "plan", "tasks", "feedback",
+    "create",
+    "validate",
+    "status",
+    "task",
+    "activate",
+    "coverage",
+    "impl",
+    "add",
+    "delete",
+    "jtbd",
+    "update",
+    "specify",
+    "plan",
+    "tasks",
+    "feedback",
+    "govcreate",
 ];
 
 impl SpecCommand {
@@ -435,6 +584,7 @@ impl SpecCommand {
                     }
                 }
             }
+            "govcreate" => parse_govcreate(rest),
             other => Self::Unknown(other.to_string()),
         }
     }
@@ -444,10 +594,13 @@ impl SpecCommand {
     /// Usage errors are represented as `Unknown(<subcommand>)` where the
     /// subcommand is one that exists but was given missing arguments; the
     /// accepted names come from [`USAGE_SUBCOMMANDS`] so they cannot drift
-    /// from the subcommands parsed above.
+    /// from the subcommands parsed above. A `/spec govcreate` invocation that
+    /// parsed but failed validation (bad spec ID or bad `/new` flags) is also a
+    /// usage error, reported as [`SpecCommand::GovCreateUsage`].
     #[must_use]
     pub fn is_usage_error(&self) -> bool {
-        matches!(self, Self::Unknown(s) if USAGE_SUBCOMMANDS.contains(&s.as_str()))
+        matches!(self, Self::GovCreateUsage(_))
+            || matches!(self, Self::Unknown(s) if USAGE_SUBCOMMANDS.contains(&s.as_str()))
     }
 
     /// Build the static help message shown by `/spec help`.
@@ -459,6 +612,7 @@ impl SpecCommand {
                     |---|---|---|\n\
                     | `/spec help` | none | Show this command reference table. |\n\
                     | `/spec create <specname> <feature description> [--from-research <name>]` | required `specname` + `feature description`, optional `--from-research` | Generate `specs/<specname>/SPEC.md` (EARS spec) and `specs/<specname>/PLAN.md` (implementation plan). `--from-research` pre-populates a `## Related Research` section. |\n\
+                    | `/spec govcreate <specid> <content-ref> <target-folder> [--language <lang>] [--type <type>] [--stack <name>] [--github \\| --gitlab] [--force]` | required `specid` + `content-ref` + `target-folder`, optional `/new` flags and `--force` | Create a project from an architecture document: acquire the URL or local file/folder content, extract the architecture structure, author `SPEC.md`/`PLAN.md`/`TESTPLAN.md` into `<target-folder>/specs/<specid>/`, and scaffold the project with the `/new` engine (see `/spec govcreate help` for the full usage block). Example: `/spec govcreate payments-arch https://docs.example.gov/arch ./payments-svc --language rust --type cmdline --stack axum` |\n\
                     | `/spec add <spec-id> <feature description>` | required `spec-id` + `feature description` | Incrementally add requirements to an existing spec and update its plan. |\n\
                     | `/spec delete <spec-id> [--yes]` | required `spec-id`, optional `--yes` | Delete a spec directory. Use `--yes` to skip the confirmation prompt. |\n\
                     | `/spec validate [specname]` | optional `specname` | Validate EARS compliance. Without argument, validates all specs. |\n\
@@ -1418,6 +1572,354 @@ Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan a
         )
     }
 
+    // ── govcreate helpers (FR-003, FR-018, NFR-005) ──────────────────────────
+
+    /// Build the `/spec govcreate` usage block (FR-003, NFR-005).
+    ///
+    /// Documents the positional argument order, both content-reference forms
+    /// (URL and local file/folder), the target-folder requirement, the optional
+    /// `--force` flag, and the accepted `/new` flags. The `--language` and
+    /// `--type` value lists are derived from the shared scaffold registries
+    /// (NFR-005) so they cannot drift from what `parse_flags` accepts. The
+    /// output is ASCII-only.
+    #[must_use]
+    pub fn build_govcreate_help_message() -> String {
+        let languages = ragent_tools_extended::project_scaffold::language_value_list();
+        let app_types = ragent_tools_extended::project_scaffold::app_type_value_list();
+        [
+            "From: /spec govcreate",
+            "",
+            "## /spec govcreate - architecture document to spec and project scaffold",
+            "",
+            "Usage:",
+            "  /spec govcreate <specid> <content-ref> <target-folder>",
+            "         [--language <lang>] [--type <type>] [--stack <name>]",
+            "         [--github | --gitlab] [--force]",
+            "",
+            "Argument order (positional):",
+            "  <specid>         Spec identifier; validated with the existing spec-ID rules",
+            "                   and written to <target-folder>/specs/<specid>/.",
+            "  <content-ref>    Architecture source: an http:// or https:// URL, or a local",
+            "                   file or folder path. Paths containing spaces must be quoted.",
+            "  <target-folder>  Directory in which the project is scaffolded; created if it",
+            "                   does not already exist.",
+            "",
+            "/new flags:",
+            &format!("  --language <lang>    Required. Accepted values: {languages}"),
+            &format!("  --type <type>        Required. Accepted values: {app_types}"),
+            "  --stack <name>       Optional. Layer a known framework starter on the base layout.",
+            "  --github | --gitlab  Optional (mutually exclusive). Create a private remote and push.",
+            "  --force              Optional. Overwrite an existing spec at <target-folder>/specs/<specid>/.",
+            "",
+            "Examples:",
+            "  /spec govcreate payments-arch https://docs.example.gov/architecture/payments \\",
+            "  ./payments-svc --language rust --type cmdline --stack axum",
+            "  /spec govcreate legacy-crm doc/architecture/legacy-crm-sad.pdf \\",
+            "  ./legacy-crm --language python --type library",
+        ]
+        .join("\n")
+    }
+
+    /// Build the user-facing status string for a govcreate run (NFR-005).
+    #[must_use]
+    pub fn build_govcreate_status(spec_id: &str) -> String {
+        format!("spec govcreate: {spec_id}")
+    }
+
+    /// Build the assistant message shown when a govcreate run starts
+    /// (FR-003, NFR-005).
+    #[must_use]
+    pub fn build_govcreate_message(
+        spec_id: &str,
+        content_ref: &str,
+        target_folder: &str,
+    ) -> String {
+        format!(
+            "From: /spec govcreate\n\
+             **Creating project from architecture document...**\n\n\
+             - Spec ID: `{spec_id}`\n\
+             - Content reference: `{content_ref}`\n\
+             - Target folder: `{target_folder}`\n\n\
+             The run acquires the referenced content, extracts the architecture structure, \
+             generates `specs/{spec_id}/SPEC.md`, `PLAN.md`, and `TESTPLAN.md`, then \
+             scaffolds the project. This may take a few moments."
+        )
+    }
+
+    /// Build the log entry for a govcreate run (NFR-005).
+    #[must_use]
+    pub fn build_govcreate_log(
+        spec_id: &str,
+        content_ref: &str,
+        target_folder: &str,
+        force: bool,
+    ) -> String {
+        let force_tag = if force { " --force" } else { "" };
+        format!(
+            "govcreate '{spec_id}' from {content_ref} -> \
+             {target_folder}/specs/{spec_id}/ (scaffold + spec){force_tag}"
+        )
+    }
+
+    /// Build the FR-018 invocation record for a govcreate-generated spec.
+    ///
+    /// Returns the complete YAML frontmatter block (opening and closing
+    /// `---` fences included) recording how the spec was produced so a later
+    /// command can replay or audit the run. Every free-form value is
+    /// double-quoted with backslash/quote escapes so the block stays
+    /// parseable; absent stack renders as `null`, absent hosting as `none`.
+    #[must_use]
+    pub fn build_govcreate_frontmatter(
+        spec_id: &str,
+        content_ref: &str,
+        target_folder: &str,
+        scaffold: &ragent_tools_extended::project_scaffold::ScaffoldRequest,
+    ) -> String {
+        use ragent_tools_extended::project_scaffold::HostingTarget;
+
+        let command = yaml_double_quote("/spec govcreate");
+        let content = yaml_double_quote(content_ref);
+        let target = yaml_double_quote(target_folder);
+        let stack = match scaffold.stack() {
+            Some(value) => yaml_double_quote(value),
+            None => "null".to_string(),
+        };
+        let hosting = match scaffold.hosting() {
+            Some(HostingTarget::GitHub) => "github",
+            Some(HostingTarget::GitLab) => "gitlab",
+            None => "none",
+        };
+        let language = scaffold.language();
+        let app_type = scaffold.app_type();
+        format!(
+            "---\n\
+             status: draft\n\
+             id: {spec_id}\n\
+             invocation:\n\
+             \x20 command: {command}\n\
+             \x20 content_ref: {content}\n\
+             \x20 target_folder: {target}\n\
+             \x20 language: {language}\n\
+             \x20 type: {app_type}\n\
+             \x20 stack: {stack}\n\
+             \x20 hosting: {hosting}\n\
+             ---\n"
+        )
+    }
+
+    /// Build the prompt sent to the explore agent for govcreate spec
+    /// generation (FR-008).
+    ///
+    /// Mirrors the [`SpecCommand::build_create_prompt`] file-list contract
+    /// (a `SPEC.md` EARS spec with `status: draft` frontmatter, a `PLAN.md`
+    /// task table, and a `TESTPLAN.md` of manual cases) but anchors the
+    /// generated content in the extracted [`ArchitectureStructure`] and
+    /// targets `<target-folder>/specs/<specid>/` instead of the workspace
+    /// `specs/` root. The prompt embeds the FR-018 invocation frontmatter so
+    /// the SPEC.md the agent writes records the exact invocation.
+    ///
+    /// The caller is responsible for FR-006: when the corpus was empty or the
+    /// model produced nothing usable, the run must stop before this prompt is
+    /// built with the acquisition or extraction cause surfaced; an empty
+    /// `structure` here therefore means the deterministic fallback ran, which
+    /// the prompt states.
+    #[must_use]
+    pub fn build_govcreate_prompt(
+        spec_id: &str,
+        structure: &ragent_tools_extended::archdoc::ArchitectureStructure,
+        content_ref: &str,
+        target_folder: &str,
+        scaffold: &ragent_tools_extended::project_scaffold::ScaffoldRequest,
+    ) -> String {
+        let structure_summary = Self::build_architecture_structure_summary(structure);
+        let frontmatter =
+            Self::build_govcreate_frontmatter(spec_id, content_ref, target_folder, scaffold);
+        let extraction_note = if structure.from_fallback {
+            "\nThe extraction stage fell back to a mechanical per-source structure \
+             because the model output was not usable; requirements must be grounded \
+             in the component names and responsibilities below, not invented detail."
+        } else {
+            ""
+        };
+        format!(
+            r"You are an expert specification writer. An architecture document was analysed and its structure extracted. Write a requirements specification and implementation plan for re-implementing that system.
+
+**Spec ID:** {spec_id}
+**Source documentation:** {content_ref}
+**Project scaffold:** language `{language}`, type `{app_type}`
+
+## Extracted architecture structure
+{structure_summary}{extraction_note}
+
+Write the following files:
+
+1. `{target_folder}/specs/{spec_id}/SPEC.md` — A requirements specification using EARS notation:
+   - Use at least one of each EARS template: ubiquitous, event-driven, state-driven, optional, unwanted
+   - Number requirements as FR-001, FR-002, etc.
+   - Derive the requirements and component descriptions from the extracted architecture structure above
+   - Start EXACTLY with this YAML frontmatter block (it records the invocation; do not alter it):
+{frontmatter_block}
+   - Include a `## Requirements` section after the frontmatter
+
+2. `{target_folder}/specs/{spec_id}/PLAN.md` — An implementation plan with:
+   - A '## Tasks' section with a markdown table
+   - Columns: ID, Title, Requirement, Effort, Priority, Status, Dependencies
+   - Task IDs as T-001, T-002, etc., one task per extracted component at minimum
+   - Link each task to relevant requirements
+   - Effort values: S, M, L
+   - Priority values: Critical, High, Medium, Low
+   - Status values: Pending (set all new tasks to Pending)
+
+3. `{target_folder}/specs/{spec_id}/TESTPLAN.md` — A **manual** test plan (human-readable, not automated test code):
+   - Start with YAML frontmatter containing `status: draft`
+   - A `## Test Cases` section with one or more manual test cases exercising the extracted components and interfaces
+   - Each test case has an ID (`TC-001`, `TC-002`, ...), a title, preconditions, step-by-step instructions, test data to enter, and expected results
+   - Do NOT include automated test code, `#[test]` functions, or references to `cargo test`; this is a manual test plan only
+
+Use the `write` tool to create all three files. Ensure the spec is clear, testable, and complete.",
+            language = scaffold.language(),
+            app_type = scaffold.app_type(),
+            frontmatter_block = frontmatter.trim_end(),
+        )
+    }
+
+    /// Render an [`ArchitectureStructure`] as a compact markdown digest for
+    /// embedding in the govcreate authoring prompt (FR-008).
+    ///
+    /// Empty sections are omitted; an entirely empty structure renders a
+    /// single sentence so the prompt is never silently content-free.
+    #[must_use]
+    pub fn build_architecture_structure_summary(
+        structure: &ragent_tools_extended::archdoc::ArchitectureStructure,
+    ) -> String {
+        if structure.is_empty() {
+            return "No architecture structure was extracted from the source documentation."
+                .to_string();
+        }
+
+        let mut out = String::new();
+
+        if !structure.components.is_empty() {
+            out.push_str("### Components\n");
+            for component in &structure.components {
+                out.push_str(&format!("- **{}**", component.name));
+                if !component.responsibilities.is_empty() {
+                    out.push_str(&format!(": {}", component.responsibilities.join("; ")));
+                }
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+
+        if !structure.interfaces.is_empty() {
+            out.push_str("### Interfaces\n");
+            for interface in &structure.interfaces {
+                let between = if interface.between.is_empty() {
+                    String::from("unspecified components")
+                } else {
+                    interface.between.join(" <-> ")
+                };
+                out.push_str(&format!("- **{}** ({between})", interface.name));
+                if !interface.contract_desc.is_empty() {
+                    out.push_str(&format!(": {}", interface.contract_desc));
+                }
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+
+        if !structure.data_stores.is_empty() {
+            out.push_str("### Data stores\n");
+            for store in &structure.data_stores {
+                out.push_str(&format!("- **{}** ({})", store.name, store.kind));
+                if !store.used_by.is_empty() {
+                    out.push_str(&format!(" used by {}", store.used_by.join(", ")));
+                }
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+
+        if !structure.external_dependencies.is_empty() {
+            out.push_str("### External dependencies\n");
+            for dependency in &structure.external_dependencies {
+                out.push_str(&format!("- **{}** ({})", dependency.name, dependency.kind));
+                if !dependency.used_by.is_empty() {
+                    out.push_str(&format!(" used by {}", dependency.used_by.join(", ")));
+                }
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+
+        if !structure.relationships.is_empty() {
+            out.push_str("### Relationships\n");
+            for relationship in &structure.relationships {
+                out.push_str(&format!(
+                    "- {} -[{}]-> {}",
+                    relationship.from, relationship.kind, relationship.to
+                ));
+                if !relationship.detail.is_empty() {
+                    out.push_str(&format!(": {}", relationship.detail));
+                }
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+
+        out.trim_end().to_string()
+    }
+
+    /// Write the govcreate-authored spec files to
+    /// `<target-folder>/specs/<specid>/` (FR-009).
+    ///
+    /// Creates the directory tree when the scaffold step did not already
+    /// produce it. An existing spec directory is refused unless `force` is
+    /// set (FR-017); the refusal reports the existing path so the caller can
+    /// surface the exact cause. All three files are written atomically
+    /// (temp file, sync, rename) via [`SpecIo::atomic_write`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SpecError::Validation`] when an existing spec directory is
+    /// present without `--force`, naming the conflicting path, and
+    /// [`SpecError::Io`] on any filesystem failure.
+    pub async fn write_govcreate_spec(
+        target_folder: &std::path::Path,
+        spec_id: &str,
+        spec_md: &str,
+        plan_md: &str,
+        testplan_md: &str,
+        force: bool,
+    ) -> Result<std::path::PathBuf, crate::error::SpecError> {
+        use crate::error::SpecError;
+
+        let spec_dir = target_folder.join("specs").join(spec_id);
+        let spec_dir_exists = spec_dir.is_dir();
+
+        // FR-017: refuse an existing spec without --force. The pure T-003
+        // predicate (is_forced_overwrite) is the shared decision so dispatch
+        // and tests cannot drift; an existing dir with --force is overwritten
+        // file-by-file below.
+        if !ragent_tools_extended::archdoc::is_forced_overwrite(spec_dir_exists, force)
+            && spec_dir_exists
+        {
+            return Err(SpecError::Validation(format!(
+                "spec '{}' already exists at {} (re-run with --force to overwrite)",
+                spec_id,
+                spec_dir.display()
+            )));
+        }
+
+        tokio::fs::create_dir_all(&spec_dir).await?;
+        crate::io::SpecIo::atomic_write(spec_dir.join("SPEC.md"), spec_md).await?;
+        crate::io::SpecIo::atomic_write(spec_dir.join("PLAN.md"), plan_md).await?;
+        crate::io::SpecIo::atomic_write(spec_dir.join("TESTPLAN.md"), testplan_md).await?;
+        Ok(spec_dir)
+    }
+
+    // ── Feedback helpers (FR-017, T-032) ─────────────────────────────────────
+
     // ── Feedback helpers (FR-017, T-032) ─────────────────────────────────────
 
     /// Build the user-facing status string for a feedback append operation.
@@ -1498,6 +2000,15 @@ Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan a
             format!("{trimmed}\n{row}\n")
         }
     }
+}
+
+/// Wrap a scalar in double quotes for a YAML frontmatter value.
+///
+/// Backslashes and double quotes are escaped so a content reference or target
+/// folder containing them cannot break the generated block.
+fn yaml_double_quote(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
 }
 
 /// Replace the placeholder row in a freshly-generated FEEDBACK.md template

@@ -105,6 +105,17 @@ pub struct BackgroundTaskService {
 }
 
 impl BackgroundTaskService {
+    /// Acquire the consolidated state lock, recovering from poison. State held
+    /// across a panicking lock holder may be mid-mutation; the background task
+    /// surface treats read-then-write sequences as best-effort and logs the
+    /// poison once per recovery rather than cascading panics through callers
+    /// (FUNC-043 remediation — previously `.expect("... poisoned")`).
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, BgState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// Create a new service bound to `storage` and `event_bus`.
     pub fn new(storage: Arc<Storage>, event_bus: Arc<EventBus>) -> Self {
         let notify = Arc::new(Notify::new());
@@ -181,10 +192,7 @@ impl BackgroundTaskService {
 
         // FR-015: single lock acquisition for both maps.
         {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut state = self.lock_state();
             state.tasks.insert(task_id.clone(), cmd.clone());
             state
                 .sessions
@@ -326,10 +334,7 @@ impl BackgroundTaskService {
         // FR-015: single lock to drop in-memory handles and session mappings
         // for finished tasks.
         let done_ids: Vec<String> = {
-            let state = self
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let state = self.lock_state();
             state
                 .tasks
                 .iter()
@@ -338,10 +343,7 @@ impl BackgroundTaskService {
                 .collect()
         };
         {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut state = self.lock_state();
             for id in &done_ids {
                 state.tasks.remove(id);
                 state.sessions.remove(id);
@@ -393,10 +395,7 @@ impl BackgroundTaskService {
         // This closes the flush_task race.
         // FR-015: single lock for tasks + sessions + drained_ids (was 3 locks).
         {
-            let state = self
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let state = self.lock_state();
             for (id, cmd) in state.tasks.iter() {
                 if cmd.is_done()
                     && state.sessions.get(id).map(String::as_str) == Some(session_id)
@@ -412,10 +411,7 @@ impl BackgroundTaskService {
         for id in &candidate_ids {
             // Only surface tasks belonging to this session.
             let belongs = {
-                let state = self
-                    .state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let state = self.lock_state();
                 state.sessions.get(id).map(String::as_str) == Some(session_id)
             };
             if !belongs {
@@ -429,10 +425,7 @@ impl BackgroundTaskService {
             }
             if let Ok(row) = self.status(id).await {
                 let tail = {
-                    let state = self
-                        .state
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let state = self.lock_state();
                     state
                         .tasks
                         .get(id)
@@ -454,10 +447,7 @@ impl BackgroundTaskService {
                 });
                 // Mark as drained so the next drain does not re-surface it.
                 {
-                    let mut state = self
-                        .state
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut state = self.lock_state();
                     state.drained_ids.insert(row.id);
                 }
             }
@@ -482,10 +472,7 @@ impl BackgroundTaskService {
     /// and has not already been drained.
     fn has_done_in_memory(&self, session_id: &str) -> bool {
         // FR-015: single lock for all three maps (was 3 separate locks).
-        let state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = self.lock_state();
         state.tasks.iter().any(|(id, cmd)| {
             cmd.is_done()
                 && state.sessions.get(id).map(String::as_str) == Some(session_id)

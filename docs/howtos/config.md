@@ -803,7 +803,7 @@ while ensuring an explicit user toggle persists on save.
 
 The `/tools` slash command toggles these at runtime. See
 [`docs/howtos/tool-visibility.md`](tool-visibility.md) and
-[`docs/howtos/tools.md`](tools.md).
+[`docs/howtos/tools/INDEX.md`](tools/INDEX.md).
 
 ---
 
@@ -2034,7 +2034,7 @@ This is merged last, with the highest precedence.
 | -------- | ----- |
 | [`docs/howtos/tutorial.md`](tutorial.md) | End-to-end tutorial from setup to release |
 | [`docs/howtos/permissions.md`](permissions.md) | Permissions, autopilot, and YOLO mode |
-| [`docs/howtos/tools.md`](tools.md) | Complete tool reference |
+| [`docs/howtos/tools/INDEX.md`](tools/INDEX.md) | Complete tool reference (split by category) |
 | [`docs/howtos/tool-visibility.md`](tool-visibility.md) | Tool family visibility toggles |
 | [`docs/howtos/custom-agents.md`](custom-agents.md) | Custom agent definitions (OASF / Markdown) |
 | [`docs/howtos/teams.md`](teams.md) | Teams and swarm coordination |

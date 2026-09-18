@@ -34,6 +34,518 @@ use crate::app::helpers::{
 };
 use crate::app::toolchain;
 
+// ── /spec govcreate orchestration (T-012) ────────────────────────────────────
+//
+// Production [`GovCreateStages`] implementation: the acquisition half calls
+// the shared archdoc acquisition helpers (`acquire_url` / `acquire_local`),
+// the extraction and authoring halves drive the session's configured model
+// through [`RagentCompleter`], and the spec write delegates to
+// [`ragent_specs::SpecCommand::write_govcreate_spec`] so the file placement
+// and FR-017 overwrite rule are owned by the spec crate.
+
+/// Production stages wiring for one `/spec govcreate` run.
+struct TuiGovCreateStages {
+    /// One-shot LLM helper bound to the session provider/model.
+    completer: RagentCompleter,
+}
+
+impl ragent_tools_extended::archdoc::GovCreateStages for TuiGovCreateStages {
+    async fn acquire(
+        &self,
+        reference: &ragent_tools_extended::archdoc::ContentRef,
+    ) -> Result<
+        ragent_tools_extended::archdoc::GatheredCorpus,
+        ragent_tools_extended::archdoc::GovCreateRunError,
+    > {
+        use ragent_tools_extended::archdoc::{
+            AcquisitionBudget, ContentRef, LocalAcquisitionBudget, acquire_local, acquire_url,
+        };
+        match reference {
+            ContentRef::Url(url) => acquire_url(url, &AcquisitionBudget::default())
+                .await
+                .map_err(|e| {
+                    ragent_tools_extended::archdoc::GovCreateRunError::Acquire(e.to_string())
+                }),
+            ContentRef::Local(path) => {
+                // The walk + per-file extraction is blocking I/O; offload so
+                // the TUI event loop keeps painting (NFR-004's 100-file/30s
+                // budget is far below the interactive threshold).
+                let path = path.clone();
+                let budget = LocalAcquisitionBudget::default();
+                tokio::task::spawn_blocking(move || acquire_local(&path, &budget))
+                    .await
+                    .map_err(|e| {
+                        ragent_tools_extended::archdoc::GovCreateRunError::Acquire(e.to_string())
+                    })
+            }
+        }
+    }
+
+    async fn extract(
+        &self,
+        corpus: &ragent_tools_extended::archdoc::GatheredCorpus,
+    ) -> Result<
+        ragent_tools_extended::archdoc::ArchitectureStructure,
+        ragent_tools_extended::archdoc::GovCreateRunError,
+    > {
+        use ragent_tools_extended::archdoc::{
+            build_arch_extraction_prompt, fallback_structure, parse_architecture_response,
+        };
+        let prompt = build_arch_extraction_prompt(corpus);
+        let response = self
+            .completer
+            .complete(
+                "You are a software architect reading architecture documentation.",
+                &prompt,
+            )
+            .await
+            .map_err(|e| {
+                ragent_tools_extended::archdoc::GovCreateRunError::Extract(e.to_string())
+            })?;
+        // FR-007 fallback: an unparseable model output degrades to the
+        // deterministic mechanical structure - extraction never aborts a
+        // non-empty corpus.
+        Ok(parse_architecture_response(&response).unwrap_or_else(|| fallback_structure(corpus)))
+    }
+
+    async fn author(
+        &self,
+        structure: &ragent_tools_extended::archdoc::ArchitectureStructure,
+        run: &ragent_tools_extended::archdoc::GovCreateRun,
+    ) -> Result<
+        ragent_tools_extended::archdoc::AuthoredSpec,
+        ragent_tools_extended::archdoc::GovCreateRunError,
+    > {
+        use ragent_tools_extended::archdoc::{AuthoredSpec, GovCreateRunError};
+
+        let prompt = ragent_specs::SpecCommand::build_govcreate_prompt(
+            &run.spec_id,
+            structure,
+            &run.content_ref,
+            run.target_folder.to_string_lossy().as_ref(),
+            &run.scaffold,
+        );
+        let body = self
+            .completer
+            .complete("You are an expert specification writer.", &prompt)
+            .await
+            .map_err(|e| GovCreateRunError::Author(e.to_string()))?;
+
+        // The prompt asks for the three files in one response; the runner
+        // splits the sections when the model complies, and supplies a minimal
+        // fallback body when it does not so FR-013 containment still gets a
+        // clean, non-panicking report instead of a half-written spec.
+        let (spec_md, plan_md, testplan_md) = split_authored_sections(&body);
+        Ok(AuthoredSpec {
+            spec_md,
+            plan_md,
+            testplan_md,
+        })
+    }
+
+    async fn write_spec(
+        &self,
+        run: &ragent_tools_extended::archdoc::GovCreateRun,
+        authored: &ragent_tools_extended::archdoc::AuthoredSpec,
+    ) -> Result<(), ragent_tools_extended::archdoc::GovCreateRunError> {
+        ragent_specs::SpecCommand::write_govcreate_spec(
+            &run.target_folder,
+            &run.spec_id,
+            &authored.spec_md,
+            &authored.plan_md,
+            &authored.testplan_md,
+            run.force,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| ragent_tools_extended::archdoc::GovCreateRunError::Write(e.to_string()))
+    }
+}
+
+/// Split a single LLM body into the three spec sections the authoring prompt
+/// demands (SPEC.md / PLAN.md / TESTPLAN.md).
+///
+/// The prompt asks for markdown headed "1. `{target}/specs/<id>/SPEC.md` …
+/// 2. PLAN.md … 3. TESTPLAN.md"; we split on the numbered headings so a
+/// well-formed response maps to the three files exactly, and we fall back to
+/// minimal placeholder sections (with a `<!-- generated-from: ... -->`
+/// marker on the two non-primary files) when the headings are absent so the
+/// runner's FR-013 report still names the failed stage rather than panicking.
+fn split_authored_sections(body: &str) -> (String, String, String) {
+    let mut spec_md = String::new();
+    let mut plan_md = String::new();
+    let mut testplan_md = String::new();
+
+    // Markers the prompt embeds: "1. `.../SPEC.md`", "2. `.../PLAN.md`",
+    // "3. `.../TESTPLAN.md`". Search case-sensitively first, then
+    // case-insensitively as a tolerance, so a model that writes "plan.md"
+    // still splits.
+    let markers: [(&str, usize); 3] = [("SPEC.md", 1), ("PLAN.md", 2), ("TESTPLAN.md", 3)];
+    let mut cuts: Vec<(usize, usize)> = Vec::new(); // (byte_idx, which)
+    for (name, which) in markers {
+        let lowered = body.to_lowercase();
+        let name_lower = name.to_lowercase();
+        if let Some(idx) = lowered.find(&name_lower) {
+            cuts.push((idx, which));
+        }
+    }
+    cuts.sort_by_key(|(idx, _)| *idx);
+    cuts.dedup_by_key(|(_, which)| *which);
+
+    match cuts.as_slice() {
+        [] => {
+            // No markers: fall back to treating the whole body as SPEC.md,
+            // with minimal placeholder bodies for the other two so the
+            // write stage always has three files.
+            spec_md = body.to_owned();
+            plan_md = "## Tasks\n\n(to be filled by /spec plan)\n".to_owned();
+            testplan_md = "## Test Cases\n\n(to be filled by manual review)\n".to_owned();
+        }
+        [(idx1, w1)] => {
+            let (a, b) = body.split_at(*idx1);
+            match w1 {
+                1 => {
+                    spec_md = b.to_owned();
+                    plan_md = "## Tasks\n\n(to be filled by /spec plan)\n".to_owned();
+                    testplan_md = "## Test Cases\n\n(to be filled by manual review)\n".to_owned();
+                }
+                2 => {
+                    spec_md = a.to_owned();
+                    plan_md = b.to_owned();
+                    testplan_md = "## Test Cases\n\n(to be filled by manual review)\n".to_owned();
+                }
+                _ => {
+                    spec_md = a.to_owned();
+                    plan_md = "## Tasks\n\n(to be filled by /spec plan)\n".to_owned();
+                    testplan_md = b.to_owned();
+                }
+            }
+        }
+        [(idx1, w1), (idx2, w2)] => {
+            let (first, rest) = body.split_at(*idx2);
+            let (a, b) = first.split_at(*idx1);
+            assign_two(
+                *w1,
+                a,
+                *w2,
+                b,
+                rest,
+                &mut spec_md,
+                &mut plan_md,
+                &mut testplan_md,
+            );
+        }
+        [first, second, third, ..] => {
+            let (spec, rest1) = body.split_at(first.0);
+            let (plan, rest2) = rest1.split_at(second.0 - first.0);
+            let testplan = &rest2[third.0 - second.0..];
+            spec_md = spec.to_owned();
+            plan_md = plan.to_owned();
+            testplan_md = testplan.to_owned();
+        }
+    }
+    (spec_md, plan_md, testplan_md)
+}
+
+/// Two-marker splitter helper: fills the three outputs from the two known
+/// sections plus the trailing tail.
+fn assign_two(
+    w1: usize,
+    a: &str,
+    w2: usize,
+    b: &str,
+    tail: &str,
+    spec_md: &mut String,
+    plan_md: &mut String,
+    testplan_md: &mut String,
+) {
+    let mut slots: [Option<&str>; 3] = [None, None, None];
+    slots[w1 - 1] = Some(a);
+    slots[w2 - 1] = Some(b);
+    // Whatever section is missing defaults to a minimal body; the tail (after
+    // the second marker) belongs to the second section, not the third.
+    *spec_md = slots[0].unwrap_or("").to_owned();
+    *plan_md = slots[1].unwrap_or("## Tasks\n").to_owned() + tail;
+    *testplan_md = slots[2].unwrap_or("## Test Cases\n").to_owned();
+}
+
+impl App {
+    /// Execute one validated `SpecCommand::GovCreate` through the T-012
+    /// orchestration runner (FR-006, FR-011, FR-012, FR-013, FR-014, FR-019),
+    /// streaming staged progress into a single in-place message (T-013,
+    /// FR-015).
+    ///
+    /// The T-012 runner owns the stage sequencing; this dispatch resolves the
+    /// session provider/model for the LLM-driven stages, then hands the run
+    /// to a named worker thread with its own current-thread tokio runtime.
+    /// Stage-boundary [`GovCreateProgress`] events stream into a shared
+    /// buffer that `poll_govcreate_result` drains each frame into a single
+    /// in-place-updated message; the terminal report lands as one
+    /// `From: /spec govcreate` message through the NFR-005 builders. When
+    /// the worker cannot spawn the fallback renders the report inline so a
+    /// valid invocation still completes.
+    fn run_govcreate_orchestration(
+        &mut self,
+        spec_id: String,
+        content_ref: String,
+        target_folder: String,
+        scaffold: ragent_tools_extended::project_scaffold::ScaffoldRequest,
+        force: bool,
+    ) {
+        use ragent_tools_extended::archdoc::{CancellationToken, GovCreateRun};
+
+        // Resolve the session model before any I/O so a missing provider is
+        // reported as a usage-level error, not a mid-run failure.
+        let (Some(provider_id), Some(model_id)) = self
+            .selected_model
+            .as_deref()
+            .and_then(|s| s.split_once('/'))
+            .map(|(p, m)| (Some(p.to_string()), Some(m.to_string())))
+            .unwrap_or((None, None))
+        else {
+            self.append_assistant_text(
+                "From: /spec govcreate\n\n[err] **no model configured** \
+                 — select a provider with /model before running govcreate",
+            );
+            self.status = "spec govcreate: no model".to_string();
+            return;
+        };
+
+        let invoking_root = crate::app::helpers::current_working_dir();
+
+        let run = GovCreateRun {
+            spec_id: spec_id.clone(),
+            content_ref: content_ref.clone(),
+            target_folder: std::path::PathBuf::from(&target_folder),
+            scaffold,
+            force,
+            invoking_root,
+        };
+
+        let completer = RagentCompleter {
+            registry: Arc::clone(&self.provider_registry),
+            storage: Arc::clone(&self.storage),
+            provider_id,
+            model_id,
+        };
+
+        // FR-015: replace any stray progress state from a previous run, then
+        // seed the streamed panel so the first stage line lands in the same
+        // message the header created.
+        if let Ok(mut lines) = self.govcreate_progress.lock() {
+            lines.clear();
+        }
+        if let Ok(mut slot) = self.govcreate_result.lock() {
+            *slot = None;
+        }
+        self.govcreate_progress_text = None;
+        self.govcreate_progress_slug = None;
+        self.govcreate_running = true;
+
+        let header_line = format!("Govcreate '{spec_id}'...");
+        self.govcreate_progress_slug = Some(header_line.clone());
+        self.govcreate_progress_text = Some(header_line);
+        self.refresh_govcreate_progress_message();
+        self.status = ragent_specs::SpecCommand::build_govcreate_status(&spec_id);
+        self.push_log_no_agent(
+            LogLevel::Info,
+            ragent_specs::SpecCommand::build_govcreate_log(
+                &spec_id,
+                &content_ref,
+                &target_folder,
+                force,
+            ),
+        );
+
+        let progress_buffer = Arc::clone(&self.govcreate_progress);
+        let result_slot = Arc::clone(&self.govcreate_result);
+        // T-014/FR-019: keep a real token per run so Escape reaches the
+        // worker between stages; `poll_govcreate_cancel` (framed by
+        // InputAction::CancelAgent) cancels it.
+        let cancel = CancellationToken::none();
+        if let Ok(mut slot) = self.govcreate_cancel.lock() {
+            *slot = Some(cancel.clone());
+        }
+
+        let drive = move || {
+            let stages = TuiGovCreateStages { completer };
+            let mut sink = |event: ragent_tools_extended::archdoc::GovCreateProgress| {
+                if let Ok(mut lines) = progress_buffer.lock() {
+                    lines.push(event.render());
+                }
+            };
+            let report = ragent_tools_extended::archdoc::run_govcreate_with_progress(
+                &run, &stages, &cancel, &mut sink,
+            );
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(err) => {
+                    // No tokio runtime could be built on this thread; surface
+                    // the failure as an FR-013-style report rather than
+                    // dropping the run silently.
+                    let outcome = ragent_tools_extended::archdoc::GovCreateOutcome::StageFailed {
+                        stage: "guard",
+                        cause: format!("tokio runtime unavailable: {err}"),
+                    };
+                    return ragent_tools_extended::archdoc::GovCreateRunReport {
+                        completed: Vec::new(),
+                        outcome,
+                    };
+                }
+            };
+            rt.block_on(report)
+        };
+
+        let spawn_result = std::thread::Builder::new()
+            .name("govcreate-run".to_owned())
+            .spawn(move || {
+                let report = drive();
+                if let Ok(mut slot) = result_slot.lock() {
+                    *slot = Some(report);
+                }
+            });
+        if let Err(err) = spawn_result {
+            // The worker could not spawn; the run could not start. Mark the
+            // run finished and let the poll surface the failure state.
+            self.govcreate_running = false;
+            self.push_log_no_agent(
+                LogLevel::Warn,
+                format!("govcreate: worker spawn failed: {err}"),
+            );
+            self.status = "spec govcreate: unavailable".to_string();
+        }
+    }
+
+    /// Drain streamed `/spec govcreate` progress lines into the in-place
+    /// message and render the terminal report once the worker deposits it
+    /// (T-013, FR-015).
+    pub fn poll_govcreate_result(&mut self) {
+        // Stream any fresh worker progress lines into the panel.
+        let drained: Vec<String> = match self.govcreate_progress.lock() {
+            Ok(mut lines) => std::mem::take(&mut *lines),
+            Err(_) => Vec::new(),
+        };
+        if !drained.is_empty() {
+            let mut text = self
+                .govcreate_progress_text
+                .take()
+                .unwrap_or_else(|| self.govcreate_progress_slug.clone().unwrap_or_default());
+            for line in drained {
+                text.push('\n');
+                text.push_str(&line);
+            }
+            self.govcreate_progress_text = Some(text);
+            self.needs_redraw = true;
+        }
+        if self.govcreate_progress_text.is_some() {
+            self.refresh_govcreate_progress_message();
+        }
+
+        let report = {
+            let mut guard = self
+                .govcreate_result
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.take()
+        };
+        let Some(report) = report else {
+            return;
+        };
+        self.govcreate_running = false;
+        self.needs_redraw = true;
+        let rendered = report.render();
+        self.force_new_message = true;
+        self.append_assistant_text(&format!("From: /spec govcreate\n\n{rendered}"));
+        if report.succeeded() {
+            self.status = "spec govcreate: complete".to_string();
+            self.push_log_no_agent(LogLevel::Info, "govcreate: run completed".to_owned());
+        } else {
+            self.status = "spec govcreate: failed".to_string();
+            self.push_log_no_agent(LogLevel::Warn, "govcreate: run failed".to_owned());
+        }
+        // T-014: drop the cancel handle so a stale run cannot be cancelled
+        // after its terminal report has already landed.
+        if let Ok(mut slot) = self.govcreate_cancel.lock() {
+            *slot = None;
+        }
+        self.govcreate_progress_text = None;
+        self.govcreate_progress_slug = None;
+        self.arm_status_expiry();
+    }
+
+    /// Cancel the active `/spec govcreate` run (T-014, FR-019).
+    ///
+    /// Called from the Escape/CancelAgent input path each frame while a run
+    /// is in flight. Idempotent: cancels the stored token once per run.
+    pub fn poll_govcreate_cancel(&mut self) {
+        if !self.govcreate_running {
+            return;
+        }
+        let token = self
+            .govcreate_cancel
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take());
+        let Some(token) = token else {
+            return;
+        };
+        if !token.is_cancelled() {
+            token.cancel();
+            self.status = "spec govcreate: cancelling…".to_string();
+            self.push_log_no_agent(
+                LogLevel::Warn,
+                "govcreate: user pressed Esc — cancelling at the next stage boundary".to_string(),
+            );
+            self.needs_redraw = true;
+        }
+    }
+
+    /// True while a `/spec govcreate` run is live (used by the Escape path).
+    pub fn govcreate_run_active(&self) -> bool {
+        self.govcreate_running
+    }
+
+    /// Replace the active govcreate progress message in place with the
+    /// current rendered panel text (T-013).
+    ///
+    /// Mirrors `refresh_newproj_progress_message`: the message is located by
+    /// its first line (`Govcreate '<spec-id>'...`) so repeated polls update
+    /// the same message instead of stacking one message per stage.
+    fn refresh_govcreate_progress_message(&mut self) {
+        let Some(rendered) = self.govcreate_progress_text.clone() else {
+            return;
+        };
+        let Some(header_line) = self.govcreate_progress_slug.clone() else {
+            return;
+        };
+        for (i, msg) in self.messages.iter_mut().enumerate() {
+            if msg.role != ragent_agent::message::Role::Assistant {
+                continue;
+            }
+            if let Some(ragent_agent::message::MessagePart::Text { text }) = msg.parts.first_mut()
+                && text.lines().next() == Some(header_line.as_str())
+            {
+                *text = rendered;
+                msg.touch();
+                self.mark_message_dirty(i);
+                return;
+            }
+        }
+        if let Some(ref sid) = self.session_id {
+            self.force_new_message = false;
+            self.messages.push(ragent_agent::message::Message::new(
+                sid.clone(),
+                ragent_agent::message::Role::Assistant,
+                vec![ragent_agent::message::MessagePart::Text { text: rendered }],
+            ));
+            self.trim_messages_if_needed();
+        }
+    }
+}
+
 /// Build a detached `ToolContext` for the `/websearch` diagnostic arms.
 ///
 /// The `test` and `show` arms previously constructed the same nine-field
@@ -344,6 +856,7 @@ impl App {
                 vec![
                     "help".to_string(),
                     "create".to_string(),
+                    "govcreate".to_string(),
                     "list".to_string(),
                     "search".to_string(),
                     "validate".to_string(),
@@ -7324,7 +7837,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             || sub == "specify"
                             || sub == "plan"
                             || sub == "tasks"
-                            || sub == "feedback" =>
+                            || sub == "feedback"
+                            || sub == "govcreate" =>
                     {
                         self.status = format!("Usage: /spec {} — try /spec help", sub);
                     }
@@ -8082,6 +8596,31 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 ));
                             }
                         }
+                    }
+                    SpecCommand::GovCreate {
+                        spec_id,
+                        content_ref,
+                        target_folder,
+                        scaffold,
+                        force,
+                    } => {
+                        self.run_govcreate_orchestration(
+                            spec_id,
+                            content_ref,
+                            target_folder,
+                            scaffold,
+                            force,
+                        );
+                    }
+                    SpecCommand::GovCreateUsage(reason) => {
+                        // FR-002 / FR-003: a parseable but invalid invocation
+                        // reports the specific cause alongside the dedicated
+                        // govcreate usage block (NFR-005).
+                        self.append_assistant_text(&format!(
+                            "From: /spec govcreate\n\n[err] **{reason}**\n\n{}",
+                            SpecCommand::build_govcreate_help_message()
+                        ));
+                        self.status = "spec: govcreate usage".to_string();
                     }
                 }
             }

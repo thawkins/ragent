@@ -4,6 +4,25 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (uncommitted, on top of v1.0.106)
+
+- **`/spec govcreate` — author a spec from an architecture document** —
+  `/spec govcreate <spec-id> <content-ref> <target-folder> [--language ..]
+  [--type ..] [--stack ..] [--github|--gitlab] [--force]` acquires an
+  architecture document from a local folder/file or public URL, extracts its
+  content, authors `SPEC.md`/`PLAN.md`/`TESTPLAN.md` with the configured LLM,
+  and writes the new spec. Progress streams into a single in-place message
+  (`[ .. ]/[ ok ]/[fail]` per stage), Escape cancels the run, and a non-empty
+  target folder is refused without `--force`. CLI parity: `ragent spec
+  govcreate`. See `docs/howtos/spec.md` §5.19.
+- **Markdown table rendering fix** — ragged pipe tables in model output
+  (missing trailing pipes, uneven cells, broken separator rows) are
+  normalised by a new `preprocess_markdown_tables` pass before rendering, so
+  tables display instead of raw text.
+- **Tool reference split** — the single `docs/howtos/tools.md` became 26
+  per-category pages in `docs/howtos/tools/` with argument tables and worked
+  examples per tool.
+
 ## Highlights (v1.0.106)
 
 - **`--url-cloak` research source defanging** — `/research create --url-cloak`

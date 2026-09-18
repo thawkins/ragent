@@ -18,7 +18,6 @@ use regex::Regex;
 static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::expect_used)]
     Regex::new(concat!(
-        r"(",
         // OpenAI / Stripe sk- keys (may contain underscores, hyphens)
         r"sk[-_][a-zA-Z0-9_\-]{20,}",
         r"|",
@@ -38,11 +37,14 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         r"AKIA[A-Z0-9]{16,}",
         r"|",
         // Generic token/apikey/secret/password assignments in URLs and configs.
-        // Case-insensitive, with an optional quote around the key and value and
-        // either `=` or `:` as the separator, so `API_KEY=…`, `"token": "…"` and
-        // `token: …` all match. The 16-char value floor keeps innocuous prose out.
-        r#"(?i:(?:api[_-]?key|token|secret|password)["']?\s*[:=]\s*["']?[a-zA-Z0-9_\-\.]{16,})"#,
-        r")",
+        // Capture group 1 holds the key + separator so the replacement keeps the
+        // key and only blanks the value (FUNC-007). Case-insensitive, with an
+        // optional quote around the key and value and either `=` or `:` as the
+        // separator, so `API_KEY=…`, `"token": "…"` and `token: …` all match.
+        // The value charset includes `/`, `+`, `=` so base64/base64url/JWT
+        // payloads redact fully instead of leaking the tail past the first
+        // excluded byte. The 16-char value floor keeps innocuous prose out.
+        r#"(?i:((?:api[_-]?key|token|secret|password)["']?\s*[:=]\s*["']?)[a-zA-Z0-9_\-\./+=]{16,})"#,
     ))
     .expect("valid regex pattern")
 });
@@ -221,8 +223,11 @@ fn redact_secrets_owned(msg: &str, registry_empty: bool) -> String {
         }
     }
 
-    // Layer 2: regex pattern matching for common secret formats.
+    // Layer 2: regex pattern matching for common secret formats. The generic
+    // token/apikey/secret/password arm captures the key + separator as group 1
+    // and re-inserts it (`${1}`) so JSON/config structure survives redaction;
+    // for every other arm group 1 is empty.
     SECRET_PATTERN
-        .replace_all(&result, "[REDACTED]")
+        .replace_all(&result, "${1}[REDACTED]")
         .into_owned()
 }

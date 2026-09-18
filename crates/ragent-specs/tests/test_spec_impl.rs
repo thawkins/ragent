@@ -436,3 +436,24 @@ fn test_build_single_task_prompt_independent_of_dependencies() {
     // the time it is dispatched.
     assert_eq!(p1, p2);
 }
+
+#[test]
+fn test_dependency_range_capped_at_max_expansion() {
+    // A malformed or hostile cell such as `T-001–T-99999999` must not expand:
+    // capping prevents OOM/hang and records endpoints only, so the dependency is
+    // still visible to `resolve_execution_order` as a warning.
+    let md = r"
+## Tasks
+
+| ID | Title | Requirement | Effort | Priority | Dependencies |
+|---|---|---|---|---|---|
+| T-001 | A | FR-001 | S | High | — |
+| T-002 | B | FR-002 | S | High | T-001–T-99999999 |
+";
+    let tasks = PlanParser::parse(md).unwrap();
+    assert_eq!(
+        tasks[1].dependencies,
+        vec!["T-001", "T-99999999"],
+        "out-of-cap range keeps endpoints verbatim"
+    );
+}

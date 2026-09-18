@@ -772,6 +772,9 @@ pub async fn run_tui(
             // Stream /new scaffold progress and surface the finished summary.
             app.poll_newproj_result();
 
+            // Stream /spec govcreate staged progress and surface the report.
+            app.poll_govcreate_result();
+
             // Check for completed off-thread codeindex graph builds / reindexes.
             app.poll_codeindex_bg_result();
 

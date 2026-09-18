@@ -17,7 +17,7 @@ This guide covers every part of that pipeline:
 - Configuration reference and worked examples
 
 > **Scope:** Permission rules, bash safety, autopilot, YOLO, and the
-> permission dialog. For the full tool catalog see `docs/howtos/tools.md`.
+> permission dialog. For the full tool catalog see `docs/howtos/tools/INDEX.md`.
 > For hiding/exposing tool families see `docs/howtos/tool-visibility.md`.
 > For custom agent definitions (which carry their own permission rules) see
 > `docs/howtos/custom-agents.md`. For lifecycle hooks that can also veto
@@ -1452,7 +1452,7 @@ override any `allow` rules.
 | Document                          | Topic                                          |
 |-----------------------------------|------------------------------------------------|
 | `docs/howtos/tutorial.md`         | TUI walkthrough, keybindings, getting started  |
-| `docs/howtos/tools.md`            | Complete tool catalog with schemas             |
+| `docs/howtos/tools/INDEX.md`      | Complete tool catalog with schemas (by category) |
 | `docs/howtos/tool-visibility.md`  | Hiding and exposing tool families              |
 | `docs/howtos/custom-agents.md`    | Custom agent definitions with permission rules |
 | `docs/howtos/hooks.md`            | PreToolUse/PostToolUse lifecycle hooks          |

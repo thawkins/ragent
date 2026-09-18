@@ -12,11 +12,12 @@ use ragent_llm::llm::{ChatRequest, LlmClient, StreamEvent};
 use ragent_llm::providers::mock_llm_client::{MockLlmClient, MockScenario};
 use ragent_types::event::EventBus;
 use ragent_types::message::{Message, Role};
+use ragent_types::strutil::floor_char_boundary;
 
 use crate::compaction::runner::{
     MAX_COMPACTION_PROMPT_CHARS, build_compaction_message, build_summary_request,
-    cap_head_transcript, compact, compaction_prompt_cap, floor_char_boundary,
-    resolve_compaction_model, select, summarize_via_client,
+    cap_head_transcript, compact, compaction_prompt_cap, resolve_compaction_model, select,
+    summarize_via_client,
 };
 
 fn user_msg(text: &str) -> Message {

@@ -107,6 +107,23 @@ current state of all subsystems.
 
 **Current Release Highlights (v1.0.44 → v1.0.106):**
 
+- **Uncommitted (on top of v1.0.106)** — `/spec govcreate <spec-id>
+  <content-ref> <target-folder>` (spec `govdoc`, FR-001..FR-020) authors a draft
+  spec from an architecture document (local folder/file or public URL),
+  orchestrating acquire → extract → author → write stages with live
+  `[ .. ]/[ ok ]/[fail]` TUI progress, Escape cancellation, an FR-011
+  non-empty-target guard (`--force` to override), and CLI parity via
+  `ragent spec govcreate`. The same worktree carries HEAD~3 review fixes:
+  SSE chunk coalescing flushes pending UTF-8 bytes via
+  `Utf8Error::error_len()` (no surrogate splitting; six regression tests),
+  secret redaction captures key+separator with a base64/base64url value
+  charset, spec dependency-range expansion is capped at 1000 IDs,
+  `delete_memories_by_filter` reports real row counts, masterfetch cache
+  deletes corrupt rows, and the TUI Markdown renderer normalises ragged pipe
+  tables (`preprocess_markdown_tables`). Documentation: `docs/howtos/tools.md`
+  is replaced by 26 per-category tool pages in `docs/howtos/tools/` with
+  argument tables and examples, each with a generated PDF.
+
 - **`--url-cloak` research source defanging (v1.0.106)** —
   `/research create` gained `--url-cloak`, which writes the report's web source
   URLs as defanged plain text instead of clickable links (scheme rewritten

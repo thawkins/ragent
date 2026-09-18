@@ -1,5 +1,83 @@
 # Changelog
 
+## [1.0.107] - 2026-09-18
+
+govcreate doc and help update.
+
+(Changes listed below were previously tracked as uncommitted work on top of v1.0.106.)
+
+### Added
+
+- **`/spec govcreate` — spec authoring from an architecture document** --
+  `/spec govcreate <spec-id> <content-ref> <target-folder>` (FR-001..FR-020)
+  orchestrates a staged pipeline: acquire the document (absolute local folder
+  or public URL; the local arm stages up to a 200 KB corpus budget in under
+  30 s for 50+ docs, NFR-004), extract architectural content, author
+  `SPEC.md`/`PLAN.md`/`TESTPLAN.md` via the configured LLM, and write the new
+  spec. FR-011 refuses to run into a non-empty target unless `--force` is
+  given, naming the blocking entries. Options: `--language`, `--type`,
+  `--stack`, `--github`/`--gitlab` (mutually exclusive hosting), `--force`.
+  Live `[ .. ]/[ ok ]/[fail]` progress streams into a single in-place TUI
+  message (NFR-005 ASCII render) ending with a terminal report; Escape cancels
+  the run via a per-run `CancellationToken`. `/spec govcreate help` prints the
+  usage block. Also available as the CLI subcommand `ragent spec govcreate`
+  (model resolution: `--model provider/model`, else the stored
+  `selected_model`; neither configured -> exit 2).
+
+### Fixed
+
+- **HEAD~3 review remediation (v1.0.104..1.0.106 follow-ups)**
+  * `ragent-llm/providers/http_client.rs` -- SSE chunk coalescing now flushes
+    `pending` UTF-8 bytes driven by `Utf8Error::error_len()` (only bad bytes
+    are skipped; incomplete multi-byte tails are held) instead of the
+    `pending.len() >= 4` heuristic that could split surrogate sequences;
+    `utf8_prefix_len` stays exported as the FUNC-033 contract. Six new
+    regression tests in `tests/test_http_client_stream_chunk.rs`.
+  * `ragent-types/sanitize.rs` -- secret redaction now captures
+    `key + separator` and replaces with `${1}[REDACTED]`; the value charset
+    is widened to base64/base64url (`+ / =`).
+  * `ragent-specs/plan_parser.rs` -- task dependency-range expansion
+    (`T-001..T-014`) is capped at 1000 IDs; endpoints are kept verbatim with a
+    `warn!` instead of memory exhaustion.
+  * `ragent-tools-core/copy_file.rs` -- canonicalize errors now propagate
+    instead of silently producing a wrong same-file answer.
+  * `ragent-storage` `delete_memories_by_filter` reports the real deleted row
+    count (FUNC-021).
+  * `ragent-tools-vcs/github/client.rs` -- `http://` base URLs are honoured,
+    not silently upgraded; `github_prs.rs` drops a pointless base64
+    round-trip; `percent.rs` builds percent-encoding via `fmt::Write` with a
+    1.5x capacity reservation.
+  * `masterfetch/cache.rs` -- corrupt rows are DELETEd on read instead of
+    poisoning every subsequent hit.
+  * `masterfetch/tools/crawl_tool.rs`, compaction runner, and
+    `ragent-tui/src/app/research.rs` -- smaller clean-ups (research help text
+    extracted to `show_research_help()`); compaction's boundary snapping now
+    imports `floor_char_boundary` from `strutil` instead of a local copy.
+
+### Changed
+
+- **Tool catalogue split into per-category how-tos** -- the 612-line
+  `docs/howtos/tools.md` is replaced by 26 category documents in
+  `docs/howtos/tools/` (plus `tools/INDEX.md`): every tool gets an argument
+  table (name, type, required, description, typical value) and at least one
+  worked example. A companion PDF is generated for each file
+  (`docs/howtos/tools/pdf/`). Cross-references in `docs/howtos/codeindex.md`,
+  `config.md`, `toolchain.md`, and `permissions.md` now point at
+  `tools/INDEX.md`. The `/docupdate` skill converts the new files alongside
+  the existing how-to and slash-command PDFs.
+- **Markdown table preprocessing in the TUI renderer** -- a new
+  `preprocess_markdown_tables` step in `md_worker.rs` normalises ragged pipe
+  tables (missing trailing pipes, uneven cell counts, separator rows) before
+  `pulldown-cmark` so multi-line tables render instead of falling back to raw
+  text; inline code inside cells is preserved.
+- **`ragent-agent` background locking hygiene** -- 8 lock sites in
+  `background/mod.rs` route through a single `lock_state()` helper that
+  recovers poisoned locks per the FUNC-043 policy.
+- **`ragent-specs`** gains a `cargo add`-time dependency required by
+  `govcreate`; the commands module grows ~520 lines of parser/scaffold support
+  shared between the TUI slash command and the `ragent spec` CLI (single
+  `SpecCommand::parse` entry point).
+
 ## Version: 1.0.106
 
 URL cloaking for `/research create`, plus a code-quality pass over the change set.

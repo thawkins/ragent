@@ -680,6 +680,20 @@ impl PlanParser {
                 continue;
             };
             if first <= last {
+                // Cap expansion to defend against malformed PLAN.md cells such as
+                // `T-001–T-99999999` allocating hundreds of millions of strings
+                // and hanging the caller. The endpoints are kept verbatim so the
+                // dependency is still recorded and `resolve_execution_order` can
+                // warn; the spanned IDs beyond the cap are dropped.
+                const MAX_RANGE_EXPANSION: u32 = 1_000;
+                if last - first >= MAX_RANGE_EXPANSION {
+                    tracing::warn!(
+                        "dependency range {part} spans more than {MAX_RANGE_EXPANSION} tasks; recording endpoints only"
+                    );
+                    deps.push(caps[1].to_string());
+                    deps.push(caps[2].to_string());
+                    continue;
+                }
                 let width = caps[1].len().saturating_sub(2).max(1);
                 deps.extend((first..=last).map(|n| format!("T-{n:0width$}")));
             } else {

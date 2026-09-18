@@ -285,10 +285,7 @@ impl Tool for GithubCreatePrTool {
             )
             .await
             .context("Failed to run git rev-parse")?;
-            String::from_utf8(out.0.into_bytes())
-                .context("Non-UTF8 branch name")?
-                .trim()
-                .to_string()
+            out.0.trim().to_string()
         };
 
         let base = input["base"].as_str().unwrap_or("main");

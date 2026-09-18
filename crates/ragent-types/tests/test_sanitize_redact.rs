@@ -73,3 +73,35 @@ fn longest_secret_is_replaced_first() {
 
     clear_secret_registry();
 }
+
+#[test]
+fn json_shaped_token_redacts_value_and_preserves_key() {
+    let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    clear_secret_registry();
+
+    let input = r#"{"token": "abcdefghijklmnop"}"#;
+    let redacted = redact_secrets(input);
+    assert_eq!(redacted, r#"{"token": "[REDACTED]"}"#);
+    assert!(!redacted.contains("abcdefghijklmnop"));
+
+    clear_secret_registry();
+}
+
+#[test]
+fn base64_secret_with_slash_plus_equals_redacts_fully() {
+    let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    clear_secret_registry();
+
+    let input = "token = abcdefghijklmnop+/xyz=";
+    let redacted = redact_secrets(input);
+    assert!(
+        !redacted.contains("abcdefghijklmnop"),
+        "prefix redacted, got: {redacted}"
+    );
+    assert!(
+        !redacted.contains("+/xyz="),
+        "tail also redacted, got: {redacted}"
+    );
+
+    clear_secret_registry();
+}

@@ -140,6 +140,11 @@ enum Commands {
         #[command(subcommand)]
         command: Box<cli::ResearchCommands>,
     },
+    /// Run spec commands from the CLI (the `/spec` slash-command parity surface)
+    Spec {
+        #[command(subcommand)]
+        command: cli::SpecCommands,
+    },
     /// Scaffold a new project in the current directory (the `/new` command)
     New {
         #[command(flatten)]
@@ -1253,6 +1258,31 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
         Some(Commands::New { scaffold, .. }) => {
             dispatch_new_command(scaffold)?;
         }
+        Some(Commands::Spec { command }) => match command {
+            cli::SpecCommands::GovCreate(args) => {
+                let model_str = cli
+                    .model
+                    .clone()
+                    .or_else(|| storage.get_setting("selected_model").ok().flatten());
+                let Some(model_ref) = model_str.as_deref().and_then(|s| s.split_once('/')).map(
+                    |(provider, model)| agent::ModelRef {
+                        provider_id: provider.to_string(),
+                        model_id: model.to_string(),
+                    },
+                ) else {
+                    eprintln!(
+                        "ragent spec govcreate: [err] no model configured \
+                         — pass --model provider/model or set one via /model in the TUI"
+                    );
+                    std::process::exit(2);
+                };
+                let cwd =
+                    std::env::current_dir().map_err(|e| anyhow::anyhow!("cannot read cwd: {e}"))?;
+                let tokens = args.to_token_string();
+                cli::handle_govcreate_command(&tokens, model_ref, provider_registry, storage, cwd)
+                    .await?;
+            }
+        },
     }
     Ok(())
 }

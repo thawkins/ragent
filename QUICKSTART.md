@@ -1281,6 +1281,22 @@ freshly gathered results. The original invocation is preserved on
 
 See [`docs/research.md`](docs/research.md) for the full workflow guide.
 
+### Spec from an Architecture Document (govcreate)
+
+Author a draft spec (plus `PLAN.md`/`TESTPLAN.md`) directly from an
+architecture document — a local folder/file or a public URL:
+
+```bash
+ragent spec govcreate payments-arch https://example.com/arch.html ./payments-svc
+ragent spec govcreate records-arch ./docs/sad.md ./records --language python --type library
+```
+
+The run acquires the document, extracts its structure, and authors the spec
+via the configured model (`--model provider/model`, else the stored
+`selected_model`). A non-empty target folder is refused unless `--force` is
+passed. In the TUI use `/spec govcreate ...` with live staged progress and
+Escape to cancel. See `docs/howtos/spec.md` §5.19.
+
 ---
 
 ## 14. TUI Interaction

@@ -400,6 +400,23 @@ impl ContentCache {
             .optional()?;
 
         if corrupt_metadata {
+            // Purge the poisoned row so subsequent lookups do not re-parse and
+            // re-warn on the same corrupt blob, and so the next successful fetch
+            // re-populates the entry cleanly. The connection lock is still held
+            // for the whole function, so this is atomic with the read above.
+            let _ = conn.execute(
+                "DELETE FROM fetch_cache
+                 WHERE url = ?1
+                   AND extraction_type = ?2
+                   AND css_selector = ?3
+                   AND pages = ?4",
+                params![
+                    key.url,
+                    key.extraction_type,
+                    key.css_selector_component(),
+                    key.pages_component(),
+                ],
+            );
             return Ok(None);
         }
         Ok(row)

@@ -37,7 +37,13 @@ pub const STREAM_CHUNK_IDLE_TIMEOUT_SECS: u64 = 120;
 /// the length of the longest valid prefix ending on a character boundary.
 /// A trailing incomplete multibyte sequence is not counted, so callers can
 /// hold those bytes back and prepend them to the next chunk (FUNC-033).
-fn utf8_prefix_len(buf: &[u8]) -> usize {
+///
+/// Note: `append_stream_chunk` no longer depends on this; it drives its flush
+/// from `Utf8Error::error_len` instead so an incomplete tail is never flushed
+/// lossily. Kept public because the FUNC-033 remediation contract is exported
+/// for downstream verification.
+#[must_use]
+pub fn utf8_prefix_len(buf: &[u8]) -> usize {
     match std::str::from_utf8(buf) {
         Ok(_) => buf.len(),
         Err(e) => e.valid_up_to(),
@@ -51,24 +57,48 @@ fn utf8_prefix_len(buf: &[u8]) -> usize {
 /// multibyte character split across a chunk boundary by substituting U+FFFD
 /// (FUNC-033). This keeps the incomplete tail in `pending` (a byte buffer) and
 /// only appends the valid prefix to `out`.
+///
+/// Invalid bytes are consumed as *ill-formed sequences* per the UTF-8 spec:
+/// `Utf8Error::error_len()` reports how many bytes after `valid_up_to` are a
+/// definitively bad sequence, which we flush lossily. `error_len() == None`
+/// means the tail is *incomplete* rather than invalid, so we keep it in
+/// `pending` and wait for more bytes — regardless of how long `pending` has
+/// grown. A pure length-based flush (e.g. `pending.len() >= 4`) can corrupt a
+/// valid character whose head was appended to a buffer that already contained
+/// garbage.
 pub fn append_stream_chunk(out: &mut String, pending: &mut Vec<u8>, chunk: &[u8]) {
     pending.extend_from_slice(chunk);
-    let valid = utf8_prefix_len(pending);
-    if valid > 0 {
-        // The valid prefix is guaranteed to be valid UTF-8, so this cannot
-        // fail; fall back to lossy decoding only if a caller violated that.
-        match std::str::from_utf8(&pending[..valid]) {
-            Ok(s) => out.push_str(s),
-            Err(_) => out.push_str(&String::from_utf8_lossy(&pending[..valid])),
+    loop {
+        match std::str::from_utf8(pending.as_slice()) {
+            Ok(s) => {
+                out.push_str(s);
+                pending.clear();
+                return;
+            }
+            Err(e) => {
+                let valid = e.valid_up_to();
+                // Push the valid prefix.
+                if valid > 0 {
+                    // The prefix is guaranteed valid UTF-8, so `expect`-free:
+                    // `from_utf8` just returned the split point for it.
+                    out.push_str(&String::from_utf8_lossy(&pending[..valid]));
+                }
+                match e.error_len() {
+                    // Ill-formed sequence of `bad` bytes following the valid
+                    // prefix: emit one U+FFFD and skip the bad bytes, then
+                    // re-check the remainder (it may contain another error).
+                    Some(bad) => {
+                        out.push('\u{FFFD}');
+                        pending.drain(..valid + bad);
+                    }
+                    // Incomplete tail: hold in `pending` for the next chunk.
+                    None => {
+                        pending.drain(..valid);
+                        return;
+                    }
+                }
+            }
         }
-        pending.drain(..valid);
-    }
-    // A complete-but-over-long pending buffer can only mean the upstream sent
-    // an invalid sequence longer than a character; flush it lossily so we do
-    // not stall forever. 4 bytes is the maximum UTF-8 sequence length.
-    if pending.len() >= 4 {
-        out.push_str(&String::from_utf8_lossy(pending));
-        pending.clear();
     }
 }
 

@@ -1239,6 +1239,377 @@ fn new_usage_message() -> String {
     )
 }
 
+// ---------------------------------------------------------------------------
+// `ragent spec govcreate` CLI parity (spec `govdoc` T-015, FR-020)
+// ---------------------------------------------------------------------------
+
+/// Typed clap argument set for `ragent spec govcreate …`.
+///
+/// [`GovCreateArgs::to_token_string`] rebuilds the exact token list the TUI
+/// `/spec govcreate` slash command would receive, so both surfaces share the
+/// single [`ragent_specs::SpecCommand::parse`] parser and cannot drift
+/// (FR-020, same pattern as [`ScaffoldArgs::to_tokens`]).
+#[derive(clap::Args, Debug)]
+pub struct GovCreateArgs {
+    /// Spec identifier (validated with the existing spec-ID rules)
+    #[arg(value_name = "SPECID")]
+    pub spec_id: Option<String>,
+    /// Architecture source: an http(s) URL or a local file/folder path
+    #[arg(value_name = "CONTENT_REF")]
+    pub content_ref: Option<String>,
+    /// Directory in which the project is scaffolded (created if missing)
+    #[arg(value_name = "TARGET_FOLDER")]
+    pub target_folder: Option<String>,
+    /// Computer language to scaffold (required; e.g. rust, python, go, ts)
+    #[arg(long, value_name = "LANG")]
+    pub language: Option<String>,
+    /// Type of application to scaffold (required; e.g. library, cmdline, tui, gui)
+    #[arg(long = "type", value_name = "TYPE")]
+    pub app_type: Option<String>,
+    /// Optional framework stack to layer on the base layout (e.g. axum)
+    #[arg(long, value_name = "STACK")]
+    pub stack: Option<String>,
+    /// Create a GitHub repository and push the initial commit
+    #[arg(long, conflicts_with = "gitlab")]
+    pub github: bool,
+    /// Create a GitLab repository and push the initial commit
+    #[arg(long)]
+    pub gitlab: bool,
+    /// Overwrite an existing spec at <target-folder>/specs/<specid>/
+    #[arg(long)]
+    pub force: bool,
+}
+
+impl GovCreateArgs {
+    /// Rebuild the token list `/spec govcreate` would see after the verb.
+    ///
+    /// The shared TUI tokenizer treats an unquoted token as one
+    /// whitespace-free token; clap positionals arrive pre-split, so each
+    /// value is emitted verbatim.
+    pub fn to_token_string(&self) -> String {
+        let mut tokens: Vec<String> = Vec::new();
+        if let Some(spec_id) = &self.spec_id {
+            tokens.push(spec_id.clone());
+        }
+        if let Some(content_ref) = &self.content_ref {
+            tokens.push(content_ref.clone());
+        }
+        if let Some(target_folder) = &self.target_folder {
+            tokens.push(target_folder.clone());
+        }
+        if let Some(lang) = &self.language {
+            tokens.push("--language".to_owned());
+            tokens.push(lang.clone());
+        }
+        if let Some(app_type) = &self.app_type {
+            tokens.push("--type".to_owned());
+            tokens.push(app_type.clone());
+        }
+        if let Some(stack) = &self.stack {
+            tokens.push("--stack".to_owned());
+            tokens.push(stack.clone());
+        }
+        if self.github {
+            tokens.push("--github".to_owned());
+        }
+        if self.gitlab {
+            tokens.push("--gitlab".to_owned());
+        }
+        if self.force {
+            tokens.push("--force".to_owned());
+        }
+        tokens.join(" ")
+    }
+}
+
+/// Sub-commands for the `spec` namespace (FR-020 CLI parity).
+#[derive(clap::Subcommand, Debug)]
+pub enum SpecCommands {
+    /// Create a project from a system architecture document (URL or local
+    /// file/folder): acquire the content, extract the architecture structure,
+    /// author the spec, and scaffold the project
+    #[command(name = "govcreate")]
+    GovCreate(#[command(flatten)] GovCreateArgs),
+}
+
+/// Production [`GovCreateStages`] wiring for the CLI parity surface.
+///
+/// Identical stage behaviour to the TUI dispatch (`TuiGovCreateStages` in the
+/// TUI crate): acquisition delegates to the shared `archdoc` helpers, the
+/// extraction and authoring stages drive the configured model through
+/// [`ragent_agent::send_one_shot`], and the spec write delegates to
+/// [`ragent_specs::SpecCommand::write_govcreate_spec`]. Auth resolution comes
+/// from `send_one_shot` (environment variables fall back to stored
+/// credentials), unlike the TUI's db-only reader.
+struct CliGovCreateStages {
+    registry: std::sync::Arc<ragent_agent::provider::ProviderRegistry>,
+    storage: std::sync::Arc<ragent_agent::storage::Storage>,
+    model_ref: ragent_agent::agent::ModelRef,
+}
+
+impl CliGovCreateStages {
+    /// One-shot completion against the resolved provider/model.
+    async fn complete(&self, system: &str, user: &str) -> Result<String> {
+        ragent_agent::send_one_shot(
+            std::sync::Arc::clone(&self.registry),
+            Some(std::sync::Arc::clone(&self.storage)),
+            self.model_ref.clone(),
+            Some(system.to_owned()),
+            user.to_owned(),
+            None,
+        )
+        .await
+    }
+}
+
+impl ragent_tools_extended::archdoc::GovCreateStages for CliGovCreateStages {
+    async fn acquire(
+        &self,
+        reference: &ragent_tools_extended::archdoc::ContentRef,
+    ) -> Result<
+        ragent_tools_extended::archdoc::GatheredCorpus,
+        ragent_tools_extended::archdoc::GovCreateRunError,
+    > {
+        use ragent_tools_extended::archdoc::{
+            AcquisitionBudget, ContentRef, GovCreateRunError, LocalAcquisitionBudget,
+            acquire_local, acquire_url,
+        };
+        match reference {
+            ContentRef::Url(url) => acquire_url(url, &AcquisitionBudget::default())
+                .await
+                .map_err(|e| GovCreateRunError::Acquire(e.to_string())),
+            ContentRef::Local(path) => {
+                // The walk + per-file extraction is blocking I/O; offload so
+                // the CLI runtime's worker is not stalled.
+                let path = path.clone();
+                let budget = LocalAcquisitionBudget::default();
+                tokio::task::spawn_blocking(move || acquire_local(&path, &budget))
+                    .await
+                    .map_err(|e| GovCreateRunError::Acquire(e.to_string()))
+            }
+        }
+    }
+
+    async fn extract(
+        &self,
+        corpus: &ragent_tools_extended::archdoc::GatheredCorpus,
+    ) -> Result<
+        ragent_tools_extended::archdoc::ArchitectureStructure,
+        ragent_tools_extended::archdoc::GovCreateRunError,
+    > {
+        use ragent_tools_extended::archdoc::{
+            GovCreateRunError, build_arch_extraction_prompt, fallback_structure,
+            parse_architecture_response,
+        };
+        let prompt = build_arch_extraction_prompt(corpus);
+        let response = self
+            .complete(
+                "You are a software architect reading architecture documentation.",
+                &prompt,
+            )
+            .await
+            .map_err(|e| GovCreateRunError::Extract(e.to_string()))?;
+        // FR-007 fallback: an unparseable model output degrades to the
+        // deterministic mechanical structure - extraction never aborts a
+        // non-empty corpus.
+        Ok(parse_architecture_response(&response).unwrap_or_else(|| fallback_structure(corpus)))
+    }
+
+    async fn author(
+        &self,
+        structure: &ragent_tools_extended::archdoc::ArchitectureStructure,
+        run: &ragent_tools_extended::archdoc::GovCreateRun,
+    ) -> Result<
+        ragent_tools_extended::archdoc::AuthoredSpec,
+        ragent_tools_extended::archdoc::GovCreateRunError,
+    > {
+        use ragent_tools_extended::archdoc::{AuthoredSpec, GovCreateRunError};
+
+        let prompt = ragent_specs::SpecCommand::build_govcreate_prompt(
+            &run.spec_id,
+            structure,
+            &run.content_ref,
+            run.target_folder.to_string_lossy().as_ref(),
+            &run.scaffold,
+        );
+        let body = self
+            .complete("You are an expert specification writer.", &prompt)
+            .await
+            .map_err(|e| GovCreateRunError::Author(e.to_string()))?;
+        let (spec_md, plan_md, testplan_md) = split_authored_sections(&body);
+        Ok(AuthoredSpec {
+            spec_md,
+            plan_md,
+            testplan_md,
+        })
+    }
+
+    async fn write_spec(
+        &self,
+        run: &ragent_tools_extended::archdoc::GovCreateRun,
+        authored: &ragent_tools_extended::archdoc::AuthoredSpec,
+    ) -> Result<(), ragent_tools_extended::archdoc::GovCreateRunError> {
+        ragent_specs::SpecCommand::write_govcreate_spec(
+            &run.target_folder,
+            &run.spec_id,
+            &authored.spec_md,
+            &authored.plan_md,
+            &authored.testplan_md,
+            run.force,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| ragent_tools_extended::archdoc::GovCreateRunError::Write(e.to_string()))
+    }
+}
+
+/// Split a single LLM body into the three spec sections (SPEC.md / PLAN.md /
+/// TESTPLAN.md) the authoring prompt demands.
+///
+/// Mirrors the TUI's `split_authored_sections` (kept in sync by hand): a
+/// well-formed numbered response maps to the three files exactly; a response
+/// without markers is treated as SPEC.md with minimal placeholder bodies for
+/// the other two so the write stage always has three files.
+fn split_authored_sections(body: &str) -> (String, String, String) {
+    let markers: [(&str, usize); 3] = [("SPEC.md", 1), ("PLAN.md", 2), ("TESTPLAN.md", 3)];
+    let mut cuts: Vec<(usize, usize)> = Vec::new(); // (byte_idx, which)
+    let lowered = body.to_lowercase();
+    for (name, which) in markers {
+        if let Some(idx) = lowered.find(&name.to_lowercase()) {
+            cuts.push((idx, which));
+        }
+    }
+    cuts.sort_by_key(|(idx, _)| *idx);
+    cuts.dedup_by_key(|(_, which)| *which);
+
+    let plan_placeholder = "## Tasks\n\n(to be filled by /spec plan)\n".to_owned();
+    let testplan_placeholder = "## Test Cases\n\n(to be filled by manual review)\n".to_owned();
+    match cuts.as_slice() {
+        [] => (body.to_owned(), plan_placeholder, testplan_placeholder),
+        [(idx, which)] => {
+            let (a, b) = body.split_at(*idx);
+            match which {
+                1 => (b.to_owned(), plan_placeholder, testplan_placeholder),
+                2 => (a.to_owned(), b.to_owned(), testplan_placeholder),
+                _ => (a.to_owned(), plan_placeholder, b.to_owned()),
+            }
+        }
+        [first, ..] => {
+            // Two or more markers: assign each cut's tail to its file, with
+            // the text before the first marker and any tail after the last
+            // marker folded into the surrounding sections. The three markers
+            // appear in prompt order in a compliant response; a partial or
+            // reordered response still yields three non-empty bodies.
+            let (prefix, _) = body.split_at(first.0);
+            let mut spec_md = prefix.to_owned();
+            let mut plan_md = plan_placeholder;
+            let mut testplan_md = testplan_placeholder;
+            let mut windows: Vec<((usize, usize), (usize, usize))> =
+                cuts.windows(2).map(|w| (w[0], w[1])).collect();
+            let last = cuts[cuts.len() - 1];
+            windows.push((last, (body.len(), 0)));
+            for ((start, which_a), (end, _)) in windows {
+                let section = &body[start..end];
+                match which_a {
+                    1 => spec_md = section.to_owned(),
+                    2 => plan_md = section.to_owned(),
+                    _ => testplan_md = section.to_owned(),
+                }
+            }
+            (spec_md, plan_md, testplan_md)
+        }
+    }
+}
+
+/// Execute one tokenised `spec govcreate` invocation (FR-020).
+///
+/// `tokens` is the exact argument tail the TUI slash command receives after
+/// the verb (produced from typed CLI flags by [`GovCreateArgs::to_token_string`]);
+/// parsing is delegated to [`ragent_specs::SpecCommand::parse`] so the slash
+/// and CLI surfaces share one parser and one usage text. Progress renders to
+/// stdout as the runner's FR-015 events stream in; the terminal report is the
+/// same NFR-005 block the TUI renders. Exit codes: 0 success, 1
+/// guard/acquisition/stage failure (FR-013/FR-014), 2 usage error (FR-003).
+///
+/// # Errors
+///
+/// Returns an error only for infrastructure failures outside the runner's
+/// contained-failure contract (e.g. reading the current directory).
+pub async fn handle_govcreate_command(
+    tokens: &str,
+    model_ref: ragent_agent::agent::ModelRef,
+    provider_registry: std::sync::Arc<ragent_agent::provider::ProviderRegistry>,
+    storage: std::sync::Arc<ragent_agent::storage::Storage>,
+    invoking_root: std::path::PathBuf,
+) -> Result<()> {
+    use ragent_specs::SpecCommand;
+    use ragent_tools_extended::archdoc::{
+        CancellationToken, GovCreateRun, run_govcreate_with_progress,
+    };
+
+    match SpecCommand::parse(&format!("govcreate {tokens}")) {
+        SpecCommand::GovCreate {
+            spec_id,
+            content_ref,
+            target_folder,
+            scaffold,
+            force,
+        } => {
+            let run = GovCreateRun {
+                spec_id,
+                content_ref,
+                target_folder: std::path::PathBuf::from(&target_folder),
+                scaffold,
+                force,
+                invoking_root,
+            };
+            let stages = CliGovCreateStages {
+                registry: provider_registry,
+                storage,
+                model_ref,
+            };
+            let cancel = CancellationToken::none();
+            let mut sink = |event: ragent_tools_extended::archdoc::GovCreateProgress| {
+                println!("{}", event.render());
+            };
+            let report = run_govcreate_with_progress(&run, &stages, &cancel, &mut sink).await;
+            println!("From: /spec govcreate\n\n{}", report.render());
+            if !report.succeeded() {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        SpecCommand::GovCreateUsage(reason) => {
+            eprintln!("ragent spec govcreate: [err] {reason}");
+            eprintln!();
+            eprint!(
+                "{}",
+                govcreate_usage_message().replace("/spec govcreate", "ragent spec govcreate")
+            );
+            std::process::exit(2);
+        }
+        _ => {
+            // `SpecCommand::Unknown("govcreate")`: missing positionals (FR-003).
+            eprint!(
+                "{}",
+                govcreate_usage_message().replace("/spec govcreate", "ragent spec govcreate")
+            );
+            std::process::exit(2);
+        }
+    }
+}
+
+/// The shared govcreate usage block, minus the TUI `From:` header line so the
+/// CLI surface prints plain usage text (NFR-005 keeps the body identical).
+fn govcreate_usage_message() -> String {
+    let body = ragent_specs::SpecCommand::build_govcreate_help_message()
+        .lines()
+        .skip(2)
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{body}\n")
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -1250,6 +1621,174 @@ mod tests {
     struct TestCli {
         #[command(subcommand)]
         command: ResearchCommands,
+    }
+
+    /// Wrapper so `SpecCommands` can be parsed as a standalone CLI in tests.
+    #[derive(Parser, Debug)]
+    struct SpecCli {
+        #[command(subcommand)]
+        command: super::SpecCommands,
+    }
+
+    #[test]
+    fn govcreate_to_token_string_rebuilds_positionals_and_flags() {
+        let cli = SpecCli::parse_from([
+            "spec",
+            "govcreate",
+            "my-spec",
+            "docs/arch.md",
+            "./target-dir",
+            "--language",
+            "rust",
+            "--type",
+            "cmdline",
+            "--stack",
+            "axum",
+            "--github",
+            "--force",
+        ]);
+        let super::SpecCommands::GovCreate(args) = cli.command;
+        assert_eq!(
+            args.to_token_string(),
+            "my-spec docs/arch.md ./target-dir --language rust --type cmdline \
+             --stack axum --github --force"
+        );
+    }
+
+    #[test]
+    fn govcreate_to_token_string_omits_unset_optional_flags() {
+        let cli = SpecCli::parse_from([
+            "spec",
+            "govcreate",
+            "my-spec",
+            "https://example.gov/docs",
+            "/tmp/out",
+            "--language",
+            "python",
+            "--type",
+            "library",
+        ]);
+        let super::SpecCommands::GovCreate(args) = cli.command;
+        assert_eq!(
+            args.to_token_string(),
+            "my-spec https://example.gov/docs /tmp/out --language python --type library"
+        );
+    }
+
+    #[test]
+    fn govcreate_github_gitlab_conflict_is_rejected_by_clap() {
+        let err = SpecCli::try_parse_from([
+            "spec",
+            "govcreate",
+            "my-spec",
+            "docs/arch.md",
+            "./out",
+            "--language",
+            "rust",
+            "--type",
+            "cmdline",
+            "--github",
+            "--gitlab",
+        ])
+        .expect_err("conflicting hosting flags must be rejected");
+        assert!(
+            err.to_string().contains("gitlab"),
+            "error should name the conflicting flag: {err}"
+        );
+    }
+
+    #[test]
+    fn govcreate_token_round_trip_through_shared_parser() {
+        // FR-020: the rebuilt tokens must parse through the single shared
+        // `SpecCommand::parse` into the same GovCreate variant fields.
+        use ragent_specs::SpecCommand;
+        let cli = SpecCli::parse_from([
+            "spec",
+            "govcreate",
+            "payments-arch",
+            "https://docs.example.gov/payments",
+            "./payments-svc",
+            "--language",
+            "rust",
+            "--type",
+            "cmdline",
+            "--force",
+        ]);
+        let super::SpecCommands::GovCreate(args) = cli.command;
+        let parsed = SpecCommand::parse(&format!("govcreate {}", args.to_token_string()));
+        let SpecCommand::GovCreate {
+            spec_id,
+            content_ref,
+            target_folder,
+            scaffold,
+            force,
+        } = parsed
+        else {
+            panic!("expected GovCreate, got {parsed:?}");
+        };
+        assert_eq!(spec_id, "payments-arch");
+        assert_eq!(content_ref, "https://docs.example.gov/payments");
+        assert_eq!(target_folder, "./payments-svc");
+        assert!(force);
+        assert_eq!(
+            scaffold.language().as_str(),
+            "rust",
+            "shared parser must accept the rebuilt language flag"
+        );
+    }
+
+    #[test]
+    fn govcreate_invalid_spec_id_surfaces_usage_variant_via_shared_parser() {
+        use ragent_specs::SpecCommand;
+        let cli = SpecCli::parse_from([
+            "spec",
+            "govcreate",
+            "bad$id",
+            "docs/arch.md",
+            "./out",
+            "--language",
+            "rust",
+            "--type",
+            "cmdline",
+        ]);
+        let super::SpecCommands::GovCreate(args) = cli.command;
+        let parsed = SpecCommand::parse(&format!("govcreate {}", args.to_token_string()));
+        assert!(
+            matches!(parsed, SpecCommand::GovCreateUsage(_)),
+            "invalid spec id must produce the usage variant: {parsed:?}"
+        );
+    }
+
+    #[test]
+    fn govcreate_usage_message_drops_tui_header_and_rewrites_surface_name() {
+        let body = super::govcreate_usage_message();
+        assert!(
+            !body.contains("From: /spec govcreate"),
+            "CLI usage must not carry the TUI From header: {body}"
+        );
+        assert!(body.contains("Usage:"), "usage block kept: {body}");
+        let rewritten = body.replace("/spec govcreate", "ragent spec govcreate");
+        assert!(
+            rewritten.contains("ragent spec govcreate <specid>"),
+            "surface name rewritten: {rewritten}"
+        );
+    }
+
+    #[test]
+    fn split_authored_sections_no_markers_treats_body_as_spec() {
+        let (spec, plan, testplan) = super::split_authored_sections("# The spec body\n");
+        assert_eq!(spec, "# The spec body\n");
+        assert!(plan.contains("to be filled"));
+        assert!(testplan.contains("to be filled"));
+    }
+
+    #[test]
+    fn split_authored_sections_three_markers_assign_files() {
+        let body = "1. `out/specs/x/SPEC.md`\nspec body\n2. `out/specs/x/PLAN.md`\nplan body\n3. `out/specs/x/TESTPLAN.md`\ntest body\n";
+        let (spec, plan, testplan) = super::split_authored_sections(body);
+        assert!(spec.contains("spec body"), "spec section: {spec}");
+        assert!(plan.contains("plan body"), "plan section: {plan}");
+        assert!(testplan.contains("test body"), "testplan: {testplan}");
     }
 
     #[test]

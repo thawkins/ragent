@@ -14,13 +14,19 @@
 /// contain non-ASCII text or reserved characters such as `&`, `=`, `#`, or `/`.
 #[must_use]
 pub fn encode_component(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
+    use std::fmt::Write as _;
+    // Worst case is 3 bytes out per byte in (`%XX`); 1.5x avoids most reallocations
+    // without over-reserving for typical ASCII-dominated inputs.
+    let mut out = String::with_capacity(input.len() + input.len() / 2);
     for byte in input.bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 out.push(byte as char);
             }
-            _ => out.push_str(&format!("%{byte:02X}")),
+            // write! into a String is infallible.
+            _ => {
+                let _ = write!(out, "%{byte:02X}");
+            }
         }
     }
     out

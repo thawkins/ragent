@@ -34,6 +34,7 @@ use super::super::crawl::{
 };
 use super::super::links::classify_links;
 use super::super::metadata::extract_metadata;
+use super::super::robots::{DEFAULT_USER_AGENT, RobotsChecker};
 use super::super::security::validate_url;
 
 use crate::{Tool, ToolContext, ToolOutput};
@@ -222,14 +223,25 @@ impl Tool for MfCrawlTool {
 /// 1. Fetches the URL via `reqwest` using the shared HTTP client.
 /// 2. Runs [`classify_and_extract`] on the HTML to get content + page type.
 /// 3. Extracts outgoing links for BFS discovery.
-struct HttpCrawlFetcher {
+///
+/// When `respect_robots` is set, [`RobotsChecker::is_allowed`] is consulted
+/// before each fetch (cached per domain by the checker) and a disallowed URL is
+/// skipped.
+pub struct HttpCrawlFetcher {
     /// Whether to check robots.txt before fetching.
     respect_robots: bool,
+    /// Per-domain `robots.txt` checker (only consulted when `respect_robots`).
+    robots: RobotsChecker,
 }
 
 impl HttpCrawlFetcher {
-    const fn new(respect_robots: bool) -> Self {
-        Self { respect_robots }
+    /// Create a fetcher, optionally honouring `robots.txt` (NFR-003).
+    #[must_use]
+    pub fn new(respect_robots: bool) -> Self {
+        Self {
+            respect_robots,
+            robots: RobotsChecker::new(),
+        }
     }
 }
 
@@ -243,12 +255,19 @@ impl CrawlFetcher for HttpCrawlFetcher {
             return None;
         }
 
-        // Robots.txt check (if enabled).
+        // Robots.txt check (if enabled). The checker caches rules per domain,
+        // so this costs one fetch per domain per crawl.
         if self.respect_robots {
-            // TODO: integrate robots checker when network is available.
-            // For now, we skip the robots check in the integrated runtime
-            // and rely on the caller to set respect_robots=false.
-            tracing::trace!(url = url, "crawl: robots.txt check skipped (not yet wired)");
+            match self.robots.is_allowed(url, DEFAULT_USER_AGENT).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    tracing::debug!(url = url, "crawl: skipping URL disallowed by robots.txt");
+                    return None;
+                }
+                Err(e) => {
+                    tracing::warn!(url = url, error = %e, "crawl: robots.txt check failed; allowing by default");
+                }
+            }
         }
 
         // Get the shared HTTP client.

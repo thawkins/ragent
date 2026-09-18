@@ -70,15 +70,30 @@ impl Tool for CopyFileTool {
         // FUNC-061: refuse a self-copy — copying a file onto itself would
         // truncate it (the destination is opened for write while the source is
         // read). Compare canonical forms so path aliases are caught too.
-        if let (Ok(canon_src), Ok(canon_dst)) = (
-            tokio::fs::canonicalize(&src).await,
-            tokio::fs::canonicalize(&dst).await,
-        ) && canon_src == canon_dst
-        {
-            anyhow::bail!(
-                "Source and destination are the same file: {}",
-                src.display()
-            );
+        // Canonicalise the source eagerly: a failure here means the source
+        // cannot be read, which `fs::copy` would report anyway. A failure on
+        // the *destination* only means "no existing file at this path" when it
+        // is NotFound; anything else (permissions, IO error) should not silently
+        // defeat the self-copy check.
+        let canon_src = tokio::fs::canonicalize(&src)
+            .await
+            .with_context(|| format!("Failed to canonicalize source: {}", src.display()))?;
+        match tokio::fs::canonicalize(&dst).await {
+            Ok(canon_dst) if canon_dst == canon_src => {
+                anyhow::bail!(
+                    "Source and destination are the same file: {}",
+                    src.display()
+                );
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // New file — no existing destination to collide with.
+            }
+            Err(e) => {
+                return Err(e).with_context(|| {
+                    format!("Failed to canonicalize destination: {}", dst.display())
+                });
+            }
         }
 
         if let Some(parent) = dst.parent() {

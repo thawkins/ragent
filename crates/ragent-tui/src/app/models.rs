@@ -2,8 +2,6 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use pulldown_cmark::{Options, Parser, html};
-
 use ragent_agent::team::TeamManager;
 use ragent_agent::{
     agent::{AgentInfo, ModelRef},
@@ -216,19 +214,10 @@ impl App {
         if let Some(cached) = self.md_render_cache.get(&hash) {
             return cached.clone();
         }
-        let mut opts = Options::empty();
-        opts.insert(Options::ENABLE_TABLES);
-        opts.insert(Options::ENABLE_STRIKETHROUGH);
-        opts.insert(Options::ENABLE_TASKLISTS);
-
-        let parser = Parser::new_ext(text, opts);
-        let mut html_buf = String::new();
-        html::push_html(&mut html_buf, parser);
-
         // html2text may panic on malformed HTML (word-wrapper subtraction
         // overflow); run it on a dedicated thread so any panic unwinds only
         // that thread, never the UI thread (which installs the panic hook).
-        let rendered = self.md_worker.render(&html_buf);
+        let rendered = self.md_worker.render(text);
         let rendered = match rendered {
             Ok(text) => sanitize_for_display(&text),
             Err(_) => {

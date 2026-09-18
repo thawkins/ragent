@@ -9,6 +9,7 @@
 // toolchains until the dependency is fixed upstream.
 #![recursion_limit = "256"]
 
+pub mod archdoc;
 pub mod browser;
 pub mod channels;
 pub mod codeindex_communities;

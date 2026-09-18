@@ -40,6 +40,7 @@ use ragent_config::compaction::{CompactionConfig, CompactionModelRef};
 use ragent_types::event::{Event, EventBus};
 use ragent_types::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
 use ragent_types::message::{Message, MessagePart, Role};
+use ragent_types::strutil::floor_char_boundary;
 
 use crate::compaction::{
     build_prompt, estimate_text_tokens, publish_compaction_started, serialize_message,
@@ -746,22 +747,6 @@ fn cap_head_transcript(head_transcript: &str, context_window: usize) -> String {
     let boundary = truncated.find("\n\n").unwrap_or(0);
     let truncated = &truncated[boundary..];
     format!("{marker}{truncated}")
-}
-
-/// Byte index of the UTF-8 character boundary at or before `index`.
-///
-/// Equivalent to nightly's `str::floor_char_boundary`; implemented locally
-/// because that API is not yet stable. `index` must be `<= s.len()`.
-#[must_use]
-fn floor_char_boundary(s: &str, index: usize) -> usize {
-    if index >= s.len() {
-        return s.len();
-    }
-    let mut i = index;
-    while !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
 }
 
 #[cfg(test)]

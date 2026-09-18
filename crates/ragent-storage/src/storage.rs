@@ -2888,7 +2888,7 @@ impl Storage {
             .query_map(param_refs.as_slice(), |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
-        let count = ids.len();
+        let mut deleted = 0usize;
         for id in &ids {
             // Propagate failures and count only rows actually deleted, so the
             // caller never reports a deletion that did not happen (FUNC-021).
@@ -2896,10 +2896,10 @@ impl Storage {
                 "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?1)",
                 params![id],
             )?;
-            conn.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
+            deleted += conn.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
         }
 
-        Ok(count)
+        Ok(deleted)
     }
 
     /// Updates the confidence score of a memory.

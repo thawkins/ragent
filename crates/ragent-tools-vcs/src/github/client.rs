@@ -138,7 +138,10 @@ impl GitHubClient {
     /// route through this helper so `with_base_url` (and mock servers) apply
     /// consistently. An absolute `https://` path is used verbatim.
     fn resolve_url(&self, path: &str) -> String {
-        if path.starts_with("https://") {
+        // Accept either absolute-http(s) URL so mock/test servers and
+        // http-only GitHub Enterprise installs are honored as-is instead
+        // of being concatenated to the default base URL.
+        if path.starts_with("https://") || path.starts_with("http://") {
             path.to_string()
         } else {
             format!("{}{path}", self.base_url)
@@ -242,7 +245,7 @@ impl GitHubClient {
     /// GET request returning raw bytes (follows redirects). Used for
     /// endpoints that serve binary blobs such as the Actions logs zip.
     pub async fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
-        let url = if path.starts_with("https://") {
+        let url = if path.starts_with("https://") || path.starts_with("http://") {
             path.to_string()
         } else {
             format!("https://api.github.com{path}")

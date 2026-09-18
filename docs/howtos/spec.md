@@ -517,7 +517,73 @@ that should inform future plan iterations.
 /spec feedback auth-v2 Token refresh fails silently when the server clock drifts by more than 5 seconds
 ```
 
-### 5.19 `/spec delete <spec-id> [--yes]`
+### 5.19 `/spec govcreate <specid> <content-ref> <target-folder> [--language <lang>] [--type <type>] [--stack <name>] [--github | --gitlab] [--force]`
+
+Create a project from an architecture document in one step: the command
+acquires the referenced documentation, extracts the architecture structure,
+authors a draft `SPEC.md` + `PLAN.md` + `TESTPLAN.md` into
+`<target-folder>/specs/<specid>/`, and scaffolds the project with the `/new`
+engine.
+
+Arguments are positional and strictly ordered — all three positionals first,
+then the flags:
+
+- `<specid>` — the new spec identifier. Alphanumeric with hyphens or
+  underscores only and must not start with `--`; a path-traversal name is
+  rejected before any filesystem access.
+- `<content-ref>` — location of the documentation: a web URL to crawl, or a
+  local file/folder path.
+- `<target-folder>` — the project folder to create or reuse. The spec is
+  written to `<target-folder>/specs/<specid>/`.
+
+Flags after the positionals: `--language` (default `rust`), `--type` (default
+`cmdline`; one of `library`, `cmdline`, `tui`, `gui`), `--stack <name>` (a
+framework stack for the language), `--github` / `--gitlab` (mutually exclusive
+remote hosting), and govcreate-specific `--force` (overwrite an existing
+`<target-folder>/specs/<specid>/`; refused otherwise).
+
+Behaviour, in order:
+
+1. **Classify and acquire the content reference.** A URL runs a bounded,
+   same-domain crawl that honours `robots.txt`, refuses private/loopback
+   targets (SSRF protection) and non-HTTP(S) schemes, and never follows
+   symlinks. A local file must be a supported document format (Markdown/text,
+   PDF, DOCX, ODT, XLSX, ODS, PPTX, ODP, CSV, HTML, EPUB); a local folder is
+   walked recursively for supported files. Acquisition is bounded by page,
+   depth, character, and deadline caps and reports the first cap reached in
+   the run notes.
+2. **Extract the architecture structure** — components, interfaces, data
+   stores, external dependencies, and relationships — from the gathered text,
+   falling back to a deterministic per-source structure when the model output
+   is not usable.
+3. **Author the spec** with status `draft` frontmatter recording the source
+   reference, `generated_by: govcreate`, and the scaffold options, then
+   **scaffold the project** via the `/new` engine in the target folder.
+
+Progress streams live in the message window and log panel while the run is in
+flight — a single assistant message is refreshed in place with one
+`[ .. ]/[ ok ]/[fail]` ASCII line per stage, and a terminal report summarises
+the outcome; pressing Escape while a run is live cancels its
+`CancellationToken`. Failure reporting is explicit: an invalid spec ID or flag
+shows the usage block with the cause; a blocked or unreadable content reference
+explains why (SSRF, robots, unreadable/unsupported/escaping file); an empty
+corpus or unusable model output stops before writing anything and names the
+cause; and an existing spec directory refuses unless `--force` was passed.
+
+The same pipeline is available from the shell as
+`ragent spec govcreate <specid> <content-ref> <target-folder> [flags]` — it
+shares the TUI parser, resolves the model from `--model` or the stored
+`selected_model` (neither configured -> exit 2), prints the staged progress and
+final report to stdout, and exits non-zero on failure.
+
+```text
+/spec govcreate payments-arch https://docs.provider.gov/payment-service ./payments-svc
+/spec govcreate records-arch ./arch-records/records-hld.pdf ./records --language python --type library
+/spec govcreate billing-arch ./doc/sad.md ./billing-svc --language rust --type cmdline --stack axum
+/spec govcreate billing-arch ./doc/sad.md ./billing-svc --force   # overwrite an existing spec directory
+```
+
+### 5.20 `/spec delete <spec-id> [--yes]`
 
 Delete a spec directory from the workspace. The `--yes` flag skips the
 confirmation prompt.

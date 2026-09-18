@@ -8,6 +8,10 @@ description = "Spec management system for ragent: EARS notation specs, validatio
 repository = "https://github.com/thawkins/ragent"
 
 [dependencies]
+# Shared `/new` scaffold flag parser (spec `govdoc` T-002): `/spec govcreate`
+# delegates its trailing flags here so accepted values and error text cannot
+# drift from the `/new` surface.
+ragent-tools-extended = { path = "../ragent-tools-extended" }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1"
 regex = "1"

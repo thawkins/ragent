@@ -10,7 +10,7 @@ the runtime mapping, the probe mechanics, and the report formats.
 > `crates/ragent-tui/src/app/toolchain.rs` probe engine, and the
 > language-to-runtime mapping. For the code index itself see
 > `docs/howtos/codeindex.md`. For the full tool catalog see
-> `docs/howtos/tools.md`. For TUI workflow see `docs/howtos/tutorial.md`.
+> `docs/howtos/tools/INDEX.md`. For TUI workflow see `docs/howtos/tutorial.md`.
 
 ---
 

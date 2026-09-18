@@ -866,7 +866,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "spec",
-        description: "Specification management: /spec create|add|delete|list|search|validate|status|task|help",
+        description: "Specification management: /spec create|add|delete|list|search|validate|status|task|govcreate <specid> <content-ref> <target-folder> [flags]|help",
     },
     SlashCommandDef {
         trigger: "research",
@@ -1909,6 +1909,29 @@ pub struct App {
     pub newproj_result: Arc<std::sync::Mutex<Option<Result<(String, String), String>>>>,
     /// True while the `/new` scaffold worker thread is running (T-013).
     pub newproj_running: bool,
+    /// Shared progress lines from the `/spec govcreate` worker (T-013,
+    /// FR-015). The worker appends one rendered [`GovCreateProgress`] line
+    /// per stage boundary; the UI thread drains them into the
+    /// in-place-updated progress message.
+    pub govcreate_progress: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Rendered progress-panel text for the active govcreate run (T-013).
+    pub govcreate_progress_text: Option<String>,
+    /// First-line tag of the active govcreate progress message (T-013),
+    /// used for the in-place message lookup.
+    pub govcreate_progress_slug: Option<String>,
+    /// Pending `/spec govcreate` outcome deposited by the worker thread and
+    /// drained by `poll_govcreate_result` (T-013).
+    pub govcreate_result:
+        Arc<std::sync::Mutex<Option<ragent_tools_extended::archdoc::GovCreateRunReport>>>,
+    /// True while the `/spec govcreate` worker thread is running (T-013).
+    pub govcreate_running: bool,
+    /// Cancellation handle for the active `/spec govcreate` run (T-014,
+    /// FR-019). Stored per-run so the Escape path (`poll_govcreate_cancel`,
+    /// reached by `InputAction::CancelAgent`) can signal the worker at the
+    /// next stage boundary; the runner then reports a `Cancelled` outcome and
+    /// stops before writing spec files.
+    pub govcreate_cancel:
+        std::sync::Arc<std::sync::Mutex<Option<ragent_tools_extended::archdoc::CancellationToken>>>,
     /// Pending result from an async compaction call: the replacement history
     /// (`[compaction, ...recent]`) on success, or the error message.
     pub compact_result: Arc<std::sync::Mutex<Option<Result<Vec<Message>, String>>>>,

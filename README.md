@@ -427,6 +427,23 @@ research system, and multi-layered security are functional and under active deve
 
 Recent highlights:
 
+- **`/spec govcreate` — spec authoring from an architecture document
+  (uncommitted, on top of v1.0.106)** — `/spec govcreate <spec-id>
+  <content-ref> <target-folder>` (and the `ragent spec govcreate` CLI
+  subcommand) acquires an architecture document from a local folder or URL,
+  extracts its content, authors `SPEC.md`/`PLAN.md`/`TESTPLAN.md` via the
+  configured LLM, and writes a new spec — with staged `[ .. ]/[ ok ]/[fail]`
+  progress in the TUI, Escape cancellation, and an FR-011 guard that refuses
+  non-empty targets without `--force`. The same window carries HEAD~3 review
+  fixes: SSE chunk coalescing no longer splits multi-byte UTF-8 sequences
+  driven by `Utf8Error::error_len()` (with six regression tests), secret
+  redaction captures key+separator and widens the value charset to
+  base64/base64url, spec dependency-range expansion is capped at 1000 IDs,
+  `delete_memories_by_filter` reports real row counts, and masterfetch's cache
+  deletes corrupt rows instead of poisoning hits. Documentation: the 612-line
+  `tools.md` is replaced by 26 per-category how-tos in `docs/howtos/tools/`
+  with argument tables and examples, each with a generated PDF.
+
 - **`--url-cloak` research source defanging (v1.0.106)** —
   `/research create` gained `--url-cloak`, which emits web source URLs as
   defanged plain text rather than clickable links: the scheme is rewritten

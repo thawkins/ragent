@@ -1587,6 +1587,12 @@ impl App {
                     self.execute_slash_command(&cmd);
                 }
                 InputAction::CancelAgent => {
+                    // govdoc T-014/FR-019: when a govcreate run is live,
+                    // Esc cancels it at the next stage boundary instead of
+                    // hitting the (absent) agent turn.
+                    if self.govcreate_run_active() {
+                        self.poll_govcreate_cancel();
+                    }
                     self.halt_running_agent();
                 }
                 InputAction::ConfirmForceCleanup => {

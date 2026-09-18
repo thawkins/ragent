@@ -8,7 +8,7 @@ usage patterns.
 
 > **Scope:** Code index tools, slash commands, graph analysis, language
 > support, and troubleshooting. For the full tool catalog see
-> `docs/howtos/tools.md`. For hiding/exposing tool families see
+> `docs/howtos/tools/INDEX.md`. For hiding/exposing tool families see
 > `docs/howtos/tool-visibility.md`. For TUI workflow see
 > `docs/howtos/tutorial.md`.
 
@@ -750,7 +750,7 @@ The full-text search index has no documents. Run:
 
 | Document | Covers |
 |----------|--------|
-| `docs/howtos/tools.md` | Full tool catalog (all 168 static + 1 dynamic tool) |
+| `docs/howtos/tools/INDEX.md` | Full tool catalog (all 168 static + 1 dynamic tool, split by category) |
 | `docs/howtos/tool-visibility.md` | Hiding and exposing tool families |
 | `docs/howtos/tutorial.md` | End-to-end TUI workflow tutorial |
 | `docs/howtos/custom-agents.md` | Custom agent profiles |

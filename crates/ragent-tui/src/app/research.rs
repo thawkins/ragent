@@ -210,6 +210,13 @@ async fn run_cluster_extraction(
 }
 
 impl App {
+    /// Render `/research` help and update the status message. Used by both the
+    /// Help early-return and the defensive fallback in the dispatch match.
+    fn show_research_help(&mut self) {
+        self.append_assistant_text(&ragent_research::cli::ResearchCliCommand::build_help_message());
+        self.status = "research: help".to_string();
+    }
+
     pub(crate) fn handle_research_command(&mut self, args: &str) {
         use ragent_research::cli::ResearchCliCommand;
         use ragent_research::{
@@ -221,8 +228,7 @@ impl App {
         // Record the verbatim slash command for frontmatter replay.
         let invocation = format!("/research {args}");
         if matches!(cmd, ResearchCliCommand::Help) {
-            self.append_assistant_text(&ResearchCliCommand::build_help_message());
-            self.status = "research: help".to_string();
+            self.show_research_help();
             return;
         }
         // `self.cwd` is a `~`-collapsed DISPLAY string (see `App::new`), so it
@@ -253,10 +259,10 @@ impl App {
 
         match cmd {
             // FUNC-043: `Help` is handled above; a no-op here avoids the
-            // `unreachable!()` panic if the early-return ever changes.
+            // `unreachable!()` panic if the early-return ever changes. Reuse
+            // the shared helper so help rendering lives in exactly one place.
             ResearchCliCommand::Help => {
-                self.append_assistant_text(&ResearchCliCommand::build_help_message());
-                self.status = "research: help".to_string();
+                self.show_research_help();
             }
             ResearchCliCommand::Create {
                 name,

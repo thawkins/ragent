@@ -1001,7 +1001,7 @@ impl App {
                 "[show|help|office|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
             ),
             "model" => Some("[show]".to_string()),
-            "spec" => Some("[create|add|delete|list|search|validate|status|task|activate|deactivate|coverage|impl|jtbd|help]".to_string()),
+            "spec" => Some("[create|add|delete|list|search|validate|status|task|govcreate <specid> <content-ref> <target-folder> [--language <lang>] [--type <type>] [--stack <name>] [--github|--gitlab] [--force]|activate|deactivate|coverage|impl|jtbd|help]".to_string()),
             "router" => {
                 Some("[on|off|status|tiers|weights|boundaries|test|stats|reload|help]".to_string())
             }

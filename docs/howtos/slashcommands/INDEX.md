@@ -48,7 +48,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/bash` | [bash](bash.md) | Manage bash command lists: /bash add\|remove allow\|deny <entry> [--global] \| show \| help |
 | `/dirs` | [dirs](dirs.md) | Manage directory/file permission lists: /dirs add\|remove allow\|deny <pattern> [--global] \| show \| help |
 | `/yolo` | [yolo](yolo.md) | Toggle YOLO mode  -  bypass all command validation and tool restrictions (/yolo help) |
-| `/spec` | [spec](spec.md) | Specification management: /spec create\|add\|delete\|list\|search\|validate\|status\|task\|help |
+| `/spec` | [spec](spec.md) | Specification management: /spec create\|add\|delete\|list\|search\|validate\|status\|task\|govcreate\|help |
 | `/research` | [research](research.md) | Research system: /research create [--mode tiered\|supervisor\|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> \| list \| open \| search \| show \| delete \| archive \| cluster |
 | `/reverse` | [reverse](reverse.md) | Reverse-engineer a GitHub repo: /reverse <owner/repo \| URL> [--tech <stack>] [--create <name>] |
 | `/new` | [new](new.md) | Scaffold a new project: /new --language <lang> --type <type> [--stack <name>] [--github \| --gitlab] \| /new help |
