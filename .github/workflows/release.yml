@@ -199,7 +199,7 @@ jobs:
           import re, sys
           ver = sys.argv[1]
           text = open("CHANGELOG.md").read()
-          pat = re.compile(r"^## Version: " + re.escape(ver) + r"\b.*?(?=^## Version: |\\Z)", re.M | re.S)
+          pat = re.compile(r"^(?:## \[Unreleased\] - " + re.escape(ver) + r"|## \[" + re.escape(ver) + r"\] - |## Version: " + re.escape(ver) + r")\b.*?(?=^## (?:\[.*\] - |Version: )|\\Z)", re.M | re.S)
           m = pat.search(text)
           open("release_notes.md", "w").write(m.group(0) if m else "")
           ' "$version"

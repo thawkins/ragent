@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.0.111] - 2026-09-20
+
+Fix release mechanism: GitHub releases were created with empty release notes
+because the changelog extractor in the release workflow searched for a
+`## Version: <version>` header (and historically a `## [Unreleased] - <version>`
+form), while CHANGELOG.md uses the Keep a Changelog form
+`## [<version>] - <date>`.
+
+### Fixed
+
+- **`.github/workflows/release.yml`** -- the "Extract release notes from
+  CHANGELOG.md" step now matches all three header forms
+  (`## [<version>] - <date>`, `## [Unreleased] - <version>`,
+  `## Version: <version>`) and is bounded by either a bracketed section
+  header or a `## Version:` header, so the extracted entry no longer runs to
+  end-of-file for older formats.
+- **Backfilled release notes** -- the v1.0.110, v1.0.109, v1.0.108 and
+  v1.0.107 GitHub releases had their notes populated from their
+  CHANGELOG.md entries retroactively.
+
 ## [1.0.110] - 2026-09-20
 
 Worktree changes previously recorded as "Uncommitted (on top of v1.0.109)",
