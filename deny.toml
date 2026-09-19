@@ -17,15 +17,9 @@ ignore = [
     # RUSTSEC-2024-0384: instant crate no longer maintained.
     # instant is a transitive dep (via measure_time -> tantivy); awaiting upstream update.
     { id = "RUSTSEC-2024-0384", reason = "transitive via tantivy; awaiting upstream update" },
-    # RUSTSEC-2025-0119: markdown parser panic (unmaintained pulldown-cmark fork).
-    # pulldown-cmark is a transitive dep (via ratatui); no actionable fix available.
-    { id = "RUSTSEC-2025-0119", reason = "transitive via ratatui; no fixed version available" },
     # RUSTSEC-2026-0192: ttf-parser unmaintained.
     # ttf-parser is a transitive dep (via printpdf); functionality unaffected.
     { id = "RUSTSEC-2026-0192", reason = "transitive via printpdf; functionality unaffected" },
-    # RUSTSEC-2026-0190: anyhow downcast_mut unsoundness.
-    # anyhow is a transitive dep widely used; awaiting upstream fix.
-    { id = "RUSTSEC-2026-0190", reason = "transitive; awaiting upstream fix" },
     # RUSTSEC-2026-0187: lopdf stack overflow via deeply nested PDF objects.
     # lopdf 0.39 is a direct dep; upgrade to 0.42+ requires ooxmlsdk/quick-xml break.
     { id = "RUSTSEC-2026-0187", reason = "direct dep blocked by ooxmlsdk/quick-xml compatibility; trusted PDF input" },
@@ -35,12 +29,6 @@ ignore = [
     # RUSTSEC-2026-0195: quick-xml unbounded namespace declarations.
     # Same compatibility constraint as RUSTSEC-2026-0194.
     { id = "RUSTSEC-2026-0195", reason = "direct dep blocked by ooxmlsdk compatibility; trusted XML input" },
-    # RUSTSEC-2026-0185: quinn-proto remote memory exhaustion from unbounded
-    # out-of-order stream reassembly. Transitive via reqwest/h3; awaiting upstream fix.
-    { id = "RUSTSEC-2026-0185", reason = "transitive via reqwest/h3; awaiting upstream fix" },
-    # RUSTSEC-2026-0235: rkyv insufficient archive validation causing out-of-bounds reads.
-    # rkyv is a transitive dep; upgrade to >=0.8.17 is blocked by downstream crates.
-    { id = "RUSTSEC-2026-0235", reason = "transitive; upgrade blocked by downstream compatibility" },
     # RUSTSEC-2025-0052: async-std has been discontinued.
     # async-std is pulled in by opentelemetry_sdk 0.28; upgrading OTEL is tracked separately.
     { id = "RUSTSEC-2025-0052", reason = "transitive via opentelemetry_sdk 0.28; upgrade tracked separately" },

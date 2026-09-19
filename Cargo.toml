@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.109"
+version = "1.0.110"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -319,7 +319,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
-dirs = { workspace = true }
 uuid = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }

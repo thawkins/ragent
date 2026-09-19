@@ -20,7 +20,6 @@ tracing = "0.1"
 chrono = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
 tempfile = "3"
 serial_test = "3.2"
 

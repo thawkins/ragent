@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.0.110] - 2026-09-20
+
+Worktree changes previously recorded as "Uncommitted (on top of v1.0.109)",
+promoted to a release:
+
+- **`ragent-tui` PERF-042 stream-throttle tail fix** -- `should_render` in
+  `crates/ragent-tui/src/lib.rs` now also forces the safety-interval paint when
+  a message-cache group is still pending (`message_cache_dirty_from <
+  messages.len()`), closing the stall where a tool-call row left unpainted by
+  the PERF-042 throttle stayed invisible while the status bar already showed
+  it running; regression test
+  `test_pending_message_cache_group_forces_safety_paint` in
+  `crates/ragent-tui/tests/test_perf_render_idle.rs`.
+- **Dependency and advisory hygiene** -- dropped now-unused `dirs` from the
+  root, `ragent-tools-extended` and `ragent-tools-vcs` manifests, unused
+  `tokio` dev-dependency from `ragent-config`, and unused `tempfile`
+  dev-dependency from `ragent-server`; removed four stale advisory ignores
+  from `deny.toml` (RUSTSEC-2025-0119, RUSTSEC-2026-0190, RUSTSEC-2026-0185,
+  RUSTSEC-2026-0235 -- no longer triggered by the resolved tree).
+- **New spec: `plugins`** -- `specs/plugins/` (SPEC.md, PLAN.md,
+  TESTPLAN.md) drafts a plugin system that loads Codex- and Claude
+  Code/Desktop-dialect plugins, runs their JavaScript code on an embedded,
+  budget-sandboxed engine with a versioned host API (tool/slash-command
+  contribution under `plugin_<id>_<name>`), and manages it through the
+  six-subcommand `/plugins` family (`list`, `add`, `remove`, `enable`,
+  `disable`, `help`, `test`).
+
 ## [1.0.109] - 2026-09-19
 
 Final phase of the `/simplify all` quality pass over the last three commits

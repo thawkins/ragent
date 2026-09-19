@@ -4,6 +4,27 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.107..v1.0.109, incl. uncommitted work)
+
+- **Paint-safety fix (PERF-042 throttle tail, uncommitted)** — when the stream
+  throttle leaves a message group pending (for example a tool-call row that
+  arrives while the window is open), the safety-interval wake now paints it,
+  so the row no longer stays invisible while the status bar already shows the
+  tool running (`should_render` in `crates/ragent-tui/src/lib.rs`;
+  regression test `test_pending_message_cache_group_forces_safety_paint`).
+- **Plugin system spec draft (uncommitted)** — `specs/plugins/` specifies a
+  `/plugins` six-subcommand family (`list`, `add`, `remove`, `enable`,
+  `disable`, `help`, `test`) and a sandboxed JavaScript runtime hosting
+  Codex- and Claude Code/Desktop-dialect plugins behind a versioned host API.
+  Spec only — not yet implemented.
+- **Config rules and fixes (v1.0.108)** — `/config show` renders unavailable
+  global memory/agent dirs as "(unavailable)"; `/spec govcreate` mutexes
+  recover uniformly from poisoning; GitLab legacy credential migration and
+  the legacy team-blueprint fallback scan the real `~/.ragent/` root again.
+- **`/simplify` final phase (v1.0.109)** — code-quality-only cleanups across
+  the LLM HTTP client, custom-agent discovery, and `ragent-research`; no
+  behaviour change.
+
 ## Highlights (uncommitted, on top of v1.0.106)
 
 - **`/spec govcreate` — author a spec from an architecture document** —

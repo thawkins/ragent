@@ -31,7 +31,6 @@ rand = "0.9"
 paft-decimal = "0.9"
 paft-money = "0.9"
 uuid = { workspace = true }
-dirs = { workspace = true }
 html2text = { workspace = true }
 readability-rs = { workspace = true }
 # GPL-3.0 dependency (explicitly accepted by the project owner 2026-09-06):
@@ -86,8 +85,9 @@ default = []
 embeddings = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
 
 [package.metadata.cargo-machete]
-# readability-rs is used via its lib name `readability` (extractor.rs, webfetch.rs);
-# cargo-machete matches on the package name and flags it as unused.
+# readability-rs is used via its lib name `readability` (extractor.rs,
+# webfetch.rs); cargo-machete matches on the package name and flags it as
+# unused. Keep ignoring it.
 ignored = ["readability-rs"]
 
 [lints]

@@ -1,9 +1,9 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.106</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.109</p>
         <p style="font-size: 1.1em;">
-          <strong>Date:</strong> 2026-09-17
+          <strong>Date:</strong> 2026-09-20
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -98,16 +98,49 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.106). The core architecture, tool system,
+Ragent is in **beta** (v1.0.109). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.44 → v1.0.106):**
+**Current Release Highlights (v1.0.107 → v1.0.109, incl. uncommitted work):**
 
-- **Uncommitted (on top of v1.0.106)** — `/spec govcreate <spec-id>
+- **Uncommitted (on top of v1.0.109)** — TUI paint-safety fix: `should_render`
+  (`crates/ragent-tui/src/lib.rs`) now also forces the safety-interval paint
+  when a message-cache group is still pending (`message_cache_dirty_from <
+  messages.len()`), closing the PERF-042 throttle-tail stall where a tool-call
+  row left unpainted by the throttle stayed invisible while the status bar
+  already showed it running (regression test
+  `test_pending_message_cache_group_forces_safety_paint` in
+  `crates/ragent-tui/tests/test_perf_render_idle.rs`). Dependency hygiene:
+  unused `dirs`/`tokio`/`tempfile` dependencies dropped and four stale
+  `deny.toml` advisory ignores removed. New spec draft: **`plugins`**
+  (`specs/plugins/`) — a plugin system loading Codex- and Claude
+  Code/Desktop-dialect plugins onto an embedded, budget-sandboxed JavaScript
+  engine behind a versioned host API (`register_tool`, `register_command`,
+  `config.get`, `message.*`, `log`, `plugin.read_text_file`), managed through
+  the six-subcommand `/plugins` family (`list`, `add`, `remove`, `enable`,
+  `disable`, `help`, `test`).
+
+- **`/simplify` final phase over v1.0.106..v1.0.108 (v1.0.109)** — dead
+  `utf8_prefix_len` removed from the LLM HTTP client, `config_agents_dir`
+  collapsed into `global_agents_dir`, byte-wise `extract_http_status` parsing,
+  and one shared `lock_conn()` helper with `SourceVaultError::LockPoisoned`
+  replacing eight poisoned-lock sites in `ragent-research`.
+
+- **Config rules and fixes (v1.0.108)** — GitLab legacy credential migration
+  scans the real legacy `~/.ragent/` root again (regression pinned), the
+  team-blueprint "global" fallback restores the legacy
+  `~/.ragent/blueprints(/teams)` scan, `/spec govcreate` mutex-lock sites
+  uniformly recover poisoned locks, `/config show` renders unavailable global
+  dirs as "(unavailable)", `acquire_local` no longer misreports exact-cap
+  natural completion as budget exhaustion, and research helpers
+  (`num_prefix_re`, `join_text`) are deduplicated.
+
+- **`/spec govcreate` — spec authoring from an architecture document
+  (v1.0.107)** — `/spec govcreate <spec-id>
   <content-ref> <target-folder>` (spec `govdoc`, FR-001..FR-020) authors a draft
   spec from an architecture document (local folder/file or public URL),
   orchestrating acquire → extract → author → write stages with live
@@ -123,6 +156,8 @@ current state of all subsystems.
   tables (`preprocess_markdown_tables`). Documentation: `docs/howtos/tools.md`
   is replaced by 26 per-category tool pages in `docs/howtos/tools/` with
   argument tables and examples, each with a generated PDF.
+
+**Earlier highlights (through v1.0.106):**
 
 - **`--url-cloak` research source defanging (v1.0.106)** —
   `/research create` gained `--url-cloak`, which writes the report's web source
@@ -1606,7 +1641,9 @@ requirements, and implementation tasks.
 
 ### 10.2 Directory Layout
 
-Specs live in `specs/<SpecId>/`:
+Specs live in `specs/<SpecId>/` (50 spec directories as of v1.0.109; the newest
+is `specs/plugins/` — a draft spec for a Codex/Claude-compatible JavaScript
+plugin system with a `/plugins` six-subcommand family):
 
 ```text
 specs/
@@ -2896,6 +2933,9 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.109 | 2026-09-18 | Final phase of the `/simplify all` pass over v1.0.106..v1.0.108: dead `utf8_prefix_len` helper removed from the LLM HTTP client (superseded by the FUNC-033 `Utf8Error::error_len()`-driven flush), `config_agents_dir` collapsed into `global_agents_dir`, `extract_http_status` parses the three status digits byte-wise without an intermediate `String`, and all eight `ragent-research` `SourceVault` poisoned-lock sites now share one `lock_conn()` helper carrying a dedicated `SourceVaultError::LockPoisoned` variant (no behaviour change). (Uncommitted follow-up on the same tree: PERF-042 throttle-tail paint fix in `should_render` + `test_pending_message_cache_group_forces_safety_paint`, dependency/advisory hygiene drops, and the new `plugins` spec draft in `specs/plugins/` — sandboxed JavaScript plugin runtime loading Codex/Claude manifests + six-subcommand `/plugins` family, spec only.) |
+| v1.0.108 | 2026-09-18 | Config rules and fixes from a five-agent explore review of the v1.0.105..v1.0.107 window: GitLab legacy credential migration scans the real legacy `~/.ragent/` root again (`migrate_legacy_files` self-scan silent no-op fixed; `test_gitlab_legacy_migration.rs` pins it); team-blueprint "global" fallback restored to the true legacy `~/.ragent/blueprints(/teams)` scan (TUI `blueprints.rs` + `team_create.rs`); the four `/spec govcreate` mutex-lock sites uniformly recover poisoning via `into_inner`; `/config show` renders unavailable global memory/agent dirs as "(unavailable)"; `acquire_local` gains a `stopped_early` flag so exact-cap natural completion is not misreported as budget exhaustion; research helpers `num_prefix_re` and `join_text` deduplicated into single shared copies; `global_skills_dir().unwrap_or_default()` empty-path leg fixed in the session processor. |
+| v1.0.107 | 2026-09-18 | `/spec govcreate` — spec authoring from an architecture document (spec `govdoc`, FR-001..FR-020): `/spec govcreate <spec-id> <content-ref> <target-folder>` and CLI parity `ragent spec govcreate` acquire a document from a local file/folder or public URL, extract content, author `SPEC.md`/`PLAN.md`/`TESTPLAN.md` via the configured LLM, and write the new spec with staged `[ .. ]/[ ok ]/[fail]` in-place TUI progress, per-run `CancellationToken` on Escape, and an FR-011 non-empty-target guard (`--force` overrides). The window also carries HEAD~3 review fixes: SSE chunk coalescing driven by `Utf8Error::error_len()` (no multi-byte splitting; six regression tests), secret redaction captures key+separator with a base64/base64url value charset, spec dependency-range expansion capped at 1000 IDs, `delete_memories_by_filter` reports real row counts, masterfetch cache deletes corrupt rows, and the TUI Markdown renderer gains `preprocess_markdown_tables` for ragged pipe tables. Documentation: the 612-line `docs/howtos/tools.md` replaced by 26 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs). |
 | v1.0.106 | 2026-09-17 | `--url-cloak` research source defanging (`/research create --url-cloak`, TUI, `POST /research` `url_cloak`): web source URLs are written as defanged plain text (`https://` -> `hxxps://`, `http://` -> `hxxp://`, dots bracketed `example[.]com`, wrapped in a Markdown code span) in the `**Sources:**` bullets and `References Index` table of `RESEARCH.md` (plus the `Sources Reference` table in `CORPA.md`), leaving non-URL rows untouched; off by default and recorded in frontmatter (`url_cloak: true`) for `/research update` replay. Includes a `/simplify` code-quality pass over the change set (shared `SourceVault::run_blocking` helper + `TaskPanic` error, `AssembleInput` struct replacing an 18-parameter `assemble_and_write`, hardened `extract_http_status`/`lowercase_cow`/`cloak_url`, `Arc`-keyed query map, and test-literal collapse onto `minimal_request`). |
 | v1.0.105 | 2026-09-16 | Research output limits (`research.max_concepts`/`research.max_findings`, `--max-concepts`/`--max-findings`, `POST /research` fields; defaults 5/20, `0` = unbounded, most-relevant-first reordering before truncation), scholarly-engine exclusion (`mf_search` `exclude_engines`, research `--no-papers`/`--no-scholarly`, `research.exclude_academic_engines`), per-run open-access toggles (`--oa-enable`/`--no-oa`), a progress table that breaks exclusions and fetch failures down by reason/cause, `/spec impl` task-range Dependencies expansion, and TUI panel changes (TASKS panel `[STATUS] <id> title` rows, 50%-width side panels). |
 | v1.0.104 | 2026-09-14 | Functional anti-pattern remediation (FUNC-038..069, 080..082): the FUNCPLAN.md second pass closes the plan's M1 tail and all of M2-M5 -- `mf_search` keyless engines surface a dead engine as an error instead of a zero-result success (FUNC-035), `github_merge_pr` rejects an unknown merge method (FUNC-038), the last three production poison-lock panics recover via `PoisonError::into_inner` (FUNC-040/041/042), no production `unreachable!`/poison-expect remains (FUNC-043/044/045), GitLab GETs retry 429 honouring `Retry-After` with bounded request/entry budgets and full pagination and research blocking reads move behind `block_in_place` (FUNC-050/052/053), and the TUI/tools/VCS/codeindex/server/research correctness fixes (FUNC-060..069) plus a new `scripts/check-poison-locks.sh` guard wired into `pre-flight.sh` and CI (FUNC-080/081/082). |

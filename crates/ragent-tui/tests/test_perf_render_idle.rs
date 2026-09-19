@@ -73,6 +73,84 @@ fn test_dirty_wake_always_renders() {
 }
 
 #[test]
+fn test_pending_message_cache_group_forces_safety_paint() {
+    // Regression: a ToolCallStart that lands inside the PERF-042 throttle
+    // window leaves the message group pending (`message_cache_dirty_from <
+    // messages.len()`) and the pending-preserving frame both clears
+    // `needs_redraw` and re-arms the throttle.  If a burst of events re-sets
+    // `needs_redraw` afterwards, the last wake of the burst repaints only the
+    // status bar and no further repaint is scheduled: the tool-call row (and
+    // any streamed text following it) would stay invisible until unrelated
+    // mouse/keyboard input forced a frame.  A pending group is visible
+    // content, so the safety wake must paint it even with no spinner or
+    // countdown live.
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    let sid = "s1".to_string();
+
+    // Prime: an assistant message rendered into the cache, all state clean.
+    app.handle_event(ragent_agent::event::Event::TextDelta {
+        session_id: sid.clone(),
+        text: "working on it".to_string(),
+    });
+    render(&mut app);
+    assert_eq!(
+        app.message_cache_dirty_from,
+        app.messages.len(),
+        "primed frame leaves nothing pending"
+    );
+
+    // Stream one more token so the group has already been populated (the
+    // tool-call part then lands in a *throttled* group, matching production).
+    app.handle_event(ragent_agent::event::Event::TextDelta {
+        session_id: sid.clone(),
+        text: " more".to_string(),
+    });
+    render(&mut app); // deferred by the throttle; the group stays pending
+
+    // The ToolCallStart arrives while the throttle window is still open.  Its
+    // wake paints the status bar (needs_redraw) but the group stays pending.
+    app.handle_event(ragent_agent::event::Event::ToolCallStart {
+        session_id: sid.clone(),
+        call_id: "call-1".to_string(),
+        tool: "bash".to_string(),
+    });
+
+    // A burst of unrelated events (e.g. ToolResult/ToolCallArgs from earlier
+    // calls) re-marks the UI dirty before the throttle tail wake fires; each
+    // painted frame re-arms the throttle window and consumes the dirty flag.
+    render(&mut app);
+    std::thread::sleep(ragent_tui::layout::MESSAGE_STREAM_MIN_INTERVAL);
+    render(&mut app);
+
+    let tool_msg_idx = app.messages.len() - 1;
+    if app.message_cache_dirty_from > tool_msg_idx {
+        render(&mut app);
+    }
+
+    // Simulate the end of the burst: every event was consumed, so nothing is
+    // flagged dirty, yet the tool-call group may still be pending while the
+    // status bar already reads "running: bash".
+    app.needs_redraw = false;
+    assert!(
+        !app.needs_periodic_redraw(),
+        "no countdown or spinner is live in this scenario"
+    );
+
+    let pending_before = ragent_tui::should_render(&app, past_idle_interval());
+    if pending_before {
+        render(&mut app);
+    }
+
+    // The pending message must become visible at the safety interval without
+    // any user input (previously it required mouse/keyboard to appear).
+    assert!(
+        app.message_cache_dirty_from > tool_msg_idx,
+        "the pending tool-call group must be painted by the safety wake"
+    );
+}
+
+#[test]
 fn test_periodic_redraw_only_while_countdown_active() {
     let mut app = support::make_app();
     app.needs_redraw = false;

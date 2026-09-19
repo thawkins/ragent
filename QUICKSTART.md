@@ -1727,6 +1727,31 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.109 (incl. uncommitted work)
+
+- **TUI paint-safety fix (PERF-042 throttle tail, uncommitted)** — a message
+  group left pending by the stream throttle is now painted at the safety
+  interval, so a tool-call row no longer stays invisible while the status bar
+  already shows the tool running.
+- **Dependency hygiene (uncommitted)** — unused `dirs`, `tokio` (dev), and
+  `tempfile` (dev) dependencies removed; four stale `deny.toml` advisory
+  ignores dropped.
+- **Plugin system spec draft (uncommitted)** — `specs/plugins/` specifies a
+  plugin system that loads Codex- and Claude Code/Desktop-dialect plugins onto
+  an embedded, sandboxed JavaScript engine behind a versioned host API, managed
+  through a six-subcommand `/plugins` family (`list`, `add`, `remove`,
+  `enable`, `disable`, `help`, `test`).
+- **`/simplify` final phase (v1.0.109)** — dead helper removals in the LLM
+  HTTP client and custom-agent path discovery, byte-wise `extract_http_status`
+  parsing, and one shared poisoned-lock helper in `ragent-research`.
+- **Config rules and fixes (v1.0.108)** — GitLab legacy credential migration
+  scans the real `~/.ragent/` root again, the true legacy team-blueprint
+  fallback is restored, `/spec govcreate` mutex poisoning is uniformly
+  recovered, and shared research helpers are deduplicated.
+- **`/spec govcreate` (v1.0.107)** — author a draft spec from an architecture
+  document (local folder/file or public URL) with staged TUI progress, Escape
+  cancellation, a non-empty-target guard, and CLI parity.
+
 ## Version 1.0.106
 
 - **`--url-cloak` research source defanging** (v1.0.106) —

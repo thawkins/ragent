@@ -6116,12 +6116,11 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "1.0.109"
+version = "1.0.110"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "dirs 6.0.0",
  "futures",
  "parking_lot",
  "ragent-agent",
@@ -6143,7 +6142,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.109"
+version = "1.0.110"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6196,7 +6195,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.109"
+version = "1.0.110"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6220,7 +6219,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.109"
+version = "1.0.110"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6267,7 +6266,6 @@ dependencies = [
  "serde_json",
  "serial_test",
  "tempfile",
- "tokio",
  "tracing",
 ]
 
@@ -6298,7 +6296,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.109"
+version = "1.0.110"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6328,7 +6326,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.109"
+version = "1.0.110"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6341,7 +6339,6 @@ dependencies = [
  "ragent-research",
  "serde",
  "serde_json",
- "tempfile",
  "tokio",
  "tokio-stream",
  "tower 0.5.3",
@@ -6388,7 +6385,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "1.0.109"
+version = "1.0.110"
 dependencies = [
  "anyhow",
  "parking_lot",
@@ -6454,7 +6451,6 @@ dependencies = [
  "base64 0.22.1",
  "calamine",
  "chrono",
- "dirs 6.0.0",
  "docx-rust",
  "futures",
  "html2text",
@@ -6503,7 +6499,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "dirs 6.0.0",
  "ragent-config",
  "ragent-storage",
  "ragent-types",
@@ -6519,7 +6514,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.109"
+version = "1.0.110"
 dependencies = [
  "anyhow",
  "arboard",

@@ -1084,8 +1084,19 @@ pub fn compute_next_deadline_test(app: &App, last_draw: std::time::Instant) -> s
 /// (`App::needs_periodic_redraw`).  A fully idle TUI therefore paints nothing
 /// at rest, and the safety interval only guards against a missed
 /// `needs_redraw` while a countdown or spinner is actually advancing.
+///
+/// Safety bound for the PERF-042 stream throttle: a message group that was
+/// left pending by the throttle can be stranded unpainted for up to a couple
+/// of frames when a burst of events re-sets `needs_redraw` after the
+/// pending-preserving frame (each such frame arms the throttle window anew),
+/// and the last wake of the burst only repaints the status bar.  The
+/// throttle-tail deadline keeps waking the loop, but without this clause no
+/// frame is painted until unrelated input arrives, so a freshly added
+/// tool-call row stays invisible while the status bar already shows it
+/// running.  A pending cache group is *visible* content waiting to be
+/// painted, so it must force a paint at the safety interval.
 pub fn should_render(app: &App, last_draw: std::time::Instant) -> bool {
     app.needs_redraw
         || (last_draw.elapsed() >= Duration::from_millis(IDLE_REDRAW_INTERVAL_MS)
-            && app.needs_periodic_redraw())
+            && (app.needs_periodic_redraw() || app.message_cache_dirty_from < app.messages.len()))
 }

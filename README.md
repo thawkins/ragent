@@ -423,14 +423,47 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.106** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.109** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- **Uncommitted (on top of v1.0.109)** — TUI render fix (`should_render` now
+  paints a pending message-cache group at the safety interval, closing the
+  PERF-042 throttle-tail stall where a tool-call row stayed invisible while
+  the status bar showed it running; regression test
+  `test_pending_message_cache_group_forces_safety_paint`), dependency hygiene
+  (dropped unused `dirs`/`tokio`/`tempfile` dependencies; removed four stale
+  `deny.toml` advisory ignores), and a new **`plugins` spec draft**
+  (`specs/plugins/`): a plugin system spec that loads Codex- and Claude
+  Code/Desktop-dialect plugins onto an embedded, budget-sandboxed JavaScript
+  engine behind a versioned host API, managed through a six-subcommand
+  `/plugins` family (`list`, `add`, `remove`, `enable`, `disable`, `help`,
+  `test`).
+
+- **`/simplify` final phase over v1.0.106..v1.0.108 (v1.0.109)** — the last
+  code-quality findings from the three-commit review window land: dead
+  `utf8_prefix_len` helper removed from the LLM HTTP client (FUNC-033 made it
+  redundant), `config_agents_dir` collapsed into `global_agents_dir`,
+  `extract_http_status` parses status digits byte-wise without an intermediate
+  allocation, and `ragent-research`'s eight poisoned-lock sites now share one
+  `lock_conn()` helper with a dedicated `SourceVaultError::LockPoisoned`
+  variant.
+
+- **Config rules and fixes (v1.0.108)** — code-quality pass over the
+  v1.0.105..v1.0.107 window from five parallel explore reviews: GitLab legacy
+  credential migration scans the real legacy `~/.ragent/` root again (silent
+  no-op migration fixed, regression test pinned), the team-blueprint "global"
+  fallback restores the true legacy `~/.ragent/blueprints(/teams)` scan so old
+  installs keep working, the four `/spec govcreate` mutex-lock sites uniformly
+  recover poisoned locks, `/config show` renders unavailable global dirs as
+  "(unavailable)", `acquire_local` no longer misreports an exact-cap natural
+  completion as budget exhaustion, and shared research helpers
+  (`num_prefix_re`, `join_text`) are deduplicated into single copies.
+
 - **`/spec govcreate` — spec authoring from an architecture document
-  (uncommitted, on top of v1.0.106)** — `/spec govcreate <spec-id>
+  (v1.0.107)** — `/spec govcreate <spec-id>
   <content-ref> <target-folder>` (and the `ragent spec govcreate` CLI
   subcommand) acquires an architecture document from a local folder or URL,
   extracts its content, authors `SPEC.md`/`PLAN.md`/`TESTPLAN.md` via the
