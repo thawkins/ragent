@@ -31,25 +31,6 @@ const REQUEST_TIMEOUT_SECS: u64 = 120;
 /// the stream is already producing data.
 pub const STREAM_CHUNK_IDLE_TIMEOUT_SECS: u64 = 120;
 
-/// Number of leading bytes of `buf` that are a valid UTF-8 prefix.
-///
-/// Returns `buf.len()` when the whole slice is valid UTF-8; otherwise returns
-/// the length of the longest valid prefix ending on a character boundary.
-/// A trailing incomplete multibyte sequence is not counted, so callers can
-/// hold those bytes back and prepend them to the next chunk (FUNC-033).
-///
-/// Note: `append_stream_chunk` no longer depends on this; it drives its flush
-/// from `Utf8Error::error_len` instead so an incomplete tail is never flushed
-/// lossily. Retained for FUNC-033 boundary verification.
-#[cfg(test)]
-#[must_use]
-fn utf8_prefix_len(buf: &[u8]) -> usize {
-    match std::str::from_utf8(buf) {
-        Ok(_) => buf.len(),
-        Err(e) => e.valid_up_to(),
-    }
-}
-
 /// Decode a stream chunk onto a growing `String`, buffering any incomplete
 /// trailing multibyte character so it can be completed by the next chunk.
 ///

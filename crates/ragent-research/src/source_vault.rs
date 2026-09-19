@@ -39,6 +39,9 @@ pub enum SourceVaultError {
     /// A blocking-pool task for a vault operation panicked or was cancelled.
     #[error("vault task panicked: {0}")]
     TaskPanic(String),
+    /// The connection mutex was poisoned by a panicking holder.
+    #[error("vault connection lock poisoned: {0}")]
+    LockPoisoned(String),
 }
 
 /// Result alias for vault operations.
@@ -135,6 +138,20 @@ impl fmt::Debug for SourceVault {
 }
 
 impl SourceVault {
+    /// Lock the shared SQLite connection, recovering from poison.
+    ///
+    /// The connection mutex guards only the `rusqlite::Connection`; a panic
+    /// while holding it would otherwise surface as a `PoisonError` at every
+    /// call site, obscuring the actual failure. We recover with
+    /// [`std::sync::PoisonError::into_inner`] and surface the poison as a
+    /// dedicated [`SourceVaultError::LockPoisoned`], keeping the *run-tag*
+    /// variant for its documented domain (invalid run-tag inputs).
+    fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
+        self.conn
+            .lock()
+            .map_err(|e| SourceVaultError::LockPoisoned(e.to_string()))
+    }
+
     /// Open (or create) a vault rooted at `project_root/.ragent/research_vault/<run_tag>/`.
     ///
     /// `run_tag` must be a single path component with no traversal sequences.
@@ -197,9 +214,7 @@ impl SourceVault {
     /// exist in the index, or [`SourceVaultError::Io`] when the file is missing.
     pub fn read_content(&self, source_id: &str) -> Result<String> {
         let content_path: Option<String> = self
-            .conn
-            .lock()
-            .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?
+            .lock_conn()?
             .query_row(
                 "SELECT content_path FROM vault_sources
                  WHERE run_tag = ?1 AND source_id = ?2",
@@ -221,9 +236,7 @@ impl SourceVault {
     /// exist in the index.
     pub fn read_summary(&self, source_id: &str) -> Result<Option<String>> {
         let summary: Option<String> = self
-            .conn
-            .lock()
-            .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?
+            .lock_conn()?
             .query_row(
                 "SELECT summary_text FROM vault_sources
                    WHERE run_tag = ?1 AND source_id = ?2",
@@ -254,10 +267,7 @@ impl SourceVault {
 
         atomic_write_file(&content_path, source.body_text.as_bytes())?;
 
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?;
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO vault_sources
                (source_id, run_tag, url, title, fetch_timestamp, search_tool, search_engine,
@@ -301,10 +311,7 @@ impl SourceVault {
 
     /// Look up a source by exact URL within this run.
     pub fn find_by_url(&self, url: &str) -> Result<Option<VaultSource>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?;
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, source_id, run_tag, url, title, fetch_timestamp, search_tool,
                       search_engine, media_type, content_path, content_hash, body_text, summary_text
@@ -349,10 +356,7 @@ impl SourceVault {
         sql.push_str(" ORDER BY fetch_timestamp DESC LIMIT ?");
         sql.push_str(&format!("{}", tokens.len() + 2));
 
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?;
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(&sql)?;
         let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(tokens.len() + 2);
         params.push(&self.run_tag);
@@ -373,10 +377,7 @@ impl SourceVault {
 
     /// List every source in this run, newest first.
     pub fn list(&self, limit: usize) -> Result<Vec<VaultSource>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?;
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, source_id, run_tag, url, title, fetch_timestamp, search_tool,
                       search_engine, media_type, content_path, content_hash, body_text, summary_text
@@ -395,10 +396,7 @@ impl SourceVault {
 
     /// Total number of sources stored for this run.
     pub fn count(&self) -> Result<usize> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?;
+        let conn = self.lock_conn()?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM vault_sources WHERE run_tag = ?1",
             params![self.run_tag],
@@ -408,10 +406,7 @@ impl SourceVault {
     }
 
     fn migrate(&self) -> Result<()> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| SourceVaultError::InvalidRunTag(format!("lock poisoned: {e}")))?;
+        let conn = self.lock_conn()?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS vault_sources (
                 id INTEGER PRIMARY KEY,

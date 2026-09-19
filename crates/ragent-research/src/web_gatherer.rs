@@ -633,21 +633,19 @@ fn extract_http_status(message: &str) -> Option<u16> {
     for marker in ["status", "http"] {
         let mut search = message;
         while let Some(pos) = search.find(marker) {
-            let after = &search[pos + marker.len()..];
-            let trimmed = after.trim_start();
+            let after = search[pos + marker.len()..].trim_start();
             // Allow an optional "code" word between the marker and the number.
-            let after_code = trimmed
-                .strip_prefix("code")
-                .map_or(trimmed, str::trim_start);
-            let digits: String = after_code
-                .chars()
-                .take_while(char::is_ascii_digit)
-                .collect();
-            if digits.len() == 3
-                && let Ok(code) = digits.parse::<u16>()
-                && (100..=599).contains(&code)
-            {
-                return Some(code);
+            let after = after.strip_prefix("code").map_or(after, str::trim_start);
+            // Parse exactly three digits without allocating: only a 3-digit
+            // ASCII run followed by a non-digit counts as a status code.
+            let digit_bytes: usize = after.bytes().take_while(u8::is_ascii_digit).take(4).count();
+            if digit_bytes == 3 {
+                let code = u16::from(after.as_bytes()[0] - b'0') * 100
+                    + u16::from(after.as_bytes()[1] - b'0') * 10
+                    + u16::from(after.as_bytes()[2] - b'0');
+                if (100..=599).contains(&code) {
+                    return Some(code);
+                }
             }
             search = &search[pos + marker.len()..];
         }

@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.0.109] - 2026-09-19
+
+Final phase of the `/simplify all` quality pass over the last three commits
+(v1.0.106..v1.0.108), applying the remaining code-quality findings flagged
+in the earlier review. No user-visible behaviour change.
+
+### Changed
+
+- **`ragent-llm/providers/http_client.rs`** -- removed `utf8_prefix_len`,
+  dead since the FUNC-033 rewrite drives stream-chunk flushing from
+  `Utf8Error::error_len` and the helper had zero call sites even in tests.
+- **`ragent-agent/agent/custom.rs`** -- collapsed `config_agents_dir` into a
+  direct alias of `global_agents_dir`; both resolved the same canonical XDG
+  path and maintaining two byte-identical delegations only confused the
+  discovery layer.
+- **`ragent-research/web_gatherer.rs`** -- `extract_http_status` now parses
+  the three status digits byte-wise without the intermediate `String`
+  allocation in its marker loop.
+
+### Fixed
+
+- **`ragent-research/source_vault.rs`** -- the eight copies of
+  `.conn.lock().map_err(... InvalidRunTag "lock poisoned")` are replaced by a
+  shared `lock_conn()` helper carrying a dedicated
+  `SourceVaultError::LockPoisoned` variant, so a poisoned connection mutex
+  no longer masquerades as a run-tag validation error.
+
 ## [1.0.108] - 2026-09-18
 
 Config rules and fixes: code-quality pass over the v1.0.105..v1.0.107 window

@@ -149,14 +149,12 @@ pub fn global_agents_dir() -> Option<PathBuf> {
 /// Return the XDG user-config agents directory: `~/.config/ragent/agents/`
 /// (honours `$XDG_CONFIG_HOME` when set).
 ///
-/// `global_agents_dir` and `config_agents_dir` now resolve to the same
-/// canonical path; the function is kept as a stable public entry point for
-/// callers that distinguish between "the canonical dir" and "the config
-/// dir". Custom-agent discovery uses a single canonical directory plus the
+/// Alias for [`global_agents_dir`]; both resolve to the same canonical path.
+/// Custom-agent discovery uses a single canonical directory plus the
 /// project-local tier.
 #[must_use]
 pub fn config_agents_dir() -> Option<PathBuf> {
-    ragent_config::user_dirs::global_agents_dir()
+    global_agents_dir()
 }
 
 /// The full discovery-directory list for `working_dir`, lowest priority first.
