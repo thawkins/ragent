@@ -77,11 +77,11 @@ impl ResponsiveBreakpoint {
     /// profile, telemetry, and the Alt+C Context panel).
     /// Returns (messages_percent, log_percent)
     ///
-    /// Every right-hand side panel takes half the application width at all
+    /// Every right-hand side panel takes 40% of the application width at all
     /// breakpoints.
     pub fn log_split(&self) -> (u16, u16) {
-        // Every side panel takes half the application width.
-        (50, 50)
+        // Every side panel takes 40% of the application width.
+        (60, 40)
     }
 
     /// Get the minimum content width for this breakpoint.

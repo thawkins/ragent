@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Unit tests for `masterfetch::cache` — `SQLite` WAL content cache
 //! (T-035, FR-018, NFR-003).
 //!

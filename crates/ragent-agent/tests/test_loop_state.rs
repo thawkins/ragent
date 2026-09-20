@@ -7,7 +7,6 @@
 
 // Pedantic-level warnings on collection-emptiness asserts are accepted in
 // this suite (same treatment as the pre-agentloop test files).
-#![allow(clippy::assert_is_empty)]
 
 use ragent_agent::session::loop_state::{LoopSpec, LoopTracker, StopCondition};
 

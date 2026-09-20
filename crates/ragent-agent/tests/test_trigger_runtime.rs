@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the trigger runtime (spec `piegap`, T-001).
 //!
 //! These tests verify the trigger runtime's deduplication and cycle

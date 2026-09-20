@@ -1388,6 +1388,7 @@ Type `/` in the input to open an autocomplete menu:
 | `/thinking auto|off|low|medium|high` | Switch reasoning level for the active model |
 | `/provider` | Change provider |
 | `/provider_reset` | Reset provider credentials |
+| `/queue [list\|clear\|next\|help]` | Inspect and control the message input queue |
 | `/quit` | Exit ragent |
 | `/system <prompt>` | Override system prompt |
 | `/prompt help\|primary [agent]\|subagent [agent]\|list\|<agent>` | Inspect the assembled agent system prompt (read-only, no LLM call) |
@@ -1565,6 +1566,7 @@ Notes:
 | `PageUp/PageDown` | Scroll messages |
 | `Ctrl+PageUp/Down` | Scroll log panel |
 | `Alt+C` | Toggle the live context-window panel |
+| `Alt+Q` | Open the queue-control menu (`Next` / `Stop`/`Resume` / `Clear` / `Show`) |
 | `Ctrl+C` | Abort / exit |
 
 ---
@@ -1764,6 +1766,29 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.113
+
+- **Input queue + ALT-Q queue-control menu** — the TUI input field stays
+  editable while the primary agent executes: each `Enter` appends the message
+  to a bounded FIFO queue (default 32, `input_queue_capacity` config, clamped
+  `1..=99`) with a two-digit zero-padded counter before the `> ` prompt, and the
+  oldest entry runs automatically at each turn boundary. `Alt+Q` opens a
+  four-row menu (`Next`, `Stop`/`Resume`, `Clear`, `Show`) navigated with
+  `Up`/`Down`/`Enter`; `Clear` opens a `Yes`/`No` confirmation (default `No`)
+  and `Show` opens a scrollable queue-entry panel where `Enter` moves an entry
+  toward the front and `Del` removes it. `/queue [list|clear|next|help]` exposes
+  the same queue. Slash, bang, and teammate-targeted sends keep the busy
+  refusal. Spec `inputqueue` complete (T-001..T-027); 234 new test attributes
+  across 19 new test files. See
+  [`docs/howtos/slashcommands/queue.md`](docs/howtos/slashcommands/queue.md).
+- **Code-quality pass (`/simplify all`)** — de-duplication and dead-code
+  removal across the inputqueue diff and the v1.0.109..v1.0.112 plugins/research
+  work, with no user-visible behaviour change.
+- **CI hygiene** — the non-existent `clippy::assert_is_empty` allow is removed
+  from 244 files and the full `cargo clippy --all-targets -D warnings` gate is
+  now clean (float-comparison, suboptimal-float-op, formatting-arg, underscore-
+  binding, and items-after-test-module fixes).
 
 ## Version 1.0.112
 

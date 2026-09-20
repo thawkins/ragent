@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! todo2tasks T-007: integration tests for the `task_create` tool
 //! (`TaskCreateTool`).
 //!

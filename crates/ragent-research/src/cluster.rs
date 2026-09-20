@@ -820,7 +820,6 @@ pub async fn write_concepts_md(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
 
     fn tmp_root() -> (tempfile::TempDir, ResearchName) {

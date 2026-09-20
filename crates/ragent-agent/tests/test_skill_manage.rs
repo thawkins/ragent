@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for the `skill_manage` tool (JCODEPLAN M8 T-071).
 
 use ragent_agent::event::EventBus;

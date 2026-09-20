@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Backward-compatibility verification for existing `codeindex_*` tools
 //! (spec graphCI, T-029, FR-006).
 //!

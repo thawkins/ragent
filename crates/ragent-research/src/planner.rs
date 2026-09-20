@@ -307,7 +307,6 @@ fn parse_llm_questions(text: &str, topic: &str) -> Option<Vec<LlmSubQuestion>> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
 
     #[tokio::test]

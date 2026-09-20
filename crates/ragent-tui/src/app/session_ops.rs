@@ -20,7 +20,7 @@ use ragent_tools_core::{Tool, ToolContext};
 use crate::app::state::{
     App, ContextAction, ContextPartitionSnapshot, FileMenuEntry, FileMenuState, LlmRequestStat,
     LlmStatsSummary, LogEntry, LogLevel, OutputViewState, OutputViewTarget, ProviderSetupStep,
-    ScreenMode, ScrollbarDragPane, SelectionPane, TextSelection, atomic_config_update,
+    QueuedInput, ScreenMode, ScrollbarDragPane, SelectionPane, TextSelection, atomic_config_update,
     is_image_path, percent_decode_path, save_clipboard_image_to_temp,
 };
 
@@ -880,6 +880,10 @@ impl App {
 
     /// Return whether user input is currently blocked (agent is processing,
     /// compression is running, or a post-compact send is pending).
+    ///
+    /// This is the "busy" gate: while a turn is executing a plain message is
+    /// still accepted (FR-002) but slash commands, bang commands, and
+    /// teammate-targeted messages are refused (FR-017).
     pub(crate) fn is_input_blocked(&self) -> bool {
         self.is_processing
             || self.compact_in_progress
@@ -887,9 +891,550 @@ impl App {
             || self.pending_send_after_compact.is_some()
     }
 
+    /// Return whether the input field is genuinely locked, as opposed to merely
+    /// busy because the primary agent is executing.
+    ///
+    /// While the primary agent executes the input field stays editable and
+    /// renders its unlocked border (FR-002, FR-011, FR-012). Input is only
+    /// locked when an overlay would swallow keystrokes (a modal dialog, picker,
+    /// or full-screen view) or while a compaction run owns the turn.
+    pub(crate) fn is_input_locked(&self) -> bool {
+        !self.permission_queue.is_empty()
+            || !self.question_queue.is_empty()
+            || self.provider_setup.is_some()
+            || self.mcp_discover.is_some()
+            || self.loop_setup.is_some()
+            || self.pending_forcecleanup.is_some()
+            || self.pending_rollback.is_some()
+            || self.plan_approval_pending.is_some()
+            || self.pending_memory_delete.is_some()
+            || self.pending_router_save.is_some()
+            || self.pending_stop_confirm
+            || self.output_view.is_some()
+            || self.memory_view.is_some()
+            || self.research_view.is_some()
+            || self.config_save_picker.is_some()
+            || self.history_picker.is_some()
+            || self.context_menu.is_some()
+            || self.show_shortcuts
+            || self.compact_in_progress
+            || self.auto_compact_in_progress
+            || self.pending_send_after_compact.is_some()
+            // The queue-control menu (ALT-Q) is a modal overlay that swallows
+            // every keystroke, so it must never let a character reach the input
+            // buffer (spec `inputqueue` FR-031). The per-key interception lives
+            // in `input::handle_key`; this entry keeps the guard layer and the
+            // locked-border render consistent with the other modals.
+            || self.queue_menu_open
+            // The `Clear the input queue?` confirmation dialog is likewise a modal
+            // overlay that swallows every keystroke (spec `inputqueue` FR-035).
+            || self.queue_clear_confirm_open
+            // The queue-entry panel (ALT-Q `Show` row) is a modal overlay too:
+            // every key is routed to it, so no character may reach the input
+            // buffer while it is open.
+            || self.queue_show_open
+    }
+
     /// Return the number of Unicode code points currently in the input buffer.
     pub fn input_len_chars(&self) -> usize {
         self.input.chars().count()
+    }
+
+    /// Return the number of messages currently waiting in the input queue
+    /// (spec `inputqueue` FR-001).
+    pub fn input_queue_len(&self) -> usize {
+        self.input_queue.len()
+    }
+
+    /// Labels for the four queue-control menu rows, in fixed order: `Next`,
+    /// `Stop`/`Resume`, `Clear`, `Show` (spec `inputqueue` FR-021, FR-023,
+    /// FR-026).
+    ///
+    /// The halt row reads `Stop` while a turn is in flight and `Resume` once it
+    /// has stopped (FR-026). The render path in `crate::layout` and the action
+    /// dispatch both read this one source, so the painted label can never
+    /// disagree with what selecting the row does.
+    pub fn queue_menu_labels(&self) -> [&'static str; 4] {
+        ["Next", self.queue_menu_halt_label(), "Clear", "Show"]
+    }
+
+    /// Whether the given queue-control menu row can be selected.
+    ///
+    /// Only the `Next` row is conditional: it is non-selectable while the input
+    /// queue is empty (FR-023). `Stop`/`Resume`, `Clear`, and `Show` are always
+    /// selectable, so the keyboard navigation skips only the dead `Next` row.
+    pub fn queue_menu_row_selectable(&self, row: usize) -> bool {
+        if row == crate::app::QUEUE_MENU_ROW_NEXT {
+            return self.input_queue_len() > 0;
+        }
+        row < crate::app::QUEUE_MENU_ROWS
+    }
+
+    /// Move the queue-control menu highlight up one row, skipping non-selectable
+    /// rows (spec `inputqueue` FR-023). A no-op at the top row.
+    pub fn queue_menu_move_up(&mut self) {
+        let mut row = self.queue_menu_selected;
+        while row > 0 {
+            row -= 1;
+            if self.queue_menu_row_selectable(row) {
+                self.queue_menu_selected = row;
+                self.needs_redraw = true;
+                return;
+            }
+        }
+    }
+
+    /// Move the queue-control menu highlight down one row, skipping
+    /// non-selectable rows (spec `inputqueue` FR-023). A no-op at the bottom row.
+    pub fn queue_menu_move_down(&mut self) {
+        let mut row = self.queue_menu_selected;
+        while row + 1 < crate::app::QUEUE_MENU_ROWS {
+            row += 1;
+            if self.queue_menu_row_selectable(row) {
+                self.queue_menu_selected = row;
+                self.needs_redraw = true;
+                return;
+            }
+        }
+    }
+
+    /// Close the queue-control menu and reset its highlight.
+    ///
+    /// The single place the menu's open flag and selection are cleared, so every
+    /// dismiss path (Esc, activating a row, or opening the entry panel) leaves
+    /// the same state (FR-022, FR-032).
+    pub(crate) fn close_queue_menu(&mut self) {
+        self.queue_menu_open = false;
+        self.queue_menu_selected = 0;
+    }
+
+    /// Activate the highlighted queue-control menu row (spec `inputqueue`
+    /// FR-024, FR-025, FR-027, FR-028, and the `Show` row).
+    ///
+    /// `Enter` dispatches to the row-specific action: `Next` runs the oldest
+    /// entry, the halt row stops or resumes the agent, `Clear` opens the
+    /// confirmation dialog, and `Show` opens the queue-entry panel. A
+    /// non-selectable row (the empty-queue `Next`) is a no-op, so a stray
+    /// `Enter` can never act on a dead row (FR-023).
+    pub fn queue_menu_activate_selected(&mut self) {
+        if !self.queue_menu_row_selectable(self.queue_menu_selected) {
+            return;
+        }
+        match self.queue_menu_selected {
+            crate::app::QUEUE_MENU_ROW_NEXT => self.queue_menu_select_next(),
+            crate::app::QUEUE_MENU_ROW_HALT => self.queue_menu_select_halt(),
+            crate::app::QUEUE_MENU_ROW_CLEAR => self.queue_menu_select_clear(),
+            crate::app::QUEUE_MENU_ROW_SHOW => self.queue_show_open_panel(),
+            _ => {}
+        }
+    }
+
+    /// Open the scrollable queue-entry panel (spec `inputqueue` `Show` row).
+    ///
+    /// Closes the queue-control menu and shows every queued entry oldest-first
+    /// so the user can reorder or delete entries without leaving the chat
+    /// screen. The queue itself, the input buffer, the staged attachments, and
+    /// the running turn are all left untouched; only `Esc` dismisses the panel.
+    pub fn queue_show_open_panel(&mut self) {
+        self.close_queue_menu();
+        self.queue_show_open = true;
+        self.queue_show_selected = 0;
+        self.needs_redraw = true;
+    }
+
+    /// Dismiss the queue-entry panel (spec `inputqueue` `Show` row).
+    ///
+    /// `Esc` is the only key that closes the panel; the highlighted index is
+    /// reset so the next open starts at the oldest entry.
+    pub fn queue_show_close(&mut self) {
+        self.queue_show_open = false;
+        self.queue_show_selected = 0;
+        self.needs_redraw = true;
+    }
+
+    /// Move the queue-entry panel highlight up one entry. A no-op at the first
+    /// entry. The panel is scrolled to keep the highlight visible by the render
+    /// pass, which keeps the selected entry on screen.
+    pub fn queue_show_move_up(&mut self) {
+        if self.queue_show_selected > 0 {
+            self.queue_show_selected -= 1;
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the queue-entry panel highlight down one entry. A no-op at the last
+    /// entry. The changed selection is painted on the next frame.
+    pub fn queue_show_move_down(&mut self) {
+        if self.queue_show_selected + 1 < self.input_queue.len() {
+            self.queue_show_selected += 1;
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the highlighted queue entry one step toward the front of the queue
+    /// (spec `inputqueue` `Show` row, `Enter`).
+    ///
+    /// The entry at `index` is swapped with the one at `index - 1` so it runs
+    /// sooner; a no-op at the front entry. The highlight follows the moved entry
+    /// so a second `Enter` advances it again. FIFO order is preserved for every
+    /// other entry.
+    pub fn queue_show_promote_selected(&mut self) {
+        let index = self.queue_show_selected;
+        if index == 0 || index >= self.input_queue.len() {
+            return;
+        }
+        self.input_queue.swap(index, index - 1);
+        self.queue_show_selected = index - 1;
+        self.needs_redraw = true;
+    }
+
+    /// Remove the highlighted queue entry (spec `inputqueue` `Show` row, `Del`).
+    ///
+    /// The entry is dropped from the queue; the highlight stays within range and
+    /// the queue counter repaints on the next frame. A no-op on an empty queue.
+    pub fn queue_show_delete_selected(&mut self) {
+        let index = self.queue_show_selected;
+        if index >= self.input_queue.len() {
+            return;
+        }
+        if let Some(entry) = self.input_queue.remove(index) {
+            let text = crate::app::helpers::truncate_to_char_boundary(&entry.text, 120);
+            self.push_log_no_agent(
+                LogLevel::Info,
+                format!("queue: deleted queued entry: {text}"),
+            );
+        }
+        self.queue_show_selected = self
+            .queue_show_selected
+            .min(self.input_queue.len().saturating_sub(1));
+        if self.input_queue.is_empty() {
+            // An empty queue has nothing left to show, so the panel closes
+            // itself (the counter also disappears).
+            self.queue_show_open = false;
+            self.queue_show_selected = 0;
+        }
+        self.needs_redraw = true;
+    }
+
+    /// The label for the queue-control menu's second row: `Stop` while a turn is
+    /// executing, `Resume` once the agent has stopped (spec `inputqueue` FR-026).
+    pub fn queue_menu_halt_label(&self) -> &'static str {
+        if self.is_input_blocked() {
+            "Stop"
+        } else {
+            "Resume"
+        }
+    }
+
+    /// Empty the input queue.
+    ///
+    /// Called wherever the TUI session is reset (session switch/resume, new
+    /// session creation, and process teardown) so a queued message never
+    /// crosses a session boundary (NFR-005). The queue is never persisted, so
+    /// no save is needed here.
+    pub fn clear_input_queue(&mut self) {
+        // A pending queue-control `Next` is meaningless once the queue is
+        // emptied, so drop it with the entries (FR-024).
+        self.queue_next_pending = false;
+        // The queue-entry panel has nothing left to list once the queue is
+        // emptied, so it closes with the entries.
+        self.queue_show_open = false;
+        self.queue_show_selected = 0;
+        if self.input_queue.is_empty() {
+            return;
+        }
+        self.input_queue.clear();
+        // The prompt's queue counter disappears once the queue is empty, so the
+        // change must be painted on the next frame (NFR-003).
+        self.needs_redraw = true;
+    }
+
+    /// Append a message to the input queue (spec `inputqueue` FR-005).
+    ///
+    /// Called when the user presses Enter with non-empty input while the
+    /// primary agent is executing. The entry is appended to the tail so
+    /// submission order is preserved (FR-001, FR-019); the input field only
+    /// loses its text on success. Entries are added to the input history at
+    /// submission time (FR-003) rather than when they are dispatched.
+    ///
+    /// Returns the untouched [`QueuedInput`] as `Err` when the queue is already
+    /// at capacity (FR-004): the submission is rejected, a status message
+    /// explains why, and the caller can restore the typed text and staged
+    /// attachments so the user does not lose the message. The capacity comes
+    /// from [`App::input_queue_capacity`] (FR-015).
+    ///
+    /// A successful enqueue also echoes a `queued (N in queue)` notice into the
+    /// log panel (FR-014), where `N` is the depth *after* the append.
+    pub(crate) fn enqueue_input(
+        &mut self,
+        text: String,
+        image_paths: Vec<std::path::PathBuf>,
+    ) -> Result<(), QueuedInput> {
+        if self.input_queue.len() >= self.input_queue_capacity {
+            self.status = format!(
+                "queue full (max {}) - wait for the current turn to finish",
+                self.input_queue_capacity
+            );
+            return Err(QueuedInput { text, image_paths });
+        }
+        // History is updated at entry time, before execution (FR-003).
+        self.add_to_history(text.clone());
+        self.input.clear();
+        self.input_cursor = 0;
+        self.history_index = None;
+        self.file_menu = None;
+        self.input_queue
+            .push_back(QueuedInput { text, image_paths });
+        // FR-014: echo the enqueue into the log panel with the post-enqueue depth.
+        self.push_log_no_agent(
+            LogLevel::Info,
+            format!("queued ({} in queue)", self.input_queue.len()),
+        );
+        // The counter renders the new length on the next frame (NFR-003).
+        self.needs_redraw = true;
+        Ok(())
+    }
+
+    /// Pop the oldest queued entry and dispatch it as the next user turn
+    /// (spec `inputqueue` FR-006, FR-007, FR-019).
+    ///
+    /// Called at the turn boundaries (`MessageEnd` with a non-cancelled finish
+    /// reason, and `AgentError`) once the finishing handler has cleared
+    /// `is_processing`. Entries are popped from the head so FIFO order is never
+    /// violated (FR-019) and the drain reuses [`App::dispatch_user_message`],
+    /// which spawns the turn asynchronously so the UI thread is not blocked
+    /// (NFR-004). The counter reflects the decremented length on the next frame
+    /// (FR-008).
+    ///
+    /// FR-016 (T-008): dispatch is guarded against processing/compaction
+    /// overlap. The queue is left untouched — deferring to the next safe turn
+    /// boundary — while the primary agent is still executing (`is_processing`)
+    /// or a compaction run owns the turn (`compact_in_progress`,
+    /// `auto_compact_in_progress`, or `pending_send_after_compact`). The check
+    /// lives here rather than in the callers so every drain path
+    /// (`MessageEnd`, `AgentError`, and the queue-control `Next` selection)
+    /// shares one boundary guard and no path can dispatch over a live turn.
+    ///
+    /// A dispatch runs when either the queue is non-empty (the ordinary
+    /// turn-boundary drain) or a queue-control `Next` selection is pending
+    /// (FR-024). The pending flag is consumed first, so `Next` fires exactly once
+    /// instead of re-arming at every later boundary. A `Next`-triggered dispatch
+    /// preserves whatever draft the user is editing, so selecting the row never
+    /// mutates the editable input buffer (FR-031).
+    pub fn advance_input_queue(&mut self) {
+        let next_pending = self.queue_next_pending;
+        self.queue_next_pending = false;
+        if self.session_id.is_none()
+            || self.is_processing
+            || self.compact_in_progress
+            || self.auto_compact_in_progress
+            || self.pending_send_after_compact.is_some()
+        {
+            // FR-030: a `Next` that cannot dispatch yet stays pending and is
+            // retried at the next safe turn boundary instead of being lost.
+            self.queue_next_pending = next_pending;
+            return;
+        }
+        if !next_pending && self.input_queue.is_empty() {
+            return;
+        }
+        let Some(entry) = self.input_queue.pop_front() else {
+            return;
+        };
+        // FR-008: the counter decrements, so the field must repaint next frame.
+        self.needs_redraw = true;
+        if next_pending {
+            // FR-031: a menu `Next` dispatch must not mutate the editable buffer,
+            // so snapshot the live draft and restore it once the queued entry has
+            // been handed to the (asynchronous) dispatch path.
+            let saved_input = std::mem::take(&mut self.input);
+            let saved_cursor = self.input_cursor;
+            let saved_anchor = self.kb_select_anchor;
+            self.dispatch_user_message(entry.text, entry.image_paths);
+            self.input = saved_input;
+            self.input_cursor = saved_cursor;
+            self.kb_select_anchor = saved_anchor;
+        } else {
+            self.dispatch_user_message(entry.text, entry.image_paths);
+        }
+    }
+
+    /// Select the queue-control menu's `Next` row (spec `inputqueue` FR-024,
+    /// FR-029, FR-030, NFR-006).
+    ///
+    /// Stops the running turn exactly as `InputAction::CancelAgent` does (FR-024)
+    /// and dispatches the oldest queued entry. A live turn cannot be dispatched
+    /// over (FR-016), so while the agent is executing the dispatch is *deferred*:
+    /// the selection is recorded in [`App::queue_next_pending`] and runs at the
+    /// turn boundary the cancel opens, never overlapping the running turn (FR-029,
+    /// FR-030). The deferral reuses the shared asynchronous dispatch path, so the
+    /// UI thread is never blocked (NFR-006). The menu closes and the change paints
+    /// on the next frame.
+    ///
+    /// When no turn is executing there is nothing to cancel, so the oldest entry
+    /// dispatches immediately. Selecting `Next` never mutates the input buffer or
+    /// the staged attachments (FR-031).
+    ///
+    /// Public so the T-019 integration tests can drive the row directly, mirroring
+    /// [`App::queue_menu_select_halt`]. The Up/Down/Enter menu key handling that
+    /// invokes it is added by the menu key-handling task; it is not part of this
+    /// action.
+    pub fn queue_menu_select_next(&mut self) {
+        if self.input_queue.is_empty() {
+            // FR-023: the `Next` row is non-selectable with an empty queue, so
+            // this is only reachable defensively; report and close.
+            self.status = "queue: nothing to run — the queue is empty".to_string();
+            self.close_queue_menu();
+            self.needs_redraw = true;
+            return;
+        }
+        // FR-030: never dispatch over a compaction run or a post-compact send.
+        // There is no live turn to cancel in that window, so refuse with a status
+        // message rather than deferring an entry that no boundary would pick up.
+        if self.compact_in_progress
+            || self.auto_compact_in_progress
+            || self.pending_send_after_compact.is_some()
+        {
+            self.status = "queue: next deferred — compaction in progress".to_string();
+            self.push_log_no_agent(
+                LogLevel::Warn,
+                "queue: Next deferred — compaction owns the turn (FR-030)".to_string(),
+            );
+            self.close_queue_menu();
+            self.needs_redraw = true;
+            return;
+        }
+        if self.is_processing {
+            // FR-024/FR-029: stop the running turn exactly like `CancelAgent`.
+            // The queue is untouched — halt never advances it — so the oldest
+            // entry survives into the resumed turn.
+            self.halt_turn_like_cancel_agent();
+            // FR-030: the live turn cannot be dispatched over, so defer the run
+            // of the oldest entry to the turn boundary the cancel opens.
+            self.queue_next_pending = true;
+            self.status = "queue: stopping turn — running the next queued entry".to_string();
+            self.push_log_no_agent(
+                LogLevel::Info,
+                "queue: Next — halting turn, dispatching oldest queued entry at the boundary"
+                    .to_string(),
+            );
+        } else {
+            // Nothing to stop, so the oldest entry runs straight away on the
+            // shared asynchronous path (FR-024, NFR-006). The same pending flag
+            // drives it so the editable draft is preserved (FR-031).
+            let text = self
+                .input_queue
+                .front()
+                .map(|e| crate::app::helpers::truncate_to_char_boundary(&e.text, 120))
+                .unwrap_or_default();
+            self.push_log_no_agent(
+                LogLevel::Info,
+                format!("queue: Next — dispatching oldest queued entry: {text}"),
+            );
+            self.queue_next_pending = true;
+            self.advance_input_queue();
+        }
+        self.close_queue_menu();
+        self.needs_redraw = true;
+    }
+
+    /// Select the queue-control menu's halt row (spec `inputqueue` FR-025,
+    /// FR-026, FR-027, FR-029, NFR-008).
+    ///
+    /// While a turn is executing (`is_input_blocked`) this performs exactly the
+    /// `InputAction::CancelAgent` behaviour and leaves the queue untouched, so
+    /// halting never advances it (FR-025, FR-029). Once the agent has stopped the
+    /// same row is labelled `Resume` (FR-026) and selecting it resumes the
+    /// interrupted work instead (FR-027). Either way the menu closes and the
+    /// change paints on the next frame (NFR-008).
+    ///
+    /// Public so the T-019 integration tests can drive the row directly, mirroring
+    /// [`App::advance_input_queue`]. The Up/Down/Enter menu key handling that
+    /// invokes it is added by the menu key-handling task; it is not part of this
+    /// action.
+    pub fn queue_menu_select_halt(&mut self) {
+        if self.is_input_blocked() {
+            // The halt row performs exactly the `CancelAgent` behaviour.
+            self.halt_turn_like_cancel_agent();
+        } else {
+            // FR-027: the agent is already stopped, so the row resumes the
+            // interrupted work instead of halting.
+            if !self.agent_halted {
+                self.status = "Nothing to resume — agent was not halted".to_string();
+            } else if !self.dispatch_resume_continuation() {
+                self.status = "No active session".to_string();
+            }
+        }
+        self.close_queue_menu();
+        self.needs_redraw = true;
+    }
+
+    /// Halt the running turn exactly as `InputAction::CancelAgent` does: ask a
+    /// live govcreate run to cancel at its next stage boundary, then set the
+    /// turn cancel flag. Shared by the queue-control `Next` and halt rows so the
+    /// two stay in step with the cancel path.
+    fn halt_turn_like_cancel_agent(&mut self) {
+        if self.govcreate_run_active() {
+            self.poll_govcreate_cancel();
+        }
+        self.halt_running_agent();
+    }
+
+    /// Resume a halted agent: clear the halted flag, append the continuation
+    /// user turn, and dispatch it asynchronously on the shared processor (the
+    /// behaviour `/resume` and the queue-control `Resume` row both present).
+    ///
+    /// Returns `false` without side effects when there is no active session, so
+    /// the caller can report `No active session`.
+    pub(crate) fn dispatch_resume_continuation(&mut self) -> bool {
+        let Some(sid) = self.session_id.clone() else {
+            return false;
+        };
+        self.agent_halted = false;
+        let resume_text = "You were previously interrupted by the user. Continue the task from where you left off.";
+        self.messages.push(Message::user_text(&sid, resume_text));
+        self.set_status_working("processing");
+        self.push_log_no_agent(LogLevel::Info, "Resuming halted agent".to_string());
+
+        let mut agent = self.agent_info.clone();
+        self.apply_selected_model_and_thinking(&mut agent);
+
+        let processor = self.session_processor.clone();
+        let flag = Arc::new(AtomicBool::new(false));
+        self.cancel_flag = Some(flag.clone());
+        tokio::spawn(async move {
+            if let Err(e) = processor
+                .process_message(&sid, resume_text, &agent, flag)
+                .await
+            {
+                tracing::debug!(error = %e, "Failed to resume agent");
+            }
+        });
+        true
+    }
+
+    /// Select the queue-control menu's `Clear` row (spec `inputqueue` FR-028,
+    /// FR-033, NFR-008).
+    ///
+    /// Selecting `Clear` never empties the queue directly: it closes the menu and
+    /// opens the `Clear the input queue?` confirmation dialog instead (FR-033).
+    /// The queue is emptied only after the user confirms with `Yes` (FR-028,
+    /// FR-037), so this action deliberately leaves the queue, the input buffer,
+    /// the staged attachments, and the running turn untouched. The dialog paints
+    /// on the next frame because the redraw flag is set (NFR-008).
+    ///
+    /// The dialog's default selection is reset to `No` every time it opens so a
+    /// stray `Enter` cannot empty the queue (FR-034).
+    ///
+    /// Public so the T-019 integration tests can drive the row directly, mirroring
+    /// [`App::queue_menu_select_halt`]. The Up/Down/Enter menu key handling that
+    /// invokes it is added by the menu key-handling task; it is not part of this
+    /// action.
+    pub fn queue_menu_select_clear(&mut self) {
+        self.close_queue_menu();
+        self.queue_clear_confirm_open = true;
+        self.queue_clear_confirm_selected = crate::app::QUEUE_CLEAR_CONFIRM_NO;
+        self.needs_redraw = true;
     }
 
     pub(crate) fn assert_input_cursor_invariant(&self) {
@@ -1012,6 +1557,7 @@ impl App {
             "thinking" => Some("[auto|off|low|medium|high]".to_string()),
             "mouse" => Some("[on|off|help]".to_string()),
             "status" => Some("[clear]".to_string()),
+            "queue" => Some("[list|clear|next|help]".to_string()),
             "alog" => Some("[help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes]".to_string()),
             "toolchain" => Some("[help|list [lang] [--json]]".to_string()),
             "prompt" => Some("[help|primary [agent]|subagent [agent]|list|<agent>]".to_string()),
@@ -1123,15 +1669,21 @@ impl App {
         let end_disp_exclusive = end_row.saturating_sub(inner_y) as usize * inner_w
             + end_col.saturating_sub(inner_x) as usize
             + 1;
-        let display_len = self.input_len_chars() + 2; // "> " prefix
+        // The prompt prefix widens by two columns while the queue counter is
+        // shown, so selection columns only line up with the input text when the
+        // counter width is subtracted too (spec `inputqueue` NFR-002, FR-020).
+        let prefix_len = crate::layout::input_prompt_prefix_len(self.input_queue_len());
+        let display_len = self.input_len_chars() + prefix_len;
         let start_disp = start_disp.min(display_len);
         let end_disp_exclusive = end_disp_exclusive.min(display_len);
         if end_disp_exclusive <= start_disp {
             return None;
         }
-        let start_input = start_disp.saturating_sub(2).min(self.input_len_chars());
+        let start_input = start_disp
+            .saturating_sub(prefix_len)
+            .min(self.input_len_chars());
         let end_input = end_disp_exclusive
-            .saturating_sub(2)
+            .saturating_sub(prefix_len)
             .min(self.input_len_chars());
         if end_input <= start_input {
             None
@@ -1769,6 +2321,8 @@ impl App {
         match self.session_processor.session_manager.create_session(dir) {
             Ok(session) => {
                 self.session_id = Some(session.id.clone());
+                // A fresh session starts with an empty queue (NFR-005).
+                self.clear_input_queue();
                 // Map the primary session's short_sid to the current agent name
                 let short_sid = short_session_id(&session.id);
                 self.sid_to_display_name
@@ -1849,6 +2403,10 @@ impl App {
         let msg_count = messages.len();
 
         self.session_id = Some(session_id.to_string());
+        // Switching or resuming a session drops any queued messages from the
+        // previous session (NFR-005: the queue is not persisted and does not
+        // cross a session boundary).
+        self.clear_input_queue();
         // Cache the resumed session's creation timestamp for the teams panel
         // elapsed-time display (FR-009: avoids per-frame storage reads).
         self.lead_session_created_at = chrono::DateTime::parse_from_rfc3339(&session.created_at)

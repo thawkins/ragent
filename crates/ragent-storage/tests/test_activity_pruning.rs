@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for optional context pruning integration with the activity log
 //! (maka spec T-018, FR-009 + FR-015).
 //!

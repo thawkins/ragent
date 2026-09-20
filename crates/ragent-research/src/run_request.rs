@@ -492,7 +492,6 @@ pub fn build_session_config(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::session::DEFAULT_WEB_PHASE_TIMEOUT_SECS;
 

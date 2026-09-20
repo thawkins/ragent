@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for `GraphEdge`, `EdgeKind`, and `Confidence` types (spec graphCI, T-002).
 
 use ragent_codeindex::store::IndexStore;

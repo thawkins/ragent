@@ -1,4 +1,4 @@
-#![allow(clippy::assert_is_empty)]
+#![allow(clippy::float_cmp)] // deterministic f64 scores compare exactly in these unit tests
 //! External tests for `tests` from `crates/ragent-tools-extended/src/memory/embedding.rs`
 //!
 //! Relocated from the inline `#[cfg(test)]` module.

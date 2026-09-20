@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for Ollama (OpenAI-compatible) streaming tool-call handling.
 
 use std::collections::HashMap;

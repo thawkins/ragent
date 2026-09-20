@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for `ragent-storage` discovered-models cache.
 //!
 //! Relocated from the inline `#[cfg(test)]` module in `src/storage.rs`

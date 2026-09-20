@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration test for the pre-send compaction wiring (T-008, FR-003).
 //!
 //! Builds a `SessionProcessor` with a mock provider whose model has a small

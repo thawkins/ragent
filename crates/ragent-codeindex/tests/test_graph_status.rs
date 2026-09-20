@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for `CodeIndex::graph_status()` (spec graphCI).
 //!
 //! Verifies that the graph status aggregation used by the

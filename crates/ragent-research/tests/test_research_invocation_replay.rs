@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for `/research update` invocation replay.
 //!
 //! The recorded frontmatter `invocation` string is written in three

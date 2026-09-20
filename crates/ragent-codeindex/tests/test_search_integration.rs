@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! External tests for `integration_tests` from `crates/ragent-codeindex/src/search.rs`
 //!
 //! Relocated from the inline `#[cfg(test)]` module.

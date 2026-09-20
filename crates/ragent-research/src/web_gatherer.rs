@@ -3099,7 +3099,6 @@ fn web_body_path(index: usize) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::source_vault::{NewVaultSource, SourceVault};
     use std::sync::Mutex;

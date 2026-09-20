@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! End-to-end integration tests for `ragent-research` (T-052).
 //!
 //! Exercises the full create → list → show → search → delete flow against a

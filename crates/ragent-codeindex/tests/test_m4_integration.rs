@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 #![allow(missing_docs)]
 
 /// Integration tests for Milestone 4: background worker, watcher, and watch session.

@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `Arc<str>` tool-result content path
 //! (`AgentPerf` T-008 / FR-013).
 //!

@@ -801,6 +801,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Reset the current provider and remove stored credentials",
     },
     SlashCommandDef {
+        trigger: "queue",
+        description: "Inspect the message input queue: /queue [list|clear|next|help]",
+    },
+    SlashCommandDef {
         trigger: "quit",
         description: "Exit ragent",
     },
@@ -1274,6 +1278,12 @@ pub struct InputRenderCache {
     pub cursor: usize,
     /// Keyboard-selection range the cached rows were built with.
     pub selection: Option<(usize, usize)>,
+    /// Input-queue length the cached rows were built for (spec `inputqueue`).
+    ///
+    /// The prompt gains a two-digit queue counter when the queue is non-empty,
+    /// so the cached rows, height, and cursor position depend on the queue
+    /// length and must be rebuilt whenever it changes (FR-008, NFR-002).
+    pub queue_len: usize,
     /// Inner width the cached rows were wrapped at.
     pub width: u16,
     /// Wrapped styled rows (one per display row).
@@ -1348,6 +1358,16 @@ pub struct QuestionRequest {
     pub question: String,
     /// Optional multiple-choice options.
     pub options: Vec<String>,
+}
+
+/// One queued user message: the text plus any image attachments staged when the
+/// message was submitted (spec `inputqueue` FR-001).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct QueuedInput {
+    /// The message text as typed by the user.
+    pub text: String,
+    /// Image files staged as attachments at submission time (may be empty).
+    pub image_paths: Vec<std::path::PathBuf>,
 }
 
 /// Core TUI application state.
@@ -1504,6 +1524,62 @@ pub struct App {
     pub history_index: Option<usize>,
     /// Saved in-progress input while browsing history.
     pub history_draft: String,
+    /// FIFO queue of messages submitted while the primary agent is executing
+    /// (spec `inputqueue` FR-001): oldest entry first, bounded to
+    /// [`MAX_INPUT_QUEUE`] entries (FR-004). Cleared whenever the session is
+    /// reset and never persisted to disk (NFR-005).
+    pub input_queue: VecDeque<QueuedInput>,
+    /// Maximum number of entries the input queue may hold, resolved from the
+    /// `input_queue_capacity` config field at startup and clamped to `1..=99`
+    /// (spec `inputqueue` FR-015). Falls back to [`MAX_INPUT_QUEUE`].
+    pub input_queue_capacity: usize,
+    /// Whether the queue-control menu overlay (ALT-Q) is open (spec `inputqueue`
+    /// FR-021). While open it renders the `Next` / `Stop` / `Clear` / `Show` menu
+    /// and navigates with Up/Down/Enter; the input buffer, staged attachments,
+    /// and running turn are left untouched (FR-022).
+    pub queue_menu_open: bool,
+    /// Selected row index within the queue-control menu: `0` = `Next`,
+    /// `1` = `Stop`/`Resume`, `2` = `Clear`, `3` = `Show` (spec `inputqueue`
+    /// FR-021; see [`QUEUE_MENU_ROW_NEXT`] and friends).
+    pub queue_menu_selected: usize,
+    /// Whether a queue-control `Next` selection is waiting to dispatch the oldest
+    /// queued entry at the next turn boundary (spec `inputqueue` FR-024).
+    ///
+    /// A live turn cannot be dispatched over (FR-016), so selecting `Next` while
+    /// the agent is executing cancels the turn and defers the dispatch here. The
+    /// first turn boundary that can act consumes the flag and runs the oldest
+    /// entry, which is why it fires exactly once. Cleared on session reset
+    /// (NFR-005).
+    pub queue_next_pending: bool,
+    /// Cached area of the queue-control menu overlay (set during render). Kept
+    /// in [`Rect::default`] while the menu is closed.
+    pub queue_menu_area: Rect,
+    /// Whether the scrollable queue-entry panel (opened by the queue-control
+    /// menu's `Show` row) is displayed. While open it lists every queued entry
+    /// oldest-first so the user can reorder or delete entries without leaving
+    /// the chat screen; only `Esc` dismisses it.
+    pub queue_show_open: bool,
+    /// Highlighted entry index within the queue-entry panel. Clamped to the
+    /// current queue length when displayed; reset to `0` every time the panel
+    /// opens and when entries are removed.
+    pub queue_show_selected: usize,
+    /// Cached area of the queue-entry panel (set during render). Kept in
+    /// [`Rect::default`] while the panel is closed.
+    pub queue_show_area: Rect,
+    /// Whether the `Clear the input queue?` confirmation dialog (opened by the
+    /// queue-control menu's `Clear` row) is displayed (spec `inputqueue` FR-033).
+    /// The queue is left untouched while it is open; it is emptied only after the
+    /// user confirms with `Yes` (FR-037).
+    pub queue_clear_confirm_open: bool,
+    /// Selected option index within the `Clear the input queue?` confirmation
+    /// dialog: [`QUEUE_CLEAR_CONFIRM_YES`] (`Yes`) or [`QUEUE_CLEAR_CONFIRM_NO`]
+    /// (`No`) (spec `inputqueue` FR-033). Initialised to `No` and reset to it
+    /// every time the dialog opens so a stray `Enter` cannot empty the queue
+    /// (FR-034).
+    pub queue_clear_confirm_selected: usize,
+    /// Cached area of the `Clear the input queue?` confirmation dialog (set
+    /// during render). Kept in [`Rect::default`] while the dialog is closed.
+    pub queue_clear_confirm_area: Rect,
     /// Cursor position (character index) within the input line.
     pub input_cursor: usize,
     /// Keyboard selection anchor (character index). When `Some(n)`, the region
@@ -2828,6 +2904,44 @@ pub const RUN_COST_BANNER_EXPIRY_SECS: u64 = 15;
 /// Grace period (in milliseconds) before a slash-command status auto-clears to
 /// `"ready"`. Long enough to read the status, short enough to feel responsive.
 pub const STATUS_EXPIRY_MS: u64 = 2000;
+
+/// Default maximum number of entries the message input queue may hold
+/// (FR-004, FR-015).
+///
+/// Submissions beyond this limit are rejected with a status message rather
+/// than silently dropped. The cap can be overridden by the
+/// `input_queue_capacity` config field (clamped to `1..=99`); this constant
+/// supplies the fallback default and aliases the canonical
+/// [`ragent_config::DEFAULT_INPUT_QUEUE_CAPACITY`]. The counter is zero-padded
+/// to two digits, so the default of 32 keeps the rendered prefix comfortably
+/// within `99`.
+pub const MAX_INPUT_QUEUE: usize = ragent_config::DEFAULT_INPUT_QUEUE_CAPACITY;
+
+/// Index of the `Yes` option in the `Clear the input queue?` confirmation dialog
+/// (spec `inputqueue` FR-033).
+pub const QUEUE_CLEAR_CONFIRM_YES: usize = 0;
+
+/// Index of the `No` option in the `Clear the input queue?` confirmation dialog.
+/// `No` is the default selection so pressing `Enter` without changing the
+/// selection does not empty the queue (spec `inputqueue` FR-034).
+pub const QUEUE_CLEAR_CONFIRM_NO: usize = 1;
+
+/// Row index of the `Next` option in the queue-control menu (spec `inputqueue`
+/// FR-021).
+pub const QUEUE_MENU_ROW_NEXT: usize = 0;
+
+/// Row index of the `Stop`/`Resume` option in the queue-control menu.
+pub const QUEUE_MENU_ROW_HALT: usize = 1;
+
+/// Row index of the `Clear` option in the queue-control menu.
+pub const QUEUE_MENU_ROW_CLEAR: usize = 2;
+
+/// Row index of the `Show` option in the queue-control menu. Selecting it opens
+/// the scrollable queue-entry panel.
+pub const QUEUE_MENU_ROW_SHOW: usize = 3;
+
+/// Number of rows the queue-control menu presents.
+pub const QUEUE_MENU_ROWS: usize = 4;
 
 /// Serialise history entries to a newline-separated string.
 ///

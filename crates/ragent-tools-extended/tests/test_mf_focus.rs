@@ -1,4 +1,4 @@
-#![allow(clippy::assert_is_empty)]
+#![allow(clippy::float_cmp)] // deterministic f64 scores compare exactly in these unit tests
 //! Integration tests for `masterfetch::focus` — BM25 query-focused content
 //! filtering (T-009 / T-034, FR-004, NFR-003).
 //!

@@ -1,3 +1,4 @@
+#![allow(clippy::float_cmp)] // deterministic f64 scores compare exactly in these unit tests
 //! Inline tests for router_classifier (M8/T8.1).
 //! Compiled as a submodule via #[path], super::* resolves to router_classifier.
 

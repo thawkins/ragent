@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! External integration tests for the code-index SQLite store.
 
 use chrono::Utc;

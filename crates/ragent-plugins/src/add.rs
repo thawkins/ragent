@@ -216,8 +216,7 @@ fn add_inner(source: &str, workdir: &Path, staging: &Path) -> Result<Staging, Ad
     if source.starts_with("http://") {
         return Err(AddError::NotHttps(source.to_string()));
     }
-    if let Some(rest) = source.strip_prefix("https://") {
-        let _ = rest;
+    if source.strip_prefix("https://").is_some() {
         return download_and_extract(source, staging).map(Staging::Extracted);
     }
     if source.contains("://") {
@@ -528,10 +527,11 @@ fn cleanup_staging(staged: &Staging, staging_root: &Path) {
     let _ = remove_if_empty(staging_root);
 }
 
+/// Remove the staging directory, ignoring "not empty" (the caller only uses
+/// this once the staged contents have been moved or copied out).
 fn remove_if_empty(dir: &Path) -> std::io::Result<()> {
-    match std::fs::remove_dir(dir) {
-        Ok(()) | Err(_) => Ok(()),
-    }
+    let _ = std::fs::remove_dir(dir);
+    Ok(())
 }
 
 fn io_err(e: std::io::Error) -> AddError {

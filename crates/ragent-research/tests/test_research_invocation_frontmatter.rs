@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for the `invocation` frontmatter field (FR: verbatim replay).
 //!
 //! Every research run records the exact front-end invocation (CLI command,

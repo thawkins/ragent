@@ -583,6 +583,20 @@ impl App {
                 // completion paths. Consume the flag so the stale value cannot
                 // leak into a later turn-end.
                 self.auto_compact_in_progress = false;
+
+                // FR-006/FR-019: after a non-cancelled turn the oldest queued
+                // message becomes the next user turn (FIFO). A cancelled turn
+                // retains the queue (FR-018), so the drain is skipped then; it
+                // is also a no-op while compaction or a run still owns the turn
+                // (FR-016), deferring to the next boundary.
+                //
+                // A queue-control `Next` selection (FR-024) cancels the turn
+                // precisely so the oldest entry can run, so it forces the drain at
+                // the very boundary its own cancel opened — otherwise the deferred
+                // run would never fire on the cancelled path.
+                if *reason != FinishReason::Cancelled || self.queue_next_pending {
+                    self.advance_input_queue();
+                }
             }
             Event::PermissionRequested {
                 ref session_id,
@@ -931,6 +945,12 @@ impl App {
                 let summary = summarise_error(error);
                 self.status = format!("error: {}", summary);
                 self.append_assistant_text(&format!("[warn] {}", summary));
+                // FR-007/FR-018: an errored turn must not strand the queue.
+                // Every processing/compaction guard the drain checks has just
+                // been cleared above, so the oldest entry becomes the next user
+                // turn via the shared asynchronous dispatch path; a failed turn
+                // never discards the remaining entries.
+                self.advance_input_queue();
             }
             Event::TokenUsage {
                 ref session_id,

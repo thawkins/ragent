@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Backward-compatibility tests for FR-018.
 //!
 //! Verifies that existing spec directories containing only `SPEC.md` and

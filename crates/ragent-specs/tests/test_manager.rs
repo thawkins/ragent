@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for the spec manager: filters, sorting, and status transitions.
 
 use ragent_specs::manager::{SortBy, SpecFilter, SpecManager, is_valid_transition};

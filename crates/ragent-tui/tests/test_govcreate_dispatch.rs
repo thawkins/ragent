@@ -147,7 +147,7 @@ fn test_spec_help_govcreate_row_keeps_positionals_in_command_column() {
     let header = body
         .lines()
         .find(|l| l.contains("Command") && l.contains("Arguments"))
-        .expect("help table header: {body}");
+        .unwrap_or_else(|| panic!("help table header: {body}"));
     assert_eq!(header.matches('|').count(), 4, "three columns: {header}");
 
     // Identify the govcreate row (the multi-line block that mentions
@@ -178,7 +178,7 @@ fn test_spec_help_govcreate_row_keeps_positionals_in_command_column() {
     let first_data_line = row_text
         .lines()
         .find(|l| l.starts_with('|') && l.contains("/spec govcreate") && l.contains("<specid>"))
-        .expect("first govcreate row line: {row_text}");
+        .unwrap_or_else(|| panic!("first govcreate row line: {row_text}"));
     let cells: Vec<&str> = first_data_line.split('|').skip(1).collect();
     assert!(cells.len() >= 3, "row line has 3 cells: {first_data_line}");
     let (col1, col2, col3) = (cells[0].trim(), cells[1].trim(), cells[2].trim());
@@ -204,7 +204,7 @@ fn test_spec_help_govcreate_row_keeps_positionals_in_command_column() {
         .find(|l| {
             l.starts_with('|') && !l.contains("/spec govcreate") && l.contains("<content-ref>")
         })
-        .expect("content-ref continuation line: {row_text}");
+        .unwrap_or_else(|| panic!("content-ref continuation line: {row_text}"));
     let cells2: Vec<&str> = second.split('|').skip(1).collect();
     assert!(
         cells2[0].trim().contains("<content-ref>"),
@@ -219,7 +219,7 @@ fn test_spec_help_govcreate_row_keeps_positionals_in_command_column() {
         .find(|l| {
             l.starts_with('|') && l.contains("<target-folder>") && !l.contains("<content-ref>")
         })
-        .expect("target-folder line: {row_text}");
+        .unwrap_or_else(|| panic!("target-folder line: {row_text}"));
     let cells3: Vec<&str> = third.split('|').skip(1).collect();
     assert!(
         cells3[0].trim().contains("<target-folder>"),

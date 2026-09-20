@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! todo2tasks T-005: tests for cycle detection in the task dependency
 //! DAG (`detect_cycle`).
 //!

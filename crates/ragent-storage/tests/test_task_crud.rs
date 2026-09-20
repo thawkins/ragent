@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! todo2tasks T-003: tests for the new Task CRUD storage methods
 //! (`create_task`, `get_task`, `list_tasks`, `update_task`).
 //!

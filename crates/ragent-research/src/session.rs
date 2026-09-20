@@ -3874,7 +3874,6 @@ use topic::{clean_site_title, derive_topic_from_url_body};
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::local_gatherer::{GrepMatch, LocalTool};
     use crate::web_gatherer::{

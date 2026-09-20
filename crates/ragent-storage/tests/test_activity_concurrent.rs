@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for event log consistency validation on resume (maka spec T-017,
 //! FR-011).
 //!

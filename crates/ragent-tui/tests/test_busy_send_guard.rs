@@ -1,4 +1,9 @@
-//! Regression tests for blocking new prompt submission while the app is busy.
+//! Tests for how the input field behaves while the primary agent is busy.
+//!
+//! Spec `inputqueue` (FR-002, FR-011, FR-012, FR-017) relaxes the old guard so a
+//! plain message is still accepted while a turn is executing, while slash
+//! commands, bang commands, and teammate-targeted messages keep their busy
+//! behaviour and are never queued.
 
 use std::sync::Arc;
 
@@ -16,16 +21,21 @@ use ragent_tui::{
 mod support;
 
 #[test]
-fn test_enter_is_ignored_while_processing() {
+fn test_enter_submits_plain_message_while_processing() {
     let mut app = support::make_app();
     app.is_processing = true;
     app.input = "hello".to_string();
 
     let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    assert!(action.is_none(), "busy app should not emit a send action");
-    assert_eq!(app.input, "hello");
-    assert_eq!(app.status, "busy - wait for the current turn to finish");
+    match action {
+        Some(InputAction::SendMessage(text)) => assert_eq!(text, "hello"),
+        _ => panic!("expected SendMessage action while busy"),
+    }
+    assert_ne!(
+        app.status, "busy - wait for the current turn to finish",
+        "a plain message must not be rejected while the agent executes"
+    );
 }
 
 #[test]
@@ -42,7 +52,7 @@ fn test_enter_still_submits_when_idle() {
 }
 
 #[test]
-fn test_plain_char_is_ignored_while_processing() {
+fn test_plain_char_is_accepted_while_processing() {
     let mut app = support::make_app();
     app.is_processing = true;
     app.input = "draft".to_string();
@@ -52,11 +62,54 @@ fn test_plain_char_is_ignored_while_processing() {
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
     );
 
+    assert!(action.is_none(), "typing a character emits no action");
+    assert_eq!(
+        app.input, "sdraft",
+        "the input field stays editable while the agent executes"
+    );
+    assert_ne!(
+        app.status, "busy - wait for the current turn to finish",
+        "typing must not be rejected while the agent executes"
+    );
+}
+
+#[test]
+fn test_slash_command_is_refused_while_processing() {
+    let mut app = support::make_app();
+    app.is_processing = true;
+    app.input = "/status".to_string();
+
+    let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(action.is_none(), "slash commands keep their busy guard");
+    assert_eq!(app.status, "busy - wait for the current turn to finish");
+}
+
+#[test]
+fn test_bang_command_is_refused_while_processing() {
+    let mut app = support::make_app();
+    app.is_processing = true;
+    app.input = "! ls -la".to_string();
+
+    let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(action.is_none(), "bang commands keep their busy guard");
+    assert_eq!(app.status, "busy - wait for the current turn to finish");
+}
+
+#[test]
+fn test_teammate_targeted_message_is_refused_while_processing() {
+    let mut app = support::make_app();
+    app.is_processing = true;
+    app.focused_teammate = Some("teammate-1".to_string());
+    app.input = "hello teammate".to_string();
+
+    let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
     assert!(
         action.is_none(),
-        "busy app should not accept plain text input"
+        "teammate-targeted messages keep their busy guard"
     );
-    assert_eq!(app.input, "draft");
     assert_eq!(app.status, "busy - wait for the current turn to finish");
 }
 
@@ -130,9 +183,25 @@ fn test_input_border_is_white_when_idle() {
 }
 
 #[test]
-fn test_input_border_is_red_when_busy() {
+fn test_input_border_stays_white_while_processing() {
     let mut app = support::make_app();
     app.is_processing = true;
+
+    let color = render_and_get_input_border_color(&mut app);
+
+    assert_eq!(
+        color,
+        Color::White,
+        "the input border stays unlocked while the agent executes (FR-011)"
+    );
+}
+
+#[test]
+fn test_input_border_is_red_when_a_modal_is_open() {
+    let mut app = support::make_app();
+    app.is_processing = true;
+    // An overlay that swallows keystrokes genuinely locks the input field.
+    app.pending_stop_confirm = true;
 
     let color = render_and_get_input_border_color(&mut app);
 

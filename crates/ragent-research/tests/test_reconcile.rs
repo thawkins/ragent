@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for cross-locus reconcile and source tensions (T-009).
 //!
 //! Migrated from `crates/ragent-research/src/reconcile.rs` inline tests

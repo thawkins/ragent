@@ -383,7 +383,6 @@ fn is_weak_clause(clause: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
 
     #[test]

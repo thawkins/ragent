@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for the shared [`ResearchRunRequest`] / [`build_session_config`] builder
 //! (RESEARCHPLAN.md Phase 4 — R-001/R-032 convergence).
 //!

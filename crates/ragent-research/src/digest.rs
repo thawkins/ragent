@@ -422,7 +422,6 @@ fn summary_of_claims(claims: &[&DigestClaim]) -> String {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::contradiction::ContradictionGraph;
     use std::path::PathBuf;

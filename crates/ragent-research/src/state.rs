@@ -350,7 +350,6 @@ fn same_source(left: &Source, right: &Source) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::source::{LocalSourceKind, Source};
     use chrono::Utc;

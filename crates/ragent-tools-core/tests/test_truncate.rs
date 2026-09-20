@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for `ragent-tools-core` content truncation helpers.
 //!
 //! Relocated from the inline `#[cfg(test)]` module in `src/truncate.rs`

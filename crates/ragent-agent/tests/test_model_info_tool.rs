@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `model_info` tool.
 
 use ragent_agent::agent::ModelRef;

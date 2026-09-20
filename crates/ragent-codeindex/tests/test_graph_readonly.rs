@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Verification test: existing SQLite tables are read-only by the graph layer
 //! (spec graphCI, T-030, FR-025).
 //!

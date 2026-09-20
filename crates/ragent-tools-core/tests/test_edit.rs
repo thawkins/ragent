@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for `ragent-tools-core` edit helpers.
 //!
 //! Relocated from the inline `#[cfg(test)]` module in `src/edit.rs`

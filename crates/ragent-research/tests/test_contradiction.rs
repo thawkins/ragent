@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the contradiction-graph builder (T-007).
 //!
 //! Migrated from `crates/ragent-research/src/contradiction.rs` inline tests

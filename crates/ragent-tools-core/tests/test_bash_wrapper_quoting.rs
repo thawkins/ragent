@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Regression tests for C-003: shell command injection via state-file quoting.
 //!
 //! These tests ensure that malicious session IDs and temporary paths cannot

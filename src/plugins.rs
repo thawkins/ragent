@@ -28,10 +28,7 @@
 
 use anyhow::Result;
 
-use ragent_plugins::{
-    PLUGIN_SUBCOMMANDS, PluginSession, ScratchSurface, render_help, run_control_command,
-    run_store_command, run_test_command, store_and_config, subcommand_of,
-};
+use ragent_plugins::{PLUGIN_SUBCOMMANDS, render_help, run_plugin_subcommand, subcommand_of};
 
 /// The CLI usage block. Structurally mirrors the shared
 /// [`render_help`] body (T-014, FR-014) but uses the non-TUI surface spelling
@@ -93,33 +90,21 @@ pub fn run_cli(args: &[String]) -> Result<()> {
     }
 
     let workdir = std::env::current_dir()?;
-    let (dirs, config) = store_and_config(&workdir);
-
-    // Store subcommands (add / remove) need no live session.
-    if let Some(report) = run_store_command(&config, &dirs, &workdir, sub, rest) {
-        print!("{}", cli_body(&report));
-        return Ok(());
-    }
-
-    // The isolated test harness must not touch any live session (FR-013).
-    if let Some(report) = run_test_command(dirs.clone(), &config, sub, rest) {
-        print!("{}", cli_body(&report));
-        return Ok(());
-    }
-
-    // Control subcommands (list / enable / disable) drive a live session for
-    // the duration of this call; the sandbox contexts are dropped on return.
+    // Seed the collision surface (FR-024) from the built-in tool registry and the
+    // `SLASH_COMMANDS` triggers so it matches the live TUI surface, then run the
+    // shared dispatch ladder (store / test / control).
     let registry = ragent_agent::tool::create_default_registry();
-    let mut surface = ScratchSurface::seeded(
+    let report = run_plugin_subcommand(
+        &workdir,
+        sub,
+        rest,
         registry.list().into_iter().collect(),
         ragent_tui::app::SLASH_COMMANDS
             .iter()
             .map(|c| c.trigger.to_string())
             .collect(),
-    );
-    let mut session = PluginSession::start(dirs, config, &mut surface);
-    let report = run_control_command(&mut session, &mut surface, sub, rest)
-        .unwrap_or_else(|| render_help(sub));
+    )
+    .unwrap_or_else(|| render_help(sub));
     print!("{}", cli_body(&report));
     Ok(())
 }

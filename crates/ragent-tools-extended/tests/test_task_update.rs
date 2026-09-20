@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! todo2tasks T-008 / T-017: integration tests for the `task_update` tool
 //! (`TaskUpdateTool`).
 //!

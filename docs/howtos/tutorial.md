@@ -585,6 +585,7 @@ See `docs/howtos/custom-agents.md` for the full schema.
 | `Alt+M` | Toggle Memory panel |
 | `Alt+O` | Toggle Telemetry panel |
 | `Alt+C` | Toggle Context side panel |
+| `Alt+Q` | Open the queue-control menu (`Next` / `Stop` / `Clear` / `Show`) |
 | `Alt+V` | Paste image from clipboard |
 | `Alt+Y` | Toggle YOLO mode |
 | `@` | Open file mention picker |
@@ -595,6 +596,34 @@ Log and Profile can coexist (Log above, Profile below). Other side panels
 are mutually exclusive. All support mouse scrolling and scrollbar
 dragging. Every toggled side panel (Log, Profile, TASKS, Memory, Telemetry,
 and Context) takes 50% of the application width.
+
+While the agent is executing the input field stays editable: each `Enter`
+appends the message to a FIFO **input queue** (counter shown as `NN> ` before
+the prompt) and the oldest entry runs at each turn boundary. A queued entry is
+added to the **input history** as soon as you press `Enter`, not when it runs,
+and it is not echoed into the message window until it is dispatched. Press
+`Alt+Q` to open the **queue-control menu**; move the highlight with `Up`/`Down`
+(skipping the non-selectable empty-queue `Next` row) and activate a row with
+`Enter`:
+
+- `Next` — stop the running turn and dispatch the oldest queued entry (shown
+  non-selectable when the queue is empty).
+- `Stop` / `Resume` — the row reads `Stop` while a turn is executing (halts the
+  agent like `Escape` and does **not** advance the queue); it reads `Resume`
+  once the agent is stopped.
+- `Clear` — open a `Clear the input queue?` confirmation dialog with `Yes` /
+  `No` (**`No` is the default**); only `Yes` empties the queue.
+- `Show` — open a scrollable panel listing every queued entry oldest-first with
+  a block cursor: `Up`/`Down` scroll the highlight, `Enter` moves the
+  highlighted entry one step toward the front (it runs sooner), and `Del`
+  removes it. Only `Esc` dismisses the panel.
+
+`Esc` dismisses the menu without taking any action. See `TUI-QUICKSTART.md` §4.
+
+The `/queue` slash command inspects the same queue from the prompt: `/queue list`
+lists the entries oldest-first, `/queue clear` empties the queue, `/queue next`
+runs the oldest entry (deferred to the turn boundary while a turn is still
+executing), and `/queue help` shows the usage.
 
 ---
 

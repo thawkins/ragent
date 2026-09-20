@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration test for T-012: per-run cost summary event.
 //!
 //! Drives `SessionProcessor::process_message` with a mock provider whose

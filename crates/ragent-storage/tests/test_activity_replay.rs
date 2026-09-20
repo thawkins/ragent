@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for the ActivityLog replay convenience methods (maka spec T-011,
 //! FR-012, FR-013).
 

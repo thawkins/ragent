@@ -4,8 +4,17 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.110..v1.0.112)
+## Highlights (v1.0.110..v1.0.113)
 
+- **Input queue + ALT-Q queue-control menu (v1.0.113)** — the input field
+  stays editable while the agent runs: each `Enter` appends the message to a
+  bounded FIFO queue (a two-digit counter appears before the `> ` prompt) and
+  the oldest entry runs automatically at each turn boundary. Press **`Alt+Q`**
+  during a run to open the four-row queue-control menu (`Next`, `Stop`/`Resume`,
+  `Clear`, `Show`); the `Show` row opens a scrollable panel that lists the queued
+  entries and lets you reorder (`Enter`) or remove (`Del`) them, and
+  `/queue [list|clear|next|help]` exposes the same queue. See §4 and
+  [`docs/howtos/slashcommands/queue.md`](docs/howtos/slashcommands/queue.md).
 - **`/plugins` slash family (v1.0.112)** — the plugin system is now
   implemented, not just specified. `/plugins list|add|remove|enable|disable|test|help`
   manages sandboxed Codex- and Claude Code/Desktop-dialect plugins; enabled
@@ -48,6 +57,13 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 - **Tool reference split** — the single `docs/howtos/tools.md` became 26
   per-category pages in `docs/howtos/tools/` with argument tables and worked
   examples per tool.
+- **Input queue + ALT-Q queue-control menu** — the input field stays editable
+  while the agent runs: each `Enter` appends the message to a bounded FIFO
+  queue (a two-digit counter appears before the `> ` prompt) and the oldest
+  entry runs automatically at each turn boundary. Press **`Alt+Q`** during a
+  run to open the four-option queue-control menu (`Next`, `Stop`/`Resume`,
+  `Clear`, `Show`); the `Show` row opens a scrollable panel that lists the queued
+  entries and lets you reorder (`Enter`) or remove (`Del`) them. See §4.
 
 ## Highlights (v1.0.106)
 
@@ -647,6 +663,68 @@ have 120 seconds to:
 
 The dialog title shows a live countdown (e.g. `Permission Required (1:45 remaining)`).
 
+### The input queue and the ALT-Q queue-control menu
+
+The input field stays live while the agent is executing. Instead of rejecting
+your message with `busy - wait for the current turn to finish`, pressing
+**`Enter`** appends it to a bounded FIFO **input queue** (maximum 32 entries).
+A two-digit, zero-padded counter appears immediately before the prompt, for
+example:
+
+```text
+03> refactor the parser
+```
+
+The oldest queued entry runs automatically when the running turn ends, and the
+counter decrements each time. No counter is shown when the queue is empty.
+
+A queued entry is added to the **input history** the moment you press `Enter`
+(so `Up` recalls it immediately), not when it runs, and it is not echoed into
+the message window until it is actually dispatched.
+
+Press **`Alt+Q`** during a run to open the **queue-control menu** — a centred
+overlay with exactly four options. Use **`Up`**/**`Down`** to move the highlight
+and **`Enter`** to activate the highlighted row:
+
+| Option        | Behaviour |
+| ------------- | --------- |
+| `Next`        | Stops the running turn and immediately dispatches the **oldest** queued entry, then closes the menu. FIFO order is preserved. `Next` is shown as non-selectable when the queue is empty (the highlight skips it). |
+| `Stop` / `Resume` | While a turn is executing the row reads **`Stop`**: it halts the agent exactly as pressing `Escape` would and does **not** advance the queue. When the agent is already stopped the same row reads **`Resume`**: it restarts the interrupted work. |
+| `Clear`       | Opens a `Clear the input queue?` confirmation dialog with `Yes` / `No`. **`No` is the default**, so pressing `Enter` without changing the selection changes nothing; only `Yes` empties the queue. Selecting `No` or pressing `Esc` closes the dialog and leaves the queue, the input buffer, and the staged attachments untouched. |
+| `Show`        | Opens a scrollable **queue panel** listing every queued entry oldest-first with a block cursor (see below). |
+
+`Esc` dismisses the menu taking no action — the input buffer, staged
+attachments, the queue, and the running turn are all left untouched. Queued
+entries survive a cancelled turn, an agent error, or a compaction; they are
+only removed when they are dispatched or explicitly cleared.
+
+#### The `Show` queue panel
+
+The `Show` row opens a panel that lists every queued entry, oldest first, with a
+block cursor marking the highlighted entry. Use it to inspect, reorder, or prune
+the queue without leaving the chat screen:
+
+| Key      | Behaviour |
+| -------- | --------- |
+| `Up` / `Down` | Move the block cursor up and down the list; the panel scrolls to keep the highlighted entry visible. |
+| `Enter`  | Moves the highlighted entry **one step toward the front** of the queue, so it runs sooner, and keeps the cursor on it. Press `Enter` again to walk it further forward; at the front it is a no-op. The order of every other entry is preserved. |
+| `Del`    | Removes the highlighted entry from the queue (the counter decrements). |
+| `Esc`    | Dismisses the panel. |
+
+Only `Esc` closes the panel; `Enter`, `Del`, and the navigation keys keep it
+open and repaint it immediately. The panel never touches your in-progress draft
+or staged attachments.
+
+There is also a `/queue` slash command that inspects the same queue from the
+prompt:
+
+| Sub-command  | Behaviour |
+| ------------ | --------- |
+| `/queue list` or `/queue` | Lists the queued entries in submission order (oldest first) with the queue depth. |
+| `/queue clear` | Empties the queue immediately; the counter disappears. |
+| `/queue next`  | Dispatching the oldest entry immediately. While a turn is still executing the action is deferred to the turn boundary (it never overlaps a running turn or a compaction); use `Alt+Q` → `Next` to stop the current turn and run it now. |
+| `/queue help`  | Shows the sub-command usage. |
+
 ---
 
 ## 5. Goal-driven loops with `/loop`
@@ -1234,6 +1312,7 @@ shortcut again to close the panel.
 | `Alt+M`                       | Toggle Memory panel                         |
 | `Alt+O`                       | Toggle Telemetry panel                      |
 | `Alt+C`                       | Toggle Context panel                        |
+| `Alt+Q`                       | Open the queue-control menu (Next/Stop/Clear/Show) |
 | `Alt+V`                       | Paste image from clipboard                  |
 | `Alt+Y`                       | Toggle YOLO mode on/off                     |
 | `@`                           | Open file mention picker                    |

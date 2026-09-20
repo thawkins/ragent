@@ -28,7 +28,7 @@ fn openalex_report(n: usize) -> EngineReport {
                 "openalex",
             );
             // Descending relevance: top hits near 0.6, tail down to ~0.05.
-            r.score = Some((0.6 - i as f64 * 0.007).max(0.05));
+            r.score = Some((i as f64).mul_add(-0.007, 0.6).max(0.05));
             r
         })
         .collect();
@@ -228,7 +228,7 @@ fn test_share_limit_keeps_consensus_urls() {
                 "abstract",
                 "openalex",
             );
-            r.score = Some((0.6 - i as f64 * 0.05).max(0.05));
+            r.score = Some((i as f64).mul_add(-0.05, 0.6).max(0.05));
             r
         })
         .collect();

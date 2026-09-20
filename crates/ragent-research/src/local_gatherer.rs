@@ -644,7 +644,6 @@ pub fn derive_terms(topic: &str, fallback: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
     use std::collections::HashMap;
     use std::sync::Mutex;

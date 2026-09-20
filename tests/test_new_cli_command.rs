@@ -96,7 +96,7 @@ fn test_new_cli_help_word_prints_detailed_help_page() {
     // FR-018: `ragent new help` prints the dedicated help page — purpose,
     // per-argument docs with optionality/values/omitted defaults, and two
     // worked examples (one minimal, one with a hosting flag).
-    let (_dir, out) = ragent_in_empty_cwd(&["new", "help"]);
+    let (dir, out) = ragent_in_empty_cwd(&["new", "help"]);
     assert!(
         out.status.success(),
         "help exits 0, stderr: {}",
@@ -117,7 +117,7 @@ fn test_new_cli_help_word_prints_detailed_help_page() {
     assert!(text.contains("ragent new --language rust --type cmdline"));
     assert!(text.contains("ragent new --language python --type library --gitlab"));
     // Zero file mutations: help never scaffolds.
-    assert!(!_dir.join("Cargo.toml").exists());
+    assert!(!dir.join("Cargo.toml").exists());
 }
 
 #[test]

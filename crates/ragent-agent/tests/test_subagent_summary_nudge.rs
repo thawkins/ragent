@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Regression test for sub-agent premature-termination (the "narration
 //! without findings" truncation pattern).
 //!

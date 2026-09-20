@@ -202,6 +202,27 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.run_cost_banner.is_some() {
         render_run_cost_banner(frame, app);
     }
+    // Queue-control menu overlay (ALT-Q) — a modal drawn above everything so the
+    // actions stay reachable while the queue drains underneath (FR-021). The
+    // queue-entry panel (the menu's `Show` row) is drawn above it when open.
+    if app.queue_menu_open {
+        render_queue_menu(frame, app);
+    } else {
+        app.queue_menu_area = Rect::default();
+    }
+    if app.queue_show_open {
+        render_queue_show_panel(frame, app);
+    } else {
+        app.queue_show_area = Rect::default();
+    }
+    // `Clear the input queue?` confirmation dialog (ALT-Q `Clear` row) — a modal
+    // drawn above the menu/chat that reuses the shared overlay machinery
+    // (spec `inputqueue` FR-033, NFR-010).
+    if app.queue_clear_confirm_open {
+        render_queue_clear_confirm(frame, app);
+    } else {
+        app.queue_clear_confirm_area = Rect::default();
+    }
 }
 
 /// Render the transient run-complete banner as a centered one-line popup
@@ -241,6 +262,313 @@ fn render_run_cost_banner(frame: &mut Frame, app: &mut App) {
             .alignment(Alignment::Center)
             .block(block),
         popup,
+    );
+}
+
+/// Render the queue-control menu overlay opened by ALT-Q (spec `inputqueue`
+/// FR-021, FR-023).
+///
+/// The menu is a small centred modal that reuses the shared overlay drawing
+/// path (`Clear` + a bordered `List`) and the standard key-dispatch machinery
+/// (NFR-007, NFR-009). It presents exactly four rows in a fixed order:
+/// `Next`, `Stop`/`Resume`, `Clear`, and `Show`.
+///
+/// While the input queue is empty the `Next` row is drawn dimmed and a leading
+/// space (instead of `>`) marks it non-selectable; while entries are pending it
+/// is drawn like the other rows and carries the `>` selection marker (FR-023).
+/// The `Stop`/`Resume` label is resolved by
+/// [`App::queue_menu_halt_label`], which reflects whether a turn is executing
+/// (FR-026), and all four labels are produced by [`App::queue_menu_labels`] so
+/// the render and the action dispatch share one source of truth.
+fn render_queue_menu(frame: &mut Frame, app: &mut App) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    let labels = app.queue_menu_labels();
+    let title = format!(" Queue control — {} pending ", app.input_queue_len());
+
+    // Width fits the widest label (with its selection marker and padding) and
+    // the title, whichever is longer; height is the rows plus the
+    // title/border chrome.
+    let max_label = labels.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    let width = (max_label as u16)
+        .saturating_add(6)
+        .max(title.chars().count() as u16 + 2)
+        .max(22);
+    let height = (labels.len() as u16).saturating_add(5);
+    let screen = frame.area();
+    let w = width.min(screen.width);
+    let h = height.min(screen.height);
+    let area = Rect::new(
+        screen.x + screen.width.saturating_sub(w) / 2,
+        screen.y + screen.height.saturating_sub(h) / 2,
+        w,
+        h,
+    );
+    frame.render_widget(Clear, area);
+    app.queue_menu_area = area;
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let selected_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let normal_style = Style::default().fg(Color::White);
+    let disabled_style = Style::default().fg(Color::DarkGray);
+
+    let items: Vec<ListItem> = labels
+        .iter()
+        .enumerate()
+        .map(|(i, &label)| {
+            // Only the empty-queue `Next` row is non-selectable (FR-023); every
+            // other row (including `Show`) is always actionable.
+            let selectable = app.queue_menu_row_selectable(i);
+            // The `>` marker is the on-screen expression of selectability: a
+            // non-selectable row (empty-queue `Next`) must never carry it, even
+            // when it is the current selection index (FR-023).
+            let selected = selectable && i == app.queue_menu_selected;
+            let marker = if selected { "> " } else { "  " };
+            let style = if !selectable {
+                disabled_style
+            } else if selected {
+                selected_style
+            } else {
+                normal_style
+            };
+            ListItem::new(Line::from(Span::styled(format!("{marker}{label}"), style)))
+        })
+        .collect();
+
+    // Footer hints for navigation/selection of the queue-control menu.
+    let footer = if inner.height > labels.len() as u16 {
+        Line::from(Span::styled(
+            "↑/↓ move · Enter select · Esc close",
+            Style::default().fg(Color::DarkGray),
+        ))
+    } else {
+        Line::default()
+    };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+    let list = List::new(items);
+    let mut state = ListState::default();
+    state.select(Some(
+        app.queue_menu_selected.min(labels.len().saturating_sub(1)),
+    ));
+    frame.render_stateful_widget(list, chunks[0], &mut state);
+    frame.render_widget(
+        Paragraph::new(footer).alignment(Alignment::Center),
+        chunks[1],
+    );
+}
+
+/// Render the scrollable queue-entry panel opened by the queue-control menu's
+/// `Show` row (spec `inputqueue` `Show` row).
+///
+/// The panel is a modal that reuses the shared overlay drawing path (`Clear` +
+/// a bordered `List`, NFR-007). It lists every queued entry oldest-first with a
+/// running position, keeping the highlighted entry visible via the list's own
+/// scroll offset; the highlighted row carries the block-cursor background. Only
+/// `Esc` dismisses the panel; `Up`/`Down` move the highlight, `Enter` moves the
+/// highlighted entry one step toward the front, and `Del` removes it.
+fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    let len = app.input_queue.len();
+    // Keep the highlight within range while the queue length can change under
+    // the panel (e.g. a turn-boundary drain) so the block cursor is always valid.
+    let selected = app.queue_show_selected.min(len.saturating_sub(1));
+    let title = format!(" Queued messages — {len} ");
+
+    // Size the panel to the entries and the widest entry text, clamped to the
+    // screen so a long queue scrolls instead of overflowing.
+    let screen = frame.area();
+    let max_entry = app
+        .input_queue
+        .iter()
+        .map(|e| e.text.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(60);
+    let width = (max_entry as u16)
+        .saturating_add(10)
+        .max(title.chars().count() as u16 + 2)
+        .max(30);
+    let height = (len as u16).saturating_add(5).min(16).min(screen.height);
+    let w = width.min(screen.width);
+    let h = height.min(screen.height);
+    let area = Rect::new(
+        screen.x + screen.width.saturating_sub(w) / 2,
+        screen.y + screen.height.saturating_sub(h) / 2,
+        w,
+        h,
+    );
+    frame.render_widget(Clear, area);
+    app.queue_show_area = area;
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Magenta));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // The highlighted row carries the block cursor: a full-row background that
+    // marks the entry `Enter`/`Del` will act on.
+    let cursor_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
+    let normal_style = Style::default().fg(Color::White);
+    let index_style = Style::default().fg(Color::DarkGray);
+
+    let items: Vec<ListItem> = app
+        .input_queue
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let text = entry.text.lines().next().unwrap_or("").to_string();
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{:>3}", i + 1), index_style),
+                Span::raw(" "),
+                Span::styled(text, normal_style),
+            ]))
+        })
+        .collect();
+
+    let footer = if inner.height > len as u16 {
+        Line::from(Span::styled(
+            "↑/↓ move · Enter move up · Del remove · Esc close",
+            Style::default().fg(Color::DarkGray),
+        ))
+    } else {
+        Line::default()
+    };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+    // The highlighted row carries the block cursor: `highlight_style` patches the
+    // whole row after the items are drawn, so the background spans every cell
+    // (the index prefix included) rather than only the text span.
+    let list = List::new(items).highlight_style(cursor_style);
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    frame.render_stateful_widget(list, chunks[0], &mut state);
+    frame.render_widget(
+        Paragraph::new(footer).alignment(Alignment::Center),
+        chunks[1],
+    );
+}
+
+/// Render the `Clear the input queue?` confirmation dialog (spec `inputqueue`
+/// T-021, FR-033, FR-034, NFR-010).
+///
+/// Opened by the queue-control menu's `Clear` row; it reuses the shared overlay
+/// drawing path (`Clear` + a bordered `List`) and the standard modal key-dispatch
+/// machinery in [`crate::input::handle_key`] rather than adding a parallel input
+/// path (NFR-010). It presents the message `Clear the input queue?` and exactly
+/// two options, `Yes` and `No`, with `No` selected by default so a stray `Enter`
+/// cannot empty the queue (FR-034).
+///
+/// The dialog only paints state here — it removes no entry. The queue is emptied
+/// by the `Yes` gating step (FR-036); `No`/`Esc` leave it unchanged (FR-035).
+fn render_queue_clear_confirm(frame: &mut Frame, app: &mut App) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    // Option order matches the index constants: `Yes` at 0, `No` at 1.
+    let options = ["Yes", "No"];
+    let title = " Clear the input queue? ";
+
+    let width = (title.chars().count() as u16 + 2).max(30);
+    let height = (options.len() as u16).saturating_add(5);
+    let screen = frame.area();
+    let w = width.min(screen.width);
+    let h = height.min(screen.height);
+    let area = Rect::new(
+        screen.x + screen.width.saturating_sub(w) / 2,
+        screen.y + screen.height.saturating_sub(h) / 2,
+        w,
+        h,
+    );
+    frame.render_widget(Clear, area);
+    app.queue_clear_confirm_area = area;
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Yellow));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let selected_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let normal_style = Style::default().fg(Color::White);
+
+    let items: Vec<ListItem> = options
+        .iter()
+        .enumerate()
+        .map(|(i, label)| {
+            let selected = i == app.queue_clear_confirm_selected;
+            let marker = if selected { "> " } else { "  " };
+            let style = if selected {
+                selected_style
+            } else {
+                normal_style
+            };
+            ListItem::new(Line::from(Span::styled(format!("{marker}{label}"), style)))
+        })
+        .collect();
+
+    let footer = if inner.height > options.len() as u16 {
+        Line::from(Span::styled(
+            "←/→ move · Enter select · Esc close",
+            Style::default().fg(Color::DarkGray),
+        ))
+    } else {
+        Line::default()
+    };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+    let list = List::new(items);
+    let mut state = ListState::default();
+    state.select(Some(
+        app.queue_clear_confirm_selected
+            .min(options.len().saturating_sub(1)),
+    ));
+    frame.render_stateful_widget(list, chunks[0], &mut state);
+    frame.render_widget(
+        Paragraph::new(footer).alignment(Alignment::Center),
+        chunks[1],
     );
 }
 
@@ -2063,17 +2391,69 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
     frame.render_widget(paragraph, popup);
 }
 
+/// Width in columns of the `"> "` prompt when no queue counter is shown.
+const PROMPT_WIDTH: usize = 2;
+/// Width in columns of the two-digit, zero-padded queue counter.
+const COUNTER_WIDTH: usize = 2;
+
+/// Build the chat input's prompt prefix string.
+///
+/// The prompt is `"> "` while the input queue is empty and `"NN> "` (a
+/// two-digit, zero-padded counter immediately before `>`) while entries are
+/// pending (spec `inputqueue` FR-009, FR-010). The counter is clamped to `99`
+/// so the prefix never widens beyond four columns (NFR-002).
+fn input_prompt_prefix(queue_len: usize) -> String {
+    if queue_len == 0 {
+        "> ".to_string()
+    } else {
+        format!("{:02}> ", queue_len.min(99))
+    }
+}
+
+/// Width in columns of the chat input's prompt prefix for `queue_len`.
+///
+/// Mirrors [`input_prompt_prefix`] without allocating.  Every geometry
+/// consumer (wrapped rows, cursor position, selection mapping) derives its
+/// prefix width from this so the cursor column and wrapped-row geometry stay
+/// aligned to the counter prefix (spec `inputqueue` NFR-002, FR-020).
+pub(crate) fn input_prompt_prefix_len(queue_len: usize) -> usize {
+    if queue_len == 0 {
+        PROMPT_WIDTH
+    } else {
+        PROMPT_WIDTH + COUNTER_WIDTH
+    }
+}
+
+/// Selection-safe variant of [`input_prompt_prefix`].
+///
+/// Identical in width to the painted prompt prefix so mouse and keyboard
+/// selection columns line up with the rendered frame (NFR-002), but the
+/// counter digits are replaced by spaces so the queue counter can never be
+/// copied or cut as message content (FR-020).
+pub(crate) fn input_prompt_selection_prefix(queue_len: usize) -> String {
+    if queue_len == 0 {
+        "> ".to_string()
+    } else {
+        format!("{}> ", " ".repeat(COUNTER_WIDTH))
+    }
+}
+
 /// Height of the chat input widget at `inner_width`, borders included.
 ///
 /// PERF-046: the input is character-wrapped (fixed width, no word breaks), so
-/// each logical line occupies `2 + chars` cells of content.  Summing the
-/// per-line row counts is equivalent to counting wrapped rows but performs no
-/// allocation.
-pub(crate) fn input_widget_height(input: &str, inner_width: usize) -> u16 {
+/// each logical line occupies `prefix_len + chars` cells of content.  Summing
+/// the per-line row counts is equivalent to counting wrapped rows but performs
+/// no allocation.  `prefix_len` is the prompt prefix width, which grows from
+/// two columns to four while the queue counter is shown (FR-009, NFR-002).
+pub(crate) fn input_widget_height(input: &str, inner_width: usize, prefix_len: usize) -> u16 {
     let width = inner_width.max(1);
     let rows: usize = input
         .split('\n')
-        .map(|logical_line| (2 + logical_line.chars().count()).div_ceil(width).max(1))
+        .map(|logical_line| {
+            (prefix_len + logical_line.chars().count())
+                .div_ceil(width)
+                .max(1)
+        })
         .sum();
     (rows.max(1) as u16) + 2 // +2 for borders
 }
@@ -2165,13 +2545,13 @@ fn input_cursor_display_pos(
     input: &str,
     cursor_chars: usize,
     inner_width: usize,
+    prefix_len: usize,
 ) -> (usize, usize) {
     let inner_width = inner_width.max(1);
     let mut display_row = 0usize;
     let mut char_idx = 0usize;
 
     for (line_i, logical_line) in input.split('\n').enumerate() {
-        let prefix_len = 2usize; // "> " or "  "
         let content_len = logical_line.chars().count();
 
         // Is the cursor within this logical line's content range (inclusive of end)?
@@ -2218,29 +2598,40 @@ fn with_cursor_marker(text: &str, cursor: usize) -> String {
 /// or non-typing frame performs no wrapping or measurement work.
 fn refresh_input_render_cache(app: &mut App, inner_width: u16) {
     let selection = app.kb_selection_char_range();
-    let height = input_widget_height(&app.input, inner_width as usize);
+    let queue_len = app.input_queue_len();
+    let prefix = input_prompt_prefix(queue_len);
+    let prefix_len = input_prompt_prefix_len(queue_len);
+    let height = input_widget_height(&app.input, inner_width as usize, prefix_len);
     let cache = &mut app.input_render_cache;
     let rows_current = cache.key == app.input
         && cache.selection == selection
         && cache.width == inner_width
+        && cache.queue_len == queue_len
         && !cache.lines.is_empty();
     let cursor_current = cache.key == app.input
         && cache.cursor == app.input_cursor
         && cache.width == inner_width
+        && cache.queue_len == queue_len
         && cache.height != 0;
     if rows_current && cursor_current {
         return;
     }
     if !rows_current {
-        cache.lines = input_lines_with_kb_selection(&app.input, inner_width as usize, selection);
+        cache.lines =
+            input_lines_with_kb_selection(&app.input, inner_width as usize, selection, &prefix);
         cache.selection = selection;
     }
     if !cursor_current {
-        cache.cursor_pos =
-            input_cursor_display_pos(&app.input, app.input_cursor, (inner_width as usize).max(1));
+        cache.cursor_pos = input_cursor_display_pos(
+            &app.input,
+            app.input_cursor,
+            (inner_width as usize).max(1),
+            prefix_len,
+        );
         cache.cursor = app.input_cursor;
     }
     cache.height = height;
+    cache.queue_len = queue_len;
     cache.key.clone_from(&app.input);
     cache.width = inner_width;
 }
@@ -2487,6 +2878,7 @@ fn input_lines_with_kb_selection(
     input: &str,
     inner_width: usize,
     selection: Option<(usize, usize)>,
+    prefix: &str,
 ) -> Vec<ratatui::text::Line<'static>> {
     use ratatui::style::{Color, Style};
     use ratatui::text::{Line, Span};
@@ -2500,15 +2892,23 @@ fn input_lines_with_kb_selection(
     let mut flat: Vec<(char, Option<usize>)> = Vec::new();
     let mut char_idx = 0usize;
     let logical_line_count = input.split('\n').count();
+    // Continuation rows are indented under the first-row prompt so content stays
+    // aligned (the counter prefix itself is only shown on the first row).
+    let continuation_prefix: String = " ".repeat(prefix.chars().count());
 
     for (line_i, logical_line) in input.split('\n').enumerate() {
         // Each logical line starts a new display line — flush a boundary marker.
         // We represent this as a "newline flush" by letting the chunker know when
         // to start a new display row; we do this by resetting a counter below.
-        let prefix = if line_i == 0 { "> " } else { "  " };
+        // The first row shows the prompt (with the queue counter when present).
+        let row_prefix = if line_i == 0 {
+            prefix
+        } else {
+            continuation_prefix.as_str()
+        };
 
         // Prefix chars: not selectable
-        for c in prefix.chars() {
+        for c in row_prefix.chars() {
             flat.push((c, None));
         }
 
@@ -2552,7 +2952,7 @@ fn input_lines_with_kb_selection(
         display_lines.push(current);
     }
     if display_lines.is_empty() {
-        display_lines.push(vec![('>', None), (' ', None)]);
+        display_lines.push(prefix.chars().map(|c| (c, None)).collect());
     }
 
     // Convert each display line into a ratatui Line with selection spans.
@@ -5730,22 +6130,29 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(title, title_style))
-        .border_style(Style::default().fg(if app.is_input_blocked() {
+        .border_style(Style::default().fg(if app.is_input_locked() {
             Color::Red
         } else {
             Color::White
         }));
 
+    // Prompt prefix: a two-digit queue counter plus "> " while entries are
+    // pending, otherwise the bare "> " prompt (FR-009, FR-010). The prefix is a
+    // fixed width per state so the cursor and wrap geometry stay stable
+    // (NFR-002).
+    let prefix = input_prompt_prefix(app.input_queue_len());
+
     if app.input.is_empty() {
-        // Show "> " prompt with dimmed placeholder text so the line doesn't jump.
+        // Show the prompt with dimmed placeholder text so the line doesn't jump.
         let ghost = Line::from(vec![
-            Span::raw("> "),
+            Span::raw(prefix.clone()),
             Span::styled(INPUT_PLACEHOLDER, Style::default().fg(Color::DarkGray)),
         ]);
         let paragraph = Paragraph::new(ghost).block(block);
         frame.render_widget(paragraph, area);
-        // Cursor sits right after the "> " prefix.
-        frame.set_cursor_position((area.x + 1 + 2, area.y + 1));
+        // Cursor sits right after the prompt prefix.
+        let prefix_cols = input_prompt_prefix_len(app.input_queue_len()) as u16;
+        frame.set_cursor_position((area.x + 1 + prefix_cols, area.y + 1));
     } else {
         // PERF-046: reuse the rows and cursor position cached by
         // `refresh_input_render_cache` instead of re-wrapping and re-measuring

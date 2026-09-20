@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for recording model-message events (maka spec T-004, FR-001).
 //!
 //! FR-001 requires that every execution event — including a model message —

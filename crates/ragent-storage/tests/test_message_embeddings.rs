@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for M5 session-message embedding storage helpers.
 
 use ragent_storage::storage::Storage;

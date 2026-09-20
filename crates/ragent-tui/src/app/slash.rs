@@ -33,6 +33,7 @@ use crate::app::helpers::{
     short_run_id, short_session_id,
 };
 use crate::app::toolchain;
+use crate::widgets::message_widget::pluralize;
 
 // ── /spec govcreate orchestration (T-012) ────────────────────────────────────
 //
@@ -747,6 +748,14 @@ impl App {
             ],
             "status" => {
                 vec!["clear".to_string()]
+            }
+            "queue" => {
+                vec![
+                    "list".to_string(),
+                    "clear".to_string(),
+                    "next".to_string(),
+                    "help".to_string(),
+                ]
             }
             "help" => {
                 vec![
@@ -4604,36 +4613,9 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     self.push_log_no_agent(LogLevel::Warn, "Nothing to resume".to_string());
                     return;
                 }
-                if self.session_id.is_none() {
+                if !self.dispatch_resume_continuation() {
                     self.status = "No active session".to_string();
-                    return;
                 }
-
-                self.agent_halted = false;
-                let Some(sid) = self.session_id.clone() else {
-                    self.status = "No active session".to_string();
-                    return;
-                };
-                let resume_text = "You were previously interrupted by the user. Continue the task from where you left off.";
-                let msg = Message::user_text(&sid, resume_text);
-                self.messages.push(msg);
-                self.set_status_working("processing");
-                self.push_log_no_agent(LogLevel::Info, "Resuming halted agent".to_string());
-
-                let mut agent = self.agent_info.clone();
-                self.apply_selected_model_and_thinking(&mut agent);
-
-                let processor = self.session_processor.clone();
-                let flag = Arc::new(AtomicBool::new(false));
-                self.cancel_flag = Some(flag.clone());
-                tokio::spawn(async move {
-                    if let Err(e) = processor
-                        .process_message(&sid, resume_text, &agent, flag)
-                        .await
-                    {
-                        tracing::debug!(error = %e, "Failed to resume agent");
-                    }
-                });
             }
             "system" => {
                 if is_help_args(args) {
@@ -10699,6 +10681,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "triggers" => self.handle_triggers_command(args),
             // ── /inbox ────────────────────────────────────
             "inbox" => self.handle_inbox_command(args),
+            // ── /queue ───────────────────────────────────────────────────
+            "queue" => self.handle_queue_command(args),
             // ── /loop ────────────────────────────────────────────────────
             "loop" => handle_loop_command(self, args),
             _ => {
@@ -10732,6 +10716,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         match self.session_processor.session_manager.create_session(dir) {
                             Ok(session) => {
                                 self.session_id = Some(session.id.clone());
+                                // A fresh session starts with an empty queue (NFR-005).
+                                self.clear_input_queue();
                                 // Map the primary session's short_sid to the current agent name
                                 let short_sid = short_session_id(&session.id);
                                 self.sid_to_display_name
@@ -12006,6 +11992,131 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
              **Statuses:** `open` (default), `claimed`, `dismissed`.",
         );
         self.status = "inbox: help".to_string();
+    }
+
+    /// Handle the optional `/queue` command (spec `inputqueue` FR-013).
+    ///
+    /// Inspects the in-memory input queue. Sub-commands:
+    ///
+    /// - `list` (default) — print the queued entries in FIFO order;
+    /// - `clear` — empty the queue;
+    /// - `next` — immediately dispatch the oldest entry;
+    /// - `help` — show this usage.
+    ///
+    /// `clear` and `next` intentionally do **not** mutate or halt the currently
+    /// executing turn: `next` only dispatches when the turn boundary is free
+    /// (FR-016/FR-030), otherwise it reports that the action is deferred, so a
+    /// queued entry can never overlap a running turn or a compaction.
+    fn handle_queue_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+        match sub.as_str() {
+            "list" | "" => self.handle_queue_list(),
+            "clear" => self.handle_queue_clear(),
+            "next" => self.handle_queue_next(),
+            "help" | "--help" | "-h" => self.handle_queue_help(),
+            _ => {
+                self.append_assistant_text(&format!(
+                    "From: /queue\n[warn] Unknown sub-command '{sub}'. Use `/queue help` for usage."
+                ));
+                self.status = "queue: unknown".to_string();
+            }
+        }
+    }
+
+    /// `/queue list` — print the queued entries in submission order (FR-001).
+    fn handle_queue_list(&mut self) {
+        let count = self.input_queue_len();
+        if count == 0 {
+            self.append_assistant_text(
+                "From: /queue list\n\nℹ️  The input queue is empty.\n\n\
+                 Messages typed while the agent is executing are staged here and run in order.",
+            );
+            self.status = "queue: list empty".to_string();
+            return;
+        }
+        let mut output = String::from("From: /queue list\n\n## Input Queue\n\n");
+        for (i, entry) in self.input_queue.iter().enumerate() {
+            output.push_str(&format!(
+                "{}. {}\n",
+                i + 1,
+                crate::app::helpers::truncate_to_char_boundary(&entry.text, 120)
+            ));
+        }
+        output.push_str(&format!(
+            "\n**{} queued (oldest first).**",
+            pluralize(count, "entry", "entries")
+        ));
+        self.append_assistant_text(&output);
+        self.status = format!("queue: {}", pluralize(count, "entry", "entries"));
+    }
+
+    /// `/queue clear` — empty the input queue and repaint the prompt (FR-028).
+    fn handle_queue_clear(&mut self) {
+        let count = self.input_queue_len();
+        self.clear_input_queue();
+        let entries = pluralize(count, "entry", "entries");
+        self.push_log_no_agent(LogLevel::Info, format!("queue: cleared {entries}"));
+        self.append_assistant_text(&format!(
+            "From: /queue clear\n[clr] Cleared {entries} from the input queue."
+        ));
+        self.status = "queue: cleared".to_string();
+    }
+
+    /// `/queue next` — dispatch the oldest queued entry now (FR-024 analogue).
+    ///
+    /// Delegates to [`App::advance_input_queue`], which owns the single boundary
+    /// guard (FR-016/FR-030): it dispatches only when no turn is executing and
+    /// no compaction is in progress, so `next` can never overlap a running turn.
+    /// When the guard defers, the queue is left untouched and the user is told.
+    fn handle_queue_next(&mut self) {
+        if self.input_queue_len() == 0 {
+            self.append_assistant_text(
+                "From: /queue next\n\nℹ️  The input queue is empty — nothing to run.",
+            );
+            self.status = "queue: next empty".to_string();
+            return;
+        }
+        if self.is_input_blocked() {
+            self.append_assistant_text(
+                "From: /queue next\n\n[warn] The agent is still executing — the next queued \
+                 entry will run at the turn boundary. Use the ALT-Q menu's `Next` to stop the \
+                 current turn and run it immediately.",
+            );
+            self.status = "queue: next deferred".to_string();
+            return;
+        }
+        let text = self
+            .input_queue
+            .front()
+            .map(|e| crate::app::helpers::truncate_to_char_boundary(&e.text, 120))
+            .unwrap_or_default();
+        self.advance_input_queue();
+        self.push_log_no_agent(
+            LogLevel::Info,
+            format!("queue: dispatching next entry: {text}"),
+        );
+        self.append_assistant_text(&format!(
+            "From: /queue next\n[run] Dispatching the oldest queued entry: {text}"
+        ));
+        self.status = "queue: next dispatched".to_string();
+    }
+
+    /// Show `/queue` usage help (FR-013).
+    fn handle_queue_help(&mut self) {
+        self.append_assistant_text(
+            "From: /queue help\n\n\
+             ## /queue — Message input queue\n\n\
+             While the primary agent is executing, messages you submit are staged in a\n\
+             bounded FIFO queue and run in order at each turn boundary.\n\n\
+             | Sub-command | Usage | Description |\n\
+             |---|---|---|\n\
+             | `list` | `/queue list` | List the queued entries in order |\n\
+             | `clear` | `/queue clear` | Remove all queued entries |\n\
+             | `next` | `/queue next` | Run the oldest queued entry immediately |\n\
+             | `help` | `/queue help` | Show this help |\n\n\
+             Press `Alt+Q` to open the interactive queue-control menu (`Next` / `Stop` / `Clear`).",
+        );
+        self.status = "queue: help".to_string();
     }
 }
 

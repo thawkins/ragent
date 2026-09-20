@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the Amazon Bedrock provider.
 //!
 //! Tests the provider contract: registration, model catalog, client creation,

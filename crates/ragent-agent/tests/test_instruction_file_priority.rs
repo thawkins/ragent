@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for instruction file discovery priority:
 //! project root → global directory → project subdirectories
 

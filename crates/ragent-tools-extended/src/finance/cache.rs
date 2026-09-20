@@ -100,6 +100,8 @@ fn normalized_key(provider: &str, symbol: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+    // Fixture quotes use exactly representable decimal values.
+    #![allow(clippy::float_cmp)]
     use super::*;
 
     fn sample_quote(symbol: &str) -> Quote {

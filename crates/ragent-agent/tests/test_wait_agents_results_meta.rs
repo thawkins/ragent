@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Regression test for the recurring "wait_agents reports truncated output"
 //! complaint.
 //!

@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 #![allow(clippy::await_holding_lock)]
 //! Tests for the busy-state fallback for graph tools (spec graphCI, T-023, FR-017).
 //!

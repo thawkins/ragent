@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the loop stop-flag guard (spec `agentloop`, task
 //! T-008 / FR-010, FR-017): once the loop's stop flag is set — by goal
 //! achievement or a budget breach — no further LLM request is sent, the

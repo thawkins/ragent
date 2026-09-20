@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `websearch` tool wrapper.
 //!
 //! These tests exercise the refactored `WebSearchTool` which delegates to

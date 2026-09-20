@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `browser` tool — JCODEPLAN M4 (T-033).
 //!
 //! Covers:

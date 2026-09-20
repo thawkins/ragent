@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `bg` background command runner (M3).
 //!
 //! These tests exercise [`ragent_tools_core::bg::BackgroundCommand`] directly:

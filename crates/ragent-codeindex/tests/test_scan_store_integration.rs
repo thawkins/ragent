@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration test: scan a temp directory, store results, modify a file,
 //! re-scan, and verify stale detection correctly identifies changes.
 #![allow(missing_docs)]

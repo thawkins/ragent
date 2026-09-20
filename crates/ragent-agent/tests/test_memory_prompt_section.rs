@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for token-budget memory injection into the system prompt.
 
 use std::path::PathBuf;

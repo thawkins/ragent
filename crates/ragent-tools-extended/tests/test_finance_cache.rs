@@ -1,4 +1,4 @@
-#![allow(clippy::assert_is_empty)]
+#![allow(clippy::float_cmp)] // deterministic f64 scores compare exactly in these unit tests
 //! Unit tests for `finance::cache` TTL and eviction behavior.
 //!
 //! These tests exercise the public `QuoteCache` API through the crate boundary

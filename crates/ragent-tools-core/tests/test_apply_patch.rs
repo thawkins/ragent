@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `apply_patch` Codex-style patch tool.
 //!
 //! Following EDITPLAN Milestone 1 (T4), hunk context matching is **strict

@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for `ragent-tools-core` replace-matcher helpers.
 //!
 //! Following EDITPLAN Milestone 1/2, batch resolution calls

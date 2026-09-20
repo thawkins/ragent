@@ -352,8 +352,10 @@ impl SourceVault {
                 i = i + 2
             ));
         }
-        sql.push_str(" ORDER BY fetch_timestamp DESC LIMIT ?");
-        sql.push_str(&format!("{}", tokens.len() + 2));
+        sql.push_str(&format!(
+            " ORDER BY fetch_timestamp DESC LIMIT ?{}",
+            tokens.len() + 2
+        ));
 
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(&sql)?;
@@ -551,7 +553,18 @@ fn row_to_source(row: &rusqlite::Row<'_>) -> Result<VaultSource> {
         title: row.get(4)?,
         fetch_timestamp: DateTime::parse_from_rfc3339(&fetch_timestamp)
             .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now()),
+            .unwrap_or_else(|e| {
+                // A corrupt stored timestamp must not be silently reported as
+                // "just captured": surface it so the bad row is visible, then
+                // fall back to now (the column is NOT NULL, so it cannot be
+                // repaired to a better value here).
+                tracing::warn!(
+                    error = %e,
+                    raw = %fetch_timestamp,
+                    "vault: unparseable fetch_timestamp; falling back to now"
+                );
+                Utc::now()
+            }),
         search_tool: row.get(6)?,
         search_engine: row.get(7)?,
         media_type: row.get(8)?,
@@ -583,11 +596,11 @@ fn validate_run_tag(run_tag: &str) -> Result<()> {
 
 /// Map a media-type classifier to a file extension for raw-content files.
 fn media_extension(media_type: &str) -> String {
-    match media_type.to_lowercase().as_str() {
-        "pdf" => "pdf",
-        _ => "md",
+    if media_type.eq_ignore_ascii_case("pdf") {
+        "pdf".to_string()
+    } else {
+        "md".to_string()
     }
-    .to_string()
 }
 
 /// Write `content` to `path` atomically (temp file + rename).

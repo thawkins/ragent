@@ -1,5 +1,198 @@
 # Changelog
 
+## [1.0.113] - 2026-09-21
+
+Message input queue (spec `inputqueue`, `specs/inputqueue/`): the TUI
+message-window input field stays **editable while the primary agent is
+executing**. Each `Enter` appends the submission to a bounded FIFO queue
+(default 32 entries), a two-digit, zero-padded counter appears immediately
+before the `> ` prompt, and the oldest entry runs automatically at each turn
+boundary. Queue control is exposed through an `Alt+Q` menu and a `/queue`
+slash command. All 27 plan tasks (T-001..T-027) are complete. The `Alt+Q` menu
+now has four rows (`Next`, `Stop`/`Resume`, `Clear`, `Show`), is navigated with
+`Up`/`Down`/`Enter`, and its new `Show` row opens a scrollable queue-entry
+panel where `Enter` moves an entry toward the front and `Del` removes it. 234
+new test attributes across 19 new test files (18 with `test_busy_send_guard.rs`).
+
+### Added
+
+- **Input queue core** (FR-001..FR-012) — `App` gains
+  `input_queue: VecDeque<QueuedInput>` (text + staged image paths),
+  `QueuedInput`, `input_queue_len()`, `enqueue_input()` (cap-rejecting),
+  `clear_input_queue()`, and `advance_input_queue()`. `MAX_INPUT_QUEUE` (32)
+  aliases the new `ragent_config::DEFAULT_INPUT_QUEUE_CAPACITY`. The input
+  field no longer rejects a plain message while a turn runs: instead of
+  `busy - wait for the current turn to finish` the submission is queued;
+  slash commands (`/…`), bang commands (`!…`), and teammate-targeted messages
+  keep their existing busy refusal (FR-017). `Enter` on the slash picker and
+  teammate-routed sends remain guarded.
+- **Two-digit queue counter** (FR-008..FR-010, NFR-002/003) —
+  `layout::input_prompt_prefix(queue_len)` renders `NN> ` (zero-padded) before
+  the prompt when the queue is non-empty and the bare `> ` prompt when empty;
+  `input_prompt_prefix_len`, `input_prompt_selection_prefix`, and
+  `input_widget_height(input, inner_width, prefix_len)` keep the cursor,
+  wrapped-row geometry, and clipboard-copy offset aligned to the prefix. The
+  geometry copy replaces the digits with spaces so a copy can never include the
+  counter as message content (FR-020). `InputRenderCache` gained a `queue_len`
+  field so the cached rows/height rebuild whenever the queue length changes.
+- **Turn-boundary drain** (FR-006/FR-007/FR-016/FR-018/FR-019) — the
+  `Event::MessageEnd` (non-cancelled) and `Event::AgentError` handlers call
+  `advance_input_queue()`; the single guard inside it defers while
+  `is_processing`, `compact_in_progress`, `auto_compact_in_progress`, or
+  `pending_send_after_compact.is_some()`, preserving `queue_next_pending` and
+  never popping an entry. A cancelled turn retains the queue.
+- **ALT-Q queue-control menu** (FR-021..FR-032, NFR-006..NFR-009) — `Alt+Q`
+  opens a centred overlay with four rows: `Next` (stop the turn and dispatch
+  the oldest entry, shown non-selectable when the queue is empty),
+  `Stop`/`Resume` (halts exactly like `CancelAgent` without advancing the
+  queue, or resumes the interrupted work), `Clear` (opens the confirmation
+  dialog), and `Show` (opens the queue-entry panel). `Up`/`Down` move the
+  highlight (skipping the non-selectable empty-queue `Next` row) and `Enter`
+  activates the highlighted row. `Esc` dismisses without mutating the input
+  buffer, staged attachments, queue, or running turn. Implemented by
+  `queue_menu_move_up` / `queue_menu_move_down` /
+  `queue_menu_activate_selected` (plus the existing
+  `queue_menu_select_next` / `_halt` / `_clear`) and rendered by
+  `layout::render_queue_menu`; the `QUEUE_MENU_ROW_*` / `QUEUE_MENU_ROWS`
+  consts name the row indices.
+- **`Show` queue-entry panel** (FR-038..FR-043, NFR-012) — the menu's new
+  `Show` row opens a scrollable modal that lists every queued entry
+  oldest-first with a block cursor. `Up`/`Down` scroll the highlight (the list
+  keeps it visible), `Enter` moves the highlighted entry one step **toward the
+  front** (`queue_show_promote_selected`, a neighbouring swap that follows the
+  moved entry so repeated `Enter` walks it forward), and `Del` removes it
+  (`queue_show_delete_selected`, clamping the highlight and closing the panel
+  when the queue empties). Only `Esc` dismisses the panel
+  (`queue_show_close`); an emptied-and-cleared queue also closes it via
+  `clear_input_queue`. The panel never mutates the draft or staged
+  attachments. Implemented by `queue_show_open_panel` and rendered by
+  `layout::render_queue_show_panel`.
+- **`Clear the input queue?` confirmation dialog** (FR-033..FR-037,
+  NFR-010/NFR-011) — a `Yes`/`No` modal, default `No`
+  (`QUEUE_CLEAR_CONFIRM_NO`), opened by the menu's `Clear` row. `Yes`
+  (`InputAction::ConfirmQueueClear`) drains the queue via
+  `clear_input_queue()`; `No`/`Esc` (`CancelQueueClear`) close the dialog
+  leaving the queue untouched. `InputAction::ConfirmQueueClear` /
+  `CancelQueueClear` and the `QUEUE_CLEAR_CONFIRM_YES`/`_NO` consts are new;
+  `is_input_locked()` also reports the dialog as modal.
+- **`/queue` slash command** (FR-013) — `handle_queue_command` with
+  sub-commands `list` (default), `clear`, `next`, and `help`; registered in
+  `SLASH_COMMANDS`, the autocomplete suggestions table, and the dispatcher.
+  `/queue next` delegates to `advance_input_queue()`, so it only dispatches at
+  a free boundary and is deferred (never overlapping a running turn or
+  compaction) otherwise.
+- **Configurable capacity** (FR-015) — `Config::input_queue_capacity`
+  (`Option<usize>`) resolved by `Config::effective_input_queue_capacity()`,
+  clamped to `1..=99` (the two-digit counter's bound) with a default of 32;
+  merged overlay-wins so a project override is not discarded by an absent
+  user-global value. `DEFAULT_INPUT_QUEUE_CAPACITY` is re-exported from
+  `ragent-config`.
+- **New test suites** — `crates/ragent-tui/tests/`:
+  `test_input_queue.rs` (21), `_enqueue.rs` (11), `_drain.rs` (13),
+  `_error_drain.rs` (10), `_geometry.rs` (8), `_guard.rs` (8),
+  `_command.rs` (13), `_menu_binding.rs` (9), `_menu_render.rs` (12),
+  `_menu_next.rs` (16), `_menu_stop_resume.rs` (13), `_menu_clear.rs` (8),
+  `_menu_clear_confirm.rs` (13), `_menu_clear_gating.rs` (8), `_menu_esc.rs`
+  (10), `_menu_integration.rs` (10), `_menu_navigation.rs` (13),
+  `_show_panel.rs` (28), plus
+  `crates/ragent-config/tests/test_input_queue_config.rs` (10).
+  `test_busy_send_guard.rs` is rewritten: a plain message and plain typing are
+  now accepted while processing; slash/bang/teammate sends keep the busy guard;
+  the input border stays white while processing and turns red only when a modal
+  is open.
+
+### Changed
+
+- **Side-panel split** — `ResponsiveBreakpoint::log_split` changed from a 50/50
+  to a 60/40 messages/side-panel split (`crates/ragent-tui/src/utils.rs`), so
+  every right-hand side panel now takes 40% of the application width.
+- **Teardown** — `run_tui` calls `clear_input_queue()` on exit; the queue is
+  never persisted (NFR-005).
+- **Input geometry** — `input_handler.rs` builds the selection/clipboard copy
+  from the shared `input_prompt_selection_prefix` helper, and `halt_running_agent`
+  is now `pub(crate)` so the menu's `Stop` row shares the cancel path.
+
+### Documentation
+
+- **TUI-QUICKSTART.md §4** — the "input queue and the ALT-Q queue-control menu"
+  subsection now documents the four-row menu, `Up`/`Down`/`Enter` navigation,
+  and the `Show` queue-entry panel (`Up`/`Down` scroll, `Enter` moves toward the
+  front, `Del` removes, `Esc` dismisses); the `Alt+Q` row in the
+  keyboard-shortcut table and the v1.0.112 highlight are updated.
+- **`docs/howtos/tutorial.md`** — the queue behaviour, ALT-Q menu, and `/queue`
+  command added beside the side-panel shortcut table.
+- **`docs/howtos/slashcommands/queue.md`** — new per-command reference, linked
+  from `slashcommands/INDEX.md`.
+- **`docs/howtos/config.md` §7.38** — `input_queue_capacity` field table and
+  merge-semantics row.
+
+### Code quality (`/simplify all`)
+
+Quality pass over the uncommitted `inputqueue` diff and the HEAD~3
+plugins/research/config work (v1.0.109..v1.0.112); de-duplication, dead-code
+removal, and per-frame allocation removal, with no user-visible behaviour
+change.
+
+- **`ragent-tui/app/session_ops.rs`** — new `close_queue_menu()` centralises the
+  "dismiss the ALT-Q menu" effect (clears `queue_menu_open` + selection) and is
+  adopted by `queue_show_open_panel` and all three `queue_menu_select_*` rows;
+  `halt_turn_like_cancel_agent()` extracts the shared cancel path used by the
+  govcreate poll and `halt_running_agent`; new `dispatch_resume_continuation()`
+  carries the resume-a-halted-agent body and is now shared by the `/resume`
+  slash command and the menu's `Resume` row; `queue_menu_labels()` returns
+  `[&'static str; 4]` instead of `[String; 4]`, removing four per-frame
+  allocations.
+- **`ragent-tui/app/slash.rs`** — the `/resume` arm calls
+  `dispatch_resume_continuation()` (was a ~25-line inline block); the four
+  `if count == 1 { "y" } else { "ies" }` sites reuse the existing
+  `widgets::message_widget::pluralize()`; the two `/queue` count truncations use
+  `helpers::truncate_to_char_boundary`, unifying them with the three
+  `session_ops` sites.
+- **`ragent-tui/input.rs`** — the `Esc` arm dismisses the menu through
+  `app.close_queue_menu()`.
+- **`ragent-tui/layout.rs`** — `render_queue_menu` binds each label by reference
+  (no per-frame `to_string`).
+- **`ragent-plugins/surface.rs`** — `ScratchSurface::merged()` extracts the two
+  identical `existing_*` set bodies; new `pub fn run_plugin_subcommand(...)`
+  holds the store -> test -> control dispatch ladder plus the usage fallback,
+  and is now called by both `src/plugins.rs` and
+  `crates/ragent-tui/src/app/plugin.rs` (the latter also resolves its working
+  directory once instead of twice).
+- **`ragent-plugins/commands.rs`** — `StoreArgError::report` uses
+  `attribution(sub)` consistently (was hardcoded to `add`/`remove`).
+- **`ragent-plugins/add.rs`** — dead `let _ = rest` binding removed; the
+  `remove_if_empty` `Ok`/`Err` swallow-match simplified.
+- **`ragent-research/source_vault.rs`** — `row_to_source` now `tracing::warn!`s
+  an unparseable `fetch_timestamp` before falling back to `Utc::now` (was
+  silent); `media_extension` uses `eq_ignore_ascii_case` (no `to_lowercase()`
+  allocation); two `push_str` calls folded into one.
+
+### CI hygiene (`cargo clippy --all-targets -D warnings`)
+
+The full `--all-targets` clippy gate now passes clean. The workspace had masked
+an unknown-lint failure: 244 files carried
+`#![allow(clippy::assert_is_empty)]`, a lint that does not exist, which CI never
+caught because the workflow runs clippy on `--workspace` (lib/bin targets) only.
+
+- **Removed the non-existent lint allow** from 244 files: 237 test files plus
+  the inner `#[cfg(test)]` modules in `crates/ragent-research/src/*.rs`.
+- **`clippy::float_cmp`** — added `#![allow(clippy::float_cmp)]` (with a
+  one-line justification comment, matching the existing `test_profiler.rs`
+  pattern) to 11 test files whose f64 literals compare exactly, plus the inner
+  test modules of `ragent-tools-extended/src/finance/cache.rs` and
+  `.../finance/providers/twelvedata.rs`.
+- **`clippy::suboptimal_flops`** — `ragent-tools-extended/tests/
+  test_mf_consensus_multieng.rs` rewrites `0.6 - i * 0.007` (and the `-0.05`
+  variant) as `(i as f64).mul_add(-0.007, 0.6)`.
+- **`clippy::literal_string_with_formatting_args`** — the four
+  `.expect("... {var}")` sites in `ragent-tui/tests/test_govcreate_dispatch.rs`
+  become `.unwrap_or_else(|| panic!(...))`.
+- **`clippy::used_underscore_binding`** — `tests/test_new_cli_command.rs`
+  renames `_dir` to `dir` (the binding is used three lines later).
+- **`clippy::items_after_test_module`** — `ragent-llm/src/providers/
+  tool_cache.rs` moves `tool_arguments_json` above the test module (106 lines
+  relocated, no logic change).
+
 ## [1.0.112] - 2026-09-20
 
 Plugin system release: the `plugins` spec (`specs/plugins/`) moves from draft

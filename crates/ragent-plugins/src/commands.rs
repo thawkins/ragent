@@ -55,12 +55,12 @@ impl StoreArgError {
                  Usage: `/plugins add <source> [--force]`\n\
                  Source forms: a local directory, a local `.zip`/`.tar.gz` file, or an \
                  `https://` URL ending in `.zip`/`.tar.gz`.",
-                attribution("add")
+                attribution(sub)
             ),
             Self::MissingRemoveId => format!(
                 "{}\n\n[err] Missing <pluginid>.\n\n\
                  Usage: `/plugins {sub} <pluginid>`",
-                attribution("remove")
+                attribution(sub)
             ),
         }
     }

@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `mf_search` tool surface.
 //!
 //! These tests exercise the tool's `Tool` trait implementation (name,

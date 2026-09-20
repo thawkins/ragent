@@ -265,10 +265,30 @@ pub struct Config {
     /// overrides user-global). `None` means the compiled defaults apply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugins: Option<crate::plugins::PluginsConfig>,
+    /// Maximum number of messages the TUI message input queue may hold
+    /// (spec `inputqueue` FR-015).
+    ///
+    /// When `None` the queue falls back to [`DEFAULT_INPUT_QUEUE_CAPACITY`]
+    /// (32). Values are clamped to `1..=99` by
+    /// [`Config::effective_input_queue_capacity`]; the per-run queue is never
+    /// persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_queue_capacity: Option<usize>,
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
 }
+
+/// Default capacity of the TUI message input queue (spec `inputqueue` FR-015).
+pub const DEFAULT_INPUT_QUEUE_CAPACITY: usize = 32;
+
+/// Minimum configurable input-queue capacity.
+const MIN_INPUT_QUEUE_CAPACITY: usize = 1;
+
+/// Maximum configurable input-queue capacity.
+///
+/// Mirrors the two-digit queue counter, which clamps at `99` (FR-009).
+const MAX_INPUT_QUEUE_CAPACITY: usize = 99;
 
 /// Tool-family visibility configuration.
 ///
@@ -2057,6 +2077,18 @@ impl Config {
         hidden
     }
 
+    /// Resolve the message input-queue capacity (spec `inputqueue` FR-015).
+    ///
+    /// Returns the configured `input_queue_capacity`, clamped to `1..=99` (the
+    /// bound the two-digit queue counter renders, FR-009), or
+    /// [`DEFAULT_INPUT_QUEUE_CAPACITY`] (32) when the field is unset.
+    #[must_use]
+    pub fn effective_input_queue_capacity(&self) -> usize {
+        self.input_queue_capacity
+            .unwrap_or(DEFAULT_INPUT_QUEUE_CAPACITY)
+            .clamp(MIN_INPUT_QUEUE_CAPACITY, MAX_INPUT_QUEUE_CAPACITY)
+    }
+
     /// Deep merge two configs, with overlay taking precedence for set fields.
     /// # Examples
     ///
@@ -2305,6 +2337,13 @@ impl Config {
         // absent user-global block (spec `plugins` T-001).
         if overlay.plugins.is_some() {
             base.plugins = overlay.plugins;
+        }
+
+        // Input-queue capacity: overlay wins when explicitly set (spec
+        // `inputqueue` FR-015), so a project-level override is not discarded by
+        // an absent user-global value.
+        if overlay.input_queue_capacity.is_some() {
+            base.input_queue_capacity = overlay.input_queue_capacity;
         }
 
         // dirs: union of allowlist, denylist, and allowed_roots from both configs

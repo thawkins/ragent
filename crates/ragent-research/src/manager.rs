@@ -1068,7 +1068,6 @@ fn supporting_index(prefix: &str, prefix_sources: &[Source]) -> usize {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
     use tempfile::TempDir;
 

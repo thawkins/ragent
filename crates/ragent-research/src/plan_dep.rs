@@ -215,7 +215,6 @@ pub fn research_dependency_names(plan_md: &str) -> Result<Vec<String>, ResearchD
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
 
     #[test]

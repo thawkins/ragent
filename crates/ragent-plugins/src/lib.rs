@@ -88,5 +88,5 @@ pub use store::{
     LifecycleState, PluginState, STATE_FILE, ScanFailure, ScannedPlugin, StoreDirs, StoreLedger,
     TelemetryCounters, scan, scan_dirs, store_dirs, store_dirs_at,
 };
-pub use surface::{ScratchSurface, store_and_config};
+pub use surface::{ScratchSurface, run_plugin_subcommand, store_and_config};
 pub use tool_adapter::{PluginToolAdapter, dispatch_sandbox, plugin_tool_name};

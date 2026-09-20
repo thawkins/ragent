@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for cross-file symbol resolution (spec graphCI, T-005).
 
 use chrono::Utc;

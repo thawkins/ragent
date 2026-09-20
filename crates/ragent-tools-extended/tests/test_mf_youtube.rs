@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for the mf_fetch YouTube transcript pipeline in
 //! `ragent_tools_extended::masterfetch::youtube`.
 //!

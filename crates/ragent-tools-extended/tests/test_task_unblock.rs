@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! todo2tasks T-006: integration tests for auto-unblock evaluation
 //! (FR-003, FR-005).
 //!

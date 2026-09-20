@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Regression tests for web-source author acquisition in the research
 //! pipeline.
 //!

@@ -558,6 +558,8 @@ fn parse_statistics_response(parsed: &Value, symbol: &str) -> FinanceResult<Fund
 
 #[cfg(test)]
 mod tests {
+    // Fixture quotes use exactly representable decimal values.
+    #![allow(clippy::float_cmp)]
     use super::*;
 
     #[test]

@@ -2780,7 +2780,6 @@ pub fn render_bibliography(sources: &[Source]) -> String {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::source::Source;
     use std::path::PathBuf;

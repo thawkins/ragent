@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the renewed `EditTool` (editrenewal spec).
 //!
 //! The renewed `edit` tool uses **strict exact-match** replacement (FR-004):

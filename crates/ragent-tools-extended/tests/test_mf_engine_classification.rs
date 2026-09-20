@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for the masterfetch engine-name vocabulary and academic
 //! classification helper (spec `researchnoacc`, T-001; FR-003, FR-015).
 //!

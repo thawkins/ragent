@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for optional retention limit / archival (maka spec T-010, FR-016,
 //! NFR-003).
 //!

@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Manual verification test cases for the Hyperresearch pipeline (T-022).
 //!
 //! These tests exercise the post-implementation Hyperresearch features in a

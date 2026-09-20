@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the `open` tool.
 
 use std::path::PathBuf;

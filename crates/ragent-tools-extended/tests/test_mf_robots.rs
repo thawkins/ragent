@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for `masterfetch::robots` — robots.txt fetch + parse +
 //! per-domain cache (T-010, FR-028, NFR-003).
 //!

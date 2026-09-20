@@ -1,6 +1,6 @@
 # Project Statistics
 
-**Version:** 1.0.112
+**Version:** 1.0.113
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
@@ -9,19 +9,19 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 480715 (477005 in `crates/` + 3710 in root `src/`/`examples/`) |
-| Total Rust files | 1193 (workspace crates) + 6 (root `src/`/`examples/`) |
-| Tests defined | ~9080 (7369 external test-file tests + 1677 inline `#[cfg(test)]` + 34 root `tests/`/`src/`) |
-| Test files | 579 external + 120 inline-bearing |
-| Test binaries | ~613 (579 integration test files + 33 lib/bin targets + 1 root bin) |
+| Total Rust lines | 486657 (482947 in `crates/` + 3710 in root `src/`/`examples/`) |
+| Total Rust files | 1210 (workspace crates) + 6 (root `src/`/`examples/`) |
+| Tests defined | ~9273 (7562 external test-file tests + 1677 inline `#[cfg(test)]` + 34 root `tests/`/`src/`) |
+| Test files | 596 external + ~120 inline-bearing |
+| Test binaries | ~630 (596 integration test files + 33 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 168 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 17 |
-| Specs on disk | 50 directories in `specs/` |
-| Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 19 category how-tos, 76 slash-command docs |
+| Specs on disk | 51 directories in `specs/` |
+| Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 20 category how-tos, 77 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.112 |
+| Version | 1.0.113 |
 
 ---
 
@@ -36,7 +36,7 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-agent` | 226 | 79523 | 90 |
 | `ragent-bench` | 24 | 8436 | 3 |
 | `ragent-codeindex` | 69 | 23584 | 40 |
-| `ragent-config` | 43 | 10869 | 27 |
+| `ragent-config` | 44 | 11003 | 28 |
 | `ragent-llm` | 52 | 23550 | 23 |
 | `ragent-plugins` | 36 | 11689 | 17 |
 | `ragent-research` | 114 | 60103 | 48 |
@@ -48,7 +48,7 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-tools-core` | 56 | 17760 | 20 |
 | `ragent-tools-extended` | 203 | 74350 | 85 |
 | `ragent-tools-vcs` | 56 | 14627 | 20 |
-| `ragent-tui` | 160 | 90782 | 104 |
+| `ragent-tui` | 176 | 96590 | 120 |
 | `ragent-types` | 36 | 8676 | 18 |
 
 ---
@@ -56,21 +56,21 @@ shows the file count, line count, and test-file count for each crate (including
 ## Crate Size Distribution
 
 ```
-ragent-tui             ██████████████████████████████ 90,782 lines (18.9%)
-ragent-agent           ██████████████████████████ 79,523 lines (16.6%)
-ragent-tools-extended  ███████████████████████ 74,350 lines (15.5%)
-ragent-research        ████████████████████ 60,103 lines (12.5%)
-ragent-codeindex       ████████ 23,584 lines ( 4.9%)
-ragent-llm             ████████ 23,550 lines ( 4.9%)
+ragent-tui             ██████████████████████████████ 96,590 lines (19.8%)
+ragent-agent           ██████████████████████████ 79,523 lines (16.3%)
+ragent-tools-extended  ███████████████████████ 74,350 lines (15.3%)
+ragent-research        ████████████████████ 60,103 lines (12.3%)
+ragent-codeindex       ████████ 23,584 lines ( 4.8%)
+ragent-llm             ████████ 23,550 lines ( 4.8%)
 ragent-specs           ██████ 19,421 lines ( 4.0%)
-ragent-tools-core      ██████ 17,760 lines ( 3.7%)
-ragent-storage         █████ 14,746 lines ( 3.1%)
+ragent-tools-core      ██████ 17,760 lines ( 3.6%)
+ragent-storage         █████ 14,746 lines ( 3.0%)
 ragent-tools-vcs       █████ 14,627 lines ( 3.0%)
 ragent-plugins         ████ 11,689 lines ( 2.4%)
-ragent-config          ███ 10,869 lines ( 2.3%)
+ragent-config          ███ 11,003 lines ( 2.3%)
 ragent-telemetry       ███ 10,265 lines ( 2.1%)
 ragent-types           ███ 8,676 lines ( 1.8%)
-ragent-bench           ███ 8,436 lines ( 1.8%)
+ragent-bench           ███ 8,436 lines ( 1.7%)
 ragent-server          ██ 5,854 lines ( 1.2%)
 ragent-team            █ 2,770 lines ( 0.6%)
 ```
@@ -82,7 +82,7 @@ ragent-team            █ 2,770 lines ( 0.6%)
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
 | `ragent-tools-extended` | 85 | ~1,892 |
-| `ragent-tui` | 104 | ~1,213 |
+| `ragent-tui` | 120 | ~1,406 |
 | `ragent-agent` | 90 | ~779 |
 | `ragent-specs` | 17 | ~514 |
 | `ragent-research` | 48 | ~402 |
@@ -91,19 +91,19 @@ ragent-team            █ 2,770 lines ( 0.6%)
 | `ragent-storage` | 32 | ~285 |
 | `ragent-llm` | 23 | ~273 |
 | `ragent-tools-core` | 20 | ~251 |
+| `ragent-config` | 28 | ~238 |
 | `ragent-plugins` | 17 | ~234 |
-| `ragent-config` | 27 | ~228 |
 | `ragent-types` | 18 | ~191 |
 | `ragent-telemetry` | 16 | ~187 |
 | `ragent-server` | 5 | ~96 |
 | `ragent-team` | 14 | ~81 |
 | `ragent-bench` | 3 | ~50 |
-| **Total (external)** | **579** | **~7,369** |
+| **Total (external)** | **596** | **~7,562** |
 
 Inline `#[cfg(test)]` modules in library sources contribute a further
 1,677 test attributes (largest contributors: `ragent-research`, `ragent-agent`,
 `ragent-tools-extended`, `ragent-tui`, `ragent-specs`), bringing the estimated
-total to ~9,080.
+total to ~9,273.
 
 ---
 
@@ -165,8 +165,8 @@ Notes:
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 53 lines (9,080 tests / 480,715 lines)
-- Largest crate: `ragent-tui` (90,782 lines, 18.9%)
+- Test-to-code ratio: ~1 test per 52 lines (9,273 tests / 486,657 lines)
+- Largest crate: `ragent-tui` (96,590 lines, 19.8%)
 - Smallest crate: `ragent-team` (2,770 lines, 0.6%)
 - Median crate size: 14,746 lines (`ragent-storage`)
 - Crates over 10k lines: 13 of 17
@@ -174,4 +174,4 @@ Notes:
 
 ---
 
-_Generated 2026-09-20 (v1.0.112, incl. `ragent-plugins` crate and `/plugins` TUI + CLI surfaces)._
+_Generated 2026-09-21 (v1.0.113: TUI message input queue, four-row ALT-Q queue-control menu with `Show` queue-entry panel, `/queue` slash command, and `input_queue_capacity` config; a `/simplify all` quality pass over the diff and the HEAD~3 plugins/research/config work with no behaviour change; and a full-workspace clippy hygiene pass that removes the non-existent `clippy::assert_is_empty` allow from 244 files and makes `cargo clippy --all-targets -D warnings` clean)._

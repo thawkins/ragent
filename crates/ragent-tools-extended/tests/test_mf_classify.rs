@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Unit tests for `masterfetch::crawl::classify` — content-adaptive page
 //! classification and extraction (T-018, FR-012, FR-029, NFR-003).
 //!

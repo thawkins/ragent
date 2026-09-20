@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for the `codeindex_communities` tool (spec graphCI, T-014).
 //!
 //! Covers FR-013 (community detection) and FR-017 (non-blocking busy

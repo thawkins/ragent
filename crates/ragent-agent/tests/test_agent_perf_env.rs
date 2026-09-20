@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the agent-loop performance profiling gate.
 //!
 //! Validates that the `RAGENT_AGENT_PERF=1` environment variable and the

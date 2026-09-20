@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! External tests for `tests` from `crates/ragent-tools-extended/src/masterfetch/search/tavily.rs`
 //!
 //! Relocated from the inline `#[cfg(test)]` module.

@@ -1,3 +1,4 @@
+#![allow(clippy::float_cmp)] // deterministic f64 scores compare exactly in these unit tests
 //! Extended classifier tests (M8/T8.1).
 
 use super::*;

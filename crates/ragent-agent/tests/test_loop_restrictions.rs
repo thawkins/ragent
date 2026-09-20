@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for per-loop tool-set and scope restriction (spec
 //! `agentloop`, task T-009 / FR-008, FR-009, FR-021, FR-022):
 //!

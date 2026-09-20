@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for the task tool family guidance, schemas, and descriptions.
 //!
 //! These tests guard against regressions in the guidance that prevents models

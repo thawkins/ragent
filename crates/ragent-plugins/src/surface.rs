@@ -13,7 +13,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::command_adapter::PluginCommandAdapter;
-use crate::session::PluginSurface;
+use crate::commands::run_store_command;
+use crate::control::run_control_command;
+use crate::harness::run_test_command;
+use crate::session::{PluginSession, PluginSurface};
 use crate::store::{StoreDirs, store_dirs};
 use crate::tool_adapter::{PluginToolAdapter, plugin_tool_name};
 
@@ -44,19 +47,23 @@ impl ScratchSurface {
             ..Self::default()
         }
     }
+
+    /// Union the caller's pre-existing names (`base`) with the names registered
+    /// during this call (`registered`), so collision checks see the real surface.
+    fn merged(base: &BTreeSet<String>, registered: &BTreeSet<String>) -> BTreeSet<String> {
+        let mut set = base.clone();
+        set.extend(registered.iter().cloned());
+        set
+    }
 }
 
 impl PluginSurface for ScratchSurface {
     fn existing_tool_names(&self) -> BTreeSet<String> {
-        let mut set = self.existing_tools.clone();
-        set.extend(self.tools.iter().cloned());
-        set
+        Self::merged(&self.existing_tools, &self.tools)
     }
 
     fn existing_command_names(&self) -> BTreeSet<String> {
-        let mut set = self.existing_commands.clone();
-        set.extend(self.commands.iter().cloned());
-        set
+        Self::merged(&self.existing_commands, &self.commands)
     }
 
     fn register_tool(&mut self, adapter: Arc<PluginToolAdapter>) {
@@ -98,4 +105,47 @@ pub fn store_and_config(workdir: &Path) -> (StoreDirs, ragent_config::PluginsCon
     };
     let dirs = store_dirs(workdir, config.store_dir.as_deref());
     (dirs, config)
+}
+
+/// Parse-and-run the management subcommands of `/plugins <sub> <rest>` on the
+/// shared surface.
+///
+/// This is the one dispatch ladder both front ends ([`crate::run_cli`] for
+/// `ragent plugins` and the TUI `/plugins` family) drive, so the store / test /
+/// control fall-through can never drift between them. `existing_tools` and
+/// `existing_commands` seed the collision surface (FR-024).
+///
+/// Returns `None` when `sub` is not a management subcommand (`add` / `remove` /
+/// `list` / `enable` / `disable` / `test`), so the caller can render its own
+/// (surface-specific) usage text. When it is a management subcommand the report
+/// string to print is returned, including the usage fall-back when the control
+/// parse rejects an otherwise-known `sub`.
+#[must_use]
+pub fn run_plugin_subcommand(
+    workdir: &Path,
+    sub: &str,
+    rest: &str,
+    existing_tools: BTreeSet<String>,
+    existing_commands: BTreeSet<String>,
+) -> Option<String> {
+    let (dirs, config) = store_and_config(workdir);
+
+    // Store subcommands (add / remove) need no live session.
+    if let Some(report) = run_store_command(&config, &dirs, workdir, sub, rest) {
+        return Some(report);
+    }
+
+    // The isolated test harness must not touch any live session (FR-013).
+    if let Some(report) = run_test_command(dirs.clone(), &config, sub, rest) {
+        return Some(report);
+    }
+
+    // Control subcommands (list / enable / disable) drive a live session for the
+    // duration of this call; the sandbox contexts are dropped on return. Seed the
+    // collision surface so collision rejection (FR-024) is checked against the
+    // real surface.
+    let mut surface = ScratchSurface::seeded(existing_tools, existing_commands);
+    let mut session = PluginSession::start(dirs, config, &mut surface);
+    run_control_command(&mut session, &mut surface, sub, rest)
+        .or_else(|| Some(crate::help::render_help(sub)))
 }

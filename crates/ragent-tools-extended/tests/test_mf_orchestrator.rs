@@ -1,4 +1,4 @@
-#![allow(clippy::assert_is_empty)]
+#![allow(clippy::float_cmp)] // deterministic f64 scores compare exactly in these unit tests
 //! Unit tests for `masterfetch::crawl::orchestrator` — best-first crawl
 //! orchestration (T-019, FR-011, FR-013, FR-014, NFR-001, NFR-003).
 //!

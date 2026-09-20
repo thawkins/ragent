@@ -679,8 +679,13 @@ impl App {
             SelectionPane::Telemetry => &self.telemetry_content_lines,
             SelectionPane::ContextPanel => &self.context_content_lines,
             SelectionPane::Input => {
-                // For input widgets, build a single-line content from app.input
-                let input_text = format!("> {}", self.input);
+                // For input widgets, build the painted content from `app.input`.
+                // The prompt prefix carries the queue counter while entries are
+                // pending (spec `inputqueue` FR-009); the counter digits are
+                // replaced by spaces in the geometry copy so a copy can never
+                // include them as message content (FR-020, NFR-002).
+                let prefix = crate::layout::input_prompt_selection_prefix(self.input_queue_len());
+                let input_text = format!("{prefix}{}", self.input);
                 let area = self.input_area;
                 let inner_x = area.x + 1; // inside border
                 let inner_y = area.y + 1;
@@ -775,7 +780,7 @@ impl App {
     /// Halt the running agent turn (Esc / Ctrl+X / confirmed Alt+X): set the
     /// turn cancel flag and raise the goal-driven loop interrupt (FR-016).
     /// A no-op when no turn is running (`cancel_flag` unset).
-    fn halt_running_agent(&mut self) {
+    pub(crate) fn halt_running_agent(&mut self) {
         if let Some(ref flag) = self.cancel_flag {
             flag.store(true, Ordering::Relaxed);
             // T-011 (FR-016): an active goal-driven loop stops at
@@ -916,6 +921,8 @@ impl App {
                         match self.session_processor.session_manager.create_session(dir) {
                             Ok(session) => {
                                 self.session_id = Some(session.id.clone());
+                                // A fresh session starts with an empty queue (NFR-005).
+                                self.clear_input_queue();
                                 let short_sid = short_session_id(&session.id);
                                 self.sid_to_display_name
                                     .insert(short_sid, self.agent_name.clone());
@@ -968,12 +975,32 @@ impl App {
                         self.status = "⚠ No model selected — use /model to choose".to_string();
                         return;
                     }
+                    // FR-002/FR-005/FR-012: while the primary agent is
+                    // executing the input field stays live; a plain message is
+                    // accepted and queued instead of being rejected.
+                    // FR-016: never queue a compaction-pending send or overlap
+                    // a running turn.
+                    if self.is_input_blocked() {
+                        let image_paths: Vec<std::path::PathBuf> =
+                            std::mem::take(&mut self.pending_attachments);
+                        if let Err(rejected) = self.enqueue_input(text, image_paths) {
+                            // FR-004: the queue is at capacity. The submission
+                            // is rejected, but the typed text and staged
+                            // attachments must not be lost.
+                            self.input = rejected.text;
+                            self.input_cursor = self.input_len_chars();
+                            self.pending_attachments = rejected.image_paths;
+                        }
+                        return;
+                    }
                     // Create session if needed
                     if self.session_id.is_none() {
                         let dir = std::env::current_dir().unwrap_or_default();
                         match self.session_processor.session_manager.create_session(dir) {
                             Ok(session) => {
                                 self.session_id = Some(session.id.clone());
+                                // A fresh session starts with an empty queue (NFR-005).
+                                self.clear_input_queue();
                                 // Map the primary session's short_sid to the current agent name
                                 let short_sid = short_session_id(&session.id);
                                 self.sid_to_display_name
@@ -1392,6 +1419,16 @@ impl App {
                     }
                     self.needs_redraw = true;
                 }
+                // Alt+Q opens the queue-control menu overlay (spec `inputqueue`
+                // FR-021). Opening it only flips the menu flag and resets the
+                // selection; the input buffer, staged attachments, and running
+                // turn are left untouched (FR-022) and the change is painted on
+                // the next frame (NFR-008/NFR-009).
+                InputAction::OpenQueueMenu => {
+                    self.queue_menu_open = true;
+                    self.queue_menu_selected = 0;
+                    self.needs_redraw = true;
+                }
                 InputAction::OutputViewPageUp => {
                     self.scroll_output_view_by(5);
                 }
@@ -1693,6 +1730,30 @@ impl App {
                     if self.pending_stop_confirm {
                         self.pending_stop_confirm = false;
                         self.status = "stop cancelled — agent still running".to_string();
+                    }
+                }
+                // `Clear the input queue?` confirmation dialog (spec `inputqueue`
+                // T-021/T-022, FR-033/FR-034/FR-036). Opened by
+                // `queue_menu_select_clear`; the entries are removed only here,
+                // on an explicit `Yes` (FR-036/FR-037).
+                InputAction::ConfirmQueueClear => {
+                    if self.queue_clear_confirm_open {
+                        self.queue_clear_confirm_open = false;
+                        self.queue_clear_confirm_selected = crate::app::QUEUE_CLEAR_CONFIRM_NO;
+                        // FR-036: `Yes` drains every entry and refreshes the
+                        // counter (clear_input_queue sets needs_redraw).
+                        self.clear_input_queue();
+                        // NFR-011: the closure must paint on the next frame.
+                        self.needs_redraw = true;
+                    }
+                }
+                InputAction::CancelQueueClear => {
+                    if self.queue_clear_confirm_open {
+                        self.queue_clear_confirm_open = false;
+                        self.queue_clear_confirm_selected = crate::app::QUEUE_CLEAR_CONFIRM_NO;
+                        // FR-035: dismissing with `No`/`Esc` leaves the queue
+                        // unchanged; only the dialog state is reset.
+                        self.needs_redraw = true;
                     }
                 }
                 InputAction::ConfirmRouterSave => {

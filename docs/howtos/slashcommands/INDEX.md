@@ -32,6 +32,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/thinking` | [thinking](thinking.md) | Switch the current thinking level: /thinking auto\|off\|low\|medium\|high |
 | `/provider` | [provider](provider.md) | Change provider, show config, or configure model router: /provider [show\|router\|help] |
 | `/provider_reset` | [provider_reset](provider_reset.md) | Reset the current provider and remove stored credentials |
+| `/queue` | [queue](queue.md) | Inspect the message input queue: /queue [list\|clear\|next\|help] |
 | `/quit` | [quit](quit.md) | Exit ragent |
 | `/reload` | [reload](reload.md) | Reload customizations (/reload [all\|config\|mcp\|skills\|agents]) |
 | `/resume` | [resume](resume.md) | Resume the agent from where it was halted (/resume help) |

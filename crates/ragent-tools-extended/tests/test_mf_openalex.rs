@@ -1,4 +1,4 @@
-#![allow(clippy::assert_is_empty)]
+#![allow(clippy::float_cmp)] // deterministic f64 scores compare exactly in these unit tests
 //! Unit tests for the OpenAlex backend request builder and response parser.
 //!
 //! These tests exercise

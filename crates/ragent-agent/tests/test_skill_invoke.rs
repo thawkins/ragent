@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for skill model resolution helpers.
 
 use ragent_agent::agent::{AgentInfo, ModelRef, resolve_agent};

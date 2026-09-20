@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Behavioural smoke test for EDITPLAN T-14: strict exact-byte `edit` matching.
 //!
 //! Drives `ragent-tools-core` directly (the same code path that `ragent run` uses):

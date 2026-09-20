@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for `MultiEditTool` (WSPLAN Milestone 3).
 //!
 //! Covers: two edits in one file, edits across two files, overlap detection,

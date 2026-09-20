@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for the MCP notification push-event adapter
 //! (spec `piegap` FR-003 / T-003).
 //!

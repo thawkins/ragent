@@ -8,7 +8,7 @@ use ragent_types::ThinkingLevel;
 
 use crate::app::{
     App, ConfiguredProvider, ContextAction, ModelPickerEntry, PROVIDER_LIST, ProviderSetupStep,
-    ProviderSource,
+    ProviderSource, QUEUE_CLEAR_CONFIRM_YES,
 };
 use crate::utils::is_ollama_family;
 use ragent_llm::providers::router_config::Tier;
@@ -103,6 +103,12 @@ pub enum InputAction {
     ConfirmStopAgent,
     /// Cancel the Alt+X stop-agent dialog (Esc -> keep the agent running).
     CancelStopAgent,
+    /// Confirm the `Clear the input queue?` dialog's `Yes` option (spec
+    /// `inputqueue` FR-033, FR-036).
+    ConfirmQueueClear,
+    /// Dismiss the `Clear the input queue?` dialog: the `No` option or `Esc`.
+    /// Leaves the queue unchanged (spec `inputqueue` FR-035).
+    CancelQueueClear,
     /// Confirm the plan approval dialog (Enter when cursor_approve = true).
     ApprovePlan,
     /// Reject the plan approval dialog (Enter when cursor_approve = false, or `r`/Esc).
@@ -173,6 +179,8 @@ pub enum InputAction {
     ToggleEditLog,
     /// Toggle GCF tool-result encoding (Alt+G).
     ToggleGcf,
+    /// Open the queue-control menu overlay (Alt+Q) — spec `inputqueue` FR-021.
+    OpenQueueMenu,
     /// Scroll the research markdown viewer up.
     ResearchViewPageUp,
     /// Scroll the research markdown viewer down.
@@ -256,6 +264,46 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             KeyCode::Esc => return Some(InputAction::CancelStopAgent),
             _ => return None,
         }
+    }
+
+    // While the queue-entry panel (ALT-Q `Show` row) is open it swallows every
+    // keystroke so none of them can mutate the editable input buffer: `Up`/`Down`
+    // move the highlight, `Enter` moves the highlighted entry one step toward the
+    // front, `Del` removes it, and `Esc` is the only key that dismisses the panel.
+    // Every change repaints on the next frame; the input buffer, staged
+    // attachments, the running turn, and (apart from `Enter`/`Del`) the queue are
+    // left untouched.
+    if app.queue_show_open {
+        match key.code {
+            KeyCode::Up => app.queue_show_move_up(),
+            KeyCode::Down => app.queue_show_move_down(),
+            KeyCode::Enter => app.queue_show_promote_selected(),
+            KeyCode::Delete => app.queue_show_delete_selected(),
+            KeyCode::Esc => app.queue_show_close(),
+            _ => {}
+        }
+        return None;
+    }
+
+    // While the queue-control menu overlay (ALT-Q) is open it swallows every
+    // keystroke so none of them can mutate the editable input buffer (FR-031).
+    // `Up`/`Down` move the highlight (skipping the non-selectable empty-queue
+    // `Next` row, FR-023), `Enter` activates the highlighted row, and `Esc`
+    // dismisses the menu taking no action (FR-032): the input buffer, staged
+    // attachments, the queue, and the running turn are all left untouched, and
+    // the closure is painted on the next frame (NFR-008).
+    if app.queue_menu_open {
+        match key.code {
+            KeyCode::Up => app.queue_menu_move_up(),
+            KeyCode::Down => app.queue_menu_move_down(),
+            KeyCode::Enter => app.queue_menu_activate_selected(),
+            KeyCode::Esc => {
+                app.close_queue_menu();
+                app.needs_redraw = true;
+            }
+            _ => {}
+        }
+        return None;
     }
 
     // If context menu is active, route all keys there.
@@ -458,6 +506,39 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         };
     }
 
+    // If the `Clear the input queue?` confirmation dialog (opened by the
+    // queue-control menu's `Clear` row) is active, intercept keys before any
+    // other dialog. It reuses the shared modal key-dispatch machinery
+    // (NFR-010): `Left`/`Right` (and `Tab`/`BackTab`) move between `Yes` and
+    // `No`, `Enter` selects, `Esc` dismisses. Every other key is swallowed so
+    // it cannot mutate the editable input buffer (FR-035, FR-037).
+    if app.queue_clear_confirm_open {
+        match key.code {
+            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                app.queue_clear_confirm_selected =
+                    if app.queue_clear_confirm_selected == QUEUE_CLEAR_CONFIRM_YES {
+                        crate::app::QUEUE_CLEAR_CONFIRM_NO
+                    } else {
+                        QUEUE_CLEAR_CONFIRM_YES
+                    };
+                // NFR-011: the selection change must paint on the next frame.
+                app.needs_redraw = true;
+                return None;
+            }
+            KeyCode::Enter => {
+                return Some(
+                    if app.queue_clear_confirm_selected == QUEUE_CLEAR_CONFIRM_YES {
+                        InputAction::ConfirmQueueClear
+                    } else {
+                        InputAction::CancelQueueClear
+                    },
+                );
+            }
+            KeyCode::Esc => return Some(InputAction::CancelQueueClear),
+            _ => return None,
+        }
+    }
+
     // If a router save confirmation modal is active, intercept Enter/Esc
     if app.pending_router_save.is_some() {
         match key.code {
@@ -529,6 +610,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 return None;
             }
             KeyCode::Enter => {
+                // FR-017: slash commands are never queued; while a turn is
+                // executing they keep the busy refusal instead of dispatching.
+                if app.is_input_blocked() {
+                    app.status = "busy - wait for the current turn to finish".to_string();
+                    return None;
+                }
                 // Select the highlighted command, or use the typed text.
                 // If the user typed more than just the trigger, preserve the full
                 // input so subcommands and arguments are not lost.
@@ -760,12 +847,19 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             Some(InputAction::OpenMemoryView)
         }
         KeyCode::Enter => {
-            if app.is_input_blocked() {
-                app.status = "busy - wait for the current turn to finish".to_string();
-                return None;
-            }
             let text = app.input.clone();
             if text.is_empty() {
+                return None;
+            }
+            // FR-002/FR-012: a plain message is accepted while the primary
+            // agent is executing; the submit path queues it instead of
+            // rejecting it. FR-017: slash commands, bang commands, and
+            // teammate-targeted messages are never queued and keep their
+            // existing busy behaviour while a turn is running.
+            let is_command = text.starts_with('/') || text.starts_with('!');
+            let teammate_targeted = app.focused_teammate.is_some();
+            if (is_command || teammate_targeted) && app.is_input_blocked() {
+                app.status = "busy - wait for the current turn to finish".to_string();
                 return None;
             }
             if text.starts_with('/') {
@@ -874,8 +968,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             None
         }
+        // Alt+Q opens the queue-control menu overlay (spec `inputqueue` FR-021).
+        // Placed before the generic char-insert arm so the `q` is never typed
+        // into the input buffer (FR-022, FR-031). ALT was otherwise unbound for
+        // `q`, so no other key behaviour changes (NFR-009).
+        KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::OpenQueueMenu)
+        }
         KeyCode::Char(c) => {
-            if app.is_input_blocked() {
+            if app.is_input_locked() {
                 app.status = "busy - wait for the current turn to finish".to_string();
                 return None;
             }

@@ -597,7 +597,6 @@ impl IterativeEngine {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::*;
     use crate::analysis::NoopAnalysisEngine;
     use crate::planner::HeuristicPlanner;

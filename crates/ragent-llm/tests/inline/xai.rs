@@ -1,3 +1,4 @@
+#![allow(clippy::float_cmp)] // deterministic f64 scores compare exactly in these unit tests
 //! Tests for xai.rs (M8/T8.4).
 //! Compiled as a submodule via #[path], super::* resolves to the source module.
 

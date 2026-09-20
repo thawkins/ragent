@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for tool visibility configuration.
 
 use ragent_agent::{Config, ToolVisibilityConfig, tool_family_names};

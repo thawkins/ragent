@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Comprehensive storage round-trip tests for the `cron_events` table
 //! (spec agentchron T-018).
 //!

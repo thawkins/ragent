@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Regression tests for the Gemini streaming tool-call extraction (F2).
 //!
 //! Gemini's final frame commonly carries BOTH `finishReason` and the

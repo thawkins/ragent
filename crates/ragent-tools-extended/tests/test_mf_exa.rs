@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Unit tests for the Exa backend request builder (T-004, FR-003).
 //!
 //! These tests exercise

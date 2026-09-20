@@ -58,6 +58,7 @@ the project root `README.md` and the **Tutorial** in
    - 7.35 [`loop`](#735-loop)
    - 7.36 [`activity_log`](#736-activity_log)
     - 7.37 [`plugins`](#737-plugins)
+    - 7.38 [`input_queue_capacity`](#738-input_queue_capacity)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -188,6 +189,7 @@ different merge strategies:
 | `telemetry` | If overlay enables telemetry, the whole overlay `otel` block replaces the base. Otherwise maps (`resource_attributes`, `metrics`) are unioned. |
 | `experimental` | `open_telemetry` and `parallel_tool_calls`: OR semantics. Other fields: overlay defaults. |
 | `plugins` | Overlay wins wholesale when the `plugins` section is present, so a project-level block is not discarded by an absent user-global block. |
+| `input_queue_capacity` | Overlay wins when explicitly set, so a project-level override is not discarded by an absent user-global value. |
 
 The `config_paths` field records every file that contributed to the final
 merged config, in load order.
@@ -1599,6 +1601,28 @@ user-global). Manage plugins with `/plugins list|add|remove|enable|disable|test|
 in the TUI or `ragent plugins <sub>` from the CLI. See
 [`docs/howtos/slashcommands/plugins.md`](slashcommands/plugins.md).
 
+### 7.38 `input_queue_capacity`
+
+Maximum number of messages the TUI message input queue may hold (spec
+`inputqueue`). While the primary agent is executing, messages submitted with
+`Enter` are staged in this bounded FIFO queue and run at each turn boundary; a
+two-digit counter appears before the prompt while entries are pending.
+
+```jsonc
+{
+  "input_queue_capacity": 32
+}
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `input_queue_capacity` | `usize?` | `32` | Maximum queued entries; resolved by `Config::effective_input_queue_capacity()` and clamped to `1..=99` (the two-digit counter's bound). Submissions beyond the cap are rejected with a status message and the typed text/attachments are restored. |
+
+The field merges overlay-wins: an explicitly set project value survives an
+absent user-global value. The per-run queue is in memory only and is never
+persisted. Manage the queue with the `Alt+Q` menu or the `/queue` slash command
+(see `docs/howtos/slashcommands/queue.md` and `TUI-QUICKSTART.md` §4).
+
 ---
 
 ## 8. Full Example File
@@ -1881,7 +1905,9 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "max_memory_mb": 64,
     "store_dir": null,
     "permissions": {}
-  }
+  },
+
+  "input_queue_capacity": 32
 }
 ```
   

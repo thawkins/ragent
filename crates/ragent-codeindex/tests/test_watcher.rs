@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! External integration tests for the code-index filesystem watcher.
 
 use ragent_codeindex::watcher::{CodeWatcher, WatchEvent, should_ignore};

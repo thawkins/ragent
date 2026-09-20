@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration tests for dynamic trigger rules (spec `piegap` FR-002 / T-002).
 //!
 //! These tests verify the dynamic trigger engine's public API: parsing,

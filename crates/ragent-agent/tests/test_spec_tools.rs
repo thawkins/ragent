@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for spec agent tools.
 
 use ragent_agent::tool::{

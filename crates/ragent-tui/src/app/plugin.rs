@@ -23,10 +23,7 @@
 //! never stored on [`App`](crate::app::App) and never crosses an `.await`, so
 //! `App` stays `Send + Sync` for the async event loop.
 
-use ragent_plugins::{
-    PLUGIN_SUBCOMMANDS, PluginSession, ScratchSurface, render_help, run_control_command,
-    run_store_command, run_test_command, store_and_config, subcommand_of,
-};
+use ragent_plugins::{PLUGIN_SUBCOMMANDS, render_help, run_plugin_subcommand, subcommand_of};
 
 use crate::app::helpers::current_working_dir;
 
@@ -56,23 +53,15 @@ pub(super) fn handle_plugins_command(app: &crate::app::App, args: &str) -> Strin
         return render_help(sub);
     }
 
-    let (dirs, config) = store_and_config(&current_working_dir());
-
-    // Store subcommands (add / remove) never need a live session.
-    if let Some(report) = run_store_command(&config, &dirs, &current_working_dir(), sub, rest) {
-        return report;
-    }
-
-    // The isolated test harness must not touch any live session (FR-013).
-    if let Some(report) = run_test_command(dirs.clone(), &config, sub, rest) {
-        return report;
-    }
-
-    // Control subcommands (list / enable / disable) drive a live session for
-    // the duration of this call; the sandbox contexts are dropped on return.
-    // Seed the collision surface from the live session: built-in tool names
-    // plus the `SLASH_COMMANDS` triggers (FR-024).
-    let mut surface = ScratchSurface::seeded(
+    let workdir = current_working_dir();
+    // Seed the collision surface (FR-024) from the live session: built-in tool
+    // names plus the `SLASH_COMMANDS` triggers, then run the shared dispatch
+    // ladder (store / test / control). The control subcommands drive an ephemeral
+    // session whose sandbox contexts are dropped on return.
+    run_plugin_subcommand(
+        &workdir,
+        sub,
+        rest,
         app.session_processor
             .tool_registry
             .list()
@@ -82,7 +71,6 @@ pub(super) fn handle_plugins_command(app: &crate::app::App, args: &str) -> Strin
             .iter()
             .map(|c| c.trigger.to_string())
             .collect(),
-    );
-    let mut session = PluginSession::start(dirs, config, &mut surface);
-    run_control_command(&mut session, &mut surface, sub, rest).unwrap_or_else(|| render_help(sub))
+    )
+    .unwrap_or_else(|| render_help(sub))
 }

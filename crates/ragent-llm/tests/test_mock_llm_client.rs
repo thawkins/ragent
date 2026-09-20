@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! External tests for `tests` from `crates/ragent-llm/src/providers/mock_llm_client.rs`
 //!
 //! Relocated from the inline `#[cfg(test)]` module.

@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Integration test verifying masterfetch tool permission categories (T-039,
 //! FR-022, NFR-003).
 //!

@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Tests for `RouterClient` prompt routing and provider delegation.
 //!
 //! These tests verify that the router client classifies prompts into the

@@ -964,7 +964,6 @@ pub fn cap_findings_to_limit(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::assert_is_empty)]
     use super::parser::{
         mechanical_fallback_findings, parse_analysis_response, parse_bullet_list,
         parse_numbered_list, reorder_findings_by_dependency, truncate_body,

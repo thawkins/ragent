@@ -939,6 +939,10 @@ pub async fn run_tui(
         std::process::exit(0);
     });
 
+    // Drop the in-memory input queue at teardown; it is never persisted
+    // (spec `inputqueue` NFR-005).
+    app.clear_input_queue();
+
     // Final synchronous save if history was modified since last flush.
     if app.history_dirty {
         if let Err(e) = app.save_history() {

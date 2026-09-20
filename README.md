@@ -68,7 +68,9 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   - **Terminal UI** — full-screen ratatui interface with provider setup dialog,
     slash-command autocomplete, agent cycling, streaming chat with markdown and syntax
     highlighting, step-numbered tool calls with pretty-printed JSON in the log panel,
-    and a live permission countdown timer (120-second timeout with EXPIRED state)
+    a live permission countdown timer (120-second timeout with EXPIRED state), and a
+    message input queue (`Alt+Q` menu / `/queue`) that keeps the input field editable
+    while the agent executes
   - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
   - **Session management** — persistent conversation history stored in SQLite;
     list, resume, export, and import sessions
@@ -147,6 +149,14 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   tools (`plugin_<id>_<tool>`) and slash commands; managed through
   `/plugins list|add|remove|enable|disable|test|help` in the TUI and the
   `ragent plugins <sub>` CLI; `plugins.enabled: false` makes the subsystem inert
+- **Input queue** — the TUI input field stays editable while the primary agent
+  executes: each `Enter` appends the message to a bounded FIFO queue (default 32
+  entries, configurable via `input_queue_capacity`), a two-digit counter appears
+  before the prompt, and the oldest entry runs at each turn boundary; control it
+  with the `Alt+Q` menu (`Next` / `Stop` / `Clear` / `Show`, navigated with
+  `Up`/`Down`/`Enter`) or `/queue [list|clear|next|help]`; the `Show` row opens a
+  scrollable panel of the queued entries where `Enter` moves the highlighted entry
+  one step toward the front and `Del` removes it
 - **Teams & Swarms** — multi-agent coordination with named teammates, shared task lists,
   mailbox messaging, and swarm decomposition for parallel work (`/swarm <prompt>`)
 - **Autopilot mode** — autonomous operation with configurable iteration limits and
@@ -440,12 +450,27 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.112** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.113** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
+
+- **Message input queue (v1.0.113)** — the TUI input field
+  stays editable while the primary agent executes: each `Enter` queues the
+  message in a bounded FIFO (default 32, `input_queue_capacity` config, clamped
+  `1..=99`) with a two-digit counter before the prompt, and the oldest entry runs
+  at each turn boundary. An `Alt+Q` queue-control menu (`Next` / `Stop`/`Resume`
+  / `Clear` / `Show`, navigated with `Up`/`Down`/`Enter`) and a
+  `/queue [list|clear|next|help]` slash command expose the same queue; a
+  `Yes`/`No` dialog (default `No`) guards clearing, and the `Show` row opens a
+  scrollable queue-entry panel where `Enter` moves an entry one step toward the
+  front and `Del` removes it. Slash/bang/teammate sends keep the busy refusal.
+  Spec `inputqueue` complete (T-001..T-027), 19 new test files (234 new test
+  attributes). This release also lands the full-workspace clippy hygiene pass:
+  the non-existent `clippy::assert_is_empty` allow is removed from 244 files
+  and the `--all-targets` clippy gate is now clean.
 
 - **Plugin system (v1.0.112)** — the **plugin system** goes from spec
   draft to full implementation: the new `ragent-plugins` crate (234 tests)

@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! Unit tests for paid-provider routing logic.
 //!
 //! These tests verify that the finance module selects the right provider based

@@ -1,4 +1,3 @@
-#![allow(clippy::assert_is_empty)]
 //! PERF-040: tests for the batched activity-log writer.
 //!
 //! The writer task ([`SessionProcessor::start_activity_writer`]) is the single
