@@ -1,7 +1,7 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>  <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.109</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.112</p>
         <p style="font-size: 1.1em;">
           <strong>Date:</strong> 2026-09-20
       </p>
@@ -497,6 +497,7 @@ graph TB
 | `ragent-bench` | Criterion benchmarks shared between TUI and CLI | ~900 |
 | `ragent-specs` | Spec lifecycle management, SDD artifact generation, consistency validation, constitution parsing | ~3,200 |
 | `ragent-research` | Research types, gatherers, and plan-dep parser | ~1,600 |
+| `ragent-plugins` | Plugin discovery, dialect manifests, sandboxed JS runtime, lifecycle, `/plugins` surface | ~5,700 |
 
 ### 2.2 Crate Dependency Graph
 
@@ -517,6 +518,7 @@ graph TD
     SP[ragent-specs]
     RS[ragent-research]
     B[ragent-bench]
+    PL[ragent-plugins]
 
     T --> D
     T --> S
@@ -547,6 +549,8 @@ graph TD
     RS --> A
     B --> TU
     B --> SV
+    PL --> A
+    PL --> TU
 ```
 
 **Figure 3:** Crate Dependency Graph — Inter-crate dependency relationships
@@ -1352,6 +1356,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
+| `/plugins list\|add\|remove\|enable\|disable\|test\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; CLI parity via `ragent plugins` |
 | `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
@@ -3292,6 +3297,15 @@ still override per run with the corresponding flags.
       "masterfetch": true,
       "browser": true
     },
+    // Plugin subsystem (spec `plugins`). `enabled: false` makes the whole
+    // subsystem inert (no discovery or loading). Budgets default to 5 s per
+    // tool, 10 s per entry point, 64 MiB per JS context.
+    "plugins": {
+      "enabled": true,
+      "max_execution_ms": 5000,
+      "max_entry_ms": 10000,
+      "max_memory_mb": 64
+    },
     "yolo": false,
     "stream": {
       "timeout_secs": 120,
@@ -3507,6 +3521,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
+| `/plugins list\|add\|remove\|enable\|disable\|test\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; CLI parity via `ragent plugins` |
 | `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |

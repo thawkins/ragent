@@ -1,0 +1,92 @@
+//! Plugin system for ragent (spec `plugins`).
+//!
+//! Discovers, loads, and executes third-party plugins written for OpenAI Codex
+//! and Claude Code / Claude Desktop inside a sandboxed embedded JavaScript
+//! runtime, presenting plugin code with the versioned `ragent` host API.
+//!
+//! Module layout (one module per implementation task):
+//!
+//! | Module             | Task  | Responsibility                                        |
+//! | ------------------ | ----- | ----------------------------------------------------- |
+//! | [`descriptor`]     | T-002 | [`PluginDescriptor`] model + dialect recognition (FR-002, FR-025) |
+//! | [`manifest`]       | T-003 | per-dialect parsing, normalisation, host-API version check (FR-002, FR-019, FR-025) |
+//! | [`store`]          | T-005 | plugin store paths, discovery scan, state ledger (FR-001, FR-023) |
+//! | [`mod@add`]        | T-006 | `/plugins add` source handling (FR-007, FR-010)    |
+//! | [`mod@remove`]     | T-011 | `/plugins remove` store operation (FR-010)         |
+//! | [`mod@report`]     | T-011 | `/plugins add|remove` report rendering (FR-007, FR-010) |
+//! | [`mod@commands`]   | T-011 | `/plugins add|remove` parse + dispatch glue (FR-007, FR-010) |
+//! | [`mod@control`]    | T-013 | `/plugins list|enable|disable` (FR-009, FR-011, FR-012, FR-016, FR-022, FR-025) |
+//! | [`runtime`]        | T-004/T-007 | sandboxed JavaScript runtime                          |
+//! | [`host_api`]       | T-008 | versioned `ragent` host-API bridge                    |
+//! | [`lifecycle`]      | T-009 | enable/disable/load/unload/errored lifecycle          |
+//! | [`tool_adapter`]   | T-010 | plugin tools in the session registry                  |
+//! | [`command_adapter`]| T-012 | plugin slash commands in the TUI command surface      |
+//! | [`mod@session`]    | T-016 | session start: discover, load, register, shutdown (FR-008, FR-022) |
+//! | [`mod@harness`]    | T-015 | `/plugins test` isolated harness (FR-013, FR-026)     |
+//! | [`mod@help`]       | T-014 | `/plugins help` usage text + subcommand metadata (FR-006, FR-014) |
+//! | [`error`]          | T-002 | contained error reporting (FR-026)                    |
+
+pub mod add;
+pub mod command_adapter;
+pub mod commands;
+pub mod control;
+pub mod descriptor;
+pub mod error;
+pub mod harness;
+pub mod help;
+pub mod host_api;
+pub mod lifecycle;
+pub mod manifest;
+pub mod remove;
+pub mod report;
+pub mod runtime;
+pub mod session;
+pub mod store;
+pub mod surface;
+pub mod tool_adapter;
+
+pub use add::{AddError, AddOutcome, MAX_ARCHIVE_BYTES, add};
+pub use command_adapter::{PluginCommandAdapter, dispatch_command_sandbox};
+pub use commands::{StoreArgError, StoreCommand, parse_store_command, run_store_command};
+pub use control::{
+    ControlArgError, ControlCommand, disable_error_report, disable_report,
+    disabled_subsystem_report, enable_error_report, enable_report, parse_control_command,
+    render_list, run_control_command,
+};
+pub use descriptor::{
+    CLAUDE_MANIFEST_FILE, CLAUDE_NESTED_MANIFEST, CODEX_MANIFEST_FILE, CODEX_MARKER_FIELD,
+    DialectMatch, GENERIC_MANIFEST_FILE, PluginDescriptor, PluginDialect, detect_dialect,
+    recognise_dialect,
+};
+pub use error::PluginError;
+pub use harness::{
+    HarnessReport, HarnessStep, StepOutcome, TestArgError, parse_test_command, render_report,
+    run_test_command, sample_for_schema, test_plugin,
+};
+pub use help::{PLUGIN_SUBCOMMANDS, attribution, render_help, subcommand_of};
+pub use host_api::{
+    HostApiInstall, HostCalls, PermissionGate, PluginLogLine, PluginMessage,
+    capability_permission_key, read_within,
+};
+pub use lifecycle::{
+    DEFAULT_AUTO_UNLOAD_THRESHOLD, DisableReport, LoadReport, LoadedPlugin, PluginManager,
+    UnloadedPlugin, build_gate,
+};
+pub use manifest::{
+    HOST_API_VERSION, ParsedManifest, PermissionRequest, PluginCommandDecl, PluginToolDecl,
+    UNSUP_DESKTOP_MOUNTS, UNSUP_DESKTOP_WINDOW, UNSUP_EXEC, UNSUP_FS, UNSUP_MCP, V1_CAPABILITIES,
+    VersionMismatch, check_api_version, derive_id, parse_claude_manifest, parse_codex_manifest,
+    parse_manifest, parse_plugin_dir,
+};
+pub use remove::{RemoveError, RemoveOutcome, remove};
+pub use report::{add_error_report, add_report, remove_error_report, remove_report};
+pub use runtime::{RuntimePool, SandboxBudget, SandboxContext};
+pub use session::{
+    DisableOutcome, EnableOutcome, PluginSession, PluginSurface, RegistrationOutcome,
+};
+pub use store::{
+    LifecycleState, PluginState, STATE_FILE, ScanFailure, ScannedPlugin, StoreDirs, StoreLedger,
+    TelemetryCounters, scan, scan_dirs, store_dirs, store_dirs_at,
+};
+pub use surface::{ScratchSurface, store_and_config};
+pub use tool_adapter::{PluginToolAdapter, dispatch_sandbox, plugin_tool_name};

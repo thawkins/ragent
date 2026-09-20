@@ -861,6 +861,19 @@ impl App {
             "init" => {
                 vec!["config".to_string(), "help".to_string()]
             }
+            // `/plugins` subcommands + the flags the six subcommands accept
+            // (FR-006, FR-014).
+            "plugins" => vec![
+                "list".to_string(),
+                "add".to_string(),
+                "remove".to_string(),
+                "enable".to_string(),
+                "disable".to_string(),
+                "test".to_string(),
+                "help".to_string(),
+                "--verbose".to_string(),
+                "--force".to_string(),
+            ],
             "alog" => {
                 vec![
                     "help".to_string(),
@@ -6810,6 +6823,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             } // ── /research ────────────────────────────────────────────────
             "research" => {
                 self.handle_research_command(args);
+            }
+
+            // ── /plugins ────────────────────────────────────────────────
+            // A bare `/plugins`, `/plugins help`, and an unrecognised
+            // subcommand all render the usage block (FR-006, FR-014). The
+            // call drives an ephemeral plugin session synchronously; sandbox
+            // contexts are `!Send` and never cross an `.await`.
+            "plugins" => {
+                let report = crate::app::plugin::handle_plugins_command(self, args);
+                self.append_assistant_text(&report);
+                self.status = "plugins".to_string();
             }
 
             // ── /reverse ────────────────────────────────────────────────

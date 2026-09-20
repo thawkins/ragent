@@ -45,6 +45,7 @@ pulldown-cmark = "0.12"
 ragent-specs = { path = "../ragent-specs" }
 ragent-research = { path = "../ragent-research" }
 ragent-llm = { path = "../ragent-llm" }
+ragent-plugins = { path = "../ragent-plugins" }
 async-trait = { workspace = true }
 fs2 = { workspace = true }
 lru = { workspace = true }

@@ -138,14 +138,13 @@ impl fmt::Debug for SourceVault {
 }
 
 impl SourceVault {
-    /// Lock the shared SQLite connection, recovering from poison.
+    /// Lock the shared SQLite connection, surfacing poison as an error.
     ///
     /// The connection mutex guards only the `rusqlite::Connection`; a panic
-    /// while holding it would otherwise surface as a `PoisonError` at every
-    /// call site, obscuring the actual failure. We recover with
-    /// [`std::sync::PoisonError::into_inner`] and surface the poison as a
-    /// dedicated [`SourceVaultError::LockPoisoned`], keeping the *run-tag*
-    /// variant for its documented domain (invalid run-tag inputs).
+    /// while holding it is reported as a dedicated
+    /// [`SourceVaultError::LockPoisoned`] rather than a bare `PoisonError` at
+    /// every call site, keeping the *run-tag* variant for its documented domain
+    /// (invalid run-tag inputs).
     fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
         self.conn
             .lock()

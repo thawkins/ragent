@@ -16,6 +16,7 @@ pub mod edit_log;
 pub mod finance;
 pub mod gcf;
 pub mod permission;
+pub mod plugins;
 pub mod runtime_flag;
 pub mod telemetry;
 pub mod trigger;
@@ -37,5 +38,6 @@ pub use permission::{
     Permission, PermissionAction, PermissionChecker, PermissionDecision, PermissionRequest,
     PermissionRule,
 };
+pub use plugins::PluginsConfig;
 pub use telemetry::{OtelConfig, OtelProtocol, TelemetryConfig};
 pub use trigger::{McpNotificationMode, TriggerConfig};

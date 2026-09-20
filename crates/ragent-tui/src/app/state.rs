@@ -869,6 +869,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Specification management: /spec create|add|delete|list|search|validate|status|task|govcreate <specid> <content-ref> <target-folder> [flags]|help",
     },
     SlashCommandDef {
+        trigger: "plugins",
+        description: "Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | help",
+    },
+    SlashCommandDef {
         trigger: "research",
         description: "Research system: /research create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> | list | open | search | show | delete | archive | cluster",
     },

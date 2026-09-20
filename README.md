@@ -140,6 +140,13 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   and fetch failures out by reason/cause, and `mf_search` `exclude_engines`
 - **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
   prompts, and file context into agent sessions
+- **Plugin system** — load Codex-dialect (`codex-plugin.json`) and Claude
+  Code/Desktop-dialect (`.claude-plugin/plugin.json`) plugins, run their
+  JavaScript entries on an embedded, budget-sandboxed engine (`rquickjs`, no
+  Node/Deno required) behind a versioned `ragent` host API, and register their
+  tools (`plugin_<id>_<tool>`) and slash commands; managed through
+  `/plugins list|add|remove|enable|disable|test|help` in the TUI and the
+  `ragent plugins <sub>` CLI; `plugins.enabled: false` makes the subsystem inert
 - **Teams & Swarms** — multi-agent coordination with named teammates, shared task lists,
   mailbox messaging, and swarm decomposition for parallel work (`/swarm <prompt>`)
 - **Autopilot mode** — autonomous operation with configurable iteration limits and
@@ -217,6 +224,7 @@ Commands:
   models   List available models
   config   Show resolved configuration
   new      Scaffold a new project in the current directory
+  plugins  Manage plugins (the `/plugins` slash-command parity surface)
 
 Options:
       --model <MODEL>          Override model (provider/model format)
@@ -274,6 +282,14 @@ with OpenCode's `opencode.json`.
     "agents": true,
     "plan": true,
     "codeindex": true
+  },
+  // Plugin subsystem (defaults shown). `enabled: false` makes the whole
+  // subsystem inert (no discovery or loading).
+  "plugins": {
+    "enabled": true,
+    "max_execution_ms": 5000,
+    "max_entry_ms": 10000,
+    "max_memory_mb": 64
   }
 }
 ```
@@ -355,7 +371,7 @@ Docs and examples:
 
 ## Architecture
 
-The project is a Cargo workspace built from 16 focused crates:
+The project is a Cargo workspace built from 17 focused crates:
 
 | Crate                     | Purpose                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -364,6 +380,7 @@ The project is a Cargo workspace built from 16 focused crates:
 | `ragent-codeindex`      | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher                                                                                                                   |
 | `ragent-config`         | Configuration types, defaults, and parsing                                                                                                                                                        |
 | `ragent-llm`            | Provider clients and model/provider registry (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock, Microsoft Foundry Local) |
+| `ragent-plugins`        | Plugin system: Codex/Claude dialect manifests, sandboxed JS runtime, lifecycle, `/plugins` surface                                                                                                |
 | `ragent-research`       | Research system: web/local gathering, synthesis, RESEARCH.md output                                                                                                                               |
 | `ragent-server`         | Axum HTTP routes and SSE streaming                                                                                                                                                                |
 | `ragent-specs`          | Spec lifecycle management: discovery, validation, status transitions, review, archival, JTBD analysis                                                                                          |
@@ -423,24 +440,39 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.109** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.112** — The core architecture, tool system (168 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
-research system, and multi-layered security are functional and under active development.
+research system, plugin system, and multi-layered security are functional and under
+active development.
 
 Recent highlights:
 
-- **Uncommitted (on top of v1.0.109)** — TUI render fix (`should_render` now
+- **Plugin system (v1.0.112)** — the **plugin system** goes from spec
+  draft to full implementation: the new `ragent-plugins` crate (234 tests)
+  discovers and normalises Codex- and Claude Code/Desktop-dialect manifests,
+  runs plugin JavaScript on a budgeted embedded `rquickjs` engine behind the
+  versioned `ragent` host API, registers `plugin_<id>_<tool>` tools and slash
+  commands, and drives the `/plugins` six-subcommand family plus the
+  `ragent plugins` CLI parity surface. A `plugins` config block
+  (`enabled`, budget limits, `store_dir`, per-plugin permissions) with
+  overlay-wins merge, eight acceptance/fixture plugins under
+  `assets/plugins/fixtures/`, and a code-quality cleanup pass (shared
+  `ScratchSurface`/`store_and_config`, single `help::attribution` header
+  source, surfaced config-load warnings, hoisted prefix allocation) complete
+  the change set.
+
+- **Release mechanism fix (v1.0.111)** — the release workflow's changelog
+  extractor now matches the Keep a Changelog `## [<version>] - <date>` header
+  form (plus the two legacy forms), so GitHub releases carry their notes; the
+  v1.0.107..v1.0.110 releases were backfilled.
+
+- **TUI paint-safety fix (v1.0.110)** — `should_render` now
   paints a pending message-cache group at the safety interval, closing the
   PERF-042 throttle-tail stall where a tool-call row stayed invisible while
-  the status bar showed it running; regression test
-  `test_pending_message_cache_group_forces_safety_paint`), dependency hygiene
-  (dropped unused `dirs`/`tokio`/`tempfile` dependencies; removed four stale
-  `deny.toml` advisory ignores), and a new **`plugins` spec draft**
-  (`specs/plugins/`): a plugin system spec that loads Codex- and Claude
-  Code/Desktop-dialect plugins onto an embedded, budget-sandboxed JavaScript
-  engine behind a versioned host API, managed through a six-subcommand
-  `/plugins` family (`list`, `add`, `remove`, `enable`, `disable`, `help`,
-  `test`).
+  the status bar showed it running (regression test
+  `test_pending_message_cache_group_forces_safety_paint`), plus dependency and
+  advisory hygiene (dropped unused `dirs`/`tokio`/`tempfile` dependencies;
+  removed four stale `deny.toml` advisory ignores).
 
 - **`/simplify` final phase over v1.0.106..v1.0.108 (v1.0.109)** — the last
   code-quality findings from the three-commit review window land: dead

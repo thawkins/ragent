@@ -1,6 +1,6 @@
 # Project Statistics
 
-**Version:** 1.0.109
+**Version:** 1.0.112
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
@@ -9,25 +9,25 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 468164 (464607 in `crates/` + 3557 in root `src/`/`examples/`) |
-| Total Rust files | 1152 (workspace crates) + 5 (root `src/`/`examples/`) |
-| Tests defined | ~8747 (7117 external test-file tests + 1602 inline `#[cfg(test)]` + 28 root `tests/`/`src/`) |
-| Test files | 562 external + 131 inline-bearing |
-| Test binaries | ~595 (562 integration test files + 32 lib/bin targets + 1 root bin) |
+| Total Rust lines | 480715 (477005 in `crates/` + 3710 in root `src/`/`examples/`) |
+| Total Rust files | 1193 (workspace crates) + 6 (root `src/`/`examples/`) |
+| Tests defined | ~9080 (7369 external test-file tests + 1677 inline `#[cfg(test)]` + 34 root `tests/`/`src/`) |
+| Test files | 579 external + 120 inline-bearing |
+| Test binaries | ~613 (579 integration test files + 33 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 168 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
-| Workspace crates | 16 |
-| Specs on disk | 50 directories in `specs/` (newest: `plugins`) |
-| Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 19 category how-tos, 75 slash-command docs |
+| Workspace crates | 17 |
+| Specs on disk | 50 directories in `specs/` |
+| Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 19 category how-tos, 76 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.109 |
+| Version | 1.0.112 |
 
 ---
 
 ## Breakdown by Crate
 
-The project is organised as a Cargo workspace of 16 focused crates. The table below
+The project is organised as a Cargo workspace of 17 focused crates. The table below
 shows the file count, line count, and test-file count for each crate (including
 `src/`, `tests/`, `benches/`, and `examples/` directories where present).
 
@@ -36,8 +36,9 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-agent` | 226 | 79523 | 90 |
 | `ragent-bench` | 24 | 8436 | 3 |
 | `ragent-codeindex` | 69 | 23584 | 40 |
-| `ragent-config` | 41 | 10621 | 26 |
+| `ragent-config` | 43 | 10869 | 27 |
 | `ragent-llm` | 52 | 23550 | 23 |
+| `ragent-plugins` | 36 | 11689 | 17 |
 | `ragent-research` | 114 | 60103 | 48 |
 | `ragent-server` | 11 | 5854 | 5 |
 | `ragent-specs` | 30 | 19421 | 17 |
@@ -47,7 +48,7 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-tools-core` | 56 | 17760 | 20 |
 | `ragent-tools-extended` | 203 | 74350 | 85 |
 | `ragent-tools-vcs` | 56 | 14627 | 20 |
-| `ragent-tui` | 157 | 90321 | 102 |
+| `ragent-tui` | 160 | 90782 | 104 |
 | `ragent-types` | 36 | 8676 | 18 |
 
 ---
@@ -55,21 +56,22 @@ shows the file count, line count, and test-file count for each crate (including
 ## Crate Size Distribution
 
 ```
-ragent-tui             ██████████████████████████████ 90,321 lines (19.4%)
-ragent-agent           ██████████████████████████ 79,523 lines (17.1%)
-ragent-tools-extended  ███████████████████████ 74,350 lines (16.0%)
-ragent-research        ████████████████████ 60,103 lines (12.9%)
-ragent-codeindex       ████████ 23,584 lines ( 5.1%)
-ragent-llm             ████████ 23,550 lines ( 5.1%)
-ragent-specs           ██████ 19,421 lines ( 4.2%)
-ragent-tools-core      ██████ 17,760 lines ( 3.8%)
-ragent-storage         █████ 14,746 lines ( 3.2%)
-ragent-tools-vcs       █████ 14,627 lines ( 3.1%)
-ragent-config          ███ 10,621 lines ( 2.3%)
-ragent-telemetry       ███ 10,265 lines ( 2.2%)
-ragent-types           ███ 8,676 lines ( 1.9%)
+ragent-tui             ██████████████████████████████ 90,782 lines (18.9%)
+ragent-agent           ██████████████████████████ 79,523 lines (16.6%)
+ragent-tools-extended  ███████████████████████ 74,350 lines (15.5%)
+ragent-research        ████████████████████ 60,103 lines (12.5%)
+ragent-codeindex       ████████ 23,584 lines ( 4.9%)
+ragent-llm             ████████ 23,550 lines ( 4.9%)
+ragent-specs           ██████ 19,421 lines ( 4.0%)
+ragent-tools-core      ██████ 17,760 lines ( 3.7%)
+ragent-storage         █████ 14,746 lines ( 3.1%)
+ragent-tools-vcs       █████ 14,627 lines ( 3.0%)
+ragent-plugins         ████ 11,689 lines ( 2.4%)
+ragent-config          ███ 10,869 lines ( 2.3%)
+ragent-telemetry       ███ 10,265 lines ( 2.1%)
+ragent-types           ███ 8,676 lines ( 1.8%)
 ragent-bench           ███ 8,436 lines ( 1.8%)
-ragent-server          ██ 5,854 lines ( 1.3%)
+ragent-server          ██ 5,854 lines ( 1.2%)
 ragent-team            █ 2,770 lines ( 0.6%)
 ```
 
@@ -80,7 +82,7 @@ ragent-team            █ 2,770 lines ( 0.6%)
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
 | `ragent-tools-extended` | 85 | ~1,892 |
-| `ragent-tui` | 102 | ~1,203 |
+| `ragent-tui` | 104 | ~1,213 |
 | `ragent-agent` | 90 | ~779 |
 | `ragent-specs` | 17 | ~514 |
 | `ragent-research` | 48 | ~402 |
@@ -89,19 +91,19 @@ ragent-team            █ 2,770 lines ( 0.6%)
 | `ragent-storage` | 32 | ~285 |
 | `ragent-llm` | 23 | ~273 |
 | `ragent-tools-core` | 20 | ~251 |
-| `ragent-config` | 26 | ~220 |
+| `ragent-plugins` | 17 | ~234 |
+| `ragent-config` | 27 | ~228 |
 | `ragent-types` | 18 | ~191 |
 | `ragent-telemetry` | 16 | ~187 |
 | `ragent-server` | 5 | ~96 |
 | `ragent-team` | 14 | ~81 |
 | `ragent-bench` | 3 | ~50 |
-| **Total (external)** | **562** | **~7,117** |
+| **Total (external)** | **579** | **~7,369** |
 
 Inline `#[cfg(test)]` modules in library sources contribute a further
-1,602 test attributes (largest contributors: `ragent-research`, `ragent-agent`,
+1,677 test attributes (largest contributors: `ragent-research`, `ragent-agent`,
 `ragent-tools-extended`, `ragent-tui`, `ragent-specs`), bringing the estimated
-total to ~8,747. The uncommitted PERF-042 fix adds one TUI paint-safety
-regression test (`test_pending_message_cache_group_forces_safety_paint`).
+total to ~9,080.
 
 ---
 
@@ -144,7 +146,8 @@ Notes:
 
 - The coverage figures above are the last full workspace measurement (v1.0.95);
   they are not re-measured on every documentation pass because
-  `cargo llvm-cov` instruments and runs the entire workspace.
+  `cargo llvm-cov` instruments and runs the entire workspace. The
+  `ragent-plugins` crate (added in v1.0.112) is not part of that run.
 - Line counts here are executable lines under LLVM profiling, which is smaller
   than the raw `wc -l` figures in the crate table above (declarations, blank
   and comment-only lines are not instrumented).
@@ -154,22 +157,21 @@ Notes:
 - `ragent-team`'s library surface is thin glue over `ragent-types`; its logic
   is tested through the team integration tests, but the 3 instrumented lines
   never execute.
-- Root binary sources (`src/cli.rs`, `src/main.rs`, `src/panic_hook.rs`) are
-  only lightly covered (24.9%) because `cargo llvm-cov` does not drive the
-  interactive TUI.
+- Root binary sources (`src/cli.rs`, `src/main.rs`, `src/plugins.rs`,
+  `src/panic_hook.rs`) are only lightly covered (24.9%) because
+  `cargo llvm-cov` does not drive the interactive TUI.
 
 ---
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 54 lines (8,663 tests / 468,164 lines)
-- Largest crate: `ragent-tui` (90,321 lines, 19.4%)
+- Test-to-code ratio: ~1 test per 53 lines (9,080 tests / 480,715 lines)
+- Largest crate: `ragent-tui` (90,782 lines, 18.9%)
 - Smallest crate: `ragent-team` (2,770 lines, 0.6%)
-- Median crate size: 16,253 lines (between `ragent-tools-core` and
-  `ragent-storage`)
-- Crates over 10k lines: 12 of 16
-- Crates under 5k lines: 1 of 16 (team)
+- Median crate size: 14,746 lines (`ragent-storage`)
+- Crates over 10k lines: 13 of 17
+- Crates under 5k lines: 1 of 17 (team)
 
 ---
 
-_Generated 2026-09-20 (v1.0.109, incl. uncommitted PERF-042 paint-safety fix, dependency-hygiene removals, and the `plugins` spec draft)._
+_Generated 2026-09-20 (v1.0.112, incl. `ragent-plugins` crate and `/plugins` TUI + CLI surfaces)._

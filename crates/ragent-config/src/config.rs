@@ -258,6 +258,13 @@ pub struct Config {
     /// Paid finance-provider configuration.
     #[serde(default)]
     pub finance: crate::finance::FinanceProviderConfig,
+    /// Plugin subsystem configuration (spec `plugins`; FR-001, FR-017).
+    ///
+    /// Loaded and merged with the same precedence as other optional config
+    /// sections: the overlay section wins when present (project config
+    /// overrides user-global). `None` means the compiled defaults apply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugins: Option<crate::plugins::PluginsConfig>,
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
@@ -2291,6 +2298,13 @@ impl Config {
         // not silently discarded by the default Yahoo config.
         if overlay.finance.is_explicitly_configured() {
             base.finance = overlay.finance;
+        }
+
+        // Plugins config: the overlay section wins wholesale when present, so
+        // project-level `plugins` settings are not silently discarded by an
+        // absent user-global block (spec `plugins` T-001).
+        if overlay.plugins.is_some() {
+            base.plugins = overlay.plugins;
         }
 
         // dirs: union of allowlist, denylist, and allowed_roots from both configs

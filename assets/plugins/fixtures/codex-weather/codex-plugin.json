@@ -1,0 +1,23 @@
+{
+  "id": "codex-weather",
+  "name": "Codex Weather",
+  "version": "1.2.0",
+  "entry": "main.js",
+  "api_version": 1,
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Return canned weather conditions for a city",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "City name to look up"
+          }
+        },
+        "required": ["city"]
+      }
+    }
+  ]
+}

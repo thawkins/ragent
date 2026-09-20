@@ -29,6 +29,7 @@ use ragent_config::{activity_log, edit_log, gcf, yolo};
 
 mod cli;
 mod panic_hook;
+mod plugins;
 
 /// Top-level CLI arguments parsed by clap.
 #[derive(Parser)]
@@ -144,6 +145,13 @@ enum Commands {
     Spec {
         #[command(subcommand)]
         command: cli::SpecCommands,
+    },
+    /// Manage plugins (the `/plugins` slash-command parity surface)
+    #[command(name = "plugins")]
+    Plugins {
+        /// Subcommand and arguments: `list|add|remove|enable|disable|test|help`
+        #[arg(value_name = "ARGS", trailing_var_arg = true, num_args = 0..)]
+        args: Vec<String>,
     },
     /// Scaffold a new project in the current directory (the `/new` command)
     New {
@@ -1285,6 +1293,12 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
                     .await?;
             }
         },
+        Some(Commands::Plugins { args }) => {
+            // Sync dispatch: the ephemeral plugin session owns `!Send` rquickjs
+            // contexts, so it must not cross an `.await`. `run_cli` is fully
+            // synchronous, keeping this future `Send` for the async runtime.
+            plugins::run_cli(&args)?;
+        }
     }
     Ok(())
 }

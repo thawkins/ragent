@@ -637,7 +637,8 @@ fn extract_http_status(message: &str) -> Option<u16> {
             // Allow an optional "code" word between the marker and the number.
             let after = after.strip_prefix("code").map_or(after, str::trim_start);
             // Parse exactly three digits without allocating: only a 3-digit
-            // ASCII run followed by a non-digit counts as a status code.
+            // ASCII run (a fourth digit or a non-digit beyond it both exclude
+            // the run) counts as a status code.
             let digit_bytes: usize = after.bytes().take_while(u8::is_ascii_digit).take(4).count();
             if digit_bytes == 3 {
                 let code = u16::from(after.as_bytes()[0] - b'0') * 100

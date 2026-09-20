@@ -57,6 +57,7 @@ the project root `README.md` and the **Tutorial** in
    - 7.34 [`research`](#734-research)
    - 7.35 [`loop`](#735-loop)
    - 7.36 [`activity_log`](#736-activity_log)
+    - 7.37 [`plugins`](#737-plugins)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -186,6 +187,7 @@ different merge strategies:
 | `research.open_access_recovery`, `research.exclude_academic_engines` | OR semantics. `contact_email`, `oa_min_full_text_chars`, `max_concepts`, and `max_findings`: overlay overrides when present (and different from the default). |
 | `telemetry` | If overlay enables telemetry, the whole overlay `otel` block replaces the base. Otherwise maps (`resource_attributes`, `metrics`) are unioned. |
 | `experimental` | `open_telemetry` and `parallel_tool_calls`: OR semantics. Other fields: overlay defaults. |
+| `plugins` | Overlay wins wholesale when the `plugins` section is present, so a project-level block is not discarded by an absent user-global block. |
 
 The `config_paths` field records every file that contributed to the final
 merged config, in load order.
@@ -1563,6 +1565,40 @@ win.
 
 Toggle at runtime with `/alog on|off`.
 
+### 7.37 `plugins`
+
+Plugin subsystem configuration (spec `plugins`). Controls the master switch,
+the sandbox budgets, the store location, and per-plugin permission grants.
+
+```jsonc
+{
+  "plugins": {
+    "enabled": true,                 // master switch; default true
+    "max_execution_ms": 5000,        // per-tool wall-clock budget
+    "max_entry_ms": 10000,           // entry-point wall-clock budget
+    "max_memory_mb": 64,             // per-JS-context memory ceiling
+    "store_dir": null,               // optional override of the plugin store path
+    "permissions": {                 // optional per-plugin permission grants
+      "codex-weather": ["network.outbound"]
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `enabled` | `bool` | `true` | Master switch. When `false`, no discovery or loading happens and `/plugins` subcommands other than `help` report the subsystem is disabled. |
+| `max_execution_ms` | `u64` | `5000` | Per-plugin-tool wall-clock execution budget in milliseconds. |
+| `max_entry_ms` | `u64` | `10000` | Wall-clock budget for executing a plugin's entry point in milliseconds. |
+| `max_memory_mb` | `u64` | `64` | Per-JavaScript-context memory ceiling in mebibytes. |
+| `store_dir` | `string?` | `null` | Optional override of the plugin store directory. When `null`, the store is discovered at `.ragent/plugins/` (project), falling back to `~/.config/ragent/plugins/` (user-global). |
+| `permissions` | `map<string, string[]>` | `{}` | Per-plugin permission grants keyed by plugin id. |
+
+The section merges with overlay-wins precedence (project config overrides
+user-global). Manage plugins with `/plugins list|add|remove|enable|disable|test|help`
+in the TUI or `ragent plugins <sub>` from the CLI. See
+[`docs/howtos/slashcommands/plugins.md`](slashcommands/plugins.md).
+
 ---
 
 ## 8. Full Example File
@@ -1836,7 +1872,16 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "checkpoint_timeout_secs": 120
   },
 
-  "activity_log": true
+  "activity_log": true,
+
+  "plugins": {
+    "enabled": true,
+    "max_execution_ms": 5000,
+    "max_entry_ms": 10000,
+    "max_memory_mb": 64,
+    "store_dir": null,
+    "permissions": {}
+  }
 }
 ```
   

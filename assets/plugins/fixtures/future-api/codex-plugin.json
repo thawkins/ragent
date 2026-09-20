@@ -1,0 +1,7 @@
+{
+  "id": "future-api",
+  "name": "Future API",
+  "version": "1.0.0",
+  "entry": "main.js",
+  "api_version": 99
+}

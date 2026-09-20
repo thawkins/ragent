@@ -1,0 +1,29 @@
+{
+  "name": "Claude Todo",
+  "version": "0.3.0",
+  "entry": "index.js",
+  "api_version": 1,
+  "tools": [
+    {
+      "name": "add_todo",
+      "description": "Add an item to the plugin's todo list",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Todo item text"
+          }
+        },
+        "required": ["text"]
+      }
+    }
+  ],
+  "commands": [
+    {
+      "name": "todo-add",
+      "description": "Add a todo item",
+      "usage": "/todo-add <text>"
+    }
+  ]
+}

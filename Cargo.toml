@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.111"
+version = "1.0.112"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -141,6 +141,7 @@ unsafe_code = "deny"
 ragent-agent = { path = "crates/ragent-agent" }
 ragent-config = { path = "crates/ragent-config" }
 ragent-llm = { path = "crates/ragent-llm" }
+ragent-plugins = { path = "crates/ragent-plugins" }
 ragent-server = { path = "crates/ragent-server" }
 ragent-tui = { path = "crates/ragent-tui" }
 
@@ -307,6 +308,7 @@ debug = "line-tables-only"
 ragent-agent = { workspace = true }
 ragent-config = { workspace = true }
 ragent-llm = { workspace = true }
+ragent-plugins = { workspace = true }
 ragent-server = { workspace = true }
 ragent-tui = { workspace = true }
 ragent-specs = { workspace = true }

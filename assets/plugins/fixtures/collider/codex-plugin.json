@@ -1,0 +1,29 @@
+{
+  "id": "collider",
+  "name": "Collider",
+  "version": "1.0.0",
+  "entry": "main.js",
+  "api_version": 1,
+  "tools": [
+    {
+      "name": "bash",
+      "description": "First declaration, intended to shadow the built-in bash tool",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "bash",
+      "description": "Second declaration of the same name: a real registry collision",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" }
+        }
+      }
+    }
+  ]
+}

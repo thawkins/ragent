@@ -1,5 +1,91 @@
 # Changelog
 
+## [1.0.112] - 2026-09-20
+
+Plugin system release: the `plugins` spec (`specs/plugins/`) moves from draft
+to a fully implemented plugin subsystem, plus a code-quality cleanup pass
+across the plugins, research, and config modules.
+
+### Added
+
+- **Plugin-system manual** (`docs/howtos/plugins.md`) -- a full 15-section
+  how-to covering architecture, store layout, dialects/manifests, the host API
+  v1, permissions and sandbox budgets, management commands, authoring plugins,
+  acquiring plugins from the Claude and Codex stores, configuration, security,
+  error handling/lifecycle states, performance budgets, troubleshooting, and a
+  reference; linked from `docs/howtos/slashcommands/plugins.md`.
+- **`ragent-plugins` crate** -- a new workspace crate (`crates/ragent-plugins`,
+  `v0.1.0`) implementing the `plugins` spec: discovery and normalisation of
+  Codex- and Claude Code/Desktop-dialect plugin manifests, a plugin store with
+  a JSON state ledger (`plugin_<id>_<tool>` namespaced tool registration), a
+  budgeted embedded JavaScript runtime (`rquickjs`) with `!Send` sandbox
+  contexts, the versioned `ragent` host API (`api_version`, `register_tool`,
+  `register_command`, `config.get`, `message.*`, `log`,
+  `plugin.read_text_file`), enable/disable lifecycle with capture-before-drop
+  deregistration, the `/plugins test` isolated harness with schema-derived
+  sample arguments, and `/plugins list|add|remove|enable|disable|help` report
+  rendering. 234 tests across 17 test files.
+- **`ragent plugins` CLI parity surface** (`src/plugins.rs`, FR-021) -- a
+  fully synchronous `run_cli` mirroring the TUI `/plugins` family for shell use.
+  Its ephemeral `PluginSession` owns `!Send` rquickjs contexts and never crosses
+  an `.await`, keeping the async dispatch future `Send`.
+- **TUI `/plugins` slash command** (`crates/ragent-tui/src/app/plugin.rs`) --
+  registered in `SLASH_COMMANDS` and the slash-command autocomplete menu
+  (`state.rs`, `slash.rs`); a bare `/plugins`, `/plugins help`, or an unknown
+  subcommand renders the usage block.
+- **`plugins` config section** (`crates/ragent-config/src/plugins.rs`) --
+  `PluginsConfig` (`enabled`, `max_execution_ms`, `max_entry_ms`,
+  `max_memory_mb`, `store_dir`, per-plugin `permissions`) loaded from the
+  optional `"plugins"` block, merged overlay-wins so project config is not
+  discarded by an absent user-global block. `plugins.enabled: false` makes the
+  whole subsystem inert (discovery/load/control all short-circuit).
+- **Plugin test fixtures** (`assets/plugins/fixtures/`) -- eight Codex- and
+  Claude-dialect fixtures (including infinite-loop, filesystem-escape,
+  future-`api_version`, unsupported-MCP, name-collision, and bad-manifest
+  cases) covering the spec's acceptance criteria 1--9 and NFR budgets.
+
+### Changed
+
+- **Shared plugin surface helper** -- new `crates/ragent-plugins/src/surface.rs`
+  provides `ScratchSurface` (`seeded()`) and `store_and_config(workdir)`,
+  replacing the byte-identical copies in `src/plugins.rs` (`CliPluginSurface`)
+  and `crates/ragent-tui/src/app/plugin.rs`.
+- **Single report attribution source** -- new `help::attribution(sub)` in
+  `crates/ragent-plugins/src/help.rs` is the one place the `From: /plugins …`
+  header is spelled; `report.rs`, `commands.rs`, `control.rs`, `harness.rs`,
+  and `render_help` all route through it. `src/plugins.rs` imports the shared
+  `PLUGIN_SUBCOMMANDS` list instead of keeping a local copy.
+- **Config-load failures surface** -- `store_and_config` no longer silently
+  `.ok()`s a malformed `ragent.json`; it emits `tracing::warn!` before falling
+  back to defaults.
+- **Allocation hoist** -- `is_own_tool`'s `plugin_<id>_` prefix is built once
+  outside the per-tool deregistration loop.
+- **Doc/comment accuracy** -- `SourceVault::lock_conn`'s doc now states it
+  surfaces `SourceVaultError::LockPoisoned` rather than recovering via
+  `into_inner`; `extract_http_status`'s comment reflects the `take(4)`
+  three-digit guard.
+
+### Fixed
+
+- **Plugin subsystem master switch** -- `plugins.enabled: false` is now honoured
+  by `PluginSession::start`, `run_control_command`, and `run_store_command`
+  (previously only the test harness respected it); each reports
+  `[err] Plugin subsystem is disabled (plugins.enabled = false)`.
+
+### Documentation
+
+- **README / SPEC / QUICKSTART / TUI-QUICKSTART** -- document the plugin system
+  (17 crates now), the `/plugins` slash family, the `ragent plugins` CLI, and
+  the `plugins` config block; SPEC.md gains the `ragent-plugins` crate row, an
+  updated crate dependency graph, a `/plugins` slash-command row, and the
+  `plugins` config section.
+- **`docs/howtos/config.md`** -- new section 7.37 `plugins` (field table, merge
+  semantics row, full-example entry, ToC anchor).
+- **`docs/howtos/slashcommands/plugins.md`** -- new per-command reference for
+  `/plugins`, linked from `slashcommands/INDEX.md`.
+- **PDFs regenerated** -- all `docs/howtos/`, `docs/howtos/slashcommands/`, and
+  `docs/howtos/tools/` how-tos rebuilt to A4 PDFs (19 + 76 + 27 files).
+
 ## [1.0.111] - 2026-09-20
 
 Fix release mechanism: GitHub releases were created with empty release notes

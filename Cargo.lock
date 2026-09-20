@@ -6116,7 +6116,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "1.0.111"
+version = "1.0.112"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6126,6 +6126,7 @@ dependencies = [
  "ragent-agent",
  "ragent-config",
  "ragent-llm",
+ "ragent-plugins",
  "ragent-research",
  "ragent-server",
  "ragent-specs",
@@ -6142,7 +6143,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.111"
+version = "1.0.112"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6195,7 +6196,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.111"
+version = "1.0.112"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6219,7 +6220,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.111"
+version = "1.0.112"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6295,8 +6296,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "ragent-plugins"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "flate2",
+ "ragent-config",
+ "ragent-tools-core",
+ "reqwest 0.12.28",
+ "rquickjs",
+ "serde",
+ "serde_json",
+ "tar",
+ "thiserror 1.0.69",
+ "tracing",
+ "zip 7.2.0",
+]
+
+[[package]]
 name = "ragent-research"
-version = "1.0.111"
+version = "1.0.112"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6326,7 +6346,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.111"
+version = "1.0.112"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6385,7 +6405,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "1.0.111"
+version = "1.0.112"
 dependencies = [
  "anyhow",
  "parking_lot",
@@ -6514,7 +6534,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.111"
+version = "1.0.112"
 dependencies = [
  "anyhow",
  "arboard",
@@ -6536,6 +6556,7 @@ dependencies = [
  "ragent-codeindex",
  "ragent-config",
  "ragent-llm",
+ "ragent-plugins",
  "ragent-research",
  "ragent-server",
  "ragent-specs",
@@ -6953,6 +6974,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "relative-path"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bca40a312222d8ba74837cb474edef44b37f561da5f773981007a10bbaa992b0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "rend"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7127,6 +7157,35 @@ dependencies = [
  "quote",
  "serde_json",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "rquickjs"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a135375fbac5ba723bb6a48f432a72f81539cedde422f0121a86c7c4e96d8e0d"
+dependencies = [
+ "rquickjs-core",
+]
+
+[[package]]
+name = "rquickjs-core"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bccb7121a123865c8ace4dea42e7ed84d78b90cbaf4ca32c59849d8d210c9672"
+dependencies = [
+ "hashbrown 0.16.1",
+ "relative-path",
+ "rquickjs-sys",
+]
+
+[[package]]
+name = "rquickjs-sys"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57b1b6528590d4d65dc86b5159eae2d0219709546644c66408b2441696d1d725"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -8166,7 +8225,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",

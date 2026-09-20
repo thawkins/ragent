@@ -1,0 +1,7 @@
+{
+  "id": "loop-forever",
+  "name": "Loop Forever",
+  "version": "1.0.0",
+  "entry": "main.js",
+  "api_version": 1
+}

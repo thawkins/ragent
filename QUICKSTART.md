@@ -422,6 +422,18 @@ Ragent loads configuration from multiple sources (last wins):
   "finance": {
     "provider": "alpha_vantage",
     "api_key": "YOUR_ALPHA_VANTAGE_API_KEY"
+  },
+
+  // Plugin subsystem (optional; defaults shown). Loads Codex- and
+  // Claude Code/Desktop-dialect plugins on a sandboxed JS engine.
+  // `enabled: false` makes the whole subsystem inert (no discovery/loading).
+  "plugins": {
+    "enabled": true,
+    "max_execution_ms": 5000,   // per-tool wall-clock budget
+    "max_entry_ms": 10000,      // entry-point wall-clock budget
+    "max_memory_mb": 64         // per-JS-context memory ceiling
+    // "store_dir": "/path/to/plugins"          // override the plugin store path
+    // "permissions": { "my-plugin": ["network.outbound"] }
   }
 }
 ```
@@ -859,6 +871,32 @@ EOF
 ```
 
 Then use `/code-review` in any project.
+
+---
+
+## 7b. Plugins
+
+ragent can load third-party plugins written for OpenAI Codex and Claude
+Code/Desktop, running their JavaScript on an embedded, budget-sandboxed engine
+(no Node.js, Deno, or Bun required). Plugins contribute tools (registered as
+`plugin_<id>_<tool>`) and slash commands through a versioned `ragent` host API.
+
+Manage plugins from the TUI or the CLI:
+
+| Command | Description |
+|---|---|
+| `/plugins list [--verbose]` | List discovered plugins with state and contributions |
+| `/plugins add <source> [--force]` | Install from a local directory, `.zip`/`.tar.gz`, or `https://` URL (stays disabled until enabled) |
+| `/plugins remove <pluginid>` | Uninstall a plugin (refused while enabled) |
+| `/plugins enable <pluginid>` | Enable, load, and register its tools/commands |
+| `/plugins disable <pluginid>` | Unload and deregister without deleting files |
+| `/plugins test <pluginid>` | Load in an isolated harness and invoke each tool once |
+| `/plugins help` | Show the usage block |
+
+The same operations are available from a shell as `ragent plugins <sub> …`.
+Plugins are discovered under `.ragent/plugins/` (project) or
+`~/.config/ragent/plugins/` (user-global). Set `plugins.enabled: false` to make
+the whole subsystem inert.
 
 ---
 
@@ -1726,6 +1764,20 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.112
+
+- **Plugin system (v1.0.112)** — the `plugins` spec ships as a full
+  implementation: the new `ragent-plugins` crate discovers and normalises
+  Codex- and Claude Code/Desktop-dialect manifests, runs plugin JavaScript on
+  a budgeted embedded `rquickjs` engine behind the versioned `ragent` host API,
+  and registers `plugin_<id>_<tool>` tools and slash commands. Managed through
+  `/plugins list|add|remove|enable|disable|test|help` in the TUI and the
+  `ragent plugins <sub>` CLI; the `plugins` config block controls budgets
+  (`max_execution_ms`, `max_entry_ms`, `max_memory_mb`), `store_dir`, and
+  per-plugin permissions, and `plugins.enabled: false` makes the subsystem
+  inert. See [`docs/howtos/plugins.md`](docs/howtos/plugins.md) for the full
+  manual.
 
 ## Version 1.0.109 (incl. uncommitted work)
 

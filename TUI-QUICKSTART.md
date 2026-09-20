@@ -4,19 +4,24 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.107..v1.0.109, incl. uncommitted work)
+## Highlights (v1.0.110..v1.0.112)
 
-- **Paint-safety fix (PERF-042 throttle tail, uncommitted)** — when the stream
+- **`/plugins` slash family (v1.0.112)** — the plugin system is now
+  implemented, not just specified. `/plugins list|add|remove|enable|disable|test|help`
+  manages sandboxed Codex- and Claude Code/Desktop-dialect plugins; enabled
+  plugins contribute `plugin_<id>_<tool>` tools and slash commands. Reports
+  render in the message window with the `From: /plugins <sub>` header; a bare
+  `/plugins` or an unknown subcommand prints the usage block. The subcommands
+  are listed in the slash-command autocomplete menu. CLI parity:
+  `ragent plugins <sub>`. Configure via the `plugins` block
+  (`plugins.enabled: false` makes the subsystem inert). See
+  [`docs/howtos/slashcommands/plugins.md`](docs/howtos/slashcommands/plugins.md).
+- **Paint-safety fix (PERF-042 throttle tail, v1.0.110)** — when the stream
   throttle leaves a message group pending (for example a tool-call row that
   arrives while the window is open), the safety-interval wake now paints it,
   so the row no longer stays invisible while the status bar already shows the
   tool running (`should_render` in `crates/ragent-tui/src/lib.rs`;
   regression test `test_pending_message_cache_group_forces_safety_paint`).
-- **Plugin system spec draft (uncommitted)** — `specs/plugins/` specifies a
-  `/plugins` six-subcommand family (`list`, `add`, `remove`, `enable`,
-  `disable`, `help`, `test`) and a sandboxed JavaScript runtime hosting
-  Codex- and Claude Code/Desktop-dialect plugins behind a versioned host API.
-  Spec only — not yet implemented.
 - **Config rules and fixes (v1.0.108)** — `/config show` renders unavailable
   global memory/agent dirs as "(unavailable)"; `/spec govcreate` mutexes
   recover uniformly from poisoning; GitLab legacy credential migration and
@@ -912,6 +917,35 @@ remote step never undoes the local scaffold.
 
 Prints the usage page with the flag table and the supported language/type
 values (derived from the scaffolder's registries, so they cannot drift).
+
+---
+
+## 7b. Managing plugins with `/plugins`
+
+The **`/plugins`** slash command manages sandboxed Codex- and Claude
+Code/Desktop-dialect plugins from the TUI. Enabled plugins contribute tools
+(registered as `plugin_<id>_<tool>`) and slash commands. The same operations
+are available from a shell as `ragent plugins <sub>`.
+
+```text
+/plugins list --verbose          # list plugins, state, contributions, telemetry
+/plugins add ./my-plugin         # install (stays disabled until enabled)
+/plugins enable my-plugin        # load and register its tools/commands
+/plugins test my-plugin          # isolated harness: load + invoke each tool once
+/plugins disable my-plugin       # unload and deregister (files kept)
+/plugins remove my-plugin        # uninstall (refused while enabled)
+/plugins help                    # usage block
+```
+
+Reports render in the message window with a `From: /plugins <sub>` header.
+`/plugins test` prints one `[ ok ]`/`[fail]` line per harness step and confirms
+the harness was unloaded with the live session untouched. Any of `/plugins`
+with no arguments, `/plugins help`, or an unrecognised subcommand prints the
+usage block. Plugins are discovered under `.ragent/plugins/` (project) or
+`~/.config/ragent/plugins/` (user-global); set `plugins.enabled: false` to make
+the subsystem inert.
+
+See [`docs/howtos/slashcommands/plugins.md`](docs/howtos/slashcommands/plugins.md).
 
 ---
 

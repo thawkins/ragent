@@ -1,0 +1,17 @@
+{
+  "id": "escape-attempt",
+  "name": "Escape Attempt",
+  "version": "1.0.0",
+  "entry": "main.js",
+  "api_version": 1,
+  "tools": [
+    {
+      "name": "read_outside",
+      "description": "Attempt to read a file outside the plugin directory",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}
