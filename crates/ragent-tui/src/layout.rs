@@ -14,7 +14,7 @@ use crate::app::{image_dimensions_or_placeholder, sanitize_for_display};
 
 use crate::widgets::message_widget::make_relative_path;
 use ragent_types::ThinkingLevel;
-use ragent_types::strutil::truncate_bytes;
+use ragent_types::strutil::{truncate_bytes, truncate_bytes_no_ellipsis};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Position, Rect},
@@ -55,6 +55,26 @@ const MODEL_PICKER_HEADERS: [&str; 5] = ["Model", "Context", "Cost", "Thinking",
 
 /// Default spacing between table columns (matches `Table::column_spacing`).
 const MODEL_PICKER_COLUMN_SPACING: usize = 1;
+
+/// Maximum terminal columns reserved for a plugin-store row description before
+/// it is truncated (spec `pluginstores` FR-004).
+const PLUGIN_STORE_DESC_MAX: u16 = 40;
+
+/// An ASCII-only border set for the plugin-store panel (spec `pluginstores`
+/// FR-004, acceptance criterion 10).
+///
+/// ratatui's default border draws Unicode box-drawing glyphs; the store panel
+/// must use only ASCII, so every border cell is a `+`, `-`, or `|`.
+const PLUGIN_STORE_ASCII_BORDER: ratatui::symbols::border::Set = ratatui::symbols::border::Set {
+    top_left: "+",
+    top_right: "+",
+    bottom_left: "+",
+    bottom_right: "+",
+    vertical_left: "|",
+    vertical_right: "|",
+    horizontal_top: "-",
+    horizontal_bottom: "-",
+};
 
 /// PERF-042: minimum interval between re-renders of a message whose cache
 /// group is already populated while it is being streamed.
@@ -222,6 +242,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         render_queue_clear_confirm(frame, app);
     } else {
         app.queue_clear_confirm_area = Rect::default();
+    }
+    // Plugin-store browse panel (spec `pluginstores` T-006) — a full-screen-ish
+    // modal drawn last so it sits above every other overlay while it owns the
+    // keyboard (FR-004, FR-015).
+    if app.plugin_store.is_some() {
+        render_plugin_store_panel(frame, app);
+    } else {
+        app.plugin_store_area = Rect::default();
     }
 }
 
@@ -478,6 +506,258 @@ fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
         Paragraph::new(footer).alignment(Alignment::Center),
         chunks[1],
     );
+}
+
+/// Render the plugin-store browse panel opened by `/plugins codex` and
+/// `/plugins claude` (spec `pluginstores` T-006; FR-004, FR-005, FR-011,
+/// FR-017, FR-018).
+///
+/// The panel is a bordered, titled modal overlay, modelled on
+/// [`render_queue_show_panel`], presenting a title line with the store name, the
+/// current search query, and the visible/total result count; a scrollable result
+/// list; and a footer of key hints. Only ASCII glyphs are used in the body
+/// (FR-004).
+///
+/// The highlighted result row carries the block cursor: a full-row background
+/// applied through [`ratatui::widgets::List::highlight_style`], which patches the
+/// whole row after the item spans are drawn, so the background spans every cell
+/// (the leading `> ` marker included) rather than only the text span. A row whose
+/// plugin id is in the derived installed set ([`PluginStoreBrowser::is_installed`])
+/// is painted in the installed colour and carries an `[installed]` marker,
+/// independent of the cursor (FR-005, A7).
+///
+/// The body renders an explicit state line rather than a blank list when there is
+/// nothing to show (FR-017): a loading row while the fetch is in flight (FR-016),
+/// an inline error row naming the cause when it failed (FR-013), and a
+/// `no matching plugins` line when the index or the query yields no results.
+///
+/// The panel area is recomputed from `Frame::area` every frame, so a terminal
+/// resize re-derives a centred, fully visible modal (FR-018); it is stored back in
+/// [`App::plugin_store_area`] for tests and hit-testing.
+fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    let Some(browser) = app.plugin_store.as_ref() else {
+        return;
+    };
+
+    let screen = frame.area();
+    // Size the panel to the screen with a margin, so it stays centred and fully
+    // visible as the terminal changes size (FR-018).
+    let width = screen
+        .width
+        .saturating_sub(4)
+        .clamp(30, 100)
+        .min(screen.width);
+    let height = screen
+        .height
+        .saturating_sub(2)
+        .clamp(8, 24)
+        .min(screen.height);
+    let area = Rect::new(
+        screen.x + screen.width.saturating_sub(width) / 2,
+        screen.y + screen.height.saturating_sub(height) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(Clear, area);
+    app.plugin_store_area = area;
+
+    let title = plugin_store_title(browser);
+    let visible = browser.filtered.len();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(PLUGIN_STORE_ASCII_BORDER)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Magenta));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Reserve the last inner row for the footer key hints and one row for the
+    // (optional) last-install notice above it.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+    let list_area = chunks[0];
+    let footer_area = chunks[1];
+
+    let cursor_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
+    let normal_style = Style::default().fg(Color::White);
+    let installed_style = Style::default().fg(Color::Green);
+    let dim_style = Style::default().fg(Color::DarkGray);
+
+    // The body: result rows, or one explicit state line (FR-013, FR-016, FR-017).
+    let body = plugin_store_body(browser);
+    match body {
+        PluginStoreBody::Rows => {
+            let items: Vec<ListItem> = browser
+                .filtered
+                .iter()
+                .map(|&index| {
+                    let entry = &browser.all[index];
+                    let marker = if browser.is_installed(&entry.id) {
+                        " [installed]"
+                    } else {
+                        ""
+                    };
+                    let style = if browser.is_installed(&entry.id) {
+                        installed_style
+                    } else {
+                        normal_style
+                    };
+                    let row = format!(
+                        "> {:<22} {:<8} {}{}",
+                        truncate_bytes_no_ellipsis(&entry.id, 22),
+                        truncate_bytes_no_ellipsis(&entry.version, 8),
+                        truncate_bytes_no_ellipsis(
+                            &entry.description,
+                            PLUGIN_STORE_DESC_MAX as usize
+                        ),
+                        marker,
+                    );
+                    ListItem::new(Line::from(Span::styled(row, style)))
+                })
+                .collect();
+            // Keep the block cursor within the filtered set. The list's own
+            // scroll keeps the selected row visible (FR-010).
+            let selected = browser.cursor.min(visible.saturating_sub(1));
+            let list = List::new(items)
+                .highlight_style(cursor_style)
+                .highlight_symbol("");
+            let mut state = ListState::default();
+            state.select(Some(selected));
+            frame.render_stateful_widget(list, list_area, &mut state);
+        }
+        PluginStoreBody::Line(text, style) => {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(text, style)))
+                    .block(Block::default())
+                    .style(Style::default()),
+                list_area,
+            );
+        }
+    }
+
+    let footer = plugin_store_footer(browser, dim_style, installed_style);
+    frame.render_widget(
+        Paragraph::new(footer)
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true }),
+        footer_area,
+    );
+}
+
+/// The body content of the plugin-store panel: either the result rows or a
+/// single explicit state line (FR-013, FR-016, FR-017).
+enum PluginStoreBody {
+    /// The filtered set is non-empty; draw the result rows.
+    Rows,
+    /// Render `text` in `style` as the body (loading / error / empty states).
+    Line(String, Style),
+}
+
+/// The panel title line for `browser` (FR-004, FR-013, FR-016, FR-025).
+///
+/// Names the store, the live search field, the visible/total counts, and - when
+/// the parser skipped any malformed entries - the skipped count, so a partial
+/// result set is visible at a glance rather than silently short (FR-025). ASCII
+/// only (acceptance criterion 10).
+fn plugin_store_title(browser: &crate::app::PluginStoreBrowser) -> String {
+    let total = browser.all.len();
+    let visible = browser.filtered.len();
+    let mut title = format!(
+        " {} Plugin Store -- search: {} -- {} of {}",
+        browser.kind.label(),
+        browser.query,
+        visible,
+        total,
+    );
+    if browser.skipped > 0 {
+        title.push_str(&format!(" -- {} skipped", browser.skipped));
+    }
+    title.push(' ');
+    title
+}
+
+/// Decide what the plugin-store panel body should show for `browser`
+/// (FR-013, FR-016, FR-017, FR-025).
+///
+/// A still-loading index, a failed fetch, and an empty/unsatisfied result set
+/// each produce an explicit line so the body is never a blank list. An empty or
+/// unsatisfied list also names the skipped-malformed-entry count when the parser
+/// dropped any entries, so a partial result is reported rather than hidden
+/// (FR-025).
+fn plugin_store_body(browser: &crate::app::PluginStoreBrowser) -> PluginStoreBody {
+    use crate::app::PluginStoreStatus;
+
+    match &browser.status {
+        PluginStoreStatus::Loading => PluginStoreBody::Line(
+            "loading store index...".to_string(),
+            Style::default().fg(Color::Cyan),
+        ),
+        PluginStoreStatus::Failed(reason) => PluginStoreBody::Line(
+            format!("store index failed: {reason}"),
+            Style::default().fg(Color::Red),
+        ),
+        PluginStoreStatus::Empty | PluginStoreStatus::Ready => {
+            if browser.has_results() {
+                PluginStoreBody::Rows
+            } else {
+                PluginStoreBody::Line(
+                    plugin_store_empty_line(browser),
+                    Style::default().fg(Color::DarkGray),
+                )
+            }
+        }
+    }
+}
+
+/// The panel's empty-state line: the no-entries or no-match text, plus the
+/// malformed-entry count when the parser skipped any (FR-013, FR-017, FR-025).
+///
+/// Reported through the status rather than a result row, so the line is the only
+/// place a partial parse surfaces in the body. ASCII only.
+fn plugin_store_empty_line(browser: &crate::app::PluginStoreBrowser) -> String {
+    let skipped = browser.skipped;
+    if browser.all.is_empty() {
+        if skipped == 0 {
+            "no plugins in this store".to_string()
+        } else {
+            format!("no plugins in this store ({skipped} malformed entries skipped)")
+        }
+    } else if skipped == 0 {
+        "no matching plugins".to_string()
+    } else {
+        format!("no matching plugins ({skipped} malformed entries skipped)")
+    }
+}
+
+/// The footer line: the most recent install notice when one is present
+/// (FR-006, FR-014), otherwise the key-hint line (FR-004).
+///
+/// A failed fetch already renders its cause in the body (FR-013), so the footer
+/// stays the ordinary hint line in every non-notice case.
+fn plugin_store_footer(
+    browser: &crate::app::PluginStoreBrowser,
+    dim_style: Style,
+    installed_style: Style,
+) -> Line<'static> {
+    if let Some(notice) = browser.last_install.as_deref() {
+        return Line::from(Span::styled(notice.to_string(), installed_style));
+    }
+    Line::from(Span::styled(
+        "Up/Down move  Enter install  Esc close".to_string(),
+        dim_style,
+    ))
 }
 
 /// Render the `Clear the input queue?` confirmation dialog (spec `inputqueue`

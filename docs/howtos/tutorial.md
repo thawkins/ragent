@@ -599,7 +599,11 @@ and Context) takes 50% of the application width.
 
 While the agent is executing the input field stays editable: each `Enter`
 appends the message to a FIFO **input queue** (counter shown as `NN> ` before
-the prompt) and the oldest entry runs at each turn boundary. A queued entry is
+the prompt) and the oldest entry runs at each turn boundary. Slash commands are
+queued the same way (FR-017 amendment) — a `/status` or `/queue` typed while a
+turn runs is enqueued and dispatched at the next boundary rather than refused;
+only bang commands (`!…`) and teammate-targeted messages keep the busy refusal.
+A queued entry is
 added to the **input history** as soon as you press `Enter`, not when it runs,
 and it is not echoed into the message window until it is dispatched. Press
 `Alt+Q` to open the **queue-control menu**; move the highlight with `Up`/`Down`

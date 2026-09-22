@@ -252,8 +252,15 @@ impl SourceVault {
     /// The body text is written to a raw-content file and also indexed for
     /// full-text search.
     pub fn store(&self, source: &NewVaultSource) -> Result<VaultSource> {
+        // Hold the connection lock across the lookup and the insert so the
+        // URL-dedup check and the write are atomic: two concurrent `store`
+        // calls for the same URL would otherwise both pass the check (each
+        // `source_id` is a fresh UUID, so the `UNIQUE(source_id)` index does
+        // not catch a URL duplicate) and insert two rows for one URL.
+        let conn = self.lock_conn()?;
+
         // Deduplicate within the run by URL.
-        if let Some(existing) = self.find_by_url(&source.url)? {
+        if let Some(existing) = find_by_url_on(&conn, &self.run_tag, &source.url)? {
             return Ok(existing);
         }
 
@@ -266,7 +273,6 @@ impl SourceVault {
 
         atomic_write_file(&content_path, source.body_text.as_bytes())?;
 
-        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO vault_sources
                (source_id, run_tag, url, title, fetch_timestamp, search_tool, search_engine,
@@ -311,17 +317,7 @@ impl SourceVault {
     /// Look up a source by exact URL within this run.
     pub fn find_by_url(&self, url: &str) -> Result<Option<VaultSource>> {
         let conn = self.lock_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, source_id, run_tag, url, title, fetch_timestamp, search_tool,
-                      search_engine, media_type, content_path, content_hash, body_text, summary_text
-               FROM vault_sources
-               WHERE run_tag = ?1 AND url = ?2",
-        )?;
-        let mut rows = stmt.query(params![self.run_tag, url])?;
-        if let Some(row) = rows.next()? {
-            return Ok(Some(row_to_source(row)?));
-        }
-        Ok(None)
+        find_by_url_on(&conn, &self.run_tag, url)
     }
 
     /// Search the vault by URL, title, or body text.
@@ -539,6 +535,25 @@ impl SourceVault {
     pub async fn count_async(&self) -> Result<usize> {
         self.run_blocking("vault count", |v| v.count()).await
     }
+}
+
+/// Look up a source by exact URL on an already-locked connection.
+///
+/// Shared by [`SourceVault::store`] (which holds the connection lock across the
+/// lookup and the insert to make the URL-dedup check atomic) and
+/// [`SourceVault::find_by_url`] (which locks the connection first).
+fn find_by_url_on(conn: &Connection, run_tag: &str, url: &str) -> Result<Option<VaultSource>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, source_id, run_tag, url, title, fetch_timestamp, search_tool,
+                  search_engine, media_type, content_path, content_hash, body_text, summary_text
+           FROM vault_sources
+           WHERE run_tag = ?1 AND url = ?2",
+    )?;
+    let mut rows = stmt.query(params![run_tag, url])?;
+    if let Some(row) = rows.next()? {
+        return Ok(Some(row_to_source(row)?));
+    }
+    Ok(None)
 }
 
 fn row_to_source(row: &rusqlite::Row<'_>) -> Result<VaultSource> {

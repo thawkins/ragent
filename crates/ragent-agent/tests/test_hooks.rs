@@ -18,6 +18,8 @@ fn test_pre_tool_use_exit_code_2_blocks_and_ignores_stdout_allow() {
         trigger: HookTrigger::PreToolUse,
         command: "echo '{\"decision\":\"allow\"}' && exit 2".to_string(),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -50,6 +52,8 @@ fn test_pre_tool_use_exit_code_2_uses_stderr_as_reason() {
         trigger: HookTrigger::PreToolUse,
         command: "echo 'policy violation' >&2 && exit 2".to_string(),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -78,6 +82,8 @@ fn test_pre_tool_use_exit_code_2_crops_long_stderr() {
             "python3 -c 'print(\"x\"*1000, end=\"\"); import sys; sys.stderr.write(\"y\"*1000); sys.exit(2)'"
         ),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -106,6 +112,8 @@ fn test_pre_tool_use_exit_code_1_warns_and_returns_no_decision() {
         trigger: HookTrigger::PreToolUse,
         command: "echo 'suspicious' >&2 && exit 1".to_string(),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -150,6 +158,8 @@ fn test_pre_tool_use_exit_code_3_falls_through_to_no_decision() {
         trigger: HookTrigger::PreToolUse,
         command: "echo 'hook bug' >&2 && exit 3".to_string(),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -179,6 +189,8 @@ fn test_pre_tool_use_exit_code_0_allow_still_parses_stdout() {
         trigger: HookTrigger::PreToolUse,
         command: "echo '{\"decision\":\"allow\"}'".to_string(),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -227,6 +239,8 @@ async fn test_post_tool_use_exit_code_0_parses_modified_output() {
         trigger: HookTrigger::PostToolUse,
         command: r#"echo '{"modified_output":{"content":"replaced"}}'"#.to_string(),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_post_tool_use_hooks(
@@ -242,7 +256,9 @@ async fn test_post_tool_use_exit_code_0_parses_modified_output() {
     .await;
 
     match result {
-        PostToolUseResult::Ok { modified_output } => {
+        PostToolUseResult::Ok {
+            modified_output, ..
+        } => {
             let modified = modified_output.expect("should have modified output");
             assert_eq!(
                 modified.get("content").unwrap().as_str().unwrap(),
@@ -261,6 +277,8 @@ async fn test_post_tool_use_exit_code_1_warns_and_publishes_hook_warning() {
         trigger: HookTrigger::PostToolUse,
         command: "echo 'suspicious output' >&2 && exit 1".to_string(),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_post_tool_use_hooks(
@@ -309,6 +327,8 @@ async fn test_post_tool_use_exit_code_2_flags_and_publishes_tool_result_flagged(
         trigger: HookTrigger::PostToolUse,
         command: "echo 'policy violation' >&2 && exit 2".to_string(),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_post_tool_use_hooks(
@@ -357,6 +377,8 @@ async fn test_post_tool_use_exit_code_3_falls_through_to_ok() {
         trigger: HookTrigger::PostToolUse,
         command: "echo 'hook bug' >&2 && exit 3".to_string(),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_post_tool_use_hooks(
@@ -372,7 +394,9 @@ async fn test_post_tool_use_exit_code_3_falls_through_to_ok() {
     .await;
 
     match result {
-        PostToolUseResult::Ok { modified_output } => {
+        PostToolUseResult::Ok {
+            modified_output, ..
+        } => {
             assert!(modified_output.is_none(), "no modified output expected");
         }
         other => panic!("expected Ok, got {:?}", other),
@@ -402,7 +426,9 @@ async fn test_post_tool_use_no_hooks_returns_ok() {
     .await;
 
     match result {
-        PostToolUseResult::Ok { modified_output } => {
+        PostToolUseResult::Ok {
+            modified_output, ..
+        } => {
             assert!(modified_output.is_none());
         }
         other => panic!("expected Ok, got {:?}", other),
@@ -418,11 +444,15 @@ async fn test_post_tool_use_flagged_takes_priority_over_warn() {
             trigger: HookTrigger::PostToolUse,
             command: "echo 'warn' >&2 && exit 1".to_string(),
             timeout_secs: 30,
+            plugin_root: None,
+            matcher: None,
         },
         HookConfig {
             trigger: HookTrigger::PostToolUse,
             command: "echo 'flagged' >&2 && exit 2".to_string(),
             timeout_secs: 30,
+            plugin_root: None,
+            matcher: None,
         },
     ];
 
@@ -469,6 +499,8 @@ async fn test_post_tool_use_timeout_falls_through_to_ok() {
         trigger: HookTrigger::PostToolUse,
         command: "sleep 10".to_string(),
         timeout_secs: 1,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_post_tool_use_hooks(
@@ -484,7 +516,9 @@ async fn test_post_tool_use_timeout_falls_through_to_ok() {
     .await;
 
     match result {
-        PostToolUseResult::Ok { modified_output } => {
+        PostToolUseResult::Ok {
+            modified_output, ..
+        } => {
             assert!(
                 modified_output.is_none(),
                 "timeout should not produce modified output"
@@ -507,11 +541,15 @@ async fn test_post_tool_use_timeout_does_not_override_warn() {
             trigger: HookTrigger::PostToolUse,
             command: "echo 'warn' >&2 && exit 1".to_string(),
             timeout_secs: 30,
+            plugin_root: None,
+            matcher: None,
         },
         HookConfig {
             trigger: HookTrigger::PostToolUse,
             command: "sleep 10".to_string(),
             timeout_secs: 1,
+            plugin_root: None,
+            matcher: None,
         },
     ];
 
@@ -545,11 +583,15 @@ async fn test_post_tool_use_timeout_does_not_override_flagged() {
             trigger: HookTrigger::PostToolUse,
             command: "echo 'flagged' >&2 && exit 2".to_string(),
             timeout_secs: 30,
+            plugin_root: None,
+            matcher: None,
         },
         HookConfig {
             trigger: HookTrigger::PostToolUse,
             command: "sleep 10".to_string(),
             timeout_secs: 1,
+            plugin_root: None,
+            matcher: None,
         },
     ];
 
@@ -610,6 +652,8 @@ fn test_fixture_pre_tool_use_exit_0_allow() {
         trigger: HookTrigger::PreToolUse,
         command: format!("sh {script}"),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -642,6 +686,8 @@ fn test_fixture_pre_tool_use_exit_0_deny() {
         trigger: HookTrigger::PreToolUse,
         command: format!("sh {script}"),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -675,6 +721,8 @@ fn test_fixture_pre_tool_use_exit_0_modified_input() {
         trigger: HookTrigger::PreToolUse,
         command: format!("sh {script}"),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -712,6 +760,8 @@ fn test_fixture_pre_tool_use_exit_1_warns_and_allows() {
         trigger: HookTrigger::PreToolUse,
         command: format!("sh {script}"),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -763,6 +813,8 @@ fn test_fixture_pre_tool_use_exit_2_blocks() {
         trigger: HookTrigger::PreToolUse,
         command: format!("sh {script}"),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -800,6 +852,8 @@ fn test_fixture_pre_tool_use_exit_3_falls_through() {
         trigger: HookTrigger::PreToolUse,
         command: format!("sh {script}"),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -837,6 +891,8 @@ fn test_fixture_pre_tool_use_exit_2_takes_precedence_over_allow_in_same_stdout()
         trigger: HookTrigger::PreToolUse,
         command: format!("sh {script}"),
         timeout_secs: 30,
+        plugin_root: None,
+        matcher: None,
     }];
 
     let result = run_pre_tool_use_hooks(
@@ -874,11 +930,15 @@ fn test_fixture_pre_tool_use_multiple_hooks_first_blocks() {
             trigger: HookTrigger::PreToolUse,
             command: format!("sh {block_script}"),
             timeout_secs: 30,
+            plugin_root: None,
+            matcher: None,
         },
         HookConfig {
             trigger: HookTrigger::PreToolUse,
             command: format!("sh {allow_script}"),
             timeout_secs: 30,
+            plugin_root: None,
+            matcher: None,
         },
     ];
 

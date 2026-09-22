@@ -5,6 +5,17 @@
 use ragent_agent::reference::fuzzy::*;
 use std::path::{Path, PathBuf};
 
+/// Return a unique scratch directory under the system temp dir.
+///
+/// Each test gets its own directory so the tests are safe to run in parallel
+/// and so two concurrent `cargo test` processes (or the lib and integration
+/// test binaries) never create and remove the same fixed path out from under
+/// each other. A shared fixed name previously caused spurious failures when
+/// one process's `remove_dir_all` deleted a tree another process was walking.
+fn unique_tmp(tag: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("ragent_test_fuzzy_{tag}_{}", uuid::Uuid::new_v4()))
+}
+
 fn candidates() -> Vec<PathBuf> {
     vec![
         PathBuf::from("src/main.rs"),
@@ -83,7 +94,7 @@ fn test_empty_candidates() {
 
 #[test]
 fn test_collect_project_files() {
-    let tmp = std::env::temp_dir().join("ragent_test_fuzzy_collect");
+    let tmp = unique_tmp("collect");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join("src")).expect("mkdir");
     std::fs::write(tmp.join("src/main.rs"), "fn main() {}").expect("write");
@@ -115,7 +126,7 @@ fn test_score_ordering() {
 
 #[test]
 fn test_collect_project_files_cache_shares_full_list() {
-    let tmp = std::env::temp_dir().join("ragent_test_fuzzy_cache_share");
+    let tmp = unique_tmp("cache_share");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join("src")).unwrap();
     std::fs::write(tmp.join("Cargo.toml"), "[package]").unwrap();
@@ -141,7 +152,7 @@ fn test_collect_project_files_cache_shares_full_list() {
 
 #[test]
 fn test_collect_project_files_cache_invalidates_on_mtime_change() {
-    let tmp = std::env::temp_dir().join("ragent_test_fuzzy_cache_mtime");
+    let tmp = unique_tmp("cache_mtime");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
     std::fs::write(tmp.join("first.rs"), "").unwrap();
@@ -172,7 +183,7 @@ fn test_collect_project_files_cache_invalidates_on_mtime_change() {
 
 #[tokio::test]
 async fn test_collect_project_files_async_matches_sync_walk() {
-    let tmp = std::env::temp_dir().join("ragent_test_fuzzy_collect_async");
+    let tmp = unique_tmp("collect_async");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join("src")).expect("mkdir");
     std::fs::write(tmp.join("src/main.rs"), "fn main() {}").expect("write");

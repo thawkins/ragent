@@ -46,9 +46,16 @@ fn stage_codex_plugin(root: &Path, dir_name: &str) -> PathBuf {
 }
 
 /// Install a plugin into the project store, returning its installed directory.
+///
+/// `add` records the plugin enabled (FR-007); these tests exercise removing a
+/// *disabled* plugin, so the helper turns the enable flag back off.
 fn install(tree: &TempTree, dir_name: &str) -> PathBuf {
     let source = stage_codex_plugin(&tree.0.join("src"), dir_name);
     let outcome = add(&dirs(tree), &tree.0, source.to_str().unwrap(), false).expect("add");
+    let store = outcome.installed_dir.parent().expect("store dir");
+    let mut ledger = StoreLedger::load(store);
+    ledger.state_mut("codex-weather").enabled = false;
+    ledger.save(store).expect("ledger saved");
     outcome.installed_dir
 }
 
@@ -149,6 +156,13 @@ fn remove_resolves_plugin_from_project_over_global() {
     std::fs::create_dir_all(&global_dir).unwrap();
     std::fs::write(global_dir.join("codex-plugin.json"), CODEX).unwrap();
     std::fs::write(global_dir.join("index.js"), "// entry").unwrap();
+
+    // `add` enabled the project copy; remove refuses an enabled plugin, so turn
+    // the project leg's flag off first (as `/plugins disable` would).
+    let project_store = tree.0.join("proj/.ragent/plugins");
+    let mut ledger = StoreLedger::load(&project_store);
+    ledger.state_mut("codex-weather").enabled = false;
+    ledger.save(&project_store).expect("ledger saved");
 
     remove(&dirs(&tree), "codex-weather").expect("remove succeeds");
     // Project copy (higher priority) is removed; global copy remains.

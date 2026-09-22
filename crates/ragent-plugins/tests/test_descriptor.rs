@@ -108,6 +108,74 @@ fn nested_marker_without_manifest_file_is_not_a_plugin() {
 }
 
 #[test]
+fn recognises_nested_codex_plugin_manifest() {
+    static BODIES: &[(&str, &str)] = &[(
+        ".codex-plugin/plugin.json",
+        r#"{"name": "linear", "version": "5.0.1"}"#,
+    )];
+    let entries = vec![".codex-plugin".to_string(), "README.md".to_string()];
+    let result = recognise_dialect(&entries, reader_with(BODIES)).expect("no ambiguity");
+    assert_eq!(
+        result,
+        Some(DialectMatch {
+            dialect: PluginDialect::Codex,
+            manifest_rel: PathBuf::from(".codex-plugin/plugin.json"),
+        })
+    );
+}
+
+#[test]
+fn nested_codex_marker_without_manifest_file_is_not_a_plugin() {
+    // A `.codex-plugin` directory exists but contains no `plugin.json`.
+    let entries = vec![".codex-plugin".to_string()];
+    let result = recognise_dialect(&entries, no_bodies).expect("no ambiguity");
+    assert_eq!(result, None);
+}
+
+#[test]
+fn multi_target_nested_manifest_pair_resolves_to_claude() {
+    // A single upstream tree shipping one manifest per host (the shape
+    // `mongodb/agent-skills` uses): both nested manifests present. This is not
+    // ambiguous; Claude wins deterministically.
+    static BODIES: &[(&str, &str)] = &[
+        (
+            ".codex-plugin/plugin.json",
+            r#"{"name": "mongodb", "version": "1.2.1"}"#,
+        ),
+        (
+            ".claude-plugin/plugin.json",
+            r#"{"name": "mongodb", "version": "1.2.1"}"#,
+        ),
+    ];
+    let entries = vec![
+        ".codex-plugin".to_string(),
+        ".claude-plugin".to_string(),
+        "skills".to_string(),
+    ];
+    let result = recognise_dialect(&entries, reader_with(BODIES)).expect("multi-target resolves");
+    assert_eq!(
+        result,
+        Some(DialectMatch {
+            dialect: PluginDialect::Claude,
+            manifest_rel: PathBuf::from(".claude-plugin/plugin.json"),
+        })
+    );
+}
+
+#[test]
+fn nested_codex_manifest_plus_top_level_claude_manifest_is_ambiguous() {
+    // Only the both-nested pairing is multi-target; a nested Codex manifest
+    // beside a top-level Claude manifest remains a genuine ambiguity.
+    static BODIES: &[(&str, &str)] = &[(".codex-plugin/plugin.json", r#"{"name": "x"}"#)];
+    let entries = vec![
+        ".codex-plugin".to_string(),
+        "claude-plugin.json".to_string(),
+    ];
+    let result = recognise_dialect(&entries, reader_with(BODIES));
+    assert!(matches!(result, Err(PluginError::AmbiguousManifest)));
+}
+
+#[test]
 fn plain_directory_is_not_a_plugin() {
     let entries = vec!["main.rs".to_string(), "Cargo.toml".to_string()];
     let result = recognise_dialect(&entries, no_bodies).expect("no ambiguity");
@@ -214,6 +282,29 @@ fn detect_dialect_reports_ambiguity_on_disk() {
 }
 
 #[test]
+fn detect_dialect_resolves_multi_target_nested_pair_on_disk() {
+    // The `mongodb/agent-skills` layout: both nested manifests on disk.
+    let dir = FixtureDir::new("multi-target");
+    dir.write(
+        ".codex-plugin/plugin.json",
+        r#"{"name": "mongodb", "version": "1.2.1"}"#,
+    );
+    dir.write(
+        ".claude-plugin/plugin.json",
+        r#"{"name": "mongodb", "version": "1.2.1"}"#,
+    );
+
+    let result = detect_dialect(&dir.0).expect("multi-target resolves");
+    assert_eq!(
+        result,
+        Some(DialectMatch {
+            dialect: PluginDialect::Claude,
+            manifest_rel: PathBuf::from(".claude-plugin/plugin.json"),
+        })
+    );
+}
+
+#[test]
 fn detect_dialect_returns_none_for_non_plugin_directory() {
     let dir = FixtureDir::new("not-a-plugin");
     dir.write("README.md", "hello");
@@ -230,7 +321,7 @@ fn descriptor_records_unsupported_capabilities() {
         name: "Weather".to_string(),
         version: "1.2.0".to_string(),
         dialect: PluginDialect::Codex,
-        entry: PathBuf::from("/plugins/codex-weather/index.js"),
+        entry: Some(PathBuf::from("/plugins/codex-weather/index.js")),
         requested_permissions: vec!["network.outbound".to_string()],
         api_version: 1,
         unsupported_capabilities: vec!["claude-desktop:mcp-server transport".to_string()],

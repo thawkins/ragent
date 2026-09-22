@@ -365,8 +365,9 @@ impl SkillRegistry {
     /// Discover and load all skills accessible from `working_dir`.
     ///
     /// Bundled skills are registered first at lowest priority, then discovered
-    /// skills are overlaid. When names conflict, higher-priority scopes win.
-    /// `extra_dirs` are additional directories to scan (from config `skill_dirs`).
+    /// skills (personal, config `extra_dirs`, enabled-plugin skill directories,
+    /// and project scope) are overlaid. When names conflict, higher-priority
+    /// scopes win.
     ///
     /// # Examples
     ///
@@ -386,8 +387,9 @@ impl SkillRegistry {
         }
         registry.bundled_count = registry.len();
 
-        // 2. Overlay discovered skills (personal + extra + project scope)
-        let discovered = loader::discover_skills(working_dir, extra_dirs);
+        // 2. Overlay discovered skills (personal + extra + plugin + project scope)
+        let effective = effective_skill_dirs(working_dir, extra_dirs);
+        let discovered = loader::discover_skills(working_dir, &effective);
         registry.discovered_count = discovered.len();
 
         for skill in discovered {
@@ -499,6 +501,37 @@ impl SkillRegistry {
         entries.sort_by(|a, b| a.name.cmp(&b.name));
         entries
     }
+}
+
+/// Build the effective skill-discovery directory list for a session.
+///
+/// Returns the configured `extra_dirs` (for example the `skill_dirs` config
+/// entries) followed by the absolute skill directories contributed by every
+/// **enabled** plugin in the project and user-global plugin stores (FR-029
+/// skills bridge). Paths are returned as strings because
+/// [`crate::skill::loader::discover_skills`] consumes a string list.
+///
+/// Plugin directories are appended last so config-declared directories keep
+/// their relative precedence; within the plugin set the order is deterministic
+/// (sorted by the bridge).
+#[must_use]
+pub fn effective_skill_dirs(working_dir: &std::path::Path, extra_dirs: &[String]) -> Vec<String> {
+    let mut dirs: Vec<String> = extra_dirs.to_vec();
+    for dir in ragent_plugins::scanned_plugin_skill_dirs(&plugin_store_dirs(working_dir)) {
+        dirs.push(dir.to_string_lossy().into_owned());
+    }
+    dirs
+}
+
+/// Resolve the plugin store directories for `working_dir` (project
+/// `.ragent/plugins/` plus the user-global store), so the skills bridge scans
+/// the same store the plugin subsystem does.
+pub(crate) fn plugin_store_dirs(working_dir: &std::path::Path) -> ragent_plugins::StoreDirs {
+    let override_dir = ragent_config::Config::load()
+        .ok()
+        .and_then(|config| config.plugins)
+        .and_then(|plugins| plugins.store_dir);
+    ragent_plugins::store_dirs(working_dir, override_dir.as_deref())
 }
 
 #[cfg(test)]

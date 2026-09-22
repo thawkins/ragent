@@ -6,10 +6,10 @@
 //! non-store subcommands:
 //!
 //! - [`render_list`] renders one row per discovered plugin (id, name, version,
-//!   dialect, state, contributed tool/command names and counts), a summary
-//!   line, any unsupported-capability notices (FR-025), and — in verbose mode —
-//!   the per-plugin telemetry counters (FR-009, FR-022). It scans manifests
-//!   only and executes no plugin code (FR-023).
+//!   dialect, state, contributed tool/command/skill/agent/hook names and
+//!   counts), a summary line, any unsupported-capability notices (FR-025), and
+//!   — in verbose mode — the per-plugin telemetry counters (FR-009, FR-022). It
+//!   scans manifests only and executes no plugin code (FR-023).
 //! - [`run_control_command`] parses the raw argument text, drives
 //!   [`PluginSession::enable`] / [`PluginSession::disable`] (which update the
 //!   ledger, load/unload the sandbox, and register/deregister contributions via
@@ -21,6 +21,7 @@
 
 use std::path::PathBuf;
 
+use crate::bridge::plugin_skill_names;
 use crate::help::attribution;
 use crate::lifecycle::PluginManager;
 use crate::session::{DisableOutcome, EnableOutcome, PluginSession, PluginSurface};
@@ -163,6 +164,12 @@ struct Row {
     state: LifecycleState,
     tools: Vec<String>,
     commands: Vec<String>,
+    /// Skill names contributed by the declared `skills` sections (FR-029).
+    skills: Vec<String>,
+    /// Declared agent-profile paths (FR-032), shown in the contributions block.
+    agents: Vec<String>,
+    /// Declared hook trigger names (FR-033).
+    hooks: Vec<String>,
     unsupported: Vec<String>,
     error: Option<String>,
     store: PathBuf,
@@ -189,18 +196,32 @@ pub fn render_list(manager: &PluginManager, verbose: bool) -> String {
 
     let with_contributions: Vec<&Row> = rows
         .iter()
-        .filter(|r| !r.tools.is_empty() || !r.commands.is_empty())
+        .filter(|r| {
+            !r.tools.is_empty()
+                || !r.commands.is_empty()
+                || !r.skills.is_empty()
+                || !r.agents.is_empty()
+                || !r.hooks.is_empty()
+        })
         .collect();
     if !with_contributions.is_empty() {
         lines.push(String::new());
         lines.push("Contributions:".to_string());
         for row in with_contributions {
-            lines.push(format!(
-                "- {}: tools [{}]; commands [{}]",
-                row.id,
-                row.tools.join(", "),
-                row.commands.join(", ")
-            ));
+            let mut parts = vec![
+                format!("tools [{}]", row.tools.join(", ")),
+                format!("commands [{}]", row.commands.join(", ")),
+            ];
+            if !row.skills.is_empty() {
+                parts.push(format!("skills [{}]", row.skills.join(", ")));
+            }
+            if !row.agents.is_empty() {
+                parts.push(format!("agents [{}]", row.agents.join(", ")));
+            }
+            if !row.hooks.is_empty() {
+                parts.push(format!("hooks [{}]", row.hooks.join(", ")));
+            }
+            lines.push(format!("- {}: {}", row.id, parts.join("; ")));
         }
     }
 
@@ -276,7 +297,7 @@ fn row_for(plugin: &ScannedPlugin, manager: &PluginManager) -> Row {
             loaded
                 .commands
                 .iter()
-                .map(|c| c.name.clone())
+                .map(|c| c.decl.name.clone())
                 .collect::<Vec<String>>(),
         ),
         None => match &plugin.outcome {
@@ -289,11 +310,26 @@ fn row_for(plugin: &ScannedPlugin, manager: &PluginManager) -> Row {
                 parsed
                     .commands
                     .iter()
-                    .map(|c| c.name.clone())
+                    .map(|c| c.decl.name.clone())
                     .collect::<Vec<String>>(),
             ),
             Err(_) => (Vec::new(), Vec::new()),
         },
+    };
+    // FR-032/FR-033: agent profiles and hook triggers come from the manifest
+    // (they are not runtime registrations). FR-029: skill names are resolved
+    // from each declared skills directory, one level deep.
+    let (skills, agents, hooks) = match &plugin.outcome {
+        Ok(parsed) => (
+            plugin_skill_names(&parsed.descriptor.root, &parsed.skills),
+            parsed.agents.clone(),
+            parsed
+                .hooks
+                .iter()
+                .map(|h| h.trigger.clone())
+                .collect::<Vec<String>>(),
+        ),
+        Err(_) => (Vec::new(), Vec::new(), Vec::new()),
     };
     Row {
         id,
@@ -303,6 +339,9 @@ fn row_for(plugin: &ScannedPlugin, manager: &PluginManager) -> Row {
         state,
         tools,
         commands,
+        skills,
+        agents,
+        hooks,
         unsupported,
         error,
         store: plugin.store.clone(),
@@ -314,10 +353,15 @@ const W_NAME: usize = 20;
 const W_VERSION: usize = 8;
 const W_DIALECT: usize = 7;
 const W_STATE: usize = 8;
+const W_TOOLS: usize = 5;
+const W_COMMANDS: usize = 8;
+const W_SKILLS: usize = 6;
+const W_AGENTS: usize = 6;
+const W_HOOKS: usize = 5;
 
 fn table_header() -> String {
     format!(
-        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>5} | {:>8} |",
+        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>wt$} | {:>wc$} | {:>ws$} | {:>wa$} | {:>wh$} |",
         "ID",
         "Name",
         "Version",
@@ -325,31 +369,42 @@ fn table_header() -> String {
         "State",
         "Tools",
         "Commands",
+        "Skills",
+        "Agents",
+        "Hooks",
         w_id = W_ID,
         w_name = W_NAME,
         w_ver = W_VERSION,
         w_dia = W_DIALECT,
         w_state = W_STATE,
+        wt = W_TOOLS,
+        wc = W_COMMANDS,
+        ws = W_SKILLS,
+        wa = W_AGENTS,
+        wh = W_HOOKS,
     )
 }
 
 fn table_separator() -> String {
     let cell = |w: usize| "-".repeat(w + 2);
     format!(
-        "|{}|{}|{}|{}|{}|{}|{}|",
+        "|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
         cell(W_ID),
         cell(W_NAME),
         cell(W_VERSION),
         cell(W_DIALECT),
         cell(W_STATE),
-        cell(5),
-        cell(8),
+        cell(W_TOOLS),
+        cell(W_COMMANDS),
+        cell(W_SKILLS),
+        cell(W_AGENTS),
+        cell(W_HOOKS),
     )
 }
 
 fn table_row(row: &Row) -> String {
     format!(
-        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>5} | {:>8} |",
+        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>wt$} | {:>wc$} | {:>ws$} | {:>wa$} | {:>wh$} |",
         truncate(&row.id, W_ID),
         truncate(&row.name, W_NAME),
         truncate(&row.version, W_VERSION),
@@ -357,11 +412,19 @@ fn table_row(row: &Row) -> String {
         row.state.to_string(),
         row.tools.len(),
         row.commands.len(),
+        row.skills.len(),
+        row.agents.len(),
+        row.hooks.len(),
         w_id = W_ID,
         w_name = W_NAME,
         w_ver = W_VERSION,
         w_dia = W_DIALECT,
         w_state = W_STATE,
+        wt = W_TOOLS,
+        wc = W_COMMANDS,
+        ws = W_SKILLS,
+        wa = W_AGENTS,
+        wh = W_HOOKS,
     )
 }
 
@@ -369,14 +432,17 @@ fn truncate(value: &str, width: usize) -> String {
     value.chars().take(width).collect()
 }
 
-/// The FR-009 summary line: totals by lifecycle state.
+/// The FR-009 summary line: totals by lifecycle state. A plugin is either
+/// enabled or disabled; `loaded` is a transient sub-state of enabled (the
+/// plugin is enabled and running this session), so loaded plugins are folded
+/// into the `enabled` total.
 fn summary_line(rows: &[Row]) -> String {
     let count = |state: LifecycleState| rows.iter().filter(|r| r.state == state).count();
+    let enabled = count(LifecycleState::Loaded) + count(LifecycleState::Enabled);
     format!(
-        "Total: {} plugin(s) - {} loaded, {} enabled, {} disabled, {} errored.",
+        "Total: {} plugin(s) - {} enabled, {} disabled, {} errored.",
         rows.len(),
-        count(LifecycleState::Loaded),
-        count(LifecycleState::Enabled),
+        enabled,
         count(LifecycleState::Disabled),
         count(LifecycleState::Errored),
     )

@@ -130,6 +130,22 @@ pub fn run_plugin_subcommand(
 ) -> Option<String> {
     let (dirs, config) = store_and_config(workdir);
 
+    // `/plugins stores` reports each store's effective endpoint and its source
+    // (spec `pluginstores` FR-031). It is a pure config read: no session and no
+    // store access. With `--check` it additionally contacts each store endpoint
+    // and reports availability and catalogue size; the fetch is bounded by the
+    // configured time/byte budget and every failure is contained as `[err]`.
+    if sub == "stores" {
+        let stores = config.stores_or_default();
+        let probes = crate::commands::stores_check_requested(rest).then(|| {
+            crate::commands::probe_stores(&stores, crate::store_seam::default_fetcher().as_ref())
+        });
+        return Some(crate::commands::render_stores_report_with_probes(
+            &stores,
+            probes.as_deref(),
+        ));
+    }
+
     // Store subcommands (add / remove) need no live session.
     if let Some(report) = run_store_command(&config, &dirs, workdir, sub, rest) {
         return Some(report);

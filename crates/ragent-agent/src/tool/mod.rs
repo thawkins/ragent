@@ -67,6 +67,10 @@ pub mod skill_manage;
 /// Model metadata introspection — report the currently connected provider/model.
 pub mod model_info;
 
+/// Build and version introspection — report the running ragent version and
+/// when the binary was built.
+pub mod ragent_info;
+
 /// Spec management tools.
 pub mod spec_coverage;
 pub mod spec_list;
@@ -1514,6 +1518,8 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(skill_manage::SkillManageTool));
     // Model metadata introspection
     registry.register(Arc::new(model_info::ModelInfoTool));
+    // Build/version introspection
+    registry.register(Arc::new(ragent_info::RagentInfoTool));
     // Phase 1 — alias layer (commonly hallucinated tool names)
     registry.register(Arc::new(aliases::UpdateFileTool));
     registry.register(Arc::new(aliases::AskUserTool));

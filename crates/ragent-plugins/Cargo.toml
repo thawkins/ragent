@@ -25,9 +25,11 @@ reqwest = { workspace = true, features = ["blocking"] }
 rquickjs = "0.10"
 
 [dev-dependencies]
+ragent-config = { path = "../ragent-config" }
 zip = { workspace = true }
 flate2 = "1"
 tar = "0.4"
+tempfile = "3.5"
 
 [lints]
 workspace = true

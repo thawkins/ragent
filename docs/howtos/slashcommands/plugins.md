@@ -20,7 +20,7 @@ handlers.
 
 ```
 /plugins list [--verbose]      # list discovered plugins
-/plugins add <source> [--force]  # install a plugin (stays disabled)
+/plugins add <source> [--force]  # install a plugin (enabled on install)
 /plugins remove <pluginid>     # uninstall (refused while enabled)
 /plugins enable <pluginid>     # enable, load, register tools/commands
 /plugins disable <pluginid>    # unload, deregister tools/commands
@@ -33,7 +33,7 @@ handlers.
 | Form | Description |
 | --- | --- |
 | `/plugins list [--verbose]` | One row per discovered plugin showing id, name, version, dialect, state (`disabled`/`enabled`/`loaded`/`errored`), and contributed tool/command names, plus a totals summary. `--verbose` (or `-v`) appends per-plugin telemetry counters. |
-| `/plugins add <source> [--force]` | Install a plugin and validate its manifest; reports the plugin id and dialect. The plugin stays disabled until enabled. Refuses a duplicate id unless `--force` is given. |
+| `/plugins add <source> [--force]` | Install a plugin and validate its manifest; reports the plugin id and dialect. The plugin is recorded enabled and loads at the next session start; turn it off with `/plugins disable`. Refuses a duplicate id unless `--force` is given. |
 | `/plugins remove <pluginid>` | Uninstall a plugin from the store. Refused while the plugin is enabled. |
 | `/plugins enable <pluginid>` | Mark the plugin enabled, load it into the current session, and register its tools and commands. Reports the declared permissions and the load outcome. |
 | `/plugins disable <pluginid>` | Mark the plugin disabled, unload it, and deregister every tool and command it contributed, confirming how many of each were removed. Files are not deleted. |
@@ -76,14 +76,18 @@ Unload without deleting files:
 ## Output
 
 Reports are prefixed with a `From: /plugins <sub>` attribution line. `list`
-renders a fixed-width table:
+renders a fixed-width table with one count column per contribution kind
+(`Tools`, `Commands`, `Skills`, `Agents`, `Hooks`):
 
 ```
-|ID |Name |Version |Dialect |State    |Tools|Commands|
+| ID |Name |Version |Dialect |State    |Tools|Commands|Skills|Agents|Hooks|
 ```
 
 followed by `Contributions:`, `Unsupported capabilities:`, and `Errors:`
-sections and a summary line (`Total: N plugin(s) - X loaded, X enabled, ...`).
+sections — the `Contributions:` block lists the detailed names for each kind,
+e.g. `skills [db-setup]; agents [agents/security-reviewer.md]; hooks
+[PreToolUse, SessionStart]` — and a summary line (`Total: N plugin(s) - X
+enabled, X disabled, X errored`, with loaded plugins counted as enabled).
 
 `test` renders one line per harness step:
 

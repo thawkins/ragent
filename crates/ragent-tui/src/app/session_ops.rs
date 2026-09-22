@@ -1,4 +1,5 @@
 //! Session, team, and miscellaneous operations for the TUI.
+use std::collections::BTreeSet;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LockResult, MutexGuard};
 
@@ -11,6 +12,11 @@ use ragent_agent::{
     session::processor::estimate_tool_definition_bytes,
 };
 use ragent_llm::provider::tool_cache::{ToolFormat, cached_tools};
+use ragent_plugins::{
+    FetchLimits, StoreDirs, StoreError, StoreIndex, StoreIndexFetcher, StoreKind, add,
+    add_error_report, add_report, installed_ids, probe_stores, render_stores_report_with_probes,
+    store_and_config,
+};
 use ragent_team::team::TeamStore;
 use ragent_tools_core::{Tool, ToolContext};
 
@@ -19,9 +25,10 @@ use ragent_tools_core::{Tool, ToolContext};
 // State types from app/state.rs
 use crate::app::state::{
     App, ContextAction, ContextPartitionSnapshot, FileMenuEntry, FileMenuState, LlmRequestStat,
-    LlmStatsSummary, LogEntry, LogLevel, OutputViewState, OutputViewTarget, ProviderSetupStep,
-    QueuedInput, ScreenMode, ScrollbarDragPane, SelectionPane, TextSelection, atomic_config_update,
-    is_image_path, percent_decode_path, save_clipboard_image_to_temp,
+    LlmStatsSummary, LogEntry, LogLevel, OutputViewState, OutputViewTarget, PluginStoreBrowser,
+    PluginStoreFetchResult, PluginStoreInstallResult, ProviderSetupStep, QueuedInput, ScreenMode,
+    ScrollbarDragPane, SelectionPane, TextSelection, atomic_config_update, is_image_path,
+    percent_decode_path, save_clipboard_image_to_temp,
 };
 
 // Helpers
@@ -44,6 +51,40 @@ pub fn recover_poisoned<'a, T>(
             tracing::error!("{name} mutex poisoned, recovering");
             poisoned.into_inner()
         }
+    }
+}
+
+/// Run one plugin-store install through the existing `add` entry point and map
+/// its result to a TUI report (spec `pluginstores` T-009; FR-006, FR-024,
+/// FR-025).
+///
+/// The store-supplied `source` is forwarded verbatim: `add(force = false)`
+/// applies its own HTTPS, traversal, and size guards, so a store entry receives
+/// no elevated trust (FR-024). The success report names the installed id and
+/// dialect (FR-006); every [`AddError`] becomes the `[err]` report naming the
+/// cause (FR-025). Never panics.
+fn run_plugin_store_install(
+    dirs: &StoreDirs,
+    workdir: &std::path::Path,
+    kind: StoreKind,
+    id: &str,
+    source: &str,
+) -> PluginStoreInstallResult {
+    match add(dirs, workdir, source, false) {
+        Ok(outcome) => PluginStoreInstallResult {
+            kind,
+            id: outcome.parsed.descriptor.id.clone(),
+            notice: format!("installed {}", outcome.parsed.descriptor.id),
+            report: add_report(&outcome),
+            succeeded: true,
+        },
+        Err(err) => PluginStoreInstallResult {
+            kind,
+            id: id.to_string(),
+            notice: format!("install failed: {err}"),
+            report: add_error_report(&err),
+            succeeded: false,
+        },
     }
 }
 
@@ -933,6 +974,11 @@ impl App {
             // every key is routed to it, so no character may reach the input
             // buffer while it is open.
             || self.queue_show_open
+            // The plugin-store browse panel is a modal overlay that swallows
+            // every keystroke and places the keyboard focus in its own search
+            // field, so the message input field and the input queue stay locked
+            // while it is open (spec `pluginstores` FR-015).
+            || self.plugin_store.is_some()
     }
 
     /// Return the number of Unicode code points currently in the input buffer.
@@ -1149,6 +1195,436 @@ impl App {
         self.needs_redraw = true;
     }
 
+    /// Open the plugin-store browse panel for `kind`, pre-filling the search
+    /// field from `prefill` and recording a `--refresh` request (spec
+    /// `pluginstores` FR-007, FR-012, FR-020, FR-021).
+    ///
+    /// Both `/plugins codex` and `/plugins claude` drive the same browser,
+    /// parameterised only by store (A2). The panel opens in the `Loading` state
+    /// and its index fetch is started off-loop ([`Self::spawn_plugin_store_fetch`])
+    /// so the event loop and any in-progress agent turn keep animating (FR-007,
+    /// FR-016, FR-026). Opening the panel installs nothing and touches no input
+    /// state (FR-022); while it is open the input field and the queue are locked
+    /// (FR-015).
+    ///
+    /// The installed-plugin-id set is derived once from the store scan on open
+    /// (T-007, FR-005, A5) so the renderer can colour already-present rows.
+    pub fn open_plugin_store(&mut self, kind: StoreKind, prefill: &str, refresh: bool) {
+        let installed = self.derive_installed_set();
+        let mut browser = PluginStoreBrowser::new(kind, prefill, refresh);
+        browser.set_installed(installed);
+        self.plugin_store = Some(browser);
+        self.needs_redraw = true;
+        self.spawn_plugin_store_fetch(kind);
+    }
+
+    /// Start the store-index fetch for `kind` off the event loop (spec
+    /// `pluginstores` T-008; FR-007, FR-016, FR-026).
+    ///
+    /// Resolves the effective endpoint (configured override, else the compiled
+    /// default; T-015, FR-027..FR-029) and the fetch budgets from config on the
+    /// UI thread, then hands the blocking `reqwest` download to the TUI's
+    /// background path so the event loop never stalls. The parsed index (or the
+    /// contained [`StoreError`]) is delivered back through the
+    /// [`App::plugin_store_result`] slot and applied by
+    /// [`App::poll_plugin_store_result`] on a later frame, so the panel renders
+    /// its loading row until the result lands (FR-016).
+    ///
+    /// A refused endpoint (non-`https` or malformed, FR-024) is surfaced
+    /// immediately as the panel's inline error state instead of spawning, and
+    /// the fetch is skipped entirely when no async reactor is available. No path
+    /// panics (FR-025).
+    pub(crate) fn spawn_plugin_store_fetch(&mut self, kind: StoreKind) {
+        let (_dirs, plugins) = store_and_config(&self.cwd_path);
+        let stores = plugins.stores_or_default();
+        self.spawn_plugin_store_fetch_with_stores(kind, &stores);
+    }
+
+    /// Install an injectable store-index fetch seam (spec `pluginstores` T-019;
+    /// FR-037).
+    ///
+    /// Replaces the production HTTPS fetcher with an alternative implementation
+    /// (typically an offline [`ragent_plugins::FixtureStoreFetcher`]) so the
+    /// store-browser launch and fetch paths can be driven against fixture index
+    /// bytes with no network access (FR-037, NFR-003). The seam is
+    /// production-transparent: unless a test calls this, the browser keeps the
+    /// default HTTPS fetcher set at construction and the live launch path is
+    /// unchanged.
+    pub fn set_plugin_store_fetcher(&mut self, fetcher: Arc<dyn StoreIndexFetcher>) {
+        self.plugin_store_fetcher = fetcher;
+    }
+
+    /// [`Self::spawn_plugin_store_fetch`] with the store budget/endpoint block
+    /// supplied by the caller, so the resolution and refusal paths are testable
+    /// without reading a real config file (FR-024, FR-027..FR-029).
+    pub fn spawn_plugin_store_fetch_with_stores(
+        &mut self,
+        kind: StoreKind,
+        stores: &ragent_config::PluginStoresConfig,
+    ) {
+        // A refused endpoint (non-https or malformed, FR-024) is reported as the
+        // panel's inline error with no fetch attempted.
+        let endpoint = match kind.effective_endpoint(stores) {
+            Ok(endpoint) => endpoint,
+            Err(err) => {
+                self.plugin_store_failed(kind, err.to_string());
+                return;
+            }
+        };
+        let limits = FetchLimits::from(stores);
+        let slot = Arc::clone(&self.plugin_store_result);
+        // The seam the browser drives: the production HTTPS fetcher unless a test
+        // has replaced it with an offline fixture fetcher (FR-037).
+        let fetcher = Arc::clone(&self.plugin_store_fetcher);
+        // The blocking download runs inside the spawned task: `reqwest::blocking`
+        // must not occupy a runtime worker thread, so it goes to the blocking
+        // pool and the UI thread returns immediately, keeping the event loop and
+        // any agent turn animating while the fetch is in flight (FR-016, FR-026).
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn_blocking(move || {
+                let outcome = fetcher.fetch_index(kind, &endpoint, &limits);
+                Self::deposit_plugin_store_result(&slot, kind, outcome);
+            });
+        } else {
+            // Without an async reactor (headless/unit-test contexts) the fetch
+            // cannot run off-loop, so it is not attempted at all: running it
+            // inline would block the caller and violate FR-016/FR-026. The panel
+            // stays in its loading state.
+            tracing::debug!(
+                store = kind.token(),
+                "plugin-store fetch skipped: no async runtime available"
+            );
+        }
+    }
+
+    /// Store one fetch outcome in the shared delivery slot, recovering a
+    /// poisoned lock (FR-025).
+    fn deposit_plugin_store_result(
+        slot: &std::sync::Mutex<Option<PluginStoreFetchResult>>,
+        kind: StoreKind,
+        outcome: Result<StoreIndex, StoreError>,
+    ) {
+        *recover_poisoned(slot.lock(), "plugin_store_result") =
+            Some(PluginStoreFetchResult { kind, outcome });
+    }
+
+    /// Drain a completed off-loop store-index fetch and apply it to the open
+    /// panel (spec `pluginstores` T-008; FR-013, FR-016, FR-017).
+    ///
+    /// Called each housekeeping frame. A result whose store no longer matches the
+    /// open browser (the panel was closed or re-opened for the other store) is
+    /// discarded, so a late arrival can never fill the wrong panel. On success
+    /// the entries are installed (deriving the `Ready`/`Empty` status, FR-017);
+    /// on failure the contained [`StoreError`] is rendered as the inline error
+    /// detail (FR-013). No path panics (FR-025).
+    pub fn poll_plugin_store_result(&mut self) {
+        let result = {
+            let mut guard =
+                recover_poisoned(self.plugin_store_result.lock(), "plugin_store_result");
+            guard.take()
+        };
+        let Some(result) = result else {
+            return;
+        };
+        let open_kind = self.plugin_store.as_ref().map(|b| b.kind);
+        if open_kind != Some(result.kind) {
+            // Stale: the panel is closed or showing the other store (FR-007).
+            return;
+        }
+        match result.outcome {
+            Ok(index) => {
+                if let Some(browser) = self.plugin_store.as_mut() {
+                    browser.set_index(index);
+                }
+            }
+            Err(err) => self.plugin_store_failed(result.kind, err.to_string()),
+        }
+        self.needs_redraw = true;
+    }
+
+    /// Apply an inline failure detail to the open browser for `kind` (FR-013).
+    ///
+    /// A no-op when the panel is closed or showing the other store, so a
+    /// late/foreign failure never corrupts an unrelated panel.
+    fn plugin_store_failed(&mut self, kind: StoreKind, detail: String) {
+        if let Some(browser) = self.plugin_store.as_mut()
+            && browser.kind == kind
+        {
+            browser.set_failed(detail);
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Re-derive the panel's installed-plugin-id set from the store scan
+    /// (T-007, FR-005).
+    ///
+    /// Called on open and (by a later task) after an install commits, so a newly
+    /// installed row re-colours without keeping a second install registry (A5).
+    /// A no-op when no panel is open.
+    pub fn refresh_plugin_store_installed(&mut self) {
+        if self.plugin_store.is_none() {
+            return;
+        }
+        let installed = self.derive_installed_set();
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.set_installed(installed);
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Derive the installed-plugin-id set for the current working directory from
+    /// the plugin store scan (FR-005, A5). Never fails: an absent or unreadable
+    /// store scans as empty.
+    fn derive_installed_set(&self) -> BTreeSet<String> {
+        let (dirs, _config) = store_and_config(&self.cwd_path);
+        installed_ids(dirs)
+    }
+
+    /// Handle `ENTER` on the highlighted plugin-store result (spec `pluginstores`
+    /// FR-006, FR-011, FR-014, FR-022).
+    ///
+    /// A highlighted result whose id is already in the store scan is refused
+    /// with an already-installed notice and nothing is written (FR-014). A
+    /// not-installed result starts the off-loop install of its `source` through
+    /// the existing `ragent_plugins::add(force = false)` entry point (FR-006,
+    /// FR-024), which the poll later drains to report the installed id/dialect
+    /// and re-derive the installed set so the row re-colours (FR-011). An empty
+    /// result set records a neutral notice and installs nothing (FR-022). No path
+    /// panics (FR-025).
+    ///
+    /// Installing is only ever reached from this explicit `ENTER`: opening,
+    /// typing, and moving never call it, so nothing is installed without a
+    /// deliberate key press (FR-022).
+    pub fn plugin_store_install_selected(&mut self) {
+        let Some(browser) = self.plugin_store.as_mut() else {
+            return;
+        };
+        let Some(entry) = browser.selected() else {
+            browser.last_install = Some("no result highlighted".to_string());
+            self.needs_redraw = true;
+            return;
+        };
+        let id = entry.id.clone();
+        if browser.is_installed(&id) {
+            // FR-014: a re-install is refused; nothing is written.
+            browser.last_install = Some(format!("plugin {id} is already installed"));
+            self.needs_redraw = true;
+            return;
+        }
+        let source = entry.source.clone();
+        let kind = browser.kind;
+        browser.last_install = Some(format!("installing {id}..."));
+        self.needs_redraw = true;
+        self.spawn_plugin_store_install(kind, id, source);
+    }
+
+    /// Start the install of `source` off the event loop (spec `pluginstores`
+    /// T-009; FR-006, FR-011, FR-024, FR-025, FR-026).
+    ///
+    /// Resolves the plugin store directories from the same config the store scan
+    /// uses, then hands the blocking `ragent_plugins::add(force = false)` call to
+    /// a worker thread so the TUI event loop and any agent turn keep animating
+    /// while the download/extract/commit runs (FR-026). The store-supplied
+    /// `source` is passed through unchanged, so it receives no elevated trust:
+    /// the existing HTTPS, traversal, and size guards still apply (FR-024).
+    ///
+    /// The worker turns the [`AddOutcome`]/[`AddError`] into a
+    /// [`PluginStoreInstallResult`] (success report naming the installed id and
+    /// dialect, or the `[err]` report naming the cause) and deposits it in
+    /// [`App::plugin_store_install_result`] for
+    /// [`App::poll_plugin_store_install_result`]. When no worker thread can be
+    /// spawned the install runs inline so the action still completes; the
+    /// installed set is then re-derived immediately. No path panics (FR-025).
+    fn spawn_plugin_store_install(&mut self, kind: StoreKind, id: String, source: String) {
+        let (dirs, _config) = store_and_config(&self.cwd_path);
+        let workdir = self.cwd_path.clone();
+        let slot = Arc::clone(&self.plugin_store_install_result);
+
+        let worker_id = id.clone();
+        let worker_dirs = dirs.clone();
+        let worker_workdir = workdir.clone();
+        let worker_source = source.clone();
+        let spawn = std::thread::Builder::new()
+            .name("plugin-store-install".to_owned())
+            .spawn(move || {
+                let result = run_plugin_store_install(
+                    &worker_dirs,
+                    &worker_workdir,
+                    kind,
+                    &worker_id,
+                    &worker_source,
+                );
+                Self::deposit_plugin_store_install_result(&slot, result);
+            });
+
+        match spawn {
+            Ok(handle) => {
+                // The worker owns the install now and deposits its result for
+                // the next poll to drain.
+                drop(handle);
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "plugin-store install worker spawn failed; running inline");
+                let result = run_plugin_store_install(&dirs, &workdir, kind, &id, &source);
+                if result.succeeded {
+                    self.refresh_plugin_store_installed();
+                }
+                self.apply_plugin_store_install_result(result);
+            }
+        }
+    }
+
+    /// Store one install outcome in the shared delivery slot, recovering a
+    /// poisoned lock (FR-025).
+    fn deposit_plugin_store_install_result(
+        slot: &std::sync::Mutex<Option<PluginStoreInstallResult>>,
+        result: PluginStoreInstallResult,
+    ) {
+        *recover_poisoned(slot.lock(), "plugin_store_install_result") = Some(result);
+    }
+
+    /// Drain a completed off-loop install and apply it (spec `pluginstores`
+    /// T-009; FR-006, FR-011, FR-014, FR-025).
+    ///
+    /// Called each housekeeping frame. A result whose store no longer matches the
+    /// open browser (the panel was closed or re-opened for the other store) is
+    /// still reported to the message window — the install already happened — but
+    /// never touches a different store's panel. On success the installed set is
+    /// re-derived so the newly installed row re-colours (FR-011). No path panics.
+    pub fn poll_plugin_store_install_result(&mut self) {
+        let result = {
+            let mut guard = recover_poisoned(
+                self.plugin_store_install_result.lock(),
+                "plugin_store_install_result",
+            );
+            guard.take()
+        };
+        let Some(result) = result else {
+            return;
+        };
+        if result.succeeded {
+            self.refresh_plugin_store_installed();
+        }
+        self.apply_plugin_store_install_result(result);
+    }
+
+    /// Apply one install result: record the panel-footer notice when the panel
+    /// still belongs to the same store, and append the report to the message
+    /// window (FR-006, FR-011, FR-025).
+    fn apply_plugin_store_install_result(&mut self, result: PluginStoreInstallResult) {
+        if let Some(browser) = self.plugin_store.as_mut()
+            && browser.kind == result.kind
+        {
+            browser.last_install = Some(result.notice);
+        }
+        self.append_assistant_text(&result.report);
+        self.needs_redraw = true;
+    }
+
+    /// Start the off-loop `/plugins stores --check` availability probe (spec
+    /// `pluginstores` FR-031 `--check`).
+    ///
+    /// Resolves the store block and spawns a blocking task that contacts each
+    /// store endpoint through the same injectable [`StoreIndexFetcher`] seam the
+    /// browser uses, then deposits the fully rendered report into
+    /// [`App::plugin_store_probe_result`] for
+    /// [`App::poll_plugin_store_probe_result`] to append. The event loop never
+    /// stalls on the network probe. Without an async reactor (headless/unit-test
+    /// contexts) the probe is skipped and the plain report is deposited, exactly
+    /// as the browser fetch is skipped, so no path panics.
+    pub fn begin_plugin_store_probe(&mut self) {
+        let (_dirs, plugins) = store_and_config(&self.cwd_path);
+        let stores = plugins.stores_or_default();
+        let slot = Arc::clone(&self.plugin_store_probe_result);
+        let fetcher = Arc::clone(&self.plugin_store_fetcher);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn_blocking(move || {
+                let probes = probe_stores(&stores, fetcher.as_ref());
+                let report = render_stores_report_with_probes(&stores, Some(&probes));
+                *recover_poisoned(slot.lock(), "plugin_store_probe_result") = Some(report);
+            });
+        } else {
+            // No reactor: report the plain config view rather than block.
+            let report = render_stores_report_with_probes(&stores, None);
+            *recover_poisoned(slot.lock(), "plugin_store_probe_result") = Some(report);
+        }
+    }
+
+    /// Drain a completed off-loop `/plugins stores --check` probe and append its
+    /// report to the message window (spec `pluginstores` FR-031 `--check`).
+    ///
+    /// Called each housekeeping frame, mirroring
+    /// [`App::poll_websearch_test_result`]. No path panics (FR-025).
+    pub fn poll_plugin_store_probe_result(&mut self) {
+        let report = {
+            let mut guard = recover_poisoned(
+                self.plugin_store_probe_result.lock(),
+                "plugin_store_probe_result",
+            );
+            guard.take()
+        };
+        let Some(report) = report else {
+            return;
+        };
+        self.append_assistant_text(&report);
+        self.status = "plugins: store check complete".to_string();
+        self.needs_redraw = true;
+    }
+
+    /// Close the plugin-store browse panel and drop its state (FR-012).
+    ///
+    /// This is the only place the browser is cleared, so every close path
+    /// leaves the input field, the staged attachments, the queue, and the
+    /// running turn exactly as they were (FR-012).
+    pub fn close_plugin_store(&mut self) {
+        if self.plugin_store.take().is_some() {
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Handle the shared `Backspace` / `Esc` query-editing key while the panel
+    /// is open (spec `pluginstores` FR-009).
+    ///
+    /// Removes the last query character and returns `true` when the query is
+    /// non-empty; when it is already empty, dismisses the panel (FR-012) and
+    /// returns `false`.
+    pub fn plugin_store_edit_or_close(&mut self) -> bool {
+        let Some(browser) = self.plugin_store.as_mut() else {
+            return false;
+        };
+        if browser.backspace() {
+            self.needs_redraw = true;
+            true
+        } else {
+            self.close_plugin_store();
+            false
+        }
+    }
+
+    /// Append a typed character to the panel's search query (FR-008).
+    pub fn plugin_store_push_char(&mut self, c: char) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.push_char(c);
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the panel's block cursor up one result (FR-010).
+    pub fn plugin_store_move_up(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.move_up();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the panel's block cursor down one result (FR-010).
+    pub fn plugin_store_move_down(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.move_down();
+            self.needs_redraw = true;
+        }
+    }
+
     /// Append a message to the input queue (spec `inputqueue` FR-005).
     ///
     /// Called when the user presses Enter with non-empty input while the
@@ -1183,6 +1659,10 @@ impl App {
         self.input_cursor = 0;
         self.history_index = None;
         self.file_menu = None;
+        // A queued slash command (FR-017 amendment) must also dismiss the
+        // completion menu, otherwise it would float over a field it no longer
+        // belongs to once the entry runs.
+        self.slash_menu = None;
         self.input_queue
             .push_back(QueuedInput { text, image_paths });
         // FR-014: echo the enqueue into the log panel with the post-enqueue depth.
@@ -1222,40 +1702,81 @@ impl App {
     /// preserves whatever draft the user is editing, so selecting the row never
     /// mutates the editable input buffer (FR-031).
     pub fn advance_input_queue(&mut self) {
-        let next_pending = self.queue_next_pending;
-        self.queue_next_pending = false;
-        if self.session_id.is_none()
-            || self.is_processing
-            || self.compact_in_progress
-            || self.auto_compact_in_progress
-            || self.pending_send_after_compact.is_some()
-        {
-            // FR-030: a `Next` that cannot dispatch yet stays pending and is
-            // retried at the next safe turn boundary instead of being lost.
-            self.queue_next_pending = next_pending;
-            return;
+        // FR-017 amendment: a queued *synchronous* slash command never sets
+        // `is_processing`, so no `MessageEnd`/`AgentError` boundary follows it and
+        // the rest of the queue would otherwise stall behind it. Drain in a loop
+        // so consecutive command entries run back-to-back; the boundary guard at
+        // the top of each pass stops the moment an entry leaves the turn busy.
+        loop {
+            let next_pending = self.queue_next_pending;
+            self.queue_next_pending = false;
+            if self.session_id.is_none()
+                || self.is_processing
+                || self.compact_in_progress
+                || self.auto_compact_in_progress
+                || self.pending_send_after_compact.is_some()
+            {
+                // FR-030: a `Next` that cannot dispatch yet stays pending and is
+                // retried at the next safe turn boundary instead of being lost.
+                self.queue_next_pending = next_pending;
+                return;
+            }
+            if !next_pending && self.input_queue.is_empty() {
+                return;
+            }
+            let Some(entry) = self.input_queue.pop_front() else {
+                return;
+            };
+            // FR-008: the counter decrements, so the field must repaint next frame.
+            self.needs_redraw = true;
+            if next_pending {
+                // FR-031: a menu `Next` dispatch must not mutate the editable buffer,
+                // so snapshot the live draft and restore it once the queued entry has
+                // been handed to the (asynchronous) dispatch path. `Next` runs exactly
+                // one entry, so the drain ends here.
+                let saved_input = std::mem::take(&mut self.input);
+                let saved_cursor = self.input_cursor;
+                let saved_anchor = self.kb_select_anchor;
+                self.dispatch_queued_input(entry.text, entry.image_paths);
+                self.input = saved_input;
+                self.input_cursor = saved_cursor;
+                self.kb_select_anchor = saved_anchor;
+                return;
+            }
+            // A plain message starts an asynchronous turn that sets `is_processing`,
+            // so it ends the drain; a synchronous slash command leaves the boundary
+            // free and the loop continues with the next queued entry.
+            if self.dispatch_queued_input(entry.text, entry.image_paths) {
+                return;
+            }
         }
-        if !next_pending && self.input_queue.is_empty() {
-            return;
-        }
-        let Some(entry) = self.input_queue.pop_front() else {
-            return;
-        };
-        // FR-008: the counter decrements, so the field must repaint next frame.
-        self.needs_redraw = true;
-        if next_pending {
-            // FR-031: a menu `Next` dispatch must not mutate the editable buffer,
-            // so snapshot the live draft and restore it once the queued entry has
-            // been handed to the (asynchronous) dispatch path.
-            let saved_input = std::mem::take(&mut self.input);
-            let saved_cursor = self.input_cursor;
-            let saved_anchor = self.kb_select_anchor;
-            self.dispatch_user_message(entry.text, entry.image_paths);
-            self.input = saved_input;
-            self.input_cursor = saved_cursor;
-            self.kb_select_anchor = saved_anchor;
+    }
+
+    /// Dispatch one queued entry, routing a slash command back through the
+    /// slash-command executor instead of the chat path (spec `inputqueue`
+    /// FR-017 amendment).
+    ///
+    /// A queued plain message runs as a user turn via
+    /// [`App::dispatch_user_message`]; a queued entry whose text begins with `/`
+    /// is a slash command and is handed to [`App::execute_slash_command`] exactly
+    /// as a freshly typed one, so a queued `/status`, `/agent`, or `/spec …`
+    /// behaves identically to typing it at a free boundary. This is the single
+    /// place the two entry kinds diverge.
+    ///
+    /// Returns `true` when a chat turn was started (a plain message, which leaves
+    /// the boundary busy and ends the drain) and `false` when a synchronous slash
+    /// command ran and left the boundary free for the next queued entry.
+    fn dispatch_queued_input(
+        &mut self,
+        text: String,
+        image_paths: Vec<std::path::PathBuf>,
+    ) -> bool {
+        if text.starts_with('/') {
+            self.execute_slash_command(&text);
+            false
         } else {
-            self.dispatch_user_message(entry.text, entry.image_paths);
+            self.dispatch_user_message(text, image_paths);
+            true
         }
     }
 

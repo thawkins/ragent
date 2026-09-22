@@ -147,8 +147,12 @@ pub fn test_plugin(
         StepOutcome::Pass,
         Duration::ZERO,
         Some(format!(
-            "id {}, dialect {}, version {}",
-            parsed.descriptor.id, parsed.descriptor.dialect, parsed.descriptor.version
+            "id {}, dialect {}, version {}; agents {}, hooks {}",
+            parsed.descriptor.id,
+            parsed.descriptor.dialect,
+            parsed.descriptor.version,
+            parsed.agents.len(),
+            parsed.hooks.len()
         )),
     ));
 
@@ -190,6 +194,18 @@ pub fn test_plugin(
             return report;
         }
     };
+    // A non-JS plugin (skill-only / MCP-only) has no entry point to execute:
+    // the step passes with a note and there are no tools to sample-invoke.
+    let Some(context) = context else {
+        report.steps.push(step(
+            "entry execution",
+            StepOutcome::Pass,
+            started.elapsed(),
+            Some("no entry point (non-JS plugin)".to_string()),
+        ));
+        report.messages = calls.messages();
+        return report;
+    };
     report.steps.push(step(
         "entry execution",
         StepOutcome::Pass,
@@ -225,11 +241,17 @@ pub fn test_plugin(
 /// Check out a fresh sandbox, install the captured host API, and evaluate the
 /// entry point under the entry budget (FR-013, FR-017, FR-026). Mirrors the
 /// lifecycle load procedure but is bound to a throwaway context.
+///
+/// Returns `Ok(None)` for a non-JS plugin (no entry point): there is nothing to
+/// execute, and the caller reports the step as a pass with a note.
 fn run_entry(
     parsed: &ParsedManifest,
     budget: SandboxBudget,
     calls: &HostCalls,
-) -> Result<SandboxContext, String> {
+) -> Result<Option<SandboxContext>, String> {
+    let Some(entry) = parsed.descriptor.entry.as_ref() else {
+        return Ok(None);
+    };
     let pool = RuntimePool::new();
     let context = pool
         .checkout(budget)
@@ -239,13 +261,13 @@ fn run_entry(
     context
         .install_host_api(&install)
         .map_err(|e| format!("entry: host API install failed: {e}"))?;
-    let source = std::fs::read_to_string(&parsed.descriptor.entry)
-        .map_err(|e| format!("entry: {}: {e}", parsed.descriptor.entry.display()))?;
+    let source =
+        std::fs::read_to_string(entry).map_err(|e| format!("entry: {}: {e}", entry.display()))?;
     context.reset_interrupt();
     context
         .eval(&source)
         .map_err(|e| format!("entry: {}", cause_of(&e)))?;
-    Ok(context)
+    Ok(Some(context))
 }
 
 /// Merge manifest-declared and `register_tool`-declared tools, keeping the

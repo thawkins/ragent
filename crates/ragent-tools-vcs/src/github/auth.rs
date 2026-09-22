@@ -44,19 +44,24 @@ fn read_cached_token(path: &Path) -> Option<String> {
     value
 }
 
-/// Resolve GitHub token from environment or stored file.
-/// Returns `None` if no token is configured.
+/// Resolve GitHub token from the environment, the stored file, or the `gh`
+/// CLI. Returns `None` if no token is configured.
+///
+/// Priority (see `ragent_config::github`): the `GITHUB_TOKEN` environment
+/// variable wins outright; otherwise the cached stored-file token is used
+/// unless it is a GitHub App token (`ghu_`/`ghs_`) — those cannot create
+/// repositories, so the `gh auth token` credential is preferred when the CLI
+/// is authenticated, falling back to the stored token when it is not.
 #[must_use]
 pub fn load_token() -> Option<String> {
-    // 1. Environment variable (already in memory — no cache needed)
-    if let Ok(token) = std::env::var("GITHUB_TOKEN")
-        && !token.is_empty()
-    {
+    if let Some(token) = ragent_config::github::env_token() {
         return Some(token);
     }
-    // 2. Stored file (cached against mtime)
-    let path = token_file_path()?;
-    read_cached_token(&path)
+    // Stored file (cached against mtime), downgraded to the `gh` CLI
+    // credential when the stored token is a repository-admin-incapable app
+    // token. The `gh` subprocess only runs when the stored token is unusable.
+    let stored = token_file_path().and_then(|path| read_cached_token(&path));
+    ragent_config::github::resolve_from_stored(stored)
 }
 
 /// Save a GitHub token to `~/.ragent/github_token`.

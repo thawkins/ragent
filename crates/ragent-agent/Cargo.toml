@@ -46,6 +46,7 @@ rustc-hash = { workspace = true }
 ragent-codeindex = { path = "../ragent-codeindex" }
 ragent-config = { path = "../ragent-config" }
 ragent-llm = { path = "../ragent-llm" }
+ragent-plugins = { path = "../ragent-plugins" }
 ragent-research = { path = "../ragent-research" }
 ragent-storage = { path = "../ragent-storage" }
 ragent-tools-core = { path = "../ragent-tools-core" }
@@ -74,6 +75,9 @@ version = "2.3"
 
 [dependencies.tempfile]
 version = "3.5"
+
+[build-dependencies]
+chrono = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }

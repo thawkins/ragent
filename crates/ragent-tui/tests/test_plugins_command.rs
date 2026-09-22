@@ -43,13 +43,25 @@ fn last_text(app: &ragent_tui::App) -> String {
         .text_content()
 }
 
+/// The rendered text of the most recent assistant message with every whitespace
+/// run folded to a single space, so a long endpoint URL that the message window
+/// markdown-wrapped onto its own line can still be asserted as one cell.
+fn flat_text(app: &ragent_tui::App) -> String {
+    last_text(app)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[test]
 fn plugins_registered_in_slash_commands() {
     let def = ragent_tui::app::SLASH_COMMANDS
         .iter()
         .find(|cmd| cmd.trigger == "plugins")
         .expect("/plugins must be registered in SLASH_COMMANDS (FR-006)");
-    for sub in ["list", "add", "remove", "enable", "disable", "test", "help"] {
+    for sub in [
+        "list", "add", "remove", "enable", "disable", "test", "stores", "help",
+    ] {
         assert!(
             def.description.contains(sub),
             "the /plugins description must advertise `{sub}`: {}",
@@ -75,7 +87,9 @@ fn plugins_suggestions_list_all_subcommands() {
         .iter()
         .find(|m| m.trigger == "plugins")
         .expect("menu must contain the plugins entry");
-    for sub in ["list", "add", "remove", "enable", "disable", "test", "help"] {
+    for sub in [
+        "list", "add", "remove", "enable", "disable", "test", "stores", "help",
+    ] {
         assert!(
             entry.suggestions.iter().any(|s| s == sub),
             "autocomplete must offer `{sub}`: {:?}",
@@ -132,6 +146,63 @@ fn help_bare_and_unknown_all_render_the_usage_block() {
             "`{invocation}` output must be ASCII only: {text}"
         );
     }
+}
+
+#[test]
+fn stores_reports_both_endpoints_as_default_without_a_stores_block() {
+    // FR-031/FR-038: with no `plugins.stores` block, `/plugins stores` lists
+    // both stores, tags each `default`, and names its compiled https endpoint.
+    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_guard, temp) = enter_temp_dir();
+
+    let mut app = support::make_app();
+    app.session_id = Some("test-session".to_string());
+    app.execute_slash_command("/plugins stores");
+    let raw = last_text(&app);
+    let text = flat_text(&app);
+
+    assert!(raw.contains("From: /plugins stores"), "{raw}");
+    // The message window re-renders markdown bullets as `*` and wraps a long
+    // endpoint onto its own line, so assert on the whitespace-folded
+    // `token: [tag] endpoint` cells rather than the bullet glyph.
+    for token in ["codex", "claude"] {
+        assert!(
+            text.contains(&format!("{token}: [default] https://")),
+            "`{token}` must be tagged default with an https endpoint: {text}"
+        );
+    }
+    assert!(raw.is_ascii(), "the report must be ASCII only: {raw}");
+    assert!(
+        !temp.path().join(".ragent").join("plugins").exists(),
+        "reporting the stores must create no plugin store"
+    );
+}
+
+#[test]
+fn stores_tags_a_configured_endpoint_as_config() {
+    // FR-031: a non-empty `plugins.stores.<name>.url` override is tagged
+    // `config` and names its URL; the other store keeps its default.
+    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_guard, temp) = enter_temp_dir();
+    std::fs::write(
+        temp.path().join(".ragent").join("ragent.json"),
+        r#"{ "plugins": { "stores": { "codex": { "url": "https://cfg.example/codex.json" } } } }"#,
+    )
+    .expect("config writable");
+
+    let mut app = support::make_app();
+    app.session_id = Some("test-session".to_string());
+    app.execute_slash_command("/plugins stores");
+    let text = flat_text(&app);
+
+    assert!(
+        text.contains("codex: [config] https://cfg.example/codex.json"),
+        "an override must be tagged config with its URL: {text}"
+    );
+    assert!(
+        text.contains("claude: [default] https://"),
+        "the unconfigured store keeps its default: {text}"
+    );
 }
 
 #[test]
@@ -196,7 +267,7 @@ fn list_reports_a_discovered_plugin_as_disabled() {
 }
 
 #[test]
-fn add_from_a_local_directory_installs_and_stays_disabled() {
+fn add_from_a_local_directory_installs_and_reports_enabled() {
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (_guard, temp) = enter_temp_dir();
 
@@ -215,7 +286,7 @@ fn add_from_a_local_directory_installs_and_stays_disabled() {
         "add must report the plugin id: {added}"
     );
 
-    // Installed into the project store and still disabled (FR-007).
+    // Installed into the project store and recorded enabled (FR-007).
     assert!(
         temp.path()
             .join(".ragent")
@@ -228,8 +299,8 @@ fn add_from_a_local_directory_installs_and_stays_disabled() {
     app.execute_slash_command("/plugins list");
     let listed = last_text(&app);
     assert!(
-        listed.contains("disabled"),
-        "an added plugin stays disabled until enabled: {listed}"
+        listed.contains("enabled"),
+        "an added plugin is enabled until disabled: {listed}"
     );
 }
 

@@ -195,8 +195,52 @@ fn list_shows_row_state_counts_summary_and_contributions() {
     // Contributed names, from the manifest even while disabled.
     assert!(out.contains("plugin_codex-weather_get_weather"));
     assert!(out.contains("codex-weather-go"));
-    // Summary totals line.
-    assert!(out.contains("Total: 1 plugin(s) - 0 loaded, 0 enabled, 1 disabled, 0 errored."));
+    // Summary totals line: loaded plugins fold into `enabled`.
+    assert!(out.contains("Total: 1 plugin(s) - 0 enabled, 1 disabled, 0 errored."));
+}
+
+#[test]
+fn list_shows_skill_agent_and_hook_counts_and_details() {
+    let tree = TempTree::new("list-contributions");
+    // A Claude-dialect plugin contributing a skill, an agent profile, and hooks.
+    let plugin_dir = tree.store().join("claude-tools");
+    std::fs::create_dir_all(plugin_dir.join(".claude-plugin")).unwrap();
+    std::fs::create_dir_all(plugin_dir.join("skills/db-setup")).unwrap();
+    std::fs::create_dir_all(plugin_dir.join("agents")).unwrap();
+    std::fs::write(
+        plugin_dir.join(".claude-plugin/plugin.json"),
+        r#"{ "name": "claude-tools", "version": "2.0.0", "skills": "./skills/",
+             "hooks": { "PreToolUse": "./check.sh", "SessionStart": "./start.sh" } }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        plugin_dir.join("skills/db-setup/SKILL.md"),
+        "---\nname: db-setup\ndescription: Set up the database\n---\n\nBody.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        plugin_dir.join("agents/security-reviewer.md"),
+        "---\nname: security-reviewer\nmode: subagent\n---\n\nReview.\n",
+    )
+    .unwrap();
+    let manager =
+        ragent_plugins::PluginManager::new(tree.dirs(), ragent_config::PluginsConfig::default());
+
+    let out = render_list(&manager, false);
+    // A header row per contribution kind.
+    assert!(out.contains("Skills"), "skills column: {out}");
+    assert!(out.contains("Agents"), "agents column: {out}");
+    assert!(out.contains("Hooks"), "hooks column: {out}");
+    // Counts and detailed names/sections.
+    assert!(out.contains("skills [db-setup]"), "skill name: {out}");
+    assert!(
+        out.contains("agents [agents/security-reviewer.md]"),
+        "agent name: {out}"
+    );
+    assert!(
+        out.contains("hooks [PreToolUse, SessionStart]"),
+        "hooks: {out}"
+    );
 }
 
 #[test]
@@ -217,7 +261,13 @@ fn list_verbose_includes_telemetry_counters() {
 #[test]
 fn list_reports_unsupported_capabilities() {
     let tree = TempTree::new("list-unsupported");
-    write_plugin(&tree, "codex-weather", r#", "mcp_servers": {}"#, ENTRY);
+    // An unbridgeable MCP shape (a JSON array) keeps the FR-025 label.
+    write_plugin(
+        &tree,
+        "codex-weather",
+        r#", "mcp_servers": [ "not", "an", "object" ]"#,
+        ENTRY,
+    );
     let manager =
         ragent_plugins::PluginManager::new(tree.dirs(), ragent_config::PluginsConfig::default());
 
@@ -296,6 +346,38 @@ fn run_enable_states_declared_permissions() {
         out.contains("Declared permissions: network.outbound"),
         "got:\n{out}"
     );
+}
+
+#[test]
+fn run_enable_is_idempotent_when_the_plugin_is_already_loaded() {
+    // A plugin installed enabled (FR-007) is loaded by `PluginSession::start`;
+    // an explicit `enable` must re-report it, not collide with its own
+    // contributions.
+    let tree = TempTree::new("enable-idempotent");
+    write_plugin(&tree, "codex-weather", "", ENTRY);
+    let mut ledger = ragent_plugins::StoreLedger::load(&tree.store());
+    ledger.state_mut("codex-weather").enabled = true;
+    ledger.save(&tree.store()).expect("ledger save");
+
+    let mut surface = TestSurface::default();
+    let mut session = PluginSession::start(
+        tree.dirs(),
+        ragent_config::PluginsConfig::default(),
+        &mut surface,
+    );
+    assert!(
+        surface.tools.contains("plugin_codex-weather_get_weather"),
+        "session start loaded the enabled plugin"
+    );
+
+    let out = run_control_command(&mut session, &mut surface, "enable", "codex-weather")
+        .expect("handled");
+    assert!(out.contains("[ok]"), "re-enable succeeds: {out}");
+    assert!(
+        out.contains("registered 1 tool(s) and 1 command(s)"),
+        "the existing contributions are re-reported: {out}"
+    );
+    assert_eq!(surface.tool_adapters.len(), 1, "no duplicate registration");
 }
 
 #[test]

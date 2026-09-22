@@ -1621,7 +1621,20 @@ impl App {
                     }
                 }
                 InputAction::SlashCommand(cmd) => {
-                    self.execute_slash_command(&cmd);
+                    // FR-017 (amended)/FR-005: a slash command submitted while
+                    // the primary agent is executing is queued like a plain
+                    // message and runs at the next turn boundary. Only when the
+                    // turn is free does it dispatch immediately.
+                    if self.is_input_blocked() {
+                        if let Err(rejected) = self.enqueue_input(cmd, Vec::new()) {
+                            // FR-004: the queue is at capacity. The submission is
+                            // rejected, but the typed command must not be lost.
+                            self.input = rejected.text;
+                            self.input_cursor = self.input_len_chars();
+                        }
+                    } else {
+                        self.execute_slash_command(&cmd);
+                    }
                 }
                 InputAction::CancelAgent => {
                     // govdoc T-014/FR-019: when a govcreate run is live,

@@ -750,7 +750,7 @@ The full-text search index has no documents. Run:
 
 | Document | Covers |
 |----------|--------|
-| `docs/howtos/tools/INDEX.md` | Full tool catalog (all 168 static + 1 dynamic tool, split by category) |
+| `docs/howtos/tools/INDEX.md` | Full tool catalog (all 169 static + 1 dynamic tool, split by category) |
 | `docs/howtos/tool-visibility.md` | Hiding and exposing tool families |
 | `docs/howtos/tutorial.md` | End-to-end TUI workflow tutorial |
 | `docs/howtos/custom-agents.md` | Custom agent profiles |

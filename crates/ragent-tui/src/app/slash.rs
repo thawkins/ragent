@@ -879,6 +879,7 @@ impl App {
                 "enable".to_string(),
                 "disable".to_string(),
                 "test".to_string(),
+                "stores".to_string(),
                 "help".to_string(),
                 "--verbose".to_string(),
                 "--force".to_string(),
@@ -974,6 +975,34 @@ impl App {
                         is_skill: true,
                         suggestions: Vec::new(),
                         parameter_hint: skill.argument_hint.clone(),
+                    });
+                }
+            }
+
+            // Collect plugin-contributed command matches (spec `plugins` FR-031).
+            for plugin_cmd in &self.plugin_commands {
+                let desc = if plugin_cmd.description.is_empty() {
+                    format!("plugin {}", plugin_cmd.plugin_id)
+                } else {
+                    format!(
+                        "{} (plugin {})",
+                        plugin_cmd.description, plugin_cmd.plugin_id
+                    )
+                };
+                if matches.iter().any(|m| m.trigger == plugin_cmd.trigger) {
+                    continue;
+                }
+                if needle.is_empty()
+                    || plugin_cmd.trigger.starts_with(&needle)
+                    || plugin_cmd.name.starts_with(&needle)
+                    || desc.to_lowercase().contains(&needle)
+                {
+                    matches.push(SlashMenuEntry {
+                        trigger: plugin_cmd.trigger.clone(),
+                        description: desc,
+                        is_skill: false,
+                        suggestions: Vec::new(),
+                        parameter_hint: None,
                     });
                 }
             }
@@ -2731,6 +2760,13 @@ Usage: `/telemetry help|on|off|setup|counters`",
             return;
         }
 
+        // Plugin-contributed commands (spec `plugins` FR-031) resolve before the
+        // built-in ladder: a prompt command's body is injected into the agent as
+        // an ordinary user turn (so `/commit` behaves like a Claude Code command).
+        if self.try_plugin_command(cmd, args) {
+            return;
+        }
+
         match cmd {
             "bug-report" => self.handle_bug_report(),
             "template" => handle_template_command(self, args),
@@ -3837,6 +3873,21 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             format!("{}{}", skill.name, hint),
                             desc
                         ));
+                    }
+                }
+                // Append plugin-contributed commands (spec `plugins` FR-031).
+                if !self.plugin_commands.is_empty() {
+                    help_lines.push_str("\nPlugin commands:\n");
+                    for plugin_cmd in &self.plugin_commands {
+                        let desc = if plugin_cmd.description.is_empty() {
+                            format!("(plugin {})", plugin_cmd.plugin_id)
+                        } else {
+                            format!(
+                                "{} (plugin {})",
+                                plugin_cmd.description, plugin_cmd.plugin_id
+                            )
+                        };
+                        help_lines.push_str(&format!("  /{:<18} {}\n", plugin_cmd.trigger, desc));
                     }
                 }
                 help_lines.push_str("```\n");
@@ -6811,10 +6862,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             // A bare `/plugins`, `/plugins help`, and an unrecognised
             // subcommand all render the usage block (FR-006, FR-014). The
             // call drives an ephemeral plugin session synchronously; sandbox
-            // contexts are `!Send` and never cross an `.await`.
+            // contexts are `!Send` and never cross an `.await`. `/plugins codex`
+            // and `/plugins claude` open the browse panel instead and print no
+            // report (FR-002, FR-007).
             "plugins" => {
-                let report = crate::app::plugin::handle_plugins_command(self, args);
-                self.append_assistant_text(&report);
+                if let Some(report) = crate::app::plugin::handle_plugins_command(self, args) {
+                    self.append_assistant_text(&report);
+                }
                 self.status = "plugins".to_string();
             }
 
@@ -10834,6 +10888,69 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
         }
         self.assert_ui_invariants();
+    }
+
+    /// Invoke a plugin-contributed slash command (spec `plugins` FR-031).
+    ///
+    /// Returns `true` when `cmd` matched a registered plugin command (and the
+    /// invocation was handled), `false` otherwise so the built-in ladder runs.
+    ///
+    /// A prompt command (`prompt: Some(body)`) has its body rendered with the
+    /// typed arguments substituted and injected into the agent as an ordinary
+    /// user turn. An inline command (`prompt: None`) needs the live plugin
+    /// sandbox, which the TUI does not hold across the async loop, so it reports
+    /// that it can only run via the plugin host and does not act.
+    fn try_plugin_command(&mut self, cmd: &str, args: &str) -> bool {
+        let Some(plugin_cmd) = self
+            .plugin_commands
+            .iter()
+            .find(|c| c.trigger == cmd)
+            .cloned()
+        else {
+            return false;
+        };
+
+        let Some(body) = plugin_cmd.prompt.clone() else {
+            self.status = format!("plugin command /{cmd} requires the plugin host");
+            self.append_assistant_text(&format!(
+                "From: /{cmd}\n\n\u{26a0} `/{cmd}` is an inline plugin command \
+                 (JavaScript handler). It is registered by plugin `{}` and must be \
+                 invoked through the plugin host.",
+                plugin_cmd.plugin_id
+            ));
+            return true;
+        };
+
+        let rendered = ragent_plugins::substitute_command_args(
+            &body,
+            args,
+            &plugin_cmd.plugin_id,
+            &plugin_cmd.name,
+        );
+        let display = if args.is_empty() {
+            format!("/{}", plugin_cmd.trigger)
+        } else {
+            format!("/{} {}", plugin_cmd.trigger, args)
+        };
+
+        let sid = self.session_id.clone().unwrap_or_default();
+        self.messages.push(Message::user_text(&sid, &display));
+        self.add_to_history(display);
+        self.status = format!("plugin command /{}", plugin_cmd.trigger);
+
+        let flag = Arc::new(AtomicBool::new(false));
+        self.cancel_flag = Some(flag.clone());
+        let processor = self.session_processor.clone();
+        let agent = Arc::new(self.agent_info.clone());
+        tokio::spawn(async move {
+            if let Err(e) = processor
+                .process_message(&sid, &rendered, &agent, flag)
+                .await
+            {
+                tracing::debug!(error = %e, "Failed to process plugin command prompt");
+            }
+        });
+        true
     }
 
     /// Render a list of session tasks into the chat transcript.

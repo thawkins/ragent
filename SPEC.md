@@ -1,7 +1,7 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.113</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.114</p>
         <p style="font-size: 1.1em;">
           <strong>Date:</strong> 2026-09-20
       </p>
@@ -396,7 +396,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
 | **Multi-provider** | 13 first-class LLM provider IDs with auto-discovery and health checks |
-| **Tool-rich** | 168 registered tools across 25 categories |
+| **Tool-rich** | 169 registered tools across 25 categories |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -497,7 +497,7 @@ graph TB
 | `ragent-bench` | Criterion benchmarks shared between TUI and CLI | ~900 |
 | `ragent-specs` | Spec lifecycle management, SDD artifact generation, consistency validation, constitution parsing | ~3,200 |
 | `ragent-research` | Research types, gatherers, and plan-dep parser | ~1,600 |
-| `ragent-plugins` | Plugin discovery, dialect manifests, sandboxed JS runtime, lifecycle, `/plugins` surface | ~5,700 |
+| `ragent-plugins` | Plugin discovery, dialect manifests, sandboxed JS runtime, lifecycle, skills/MCP/commands/agents/hooks bridges, `/plugins` surface | ~6,200 |
 
 ### 2.2 Crate Dependency Graph
 
@@ -761,12 +761,13 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `task_get` | Retrieve the full record of a single task by ID |
 | `task_list` | List all session tasks, optionally filtered by status |
 
-#### Utility Tools (2)
+#### Utility Tools (3)
 
 | Tool | Purpose |
 |------|---------|
 | `get_env` | Read non-sensitive environment variables |
 | `calculator` | Evaluate mathematical expressions |
+| `ragent_info` | Report the running ragent version, build time, git commit, and compiler |
 
 ### 3.2.1 Tool System Categories Summary
 
@@ -790,7 +791,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Initiatives / skills | `initiative`, `skill_manage` | 2 |
 | Interactive | `ask_user`, `think` | 2 |
 | Task management | `task_create`, `task_update`, `task_get`, `task_list` | 4 |
-| Utility | `get_env`, `calculator` | 2 |
+| Utility | `get_env`, `calculator`, `ragent_info` | 3 |
 
 #### Team Tools (19)
 
@@ -1356,8 +1357,8 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
-| `/plugins list\|add\|remove\|enable\|disable\|test\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; CLI parity via `ragent plugins` |
-| `/queue list\|clear\|next\|help` | Inspect the message input queue (messages submitted while the agent executes; spec `inputqueue` FR-013) |
+| `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex` and `/plugins claude` browse each store's official marketplace (its own document shape is normalised by that store's `StoreProvider`); `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
+| `/queue list\|clear\|next\|help` | Inspect the message input queue (messages and slash commands submitted while the agent executes; spec `inputqueue` FR-013/FR-017 amendment) |
 | `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
@@ -2939,7 +2940,8 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| v1.0.113 | 2026-09-21 | Message input queue (spec `inputqueue`, `specs/inputqueue/`, T-001..T-027 complete): the TUI message-window input field stays editable while the primary agent executes — each `Enter` appends the submission to a bounded FIFO queue (default 32, `input_queue_capacity` config clamped `1..=99`) instead of rejecting it, a two-digit zero-padded counter renders before the `> ` prompt, and the oldest entry runs at each turn boundary (drain on `MessageEnd`/`AgentError`, deferred by the shared guard while processing/compacting). Control surfaces: the four-row `Alt+Q` queue-control menu (`Next` / `Stop`/`Resume` / `Clear` / `Show`, navigated with `Up`/`Down`/`Enter`; `Yes`/`No` clear-confirmation dialog defaulting to `No`; the `Show` row opens a scrollable queue-entry panel where `Enter` moves an entry toward the front and `Del` removes it — FR-038..FR-043, NFR-012) and the `/queue [list\|clear\|next\|help]` slash command. Slash/bang/teammate sends keep their busy refusal (FR-017); the queue is in-memory only and never persisted (NFR-005). Layout change: side panels move from a 50/50 to a 60/40 messages/panel split. 19 new test files (234 new test attributes); `test_busy_send_guard.rs` rewritten. A `/simplify all` quality pass over the diff and the HEAD~3 plugins/research/config work follows (de-duplication, dead-code removal, per-frame allocation removal; no behaviour change). Docs: `TUI-QUICKSTART.md` §4, `docs/howtos/tutorial.md`, new `docs/howtos/slashcommands/queue.md`, and `docs/howtos/config.md` §7.38 `input_queue_capacity`. Followed by a full-workspace CI hygiene pass: the non-existent `clippy::assert_is_empty` allow removed from 244 files and `cargo clippy --all-targets -D warnings` made clean. |
+| v1.0.114 | 2026-09-22 | Missing plugin components: the plugin system now bridges every non-tool surface for both Codex- and Claude-dialect plugins — skills, MCP servers, slash commands, agents, and hooks (T-021..T-023, T-026), including the full Claude `hooks.json` declaration surface and a blocking Stop continuation bounded to three continuations; the descriptor recognises the nested `.codex-plugin/plugin.json` (T-024) and resolves a directory shipping both nested manifests to the Claude dialect (T-025); `/plugins list` counts and details skills/agents/hooks (FR-009) and `/plugins add` installs a plugin **enabled** (FR-007). Also: `/new --github` resolves the GitHub token through the shared `ragent_config::github` chain (`GITHUB_TOKEN` -> `~/.config/ragent/github_token` -> `gh` CLI) with an app-token downgrade (FR-008); a slash command submitted while the agent runs is queued and drains at the next turn boundary (inputqueue FR-017 amendment); the new read-only `ragent_info` tool reports the running version, build time, git commit, and compiler (168 -> 169 tools); and a `/simplify all` pass applies seven verified code-quality fixes across `ragent-agent`, `ragent-plugins`, `ragent-tui`, and `src/` with no behaviour change (three further proposed refactors rejected as adding complexity). |
+| v1.0.113 | 2026-09-21 | Message input queue (spec `inputqueue`, `specs/inputqueue/`, T-001..T-027 complete): the TUI message-window input field stays editable while the primary agent executes — each `Enter` appends the submission to a bounded FIFO queue (default 32, `input_queue_capacity` config clamped `1..=99`) instead of rejecting it, a two-digit zero-padded counter renders before the `> ` prompt, and the oldest entry runs at each turn boundary (drain on `MessageEnd`/`AgentError`, deferred by the shared guard while processing/compacting). Control surfaces: the four-row `Alt+Q` queue-control menu (`Next` / `Stop`/`Resume` / `Clear` / `Show`, navigated with `Up`/`Down`/`Enter`; `Yes`/`No` clear-confirmation dialog defaulting to `No`; the `Show` row opens a scrollable queue-entry panel where `Enter` moves an entry toward the front and `Del` removes it — FR-038..FR-043, NFR-012) and the `/queue [list\|clear\|next\|help]` slash command. FR-017 was amended so a slash command (`/…`) is queued the same way and runs at the next turn boundary (a synchronous command leaves the boundary free, so consecutive queued commands run back-to-back; at capacity it is rejected and restored to the field), while only bang commands (`!…`) and teammate-targeted sends keep their busy refusal; the queue is in-memory only and never persisted (NFR-005). Layout change: side panels move from a 50/50 to a 60/40 messages/panel split. 19 new test files (234 new test attributes); `test_busy_send_guard.rs` rewritten. A `/simplify all` quality pass over the diff and the HEAD~3 plugins/research/config work follows (de-duplication, dead-code removal, per-frame allocation removal; no behaviour change). Docs: `TUI-QUICKSTART.md` §4, `docs/howtos/tutorial.md`, new `docs/howtos/slashcommands/queue.md`, and `docs/howtos/config.md` §7.38 `input_queue_capacity`. Followed by a full-workspace CI hygiene pass: the non-existent `clippy::assert_is_empty` allow removed from 244 files and `cargo clippy --all-targets -D warnings` made clean. (Uncommitted follow-up on the same tree: **Claude plugin hooks** — the `hooks.json` file and the group `{matcher, hooks: [...]}` shape are now read (T-026, FR-033), a plugin hook receives `CLAUDE_PLUGIN_ROOT` and the Claude event JSON on stdin, a `PostToolUse` `additionalContext` is folded into the tool result, and a blocking Stop hook feeds findings back to the model before the turn ends (bounded to three continuations); `/plugins list` counts and details skills/agents/hooks (FR-009); `/plugins add` installs a plugin **enabled** (FR-007); a multi-target directory shipping both nested manifests resolves to the Claude dialect instead of being refused as ambiguous (T-025); the GitHub credential chain gains a `gh` CLI fallback with an app-token downgrade so `/new --github` can create a hosting repository when the stored token is a GitHub App token (FR-008); the new read-only `ragent_info` tool reports the running version, build time, git commit, and compiler (168 -> 169 tools); and a `/simplify all` pass applies seven code-quality fixes across `ragent-agent`, `ragent-plugins`, `ragent-tui`, and `src/` with no behaviour change (three further proposed refactors were rejected as adding complexity).) |
 | v1.0.109 | 2026-09-18 | Final phase of the `/simplify all` pass over v1.0.106..v1.0.108: dead `utf8_prefix_len` helper removed from the LLM HTTP client (superseded by the FUNC-033 `Utf8Error::error_len()`-driven flush), `config_agents_dir` collapsed into `global_agents_dir`, `extract_http_status` parses the three status digits byte-wise without an intermediate `String`, and all eight `ragent-research` `SourceVault` poisoned-lock sites now share one `lock_conn()` helper carrying a dedicated `SourceVaultError::LockPoisoned` variant (no behaviour change). (Uncommitted follow-up on the same tree: PERF-042 throttle-tail paint fix in `should_render` + `test_pending_message_cache_group_forces_safety_paint`, dependency/advisory hygiene drops, and the new `plugins` spec draft in `specs/plugins/` — sandboxed JavaScript plugin runtime loading Codex/Claude manifests + six-subcommand `/plugins` family, spec only.) |
 | v1.0.108 | 2026-09-18 | Config rules and fixes from a five-agent explore review of the v1.0.105..v1.0.107 window: GitLab legacy credential migration scans the real legacy `~/.ragent/` root again (`migrate_legacy_files` self-scan silent no-op fixed; `test_gitlab_legacy_migration.rs` pins it); team-blueprint "global" fallback restored to the true legacy `~/.ragent/blueprints(/teams)` scan (TUI `blueprints.rs` + `team_create.rs`); the four `/spec govcreate` mutex-lock sites uniformly recover poisoning via `into_inner`; `/config show` renders unavailable global memory/agent dirs as "(unavailable)"; `acquire_local` gains a `stopped_early` flag so exact-cap natural completion is not misreported as budget exhaustion; research helpers `num_prefix_re` and `join_text` deduplicated into single shared copies; `global_skills_dir().unwrap_or_default()` empty-path leg fixed in the session processor. |
 | v1.0.107 | 2026-09-18 | `/spec govcreate` — spec authoring from an architecture document (spec `govdoc`, FR-001..FR-020): `/spec govcreate <spec-id> <content-ref> <target-folder>` and CLI parity `ragent spec govcreate` acquire a document from a local file/folder or public URL, extract content, author `SPEC.md`/`PLAN.md`/`TESTPLAN.md` via the configured LLM, and write the new spec with staged `[ .. ]/[ ok ]/[fail]` in-place TUI progress, per-run `CancellationToken` on Escape, and an FR-011 non-empty-target guard (`--force` overrides). The window also carries HEAD~3 review fixes: SSE chunk coalescing driven by `Utf8Error::error_len()` (no multi-byte splitting; six regression tests), secret redaction captures key+separator with a base64/base64url value charset, spec dependency-range expansion capped at 1000 IDs, `delete_memories_by_filter` reports real row counts, masterfetch cache deletes corrupt rows, and the TUI Markdown renderer gains `preprocess_markdown_tables` for ragged pipe tables. Documentation: the 612-line `docs/howtos/tools.md` replaced by 26 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs). |
@@ -3523,8 +3525,8 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
-| `/plugins list\|add\|remove\|enable\|disable\|test\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; CLI parity via `ragent plugins` |
-| `/queue list\|clear\|next\|help` | Inspect the message input queue (messages submitted while the agent executes; spec `inputqueue` FR-013) |
+| `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex` and `/plugins claude` browse each store's official marketplace (its own document shape is normalised by that store's `StoreProvider`); `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
+| `/queue list\|clear\|next\|help` | Inspect the message input queue (messages and slash commands submitted while the agent executes; spec `inputqueue` FR-013/FR-017 amendment) |
 | `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |

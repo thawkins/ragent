@@ -161,6 +161,7 @@ pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
         || tool_name.starts_with("task_")
         || tool_name == "ask_user"
         || tool_name == "model_info"
+        || tool_name == "ragent_info"
 }
 
 /// Return `true` for the read-only codeindex tools that are always allowed
@@ -439,8 +440,13 @@ async fn prompt_for_permission(
 /// Tools that are always available to an agent even when a skill's
 /// `allowed_tools` list is being enforced. These are essential control and
 /// introspection tools that must not be removed from the LLM's tool list.
-pub(crate) const SKILL_ALWAYS_ALLOWED_TOOLS: &[&str] =
-    &["think", "ask_user", "agent_complete", "model_info"];
+pub(crate) const SKILL_ALWAYS_ALLOWED_TOOLS: &[&str] = &[
+    "think",
+    "ask_user",
+    "agent_complete",
+    "model_info",
+    "ragent_info",
+];
 
 /// Check permission for a tool execution, prompting the user if necessary.
 ///

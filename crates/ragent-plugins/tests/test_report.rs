@@ -50,7 +50,7 @@ fn stage_codex_plugin(root: &Path, manifest: &str) -> PathBuf {
 }
 
 #[test]
-fn add_report_names_id_dialect_and_disabled_reminder() {
+fn add_report_names_id_dialect_and_enabled_notice() {
     let tree = TempTree::new("add-ok");
     let source = stage_codex_plugin(
         &tree.0.join("src"),
@@ -64,8 +64,8 @@ fn add_report_names_id_dialect_and_disabled_reminder() {
     assert!(report.contains("`codex-weather`"));
     assert!(report.contains("dialect: codex"));
     assert!(report.contains("version: 2.3.4"));
-    assert!(report.contains("disabled"));
-    assert!(report.contains("/plugins enable codex-weather"));
+    assert!(report.contains("enabled"));
+    assert!(report.contains("/plugins disable codex-weather"));
     // No non-ASCII bytes (AGENTS.md ASCII-only reports).
     assert!(report.is_ascii());
 }
@@ -88,6 +88,12 @@ fn remove_report_names_id_and_store() {
         r#"{ "id": "codex-weather", "name": "Weather", "version": "1.0.0", "entry": "index.js" }"#,
     );
     add(&dirs(&tree), &tree.0, source.to_str().unwrap(), false).expect("add");
+    // add enables the plugin; remove refuses an enabled plugin, so turn it off
+    // first (as `/plugins disable` would).
+    let store = tree.0.join("proj/.ragent/plugins");
+    let mut ledger = ragent_plugins::StoreLedger::load(&store);
+    ledger.state_mut("codex-weather").enabled = false;
+    ledger.save(&store).expect("ledger saved");
     let outcome = remove(&dirs(&tree), "codex-weather").expect("remove");
 
     let report = remove_report(&outcome);

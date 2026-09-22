@@ -1,5 +1,331 @@
 # Changelog
 
+## [1.0.114] - 2026-09-22
+
+Missing plugin components plus the `newproj` GitHub credential chain, the
+`inputqueue` FR-017 amendment, the `ragent_info` tool, and a `/simplify all`
+code-quality pass. The plugin system now bridges every non-tool surface for both
+Codex- and Claude-dialect plugins - skills, MCP servers, slash commands, agents,
+and hooks - including the full Claude `hooks.json` declaration surface and a
+blocking Stop continuation; each item is detailed in the sections below.
+
+- **Plugins** — nested `.codex-plugin/plugin.json` recognition (T-024), the
+  both-nested multi-target descriptor fix (T-025), the skills/MCP/commands/
+  agents/hooks bridges (T-021..T-023), and the full Claude `hooks.json`
+  declaration surface plus Stop continuation (T-026); `/plugins list` now counts
+  skills/agents/hooks and `/plugins add` installs enabled (FR-007/FR-009).
+- **`newproj`** — `/new --github` now resolves the GitHub token through the
+  single shared `ragent_config::github` chain (`GITHUB_TOKEN` ->
+  `~/.config/ragent/github_token` -> `gh` CLI) with an app-token downgrade so a
+  `ghu_` token no longer blocks `POST /user/repos` (FR-008).
+- **`inputqueue`** — a slash command submitted while the agent runs is queued
+  like a plain message and drains at the next turn boundary (FR-017 amendment).
+- **`ragent_info`** — a new read-only introspection tool (168 -> 169 tools) and
+  the `crates/ragent-agent/build.rs` metadata embed.
+- **`/simplify all`** — seven verified code-quality fixes across
+  `ragent-agent`, `ragent-plugins`, `ragent-tui`, and `src/` (see the
+  "Code quality" section below).
+- **Docs** — `STATS.md`, `README.md`, `SPEC.md`, `QUICKSTART.md`,
+  `TUI-QUICKSTART.md`, and the how-to set refreshed and re-rendered to PDF.
+
+### Changed
+
+- **`/plugins list` now counts and details skills, agents, and hooks** (spec
+  `plugins` FR-009) — the table gained a count column for each contribution kind
+  (`Tools`, `Commands`, `Skills`, `Agents`, `Hooks`), and the `Contributions:`
+  block now lists the detailed names for every kind — skill names (resolved from
+  each declared `skills/` directory, one level deep), agent-profile paths, and
+  hook triggers — alongside the existing tool and command names. A new
+  `plugin_skill_names` bridge and `list_shows_skill_agent_and_hook_counts_and_details`
+  test cover the skill-name resolution and the rendered output.
+
+- **`/plugins add` now installs a plugin enabled** (spec `plugins` FR-007) — a
+  freshly added plugin is recorded **enabled** in its store ledger instead of being
+  left disabled, so its tools, commands, skills, agents, and hooks become available at
+  the next session start without a separate `/plugins enable`. No plugin JavaScript
+  executes during the install itself. The add report now states the plugin is enabled
+  and points at `/plugins disable` to turn it off, and `/plugins list` shows a freshly
+  installed plugin as `enabled`. `/plugins remove` still refuses an enabled plugin, so
+  remove a fresh install with `/plugins disable <id>` first. Existing plugins whose
+  ledger row is absent remain disabled.
+
+- **Slash commands are now queued while the agent is busy** (spec `inputqueue`
+  FR-017 amendment) — a slash command submitted while the primary agent is
+  executing is appended to the message input queue exactly like a plain message,
+  instead of being refused with `busy - wait for the current turn to finish`.
+  The queued command runs at the next turn boundary (or immediately via the
+  `Alt+Q` `Next` row / `/queue next`). Bang commands (`!…`) and
+  teammate-targeted messages keep their existing busy refusal. The turn-boundary
+  drain routes a `/`-prefixed entry back through the slash-command executor; a
+  synchronous command leaves the boundary free, so the drain continues and a run
+  of consecutive queued commands executes back-to-back rather than stalling
+  behind the first. At queue capacity the command is rejected and restored to the
+  input field, so nothing is lost. Covered by the new
+  `crates/ragent-tui/tests/test_input_queue_slash.rs` and the amended
+  `test_busy_send_guard.rs`. The boundary drain is a loop (not recursion) and
+  `dispatch_queued_input` reports whether it started a chat turn, so a mixed run
+  of queued messages and commands drains in submission order without a stack
+  depth that grows with the queue. The plugin-store poisoned-lock deposit sites
+  were folded onto the shared `recover_poisoned` helper as part of the same pass.
+
+- **Documentation refresh** — the version-history and how-to docs were
+  regenerated for the current tree: `STATS.md` re-measured (1251 crate Rust
+  files, 499,037 crate lines, 628 external test files, ~9,675 tests, 169 tools,
+  52 spec directories), the `inputqueue` FR-017 amendment and the 169-tool count
+  propagated into `README.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, `SPEC.md`
+  (slash-command table + appendix), and
+  `docs/howtos/slashcommands/queue.md`; every how-to (20 category, 77 slash
+  command, 27 tool-category documents) was re-rendered to PDF (124 PDFs).
+
+### Code quality (`/simplify all`)
+
+Quality pass over the uncommitted plugins / hooks / newproj work. Seven verified
+fixes applied; three further proposed refactors were rejected and reverted after
+testing because they added more complexity than they removed (an extracted
+source-resolution helper, an `unwrap_or_else` rewrite that changed an
+`Option<String>` type, and removing the load-bearing `block_in_place` from the
+non-async `run_new_scaffold`). No user-visible behaviour change.
+
+- **`ragent-agent/tool/ragent_info.rs`** — the `Info` struct is serialised once
+  via `serde_json::to_value`, and the value is reused for both the pretty
+  `content` string and the tool-result `metadata`, instead of serialising twice.
+- **`ragent-agent/plugin.rs`** — the plugin-command name-dedup now uses a
+  `HashSet` membership test (`taken.insert`) instead of an O(n·m)
+  `merged.iter().any()` scan over the growing result vector.
+- **`ragent-agent/hooks/mod.rs`** — `cap_stderr` collapsed a provably identical
+  two-branch `if`/`else` into a single `chars().take(max).collect()`.
+- **`ragent-plugins/store_provider.rs`** — a store entry that fails to parse is
+  now logged at `tracing::debug!` before being counted as skipped (was silent);
+  the `required_str(map, "name")` lookup is bound once as `name_field` and reused
+  for the id fallback and the display name (was read twice).
+- **`ragent-tui/app/plugin.rs`** — the sub-command remainder is taken with
+  `strip_prefix(sub).map(str::trim_start).unwrap_or("")` instead of slicing
+  `args[sub.len()..]`, which could panic on a non-char-boundary index.
+- **`src/main.rs`** — `std::env::current_dir().unwrap_or_default()` now warns on
+  failure and uses an empty `PathBuf`, so a failed cwd lookup no longer silently
+  scans the wrong directory for plugin-contributed MCP servers.
+
+### Added
+
+- **Claude plugin hooks: full declaration surface + Stop continuation** (spec
+  `plugins` T-026; FR-033) — the hooks bridge (T-023) read an inline `hooks`
+  section, but the official catalogue's real layout was not consumed: a Claude
+  plugin declares its hooks in a `hooks.json` file (at the plugin root or under
+  `hooks/`), wrapping the triggers in a top-level `hooks` object, and each trigger
+  maps to a **group** `{matcher, hooks: [{type, command|command_path, timeout, if?}]}`
+  rather than a bare command. `security-guidance`, which ships only a `hooks/`
+  directory, therefore loaded inertly with `Hooks 0`, and its delivered commands
+  were non-functional: they interpolate `${CLAUDE_PLUGIN_ROOT}` (never set), read
+  the Claude event JSON from **stdin** (never written), and signal findings through
+  `hookSpecificOutput.additionalContext` / a blocking `exit 2`, none of which the
+  bridge honoured. The manifest parser now reads the `hooks.json` locations
+  (`HOOKS_FILE` / `read_plugin_hooks_file`), unwraps the group shape (inheriting a
+  group `matcher` into its children), accepts the Claude `timeout` (ms -> s) and
+  `if` fields, and skips any entry whose `type` is not `command`; `PluginHook`
+  gains `plugin_root` (exported as `CLAUDE_PLUGIN_ROOT`) and `matcher`. The agent
+  hook engine gains `HookConfig::matches_tool` (`|`/`,`-separated tool names with
+  `Name(pattern)` guards, `Bash(git commit:*)` as a prefix match), writes the
+  Claude event JSON to a plugin hook's stdin (`claude_event_payload`), folds a
+  `PostToolUse` `additionalContext` into the tool result so the model sees it on
+  the next iteration, and adds `run_stop_hooks`. A blocking Stop hook
+  (`asyncRewake` shape: `exit 2`, a top-level `decision: "block"`, or an
+  `additionalContext`) now feeds its findings back as a synthetic user turn
+  **inside** the loop, bounded by `MAX_STOP_CONTINUATIONS = 3` so a hook that
+  always blocks cannot spin. Covered by `test_hooks.rs`, `test_manifest.rs`, and
+  `test_plugin_hooks.rs`.
+
+- **Plugin agents + hooks bridges** (spec `plugins` T-023; FR-025, FR-032, FR-033) — a
+  plugin's `agents` and `hooks` sections are now consumed rather than merely recorded.
+  The manifest parser extracts declared agent profiles plus every `agents/*.md` file
+  (`extract_agent_decls` / `scan_agent_dir`) and normalises three hook shapes into
+  `PluginHook {trigger, command, timeout_secs}` (`extract_hooks`); both are resolved by
+  the new `bridge` functions `scanned_plugin_agent_files` / `scanned_plugin_hooks` for
+  every **enabled** plugin (a bare agent name resolves to `agents/<name>.md` and a path
+  that escapes the plugin root is dropped). The custom-agent loader appends the
+  plugin-contributed profiles to its discovery **sources** (scanned after
+  `.ragent/agents/`, so a project agent wins a name clash) and now accepts YAML
+  frontmatter as well as ragent's JSON, so Claude-dialect `agents/*.md` profiles load
+  unchanged. Plugin hooks are mapped onto the existing session hook engine
+  (`HookTrigger::parse` accepts both `pre_tool_use` and `PreToolUse`, plus Claude's
+  `UserPromptSubmit`/`Stop`/`PreCompact`) and merged **after** the `ragent.json` hooks so
+  a user's own hooks run first. `/plugins list` reports agent paths and hook triggers in
+  its contributions block. A section whose shape has no bridged equivalent keeps the new
+  `plugin agents` / `plugin hooks` FR-025 labels. Covered by `test_manifest.rs`,
+  `test_bridge.rs`, `test_plugin_bridge.rs`, and `test_plugin_hooks.rs`.
+
+- **Plugin slash commands** (spec `plugins` T-022; FR-004, FR-031) — a plugin's
+  contributed slash commands now reach the session command surface. The manifest
+  `commands` field is parsed tolerantly (an array of strings or objects) and the
+  Claude-dialect `commands/*.md` directory is discovered: each markdown file is a
+  **prompt command** named from its file stem with its frontmatter `description` as
+  the menu text. An inline command (a manifest object with no `file`, or
+  `ragent.register_command`) still dispatches into the plugin sandbox; a prompt
+  command's body (frontmatter stripped, `$ARGUMENTS`/`$N` substituted) is injected
+  into the session as an ordinary user turn. Every **enabled** plugin's commands are
+  bridged onto the surface (a free name registers bare, a colliding name registers
+  under the namespaced `plugin:<plugin-id>:<name>` trigger so a plugin can never
+  shadow a built-in, a skill, or another plugin), listed in the `/` autocomplete menu
+  and `/help`. Fixes Claude marketplace plugins such as `commit-commands`, whose
+  `/commit` was previously invisible. Covered by `test_manifest.rs`,
+  `test_plugin_bridge.rs`, and the TUI `test_plugin_commands.rs`.
+
+- **Plugin skills + MCP bridges** (spec `plugins` T-021; FR-025, FR-029, FR-030) —
+  a plugin's `skills` and `mcpServers` sections are now consumed rather than merely
+  recorded. `manifest::extract_skill_dirs` / `extract_mcp_servers` /
+  `map_mcp_server_entry` populate `ParsedManifest::skills`/`mcp_servers`, and a new
+  `bridge` module (`scanned_plugin_skill_dirs` / `scanned_plugin_mcp_servers`)
+  resolves the contributions of every **enabled** plugin in the project and
+  user-global stores. Skill directories (relative to the plugin root, behind a
+  lexical path-traversal guard) are appended to the skill-discovery roots, so
+  `SkillRegistry::load` loads a plugin's `SKILL.md` packs exactly like a user skill
+  directory; the agent layer adds `skill::effective_skill_dirs` and keys the
+  `SessionProcessor` skill mtime cache on the effective list. MCP servers — inline
+  objects or an external `mcp.json` (the Claude marketplace `"mcpServers":"./mcp.json"`
+  shape) — map to `McpServerConfig` with a plugin-qualified id `<plugin-id>.<server>`
+  and are merged with the configured `mcp` set at startup (configured wins on a
+  collision). A `skills`/`mcpServers` section that is bridged is no longer reported as
+  an unsupported capability (FR-025 keeps the label only for unbridgeable shapes).
+  Covered by `test_bridge.rs` (ragent-plugins) and `test_plugin_bridge.rs`
+  (ragent-agent).
+
+- **`ragent_info` tool** — a new read-only `ragent_info` introspection tool lets the
+  LLM report the running ragent version, when the binary was built, the git commit
+  it was built from (best-effort), and the compiler version, without shelling out.
+  A new `crates/ragent-agent/build.rs` embeds `BUILD_TIME` (always) plus
+  `GIT_COMMIT`, `GIT_COMMIT_SUBJECT`, and `RUSTC_VERSION` (best-effort) via
+  `cargo:rustc-env`; `crates/ragent-agent/src/tool/ragent_info.rs` renders them as
+  text (`text`, default) or structured JSON (`format: "json"`). The tool has
+  permission category `none`, is auto-approved, and is in the skill
+  always-allowed set alongside `model_info`. Registered in the default tool
+  registry (168 -> 169 tools). Covered by `test_ragent_info_tool.rs` (4 tests)
+  and a TUI display test.
+
+- **Store providers + `git+` installs** (spec `pluginstores` T-023..T-025; FR-043..FR-046,
+  NFR-005) - each store now parses its own official marketplace through a
+  `StoreProvider` trait instead of assuming one catalogue format. New
+  `crates/ragent-plugins/src/store_provider.rs` adds `StoreProvider`,
+  `CodexStoreProvider`, `ClaudeStoreProvider`, and `provider_for(kind)`; a vendor entry is
+  normalised with `name` as the id, an optional `version`, and a `local`/`url`/`git-subdir`
+  or repo-relative `source`, resolved against the marketplace repository root. Native
+  ragent indexes (entries carrying an `id`) still parse strictly, so existing fixtures are
+  unaffected. The `StoreKind` is now threaded through `StoreIndexFetcher::fetch_index` (and
+  the network/fixture fetchers, `probe_stores`, and the TUI fetch path); the compiled
+  defaults point at `openai/plugins` and `anthropics/claude-plugins-official`. The install
+  pipeline accepts a `git+<https-url>#<ref>[:<subpath>]` source via a shallow, sparse
+  `git clone`, refusing non-`https` remotes before cloning. Covered by 16 new offline tests
+  (`test_store_provider.rs`, `test_store_git_source.rs`) plus updated seam tests.
+
+- **`/plugins stores --check`** (spec `pluginstores` T-022; FR-039..FR-042) - the
+  `/plugins stores` report gains an opt-in `--check` flag on both the TUI
+  (`/plugins stores --check`) and the CLI (`ragent plugins stores --check`). With
+  the flag, each store's effective endpoint is contacted once through the same
+  config-over-compiled-default precedence and the injectable store-fetch seam,
+  and each line gains `[ok] available, N plugins` or `[err] unavailable: <reason>`.
+  The plain report (no `--check`) is unchanged: a pure configuration read that
+  makes no network request, so its tests stay offline. The TUI probe runs off the
+  event loop (spawned, then drained by `poll_plugin_store_probe_result`), so the
+  network round-trip never stalls the UI. Covered by 15 new offline tests:
+  `crates/ragent-plugins/tests/test_stores_check.rs` (9),
+  `crates/ragent-tui/tests/test_plugin_store_probe.rs` (5), and a CLI usage case
+  in `tests/test_plugins_cli_command.rs` (1).
+
+### Fixed
+
+- **`SourceVault::store` URL dedup is now atomic** — the URL-dedup check and the
+  insert in `crates/ragent-research/src/source_vault.rs` now run under a single
+  held connection lock (the lookup moved onto the shared connection via a new
+  `find_by_url_on` helper), so two concurrent `store` calls for the same URL
+  cannot both pass the check. Each row gets a fresh `source_id` (a new UUID), so
+  the `UNIQUE(source_id)` index never caught a duplicate URL; when both store
+  call sites in `web_gatherer.rs` (the seed URL and a search hit) fired for the
+  same URL concurrently, the vault ended up with two rows. This is what made
+  `supervisor::tests::iterative_researcher_node_persists_sources_to_vault` see
+  `stored.len() == 2` instead of `1`. No behaviour change for the sequential
+  path; a concurrent duplicate URL now returns the existing record.
+
+- **`reference::resolve` and `reference::fuzzy` tests no longer share fixed temp
+  directories** — the `test_fuzzy_reference.rs` integration tests derived their
+  scratch trees from static names (`ragent_test_fuzzy_collect`, `..._async`, ...),
+  so two concurrent `cargo test` processes (or overlapping runs) could
+  `remove_dir_all` a path another process was still walking, making
+  `test_collect_project_files_async_matches_sync_walk` intermittently fail with
+  `src/main.rs` missing. Each test now allocates a per-run unique directory via a
+  `unique_tmp(tag)` helper (`ragent_test_fuzzy_<tag>_<uuid>`), matching the fix
+  already applied to the `reference::resolve` inline tests. No production code
+  changed.
+
+- **`/new --github` can now create the hosting repository when `/github login`
+  stored a GitHub App token** (spec `newproj` FR-008) — `/github login` reuses the
+  OAuth application registered for the Copilot provider, and that application mints
+  GitHub App tokens (`ghu_`) whose permissions exclude repository administration, so
+  `POST /user/repos` was rejected with `403 Resource not accessible by integration`
+  and the remote step failed at `github repo create`. GitHub credential resolution is
+  now a single shared chain in `ragent_config::github` (`GITHUB_TOKEN` env → the
+  stored `~/.config/ragent/github_token` file → the authenticated `gh` CLI) with an
+  app-token downgrade: a stored token that is a GitHub App token now defers to the
+  `gh auth token` credential when one is available, while an ordinary PAT/OAuth token
+  (`ghp_`/`gho_`/`github_pat_`) is used unchanged and a read-only app token is still
+  used when no `gh` credential exists. Set `RAGENT_GITHUB_NO_GH_CLI=1` to disable the
+  `gh` fallback. The VCS tool family and the `/new` scaffolder both consume the shared
+  resolver, so `/reverse` and the GitHub issue/PR tools benefit from the same fix.
+
+- **Multi-target plugins (both nested manifests) now install** (spec `plugins`
+  T-025; FR-002) — some upstream trees ship more than one host manifest in the same
+  folder: `mongodb/agent-skills` (the `mongodb` entry in the Claude store browser)
+  carries `.claude-plugin/plugin.json` *and* `.codex-plugin/plugin.json` side by
+  side. After the nested-Codex recognition landed, such a directory matched both
+  dialects and was refused with `ambiguous plugin manifest: directory matches both
+  Codex and Claude dialects`, so `/plugins claude` -> install of `mongodb` failed.
+  The `descriptor` recogniser now treats the *both-nested-manifest* pairing as a
+  multi-target plugin and resolves it deterministically to the **Claude** dialect
+  (whose manifest supports every bridged surface: skills, MCP servers, commands,
+  agents, hooks). Every other both-match — a top-level `codex-plugin.json` beside a
+  `claude-plugin.json`, a `plugin.json` with a `"codex"` marker beside a Claude
+  manifest, or a nested Codex manifest beside a top-level Claude manifest — is
+  unchanged and still refused. Verified live:
+  `ragent plugins add 'git+https://github.com/mongodb/agent-skills#main:plugins/mongodb'`
+  now reports `Installed plugin 'mongodb' (dialect: claude, version: 1.2.1)` with its
+  7 skill directories bridged. Covered by three new `test_descriptor.rs` tests.
+
+- **Codex store entries now install and load** (spec `plugins` T-024; FR-002) — the
+  official `openai/plugins` catalogue keeps each plugin manifest in
+  `.codex-plugin/plugin.json`, the Codex counterpart of Claude's
+  `.claude-plugin/plugin.json`. ragent's recogniser accepted only a root
+  `codex-plugin.json` or a `plugin.json` with a top-level `"codex"` marker, so a
+  store entry fetched as `git+https://github.com/openai/plugins#main:plugins/<name>`
+  downloaded but failed with `no plugin manifest found` (52 of the store's entries).
+  The `descriptor` recogniser now accepts the nested `.codex-plugin/plugin.json`
+  location (`CODEX_NESTED_MANIFEST`), parsed through the existing Codex parser so the
+  `skills` / `mcpServers` / `agents` / `hooks` bridges all apply. Verified live:
+  `ragent plugins add 'git+https://github.com/openai/plugins#main:plugins/linear'`
+  now reports `Installed plugin 'linear' (dialect: codex, version: 5.0.1)` and
+  `enable`/`test` both succeed. Covered by `test_descriptor.rs` and
+  `test_add.rs::add_nested_codex_manifest_directory_installs`.
+
+- **Claude/Codex store installs of repo-relative plugins** (spec `pluginstores`;
+  FR-044) - a marketplace entry whose `source` is a repo-relative string
+  (e.g. Claude's `"./plugins/security-guidance"`, 52 of the official store's 310
+  entries) was normalised into a bare `https://raw.githubusercontent.com/...`
+  directory URL, which the install pipeline rejects with `unrecognised source`.
+  The provider now resolves a repo-relative source against the marketplace
+  origin's GitHub repository as an installable `git+<repo>#<ref>:<path>` source
+  (the `main` ref of the `raw.githubusercontent.com` or `github.com` origin, or
+  HEAD for a bare repository URL), so `/plugins claude` -> install now works for
+  every repo-relative entry. A repo-relative source with no GitHub repository
+  behind its origin is skipped and counted rather than silently uninstallable.
+  Covered by two new offline tests in `test_store_provider.rs`.
+
+- **`reference::resolve` tests no longer share fixed temp directories** — the six
+  `resolve_ref` / `resolve_all_refs` tests under
+  `crates/ragent-agent/src/reference/resolve.rs` derived their scratch directories
+  from static names (`ragent_test_resolve_file`, `..._all`, ...) in the system temp
+  dir, so the lib test binary and the integration test binaries could create and
+  `remove_dir_all` the same path concurrently and flake
+  (`test_resolve_all_refs_with_file` saw the directory vanish mid-run). Each test
+  now allocates a per-run unique directory via a small `unique_tmp(tag)` helper
+  (`ragent_test_<tag>_<uuid>`), making the workspace suite deterministic under
+  parallel execution. No production code changed.
+
 ## [1.0.113] - 2026-09-21
 
 Message input queue (spec `inputqueue`, `specs/inputqueue/`): the TUI

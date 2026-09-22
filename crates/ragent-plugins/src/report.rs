@@ -14,15 +14,16 @@ use crate::help::attribution;
 use crate::remove::{RemoveError, RemoveOutcome};
 
 /// Render the success report for `/plugins add` (FR-007): the installed id,
-/// dialect, and version, plus the reminder that the plugin is disabled until
-/// explicitly enabled.
+/// dialect, and version, plus the notice that the plugin is enabled and loads
+/// at the next session start.
 #[must_use]
 pub fn add_report(outcome: &AddOutcome) -> String {
     let d = &outcome.parsed.descriptor;
     format!(
         "{}\n\n[ok] Installed plugin `{id}` (dialect: {dialect}, version: {version}).\n\
          Installed to `{dir}`.\n\
-         The plugin is **disabled** until you run `/plugins enable {id}`.",
+         The plugin is **enabled** and loads at the next session start; run \
+         `/plugins disable {id}` to turn it off.",
         attribution("add"),
         id = d.id,
         dialect = d.dialect,

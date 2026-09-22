@@ -26,6 +26,8 @@ use std::path::{Path, PathBuf};
 use crate::agent::oasf::{OasfAgentRecord, RAGENT_MODULE_TYPE, RagentAgentPayload};
 use crate::agent::{AgentInfo, AgentMode, ModelRef};
 use crate::permission::{Permission, PermissionAction, PermissionRule};
+use crate::skill::plugin_store_dirs;
+use ragent_plugins::scanned_plugin_agent_files;
 use ragent_types::ThinkingConfig;
 use std::sync::Arc;
 
@@ -67,8 +69,12 @@ pub fn load_custom_agents(working_dir: &Path) -> (Vec<CustomAgentDef>, Vec<Strin
 
     // Compute the discovery directories + their mtimes.
     let dirs = discovery_dirs(working_dir);
+    // Plugin-contributed agent profiles (FR-032) are scanned last so an
+    // explicitly authored project agent always wins a name clash.
+    let plugin_files = scanned_plugin_agent_files(&plugin_store_dirs(working_dir));
     let dir_mtimes: Vec<(PathBuf, SystemTime)> = dirs
         .iter()
+        .chain(plugin_files.iter())
         .filter_map(|d| {
             std::fs::metadata(d)
                 .and_then(|m| m.modified())
@@ -78,9 +84,13 @@ pub fn load_custom_agents(working_dir: &Path) -> (Vec<CustomAgentDef>, Vec<Strin
         .collect();
 
     // Fast path: cached for this working dir and every directory unchanged.
+    // The length check matters when the source set is empty (no discovery
+    // directories and no plugin-contributed profiles): an empty cached list
+    // must not satisfy a later call whose source set has since grown.
     {
         let guard = cache.read().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = guard.get(working_dir)
+            && entry.dir_mtimes.len() == dir_mtimes.len()
             && entry.dir_mtimes.iter().all(|(d, mt)| {
                 std::fs::metadata(d)
                     .and_then(|m| m.modified())
@@ -97,8 +107,10 @@ pub fn load_custom_agents(working_dir: &Path) -> (Vec<CustomAgentDef>, Vec<Strin
     let mut diagnostics: Vec<String> = Vec::new();
 
     // Scan in ascending priority order: later (closer) directories win.
-    let n = dirs.len();
-    for (i, dir) in dirs.into_iter().enumerate() {
+    let mut sources: Vec<PathBuf> = dirs;
+    sources.extend(plugin_files);
+    let n = sources.len();
+    for (i, dir) in sources.into_iter().enumerate() {
         scan_dir(&dir, i == n - 1, &mut agents, &mut diagnostics);
     }
 
@@ -191,12 +203,19 @@ pub fn find_project_agents_dir(working_dir: &Path) -> Option<PathBuf> {
 /// Recursively scan `dir` for `.json` and `.md` agent files and insert
 /// validated agents into `agents`. Existing entries are replaced when
 /// `is_project_local` is `true` (project-local wins).
+///
+/// `dir` may also be a single agent file (a plugin-contributed profile, FR-032):
+/// it is loaded directly.
 fn scan_dir(
     dir: &Path,
     is_project_local: bool,
     agents: &mut HashMap<String, CustomAgentDef>,
     diagnostics: &mut Vec<String>,
 ) {
+    if dir.is_file() {
+        scan_file(dir, is_project_local, agents, diagnostics);
+        return;
+    }
     if !dir.is_dir() {
         return;
     }
@@ -220,25 +239,35 @@ fn scan_dir(
             scan_dir(&path, is_project_local, agents, diagnostics);
             continue;
         }
+        scan_file(&path, is_project_local, agents, diagnostics);
+    }
+}
 
-        let ext = path.extension().and_then(|e| e.to_str());
-        let loader: fn(&Path, bool) -> Result<CustomAgentDef, String> = match ext {
-            Some("json") => load_agent_file,
-            Some("md") => load_agent_profile,
-            _ => continue,
-        };
+/// Load one agent file (`.json` OASF record or `.md` profile) and insert it,
+/// recording a diagnostic on failure.
+fn scan_file(
+    path: &Path,
+    is_project_local: bool,
+    agents: &mut HashMap<String, CustomAgentDef>,
+    diagnostics: &mut Vec<String>,
+) {
+    let ext = path.extension().and_then(|e| e.to_str());
+    let loader: fn(&Path, bool) -> Result<CustomAgentDef, String> = match ext {
+        Some("json") => load_agent_file,
+        Some("md") => load_agent_profile,
+        _ => return,
+    };
 
-        match loader(&path, is_project_local) {
-            Ok(def) => {
-                let key = def.agent_info.name.clone();
-                // Project-local always wins; global only inserts if not already present.
-                if is_project_local || !agents.contains_key(&key) {
-                    agents.insert(key, def);
-                }
+    match loader(path, is_project_local) {
+        Ok(def) => {
+            let key = def.agent_info.name.clone();
+            // Project-local always wins; global only inserts if not already present.
+            if is_project_local || !agents.contains_key(&key) {
+                agents.insert(key, def);
             }
-            Err(err) => {
-                diagnostics.push(format!("{}: {}", path.display(), err));
-            }
+        }
+        Err(err) => {
+            diagnostics.push(format!("{}: {}", path.display(), err));
         }
     }
 }
@@ -325,10 +354,17 @@ fn load_agent_profile(path: &Path, is_project_local: bool) -> Result<CustomAgent
     let content = std::fs::read_to_string(path).map_err(|e| format!("could not read file: {e}"))?;
 
     let (frontmatter, body) = parse_json_frontmatter(&content)
-        .ok_or_else(|| "missing JSON frontmatter (expected --- delimiters)".to_string())?;
+        .ok_or_else(|| "missing frontmatter (expected --- delimiters)".to_string())?;
 
-    let fm: ProfileFrontmatter = serde_json::from_str(frontmatter)
-        .map_err(|e| format!("frontmatter JSON parse error: {e}"))?;
+    // JSON frontmatter is tried first (ragent's own profile format); YAML is
+    // accepted as a fallback so the Claude-dialect `agents/*.md` profiles
+    // (YAML frontmatter) load unchanged (FR-032).
+    let fm: ProfileFrontmatter = match serde_json::from_str(frontmatter) {
+        Ok(fm) => fm,
+        Err(json_err) => serde_yaml::from_str(frontmatter).map_err(|yaml_err| {
+            format!("frontmatter parse error - JSON: {json_err}; YAML: {yaml_err}")
+        })?,
+    };
 
     let system_prompt = body.trim().to_string();
     if system_prompt.is_empty() {
@@ -383,7 +419,10 @@ fn load_agent_profile(path: &Path, is_project_local: bool) -> Result<CustomAgent
 
 /// Extract JSON frontmatter delimited by `---` lines from markdown text.
 ///
-/// Returns `(frontmatter_json, body)` or `None` if delimiters are missing.
+/// Returns `(frontmatter_text, body)` or `None` if delimiters are missing. The
+/// frontmatter text is interpreted as JSON first, then YAML (see
+/// [`load_agent_profile`]), so both ragent's own profiles and Claude-dialect
+/// `agents/*.md` profiles are accepted.
 fn parse_json_frontmatter(text: &str) -> Option<(&str, &str)> {
     let trimmed = text.trim_start();
     if !trimmed.starts_with("---") {

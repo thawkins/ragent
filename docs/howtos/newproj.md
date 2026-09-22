@@ -262,8 +262,19 @@ offending list are suffixed with `/` to distinguish them from files.
 
 `--github` uses the same authentication chain as the `/github` tool family:
 the `GITHUB_TOKEN` environment variable first, then the
-`~/.ragent/github_token` file written by `/github login`. Without a token the
-remote step fails with an auth message and the local scaffold is kept.
+`~/.ragent/github_token` file written by `/github login`, then the
+authenticated `gh` CLI. Without any token the remote step fails with an auth
+message and the local scaffold is kept.
+
+The `gh` fallback exists because `/github login` reuses the OAuth application
+the Copilot provider uses, and that application mints GitHub App tokens
+(`ghu_`) whose permissions do not include repository administration — GitHub
+rejects `POST /user/repos` with `403 Resource not accessible by integration`.
+When the stored token is such an app token and `gh` is authenticated, ragent
+uses the CLI credential (which carries `repo` scope) instead; an ordinary PAT
+or OAuth token (`ghp_`/`gho_`/`github_pat_`) is used unchanged, and a
+read-only app token is still used when no `gh` credential exists. Set
+`RAGENT_GITHUB_NO_GH_CLI=1` to disable the CLI fallback.
 
 The flow: `GET /user` (resolve login) -> `POST /user/repos` (create a private
 repository named after the directory) -> `git remote add origin` -> `git push
@@ -413,6 +424,7 @@ ready for custom agents.
 | `--github and --gitlab are mutually exclusive` | Both hosting flags supplied | Pick one |
 | `Remote: failed at github auth: ...` | No/malformed `GITHUB_TOKEN` or `~/.ragent/github_token` | Export the token or run `/github login`, then retry the remote flow |
 | `Remote: failed at gitlab auth: ...` | No/malformed `GITLAB_TOKEN` or `~/.ragent/gitlab_token` | Export the token or run `/gitlab setup`, then retry |
+| `Remote: failed at github repo create: ... Resource not accessible by integration` | The stored token is a GitHub App token (`ghu_`) that cannot create repositories, and no `gh` credential is available | Run `gh auth login` (ragent then uses the CLI token), or export a `GITHUB_TOKEN` PAT with `repo` scope |
 | `Remote: failed at github repo create: ...` | Hosting API rejected creation (network, permissions) | Check connectivity and token scopes; the existing-repo reuse path only triggers on name-taken |
 | Unknown stack warning in the summary | `--stack` name not in the language's stack registry | Check spelling; stacks are scoped per language |
 | Progress panel shows `[fail] writing project files` | Emission error (permissions, disk) | Fix the environment; earlier creations remain on disk and are reported |

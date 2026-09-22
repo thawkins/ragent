@@ -10,7 +10,10 @@
 //! | ------------------ | ----- | ----------------------------------------------------- |
 //! | [`descriptor`]     | T-002 | [`PluginDescriptor`] model + dialect recognition (FR-002, FR-025) |
 //! | [`manifest`]       | T-003 | per-dialect parsing, normalisation, host-API version check (FR-002, FR-019, FR-025) |
+//! | [`bridge`]         | T-020 | plugin `skills`/`mcpServers`/`agents`/`hooks` bridges (FR-029, FR-030, FR-032, FR-033) |
 //! | [`store`]          | T-005 | plugin store paths, discovery scan, state ledger (FR-001, FR-023) |
+//! | [`store_index`]    | T-002 | store registry + store-index entry model (FR-001, FR-024) |
+//! | [`store_fetch`]    | T-003 | store-index fetch: HTTPS, timeout, byte cap, JSON parse (FR-003, FR-013, FR-016, FR-024, FR-025) |
 //! | [`mod@add`]        | T-006 | `/plugins add` source handling (FR-007, FR-010)    |
 //! | [`mod@remove`]     | T-011 | `/plugins remove` store operation (FR-010)         |
 //! | [`mod@report`]     | T-011 | `/plugins add|remove` report rendering (FR-007, FR-010) |
@@ -27,6 +30,7 @@
 //! | [`error`]          | T-002 | contained error reporting (FR-026)                    |
 
 pub mod add;
+pub mod bridge;
 pub mod command_adapter;
 pub mod commands;
 pub mod control;
@@ -42,12 +46,27 @@ pub mod report;
 pub mod runtime;
 pub mod session;
 pub mod store;
+pub mod store_fetch;
+pub mod store_index;
+pub mod store_provider;
+pub mod store_seam;
 pub mod surface;
 pub mod tool_adapter;
 
-pub use add::{AddError, AddOutcome, MAX_ARCHIVE_BYTES, add};
-pub use command_adapter::{PluginCommandAdapter, dispatch_command_sandbox};
-pub use commands::{StoreArgError, StoreCommand, parse_store_command, run_store_command};
+pub use add::{AddError, AddOutcome, GitSource, MAX_ARCHIVE_BYTES, add, parse_git_source};
+pub use bridge::{
+    plugin_agent_files, plugin_mcp_servers, plugin_skill_dirs, plugin_skill_names,
+    scanned_plugin_agent_files, scanned_plugin_commands, scanned_plugin_hooks,
+    scanned_plugin_mcp_servers, scanned_plugin_skill_dirs, skills_of,
+};
+pub use command_adapter::{
+    PluginCommandAdapter, dispatch_command_sandbox, substitute_command_args,
+};
+pub use commands::{
+    StoreArgError, StoreCommand, StoreProbe, parse_store_command, probe_stores,
+    render_stores_report, render_stores_report_with_probes, run_store_command,
+    stores_check_requested,
+};
 pub use control::{
     ControlArgError, ControlCommand, disable_error_report, disable_report,
     disabled_subsystem_report, enable_error_report, enable_report, parse_control_command,
@@ -55,8 +74,8 @@ pub use control::{
 };
 pub use descriptor::{
     CLAUDE_MANIFEST_FILE, CLAUDE_NESTED_MANIFEST, CODEX_MANIFEST_FILE, CODEX_MARKER_FIELD,
-    DialectMatch, GENERIC_MANIFEST_FILE, PluginDescriptor, PluginDialect, detect_dialect,
-    recognise_dialect,
+    CODEX_NESTED_MANIFEST, DialectMatch, GENERIC_MANIFEST_FILE, PluginDescriptor, PluginDialect,
+    detect_dialect, recognise_dialect,
 };
 pub use error::PluginError;
 pub use harness::{
@@ -73,10 +92,13 @@ pub use lifecycle::{
     UnloadedPlugin, build_gate,
 };
 pub use manifest::{
-    HOST_API_VERSION, ParsedManifest, PermissionRequest, PluginCommandDecl, PluginToolDecl,
-    UNSUP_DESKTOP_MOUNTS, UNSUP_DESKTOP_WINDOW, UNSUP_EXEC, UNSUP_FS, UNSUP_MCP, V1_CAPABILITIES,
-    VersionMismatch, check_api_version, derive_id, parse_claude_manifest, parse_codex_manifest,
-    parse_manifest, parse_plugin_dir,
+    AGENTS_DIR, COMMANDS_DIR, CommandSource, HOOKS_DIR, HOOKS_FILE, HOST_API_VERSION,
+    ParsedManifest, PermissionRequest, PluginCommandDecl, PluginCommandDef, PluginHook,
+    PluginMcpServer, PluginToolDecl, UNSUP_AGENTS, UNSUP_DESKTOP_MOUNTS, UNSUP_DESKTOP_WINDOW,
+    UNSUP_EXEC, UNSUP_FS, UNSUP_HOOKS, UNSUP_MCP, UNSUP_SKILLS, V1_CAPABILITIES, VersionMismatch,
+    check_api_version, derive_id, extract_agent_decls, extract_command_decls, extract_hooks,
+    extract_mcp_servers, extract_skill_dirs, parse_claude_manifest, parse_codex_manifest,
+    parse_manifest, parse_plugin_dir, read_plugin_hooks_file, scan_agent_dir, scan_command_dir,
 };
 pub use remove::{RemoveError, RemoveOutcome, remove};
 pub use report::{add_error_report, add_report, remove_error_report, remove_report};
@@ -86,7 +108,18 @@ pub use session::{
 };
 pub use store::{
     LifecycleState, PluginState, STATE_FILE, ScanFailure, ScannedPlugin, StoreDirs, StoreLedger,
-    TelemetryCounters, scan, scan_dirs, store_dirs, store_dirs_at,
+    TelemetryCounters, installed_ids, scan, scan_dirs, store_dirs, store_dirs_at,
+};
+pub use store_fetch::{
+    FetchLimits, StoreError, StoreIndex, fetch_bytes, fetch_index, read_capped, store_label,
+};
+pub use store_index::{
+    DEFAULT_CLAUDE_STORE_URL, DEFAULT_CODEX_STORE_URL, EndpointSource, StoreCatalog, StoreEndpoint,
+    StoreEndpointError, StoreEntry, StoreEntryError, StoreKind,
+};
+pub use store_provider::{ClaudeStoreProvider, CodexStoreProvider, StoreProvider, provider_for};
+pub use store_seam::{
+    FixtureStoreFetcher, NetworkStoreFetcher, StoreIndexFetcher, default_fetcher,
 };
 pub use surface::{ScratchSurface, run_plugin_subcommand, store_and_config};
 pub use tool_adapter::{PluginToolAdapter, dispatch_sandbox, plugin_tool_name};

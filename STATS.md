@@ -1,6 +1,6 @@
 # Project Statistics
 
-**Version:** 1.0.113
+**Version:** 1.0.114
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
@@ -9,19 +9,19 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 486657 (482947 in `crates/` + 3710 in root `src/`/`examples/`) |
-| Total Rust files | 1210 (workspace crates) + 6 (root `src/`/`examples/`) |
-| Tests defined | ~9273 (7562 external test-file tests + 1677 inline `#[cfg(test)]` + 34 root `tests/`/`src/`) |
-| Test files | 596 external + ~120 inline-bearing |
-| Test binaries | ~630 (596 integration test files + 33 lib/bin targets + 1 root bin) |
+| Total Rust lines | 502773 (499037 in `crates/` + 3736 in root `src/`/`examples/`) |
+| Total Rust files | 1251 (workspace crates) + 6 (root `src/`/`examples/`) |
+| Tests defined | ~9675 (7960 external test-file tests + 1679 inline `#[cfg(test)]` + 36 root `tests/`/`src/`) |
+| Test files | 628 external + ~117 inline-bearing |
+| Test binaries | ~662 (628 integration test files + 33 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
-| Tools registered | 168 |
+| Tools registered | 169 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 17 |
-| Specs on disk | 51 directories in `specs/` |
+| Specs on disk | 52 directories in `specs/` |
 | Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 20 category how-tos, 77 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.113 |
+| Version | 1.0.114 |
 
 ---
 
@@ -33,22 +33,22 @@ shows the file count, line count, and test-file count for each crate (including
 
 | Crate | Rust files | Rust lines | Test files |
 |---|---|---|---|
-| `ragent-agent` | 226 | 79523 | 90 |
+| `ragent-agent` | 232 | 81058 | 93 |
 | `ragent-bench` | 24 | 8436 | 3 |
-| `ragent-codeindex` | 69 | 23584 | 40 |
-| `ragent-config` | 44 | 11003 | 28 |
-| `ragent-llm` | 52 | 23550 | 23 |
-| `ragent-plugins` | 36 | 11689 | 17 |
-| `ragent-research` | 114 | 60103 | 48 |
+| `ragent-codeindex` | 69 | 23548 | 40 |
+| `ragent-config` | 47 | 11628 | 30 |
+| `ragent-llm` | 52 | 23540 | 23 |
+| `ragent-plugins` | 52 | 18836 | 28 |
+| `ragent-research` | 114 | 60086 | 48 |
 | `ragent-server` | 11 | 5854 | 5 |
-| `ragent-specs` | 30 | 19421 | 17 |
-| `ragent-storage` | 37 | 14746 | 32 |
+| `ragent-specs` | 30 | 19411 | 17 |
+| `ragent-storage` | 37 | 14717 | 32 |
 | `ragent-team` | 15 | 2770 | 14 |
 | `ragent-telemetry` | 25 | 10265 | 16 |
-| `ragent-tools-core` | 56 | 17760 | 20 |
-| `ragent-tools-extended` | 203 | 74350 | 85 |
-| `ragent-tools-vcs` | 56 | 14627 | 20 |
-| `ragent-tui` | 176 | 96590 | 120 |
+| `ragent-tools-core` | 56 | 17747 | 20 |
+| `ragent-tools-extended` | 203 | 74304 | 85 |
+| `ragent-tools-vcs` | 56 | 14632 | 20 |
+| `ragent-tui` | 192 | 103529 | 136 |
 | `ragent-types` | 36 | 8676 | 18 |
 
 ---
@@ -56,21 +56,21 @@ shows the file count, line count, and test-file count for each crate (including
 ## Crate Size Distribution
 
 ```
-ragent-tui             ██████████████████████████████ 96,590 lines (19.8%)
-ragent-agent           ██████████████████████████ 79,523 lines (16.3%)
-ragent-tools-extended  ███████████████████████ 74,350 lines (15.3%)
-ragent-research        ████████████████████ 60,103 lines (12.3%)
-ragent-codeindex       ████████ 23,584 lines ( 4.8%)
-ragent-llm             ████████ 23,550 lines ( 4.8%)
-ragent-specs           ██████ 19,421 lines ( 4.0%)
-ragent-tools-core      ██████ 17,760 lines ( 3.6%)
-ragent-storage         █████ 14,746 lines ( 3.0%)
-ragent-tools-vcs       █████ 14,627 lines ( 3.0%)
-ragent-plugins         ████ 11,689 lines ( 2.4%)
-ragent-config          ███ 11,003 lines ( 2.3%)
+ragent-tui             ██████████████████████████████ 103,529 lines (20.7%)
+ragent-agent           ███████████████████████ 81,058 lines (16.2%)
+ragent-tools-extended  █████████████████████ 74,304 lines (14.9%)
+ragent-research        █████████████████ 60,086 lines (12.0%)
+ragent-codeindex       ███████ 23,548 lines ( 4.7%)
+ragent-llm             ███████ 23,540 lines ( 4.7%)
+ragent-specs           ██████ 19,411 lines ( 3.9%)
+ragent-plugins         █████ 18,836 lines ( 3.8%)
+ragent-tools-core      █████ 17,747 lines ( 3.6%)
+ragent-storage         ████ 14,717 lines ( 2.9%)
+ragent-tools-vcs       ████ 14,632 lines ( 2.9%)
+ragent-config          ███ 11,628 lines ( 2.3%)
 ragent-telemetry       ███ 10,265 lines ( 2.1%)
-ragent-types           ███ 8,676 lines ( 1.8%)
-ragent-bench           ███ 8,436 lines ( 1.7%)
+ragent-types           ██ 8,676 lines ( 1.7%)
+ragent-bench           ██ 8,436 lines ( 1.7%)
 ragent-server          ██ 5,854 lines ( 1.2%)
 ragent-team            █ 2,770 lines ( 0.6%)
 ```
@@ -82,28 +82,28 @@ ragent-team            █ 2,770 lines ( 0.6%)
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
 | `ragent-tools-extended` | 85 | ~1,892 |
-| `ragent-tui` | 120 | ~1,406 |
-| `ragent-agent` | 90 | ~779 |
+| `ragent-tui` | 136 | ~1,607 |
+| `ragent-agent` | 93 | ~804 |
 | `ragent-specs` | 17 | ~514 |
 | `ragent-research` | 48 | ~402 |
 | `ragent-codeindex` | 40 | ~395 |
+| `ragent-plugins` | 28 | ~392 |
 | `ragent-tools-vcs` | 20 | ~298 |
 | `ragent-storage` | 32 | ~285 |
 | `ragent-llm` | 23 | ~273 |
+| `ragent-config` | 30 | ~258 |
 | `ragent-tools-core` | 20 | ~251 |
-| `ragent-config` | 28 | ~238 |
-| `ragent-plugins` | 17 | ~234 |
 | `ragent-types` | 18 | ~191 |
 | `ragent-telemetry` | 16 | ~187 |
 | `ragent-server` | 5 | ~96 |
 | `ragent-team` | 14 | ~81 |
 | `ragent-bench` | 3 | ~50 |
-| **Total (external)** | **596** | **~7,562** |
+| **Total (external)** | **628** | **~7,960** |
 
 Inline `#[cfg(test)]` modules in library sources contribute a further
-1,677 test attributes (largest contributors: `ragent-research`, `ragent-agent`,
+1,679 test attributes (largest contributors: `ragent-research`, `ragent-agent`,
 `ragent-tools-extended`, `ragent-tui`, `ragent-specs`), bringing the estimated
-total to ~9,273.
+total to ~9,675.
 
 ---
 
@@ -165,13 +165,13 @@ Notes:
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 52 lines (9,273 tests / 486,657 lines)
-- Largest crate: `ragent-tui` (96,590 lines, 19.8%)
+- Test-to-code ratio: ~1 test per 52 lines (9,647 tests / 501,121 lines)
+- Largest crate: `ragent-tui` (103,517 lines, 20.8%)
 - Smallest crate: `ragent-team` (2,770 lines, 0.6%)
-- Median crate size: 14,746 lines (`ragent-storage`)
+- Median crate size: 17,747 lines (`ragent-tools-core`)
 - Crates over 10k lines: 13 of 17
 - Crates under 5k lines: 1 of 17 (team)
 
 ---
 
-_Generated 2026-09-21 (v1.0.113: TUI message input queue, four-row ALT-Q queue-control menu with `Show` queue-entry panel, `/queue` slash command, and `input_queue_capacity` config; a `/simplify all` quality pass over the diff and the HEAD~3 plugins/research/config work with no behaviour change; and a full-workspace clippy hygiene pass that removes the non-existent `clippy::assert_is_empty` allow from 244 files and makes `cargo clippy --all-targets -D warnings` clean)._
+_Generated 2026-09-22 (v1.0.114 tree: Claude plugin hooks now read the `hooks.json` file and the group `{matcher, hooks: [...]}` shape, deliver `CLAUDE_PLUGIN_ROOT` and the Claude event JSON on stdin, feed a `PostToolUse` `additionalContext` back to the model, and let a blocking Stop hook continue the turn (bounded); `/plugins list` counts and details skills/agents/hooks; `/plugins add` installs a plugin enabled; a multi-target directory shipping both nested manifests resolves to Claude; and the GitHub credential chain gains a `gh` CLI fallback with an app-token downgrade. Earlier on the same tree: plugin-store providers with `git+` installs, `/plugins stores --check`, the `ragent_info` tool (169 tools), slash-command input queueing while the agent runs, and a test-isolation fix that gives the `reference::resolve` tests unique temporary directories so the workspace suite no longer flakes under parallel execution). Metrics re-measured across the workspace and docs re-rendered in the same pass._

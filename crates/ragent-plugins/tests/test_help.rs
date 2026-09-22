@@ -3,7 +3,7 @@
 
 use ragent_plugins::{PLUGIN_SUBCOMMANDS, render_help, subcommand_of};
 
-/// The usage block documents all seven subcommands, their arguments, and the
+/// The usage block documents all subcommands, their arguments, and the
 /// accepted source forms (FR-014).
 #[test]
 fn usage_block_documents_every_subcommand_and_source_form() {
@@ -20,6 +20,7 @@ fn usage_block_documents_every_subcommand_and_source_form() {
         "`/plugins enable <pluginid>`",
         "`/plugins disable <pluginid>`",
         "`/plugins test <pluginid>`",
+        "`/plugins stores`",
         "`/plugins help`",
     ] {
         assert!(help.contains(needle), "missing {needle} in:\n{help}");
@@ -52,12 +53,14 @@ fn bare_entry_has_no_subcommand_attribution() {
     assert!(!bare.starts_with("From: /plugins "), "{bare}");
 }
 
-/// The subcommand list is exactly the seven documented tokens (FR-006).
+/// The subcommand list is exactly the documented tokens (FR-006, FR-031).
 #[test]
 fn subcommand_list_matches_the_documented_family() {
     assert_eq!(
         PLUGIN_SUBCOMMANDS,
-        ["list", "add", "remove", "enable", "disable", "test", "help"]
+        [
+            "list", "add", "remove", "enable", "disable", "test", "stores", "help"
+        ]
     );
     // Every listed token appears in the usage block.
     let help = render_help("");

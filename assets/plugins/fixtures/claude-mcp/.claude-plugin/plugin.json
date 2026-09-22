@@ -3,12 +3,9 @@
   "version": "0.1.0",
   "entry": "index.js",
   "api_version": 1,
-  "mcp_servers": {
-    "docs": {
-      "command": "docs-server",
-      "args": ["--stdio"]
-    }
-  },
+  "mcp_servers": [
+    { "transport": "stdio", "command": "docs-server", "args": ["--stdio"] }
+  ],
   "tools": [
     {
       "name": "lookup_docs",

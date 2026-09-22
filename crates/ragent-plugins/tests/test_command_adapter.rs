@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use ragent_plugins::{
-    LifecycleState, PluginCommandAdapter, PluginCommandDecl, PluginError, PluginManager,
-    StoreLedger, dispatch_command_sandbox, store_dirs_at,
+    LifecycleState, PluginCommandAdapter, PluginCommandDecl, PluginCommandDef, PluginError,
+    PluginManager, StoreLedger, dispatch_command_sandbox, store_dirs_at,
 };
 
 static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -78,11 +78,11 @@ fn load_and_register(
 fn adapter_surfaces_declared_name_description_and_usage() {
     let adapter = PluginCommandAdapter::new(
         "codex-weather",
-        PluginCommandDecl {
+        PluginCommandDef::inline(PluginCommandDecl {
             name: "weather".to_string(),
             description: "Show weather for a city".to_string(),
             usage: Some("/weather <city>".to_string()),
-        },
+        }),
     );
 
     assert_eq!(adapter.name(), "weather");
@@ -95,11 +95,11 @@ fn adapter_surfaces_declared_name_description_and_usage() {
 fn adapter_without_usage_reports_none() {
     let adapter = PluginCommandAdapter::new(
         "bare",
-        PluginCommandDecl {
+        PluginCommandDef::inline(PluginCommandDecl {
             name: "bare".to_string(),
             description: "d".to_string(),
             usage: None,
-        },
+        }),
     );
     assert_eq!(adapter.usage(), None);
 }

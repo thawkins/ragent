@@ -50,6 +50,7 @@ fn ragent_in_empty_cwd(args: &[&str]) -> (PathBuf, Output) {
         .env_remove("GITHUB_TOKEN")
         .env_remove("GITLAB_TOKEN")
         .env_remove("GITLAB_URL")
+        .env("RAGENT_GITHUB_NO_GH_CLI", "1")
         .output()
         .expect("spawn ragent");
     let dir = temp.path().to_path_buf();
@@ -175,6 +176,7 @@ fn test_new_cli_non_empty_directory_refused() {
         .env_remove("GITHUB_TOKEN")
         .env_remove("GITLAB_TOKEN")
         .env_remove("GITLAB_URL")
+        .env("RAGENT_GITHUB_NO_GH_CLI", "1")
         .output()
         .expect("spawn ragent");
 

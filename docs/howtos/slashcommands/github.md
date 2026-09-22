@@ -6,12 +6,21 @@
 
 `/github` manages GitHub authentication for the TUI session.
 
-Token sources:
+Token sources (highest priority first):
 
 - The `GITHUB_TOKEN` environment variable
 - The stored token file `~/.ragent/github_token`
+- The authenticated `gh` CLI (`gh auth token`), used as a fallback
 
-`/github login` runs the OAuth device flow.
+`/github login` runs the OAuth device flow. ragent reuses the OAuth
+application the Copilot provider registers, so the token `/github login`
+stores is a GitHub App token (`ghu_`) without repository-administration
+permission: it can read issues, PRs, and repositories, but it cannot create a
+repository (`POST /user/repos` answers `403 Resource not accessible by
+integration`). When the stored token is such an app token and `gh` is
+authenticated, the GitHub tools and the `/new --github` scaffolder use the
+CLI credential instead. Set `RAGENT_GITHUB_NO_GH_CLI=1` to disable the
+fallback.
 
 ## Syntax
 

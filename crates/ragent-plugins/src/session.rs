@@ -275,6 +275,12 @@ impl PluginSession {
     /// through the lifecycle manager, immediately load it, and register its
     /// contributed tools and commands into `surface`.
     ///
+    /// Enabling a plugin that is **already loaded** in this session is
+    /// idempotent: the existing load report and registration outcome are
+    /// re-reported and nothing is loaded or registered a second time (a plugin
+    /// installed enabled, then explicitly enabled, must not collide with its own
+    /// contributions).
+    ///
     /// # Errors
     ///
     /// Returns [`PluginError::UnknownPlugin`] when no store contains the id, or
@@ -284,6 +290,40 @@ impl PluginSession {
         plugin_id: &str,
         surface: &mut impl PluginSurface,
     ) -> Result<EnableOutcome, PluginError> {
+        // Idempotent re-enable: a plugin already loaded this session is reported
+        // as-is without a second load or duplicate registration.
+        if let Some(loaded) = self.manager.get(plugin_id)
+            && loaded.state == LifecycleState::Loaded
+        {
+            let report = LoadReport {
+                id: loaded.descriptor.id.clone(),
+                state: LifecycleState::Loaded,
+                error: None,
+                tools: loaded.registered_tool_names(),
+                commands: loaded
+                    .commands
+                    .iter()
+                    .map(|c| c.decl.name.clone())
+                    .collect(),
+                declared_permissions: loaded.descriptor.requested_permissions.clone(),
+            };
+            let registration = self
+                .registrations
+                .iter()
+                .find(|r| r.plugin_id == plugin_id)
+                .cloned()
+                .unwrap_or_else(|| RegistrationOutcome {
+                    plugin_id: plugin_id.to_string(),
+                    tools: report.tools.clone(),
+                    commands: report.commands.clone(),
+                    error: None,
+                });
+            return Ok(EnableOutcome {
+                report,
+                registration,
+            });
+        }
+
         let report = self.manager.enable(plugin_id)?;
         let registration = if report.state == LifecycleState::Loaded {
             self.register_one(plugin_id, surface)
@@ -348,7 +388,26 @@ impl PluginSession {
     fn own_command_names(&self, plugin_id: &str) -> Vec<String> {
         self.manager
             .get(plugin_id)
-            .map(|p| p.commands.iter().map(|c| c.name.clone()).collect())
+            .map(|p| p.commands.iter().map(|c| c.decl.name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The prompt-command definitions for a loaded plugin: `(trigger, prompt
+    /// body)` pairs for every command whose behaviour is a prompt template
+    /// (FR-031). Empty for an inline-only or absent plugin.
+    #[must_use]
+    pub fn prompt_commands(&self, plugin_id: &str) -> Vec<(String, String)> {
+        self.manager
+            .get(plugin_id)
+            .map(|p| {
+                p.commands
+                    .iter()
+                    .filter_map(|c| {
+                        c.prompt()
+                            .map(|body| (c.decl.name.clone(), body.to_string()))
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 

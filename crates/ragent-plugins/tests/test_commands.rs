@@ -159,11 +159,11 @@ fn run_add_installs_and_reports() {
     .expect("Some");
     assert!(report.contains("[ok]"));
     assert!(report.contains("`codex-weather`"));
-    assert!(report.contains("/plugins enable codex-weather"));
-    // Installed disabled (FR-007).
+    assert!(report.contains("/plugins disable codex-weather"));
+    // Installed enabled (FR-007): add records the enable flag in the ledger.
     let found = scan_dirs(dirs(&tree));
     assert_eq!(found.len(), 1);
-    assert!(!found[0].enabled);
+    assert!(found[0].enabled);
 }
 
 #[test]
@@ -227,6 +227,13 @@ fn run_remove_deletes_disabled_plugin() {
         source.to_str().unwrap(),
     )
     .expect("ok");
+
+    // add enables the plugin; remove refuses an enabled plugin, so turn it off
+    // first (as `/plugins disable` would).
+    let store = tree.0.join("proj/.ragent/plugins");
+    let mut ledger = ragent_plugins::StoreLedger::load(&store);
+    ledger.state_mut("codex-weather").enabled = false;
+    ledger.save(&store).expect("ledger saved");
 
     let report = run_store_command(&config(), &dirs(&tree), &tree.0, "remove", "codex-weather")
         .expect("Some");

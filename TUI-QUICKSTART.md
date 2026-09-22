@@ -4,8 +4,16 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.110..v1.0.113)
+## Highlights (v1.0.110..v1.0.114)
 
+- **Plugin bridges (v1.0.114)** — plugin bridge extensions: `/plugins list`
+  counts and details skills/agents/hooks, `/plugins add` installs a plugin
+  enabled, and an enabled plugin's skills, MCP servers, `commands/*.md` prompt
+  commands, `agents/*.md` profiles, and declared (including `hooks.json`) hooks
+  are bridged into the session; `/new --github` now creates the hosting
+  repository through a shared GitHub credential chain with a `gh` CLI fallback;
+  and a new read-only `ragent_info` tool reports the running version, build
+  time, git commit, and compiler (169 tools).
 - **Input queue + ALT-Q queue-control menu (v1.0.113)** — the input field
   stays editable while the agent runs: each `Enter` appends the message to a
   bounded FIFO queue (a two-digit counter appears before the `> ` prompt) and
@@ -13,12 +21,19 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   during a run to open the four-row queue-control menu (`Next`, `Stop`/`Resume`,
   `Clear`, `Show`); the `Show` row opens a scrollable panel that lists the queued
   entries and lets you reorder (`Enter`) or remove (`Del`) them, and
-  `/queue [list|clear|next|help]` exposes the same queue. See §4 and
+  `/queue [list|clear|next|help]` exposes the same queue. A slash command
+  (`/…`) is queued the same way while a turn runs (FR-017 amendment) and runs at
+  the next turn boundary; only bang commands (`!…`) and teammate-targeted sends
+  keep the busy refusal. See §4 and
   [`docs/howtos/slashcommands/queue.md`](docs/howtos/slashcommands/queue.md).
 - **`/plugins` slash family (v1.0.112)** — the plugin system is now
-  implemented, not just specified. `/plugins list|add|remove|enable|disable|test|help`
+  implemented, not just specified. `/plugins list|add|remove|enable|disable|test|stores|help`
   manages sandboxed Codex- and Claude Code/Desktop-dialect plugins; enabled
-  plugins contribute `plugin_<id>_<tool>` tools and slash commands. Reports
+  plugins contribute `plugin_<id>_<tool>` tools, slash commands (including the
+  Claude `commands/*.md` prompt commands), skills, MCP servers, agents, and
+  hooks. `/plugins codex` and `/plugins claude` browse each store's official
+  marketplace; `/plugins stores [--check]` reports each store's effective
+  endpoint. Reports
   render in the message window with the `From: /plugins <sub>` header; a bare
   `/plugins` or an unknown subcommand prints the usage block. The subcommands
   are listed in the slash-command autocomplete menu. CLI parity:
@@ -682,6 +697,16 @@ A queued entry is added to the **input history** the moment you press `Enter`
 (so `Up` recalls it immediately), not when it runs, and it is not echoed into
 the message window until it is actually dispatched.
 
+A **slash command** (`/…`) is queued exactly like a plain message while a turn
+is running (FR-017 amendment): pressing `Enter` on `/status`, `/agent`, or a
+`queue`-style command appends it to the queue and it runs at the next turn
+boundary (or immediately via `Alt+Q` → `Next` / `/queue next`). A synchronous
+command leaves the boundary free, so a run of consecutive queued commands
+executes back-to-back rather than stalling behind the first. At queue capacity
+the command is rejected and restored to the input field, so nothing is lost.
+Only **bang commands** (`!…`) and **teammate-targeted messages** keep the
+`busy - wait for the current turn to finish` refusal.
+
 Press **`Alt+Q`** during a run to open the **queue-control menu** — a centred
 overlay with exactly four options. Use **`Up`**/**`Down`** to move the highlight
 and **`Enter`** to activate the highlighted row:
@@ -1007,7 +1032,7 @@ are available from a shell as `ragent plugins <sub>`.
 
 ```text
 /plugins list --verbose          # list plugins, state, contributions, telemetry
-/plugins add ./my-plugin         # install (stays disabled until enabled)
+/plugins add ./my-plugin         # install (enabled; loads next session)
 /plugins enable my-plugin        # load and register its tools/commands
 /plugins test my-plugin          # isolated harness: load + invoke each tool once
 /plugins disable my-plugin       # unload and deregister (files kept)
@@ -1022,6 +1047,13 @@ with no arguments, `/plugins help`, or an unrecognised subcommand prints the
 usage block. Plugins are discovered under `.ragent/plugins/` (project) or
 `~/.config/ragent/plugins/` (user-global); set `plugins.enabled: false` to make
 the subsystem inert.
+
+An enabled plugin's non-tool contributions are bridged too: `commands/*.md`
+prompt commands appear in the `/` menu, `skills/` directories join skill
+discovery, `mcpServers` connect as `<plugin-id>.<server>`, `agents/*.md`
+profiles join agent discovery, and `hooks` (declared inline or in a `hooks.json`
+file) fire on the matching session lifecycle events. `list` shows a count column
+for each kind; `add` records the plugin enabled.
 
 See [`docs/howtos/slashcommands/plugins.md`](docs/howtos/slashcommands/plugins.md).
 

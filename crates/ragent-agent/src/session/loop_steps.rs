@@ -346,7 +346,16 @@ impl SessionProcessor {
         // PERF-009 / P-2: `load_config_cached` already returns an `Arc<Config>`,
         // so we reuse it directly instead of re-wrapping.
         let session_config: Arc<ragent_config::Config> = cfg;
-        let parsed_hook_configs = crate::hooks::parse_hook_configs(&session_config.hooks);
+        // FR-033: configured hooks run first, then hooks contributed by enabled
+        // plugins, so a user's own hooks always precede a plugin's at the same
+        // trigger.
+        let parsed_hook_configs = {
+            let configured = crate::hooks::parse_hook_configs(&session_config.hooks);
+            let plugin_hooks = ragent_plugins::scanned_plugin_hooks(
+                &crate::skill::plugin_store_dirs(&working_dir),
+            );
+            crate::hooks::merge_hook_configs(&configured, &plugin_hooks)
+        };
 
         // Fire on_session_start hook when this is the first message. A
         // storage error defaults to "messages exist" (the conservative

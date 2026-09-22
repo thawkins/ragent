@@ -36,20 +36,24 @@
 //! - `RAGENT_ERROR` — error message (only for `on_error` trigger)
 //! - `RAGENT_TURN_NUMBER` — current turn/iteration number (for `on_turn_start`/`on_turn_end`)
 //! - `RAGENT_COMPACTION_REASON` — reason for compaction (for `on_compaction`)
+//! - `CLAUDE_PLUGIN_ROOT` — the declaring plugin's root (only for a
+//!   plugin-contributed hook whose command references `${CLAUDE_PLUGIN_ROOT}`)
+//! - `CLAUDE_PROJECT_DIR` — alias of `RAGENT_WORKING_DIR`, for plugin hooks
+//! - `RAGENT_TOOL_*` — see [`HookTrigger`] (only for the tool-scoped triggers)
+//!
+//! A plugin-contributed hook additionally receives the event as JSON on stdin
+//! (the Claude hook protocol shape), so a dialect script can read
+//! `hook_event_name`, `tool_name`, `tool_input`, and `cwd`.
 
 use ragent_types::event::EventBus;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
+use std::process::Stdio;
 
 /// Cap a string at `max` characters, trimming whitespace.
 fn cap_stderr(stderr: &str, max: usize) -> String {
-    let trimmed = stderr.trim();
-    if trimmed.chars().count() <= max {
-        trimmed.to_string()
-    } else {
-        trimmed.chars().take(max).collect::<String>()
-    }
+    stderr.trim().chars().take(max).collect::<String>()
 }
 
 /// Trigger point for a lifecycle hook.
@@ -124,6 +128,74 @@ impl std::fmt::Display for HookTrigger {
     }
 }
 
+impl HookTrigger {
+    /// Parse a hook trigger name into a [`HookTrigger`] (FR-033).
+    ///
+    /// Accepts both ragent's own snake_case spellings (`pre_tool_use`) and the
+    /// Claude plugin dialect's PascalCase spellings (`PreToolUse`), ignoring
+    /// `-`/`_` separators and case. Claude's `UserPromptSubmit` maps onto
+    /// [`OnTurnStart`](Self::OnTurnStart), `Stop`/`SessionEnd` onto
+    /// [`OnSessionEnd`](Self::OnSessionEnd), and `PreCompact` onto
+    /// [`OnCompaction`](Self::OnCompaction). Returns `None` for an unrecognised
+    /// trigger, which the caller drops.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        let normalised: String = name
+            .trim()
+            .chars()
+            .filter(|c| !matches!(c, '-' | '_'))
+            .collect::<String>()
+            .to_ascii_lowercase();
+        match normalised.as_str() {
+            "onsessionstart" | "sessionstart" => Some(Self::OnSessionStart),
+            "onsessionend" | "sessionend" | "stop" => Some(Self::OnSessionEnd),
+            "onerror" | "error" => Some(Self::OnError),
+            "onpermissiondenied" | "permissiondenied" => Some(Self::OnPermissionDenied),
+            "onturnstart" | "turnstart" | "userpromptsubmit" => Some(Self::OnTurnStart),
+            "onturnend" | "turnend" => Some(Self::OnTurnEnd),
+            "oncompaction" | "compaction" | "precompact" => Some(Self::OnCompaction),
+            "pretooluse" => Some(Self::PreToolUse),
+            "posttooluse" => Some(Self::PostToolUse),
+            _ => None,
+        }
+    }
+}
+
+/// Convert plugin-contributed hooks into session hook configs (FR-033).
+///
+/// A hook whose trigger name is not recognised by [`HookTrigger::parse`] is
+/// dropped (it cannot fire) rather than failing the whole plugin.
+#[must_use]
+pub fn plugin_hook_configs(plugin_hooks: &[ragent_plugins::PluginHook]) -> Vec<HookConfig> {
+    plugin_hooks
+        .iter()
+        .filter_map(|hook| {
+            let trigger = HookTrigger::parse(&hook.trigger)?;
+            Some(HookConfig {
+                trigger,
+                command: hook.command.clone(),
+                timeout_secs: hook.timeout_secs.unwrap_or_else(default_hook_timeout),
+                plugin_root: Some(hook.plugin_root.clone()),
+                matcher: hook.matcher.clone(),
+            })
+        })
+        .collect()
+}
+
+/// Merge plugin-contributed hooks with the configured hooks (FR-033).
+///
+/// Configured hooks run first, then plugin hooks, so a user's own hooks fire
+/// before any plugin-contributed hook at the same trigger.
+#[must_use]
+pub fn merge_hook_configs(
+    configured: &[HookConfig],
+    plugin_hooks: &[ragent_plugins::PluginHook],
+) -> Vec<HookConfig> {
+    let mut merged = configured.to_vec();
+    merged.extend(plugin_hook_configs(plugin_hooks));
+    merged
+}
+
 /// A single hook configuration entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookConfig {
@@ -134,6 +206,98 @@ pub struct HookConfig {
     /// Optional timeout in seconds (default: 30).
     #[serde(default = "default_hook_timeout")]
     pub timeout_secs: u64,
+    /// Absolute plugin root exported as `CLAUDE_PLUGIN_ROOT` when the hook
+    /// runs. `None` for a hook configured directly in `ragent.json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_root: Option<std::path::PathBuf>,
+    /// Optional tool match expression (a Claude-dialect `matcher`, such as
+    /// `Edit|Write` or `Bash(git commit:*)`). `None` matches every tool. Only
+    /// consulted by the tool-scoped triggers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matcher: Option<String>,
+}
+
+impl HookConfig {
+    /// Whether this hook applies to `tool_name` (FR-033).
+    ///
+    /// A hook with no matcher applies to every tool. A matcher is a `|`- or
+    /// `,`-separated list of tool names, each optionally wrapped in a
+    /// `Name(pattern)` guard whose pattern is matched as a shell-style glob
+    /// against the tool's JSON arguments. A matcher that is not a valid guard
+    /// form still matches by bare tool name, so an unrecognised Claude `if`
+    /// expression degrades to "runs for that tool" rather than being dropped.
+    #[must_use]
+    pub fn matches_tool(&self, tool_name: &str, tool_input: &str) -> bool {
+        let Some(matcher) = self.matcher.as_deref() else {
+            return true;
+        };
+        matcher.split(['|', ',']).any(|part| {
+            let part = part.trim();
+            let (name, guard) = match part.split_once('(') {
+                Some((name, rest)) => (name.trim(), rest.strip_suffix(')').map(str::trim)),
+                None => (part, None),
+            };
+            if !name.is_empty() && !name.eq_ignore_ascii_case(tool_name) {
+                return false;
+            }
+            match guard {
+                Some(pattern) if !pattern.is_empty() && pattern != "*" => {
+                    guard_matches_tool_input(pattern, tool_input)
+                }
+                _ => true,
+            }
+        })
+    }
+}
+
+/// Whether a Claude `Name(pattern)` guard matches a tool's JSON arguments.
+///
+/// A `pattern` ending in `:*` is the Claude prefix form (`Bash(git commit:*)`
+/// matches any command starting with `git commit`); any other `*` is a glob
+/// wildcard. The pattern is compared against every string value in the
+/// tool-input object and the object's compact serialisation.
+fn guard_matches_tool_input(pattern: &str, tool_input: &str) -> bool {
+    if let Some(prefix) = pattern.strip_suffix(":*") {
+        let prefix = prefix.trim();
+        return candidates_for(tool_input)
+            .iter()
+            .any(|candidate| candidate.trim_start().starts_with(prefix));
+    }
+    let Ok(glob) = globset::Glob::new(pattern) else {
+        return true;
+    };
+    let matcher = glob.compile_matcher();
+    candidates_for(tool_input)
+        .iter()
+        .any(|candidate| matcher.is_match(candidate))
+}
+
+/// The strings a guard pattern is compared against: the raw tool input, plus
+/// every scalar string nested inside it.
+fn candidates_for(tool_input: &str) -> Vec<String> {
+    let mut candidates = vec![tool_input.to_string()];
+    if let Ok(value) = serde_json::from_str::<Value>(tool_input) {
+        collect_string_values(&value, &mut candidates);
+    }
+    candidates
+}
+
+/// Collect every scalar string in a JSON value (for the guard match).
+fn collect_string_values(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(s) => out.push(s.clone()),
+        Value::Array(items) => {
+            for item in items {
+                collect_string_values(item, out);
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values() {
+                collect_string_values(item, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Parses hook definitions loaded from config JSON into typed hook configs.
@@ -155,6 +319,94 @@ pub fn parse_hook_configs(raw_hooks: &[Value]) -> Vec<HookConfig> {
 
 const fn default_hook_timeout() -> u64 {
     30
+}
+
+/// The Claude hook-protocol event name for a trigger, or `None` when the
+/// trigger has no Claude equivalent (so no stdin payload is written).
+fn claude_event_name(trigger: &HookTrigger) -> Option<&'static str> {
+    match trigger {
+        HookTrigger::OnSessionStart => Some("SessionStart"),
+        HookTrigger::OnSessionEnd => Some("Stop"),
+        HookTrigger::OnTurnStart => Some("UserPromptSubmit"),
+        HookTrigger::PreToolUse => Some("PreToolUse"),
+        HookTrigger::PostToolUse => Some("PostToolUse"),
+        HookTrigger::OnCompaction => Some("PreCompact"),
+        HookTrigger::OnError | HookTrigger::OnPermissionDenied | HookTrigger::OnTurnEnd => None,
+    }
+}
+
+/// The Claude hook-protocol event JSON written to a hook's stdin.
+///
+/// Only emitted for a plugin-contributed hook at a trigger Claude recognises;
+/// a `ragent.json` hook (no `plugin_root`) receives no stdin payload, keeping
+/// the existing behaviour for host-configured hooks.
+fn claude_event_payload(
+    hook: &HookConfig,
+    working_dir: &Path,
+    tool_name: Option<&str>,
+    tool_input: Option<&str>,
+    tool_output: Option<&str>,
+    tool_success: Option<bool>,
+    session_id: Option<&str>,
+) -> Option<String> {
+    let event = claude_event_name(&hook.trigger)?;
+    // Only a plugin-contributed hook (which carries a plugin root) speaks the
+    // Claude protocol; a `ragent.json` hook keeps the env-only contract.
+    hook.plugin_root.as_ref()?;
+    let mut obj = serde_json::Map::new();
+    obj.insert("hook_event_name".into(), Value::String(event.to_string()));
+    obj.insert(
+        "cwd".into(),
+        Value::String(working_dir.display().to_string()),
+    );
+    if let Some(session_id) = session_id {
+        obj.insert("session_id".into(), Value::String(session_id.to_string()));
+    }
+    if let Some(name) = tool_name {
+        obj.insert("tool_name".into(), Value::String(name.to_string()));
+    }
+    if let Some(input) = tool_input {
+        let value = serde_json::from_str::<Value>(input).unwrap_or(Value::Null);
+        obj.insert("tool_input".into(), value);
+    }
+    if let Some(output) = tool_output {
+        let value = serde_json::from_str::<Value>(output).unwrap_or(Value::Null);
+        obj.insert("tool_response".into(), value);
+    }
+    if let Some(success) = tool_success {
+        obj.insert("tool_success".into(), Value::Bool(success));
+    }
+    Some(serde_json::to_string(&Value::Object(obj)).unwrap_or_default())
+}
+
+/// Attach the shared hook environment to a command builder.
+fn apply_hook_env(cmd: &mut std::process::Command, hook: &HookConfig, working_dir: &Path) {
+    cmd.env("RAGENT_TRIGGER", hook.trigger.to_string())
+        .env("RAGENT_WORKING_DIR", working_dir.display().to_string())
+        .env("CLAUDE_PROJECT_DIR", working_dir.display().to_string());
+    if let Some(root) = &hook.plugin_root {
+        cmd.env("CLAUDE_PLUGIN_ROOT", root.display().to_string());
+    }
+}
+
+/// Run a fully-configured hook command, writing `payload` to its stdin when
+/// present.
+///
+/// A write error is ignored: the hook may exit without reading its stdin.
+fn run_hook_command(
+    cmd: &mut std::process::Command,
+    payload: Option<String>,
+) -> std::io::Result<std::process::Output> {
+    use std::io::Write;
+    let Some(payload) = payload else {
+        return cmd.output();
+    };
+    cmd.stdin(Stdio::piped());
+    let mut child = cmd.spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(payload.as_bytes());
+    }
+    child.wait_with_output()
 }
 
 /// Result of running a pre-tool-use hook.
@@ -190,10 +442,15 @@ pub enum PreToolUseResult {
 /// - `>= 3` → treated as a hook failure (no effect on the result).
 #[derive(Debug, Clone)]
 pub enum PostToolUseResult {
-    /// The hook completed successfully; optionally carries modified output.
+    /// The hook completed successfully; optionally carries modified output and
+    /// guidance to feed to the model.
     Ok {
         /// Last `modified_output` JSON value from a successful hook, if any.
         modified_output: Option<serde_json::Value>,
+        /// Guidance text (`additionalContext`) contributed by hooks, in
+        /// declaration order. The session appends it to the tool's result so
+        /// the model sees it on the next iteration.
+        additional_context: Vec<String>,
     },
     /// The hook flagged the tool result as policy-violated (exit code 2).
     Flagged {
@@ -251,7 +508,7 @@ pub fn run_pre_tool_use_hooks(
 ) -> PreToolUseResult {
     let matching: Vec<HookConfig> = hooks
         .iter()
-        .filter(|h| h.trigger == HookTrigger::PreToolUse)
+        .filter(|h| h.trigger == HookTrigger::PreToolUse && h.matches_tool(tool_name, tool_input))
         .cloned()
         .collect();
 
@@ -260,15 +517,26 @@ pub fn run_pre_tool_use_hooks(
     }
 
     for hook in matching {
-        let output = std::process::Command::new("sh")
-            .arg("-c")
+        let mut cmd = std::process::Command::new("sh");
+        cmd.arg("-c")
             .arg(&hook.command)
             .current_dir(working_dir)
-            .env("RAGENT_TRIGGER", "pre_tool_use")
-            .env("RAGENT_WORKING_DIR", working_dir.display().to_string())
             .env("RAGENT_TOOL_NAME", tool_name)
             .env("RAGENT_TOOL_INPUT", tool_input)
-            .output();
+            .env("RAGENT_SESSION_ID", session_id);
+        apply_hook_env(&mut cmd, &hook, working_dir);
+        let output = run_hook_command(
+            &mut cmd,
+            claude_event_payload(
+                &hook,
+                working_dir,
+                Some(tool_name),
+                Some(tool_input),
+                None,
+                None,
+                Some(session_id),
+            ),
+        );
 
         match output {
             Ok(out) if out.status.success() => {
@@ -426,19 +694,21 @@ pub async fn run_post_tool_use_hooks(
 ) -> PostToolUseResult {
     let matching: Vec<HookConfig> = hooks
         .iter()
-        .filter(|h| h.trigger == HookTrigger::PostToolUse)
+        .filter(|h| h.trigger == HookTrigger::PostToolUse && h.matches_tool(tool_name, tool_input))
         .cloned()
         .collect();
 
     if matching.is_empty() {
         return PostToolUseResult::Ok {
             modified_output: None,
+            additional_context: Vec::new(),
         };
     }
 
     let mut last_modified_output: Option<serde_json::Value> = None;
     let mut warn_message: Option<String> = None;
     let mut flagged_reason: Option<String> = None;
+    let mut additional_contexts: Vec<String> = Vec::new();
 
     for hook in matching {
         let wd = working_dir.to_path_buf();
@@ -446,24 +716,42 @@ pub async fn run_post_tool_use_hooks(
         let tool_input = tool_input.to_string();
         let tool_output = tool_output.to_string();
         let success_str = success.to_string();
+        let session_id = session_id.to_string();
         let command = hook.command.clone();
         let timeout = std::time::Duration::from_secs(hook.timeout_secs);
+        let payload = claude_event_payload(
+            &hook,
+            working_dir,
+            Some(&tool_name),
+            Some(&tool_input),
+            Some(&tool_output),
+            Some(success),
+            Some(&session_id),
+        );
+        let plugin_root = hook.plugin_root.clone();
+        let trigger = hook.trigger.to_string();
+        let session_id_for_cmd = session_id.clone();
 
         let task = tokio::task::spawn_blocking({
             let tool_name = tool_name.clone();
             let command = command.clone();
             move || {
-                std::process::Command::new("sh")
-                    .arg("-c")
+                let mut cmd = std::process::Command::new("sh");
+                cmd.arg("-c")
                     .arg(&command)
                     .current_dir(&wd)
-                    .env("RAGENT_TRIGGER", "post_tool_use")
+                    .env("RAGENT_TRIGGER", &trigger)
                     .env("RAGENT_WORKING_DIR", wd.display().to_string())
+                    .env("CLAUDE_PROJECT_DIR", wd.display().to_string())
                     .env("RAGENT_TOOL_NAME", &tool_name)
                     .env("RAGENT_TOOL_INPUT", &tool_input)
                     .env("RAGENT_TOOL_OUTPUT", &tool_output)
                     .env("RAGENT_TOOL_SUCCESS", &success_str)
-                    .output()
+                    .env("RAGENT_SESSION_ID", &session_id_for_cmd);
+                if let Some(root) = &plugin_root {
+                    cmd.env("CLAUDE_PLUGIN_ROOT", root.display().to_string());
+                }
+                run_hook_command(&mut cmd, payload)
             }
         });
         match tokio::time::timeout(timeout, task).await {
@@ -479,6 +767,18 @@ pub async fn run_post_tool_use_hooks(
                             "PostToolUse hook returned modified output"
                         );
                         last_modified_output = Some(modified.clone());
+                    }
+                    // FR-033: a Claude-dialect hook delivers guidance to the
+                    // model through `hookSpecificOutput.additionalContext`;
+                    // also accept a top-level `additionalContext`.
+                    let guidance = json
+                        .pointer("/hookSpecificOutput/additionalContext")
+                        .or_else(|| json.get("additionalContext"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty());
+                    if let Some(guidance) = guidance {
+                        additional_contexts.push(guidance.to_string());
                     }
                 }
             }
@@ -570,8 +870,130 @@ pub async fn run_post_tool_use_hooks(
     } else {
         PostToolUseResult::Ok {
             modified_output: last_modified_output,
+            additional_context: additional_contexts,
         }
     }
+}
+
+/// Run the stop (`on_session_end`) hooks and collect any guidance that should
+/// be fed back to the model (the Claude `Stop` / `asyncRewake` shape).
+///
+/// A hook signals a continuation in three ways, all accepted here:
+///
+/// - exit code **2** — the hook blocked; its stdout JSON (Claude's
+///   `decision: "block"` / `hookSpecificOutput.additionalContext`) and then its
+///   stderr are captured as the findings;
+/// - exit code **0** with `hookSpecificOutput.additionalContext`;
+/// - exit code **0** with a top-level `decision: "block"` and `reason`.
+///
+/// Every other outcome (exit 0 without guidance, exit 1 warning, exit >=3
+/// failure, timeout) contributes nothing, so a well-behaved hook does not
+/// extend the turn. Returns the collected guidance in declaration order; an
+/// empty result means the turn should end normally.
+pub async fn run_stop_hooks(
+    hooks: &[HookConfig],
+    working_dir: &Path,
+    session_id: &str,
+) -> Vec<String> {
+    let matching: Vec<HookConfig> = hooks
+        .iter()
+        .filter(|h| h.trigger == HookTrigger::OnSessionEnd)
+        .cloned()
+        .collect();
+
+    let mut guidance = Vec::new();
+    for hook in matching {
+        let wd = working_dir.to_path_buf();
+        let command = hook.command.clone();
+        let timeout = std::time::Duration::from_secs(hook.timeout_secs);
+        let payload =
+            claude_event_payload(&hook, working_dir, None, None, None, None, Some(session_id));
+        let plugin_root = hook.plugin_root.clone();
+        let trigger = hook.trigger.to_string();
+        let session_id = session_id.to_string();
+
+        let task = tokio::task::spawn_blocking({
+            let command = command.clone();
+            move || {
+                let mut cmd = std::process::Command::new("sh");
+                cmd.arg("-c")
+                    .arg(&command)
+                    .current_dir(&wd)
+                    .env("RAGENT_TRIGGER", &trigger)
+                    .env("RAGENT_WORKING_DIR", wd.display().to_string())
+                    .env("CLAUDE_PROJECT_DIR", wd.display().to_string())
+                    .env("RAGENT_SESSION_ID", &session_id);
+                if let Some(root) = &plugin_root {
+                    cmd.env("CLAUDE_PLUGIN_ROOT", root.display().to_string());
+                }
+                run_hook_command(&mut cmd, payload)
+            }
+        });
+
+        let Ok(Ok(Ok(out))) = tokio::time::timeout(timeout, task).await else {
+            tracing::warn!(
+                trigger = "on_session_end",
+                command = %command,
+                "Stop hook timed out or failed to run; ending the turn normally"
+            );
+            continue;
+        };
+
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let json = serde_json::from_str::<serde_json::Value>(stdout.trim()).ok();
+
+        // Claude's `hookSpecificOutput.additionalContext` is the primary
+        // delivery channel for a Stop hook.
+        if let Some(guidance_text) = json
+            .as_ref()
+            .and_then(|json| json.pointer("/hookSpecificOutput/additionalContext"))
+            .or_else(|| json.as_ref().and_then(|json| json.get("additionalContext")))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            guidance.push(guidance_text.to_string());
+        }
+
+        match out.status.code() {
+            Some(2) => {
+                // Blocking Stop hook: prefer the JSON reason, then stderr.
+                let reason = json
+                    .as_ref()
+                    .and_then(|json| json.get("reason"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| cap_stderr(&stderr, 8000));
+                if !reason.is_empty() && !guidance.iter().any(|g| g == &reason) {
+                    guidance.push(reason);
+                }
+                tracing::info!(
+                    trigger = "on_session_end",
+                    command = %command,
+                    "Stop hook blocked the turn; findings will be fed back to the model"
+                );
+            }
+            Some(0) => {
+                if let Some(reason) = json
+                    .as_ref()
+                    .filter(|json| {
+                        json.get("decision").and_then(serde_json::Value::as_str) == Some("block")
+                    })
+                    .and_then(|json| json.get("reason"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    guidance.push(reason.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    guidance
 }
 
 /// Fire all hooks matching `trigger`, asynchronously.
@@ -604,12 +1026,14 @@ pub fn fire_hooks(
     tokio::spawn(async move {
         for hook in matching {
             let wd = working_dir.clone();
-            let trigger_s = trigger_str.clone();
+            let trigger_s = trigger.to_string();
             let extra_e = extra.clone();
             let timeout = std::time::Duration::from_secs(hook.timeout_secs);
             let command = hook.command.clone();
             let command_for_warn = command.clone();
             let timeout_secs = hook.timeout_secs;
+            let plugin_root = hook.plugin_root.clone();
+            let payload = claude_event_payload(&hook, &working_dir, None, None, None, None, None);
 
             let task = tokio::spawn(async move {
                 let mut cmd = tokio::process::Command::new("sh");
@@ -617,11 +1041,15 @@ pub fn fire_hooks(
                     .arg(&command)
                     .current_dir(&wd)
                     .env("RAGENT_TRIGGER", &trigger_s)
-                    .env("RAGENT_WORKING_DIR", wd.display().to_string());
+                    .env("RAGENT_WORKING_DIR", wd.display().to_string())
+                    .env("CLAUDE_PROJECT_DIR", wd.display().to_string());
                 for (k, v) in &extra_e {
                     cmd.env(k, v);
                 }
-                match cmd.output().await {
+                if let Some(root) = &plugin_root {
+                    cmd.env("CLAUDE_PLUGIN_ROOT", root.display().to_string());
+                }
+                match run_hook_command_async(cmd, payload).await {
                     Ok(out) if !out.status.success() => {
                         tracing::warn!(
                             trigger = %trigger_s,
@@ -653,6 +1081,24 @@ pub fn fire_hooks(
             }
         }
     });
+}
+
+/// Run a hook command asynchronously, writing `payload` to its stdin when
+/// present (used by the fire-and-forget triggers).
+async fn run_hook_command_async(
+    mut cmd: tokio::process::Command,
+    payload: Option<String>,
+) -> std::io::Result<std::process::Output> {
+    use tokio::io::AsyncWriteExt;
+    let Some(payload) = payload else {
+        return cmd.output().await;
+    };
+    cmd.stdin(Stdio::piped());
+    let mut child = cmd.spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(payload.as_bytes()).await;
+    }
+    child.wait_with_output().await
 }
 
 /// Fire hooks for turn start event.

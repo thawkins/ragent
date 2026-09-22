@@ -258,6 +258,10 @@ fn test_new_github_hosting_without_token_fails_contained() {
         let saved = vec![
             ("GITHUB_TOKEN", std::env::var("GITHUB_TOKEN").ok()),
             ("HOME", std::env::var("HOME").ok()),
+            (
+                "RAGENT_GITHUB_NO_GH_CLI",
+                std::env::var("RAGENT_GITHUB_NO_GH_CLI").ok(),
+            ),
         ];
         let _env = EnvGuard { saved };
         // SAFETY: test-process-only env mutation, restored by EnvGuard.
@@ -265,6 +269,8 @@ fn test_new_github_hosting_without_token_fails_contained() {
         unsafe {
             std::env::remove_var("GITHUB_TOKEN");
             std::env::set_var("HOME", dir);
+            // Keep credential resolution offline: no `gh auth token` fallback.
+            std::env::set_var("RAGENT_GITHUB_NO_GH_CLI", "1");
         }
 
         let mut app = make_app();
@@ -577,6 +583,10 @@ fn test_new_remote_failure_streams_contained_summary() {
         let saved = vec![
             ("GITHUB_TOKEN", std::env::var("GITHUB_TOKEN").ok()),
             ("HOME", std::env::var("HOME").ok()),
+            (
+                "RAGENT_GITHUB_NO_GH_CLI",
+                std::env::var("RAGENT_GITHUB_NO_GH_CLI").ok(),
+            ),
         ];
         let _env = EnvGuard { saved };
         // SAFETY: test-process-only env mutation, restored by EnvGuard.
@@ -584,6 +594,8 @@ fn test_new_remote_failure_streams_contained_summary() {
         unsafe {
             std::env::remove_var("GITHUB_TOKEN");
             std::env::set_var("HOME", dir);
+            // Keep credential resolution offline: no `gh auth token` fallback.
+            std::env::set_var("RAGENT_GITHUB_NO_GH_CLI", "1");
         }
 
         let mut app = make_app();

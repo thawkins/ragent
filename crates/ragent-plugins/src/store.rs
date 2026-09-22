@@ -17,7 +17,7 @@
 //! stays inside the store directory; links escaping the store are skipped and
 //! logged.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -92,8 +92,9 @@ pub struct StoreLedger {
 /// Persisted per-plugin state (enable flag + telemetry counters, FR-022).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginState {
-    /// Whether the plugin is enabled. Plugins are disabled until explicitly
-    /// enabled via `/plugins enable` (FR-007).
+    /// Whether the plugin is enabled. A newly installed plugin is recorded
+    /// enabled by `/plugins add` (FR-007); it can be turned off with
+    /// `/plugins disable`.
     #[serde(default)]
     pub enabled: bool,
     /// Telemetry counters for the plugin (loads, tool invocations, failures).
@@ -236,6 +237,25 @@ pub struct ScanFailure {
 pub fn scan(workdir: &Path, store_dir_override: Option<&Path>) -> Vec<ScannedPlugin> {
     let dirs = store_dirs(workdir, store_dir_override);
     scan_dirs(dirs)
+}
+
+/// The plugin ids a store scan reports as installed (spec `pluginstores` A5,
+/// FR-005).
+///
+/// Derived from [`scan_dirs`]: each plugin that parsed cleanly contributes its
+/// descriptor id. A directory that failed to recognise or parse is keyed by its
+/// directory name for display but is *not* treated as installed, so a broken
+/// entry never marks a store row as present.
+///
+/// Pure over its input, so the installed set can be derived without a network
+/// request and without keeping a second install registry (A5). The result is a
+/// set because membership is the only question the browser asks of it.
+#[must_use]
+pub fn installed_ids(dirs: StoreDirs) -> BTreeSet<String> {
+    scan_dirs(dirs)
+        .into_iter()
+        .filter_map(|scanned| scanned.outcome.ok().map(|parsed| parsed.descriptor.id))
+        .collect()
 }
 
 /// Scan a pre-resolved [`StoreDirs`] set (testable core of [`scan`]).

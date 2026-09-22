@@ -6,7 +6,7 @@
 use anyhow::Result;
 use lru::LruCache;
 use ratatui::layout::Rect;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8};
 
@@ -21,6 +21,7 @@ use ragent_agent::session::processor::SessionProcessor;
 use ragent_agent::storage::Storage;
 use ragent_agent::trigger::TriggerRuntime;
 use ragent_config::OtelProtocol;
+use ragent_plugins::{StoreEntry, StoreError, StoreIndex, StoreIndexFetcher, StoreKind};
 use ragent_team::team::{MemberStatus, SwarmState, TeamConfig, TeamMember};
 use serde::Serialize;
 
@@ -681,6 +682,32 @@ pub enum ProviderSource {
     AutoDiscovered,
 }
 
+/// Resolve the plugin-contributed slash commands for the current session
+/// (spec `plugins` FR-031). The built-in `SLASH_COMMANDS` triggers and any
+/// user-invocable skill names are passed as the collision surface so a plugin
+/// command registers under its bare name only when free, otherwise under the
+/// namespaced `plugin:<id>:<name>` trigger (or is dropped if both are taken).
+#[must_use]
+pub fn plugin_commands_for_surface(
+    working_dir: &std::path::Path,
+) -> Vec<ragent_agent::plugin::PluginCommand> {
+    let mut existing: BTreeSet<String> = SLASH_COMMANDS
+        .iter()
+        .map(|c| c.trigger.to_string())
+        .collect();
+    let skill_dirs = ragent_agent::Config::load()
+        .map(|c| c.skill_dirs)
+        .unwrap_or_default();
+    let registry = ragent_agent::skill::SkillRegistry::load(working_dir, &skill_dirs);
+    existing.extend(
+        registry
+            .list_user_invocable()
+            .into_iter()
+            .map(|s| s.name.clone()),
+    );
+    ragent_agent::plugin::plugin_commands(working_dir, &existing)
+}
+
 /// A registered slash command.
 #[derive(Debug, Clone)]
 pub struct SlashCommandDef {
@@ -874,7 +901,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "plugins",
-        description: "Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | help",
+        description: "Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | stores | help",
     },
     SlashCommandDef {
         trigger: "research",
@@ -1370,6 +1397,313 @@ pub struct QueuedInput {
     pub image_paths: Vec<std::path::PathBuf>,
 }
 
+/// The outcome of one off-loop store-index fetch, tagged with the store it was
+/// requested for (spec `pluginstores` T-008; FR-007, FR-013, FR-016, FR-026).
+///
+/// The spawned fetch deposits this into [`App::plugin_store_result`]; the UI
+/// thread drains it in [`App::poll_plugin_store_result`]. The [`kind`] tag lets
+/// the poll discard a stale result that arrives after the panel was closed or
+/// re-opened for a different store, so a late arrival can never fill the wrong
+/// browser.
+///
+/// [`kind`]: PluginStoreFetchResult::kind
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginStoreFetchResult {
+    /// The store this fetch was requested for (FR-007).
+    pub kind: StoreKind,
+    /// The parsed index on success, or the contained fetch/parse error on
+    /// failure (FR-013, FR-025).
+    pub outcome: Result<StoreIndex, StoreError>,
+}
+
+/// The outcome of one off-loop `ENTER` install from the plugin-store browser
+/// (spec `pluginstores` T-009; FR-006, FR-011, FR-014, FR-025, FR-026).
+///
+/// The spawned install worker runs `ragent_plugins::add(force = false)` off the
+/// event loop and turns its result into this value, which the UI thread drains
+/// in [`App::poll_plugin_store_install_result`]. Carrying the finished report
+/// text (rather than the raw [`AddOutcome`]) keeps every field `Send`, so the
+/// result crosses the worker boundary without the parsed manifest, and lets the
+/// poll touch the message window and the panel without re-rendering the report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginStoreInstallResult {
+    /// The store the install was launched from (FR-007).
+    pub kind: StoreKind,
+    /// The plugin id the install committed (success) or was requested for
+    /// (failure).
+    pub id: String,
+    /// Short panel-footer notice: `installed <id>` or `install failed: <cause>`
+    /// (FR-006, FR-025).
+    pub notice: String,
+    /// The full message-window report: the success report naming the installed
+    /// id and dialect (FR-006), or the `[err]` report naming the cause (FR-025).
+    pub report: String,
+    /// Whether the install committed, so the poll re-derives the installed set
+    /// and the row re-colours (FR-011).
+    pub succeeded: bool,
+}
+
+/// The load state of a plugin-store browser (spec `pluginstores` T-004;
+/// FR-013, FR-016, FR-017).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginStoreStatus {
+    /// The store index is being fetched; the panel renders a loading row.
+    Loading,
+    /// The index loaded and carries at least one entry.
+    Ready,
+    /// The index loaded but carries no entries.
+    Empty,
+    /// The fetch failed; the detail is rendered inline (FR-013).
+    Failed(String),
+}
+
+/// Browser state for one plugin store (spec `pluginstores` T-004; FR-002,
+/// FR-003, FR-007, FR-009, FR-015, FR-020).
+///
+/// One browser backs both `/plugins codex` and `/plugins claude` (A2); it holds
+/// the fetched entry list, the current search query, the filtered index set,
+/// the block-cursor position, the fetch status, the malformed-entry count, and
+/// the derived installed-plugin id set. It performs no I/O itself: the off-loop
+/// fetch (T-008) fills it through [`PluginStoreBrowser::set_index`] and
+/// [`PluginStoreBrowser::set_failed`],
+/// and the store scan (T-007) fills the installed set through
+/// [`PluginStoreBrowser::set_installed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginStoreBrowser {
+    /// Which store this browser is showing (FR-001).
+    pub kind: StoreKind,
+    /// Plugin ids present in the store scan when this browser last refreshed
+    /// (FR-005, A5). Derived from the store, never persisted here; the renderer
+    /// paints a row in the installed colour, with an `[installed]` marker, when
+    /// its id is in this set.
+    pub installed: BTreeSet<String>,
+    /// The current search query (FR-008, FR-009).
+    pub query: String,
+    /// Every entry fetched from the store index, in document order (FR-003).
+    pub all: Vec<StoreEntry>,
+    /// Indices into [`Self::all`] that match [`Self::query`], in order (FR-008).
+    pub filtered: Vec<usize>,
+    /// Block-cursor position within [`Self::filtered`].
+    pub cursor: usize,
+    /// Index of the first result row shown in the list viewport. Kept in sync
+    /// with [`Self::cursor`] by [`Self::ensure_visible`] (FR-010).
+    pub scroll: usize,
+    /// How many index entries the parser skipped as malformed when this browser
+    /// last loaded ([`StoreIndex::skipped`]). Zero for a hand-built entry list.
+    /// Carried through [`Self::set_index`] so the panel can report a short list
+    /// as a partial result instead of silently dropping the bad entries
+    /// (FR-013, FR-025).
+    pub skipped: usize,
+    /// The fetch/parse status of this browser (FR-013, FR-016).
+    pub status: PluginStoreStatus,
+    /// Whether the launch requested a cache-bypassing re-fetch (FR-021).
+    pub refresh: bool,
+    /// The most recent install result shown in the panel footer (FR-006, FR-014).
+    pub last_install: Option<String>,
+}
+
+impl PluginStoreBrowser {
+    /// Build a browser for `kind`, applying the optional `prefill` query
+    /// immediately so the filter is already applied on open (FR-020) and
+    /// recording whether the launch asked for a re-fetch (FR-021).
+    ///
+    /// The status starts [`PluginStoreStatus::Loading`]: the entry list is empty
+    /// until the off-loop fetch (T-008) calls [`Self::set_entries`].
+    #[must_use]
+    pub fn new(kind: StoreKind, prefill: &str, refresh: bool) -> Self {
+        let mut browser = Self {
+            kind,
+            installed: BTreeSet::new(),
+            query: String::new(),
+            all: Vec::new(),
+            filtered: Vec::new(),
+            cursor: 0,
+            scroll: 0,
+            skipped: 0,
+            status: PluginStoreStatus::Loading,
+            refresh,
+            last_install: None,
+        };
+        if !prefill.is_empty() {
+            browser.set_query(prefill.to_string());
+        }
+        browser
+    }
+
+    /// Replace the query and re-apply the filter (FR-008).
+    pub fn set_query(&mut self, query: String) {
+        self.query = query;
+        self.apply_filter();
+    }
+
+    /// Append one character to the query and re-apply the filter (FR-008).
+    pub fn push_char(&mut self, c: char) {
+        self.query.push(c);
+        self.apply_filter();
+    }
+
+    /// Remove the last query character and re-apply the filter (FR-009).
+    ///
+    /// Returns `true` when a character was removed, `false` when the query was
+    /// already empty (so the caller can dismiss the panel on an empty `Esc`).
+    pub fn backspace(&mut self) -> bool {
+        if self.query.pop().is_some() {
+            self.apply_filter();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Re-derive [`Self::filtered`] from [`Self::all`] and reset the cursor to
+    /// the first survivor (FR-008).
+    ///
+    /// The match is a case-insensitive substring over the entry id, name,
+    /// description, and tags; an empty query matches every entry.
+    fn apply_filter(&mut self) {
+        let needle = self.query.to_lowercase();
+        self.filtered = self
+            .all
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry_matches(entry, &needle))
+            .map(|(index, _)| index)
+            .collect();
+        self.cursor = 0;
+        self.scroll = 0;
+    }
+
+    /// Move the block cursor up one result within the filtered set (FR-010).
+    pub fn move_up(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        }
+    }
+
+    /// Move the block cursor down one result within the filtered set (FR-010).
+    pub fn move_down(&mut self) {
+        if self.cursor + 1 < self.filtered.len() {
+            self.cursor += 1;
+        }
+    }
+
+    /// Adjust [`Self::scroll`] so the block cursor stays inside a list viewport
+    /// of `viewport` rows (FR-010).
+    ///
+    /// Pure integer bookkeeping: it reads and writes only [`Self::cursor`],
+    /// [`Self::filtered`], and [`Self::scroll`], so it is unit-testable with no
+    /// renderer and no I/O. A `0` viewport, or an empty filtered set, parks the
+    /// scroll at `0`. When the cursor rises above the window the scroll follows
+    /// it up; when it falls below, the scroll follows it down, so the cursor row
+    /// always lies in `scroll..scroll + viewport`. The scroll never exceeds
+    /// `filtered.len() - viewport`, so the window cannot over-scroll past the
+    /// last row.
+    pub fn ensure_visible(&mut self, viewport: usize) {
+        if viewport == 0 || self.filtered.is_empty() {
+            self.scroll = 0;
+            return;
+        }
+        let cursor = self.cursor.min(self.filtered.len() - 1);
+        if cursor < self.scroll {
+            self.scroll = cursor;
+        } else if cursor >= self.scroll + viewport {
+            self.scroll = cursor + 1 - viewport;
+        }
+        self.scroll = self
+            .scroll
+            .min(self.filtered.len().saturating_sub(viewport));
+    }
+
+    /// Whether the panel currently has a result row to show (FR-017).
+    ///
+    /// `false` covers every empty-result case the panel must call out with an
+    /// explicit empty/error line rather than a blank list: a still-loading
+    /// index, an empty index, and a query that matches nothing. A failed fetch
+    /// is reported separately through [`Self::status`].
+    #[must_use]
+    pub fn has_results(&self) -> bool {
+        !self.filtered.is_empty()
+    }
+
+    /// The entry under the block cursor, when the filtered set is non-empty.
+    #[must_use]
+    pub fn selected(&self) -> Option<&StoreEntry> {
+        self.filtered
+            .get(self.cursor)
+            .and_then(|index| self.all.get(*index))
+    }
+
+    /// Install a parsed store index and derive the resulting status (T-008,
+    /// T-010).
+    ///
+    /// Carries both the accepted entries and the count of entries the parser
+    /// skipped as malformed ([`StoreIndex::skipped`]), so the panel can report a
+    /// short list as a partial result rather than a silent one (FR-013, FR-025).
+    /// The status becomes [`PluginStoreStatus::Ready`] when at least one entry
+    /// loaded and [`PluginStoreStatus::Empty`] otherwise (FR-017); the filter is
+    /// re-applied so any prefilled query still constrains the result set.
+    pub fn set_index(&mut self, index: StoreIndex) {
+        self.all = index.entries;
+        self.skipped = index.skipped;
+        self.status = if self.all.is_empty() {
+            PluginStoreStatus::Empty
+        } else {
+            PluginStoreStatus::Ready
+        };
+        self.apply_filter();
+    }
+
+    /// Install a bare entry list with no malformed-entry count (T-008).
+    ///
+    /// Equivalent to [`Self::set_index`] with `skipped == 0`; used where the
+    /// caller already holds the accepted entries only.
+    pub fn set_entries(&mut self, entries: Vec<StoreEntry>) {
+        self.set_index(StoreIndex {
+            store: None,
+            entries,
+            skipped: 0,
+        });
+    }
+
+    /// Record a failed fetch for inline rendering (T-008, FR-013).
+    pub fn set_failed(&mut self, detail: String) {
+        self.status = PluginStoreStatus::Failed(detail);
+    }
+
+    /// Replace the derived installed-plugin-id set (T-007, FR-005).
+    ///
+    /// The caller derives the set from the store scan ([`ragent_plugins::store`])
+    /// so the browser keeps no second install registry (A5).
+    pub fn set_installed(&mut self, installed: BTreeSet<String>) {
+        self.installed = installed;
+    }
+
+    /// Whether `id` is present in the store scan (FR-005).
+    ///
+    /// The renderer uses this to choose the installed colour and the
+    /// `[installed]` marker for a row; `ENTER` uses it to refuse a re-install
+    /// (FR-014).
+    #[must_use]
+    pub fn is_installed(&self, id: &str) -> bool {
+        self.installed.contains(id)
+    }
+}
+
+/// Whether `entry` matches a lower-cased query needle over its id, name,
+/// description, and tags (FR-008). An empty needle matches every entry.
+fn entry_matches(entry: &StoreEntry, needle_lower: &str) -> bool {
+    if needle_lower.is_empty() {
+        return true;
+    }
+    entry.id.to_lowercase().contains(needle_lower)
+        || entry.name.to_lowercase().contains(needle_lower)
+        || entry.description.to_lowercase().contains(needle_lower)
+        || entry
+            .tags
+            .iter()
+            .any(|tag| tag.to_lowercase().contains(needle_lower))
+}
+
 /// Core TUI application state.
 ///
 /// Holds the message list, input buffer, scroll offset, permission dialogs,
@@ -1495,6 +1829,10 @@ pub struct App {
     /// for every character. The working directory and skill directories do
     /// not change at runtime.
     pub cached_skill_registry: Option<ragent_agent::skill::SkillRegistry>,
+    /// Slash commands contributed by enabled plugins (FR-031), resolved once at
+    /// startup. Prompt commands carry their body; inline commands (`prompt: None`)
+    /// require the live plugin sandbox and are listed but not dispatchable here.
+    pub plugin_commands: Vec<ragent_agent::plugin::PluginCommand>,
     /// File reference autocomplete menu, shown when `@` is typed.
     pub file_menu: Option<FileMenuState>,
     /// Optional spec manager for reading and updating specifications.
@@ -1580,6 +1918,59 @@ pub struct App {
     /// Cached area of the `Clear the input queue?` confirmation dialog (set
     /// during render). Kept in [`Rect::default`] while the dialog is closed.
     pub queue_clear_confirm_area: Rect,
+    /// Active plugin-store browser, present while the browse panel is open
+    /// (spec `pluginstores` FR-007). `None` when no panel is showing (FR-012).
+    /// While it is `Some`, the panel swallows every keystroke and locks the
+    /// input field and the queue (FR-015).
+    pub plugin_store: Option<PluginStoreBrowser>,
+    /// Pending result from the off-loop store-index fetch (spec `pluginstores`
+    /// T-008; FR-007, FR-016, FR-026).
+    ///
+    /// The spawned fetch task ([`App::spawn_plugin_store_fetch`]) deposits the
+    /// parsed index (or the contained [`StoreError`]) here; the UI thread drains
+    /// it in [`App::poll_plugin_store_result`] and applies it to
+    /// [`Self::plugin_store`], so the fetch never blocks the event loop or the
+    /// agent turn. The slot carries the store kind it was fetched for so a
+    /// result that arrives after the panel was closed or switched stores is
+    /// ignored rather than applied to the wrong browser.
+    pub plugin_store_result: Arc<std::sync::Mutex<Option<PluginStoreFetchResult>>>,
+    /// Pending result from the off-loop `ENTER` install (spec `pluginstores`
+    /// T-009; FR-006, FR-011, FR-025, FR-026).
+    ///
+    /// The spawned install worker ([`App::spawn_plugin_store_install`]) deposits
+    /// the finished report here; the UI thread drains it in
+    /// [`App::poll_plugin_store_install_result`], appends the report to the
+    /// message window, records the footer notice, and (on success) re-derives
+    /// the installed set so the newly installed row re-colours. The slot carries
+    /// the store kind so a result that arrives after the panel was closed or
+    /// switched stores is ignored rather than applied to the wrong browser.
+    pub plugin_store_install_result: Arc<std::sync::Mutex<Option<PluginStoreInstallResult>>>,
+    /// Pending result from the off-loop `/plugins stores --check` availability
+    /// probe (spec `pluginstores` FR-031 `--check`).
+    ///
+    /// The spawned probe ([`App::begin_plugin_store_probe`]) contacts each store
+    /// endpoint through the same injectable seam the browser uses and deposits
+    /// the fully rendered report here; the UI thread drains it in
+    /// [`App::poll_plugin_store_probe_result`] and appends it to the message
+    /// window, so the multi-second network probe never blocks the event loop.
+    pub plugin_store_probe_result: Arc<std::sync::Mutex<Option<String>>>,
+    /// The injectable store-index fetch seam the browser drives (spec
+    /// `pluginstores` T-019; FR-037).
+    ///
+    /// Defaults to the production HTTPS fetcher ([`ragent_plugins::default_fetcher`]),
+    /// so the live launch path is unchanged. Tests replace it with an offline
+    /// fixture fetcher ([`ragent_plugins::FixtureStoreFetcher`]) via
+    /// [`App::set_plugin_store_fetcher`], so the default-endpoint browser
+    /// behaviour can be exercised for both stores with no network access
+    /// (FR-032, FR-037, NFR-003, NFR-004).
+    pub plugin_store_fetcher: Arc<dyn StoreIndexFetcher>,
+    /// Cached area of the plugin-store browse panel (set during render). Kept in
+    /// [`Rect::default`] while no panel is open (spec `pluginstores` FR-018).
+    ///
+    /// Recomputed from `Frame::area` every frame, so a terminal resize re-derives
+    /// a centred, fully visible modal without any stored size to go stale
+    /// (FR-018); tests read it back to locate the painted panel.
+    pub plugin_store_area: Rect,
     /// Cursor position (character index) within the input line.
     pub input_cursor: usize,
     /// Keyboard selection anchor (character index). When `Some(n)`, the region

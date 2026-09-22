@@ -1,0 +1,20 @@
+{
+  "store": "claude",
+  "plugins": [
+    {
+      "id": "claude-todo",
+      "name": "Claude Todo",
+      "version": "0.3.0",
+      "description": "Todo list helpers",
+      "source": "https://raw.githubusercontent.com/thawkins/ragent/main/assets/plugins/fixtures/claude-todo",
+      "dialect": "claude",
+      "tags": ["todo"]
+    },
+    {
+      "id": "claude-time",
+      "name": "Claude Time",
+      "version": "0.1.0",
+      "source": "https://example.org/claude-time.zip"
+    }
+  ]
+}

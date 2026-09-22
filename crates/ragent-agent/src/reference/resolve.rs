@@ -423,9 +423,18 @@ fn format_size(bytes: u64) -> String {
 mod tests {
     use super::*;
 
+    /// Return a unique scratch directory under the system temp dir.
+    ///
+    /// Each test gets its own directory so the tests are safe to run in
+    /// parallel; a shared fixed name caused spurious failures when the
+    /// workspace suite ran both this crate's lib and integration tests at once.
+    fn unique_tmp(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("ragent_test_{tag}_{}", uuid::Uuid::new_v4()))
+    }
+
     #[tokio::test]
     async fn test_resolve_file() {
-        let tmp = std::env::temp_dir().join("ragent_test_resolve_file");
+        let tmp = unique_tmp("resolve_file");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).expect("mkdir");
         std::fs::write(tmp.join("hello.txt"), "Hello\nWorld\n").expect("write");
@@ -446,7 +455,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_directory() {
-        let tmp = std::env::temp_dir().join("ragent_test_resolve_dir");
+        let tmp = unique_tmp("resolve_dir");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("subdir")).expect("mkdir");
         std::fs::write(tmp.join("subdir/file.txt"), "content").expect("write");
@@ -465,7 +474,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_fuzzy() {
-        let tmp = std::env::temp_dir().join("ragent_test_resolve_fuzzy");
+        let tmp = unique_tmp("resolve_fuzzy");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("src")).expect("mkdir");
         std::fs::write(tmp.join("src/main.rs"), "fn main() {}").expect("write");
@@ -484,7 +493,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_nonexistent_file() {
-        let tmp = std::env::temp_dir().join("ragent_test_resolve_nofile");
+        let tmp = unique_tmp("resolve_nofile");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).expect("mkdir");
 
@@ -540,7 +549,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_all_refs_with_file() {
-        let tmp = std::env::temp_dir().join("ragent_test_resolve_all");
+        let tmp = unique_tmp("resolve_all");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).expect("mkdir");
         std::fs::write(tmp.join("data.txt"), "line1\nline2\n").expect("write");

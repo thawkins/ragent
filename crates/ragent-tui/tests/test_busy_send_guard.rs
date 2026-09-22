@@ -1,9 +1,9 @@
 //! Tests for how the input field behaves while the primary agent is busy.
 //!
 //! Spec `inputqueue` (FR-002, FR-011, FR-012, FR-017) relaxes the old guard so a
-//! plain message is still accepted while a turn is executing, while slash
-//! commands, bang commands, and teammate-targeted messages keep their busy
-//! behaviour and are never queued.
+//! plain message is still accepted while a turn is executing. FR-017 was amended
+//! to also queue slash commands the same way, while bang commands and
+//! teammate-targeted messages keep their busy behaviour and are never queued.
 
 use std::sync::Arc;
 
@@ -74,15 +74,21 @@ fn test_plain_char_is_accepted_while_processing() {
 }
 
 #[test]
-fn test_slash_command_is_refused_while_processing() {
+fn test_slash_command_is_accepted_while_processing() {
     let mut app = support::make_app();
     app.is_processing = true;
     app.input = "/status".to_string();
 
     let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    assert!(action.is_none(), "slash commands keep their busy guard");
-    assert_eq!(app.status, "busy - wait for the current turn to finish");
+    match action {
+        Some(InputAction::SlashCommand(cmd)) => assert_eq!(cmd, "/status"),
+        _ => panic!("FR-017 amendment: a slash command is queueable, not refused"),
+    }
+    assert_ne!(
+        app.status, "busy - wait for the current turn to finish",
+        "a slash command must not be rejected while the agent executes"
+    );
 }
 
 #[test]

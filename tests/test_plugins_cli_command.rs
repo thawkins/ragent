@@ -150,10 +150,10 @@ fn store_round_trip_uses_the_cli_surface_spelling() {
         "the plugin must be copied into the project store"
     );
 
-    // list shows it disabled (FR-007, FR-016)
+    // list shows it enabled (FR-007): add records the enable flag
     let listed = stdout(&fx.ragent(&["plugins", "list"]));
     assert!(listed.contains("codex-weather"), "{listed}");
-    assert!(listed.contains("disabled"), "{listed}");
+    assert!(listed.contains("enabled"), "{listed}");
 
     // enable loads it and reports the contributions (FR-011)
     let enabled = stdout(&fx.ragent(&["plugins", "enable", "codex-weather"]));
@@ -211,6 +211,67 @@ fn missing_plugin_id_is_reported_as_usage_error() {
     assert!(
         text.contains("[err] Missing <pluginid>."),
         "enable without an id reports the usage error: {text}"
+    );
+}
+
+#[test]
+fn stores_reports_each_effective_endpoint_and_its_source() {
+    // FR-031 parity: `ragent plugins stores` lists both stores. With no
+    // `plugins.stores` block, each is tagged `default` and names its compiled
+    // default endpoint.
+    let fx = Fixture::new();
+    let text = stdout(&fx.ragent(&["plugins", "stores"]));
+
+    assert!(text.contains("ragent plugins"), "{text}");
+    for token in ["codex", "claude"] {
+        assert!(
+            text.contains(&format!("- {token}: [default] https://")),
+            "`{token}` must be tagged default with an https endpoint: {text}"
+        );
+    }
+
+    // An override present in the project config tags that store `config` and
+    // names the configured URL, while the other keeps its default.
+    std::fs::create_dir_all(fx.path().join(".ragent")).expect(".ragent dir");
+    std::fs::write(
+        fx.path().join(".ragent/ragent.json"),
+        r#"{ "plugins": { "stores": { "codex": { "url": "https://cfg.example/codex.json" } } } }"#,
+    )
+    .expect("config writable");
+
+    let overridden = stdout(&fx.ragent(&["plugins", "stores"]));
+    assert!(
+        overridden.contains("- codex: [config] https://cfg.example/codex.json"),
+        "an override must be tagged config: {overridden}"
+    );
+    assert!(
+        overridden.contains("- claude: [default] https://"),
+        "the unconfigured store keeps its default: {overridden}"
+    );
+}
+
+#[test]
+fn stores_usage_documents_the_optional_check_flag() {
+    // The opt-in `--check` availability probe is documented on the CLI surface,
+    // and the default `stores` output stays the pure config report (no
+    // availability marker), so the plain report is unchanged.
+    let fx = Fixture::new();
+
+    let help = stdout(&fx.ragent(&["plugins", "help"]));
+    assert!(
+        help.contains("ragent plugins stores") && help.contains("--check"),
+        "the usage block must document the --check flag: {help}"
+    );
+
+    let plain = stdout(&fx.ragent(&["plugins", "stores"]));
+    assert!(
+        plain.contains("- codex: [default] https://")
+            && plain.contains("- claude: [default] https://"),
+        "the plain report lists both defaults: {plain}"
+    );
+    assert!(
+        !plain.contains("available") && !plain.contains("unavailable"),
+        "the plain report carries no probe suffix: {plain}"
     );
 }
 

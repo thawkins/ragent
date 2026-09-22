@@ -1425,6 +1425,11 @@ impl SessionProcessor {
         working_dir: &std::path::Path,
         extra_dirs: &[String],
     ) -> Option<crate::skill::SkillRegistry> {
+        // FR-029 skills bridge: enabled plugins contribute skill directories,
+        // appended to the config `extra_dirs`. Compute the effective list once
+        // so the cache key and the load call can never disagree.
+        let effective_extra_dirs = crate::skill::effective_skill_dirs(working_dir, extra_dirs);
+        let extra_dirs: &[String] = &effective_extra_dirs;
         // Collect the candidate skill directories exactly as `discover_skills`
         // does so the cache is invalidated precisely when the scan inputs change.
         let mut dirs: Vec<PathBuf> = Vec::new();
@@ -1895,6 +1900,11 @@ impl SessionProcessor {
         // T-011 (FR-016): set when a safe-point interrupt check fired — the
         // post-loop handler persists the partial turn and ends it normally.
         let mut loop_interrupted = false;
+        // FR-033: how many times a blocking Stop hook has already been fed back
+        // to the model this turn. Bounded so a hook that always blocks cannot
+        // spin the loop forever.
+        const MAX_STOP_CONTINUATIONS: u32 = 3;
+        let mut stop_continuations: u32 = 0;
         // PERF-036: memoise the per-step request-token estimate so a step that
         // appends one message does not re-sum the whole history + tool schemas.
         let mut token_tracker = crate::compaction::estimator::RequestTokenTracker::new();
@@ -2487,6 +2497,36 @@ impl SessionProcessor {
                     Some(&turn.working_dir),
                 )
                 .await;
+
+                // FR-033: a Stop (`on_session_end`) hook may block the turn and
+                // return findings (the Claude `asyncRewake` shape). Fold them
+                // into a synthetic user turn and keep going, so a plugin
+                // security review can feed corrections back before the turn is
+                // accepted. Bounded so a hook that always blocks cannot loop.
+                let stop_guidance = crate::hooks::run_stop_hooks(
+                    &turn.parsed_hook_configs,
+                    &turn.working_dir,
+                    session_id,
+                )
+                .await;
+                let stop_guidance: Vec<String> = stop_guidance
+                    .into_iter()
+                    .filter(|text| !text.trim().is_empty())
+                    .collect();
+                if !stop_guidance.is_empty() && stop_continuations < MAX_STOP_CONTINUATIONS {
+                    stop_continuations += 1;
+                    self.event_bus.publish(Event::AgentNotice {
+                        session_id: session_id.to_string(),
+                        message: "A Stop hook returned findings; feeding them \
+                                  back to the model before ending the turn."
+                            .to_string(),
+                    });
+                    Arc::make_mut(&mut chat_messages).push(ChatMessage {
+                        role: "user".to_string(),
+                        content: ChatContent::Text(stop_guidance.join("\n\n")),
+                    });
+                    continue;
+                }
                 break;
             }
 
@@ -2568,12 +2608,13 @@ impl SessionProcessor {
                         u64,
                         String,
                         Option<Value>,
+                        Vec<String>,
                     ),
                     ToolTaskError,
                 >;
                 // Builds the synthetic error result shared by the B1
                 // args-parse gate and the sequential/parallel join-failure
-                // paths (C1). One construction site keeps the 8-field tuple
+                // paths (C1). One construction site keeps the 9-field tuple
                 // consistent as fields evolve.
                 let synthetic_error_result =
                     |tc: &PendingToolCall, msg: &str| -> ToolExecutionResult {
@@ -2586,6 +2627,7 @@ impl SessionProcessor {
                             0u64,
                             format!("Error: {msg}"),
                             None,
+                            Vec::new(),
                         ))
                     };
                 let result_profiler = profiler.clone();
@@ -2615,6 +2657,7 @@ impl SessionProcessor {
                             duration_ms,
                             result_content,
                             tool_metadata,
+                            additional_contexts,
                         )) => {
                             let success = status == ToolCallStatus::Completed;
                             std::sync::Arc::make_mut(&mut assistant_parts).push(
@@ -2638,6 +2681,16 @@ impl SessionProcessor {
                                     tool_metadata.as_ref(),
                                 ),
                             });
+                            // FR-033: a PostToolUse hook (for example a Claude
+                            // security-guidance pattern check) may return
+                            // `hookSpecificOutput.additionalContext`; fold it
+                            // into this tool's result so the model sees the
+                            // guidance on the next iteration.
+                            for guidance in additional_contexts {
+                                tool_result_parts.push(ContentPart::Text {
+                                    text: format!("[{} hook guidance]\n{guidance}", tc.name),
+                                });
+                            }
                             // P-15: capture the per-call summary for the batch
                             // event. Reuse the already-computed line count and
                             // preview from the spawned task where available;
@@ -2744,6 +2797,7 @@ impl SessionProcessor {
                                 0u64,
                                 format!("Error: {err_msg}"),
                                 None,
+                                Vec::new(),
                             ));
                             if handle_tool_execution_result(synthetic) {
                                 break;
@@ -3034,6 +3088,7 @@ impl SessionProcessor {
                                     0u64,
                                     String::new(),
                                     None,
+                                    Vec::new(),
                                 );
                             }
                         };
@@ -3091,6 +3146,7 @@ impl SessionProcessor {
                             .and_then(|o| o.metadata.clone())
                             .unwrap_or_else(|| serde_json::json!({"content": output_content}));
                         let success = result.is_ok();
+                        let mut additional_contexts: Vec<String> = Vec::new();
                         let post_hook_result = {
                             crate::hooks::run_post_tool_use_hooks(
                                 &hook_configs,
@@ -3105,7 +3161,11 @@ impl SessionProcessor {
                             .await
                         };
                         let modified_output = match post_hook_result {
-                            crate::hooks::PostToolUseResult::Ok { modified_output } => {
+                            crate::hooks::PostToolUseResult::Ok {
+                                modified_output,
+                                additional_context,
+                            } => {
+                                additional_contexts.extend(additional_context);
                                 modified_output
                             }
                             crate::hooks::PostToolUseResult::Flagged { reason } => {
@@ -3258,6 +3318,7 @@ impl SessionProcessor {
                             duration_ms,
                             result_content,
                             tool_metadata,
+                            additional_contexts,
                         )
                     });
                     if parallel_tool_calls {
@@ -3366,6 +3427,7 @@ impl SessionProcessor {
                                     0u64,
                                     format!("Error: {msg}"),
                                     None,
+                                    Vec::new(),
                                 ));
                                 if handle_tool_execution_result(synthetic) {
                                     break;
@@ -3889,12 +3951,9 @@ impl SessionProcessor {
             .map(Some)
         })
         .await;
-        crate::hooks::fire_hooks(
-            &turn.parsed_hook_configs,
-            crate::hooks::HookTrigger::OnSessionEnd,
-            &turn.working_dir,
-            &[],
-        );
+        // FR-033: the Stop (`on_session_end`) hooks have already run inside the
+        // loop, where a blocking hook can feed findings back to the model, so no
+        // second dispatch happens here.
         Ok(saved_msg)
     }
 
@@ -4255,6 +4314,7 @@ fn denied_tool_call(
     u64,
     String,
     Option<Value>,
+    Vec<String>,
 ) {
     event_bus.publish(Event::ToolCallEnd {
         session_id: session_id_str.to_string(),
@@ -4272,5 +4332,6 @@ fn denied_tool_call(
         0u64,
         String::new(),
         None,
+        Vec::new(),
     )
 }

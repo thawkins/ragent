@@ -72,8 +72,10 @@ messages, write log lines, and read files **inside its own directory only**.
 ### Key facts
 
 - Host API is **version 1**, additive-only.
-- Plugins are **disabled when installed**; enabling is a deliberate trust
-  decision.
+- A plugin is **enabled when installed** (`/plugins add` records the enable
+  flag), so it loads and contributes at the next session start; `/plugins
+  disable` turns it off. An existing plugin whose ledger row is absent stays
+  disabled.
 - **Disable takes effect immediately** in the running session (no restart).
 - Plugin code is untrusted by default; every failure is contained so it can
   never terminate the ragent process.
@@ -184,7 +186,8 @@ Enable/disable state and telemetry counters persist in a per-store
 ```
 
 Ids absent from the ledger are treated as **disabled with zero counters** (the
-default). Plugins are disabled until explicitly enabled.
+default); `/plugins add` records a freshly installed plugin **enabled**, so it
+loads at the next session start until explicitly disabled.
 
 ### Discovery rules
 
@@ -202,13 +205,19 @@ default). Plugins are disabled until explicitly enabled.
 ## 4. Plugin Dialects and Manifests
 
 A directory carries **exactly one** dialect. A directory whose contents match
-both dialects is ambiguous and rejected.
+both dialects is ambiguous and rejected — **except** the multi-target case: a
+directory carrying *both nested* manifests (`.codex-plugin/plugin.json` **and**
+`.claude-plugin/plugin.json`) is a single upstream tree shipping one manifest
+per host, so ragent resolves it deterministically to the **Claude** dialect
+(the richer of the two). Any other both-match — a top-level `codex-plugin.json`
+beside a `claude-plugin.json`, or a `plugin.json` with a `"codex"` marker beside
+a Claude manifest — stays ambiguous.
 
 ### 4.1 Dialect recognition
 
 | Dialect | Recognised by |
 | --- | --- |
-| **Codex** | a `codex-plugin.json`, **or** a `plugin.json` carrying a top-level `"codex"` marker field |
+| **Codex** | a `codex-plugin.json`, a `.codex-plugin/plugin.json`, **or** a `plugin.json` carrying a top-level `"codex"` marker field |
 | **Claude** | a `claude-plugin.json`, **or** a `.claude-plugin/plugin.json` |
 
 ### 4.2 Codex manifest (`codex-plugin.json`)
@@ -505,7 +514,7 @@ one set of handlers:
 
 ```
 /plugins list [--verbose]        # list discovered plugins
-/plugins add <source> [--force]  # install a plugin (stays disabled)
+/plugins add <source> [--force]  # install a plugin (enabled on install)
 /plugins remove <pluginid>       # uninstall (refused while enabled)
 /plugins enable <pluginid>       # enable, load, register tools/commands
 /plugins disable <pluginid>      # unload, deregister tools/commands
@@ -516,7 +525,7 @@ one set of handlers:
 | Form | Description |
 | --- | --- |
 | `list [--verbose]` | One row per discovered plugin: id, name, version, dialect, state (`disabled`/`enabled`/`loaded`/`errored`), tool and command counts, plus a totals summary. `--verbose` (alias `-v`) appends per-plugin telemetry counters. |
-| `add <source> [--force]` | Install and validate a plugin; reports id and dialect. Stays **disabled**. Refuses a duplicate id unless `--force`. |
+| `add <source> [--force]` | Install and validate a plugin; reports id and dialect. Recorded **enabled**, so it loads at the next session start. Refuses a duplicate id unless `--force`. |
 | `remove <pluginid>` | Uninstall from the store. **Refused while the plugin is enabled.** |
 | `enable <pluginid>` | Mark enabled, load into the current session, register tools and commands. States the declared permissions and the outcome. |
 | `disable <pluginid>` | Mark disabled, unload, deregister every contributed tool and command, confirming how many of each were removed. Files are **not** deleted. |
@@ -569,19 +578,24 @@ plain `ragent plugins ...` header and `## /plugins` becomes
 ### 7.5 Output shape
 
 Reports are prefixed with a `From: /plugins <sub>` attribution line. `list`
-renders a fixed-width table:
+renders a fixed-width table with a count column per contribution kind (tools,
+commands, skills, agents, hooks):
 
 ```
-| ID                           | Name                 | Version  | Dialect | State    | Tools | Commands |
-|------------------------------|----------------------|----------|---------|----------|-------|----------|
-| codex-weather                | Codex Weather        | 1.2.0    | codex   | loaded   |     1 |        0 |
+| ID                           | Name                 | Version  | Dialect | State    | Tools | Commands | Skills | Agents | Hooks |
+|------------------------------|----------------------|----------|---------|----------|-------|----------|--------|--------|-------|
+| codex-weather                | Codex Weather        | 1.2.0    | codex   | loaded   |     1 |        0 |      0 |      0 |     0 |
+| claude-tools                 | Claude Tools         | 2.0.0    | claude  | loaded   |     0 |        0 |      1 |      1 |     2 |
 ```
 
 followed by optional `Contributions:`, `Unsupported capabilities:`, and
 `Errors:` sections, telemetry lines in verbose mode, and a summary:
 
 ```
-Total: 2 plugin(s) - 1 loaded, 0 enabled, 1 disabled, 0 errored.
+Contributions:
+- claude-tools: tools []; commands []; skills [db-setup]; agents [agents/security-reviewer.md]; hooks [PreToolUse, SessionStart]
+
+Total: 2 plugin(s) - 2 enabled, 0 disabled, 0 errored.
 ```
 
 `test` renders one line per harness step:
@@ -779,11 +793,13 @@ still loads.
 
 ### 9.2 OpenAI Codex plugins
 
-Codex plugins are recognised by a `codex-plugin.json` (or a `plugin.json` with
-a top-level `"codex"` marker). The Codex plugin packaging format is not yet
-formally standardised, so ragent's recogniser treats the Codex dialect as the
-`name`/`version`/`entry` shape documented in [section 4.2](#42-codex-manifest-codex-pluginjson),
-with optional `tools[]` and `commands[]`.
+Codex plugins are recognised by a `codex-plugin.json`, a
+`.codex-plugin/plugin.json` (the layout the official `openai/plugins` catalogue
+ships), or a `plugin.json` with a top-level `"codex"` marker. The Codex plugin
+packaging format is not yet formally standardised, so ragent's recogniser treats
+the Codex dialect as the `name`/`version`/`entry` shape documented in
+[section 4.2](#42-codex-manifest-codex-pluginjson), with optional `tools[]` and
+`commands[]`.
 
 **Step 1 - clone the plugin repository** (or download a release archive).
 
@@ -794,7 +810,7 @@ git clone https://github.com/<owner>/<codex-plugin-repo> vendor/codex-plugin
 **Step 2 - confirm the manifest.**
 
 ```bash
-ls vendor/codex-plugin/codex-plugin.json
+ls vendor/codex-plugin/codex-plugin.json   # or .codex-plugin/plugin.json
 ```
 
 **Step 3 - install it.**
@@ -831,8 +847,9 @@ before anything lands in the store.
 Because ragent recognises the **manifest dialects**, many upstream plugins load
 unchanged. When one does not, the usual fixes are small:
 
-1. **No manifest in a recognised location.** Add `codex-plugin.json` or
-   `.claude-plugin/plugin.json` with `name`, `version`, and `entry`.
+1. **No manifest in a recognised location.** Add `codex-plugin.json`,
+   `.codex-plugin/plugin.json`, or `.claude-plugin/plugin.json` with `name`, `version`,
+   and `entry`.
 2. **No JavaScript entry point.** Point `entry` at the plugin's JS file; a
    hand-written `main.js` that calls `ragent.register_tool` is enough.
 3. **A capability ragent does not implement** (MCP transports, subprocess
@@ -852,6 +869,49 @@ Enabling a third-party plugin is a **trust decision**. Before enabling:
   harness without registering anything in the live session.
 
 See [section 11](#11-security-model) for the full security posture.
+
+### 9.6 Capability coverage by store
+
+Codex and Claude plugins ship much the same broad set of contribution surfaces,
+but each store spells them differently and ragent bridges only some. The table
+below lists the known surfaces for each store provider (the Codex store
+`openai/plugins` and the Claude store `claude-plugins-official`, the two
+documents the store browser parses) and whether ragent consumes them.
+
+"Partial" and "No" rows never block a plugin's other contributions: a surface
+that has an FR-025 label is recorded and reported under `Unsupported
+capabilities:`, and any other unrecognised section is simply ignored. The
+"In ragent?" column answers "if the plugin's manifest is recognised, does ragent
+consume this surface?".
+
+| Capability | Codex store (`openai/plugins`) | Claude store (`claude-plugins-official`) | In ragent? |
+| --- | --- | --- | --- |
+| **Manifest** | `.codex-plugin/plugin.json` | `.claude-plugin/plugin.json` | **Yes** - both nested locations are recognised (plus a root `codex-plugin.json` / `claude-plugin.json`, and a `plugin.json` with a top-level `"codex"` marker) |
+| **JavaScript tools** | - (store entries carry no `entry`) | `entry` / `main` / `server.entry` | **Yes** - the entry point runs on the sandbox; `tools[]` and `register_tool` register as `plugin_<id>_<tool>` |
+| **Slash commands** | `commands/` | `commands/`, manifest `commands[]` | **Yes** - prompt commands from `commands/*.md`, plus inline `register_command` commands (FR-031) |
+| **Skills** | `skills/` (declared `skills`) | `skills/` (declared `skills`) | **Yes** - each declared skill directory joins skill discovery (FR-029) |
+| **MCP servers** | `mcpServers` / `.mcp.json` | `mcpServers` / `.mcp.json` | **Yes** - bridged and connected as `<plugin-id>.<server>` (FR-030) |
+| **Agents / subagents** | `agents/` | `agents/` | **Yes** - declared profiles and every `agents/*.md` file join agent discovery, so they appear in the agent picker and are spawnable (FR-032) |
+| **Hooks** | `hooks.json` | `hooks/`, `hooks.json` | **Yes** - hooks declared inline or in a `hooks.json` file (plugin root or `hooks/`) are normalised onto the session hook engine (FR-033), including the group `{matcher, hooks: [...]}` shape; the trigger name accepts both ragent's `pre_tool_use` and the Claude `PreToolUse` spellings; a plugin hook gets `CLAUDE_PLUGIN_ROOT` and the Claude event JSON on stdin, and a blocking Stop hook can feed findings back before the turn ends |
+| **App / UI surfaces** | `apps`, `.app.json`, `interface` | - | **No** - Codex app/UI metadata is host-specific and ignored |
+| **Desktop integration** | - | `mounts`, `window` | **No** - recorded as `claude desktop mounts` / `claude desktop window` |
+| **Subprocess / filesystem grants** | `permissions.fs`, `permissions.exec` | - | **No** - recorded as `codex permissions.fs` / `codex permissions.exec` |
+| **LSP servers / monitors** | - | LSP servers, monitors | **No** |
+| **Non-JS bundle** | common | common | **Yes** - installs and loads inertly, contributing only its bridged skills/MCP (FR-028) |
+
+Two practical consequences:
+
+- **Codex store entries install and load.** The `openai/plugins` catalogue keeps
+  each manifest in `.codex-plugin/plugin.json`, and ragent recognises that nested
+  location just like Claude's `.claude-plugin/plugin.json`, so `/plugins add`
+  and `/plugins enable` both succeed. (A Codex entry whose manifest sits in some
+  other unrecognised location still reports `no plugin manifest found`.)
+- **Skills, commands, agents, and hooks are the surfaces that carry most value
+  today**, because a large share of both catalogues are non-JS bundles. A plugin's
+  `commands/*.md` become prompt commands (registered under the bare name when free,
+  otherwise `plugin:<id>:<name>`); its declared `skills` join the session's skill
+  discovery; its `agents/*.md` profiles join agent discovery (YAML frontmatter is
+  accepted); and its declared `hooks` fire on the matching session lifecycle events.
 
 ---
 
@@ -980,7 +1040,7 @@ at an 800 ms budget).
 | --- | --- | --- |
 | `No plugins discovered.` | Store empty or wrong location | Check `.ragent/plugins/` and `~/.config/ragent/plugins/`; set `plugins.store_dir` if using a custom path |
 | Plugin row shows `dialect ?` and version `-` | Manifest failed to parse | Read the `Errors:` section for the JSON position; validate the manifest |
-| `ambiguous plugin manifest` | Directory matches both Codex and Claude recognition | Remove one of the two manifest forms |
+| `ambiguous plugin manifest` | Directory matches both Codex and Claude recognition *and* is not the both-nested-manifest multi-target layout | Remove one of the two manifest forms (a plugin shipping both `.codex-plugin/plugin.json` and `.claude-plugin/plugin.json` is accepted as Claude and needs no change) |
 | `plugin requires host API vN` | Declared `api_version` newer than 1 | Lower the declaration to `1` |
 | Enable reports cause `entry` | Entry point threw or timed out | Run `/plugins test <id>` for the exception/timeout detail |
 | Enable reports cause `name-collision` | A command name collides with a built-in trigger, or a tool/command is declared twice by the same plugin | Rename the contribution |

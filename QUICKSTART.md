@@ -734,11 +734,12 @@ The AI agent can use these tools during a session:
 | `glob`     | Find files by name pattern                     | `file:read`     |
 | `list`     | List directory contents (2 levels deep)         | `file:read`     |
 | `ask_user` | Ask the user a clarifying question              | `ask_user`      |
+| `ragent_info`| Report ragent version and build time          | `none`          |
 | `plot_line`| Render an XY line plot on the message window   | `system`        |
 | `plot_bar` | Render a bar chart (stacked/horizontal)        | `system`        |
 | `plot_pie` | Render a pie/donut chart                       | `system`        |
 
-168 tools are registered in total across 25 categories — run `/tools` in the
+169 tools are registered in total across 25 categories — run `/tools` in the
 TUI to list them all. The `plot_*` family (`plot_line`, `plot_scatter`,
 `plot_bar`, `plot_histogram`, `plot_pie`, `plot_heatmap`) renders ASCII-art
 graphs, coloured via ANSI, inline in the message window.
@@ -886,17 +887,49 @@ Manage plugins from the TUI or the CLI:
 | Command | Description |
 |---|---|
 | `/plugins list [--verbose]` | List discovered plugins with state and contributions |
-| `/plugins add <source> [--force]` | Install from a local directory, `.zip`/`.tar.gz`, or `https://` URL (stays disabled until enabled) |
+| `/plugins add <source> [--force]` | Install from a local directory, `.zip`/`.tar.gz`, an `https://` archive URL, or a `git+<https-url>#<ref>[:<subpath>]` git source (enabled and loads at the next session start) |
 | `/plugins remove <pluginid>` | Uninstall a plugin (refused while enabled) |
 | `/plugins enable <pluginid>` | Enable, load, and register its tools/commands |
 | `/plugins disable <pluginid>` | Unload and deregister without deleting files |
 | `/plugins test <pluginid>` | Load in an isolated harness and invoke each tool once |
+| `/plugins stores [--check]` | Report each store's effective endpoint and its source; `--check` also contacts each store and reports availability and plugin count |
 | `/plugins help` | Show the usage block |
 
 The same operations are available from a shell as `ragent plugins <sub> …`.
 Plugins are discovered under `.ragent/plugins/` (project) or
 `~/.config/ragent/plugins/` (user-global). Set `plugins.enabled: false` to make
 the whole subsystem inert.
+
+An enabled plugin's slash commands appear in the `/` menu and in `/help`. Besides
+the inline commands a plugin registers through the host API, ragent reads the
+Claude-dialect `commands/*.md` prompt files (for example the official
+`commit-commands` plugin's `/commit`, `/clean_gone`, and `/commit-push-pr`): each
+command's markdown body is injected into the session as a user turn, with its
+arguments substituted for `$ARGUMENTS`/`$N`. A command whose name collides with a
+built-in, a skill, or another plugin registers under the namespaced
+`plugin:<plugin-id>:<name>` trigger instead of shadowing it.
+
+Besides tools and commands, an enabled plugin's other contribution surfaces are
+bridged into the session:
+
+- **skills** (FR-029) - a declared `skills` directory joins skill discovery;
+- **MCP servers** (FR-030) - a declared `mcpServers` entry connects as
+  `<plugin-id>.<server>`;
+- **agents** (FR-032) - a plugin's `agents/*.md` profiles join agent discovery, so
+  they appear in the agent picker and are spawnable via `new_agent`. Both ragent's
+  JSON frontmatter and the Claude-dialect YAML frontmatter are accepted, and a
+  project agent of the same name wins a clash;
+- **hooks** (FR-033) - a plugin's declared `hooks` fire on the matching session
+  lifecycle events (session start/end, turn start/end, compaction, pre/post tool
+  use). The declaration is read both inline and from a `hooks.json` file (the
+  plugin root or `hooks/`), including the Claude group shape
+  `{matcher, hooks: [...]}`: a `matcher` selects the tools a hook applies to
+  (`Edit|Write`, or a `Bash(git commit:*)` prefix guard). A plugin hook receives
+  `CLAUDE_PLUGIN_ROOT` and the Claude event JSON on stdin, a `PostToolUse`
+  `additionalContext` is folded into the tool result, and a blocking Stop hook
+  can feed findings back to the model before the turn ends. The trigger name
+  accepts both ragent's `pre_tool_use` and the Claude `PreToolUse` spellings, and
+  configured `ragent.json` hooks run first at a shared trigger.
 
 ---
 
@@ -1767,6 +1800,29 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.114
+
+- **Plugin bridges** — a plugin's `skills`, `mcpServers`, `commands`, `agents`,
+  and `hooks` sections are bridged into the session (T-021..T-023), including the
+  full Claude `hooks.json` declaration surface with Stop continuation (T-026);
+  the recogniser accepts the nested `.codex-plugin/plugin.json` (T-024) and
+  resolves a directory shipping both nested manifests to the Claude dialect
+  (T-025). `/plugins list` counts and details skills/agents/hooks and
+  `/plugins add` installs a plugin enabled.
+- **`/new --github` credential chain** — GitHub tokens resolve through the shared
+  `ragent_config::github` chain (`GITHUB_TOKEN`, then
+  `~/.config/ragent/github_token`, then the `gh` CLI) with an app-token
+  downgrade, so a `ghu_` token from `/github login` no longer blocks repository
+  creation.
+- **`ragent_info` tool** — a new read-only tool reports the running ragent
+  version, build time, git commit, and compiler (168 -> 169 tools).
+- **Code-quality pass (`/simplify all`)** — seven verified fixes across
+  `ragent-agent`, `ragent-plugins`, `ragent-tui`, and `src/`, with no
+  user-visible behaviour change.
+- **Documentation** — `STATS.md` re-measured (1251 crate Rust files, 499,037
+  crate lines, 628 external test files, ~9,689 tests), the version/how-to docs
+  refreshed, and every how-to re-rendered to PDF (124 PDFs).
+
 ## Version 1.0.113
 
 - **Input queue + ALT-Q queue-control menu** — the TUI input field stays
@@ -1778,9 +1834,10 @@ parsed into the required structure (FR-005/FR-006).
   `Up`/`Down`/`Enter`; `Clear` opens a `Yes`/`No` confirmation (default `No`)
   and `Show` opens a scrollable queue-entry panel where `Enter` moves an entry
   toward the front and `Del` removes it. `/queue [list|clear|next|help]` exposes
-  the same queue. Slash, bang, and teammate-targeted sends keep the busy
-  refusal. Spec `inputqueue` complete (T-001..T-027); 234 new test attributes
-  across 19 new test files. See
+  the same queue. A slash command (`/…`) is queued the same way while a turn
+  runs (FR-017 amendment) and runs at the next turn boundary; only bang commands
+  (`!…`) and teammate-targeted sends keep the busy refusal. Spec `inputqueue`
+  complete (T-001..T-027); 234 new test attributes across 19 new test files. See
   [`docs/howtos/slashcommands/queue.md`](docs/howtos/slashcommands/queue.md).
 - **Code-quality pass (`/simplify all`)** — de-duplication and dead-code
   removal across the inputqueue diff and the v1.0.109..v1.0.112 plugins/research

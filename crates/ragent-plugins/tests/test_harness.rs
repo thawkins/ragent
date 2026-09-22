@@ -358,20 +358,27 @@ fn harness_does_not_write_the_store_ledger_or_enable_the_plugin() {
 
 #[test]
 fn harness_reports_unsupported_capabilities() {
+    // An unbridgeable MCP shape (a JSON array) keeps the FR-025 label.
     let tree = TempTree::new("unsupported");
     write_plugin_manifest(
         &tree,
         "legacy",
         r#"{
             "id": "legacy", "name": "legacy", "version": "1.0.0", "entry": "index.js",
-            "mcp_servers": { "db": { "command": "db-server" } }
+            "mcp_servers": [ "not", "an", "object" ]
         }"#,
         "0;",
     );
 
     let report = test_plugin(tree.dirs(), &config(), "legacy");
     assert!(report.passed(), "{:?}", report.steps);
-    assert!(!report.unsupported.is_empty());
+    assert!(
+        report
+            .unsupported
+            .contains(&"mcp server transports".to_string()),
+        "unsupported labels: {:?}",
+        report.unsupported
+    );
     let rendered = render_report(&report);
     assert!(rendered.contains("Unsupported capabilities:"));
     assert!(rendered.contains("mcp server transports"), "{rendered}");

@@ -295,6 +295,36 @@ Turn and compaction triggers additionally receive:
 | `RAGENT_COMPACTION_TOKENS_BEFORE` | Token count before compaction (`on_compaction`) |
 | `RAGENT_COMPACTION_TOKENS_AFTER`  | Token count after compaction (`on_compaction`)  |
 
+A **plugin-contributed** hook (see
+[`plugins.md`](plugins.md) section 9.6) additionally receives:
+
+| Variable              | Description                                          |
+|-----------------------|------------------------------------------------------|
+| `CLAUDE_PLUGIN_ROOT`  | The declaring plugin's root, so a command can resolve `${CLAUDE_PLUGIN_ROOT}/...` |
+| `CLAUDE_PROJECT_DIR`  | Alias of `RAGENT_WORKING_DIR`, for Claude-dialect scripts |
+
+and the event as JSON on **stdin** (the Claude hook protocol shape:
+`hook_event_name`, `cwd`, `session_id`, and — for the tool-scoped triggers —
+`tool_name`, `tool_input`, `tool_response`, `tool_success`). A hook declared in
+`ragent.json` keeps the environment-only contract (no stdin payload).
+
+---
+
+## Stop Hook Continuation
+
+The `on_session_end` trigger doubles as the Claude **Stop** hook. A Stop hook may
+block the turn and return findings (the Claude `asyncRewake` shape):
+
+- `exit 2` with a stdout JSON `reason`/`additionalContext`, else the stderr text;
+- `exit 0` with `hookSpecificOutput.additionalContext`; or
+- a top-level `{"decision": "block", ...}`.
+
+When a Stop hook returns non-empty findings they are appended to the conversation
+as a synthetic user turn (with an `AgentNotice`) **before the turn ends**, so a
+plugin security review can feed corrections back to the model. The loop is
+bounded to three continuations (`MAX_STOP_CONTINUATIONS = 3`), so a hook that
+always blocks cannot spin the session.
+
 ---
 
 ## Complete Example

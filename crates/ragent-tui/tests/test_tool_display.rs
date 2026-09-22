@@ -673,6 +673,13 @@ fn test_input_summary_mf_version_tool() {
 }
 
 #[test]
+fn test_input_summary_ragent_info_tool() {
+    let summary = tool_input_summary("ragent_info", &json!({}), "/home/user/project");
+    assert!(summary.contains("ragent build info"), "got: {summary}");
+    assert!(summary.contains("ℹ️"), "Should have info emoji");
+}
+
+#[test]
 fn test_input_summary_github_get_actions_tool() {
     let summary = tool_input_summary("github_get_actions", &json!({}), "/project");
     assert!(summary.contains("📋"), "Should have list emoji");

@@ -3,10 +3,22 @@
 //!
 //! Two third-party manifest dialects are recognised:
 //!
-//! - **Codex** — a directory containing `codex-plugin.json`, or a `plugin.json`
-//!   whose top-level body contains a `"codex"` marker field.
+//! - **Codex** — a directory containing `codex-plugin.json`, a
+//!   `.codex-plugin/plugin.json` file (the shape the official `openai/plugins`
+//!   catalogue ships), or a `plugin.json` whose top-level body contains a
+//!   `"codex"` marker field.
 //! - **Claude** — a directory containing `claude-plugin.json`, or a
 //!   `.claude-plugin/plugin.json` file.
+//!
+//! A directory carrying **both** nested dialect manifests
+//! (`.codex-plugin/plugin.json` *and* `.claude-plugin/plugin.json`) is a
+//! multi-target plugin, not a malformed one: a single upstream tree shipping a
+//! manifest per host (for example `mongodb/agent-skills`). Such a directory is
+//! resolved deterministically to the **Claude** dialect, whose manifest supports
+//! every bridged contribution surface (skills, MCP servers, commands, agents,
+//! hooks). Any other both-match — mixed top-level `codex-plugin.json` /
+//! `claude-plugin.json`, or a Codex-marked `plugin.json` beside a Claude manifest
+//! — stays ambiguous and is rejected.
 //!
 //! Both dialects are normalised by later tasks (T-003) into the single
 //! [`PluginDescriptor`] model defined here. Manifest sections with no ragent
@@ -30,6 +42,9 @@ pub const CODEX_MANIFEST_FILE: &str = "codex-plugin.json";
 /// Generic manifest file name; Codex when it carries a top-level `"codex"`
 /// marker field (FR-002).
 pub const GENERIC_MANIFEST_FILE: &str = "plugin.json";
+/// Codex's nested manifest location (`.codex-plugin/plugin.json`), the shape
+/// the official `openai/plugins` catalogue ships.
+pub const CODEX_NESTED_MANIFEST: &str = ".codex-plugin/plugin.json";
 /// Top-level JSON field that marks a `plugin.json` as a Codex manifest.
 pub const CODEX_MARKER_FIELD: &str = "codex";
 /// File name recognising the Claude dialect directly.
@@ -39,8 +54,10 @@ pub const CLAUDE_NESTED_MANIFEST: &str = ".claude-plugin/plugin.json";
 
 /// The manifest dialect a plugin directory was authored in.
 ///
-/// Each directory carries exactly one dialect; a directory whose contents match
-/// both dialects is ambiguous and rejected with
+/// A directory normally carries exactly one dialect. A directory that carries
+/// **both** nested dialect manifests (`.codex-plugin/plugin.json` and
+/// `.claude-plugin/plugin.json`) is resolved to [`PluginDialect::Claude`]; any
+/// other both-match is ambiguous and rejected with
 /// [`PluginError::AmbiguousManifest`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -78,7 +95,11 @@ pub struct PluginDescriptor {
     /// Recognised source dialect.
     pub dialect: PluginDialect,
     /// Entry-point JavaScript file, absolute within the plugin root.
-    pub entry: PathBuf,
+    ///
+    /// `None` for a manifest that contributes no JavaScript (a skill-only or
+    /// MCP-only plugin): the plugin installs, lists, and loads inertly without
+    /// executing any entry point.
+    pub entry: Option<PathBuf>,
     /// Permissions the manifest requests (for example `"network.outbound"`).
     pub requested_permissions: Vec<String>,
     /// Host-API version the plugin was written against (FR-019 version check).
@@ -107,18 +128,27 @@ pub struct DialectMatch {
 /// `entries` are the directory's file and subdirectory names (a plain
 /// `read_dir` listing suffices; subdirectory names should be passed with a
 /// trailing path separator stripped, i.e. the plain entry name — subdirectory
-/// files such as `.claude-plugin/plugin.json` are supplied through
-/// `read_entry`). `read_entry` lazily returns the bytes of a named file, used
-/// to inspect `plugin.json` and `.claude-plugin/plugin.json`; call it with
-/// `|_| None` for a purely name-based check that never reads manifest bodies.
+/// files such as `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`
+/// are supplied through `read_entry`). `read_entry` lazily returns the bytes of
+/// a named file, used to inspect `plugin.json`, `.codex-plugin/plugin.json`, and
+/// `.claude-plugin/plugin.json`; call it with `|_| None` for a purely name-based
+/// check that never reads manifest bodies.
 ///
 /// Returns `Ok(None)` when no dialect is recognised, `Ok(Some(_))` for exactly
-/// one dialect, and [`PluginError::AmbiguousManifest`] when both dialects match.
+/// one dialect, and [`PluginError::AmbiguousManifest`] when both dialects match
+/// in any combination other than the multi-target pairing.
+///
+/// A directory carrying **both nested dialect manifests** (`.codex-plugin/plugin.json`
+/// and `.claude-plugin/plugin.json`, the layout a single upstream tree ships when
+/// it targets several hosts at once) is not ambiguous: it resolves
+/// deterministically to the Claude dialect, whose manifest supports every
+/// bridged contribution surface. See the module docs for the rationale.
 ///
 /// # Errors
 ///
 /// Returns [`PluginError::AmbiguousManifest`] when the directory matches both
-/// the Codex and Claude recognition rules.
+/// the Codex and Claude recognition rules and the match is not the
+/// both-nested-manifest multi-target pairing.
 pub fn recognise_dialect(
     entries: &[String],
     read_entry: impl Fn(&str) -> Option<Vec<u8>>,
@@ -127,6 +157,16 @@ pub fn recognise_dialect(
     let claude = claude_match(entries, &read_entry);
 
     match (codex, claude) {
+        // A multi-target plugin ships *both nested* manifests (one per host);
+        // prefer Claude, whose manifest is the richer of the two. Any other
+        // both-match (mixed top-level manifests, or a Codex-marked `plugin.json`
+        // beside a Claude manifest) stays a genuine ambiguity.
+        (Some(codex_match), Some(claude_match))
+            if codex_match.manifest_rel.to_str() == Some(CODEX_NESTED_MANIFEST)
+                && claude_match.manifest_rel.to_str() == Some(CLAUDE_NESTED_MANIFEST) =>
+        {
+            Ok(Some(claude_match))
+        }
         (Some(_), Some(_)) => Err(PluginError::AmbiguousManifest),
         (Some(m), None) | (None, Some(m)) => Ok(Some(m)),
         (None, None) => Ok(None),
@@ -157,8 +197,8 @@ pub fn detect_dialect(root: &Path) -> Result<Option<DialectMatch>, PluginError> 
     recognise_dialect(&entries, |name| std::fs::read(root.join(name)).ok())
 }
 
-/// Codex recognition: `codex-plugin.json`, or a `plugin.json` containing a
-/// top-level `"codex"` marker field (FR-002).
+/// Codex recognition: `codex-plugin.json`, `.codex-plugin/plugin.json`, or a
+/// `plugin.json` containing a top-level `"codex"` marker field (FR-002).
 fn codex_match(
     entries: &[String],
     read_entry: &impl Fn(&str) -> Option<Vec<u8>>,
@@ -167,6 +207,12 @@ fn codex_match(
         return Some(DialectMatch {
             dialect: PluginDialect::Codex,
             manifest_rel: PathBuf::from(CODEX_MANIFEST_FILE),
+        });
+    }
+    if entries.iter().any(|e| e == ".codex-plugin") && read_entry(CODEX_NESTED_MANIFEST).is_some() {
+        return Some(DialectMatch {
+            dialect: PluginDialect::Codex,
+            manifest_rel: PathBuf::from(CODEX_NESTED_MANIFEST),
         });
     }
     if entries.iter().any(|e| e == GENERIC_MANIFEST_FILE)

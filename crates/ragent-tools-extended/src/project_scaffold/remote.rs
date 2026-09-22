@@ -5,7 +5,9 @@
 //! module implements both hosting paths (T-009 GitHub, T-010 GitLab):
 //!
 //! - **GitHub** — resolve the token (`GITHUB_TOKEN` env, then the
-//!   `~/.ragent/github_token` file written by `/github login`); create the
+//!   `~/.ragent/github_token` file written by `/github login`, then the
+//!   authenticated `gh` CLI when the stored token is a GitHub App token that
+//!   lacks repository-admin permission); create the
 //!   repository via `POST /user/repos`, reusing an existing same-name
 //!   repository (422 → `GET /repos/{login}/{name}`, FR-015 idempotent retry).
 //! - **GitLab** — resolve the token (`GITLAB_TOKEN` env, then the
@@ -109,23 +111,18 @@ pub struct RemoteReport {
     pub url: String,
 }
 
-/// Resolve the GitHub token: `GITHUB_TOKEN` first, then the
-/// `~/.ragent/github_token` file written by `/github login`. Mirrors the
-/// `ragent-tools-vcs` token precedence without a cross-crate dependency.
+/// Resolve the GitHub token via the shared credential chain
+/// (`ragent_config::github`): the `GITHUB_TOKEN` environment variable, then
+/// the `~/.ragent/github_token` file written by `/github login`, then the
+/// authenticated `gh` CLI.
+///
+/// The `gh` fallback matters here because the token `/github login` stores is
+/// a GitHub App token (`ghu_`) whose permissions do not include repository
+/// administration, so `POST /user/repos` would be rejected. A stored token
+/// that cannot create repositories defers to the CLI credential when one is
+/// available.
 pub fn load_github_token() -> Option<String> {
-    if let Ok(token) = std::env::var("GITHUB_TOKEN")
-        && !token.trim().is_empty()
-    {
-        return Some(token.trim().to_owned());
-    }
-    let path = ragent_config::user_dirs::global_github_token_path()?;
-    let raw = std::fs::read_to_string(path).ok()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_owned())
-    }
+    ragent_config::github::resolve_github_token()
 }
 
 /// API flavour controlling the authentication header style (T-009/T-010).

@@ -2,10 +2,12 @@
 //!
 //! Mirrors the TUI `/plugins` slash family so the plugin store can be managed
 //! from a shell without launching the TUI: `ragent plugins <sub> [args...]` for
-//! the seven subcommands (`list`, `add`, `remove`, `enable`, `disable`, `test`,
-//! `help`). The parse-and-run logic lives entirely in the `ragent-plugins` crate
-//! ([`run_store_command`], [`run_control_command`], [`run_test_command`],
-//! [`render_help`]); this module supplies only the CLI-side glue:
+//! the eight subcommands (`list`, `add`, `remove`, `enable`, `disable`, `test`,
+//! `stores`, `help`). The parse-and-run logic lives entirely in the
+//! `ragent-plugins` crate ([`ragent_plugins::run_store_command`],
+//! [`ragent_plugins::run_control_command`], [`ragent_plugins::run_test_command`],
+//! [`ragent_plugins::render_stores_report`], [`render_help`]); this module
+//! supplies only the CLI-side glue:
 //!
 //! - the argument vector is joined and split into a subcommand token and the
 //!   remaining text exactly as the TUI dispatch arm does;
@@ -42,11 +44,12 @@ JavaScript runtime.
 | Command | Arguments | Description |
 |---|---|---|
 | `ragent plugins list [--verbose]` | optional `--verbose` | List discovered plugins with state, contributions, and (with `--verbose`) telemetry counters. |
-| `ragent plugins add <source> [--force]` | required `source`, optional `--force` | Install a plugin and validate its manifest. It stays disabled until enabled. |
+| `ragent plugins add <source> [--force]` | required `source`, optional `--force` | Install a plugin and validate its manifest. It is enabled and loads at the next session start. |
 | `ragent plugins remove <pluginid>` | required `pluginid` | Uninstall a plugin from the store. Refused while the plugin is enabled. |
 | `ragent plugins enable <pluginid>` | required `pluginid` | Mark a plugin enabled, load it now, and register its tools and commands. |
 | `ragent plugins disable <pluginid>` | required `pluginid` | Unload a plugin and deregister its tools and commands without deleting files. |
 | `ragent plugins test <pluginid>` | required `pluginid` | Load a plugin in an isolated harness, invoke each contributed tool once, and report per-step results. |
+| `ragent plugins stores` | optional `--check` | Report each store's effective endpoint and its source; add `--check` to also contact each store and report availability and plugin count. |
 | `ragent plugins help` | none | Show this usage block. |
 
 ### Sources accepted by `ragent plugins add`

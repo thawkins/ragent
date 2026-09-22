@@ -4,7 +4,7 @@ The tools available to ragent agents, organised by category. Each category has
 its own document with per-tool arguments, required flags, typical values, and
 worked examples.
 
-> **Scope:** Tool names, parameter schemas, and usage patterns (168 statically
+> **Scope:** Tool names, parameter schemas, and usage patterns (169 statically
 > registered tools plus the dynamic `mcp_tool`). For TUI workflow see
 > `docs/howtos/tutorial.md`. For hiding/exposing tool families see
 > `docs/howtos/tool-visibility.md`. For team coordination see
@@ -36,7 +36,7 @@ worked examples.
 | 20 | [mcp.md](mcp.md) | 1 | always on |
 | 21 | [skills.md](skills.md) | 1 | always on |
 | 22 | [interactive.md](interactive.md) | 4 | always on |
-| 23 | [utility.md](utility.md) | 1 | always on |
+| 23 | [utility.md](utility.md) | 2 | always on |
 | 24 | [finance.md](finance.md) | 8 | `finance` |
 | 25 | [communications.md](communications.md) | 2 | always on |
 | 26 | [plot.md](plot.md) | 6 | always on |

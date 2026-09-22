@@ -699,19 +699,27 @@ async fn async_main() -> Result<()> {
     // process and performs a handshake + tool-list round-trip; doing this
     // sequentially on the main task can add 5-15 seconds to startup when one
     // or more servers are slow to start.
-    let mcp_server_count = config.read().await.mcp.len();
+    //
+    // FR-030 MCP bridge: enabled plugins also contribute MCP servers (their
+    // manifest `mcpServers` section). Configured servers take precedence on an
+    // id collision; the merged set connects exactly like before.
+    let mcp_configs: Vec<(String, ragent_agent::McpServerConfig)> = {
+        let working_dir = std::env::current_dir().unwrap_or_else(|e| {
+            tracing::warn!(
+                error = %e,
+                "cannot determine working directory; plugin-contributed MCP servers will not be scanned"
+            );
+            std::path::PathBuf::new()
+        });
+        let guard = config.read().await;
+        ragent_agent::plugin::plugin_mcp_servers(&working_dir, &guard.mcp)
+    };
+    let mcp_server_count = mcp_configs.len();
     if mcp_server_count > 0 {
         tracing::info!(
             mcp_servers = mcp_server_count,
             "Connecting MCP servers (background)"
         );
-        let mcp_configs: Vec<(String, ragent_agent::McpServerConfig)> = config
-            .read()
-            .await
-            .mcp
-            .iter()
-            .map(|(id, cfg)| (id.clone(), cfg.clone()))
-            .collect();
 
         let sp = Arc::clone(&session_processor);
         tokio::spawn(async move {

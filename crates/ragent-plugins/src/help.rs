@@ -12,10 +12,12 @@
 //! function with no store access.
 
 /// The `/plugins` subcommand tokens, in display order: the five management
-/// subcommands, the `test` harness, and `help` (FR-006). Used to seed the
-/// autocomplete menu and asserted against the usage block.
-pub const PLUGIN_SUBCOMMANDS: [&str; 7] =
-    ["list", "add", "remove", "enable", "disable", "test", "help"];
+/// subcommands, the `test` harness, the `stores` report, and `help` (FR-006,
+/// FR-031). Used to seed the autocomplete menu and asserted against the usage
+/// block.
+pub const PLUGIN_SUBCOMMANDS: [&str; 8] = [
+    "list", "add", "remove", "enable", "disable", "test", "stores", "help",
+];
 
 /// The usage block body (everything after the `From:` attribution line).
 ///
@@ -30,11 +32,12 @@ JavaScript runtime.
 | Command | Arguments | Description |
 |---|---|---|
 | `/plugins list [--verbose]` | optional `--verbose` | List discovered plugins with state, contributions, and (with `--verbose`) telemetry counters. |
-| `/plugins add <source> [--force]` | required `source`, optional `--force` | Install a plugin and validate its manifest. It stays disabled until enabled. |
+| `/plugins add <source> [--force]` | required `source`, optional `--force` | Install a plugin and validate its manifest. It is enabled and loads at the next session start. |
 | `/plugins remove <pluginid>` | required `pluginid` | Uninstall a plugin from the store. Refused while the plugin is enabled. |
 | `/plugins enable <pluginid>` | required `pluginid` | Mark a plugin enabled, load it now, and register its tools and commands. |
 | `/plugins disable <pluginid>` | required `pluginid` | Unload a plugin and deregister its tools and commands without deleting files. |
 | `/plugins test <pluginid>` | required `pluginid` | Load a plugin in an isolated harness, invoke each contributed tool once, and report per-step results. |
+| `/plugins stores` | optional `--check` | Report each store's effective endpoint and its source; add `--check` to also contact each store and report availability and plugin count. |
 | `/plugins help` | none | Show this usage block. |
 
 ### Sources accepted by `/plugins add`

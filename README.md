@@ -20,7 +20,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — 168 registered tools across 25 categories:
+- **Comprehensive tool system** — 169 registered tools across 25 categories:
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -50,7 +50,8 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
       - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers
       - **Task Management** — task_create, task_update, task_get, task_list
       - **Interactive** — question, think
-      - **Utility** — calculator, get_env
+      - **Utility** — calculator, get_env, ragent_info (reports the running
+        version, build time, git commit, and compiler)
       - **Stocks & currency** — stock_quote, stock_history, stock_fundamentals,
         stock_search, stock_options, currency_rate, currency_history. Free Yahoo
         Finance is the default; Alpha Vantage can be configured in `ragent.json`.
@@ -142,12 +143,34 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   and fetch failures out by reason/cause, and `mf_search` `exclude_engines`
 - **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
   prompts, and file context into agent sessions
-- **Plugin system** — load Codex-dialect (`codex-plugin.json`) and Claude
-  Code/Desktop-dialect (`.claude-plugin/plugin.json`) plugins, run their
+- **Plugin system** — load Codex-dialect (`codex-plugin.json` or the nested
+  `.codex-plugin/plugin.json` the `openai/plugins` store ships) and Claude
+  Code/Desktop-dialect (`.claude-plugin/plugin.json`) plugins — including
+  multi-target trees that ship both nested manifests side by side (e.g.
+  `mongodb/agent-skills`), which resolve to the Claude dialect — run their
   JavaScript entries on an embedded, budget-sandboxed engine (`rquickjs`, no
   Node/Deno required) behind a versioned `ragent` host API, and register their
-  tools (`plugin_<id>_<tool>`) and slash commands; managed through
-  `/plugins list|add|remove|enable|disable|test|help` in the TUI and the
+  tools (`plugin_<id>_<tool>`) and slash commands; skill-only/MCP-only plugins
+  (no JavaScript entry) install and load inertly, and their `skills` directories
+  and `mcpServers` entries are bridged into the session (plugin skills join the
+  skill-discovery roots; plugin MCP servers connect as `<plugin-id>.<server>`);
+  a plugin's slash commands are bridged too, including the Claude `commands/*.md`
+  prompt commands (each injected as a user turn with `$ARGUMENTS` substituted),
+  registered under their bare name or the namespaced `plugin:<id>:<name>` trigger
+  and listed in the `/` menu and `/help`; plugin `agents/*.md` profiles join
+  agent discovery (YAML frontmatter accepted, project agents win name clashes),
+  and plugin-declared `hooks` fire on the matching session lifecycle events
+  (both `pre_tool_use` and Claude's `PreToolUse` spellings accepted; the
+  `hooks.json` file and the group `{matcher, hooks: [...]}` shape are read, a
+  plugin hook gets `CLAUDE_PLUGIN_ROOT` and the Claude event JSON on stdin, and
+  a blocking Stop hook can feed findings back before the turn ends);
+  `/plugins codex` and `/plugins claude`
+  browse each store's official marketplace (`StoreProvider` normalises the Codex and
+  Claude document shapes), and `/plugins add` also accepts a
+  `git+<https-url>#<ref>[:<subpath>]` git source; a freshly installed plugin is
+  recorded enabled and loads at the next session start (no JavaScript runs during
+  the install); managed through
+  `/plugins list|add|remove|enable|disable|test|stores|help` in the TUI and the
   `ragent plugins <sub>` CLI; `plugins.enabled: false` makes the subsystem inert
 - **Input queue** — the TUI input field stays editable while the primary agent
   executes: each `Enter` appends the message to a bounded FIFO queue (default 32
@@ -450,12 +473,34 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.113** — The core architecture, tool system (168 tools across 25 categories), TUI,
+**v1.0.114** — The core architecture, tool system (169 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
+
+- **Plugin bridges (v1.0.114)** — plugin bridges for skills, MCP servers,
+  slash commands, agents, and hooks (including the full Claude `hooks.json`
+  declaration surface, a `.codex-plugin/plugin.json` recogniser, and the
+  both-nested multi-target descriptor fix); the GitHub credential chain now has
+  a shared `ragent_config::github` resolver with a `gh` CLI fallback and an
+  app-token downgrade, so `/new --github` creates a hosting repository even when
+  `/github login` stored a `ghu_` token; the input field queues slash commands
+  while the agent runs; and a new read-only `ragent_info` tool reports the
+  running version, build time, git commit, and compiler (169 tools).
+
+- **Store providers + plugin-store installs** — `/plugins codex` and `/plugins claude`
+  now browse the stores' own official marketplaces (`openai/plugins` and
+  `anthropics/claude-plugins-official`). A `StoreProvider` trait with per-store Codex and
+  Claude implementations normalises each vendor document shape (`name`-as-id, optional
+  `version`, `local`/`url`/`git-subdir`/repo-relative sources) into the internal model, and
+  the store kind is threaded through the fetch seam so every fetch parses with the right
+  provider. A repo-relative source resolves against the origin's GitHub repository as an
+  installable `git+<repo>#<ref>:<path>` source, and the install pipeline accepts a
+  `git+<https-url>#<ref>[:<subpath>]` source via a shallow, sparse `git clone`, so a plugin
+  hosted in a subdirectory of a large repository installs without downloading the whole
+  tree.
 
 - **Message input queue (v1.0.113)** — the TUI input field
   stays editable while the primary agent executes: each `Enter` queues the
@@ -466,7 +511,9 @@ Recent highlights:
   `/queue [list|clear|next|help]` slash command expose the same queue; a
   `Yes`/`No` dialog (default `No`) guards clearing, and the `Show` row opens a
   scrollable queue-entry panel where `Enter` moves an entry one step toward the
-  front and `Del` removes it. Slash/bang/teammate sends keep the busy refusal.
+  front and `Del` removes it. A slash command (`/…`) is queued the same way while
+  a turn runs (FR-017 amendment) and runs at the next turn boundary; only bang
+  commands (`!…`) and teammate-targeted sends keep the busy refusal.
   Spec `inputqueue` complete (T-001..T-027), 19 new test files (234 new test
   attributes). This release also lands the full-workspace clippy hygiene pass:
   the non-existent `clippy::assert_is_empty` allow is removed from 244 files

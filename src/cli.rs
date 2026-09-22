@@ -1143,7 +1143,8 @@ fn run_new_scaffold(
 ) -> Result<()> {
     use ragent_tools_extended::project_scaffold::{
         HostingTarget, RemoteStatus, enforce_empty_directory_guard, init_and_commit,
-        init_github_remote, init_gitlab_remote, plan_and_emit, recipe_for,
+        init_github_remote_with_token, init_gitlab_remote, load_github_token, plan_and_emit,
+        recipe_for,
     };
 
     let cwd = std::env::current_dir().map_err(|e| anyhow::anyhow!("cannot read cwd: {e}"))?;
@@ -1183,13 +1184,42 @@ fn run_new_scaffold(
     let git_outcome = init_and_commit(&cwd, "Initial scaffold");
     let remote_status = match request.hosting() {
         None => RemoteStatus::None,
-        Some(HostingTarget::GitHub) => match init_github_remote(&cwd, &slug, true) {
-            Ok(report) => RemoteStatus::Created { url: report.url },
-            Err(failure) => RemoteStatus::Failed {
-                step: failure.step.as_str().to_owned(),
-                message: failure.message,
-            },
-        },
+        Some(HostingTarget::GitHub) => {
+            // Use the remote-init entry point directly (rather than the
+            // `reqwest::blocking` wrapper in `remote.rs`) so the `/new` CLI
+            // scaffold can run under the main tokio runtime: the blocking
+            // client spawns its own runtime, which panics when the runtime is
+            // dropped from an async context. `reqwest::blocking` inside a
+            // `spawn_blocking` worker has no ambient runtime, so it is safe.
+            let base_url = "https://api.github.com";
+            let token = load_github_token();
+            let root = cwd.clone();
+            let repo_name = slug.clone();
+            match tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async move {
+                    tokio::task::spawn_blocking(move || {
+                        init_github_remote_with_token(
+                            base_url,
+                            token.as_deref(),
+                            &root,
+                            &repo_name,
+                            true,
+                        )
+                    })
+                    .await
+                })
+            }) {
+                Ok(Ok(report)) => RemoteStatus::Created { url: report.url },
+                Ok(Err(failure)) => RemoteStatus::Failed {
+                    step: failure.step.as_str().to_owned(),
+                    message: failure.message,
+                },
+                Err(join_err) => RemoteStatus::Failed {
+                    step: "github repo create".to_owned(),
+                    message: format!("GitHub remote-init worker failed: {join_err}"),
+                },
+            }
+        }
         Some(HostingTarget::GitLab) => match init_gitlab_remote(&cwd, &slug, true) {
             Ok(report) => RemoteStatus::Created { url: report.url },
             Err(failure) => RemoteStatus::Failed {

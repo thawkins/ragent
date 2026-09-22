@@ -78,7 +78,7 @@ fn make_tar_gz(path: &Path, files: &[(&str, &str)]) {
 // ── local directory source (FR-007, FR-010) ─────────────────────────────────
 
 #[test]
-fn add_local_directory_installs_disabled_and_reports_id_and_dialect() {
+fn add_local_directory_installs_enabled_and_reports_id_and_dialect() {
     let tree = TempTree::new("dir");
     let source = stage_codex_plugin(&tree.0.join("src"), CODEX);
 
@@ -93,10 +93,11 @@ fn add_local_directory_installs_disabled_and_reports_id_and_dialect() {
     // runtime touched it.
     assert!(outcome.installed_dir.join("index.js").exists());
 
-    // The plugin exists in a fresh scan, disabled (FR-007).
+    // The plugin exists in a fresh scan, enabled (FR-007): add records it in
+    // the ledger so it loads at the next session start.
     let found = scan_dirs(dirs(&tree));
     assert_eq!(found.len(), 1);
-    assert!(!found[0].enabled);
+    assert!(found[0].enabled);
 }
 
 #[test]
@@ -107,6 +108,28 @@ fn add_relative_source_resolves_against_workdir() {
 
     let outcome = add(&dirs(&tree), &workdir, "vendor/codex-weather", false).expect("add");
     assert_eq!(outcome.parsed.descriptor.id, "weather");
+}
+
+#[test]
+fn add_nested_codex_manifest_directory_installs() {
+    let tree = TempTree::new("dir-nested-codex");
+    let plugin = tree.0.join("src/linear");
+    std::fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();
+    std::fs::write(
+        plugin.join(".codex-plugin/plugin.json"),
+        r#"{ "name": "Linear", "version": "5.0.1" }"#,
+    )
+    .unwrap();
+
+    let outcome = add(&dirs(&tree), &tree.0, plugin.to_str().unwrap(), false).expect("add");
+    assert_eq!(outcome.parsed.descriptor.id, "linear");
+    assert_eq!(outcome.parsed.descriptor.dialect, PluginDialect::Codex);
+    assert!(
+        outcome
+            .installed_dir
+            .join(".codex-plugin/plugin.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -300,7 +323,7 @@ fn successful_add_leaves_no_staging_directories() {
     let source = stage_codex_plugin(&tree.0.join("src"), CODEX);
     add(&dirs(&tree), &tree.0, source.to_str().unwrap(), false).expect("add");
     assert!(!tree.0.join("proj/.ragent/plugins/.add-staging").exists());
-    // Ledger untouched: installed plugins are disabled (FR-007), not added to
-    // _state.json by add.
-    assert!(!tree.0.join("proj/.ragent/plugins/_state.json").exists());
+    // The ledger records the install as enabled (FR-007); no staging dir
+    // survives the successful commit.
+    assert!(tree.0.join("proj/.ragent/plugins/_state.json").exists());
 }

@@ -1,0 +1,19 @@
+{
+  "store": "codex",
+  "plugins": [
+    {
+      "id": "codex-weather",
+      "name": "Codex Weather",
+      "version": "1.2.0",
+      "description": "Weather lookups for the agent",
+      "source": "https://raw.githubusercontent.com/thawkins/ragent/main/assets/plugins/fixtures/codex-weather",
+      "tags": ["weather", "http"]
+    },
+    {
+      "id": "codex-time",
+      "name": "Codex Time",
+      "version": "0.9.1",
+      "source": "https://example.org/codex-time.zip"
+    }
+  ]
+}

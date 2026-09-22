@@ -36,7 +36,7 @@ use crate::descriptor::PluginDescriptor;
 use crate::error::PluginError;
 use crate::host_api::{HostApiInstall, HostCalls, PermissionGate};
 use crate::manifest::{
-    HOST_API_VERSION, ParsedManifest, PluginCommandDecl, PluginToolDecl, check_api_version,
+    HOST_API_VERSION, ParsedManifest, PluginCommandDef, PluginToolDecl, check_api_version,
 };
 use crate::runtime::{RuntimePool, SandboxBudget, SandboxContext};
 use crate::store::{LifecycleState, ScannedPlugin, StoreDirs, StoreLedger, scan_dirs};
@@ -61,13 +61,16 @@ pub struct LoadedPlugin {
     /// Tools the plugin contributes: manifest-declared plus any recorded via
     /// `ragent.register_tool` during entry execution (FR-005).
     pub tools: Vec<PluginToolDecl>,
-    /// Slash commands the plugin contributes (manifest + `register_command`).
-    pub commands: Vec<PluginCommandDecl>,
+    /// Slash commands the plugin contributes (manifest + `register_command`,
+    /// each tagged with its inline or prompt-file source).
+    pub commands: Vec<PluginCommandDef>,
     /// Sink of everything the plugin emitted through the host API.
     pub calls: HostCalls,
     /// Store directory this plugin was discovered in (ledger location).
     pub store: PathBuf,
-    /// Live sandbox context; `Some` only while `state == Loaded`.
+    /// Live sandbox context; `Some` only while `state == Loaded` and the
+    /// plugin contributed JavaScript (a non-JS plugin loads inertly with no
+    /// context).
     context: Option<SandboxContext>,
 }
 
@@ -210,7 +213,8 @@ impl PluginManager {
     /// Enable a plugin and immediately load it into the current session
     /// (FR-011). The ledger is updated first so a plugin that fails to load
     /// stays enabled for the next session while this session marks it
-    /// `errored`.
+    /// `errored`. A plugin already loaded in `self.tracked` is returned as-is
+    /// (the session layer's `enable` short-circuits before this call).
     ///
     /// # Errors
     ///
@@ -317,7 +321,11 @@ impl PluginManager {
             unloaded.push(UnloadedPlugin {
                 plugin_id,
                 tools: loaded.registered_tool_names(),
-                commands: loaded.commands.iter().map(|c| c.name.clone()).collect(),
+                commands: loaded
+                    .commands
+                    .iter()
+                    .map(|c| c.decl.name.clone())
+                    .collect(),
             });
         }
         tracing::debug!(
@@ -403,7 +411,7 @@ impl PluginManager {
                 let commands = loaded
                     .commands
                     .iter()
-                    .map(|c| c.name.clone())
+                    .map(|c| c.decl.name.clone())
                     .collect::<Vec<_>>();
                 self.tracked.insert(id.clone(), loaded);
                 LoadReport {
@@ -459,6 +467,22 @@ impl PluginManager {
         check_api_version(descriptor.api_version, HOST_API_VERSION)
             .map_err(|mismatch| format!("api-version: {mismatch}"))?;
 
+        // A non-JS plugin (skill-only / MCP-only) contributes no JavaScript:
+        // it has no entry point, so it loads inertly with no sandbox context
+        // and no contributions. `enable`/`load` still report it `loaded`.
+        let Some(entry) = descriptor.entry.clone() else {
+            return Ok(LoadedPlugin {
+                descriptor,
+                state: LifecycleState::Loaded,
+                error: None,
+                tools: parsed.tools,
+                commands: parsed.commands,
+                calls: HostCalls::new(),
+                store: store.to_path_buf(),
+                context: None,
+            });
+        };
+
         // FR-017 entry budget; FR-003 sandbox context.
         let budget = SandboxBudget::from_config(&self.config).with_deadline(
             std::time::Duration::from_millis(self.config.max_entry_ms.max(1)),
@@ -484,15 +508,21 @@ impl PluginManager {
         // filesystem access. The interrupt gets a fresh entry-budget window so
         // a slow entry cannot starve later tool dispatches of deadline headroom
         // (FR-017).
-        let source = std::fs::read_to_string(&descriptor.entry)
-            .map_err(|e| format!("entry: {}: {e}", descriptor.entry.display()))?;
+        let source = std::fs::read_to_string(&entry)
+            .map_err(|e| format!("entry: {}: {e}", entry.display()))?;
         context.reset_interrupt();
         context.eval(&source).map_err(|e| entry_cause(&e))?;
 
         let mut tools = parsed.tools;
         tools.extend(calls.tools());
         let mut commands = parsed.commands;
-        commands.extend(calls.commands());
+        // Runtime `register_command` contributions are inline (sandbox handlers).
+        commands.extend(
+            calls
+                .commands()
+                .into_iter()
+                .map(crate::manifest::PluginCommandDef::inline),
+        );
         Ok(LoadedPlugin {
             descriptor,
             state: LifecycleState::Loaded,
@@ -525,7 +555,7 @@ impl PluginManager {
                         name: plugin_id.to_string(),
                         version: String::new(),
                         dialect: crate::descriptor::PluginDialect::Codex,
-                        entry: PathBuf::new(),
+                        entry: None,
                         requested_permissions: Vec::new(),
                         api_version: HOST_API_VERSION,
                         unsupported_capabilities: Vec::new(),

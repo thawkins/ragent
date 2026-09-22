@@ -776,6 +776,15 @@ pub async fn run_tui(
             // Stream /spec govcreate staged progress and surface the report.
             app.poll_govcreate_result();
 
+            // Apply a completed off-loop plugin-store index fetch (T-008/FR-016).
+            app.poll_plugin_store_result();
+
+            // Apply a completed off-loop plugin-store install (T-009/FR-011).
+            app.poll_plugin_store_install_result();
+
+            // Surface the `/plugins stores --check` availability probe.
+            app.poll_plugin_store_probe_result();
+
             // Check for completed off-thread codeindex graph builds / reindexes.
             app.poll_codeindex_bg_result();
 

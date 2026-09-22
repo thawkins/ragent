@@ -11,6 +11,14 @@ of rejecting it with `busy - wait for the current turn to finish`. The oldest
 queued entry runs automatically at each turn boundary, and a two-digit counter
 appears before the prompt while entries are pending.
 
+Since the FR-017 amendment, **slash commands are queued the same way**: typing
+`/status` (or any other slash command) while a turn is executing appends it to
+the queue instead of being refused, and the queued command runs at the next turn
+boundary — or immediately via `/queue next`. Because a synchronous command leaves
+the turn boundary free, a run of consecutive queued commands executes
+back-to-back rather than stalling behind the first. Bang commands (`!…`) and
+teammate-targeted messages keep their existing busy refusal.
+
 `/queue` is the prompt-side view of the same queue the `Alt+Q` queue-control
 menu manipulates. It is an optional command: it never mutates the running turn,
 and `clear`/`next` are safe to run at any time.

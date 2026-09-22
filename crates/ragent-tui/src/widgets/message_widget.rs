@@ -1381,6 +1381,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let format = get_str(&["format"]).unwrap_or_else(|| "text".to_string());
             format!("🧠 model info ({})", format)
         }
+        "ragent_info" => {
+            let format = get_str(&["format"]).unwrap_or_else(|| "text".to_string());
+            format!("ℹ️ ragent build info ({})", format)
+        }
 
         // ═══════════════════════════════════════════════════════════════════
         // 📊 PLOT
@@ -3136,6 +3140,18 @@ pub fn tool_result_summary(
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
             Some(format!("🧠 {} / {}", trunc120(provider), trunc120(model)))
+        }
+        "ragent_info" => {
+            let version = out.get("version").and_then(|v| v.as_str()).unwrap_or("?");
+            let built = out
+                .get("build_time")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            Some(format!(
+                "ℹ️ v{} built {}",
+                trunc120(version),
+                trunc120(built)
+            ))
         }
 
         // ═══════════════════════════════════════════════════════════════════

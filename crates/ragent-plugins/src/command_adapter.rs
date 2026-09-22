@@ -36,7 +36,7 @@ use std::collections::BTreeSet;
 
 use crate::error::PluginError;
 use crate::lifecycle::PluginManager;
-use crate::manifest::PluginCommandDecl;
+use crate::manifest::PluginCommandDef;
 use crate::runtime::SandboxContext;
 use crate::store::LifecycleState;
 use crate::tool_adapter::js_literal;
@@ -56,19 +56,18 @@ pub struct PluginCommandAdapter {
     name: String,
     /// Owning plugin id.
     plugin_id: String,
-    /// Declaration as supplied by the plugin (manifest or
-    /// `register_command`).
-    decl: PluginCommandDecl,
+    /// Dispatchable definition (inline sandbox handler or prompt file).
+    def: PluginCommandDef,
 }
 
 impl PluginCommandAdapter {
-    /// Build an adapter for `decl` contributed by `plugin_id`.
+    /// Build an adapter for `def` contributed by `plugin_id`.
     #[must_use]
-    pub fn new(plugin_id: &str, decl: PluginCommandDecl) -> Self {
+    pub fn new(plugin_id: &str, def: PluginCommandDef) -> Self {
         Self {
-            name: decl.name.clone(),
+            name: def.decl.name.clone(),
             plugin_id: plugin_id.to_string(),
-            decl,
+            def,
         }
     }
 
@@ -87,13 +86,25 @@ impl PluginCommandAdapter {
     /// Human-readable description for the autocomplete menu.
     #[must_use]
     pub fn description(&self) -> &str {
-        &self.decl.description
+        &self.def.decl.description
     }
 
     /// Usage hint for help output, when the plugin declared one.
     #[must_use]
     pub fn usage(&self) -> Option<&str> {
-        self.decl.usage.as_deref()
+        self.def.decl.usage.as_deref()
+    }
+
+    /// Prompt body when this command is a prompt command, else `None`.
+    #[must_use]
+    pub fn prompt(&self) -> Option<&str> {
+        self.def.prompt()
+    }
+
+    /// Whether this command dispatches into the plugin's JavaScript sandbox.
+    #[must_use]
+    pub fn is_inline(&self) -> bool {
+        self.def.source == crate::manifest::CommandSource::Inline
     }
 }
 
@@ -106,8 +117,8 @@ impl PluginManager {
     pub fn registered_plugin_command_names(&self) -> BTreeSet<String> {
         let mut set = BTreeSet::new();
         for loaded in self.tracked_plugins() {
-            for decl in &loaded.commands {
-                set.insert(decl.name.clone());
+            for def in &loaded.commands {
+                set.insert(def.decl.name.clone());
             }
         }
         set
@@ -146,11 +157,11 @@ impl PluginManager {
         }
         let mut ours = BTreeSet::new();
         let mut adapters = Vec::with_capacity(loaded.commands.len());
-        for decl in &loaded.commands {
-            if existing.contains(&decl.name) || !ours.insert(decl.name.clone()) {
-                return Err(PluginError::NameCollision(decl.name.clone()));
+        for def in &loaded.commands {
+            if existing.contains(&def.decl.name) || !ours.insert(def.decl.name.clone()) {
+                return Err(PluginError::NameCollision(def.decl.name.clone()));
             }
-            adapters.push(PluginCommandAdapter::new(plugin_id, decl.clone()));
+            adapters.push(PluginCommandAdapter::new(plugin_id, def.clone()));
         }
         let names: Vec<String> = adapters.iter().map(|a| a.name().to_string()).collect();
         for adapter in adapters {
@@ -181,6 +192,21 @@ impl PluginManager {
             );
         };
 
+        // A prompt command has no JavaScript handler: its body is the rendered
+        // result. Returning the body here keeps the TUI dispatch uniform — the
+        // session decides whether to show it or inject it into the agent (FR-031).
+        if let Some(body) = self.prompt_for(registry_name) {
+            return (
+                Ok(substitute_command_args(
+                    &body,
+                    args,
+                    &plugin_id,
+                    &command_name,
+                )),
+                false,
+            );
+        }
+
         let context_result = self
             .get(&plugin_id)
             .and_then(|loaded| loaded.context())
@@ -203,12 +229,46 @@ impl PluginManager {
         self.tracked_plugins()
             .filter(|loaded| loaded.state == LifecycleState::Loaded)
             .find_map(|loaded| {
-                loaded.commands.iter().find_map(|decl| {
-                    (decl.name == registry_name)
-                        .then(|| (loaded.descriptor.id.clone(), decl.name.clone()))
+                loaded.commands.iter().find_map(|def| {
+                    (def.decl.name == registry_name)
+                        .then(|| (loaded.descriptor.id.clone(), def.decl.name.clone()))
                 })
             })
     }
+
+    /// The prompt body for a registered prompt command, else `None`. Used by
+    /// [`PluginManager::execute_command`] to short-circuit prompt commands away
+    /// from the sandbox and by callers that need the rendered prompt itself.
+    #[must_use]
+    pub fn prompt_for(&self, registry_name: &str) -> Option<String> {
+        self.tracked_plugins()
+            .filter(|loaded| loaded.state == LifecycleState::Loaded)
+            .find_map(|loaded| {
+                loaded.commands.iter().find_map(|def| {
+                    (def.decl.name == registry_name)
+                        .then(|| def.prompt().map(str::to_string))
+                        .flatten()
+                })
+            })
+    }
+}
+
+/// Substitute `$ARGUMENTS`, `$1..`, and `${PLUGIN_...}` placeholders in a prompt
+/// command body (FR-031). Mirrors the skill arg-substitution subset the Claude
+/// command templates use; unknown placeholders are left untouched.
+#[must_use]
+pub fn substitute_command_args(body: &str, args: &str, plugin_id: &str, command: &str) -> String {
+    let mut result = body
+        .replace("${PLUGIN_ID}", plugin_id)
+        .replace("${PLUGIN_COMMAND}", command);
+    // $ARGUMENTS[N] and $N positional access, longest patterns first.
+    let parsed: Vec<&str> = args.split_whitespace().collect();
+    for (i, arg) in parsed.iter().enumerate() {
+        result = result
+            .replace(&format!("$ARGUMENTS[{i}]"), arg)
+            .replace(&format!("${i}"), arg);
+    }
+    result.replace("$ARGUMENTS", args)
 }
 
 /// Invoke the JavaScript handler for `command_name` in the plugin's live

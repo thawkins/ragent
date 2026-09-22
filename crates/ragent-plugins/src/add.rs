@@ -1,13 +1,18 @@
 //! `/plugins add` source handling: local directory, local `.zip`/`.tar.gz`
-//! package, or `https://` URL package file (spec `plugins` T-006; FR-007,
-//! FR-010, FR-023).
+//! package, `https://` URL package file, or `git+<https-url>#<ref>[:<path>]`
+//! git source (spec `plugins` T-006; FR-007, FR-010, FR-023).
 //!
-//! Three source forms are accepted, handled by [`add`]:
+//! Four source forms are accepted, handled by [`add`]:
 //!
 //! - an existing local **directory**, copied into the store;
 //! - a local **`.zip` / `.tar.gz`** package file, extracted into the store;
 //! - an **`https://` URL** ending in `.zip` / `.tar.gz`, downloaded into the
-//!   store's staging directory and then extracted.
+//!   store's staging directory and then extracted;
+//! - a **`git+<https-url>#<ref>[:<subpath>]`** git source, shallow-cloned into
+//!   staging (a sparse checkout of `<subpath>` when present) so a plugin hosted
+//!   in a subdirectory of a larger repository installs without downloading the
+//!   whole tree. This is the form the store providers emit for vendor
+//!   marketplace entries.
 //!
 //! Guards (all refuse with a structured error and leave the store untouched):
 //!
@@ -20,18 +25,25 @@
 //! - the installed tree must parse as a valid plugin manifest
 //!   ([`AddError::NotAPlugin`] — no manifest, or [`AddError::Manifest`]).
 //!
-//! After install the manifest is parsed and validated; the plugin is left
-//! **disabled** (FR-007) and no JavaScript executes (FR-023). Install targets
-//! the project store leg (or the `store_dir` override, which supersedes it).
-//! Installs go through a staging directory renamed into place so a failure
-//! never leaves a half-written plugin in the store.
+//! A manifest that contributes no JavaScript (a skill-only or MCP-only plugin,
+//! the shape the official Claude marketplace ships) parses with no entry point
+//! and installs normally; the plugin is inert until ragent gains a skills or
+//! MCP-server bridge.
+//!
+//! After install the manifest is parsed and validated; the plugin is recorded
+//! **enabled** in the store ledger (its tools/commands load at the next
+//! session start) but no JavaScript executes during the install itself
+//! (FR-023). Install targets the project store leg (or the `store_dir`
+//! override, which supersedes it). Installs go through a staging directory
+//! renamed into place so a failure never leaves a half-written plugin in the
+//! store.
 
 use std::path::{Component, Path, PathBuf};
 
 use crate::descriptor::detect_dialect;
 use crate::error::PluginError;
 use crate::manifest::{ParsedManifest, parse_plugin_dir};
-use crate::store::StoreDirs;
+use crate::store::{StoreDirs, StoreLedger};
 
 /// Maximum accepted archive size: 50 MiB (FR-010 size cap).
 pub const MAX_ARCHIVE_BYTES: u64 = 50 * 1024 * 1024;
@@ -81,7 +93,7 @@ pub enum AddError {
 
     /// The source string matches no accepted form.
     #[error(
-        "plugin add: unrecognised source {0} (expected a directory, a .zip/.tar.gz file, or an https:// URL ending in .zip/.tar.gz)"
+        "plugin add: unrecognised source {0} (expected a directory, a .zip/.tar.gz file, an https:// URL, or a git+<https-url>#<ref>:<path> source)"
     )]
     UnknownSource(String),
 
@@ -95,7 +107,8 @@ enum Staging {
     /// The source was a directory; staging IS the source (no copy — we rename
     /// nothing, we copy on success).
     Existing(PathBuf),
-    /// The source was an archive; files were extracted under this staging dir.
+    /// The source was an archive or a git checkout; files are staged under this
+    /// directory and moved into the store on success.
     Extracted(PathBuf),
 }
 
@@ -159,20 +172,20 @@ pub fn add(
         Ok(Some(_)) => match parse_plugin_dir(&staged_root) {
             Ok(Some(parsed)) => parsed,
             Ok(None) => {
-                cleanup_staging(&staged, &staging_root);
+                cleanup_staging(&staging, &staging_root);
                 return Err(AddError::NotAPlugin(staged_root.display().to_string()));
             }
             Err(err) => {
-                cleanup_staging(&staged, &staging_root);
+                cleanup_staging(&staging, &staging_root);
                 return Err(AddError::Manifest(err));
             }
         },
         Ok(None) => {
-            cleanup_staging(&staged, &staging_root);
+            cleanup_staging(&staging, &staging_root);
             return Err(AddError::NotAPlugin(staged_root.display().to_string()));
         }
         Err(err) => {
-            cleanup_staging(&staged, &staging_root);
+            cleanup_staging(&staging, &staging_root);
             return Err(AddError::Manifest(err));
         }
     };
@@ -181,7 +194,7 @@ pub fn add(
     let dest_dir = dest_store.join(&id);
     if dest_dir.exists() {
         if !force {
-            cleanup_staging(&staged, &staging_root);
+            cleanup_staging(&staging, &staging_root);
             return Err(AddError::Exists(id));
         }
         std::fs::remove_dir_all(&dest_dir).map_err(io_err)?;
@@ -193,16 +206,28 @@ pub fn add(
         Staging::Extracted(_) => move_or_copy(&staged_root, &dest_dir),
     };
     if let Err(err) = commit {
-        cleanup_staging(&staged, &staging_root);
+        cleanup_staging(&staging, &staging_root);
         return Err(err);
     }
-    cleanup_staging(&staged, &staging_root);
+    cleanup_staging(&staging, &staging_root);
 
     // Re-parse from the installed location so paths in the descriptor point at
     // the store, not at staging.
     let installed_parsed = parse_plugin_dir(&dest_dir)
         .map_err(AddError::Manifest)?
         .ok_or_else(|| AddError::NotAPlugin(dest_dir.display().to_string()))?;
+
+    // Record the plugin enabled in its store ledger so it loads at the next
+    // session start. No JavaScript runs here (FR-023); enablement only sets the
+    // persisted flag. The ledger lives in `dest_store` (the leg the install
+    // targeted), matching where `/plugins enable` would write it.
+    let mut ledger = StoreLedger::load(&dest_store);
+    ledger.state_mut(&id).enabled = true;
+    ledger.save(&dest_store).map_err(|e| {
+        AddError::Manifest(PluginError::Io(format!(
+            "plugin installed but the enable flag could not be persisted: {e}"
+        )))
+    })?;
 
     Ok(AddOutcome {
         parsed: installed_parsed,
@@ -213,6 +238,11 @@ pub fn add(
 /// Resolve and materialise `source` into a staging area, without touching the
 /// store.
 fn add_inner(source: &str, workdir: &Path, staging: &Path) -> Result<Staging, AddError> {
+    // A git source (`git+<https-url>#<ref>[:<subpath>]`) is cloned into staging.
+    // Handled before the plain-URL branch because it shares the `https` prefix.
+    if source.starts_with("git+") {
+        return git_clone_stage(source, staging).map(Staging::Extracted);
+    }
     if source.starts_with("http://") {
         return Err(AddError::NotHttps(source.to_string()));
     }
@@ -251,7 +281,132 @@ fn classify_extract_failure(err: ExtractError) -> AddError {
     }
 }
 
-/// Download an `https://...zip|.tar.gz` URL into staging and extract it.
+/// A parsed `git+<https-url>#<ref>[:<subpath>]` source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitSource {
+    /// The `https` repository remote.
+    pub url: String,
+    /// The ref to check out; `None` uses the remote default branch (HEAD).
+    pub ref_name: Option<String>,
+    /// A repository-relative subdirectory to install; `None` installs the root.
+    pub subpath: Option<String>,
+}
+
+/// Parse a `git+<https-url>#<ref>[:<subpath>]` source string.
+///
+/// Only `https://` remotes are accepted for a store-supplied source; a
+/// `file://` remote is additionally accepted so a local git mirror can be
+/// installed, mirroring the local-directory source the same command already
+/// accepts. Every other scheme (ssh, git, http) returns `None`, so it can never
+/// reach the clone (FR-024).
+#[must_use]
+pub fn parse_git_source(source: &str) -> Option<GitSource> {
+    let rest = source.strip_prefix("git+")?;
+    let (url, fragment) = match rest.split_once('#') {
+        Some((url, fragment)) => (url, Some(fragment)),
+        None => (rest, None),
+    };
+    if url.trim().is_empty() || !(url.starts_with("https://") || url.starts_with("file://")) {
+        return None;
+    }
+    let (ref_name, subpath) = match fragment {
+        None => (None, None),
+        Some(fragment) => match fragment.split_once(':') {
+            Some((r, path)) => (git_ref(r), git_subpath(path)),
+            None => (git_ref(fragment), None),
+        },
+    };
+    Some(GitSource {
+        url: url.to_string(),
+        ref_name,
+        subpath,
+    })
+}
+
+/// A git ref, treating an empty value or `HEAD` as "the default branch".
+fn git_ref(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("HEAD") {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// A repository-relative subpath, normalised without a leading `./`.
+fn git_subpath(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_start_matches("./");
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Clone a `git+<https-url>#<ref>[:<subpath>]` source into `staging`.
+///
+/// Installs a whole repository, or a single subdirectory when a `:<subpath>`
+/// suffix is present, via a shallow sparse `git clone`, so a large marketplace
+/// repository is not downloaded in full. Git must be on `PATH`; a clone/fetch
+/// failure is a contained [`AddError::Io`] and git is never allowed to prompt
+/// interactively (credentials for a private repo are refused, not requested).
+fn git_clone_stage(source: &str, staging: &Path) -> Result<PathBuf, AddError> {
+    let Some(spec) = parse_git_source(source) else {
+        return Err(AddError::UnknownSource(source.to_string()));
+    };
+    std::fs::create_dir_all(staging).map_err(io_err)?;
+    let repo_dir = staging.join("repo");
+    let repo = repo_dir.to_string_lossy().into_owned();
+
+    git_run(
+        &["clone", "--depth", "1", "--sparse", &spec.url, &repo],
+        None,
+    )?;
+    if let Some(ref_name) = spec.ref_name.as_deref() {
+        git_run(
+            &["fetch", "--depth", "1", "origin", ref_name],
+            Some(&repo_dir),
+        )?;
+        git_run(&["checkout", "FETCH_HEAD"], Some(&repo_dir))?;
+    }
+    if let Some(subpath) = spec.subpath.as_deref() {
+        git_run(&["sparse-checkout", "set", subpath], Some(&repo_dir))?;
+    }
+
+    let root = match spec.subpath.as_deref() {
+        Some(subpath) => repo_dir.join(subpath),
+        None => repo_dir,
+    };
+    if !root.is_dir() {
+        return Err(AddError::NotAPlugin(root.display().to_string()));
+    }
+    Ok(root)
+}
+
+/// Run one non-interactive `git` invocation, returning a contained error on a
+/// missing binary or a non-zero exit.
+fn git_run(args: &[&str], cwd: Option<&Path>) -> Result<(), AddError> {
+    let verb = args.first().copied().unwrap_or("git");
+    let mut command = std::process::Command::new("git");
+    command
+        .args(args)
+        // Never prompt for credentials; a private repo fails instead of hanging.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "");
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    let output = command
+        .output()
+        .map_err(|e| AddError::Io(format!("git {verb}: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AddError::Io(format!("git {verb}: {}", stderr.trim())));
+    }
+    Ok(())
+}
+
+/// Download and extract an archive URL into `staging`.
 fn download_and_extract(url: &str, staging: &Path) -> Result<PathBuf, AddError> {
     let Some(kind) = ArchiveKind::from_path(url) else {
         return Err(AddError::UnknownSource(url.to_string()));
@@ -520,10 +675,16 @@ fn move_or_copy(from: &Path, to: &Path) -> Result<(), AddError> {
     std::fs::remove_dir_all(from).map_err(io_err)
 }
 
-fn cleanup_staging(staged: &Staging, staging_root: &Path) {
-    if let Staging::Extracted(path) = staged {
-        let _ = std::fs::remove_dir_all(path);
-    }
+/// Remove the per-call staging directory entirely and prune the `.add-staging`
+/// root when it becomes empty.
+///
+/// Removing the whole per-call directory (not just the extracted plugin root)
+/// also discards the transient git working tree created for a
+/// `git+<url>#<ref>:<subpath>` source, whose `.git` metadata lives *above* the
+/// selected subpath: leaving it behind would leak a checkout into the store and
+/// make the parent directory unremovable.
+fn cleanup_staging(staging: &Path, staging_root: &Path) {
+    let _ = std::fs::remove_dir_all(staging);
     let _ = remove_if_empty(staging_root);
 }
 
