@@ -81,6 +81,6 @@ confirmation with the event count; without `--yes` the command is refused.
 
 ## Related
 
-- `/log clear research` clears `logs/research/`, a sibling log root.
+- `/log clear research` clears `log/research/`, a sibling log directory.
 - `/editlog` -- the separate edit-operation log.
 - `log/exports/` -- destination for `/alog export`.

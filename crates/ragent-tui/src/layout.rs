@@ -30,7 +30,8 @@ use crate::layout_active_agents::render_active_agents_subpanel;
 
 use crate::theme;
 use crate::utils::{
-    ResponsiveBreakpoint, centered_rect, centered_rect_max, is_below_minimum_size, shorten_middle,
+    ResponsiveBreakpoint, centered_rect, centered_rect_fixed, centered_rect_max,
+    is_below_minimum_size, shorten_middle,
 };
 use ragent_team::team::MemberStatus;
 
@@ -324,14 +325,7 @@ fn render_queue_menu(frame: &mut Frame, app: &mut App) {
         .max(22);
     let height = (labels.len() as u16).saturating_add(5);
     let screen = frame.area();
-    let w = width.min(screen.width);
-    let h = height.min(screen.height);
-    let area = Rect::new(
-        screen.x + screen.width.saturating_sub(w) / 2,
-        screen.y + screen.height.saturating_sub(h) / 2,
-        w,
-        h,
-    );
+    let area = centered_rect_fixed(width, height, screen);
     frame.render_widget(Clear, area);
     app.queue_menu_area = area;
 
@@ -436,14 +430,7 @@ fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
         .max(title.chars().count() as u16 + 2)
         .max(30);
     let height = (len as u16).saturating_add(5).min(16).min(screen.height);
-    let w = width.min(screen.width);
-    let h = height.min(screen.height);
-    let area = Rect::new(
-        screen.x + screen.width.saturating_sub(w) / 2,
-        screen.y + screen.height.saturating_sub(h) / 2,
-        w,
-        h,
-    );
+    let area = centered_rect_fixed(width, height, screen);
     frame.render_widget(Clear, area);
     app.queue_show_area = area;
 
@@ -554,12 +541,7 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
         .saturating_sub(2)
         .clamp(8, 24)
         .min(screen.height);
-    let area = Rect::new(
-        screen.x + screen.width.saturating_sub(width) / 2,
-        screen.y + screen.height.saturating_sub(height) / 2,
-        width,
-        height,
-    );
+    let area = centered_rect_fixed(width, height, screen);
     frame.render_widget(Clear, area);
     app.plugin_store_area = area;
 
@@ -782,14 +764,7 @@ fn render_queue_clear_confirm(frame: &mut Frame, app: &mut App) {
     let width = (title.chars().count() as u16 + 2).max(30);
     let height = (options.len() as u16).saturating_add(5);
     let screen = frame.area();
-    let w = width.min(screen.width);
-    let h = height.min(screen.height);
-    let area = Rect::new(
-        screen.x + screen.width.saturating_sub(w) / 2,
-        screen.y + screen.height.saturating_sub(h) / 2,
-        w,
-        h,
-    );
+    let area = centered_rect_fixed(width, height, screen);
     frame.render_widget(Clear, area);
     app.queue_clear_confirm_area = area;
 

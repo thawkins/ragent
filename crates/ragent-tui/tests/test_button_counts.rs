@@ -22,6 +22,7 @@ fn running_task(id: &str, parent: &str, child: &str) -> TaskEntry {
         agent_name: "explore".to_string(),
         task_prompt: "x".to_string(),
         background: true,
+        detached: false,
         status: ragent_agent::task::TaskStatus::Running,
         result: None,
         error: None,

@@ -556,6 +556,13 @@ pub struct SessionProcessor {
     /// still restore it.
     pub active_loop_captures:
         tokio::sync::RwLock<HashMap<String, crate::session::loop_capture::LoopCapture>>,
+    /// Terminal [`FinishReason`] of the most recently ended `MessageEnd` on
+    /// each session, recorded right before the event is published so parent
+    /// contexts (the task registry's `SubagentComplete` publisher, team
+    /// telemetry) can report the real loop outcome instead of a hard-coded
+    /// `"stop"`. Inserted at every turn finalise; cleared at run entry.
+    pub last_message_end_reason:
+        std::sync::RwLock<HashMap<String, ragent_types::event::FinishReason>>,
 }
 
 /// C-001: a cached [`crate::skill::SkillRegistry`] plus the inputs used to
@@ -1350,6 +1357,23 @@ impl SessionProcessor {
         self.system_prompt_cache().invalidate_all();
     }
 
+    /// Terminal [`FinishReason`] of the last `MessageEnd` on `session_id`,
+    /// if the run reached the normal finalise path. Read by
+    /// `AgentManager::spawn_background_mode` when composing the
+    /// `SubagentComplete` event so the published `finish_reason` reflects
+    /// the real loop outcome (e.g. `"truncation"` for a silently-cut run)
+    /// instead of a hard-coded `"stop"`.
+    pub fn last_message_end_reason(
+        &self,
+        session_id: &str,
+    ) -> Option<ragent_types::event::FinishReason> {
+        self.last_message_end_reason
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(session_id)
+            .cloned()
+    }
+
     /// Invalidate the P-2 config cache (force the next `prepare_client`
     /// call to re-read `ragent.json` from disk). Call this when the config
     /// is known to have changed externally (e.g. after a `/config save`
@@ -1639,8 +1663,12 @@ impl SessionProcessor {
             let bus = self.event_bus.clone();
             let sid = session_id.to_string();
             let accum = usage_accum.clone();
+            // Subscribe synchronously BEFORE spawning the task. `tokio::spawn`
+            // only queues the future; the task may not be polled until after a
+            // fast LLM exchange has already published its `TokenUsage` events.
+            // Subscribing here closes that window so no usage is missed.
+            let mut rx = bus.subscribe();
             tokio::spawn(async move {
-                let mut rx = bus.subscribe();
                 loop {
                     match rx.recv().await {
                         Ok(Event::TokenUsage {
@@ -1858,6 +1886,13 @@ impl SessionProcessor {
         // a visible notice for interactive sessions when the provider
         // silently truncated the reply.
         let mut last_finish_reason: Option<FinishReason> = None;
+        // Clear any stale entry from a previous turn on this session so the
+        // `last_message_end_reason()` getter only ever observes THIS run's
+        // terminal `MessageEnd` reason.
+        self.last_message_end_reason
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(session_id);
         // P-17: reuse the per-step ContentPart buffers across loop iterations
         // to avoid reallocating two `Vec<ContentPart>`s on every step. They
         // are emptied via `std::mem::take` when pushed into `chat_messages`,
@@ -3922,6 +3957,13 @@ impl SessionProcessor {
         session_recorder.record_agent_loop(total_elapsed_ms as f64, iterations);
         publish_run_cost_summary(total_elapsed_ms);
         let end_reason = last_finish_reason.unwrap_or(FinishReason::Stop);
+        // Record the terminal reason before publishing `MessageEnd` so a
+        // parent context (the task registry's `SubagentComplete` publisher)
+        // can report the real loop outcome instead of hard-coding `"stop"`.
+        self.last_message_end_reason
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(session_id.to_string(), end_reason.clone());
         // Interactive sessions get a visible hint when the provider
         // silently truncated the reply.
         if agent.mode != crate::agent::AgentMode::Subagent

@@ -24,7 +24,8 @@
 //! `App` stays `Send + Sync` for the async event loop.
 
 use ragent_plugins::{
-    PLUGIN_SUBCOMMANDS, StoreKind, render_help, run_plugin_subcommand, subcommand_of,
+    PLUGIN_SUBCOMMANDS, StoreKind, render_help, run_plugin_subcommand, store_and_config,
+    subcommand_of,
 };
 
 use crate::app::helpers::current_working_dir;
@@ -61,7 +62,7 @@ pub(super) fn handle_plugins_command(app: &mut crate::app::App, args: &str) -> O
     if let Some(kind) = StoreKind::from_token(sub) {
         // A disabled subsystem is inert: report and open no panel (SPEC
         // configuration schema).
-        if !launch_plugins_config().is_enabled() {
+        if !store_and_config(&app.cwd_path).1.is_enabled() {
             return Some(ragent_plugins::disabled_subsystem_report(sub));
         }
         let (query, refresh) = parse_store_launch(rest);
@@ -129,25 +130,4 @@ fn parse_store_launch(rest: &str) -> (String, bool) {
         }
     }
     (query_tokens.join(" "), refresh)
-}
-
-/// The `plugins` config block for a store launch.
-///
-/// Reads the resolved configuration (project overrides user-global); an
-/// unreadable config falls back to the compiled defaults, so a bad config file
-/// never blocks a launch. Used only for the `plugins.enabled` master switch
-/// (a disabled subsystem opens no panel); the endpoint itself is resolved
-/// inside [`App::open_plugin_store`] so it is always taken fresh from config.
-#[must_use]
-fn launch_plugins_config() -> ragent_config::PluginsConfig {
-    match ragent_config::Config::load() {
-        Ok(config) => config.plugins.unwrap_or_default(),
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "plugin config could not be loaded for store launch; using compiled defaults"
-            );
-            ragent_config::PluginsConfig::default()
-        }
-    }
 }

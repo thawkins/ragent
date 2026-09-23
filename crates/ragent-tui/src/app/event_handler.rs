@@ -1307,6 +1307,7 @@ impl App {
                     agent_name: agent.clone(),
                     task_prompt: task.clone(),
                     background,
+                    detached: false,
                     status: ragent_agent::task::TaskStatus::Running,
                     result: None,
                     error: None,
@@ -1346,18 +1347,23 @@ impl App {
                         // Propagate the finish signature so the Agents popup
                         // shows truncation / continuation on the completed
                         // row instead of leaving it at the spawn default.
-                        t.report_status = match finish_reason.as_str() {
-                            "continued" => ragent_agent::task::ReportStatus::Continued,
-                            "truncated" => ragent_agent::task::ReportStatus::Truncated,
-                            _ => ragent_agent::task::ReportStatus::Complete,
-                        };
+                        // Classification is centralised in
+                        // `ReportStatus::from_finish_reason_label` so the panel
+                        // can never disagree with the row written by the task
+                        // registry (`list_agents` / `wait_agents`).
+                        t.report_status =
+                            ragent_agent::task::ReportStatus::from_finish_reason_label(
+                                finish_reason,
+                            );
                     }
                     self.active_tasks.remove(idx);
                 }
                 let icon = if success { "[ok]" } else { "[err]" };
                 let suffix = match finish_reason.as_str() {
                     "continued" => " (truncated; continuation retry recovered the tail)",
-                    "truncated" => " (TRUNCATED by provider; report is incomplete)",
+                    "truncation" | "truncated" | "length" => {
+                        " (TRUNCATED by provider; report is incomplete)"
+                    }
                     _ => "",
                 };
                 self.push_log_for(

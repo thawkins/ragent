@@ -210,9 +210,13 @@ registry the validator uses (NFR-001).
 
 ### 4.3 Stack layering (`--stack`)
 
-Known stacks append a dependency line to the language manifest and wrap the
-entry point with a framework-specific starter snippet. First-release stacks
-are Rust-only:
+Known stacks append a dependency line to the language manifest and overlay a
+framework-specific binary starter on the entry-point source. For binary app
+types (`cmdline`, `tui`, `gui`) the starter declares its own `fn main`, so the
+base hello-world `main` is **replaced** (the generated project declares exactly
+one entry point and builds and runs as generated, with no hand-editing); the
+base library body, when present, is retained. First-release stacks are
+Rust-only:
 
 | Stack | Dependency added | Starter provides |
 | ----- | ---------------- | ---------------- |

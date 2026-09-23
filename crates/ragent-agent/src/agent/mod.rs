@@ -2932,7 +2932,29 @@ fn build_system_prompt_with_storage_inner(
                parent: the task entry stays Running, `wait_agents` blocks, \
                telemetry records a timeout, and your report may never be \
                read. Treat `agent_complete` as the last mandatory step of the \
-               task - like a final commit - not an optional nicety.\n\n",
+               task - like a final commit - not an optional nicety.\n\n\
+               ## Deliverable Enforcement (FILE-WRITE TASKS)\n\n\
+               When the task prompt instructs you to WRITE a file (e.g. \
+               \"write a file called REPORT.md\", \"save findings to X\"), \
+               that file is the PRIMARY deliverable - it takes precedence \
+               over narration.\n\n\
+               - You MUST call `write` (or `create`) for the requested file \
+                 BEFORE calling `agent_complete`. An `agent_complete` whose \
+                 promised file was never written is a FAILED run, not a \
+                 completed one.\n\
+               - After writing, verify the file exists (a quick `read` of \
+                 the first lines, or `file_info`) so you catch silent write \
+                 failures.\n\
+               - The `write`/`create` tool paths are relative to the \
+                 working directory given in this prompt - do not invent \
+                 absolute paths elsewhere.\n\
+               - Put both the file content AND a short pointer (\"full \
+                 findings written to ANTIPAT.md\") into the `summary` so the \
+                 parent can recover the deliverable either way.\n\
+               - If you cannot write the file (permission denied, read-only \
+                 scope), say so explicitly in the `summary` and include the \
+                 full findings inline instead. Never claim a file was \
+                 written when it was not.\n\n",
         );
     }
 

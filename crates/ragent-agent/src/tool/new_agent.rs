@@ -68,6 +68,10 @@ impl Tool for NewAgentTool {
                     "type": "boolean",
                     "description": "If true, spawn in the background and return immediately — the agent runs concurrently. REQUIRED when spawning more than one task in the same response; background: false blocks all subsequent tool calls. Default: false (use only for a single task whose result you need immediately)."
                 },
+                "detached": {
+                    "type": "boolean",
+                    "description": "Only meaningful with `background: true`. When true, the task is fire-and-forget: excluded from `list_agents`, cannot be awaited with `wait_agents`, and its completion is NOT injected into this session as a background task result. Use for side-effect-only workflows whose output nobody should consume. Default: false."
+                },
                 "model": {
                     "type": "string",
                     "description": "Optional model override (e.g. 'anthropic/claude-sonnet-4-20250514' or 'openai:gpt-4o'). If omitted, the sub-agent inherits the parent session's model."
@@ -133,6 +137,11 @@ impl Tool for NewAgentTool {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
+        let detached = input
+            .get("detached")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
         let model = input
             .get("model")
             .and_then(|v| v.as_str())
@@ -154,30 +163,49 @@ impl Tool for NewAgentTool {
         })?;
 
         if background {
-            let entry = agent_manager
-                .spawn_background(
-                    &ctx.session_id,
-                    agent,
-                    task,
-                    model.as_deref(),
-                    &ctx.working_dir,
-                )
-                .await?;
+            let entry = if detached {
+                agent_manager
+                    .spawn_detached(
+                        &ctx.session_id,
+                        agent,
+                        task,
+                        model.as_deref(),
+                        &ctx.working_dir,
+                    )
+                    .await?
+            } else {
+                agent_manager
+                    .spawn_background(
+                        &ctx.session_id,
+                        agent,
+                        task,
+                        model.as_deref(),
+                        &ctx.working_dir,
+                    )
+                    .await?
+            };
 
+            let detach_note = if detached {
+                "\nThis task is DETACHED: it will not appear in `list_agents`, \
+                 cannot be awaited with `wait_agents`, and its result will NOT \
+                 be injected back into this session."
+            } else {
+                "\nThe task is running in the background. You will be notified \
+                 when it completes via a SubagentComplete event."
+            };
             Ok(ToolOutput {
                 content: format!(
                     "Background task spawned successfully.\n\
                      Task ID: {}\n\
                      Agent: {}\n\
-                     Status: running\n\
-                     The task is running in the background. You will be notified \
-                     when it completes via a SubagentComplete event.",
-                    entry.id, entry.agent_name
+                     Status: running{}",
+                    entry.id, entry.agent_name, detach_note
                 ),
                 metadata: Some(json!({
                     "task_id": entry.id,
                     "agent": entry.agent_name,
                     "background": true,
+                    "detached": detached,
                     "status": "running"
                 })),
             })

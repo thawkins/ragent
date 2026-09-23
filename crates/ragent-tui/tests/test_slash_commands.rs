@@ -79,6 +79,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -660,10 +661,10 @@ fn test_slash_log_clear_research() {
     let _guard = enter_with_cwd();
     let research_dir = std::env::current_dir()
         .unwrap()
-        .join("logs")
+        .join("log")
         .join("research");
 
-    // Seed logs/research with a few files.
+    // Seed log/research with a few files.
     std::fs::create_dir_all(&research_dir).expect("create research dir");
     std::fs::write(research_dir.join("research-aaa-web.jsonl"), "line a\n").expect("write a");
     std::fs::write(research_dir.join("research-bbb-web.jsonl"), "line b\n").expect("write b");
@@ -685,11 +686,11 @@ fn test_slash_log_clear_research() {
 fn test_slash_log_clear_research_missing_dir_reports_zero() {
     let _guard = enter_with_cwd();
 
-    // No logs/research directory exists yet.
+    // No log/research directory exists yet.
     assert!(
         !std::env::current_dir()
             .unwrap()
-            .join("logs")
+            .join("log")
             .join("research")
             .exists()
     );
@@ -4577,4 +4578,75 @@ fn test_model_selector_preserves_openrouter_vendor_slug() {
         Some("OpenRouter / anthropic/claude-sonnet-4"),
         "status-bar label should show the OpenRouter model id with vendor slug"
     );
+}
+
+// ── /spawn ────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_spawn_help() {
+    let mut app = make_app();
+    app.execute_slash_command("/spawn help");
+    assert_eq!(app.status, "spawn: help");
+}
+
+#[test]
+fn test_slash_spawn_bare_shows_help() {
+    let mut app = make_app();
+    app.execute_slash_command("/spawn");
+    assert_eq!(app.status, "spawn: help");
+}
+
+#[test]
+fn test_slash_spawn_no_prompt_is_usage_error() {
+    let mut app = make_app();
+    app.execute_slash_command("/spawn general");
+    assert_eq!(app.status, "spawn: usage");
+}
+
+#[test]
+fn test_slash_spawn_unknown_agent_rejected() {
+    let mut app = make_app();
+    app.execute_slash_command("/spawn no-such-agent-xyz do something");
+    assert_eq!(app.status, "spawn: unknown agent 'no-such-agent-xyz'");
+    // Nothing pending: the result slot must be free for the next /spawn.
+    let guard = app.spawn_result.lock().unwrap_or_else(|e| e.into_inner());
+    assert!(
+        guard.is_none(),
+        "rejected /spawn must not leave a pending slot"
+    );
+}
+
+#[test]
+fn test_slash_spawn_builtin_agent_launches_detached() {
+    let mut app = make_app();
+    // Wire an AgentManager into the test processor exactly like the
+    // production session does.
+    let manager = Arc::new(ragent_agent::task::AgentManager::new(
+        std::sync::Arc::clone(&app.event_bus),
+        std::sync::Arc::clone(&app.session_processor),
+        8,
+        60,
+    ));
+    let _ = app.session_processor.agent_manager.set(manager);
+
+    app.execute_slash_command("/spawn general say hello");
+
+    // The slash handler only queues the launch; the detached-task
+    // registration completes on the async side and is surfaced by the
+    // event-loop poll. Drive one poll cycle through the test hook.
+    ragent_tui::poll_spawn_result_for_tests(&mut app);
+    assert!(
+        app.status.starts_with("[wait] spawn:") || app.status.starts_with("spawn: detached task"),
+        "expected launch-in-progress or launched status, got {}",
+        app.status
+    );
+    // Whatever the outcome was, the slot must hold the in-flight marker
+    // (Err("")) or be cleared — never a stale real outcome.
+    let guard = app.spawn_result.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(v) = guard.as_ref() {
+        assert!(
+            v.as_ref().err().is_none_or(|m| m.is_empty()),
+            "slot must hold the in-flight marker or a real outcome"
+        );
+    }
 }

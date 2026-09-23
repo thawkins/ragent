@@ -84,19 +84,14 @@ pub fn load_custom_agents(working_dir: &Path) -> (Vec<CustomAgentDef>, Vec<Strin
         .collect();
 
     // Fast path: cached for this working dir and every directory unchanged.
-    // The length check matters when the source set is empty (no discovery
-    // directories and no plugin-contributed profiles): an empty cached list
-    // must not satisfy a later call whose source set has since grown.
+    // `dir_mtimes` was computed above with a single stat pass, so comparing it
+    // against the cached set needs no further filesystem access. The equality
+    // check covers both the mtimes and the source-set length, so an empty
+    // cached set cannot satisfy a later call whose source set has since grown.
     {
         let guard = cache.read().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = guard.get(working_dir)
-            && entry.dir_mtimes.len() == dir_mtimes.len()
-            && entry.dir_mtimes.iter().all(|(d, mt)| {
-                std::fs::metadata(d)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .map_or(false, |current| current == *mt)
-            })
+            && entry.dir_mtimes == dir_mtimes
         {
             return (entry.agents.clone(), entry.diagnostics.clone());
         }

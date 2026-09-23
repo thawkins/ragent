@@ -12,6 +12,11 @@
 //! itself be a tool-call JSON object/array. Anything else returns an empty
 //! vector. Calls recovered here still pass through the normal dispatch
 //! pipeline: loop restrictions, hooks, permission checks, and the registry.
+//!
+//! The helpers are `pub(crate)` although only `processor` calls them; clippy's
+//! nursery lint prefers `pub` inside a crate-private module, but the narrower
+//! visibility documents the real call surface (mirrors `app/helpers.rs`).
+#![allow(clippy::redundant_pub_crate)]
 
 use serde_json::Value;
 

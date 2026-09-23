@@ -8,7 +8,7 @@ use ragent_types::ThinkingLevel;
 
 use crate::app::{
     App, ConfiguredProvider, ContextAction, ModelPickerEntry, PROVIDER_LIST, ProviderSetupStep,
-    ProviderSource, QUEUE_CLEAR_CONFIRM_YES,
+    ProviderSource,
 };
 use crate::utils::is_ollama_family;
 use ragent_llm::providers::router_config::Tier;
@@ -279,10 +279,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             KeyCode::Up => app.plugin_store_move_up(),
             KeyCode::Down => app.plugin_store_move_down(),
             KeyCode::Enter => app.plugin_store_install_selected(),
-            KeyCode::Backspace => {
-                app.plugin_store_edit_or_close();
-            }
-            KeyCode::Esc => {
+            KeyCode::Backspace | KeyCode::Esc => {
                 app.plugin_store_edit_or_close();
             }
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -542,24 +539,17 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     if app.queue_clear_confirm_open {
         match key.code {
             KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
-                app.queue_clear_confirm_selected =
-                    if app.queue_clear_confirm_selected == QUEUE_CLEAR_CONFIRM_YES {
-                        crate::app::QUEUE_CLEAR_CONFIRM_NO
-                    } else {
-                        QUEUE_CLEAR_CONFIRM_YES
-                    };
+                app.queue_clear_confirm_toggle();
                 // NFR-011: the selection change must paint on the next frame.
                 app.needs_redraw = true;
                 return None;
             }
             KeyCode::Enter => {
-                return Some(
-                    if app.queue_clear_confirm_selected == QUEUE_CLEAR_CONFIRM_YES {
-                        InputAction::ConfirmQueueClear
-                    } else {
-                        InputAction::CancelQueueClear
-                    },
-                );
+                return Some(if app.queue_clear_confirm_is_yes() {
+                    InputAction::ConfirmQueueClear
+                } else {
+                    InputAction::CancelQueueClear
+                });
             }
             KeyCode::Esc => return Some(InputAction::CancelQueueClear),
             _ => return None,

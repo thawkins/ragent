@@ -46,6 +46,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/task` | [task](task.md) | Toggle the TASKS side panel, or list/help tasks: /task [list\|help] |
 | `/team` | [team](team.md) | Team management (/team help\|status\|show [name]\|create/open/delete <name>\|close\|message <id> <text>\|tasks\|clear\|cleanup) |
 | `/swarm` | [swarm](swarm.md) | Auto-decompose a goal into parallel subtasks (/swarm <prompt> \| /swarm status \| /swarm help) |
+| `/spawn` | [spawn](spawn.md) | Launch a detached fire-and-forget background sub-agent: /spawn <agent> <prompt...> \| /spawn help |
 | `/bash` | [bash](bash.md) | Manage bash command lists: /bash add\|remove allow\|deny <entry> [--global] \| show \| help |
 | `/dirs` | [dirs](dirs.md) | Manage directory/file permission lists: /dirs add\|remove allow\|deny <pattern> [--global] \| show \| help |
 | `/yolo` | [yolo](yolo.md) | Toggle YOLO mode  -  bypass all command validation and tool restrictions (/yolo help) |

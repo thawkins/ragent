@@ -203,6 +203,7 @@ fn test_live_agents_panel_requests_periodic_redraw() {
         agent_name: "explore".to_string(),
         task_prompt: "explore".to_string(),
         background: true,
+        detached: false,
         status: TaskStatus::Running,
         result: None,
         error: None,

@@ -25,7 +25,7 @@ directories that the agent writes to under `log/`.
 | (bare) | Toggle the log side panel on/off. |
 | `clear subagents` | Empty `log/subagents/` (background agent reports). |
 | `clear panics` | Empty `log/panics/`. |
-| `clear research` | Empty `logs/research/` (note the plural top-level directory). |
+| `clear research` | Empty `log/research/` (web-gather JSONL logs). |
 | `clear editlog` | Empty `log/editlog/`. |
 | `clear logwindow` | Empty `log/logwindow/`. |
 | `help` | Print the usage table. |
@@ -49,8 +49,8 @@ disk.
 ```
 /log clear research
 ```
-Empties `logs/research/`. This is the only clear target that maps to the
-plural `logs/` root rather than `log/`.
+Empties `log/research/`, removing accumulated web-gather instrumentation
+logs (`research-<name>-<ts>-<rand>-web.jsonl`).
 
 ```
 /log clear editlog
@@ -81,4 +81,4 @@ was emptied. `help` prints the table of valid clear targets.
 - `/profile`, `/memory`, `/telemetry` -- side panels dismissed when
   the log panel opens.
 - `log/` directory layout: `log/subagents/`, `log/panics/`, `log/editlog/`,
-  `log/logwindow/`, and `logs/research/`.
+  `log/logwindow/`, and `log/research/`.

@@ -31,6 +31,65 @@ use crate::agent::{AgentMode, ModelRef};
 use crate::event::{Event, EventBus};
 use crate::session::processor::SessionProcessor;
 
+/// Persist a completed sub-agent's FULL untruncated output to
+/// `log/subagents/<task-id>.md` under `working_dir` (the durable recovery
+/// path documented in the `wait_agents`/`list_agents` tool output and the
+/// `TaskEntry::output_file` field). Temp-file + rename so a crash mid-write
+/// never leaves a half-written report. Returns the path on success; on any
+/// I/O failure returns `None` and the in-memory `TaskEntry::result` remains
+/// the only copy.
+#[doc(hidden)]
+pub fn persist_task_output(
+    working_dir: &std::path::Path,
+    task_id: &str,
+    agent_name: &str,
+    task_prompt: &str,
+    duration_ms: u64,
+    content: &str,
+) -> Option<PathBuf> {
+    let dir = working_dir.join("log").join("subagents");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(
+            dir = %dir.display(),
+            task_id,
+            error = %e,
+            "sub-agent report directory could not be created; the task result \
+             will not be recoverable from disk"
+        );
+        return None;
+    }
+    let file = dir.join(format!("{task_id}.md"));
+    let tmp = dir.join(format!(".{task_id}.md.tmp"));
+    // Stream the report straight to the temp file instead of building the whole
+    // header+content in one `format!` String first: `content` is the full
+    // untruncated sub-agent reply, so concatenating it would double peak memory
+    // for the duration of the write. `write_all` of `content.as_bytes()` after
+    // the header keeps the byte-for-byte output identical.
+    let write_body = |path: &std::path::Path| -> std::io::Result<()> {
+        use std::io::Write as _;
+        let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+        write!(out, "# {task_id} — {agent_name}\n\n")?;
+        write!(out, "task: {task_prompt}\n\n")?;
+        write!(out, "duration_ms: {duration_ms}\n\n")?;
+        out.write_all(b"---\n\n")?;
+        out.write_all(content.as_bytes())?;
+        out.write_all(b"\n")?;
+        out.flush()
+    };
+    if let Err(e) = write_body(&tmp).and_then(|()| std::fs::rename(&tmp, &file)) {
+        tracing::warn!(
+            path = %file.display(),
+            task_id,
+            error = %e,
+            "sub-agent report could not be written to disk; the task result is \
+             only available in memory"
+        );
+        let _ = std::fs::remove_file(&tmp);
+        return None;
+    }
+    Some(file)
+}
+
 /// D4 fix: Sanitize agent name for use in task ID.
 /// Converts to lowercase, replaces spaces and special chars with hyphens.
 fn sanitize_for_id(name: &str) -> String {
@@ -89,6 +148,7 @@ fn build_task_entry(
     agent_name: &str,
     task_prompt: &str,
     background: bool,
+    detached: bool,
 ) -> TaskEntry {
     TaskEntry {
         id: task_id.to_string(),
@@ -97,6 +157,7 @@ fn build_task_entry(
         agent_name: agent_name.to_string(),
         task_prompt: task_prompt.to_string(),
         background,
+        detached,
         status: TaskStatus::Running,
         result: None,
         error: None,
@@ -168,6 +229,24 @@ impl ReportStatus {
             Self::Truncated => "truncated",
         }
     }
+
+    /// Classify a `SubagentComplete::finish_reason` label into the report
+    /// status shown on the Agents panel.
+    ///
+    /// A label of `"length"`, `"truncation"`, or `"content_filter"` means the
+    /// provider cut the reply short, so the report is incomplete
+    /// ([`ReportStatus::Truncated`]); `"continued"` means the continuation
+    /// retry recovered the tail ([`ReportStatus::Continued`]). Anything else
+    /// (including the legacy `"truncated"` spelling and the empty label on a
+    /// spawn-time placeholder) is a healthy [`ReportStatus::Complete`].
+    #[must_use]
+    pub fn from_finish_reason_label(label: &str) -> Self {
+        match label {
+            "continued" => Self::Continued,
+            "length" | "truncation" | "content_filter" | "truncated" => Self::Truncated,
+            _ => Self::Complete,
+        }
+    }
 }
 
 impl std::fmt::Display for ReportStatus {
@@ -191,6 +270,13 @@ pub struct TaskEntry {
     pub task_prompt: String,
     /// Whether this task runs in the background.
     pub background: bool,
+    /// Fire-and-forget flag: a detached task runs in the background but is
+    /// never waited on (`wait_agents`), never listed (`list_agents`), and
+    /// never announced to the session as a run-completion injection target —
+    /// it belongs to a fire-and-forget consumer (`/spawn`, future cron paths)
+    /// rather than to the agent delegation pipeline.
+    #[serde(default)]
+    pub detached: bool,
     /// Current status.
     pub status: TaskStatus,
     /// Result summary (populated on completion).
@@ -339,6 +425,7 @@ impl AgentManager {
             agent_name,
             task_prompt,
             false,
+            false,
         );
         self.tasks.insert(task_id.clone(), entry);
         // P-11: spawn_sync tasks are not background (they block the caller),
@@ -441,6 +528,54 @@ impl AgentManager {
         model_override: Option<&str>,
         working_dir: &std::path::Path,
     ) -> anyhow::Result<TaskEntry> {
+        self.spawn_background_mode(
+            parent_session_id,
+            agent_name,
+            task_prompt,
+            model_override,
+            working_dir,
+            false,
+        )
+        .await
+    }
+
+    /// Fire-and-forget variant of [`spawn_background`]: the task runs in the
+    /// background and publishes [`Event::SubagentComplete`] like any other,
+    /// but it is flagged `detached` so it is EXCLUDED from `list_agents` and
+    /// `wait_agents` (explicit or omit-`task_ids` waits) and its completion is
+    /// never injected into the parent session's message stream — the task is
+    /// simply reaped when done. Used by the TUI `/spawn` command.
+    pub async fn spawn_detached(
+        &self,
+        parent_session_id: &str,
+        agent_name: &str,
+        task_prompt: &str,
+        model_override: Option<&str>,
+        working_dir: &std::path::Path,
+    ) -> anyhow::Result<TaskEntry> {
+        self.spawn_background_mode(
+            parent_session_id,
+            agent_name,
+            task_prompt,
+            model_override,
+            working_dir,
+            true,
+        )
+        .await
+    }
+
+    /// Shared implementation for [`spawn_background`] / [`spawn_detached`].
+    /// `detached` toggles whether the task participates in the wait/list
+    /// surface (see [`TaskEntry::detached`]).
+    async fn spawn_background_mode(
+        &self,
+        parent_session_id: &str,
+        agent_name: &str,
+        task_prompt: &str,
+        model_override: Option<&str>,
+        working_dir: &std::path::Path,
+        detached: bool,
+    ) -> anyhow::Result<TaskEntry> {
         // Check concurrency limit
         let running_count = self
             .tasks
@@ -466,6 +601,17 @@ impl AgentManager {
             .session_manager
             .create_session(working_dir.to_path_buf())?;
         let child_sid = child_session.id.clone();
+        // The child session's own directory is the project root this
+        // sub-agent actually runs in, so `log/subagents/` must be resolved
+        // against it — resolving against the PARENT's session directory
+        // wrote the report somewhere the child's `working_dir` never
+        // implied. Empty (in-memory test storage) falls back to the
+        // caller-supplied `working_dir`.
+        let report_dir = if child_session.directory.as_os_str().is_empty() {
+            working_dir.to_path_buf()
+        } else {
+            child_session.directory
+        };
 
         // Register task entry
         let entry = build_task_entry(
@@ -475,10 +621,13 @@ impl AgentManager {
             agent_name,
             task_prompt,
             true,
+            detached,
         );
         self.tasks.insert(task_id.clone(), entry.clone());
         // P-11: mark that there is at least one pending background task so
-        // the agent loop's `drain_completed` call is not skipped.
+        // the agent loop's `drain_completed` call is not skipped. A detached
+        // task's completion is only reaped (it is never injected), but the
+        // flag must still trip `drain_completed` so the entry is removed.
         self.has_pending_background.store(true, Ordering::Relaxed);
 
         let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -507,6 +656,11 @@ impl AgentManager {
         let background_timeout_secs = self.background_timeout_secs;
         let tid = task_id.clone();
         let csid = child_sid.clone();
+        // Copies retained for the completion block (the agent-resolution
+        // closure takes ownership of `agent` / `prompt`).
+        let csid_for_reason = csid.clone();
+        let agent_label = agent_name.to_string();
+        let task_prompt_str = task_prompt.to_string();
         let working_dir_buf = working_dir.to_path_buf();
         let cancel_flag_outer = cancel_flag.clone();
 
@@ -518,13 +672,14 @@ impl AgentManager {
             // rather than silently aborting this background task and leaving
             // the parent wait_agents call stalled forever.
             let csid_inner = csid.clone();
+            let processor_inner = processor.clone();
             let inner = tokio::spawn(async move {
-                let config = processor.load_config_cached();
+                let config = processor_inner.load_config_cached();
                 let mut agent_info = match crate::agent::resolve_agent_with_customs_and_model(
                     &agent,
                     &config,
                     &working_dir_buf,
-                    &processor.provider_registry,
+                    &processor_inner.provider_registry,
                 ) {
                     Ok(a) => Arc::unwrap_or_clone(a),
                     Err(e) => return Err(e),
@@ -535,11 +690,11 @@ impl AgentManager {
                 apply_model_override(
                     &mut agent_info,
                     model.as_deref(),
-                    &processor,
+                    &processor_inner,
                     "background agent",
                 );
 
-                processor
+                processor_inner
                     .process_message(&csid_inner, &prompt, &agent_info, cancel_flag.clone())
                     .await
                     .map(|msg| msg.text_content())
@@ -577,11 +732,37 @@ impl AgentManager {
             match result {
                 Ok(response) => {
                     let summary = truncate_str(&response, 2000).into_owned();
+                    // Report the real loop outcome: before this fix every
+                    // successful completion was hard-coded "stop", so a run
+                    // cut by the provider's silent end-of-stream still
+                    // claimed a healthy finish. The label comes from the one
+                    // shared mapping (`finish_reason_label`) so the event and
+                    // the `report_status` below can never disagree.
+                    let reason = processor.last_message_end_reason(&csid_for_reason);
+                    let finish_reason = reason
+                        .as_ref()
+                        .map_or("stop", crate::session::finish_reason_label);
+                    let report_status = ReportStatus::from_finish_reason_label(finish_reason);
+                    // Persist the FULL untruncated output so the
+                    // `output_file` recovery path documented for
+                    // `wait_agents`/`list_agents` actually exists — before
+                    // this fix `output_file` was always `None` and no
+                    // `log/subagents/<task-id>.md` was ever written.
+                    let output_file = persist_task_output(
+                        &report_dir,
+                        &tid,
+                        &agent_label,
+                        &task_prompt_str,
+                        duration_ms,
+                        &response,
+                    );
                     {
                         if let Some(mut entry) = tasks.get_mut(&tid) {
                             entry.status = TaskStatus::Completed;
                             entry.result = Some(Arc::from(response.as_str()));
                             entry.completed_at = Some(Utc::now());
+                            entry.output_file = output_file;
+                            entry.report_status = report_status;
                         }
                     }
                     cancel_flags.remove(&tid);
@@ -592,7 +773,7 @@ impl AgentManager {
                         summary,
                         success: true,
                         duration_ms,
-                        finish_reason: "stop".to_string(),
+                        finish_reason: finish_reason.to_string(),
                     });
                 }
                 Err(e) => {
@@ -749,10 +930,14 @@ impl AgentManager {
     }
 
     /// Returns all tasks for a given parent session.
+    ///
+    /// Detached (fire-and-forget) tasks are excluded: they are not part of
+    /// the delegation pipeline so `list_agents` / `wait_agents` should not
+    /// see them.
     pub async fn list_agents(&self, parent_session_id: &str) -> Vec<TaskEntry> {
         self.tasks
             .iter()
-            .filter(|r| r.parent_session_id == parent_session_id)
+            .filter(|r| r.parent_session_id == parent_session_id && !r.detached)
             .map(|r| r.value().clone())
             .collect()
     }
@@ -761,7 +946,7 @@ impl AgentManager {
     pub async fn running_background_count(&self) -> usize {
         self.tasks
             .iter()
-            .filter(|r| r.status == TaskStatus::Running && r.background)
+            .filter(|r| r.status == TaskStatus::Running && r.background && !r.detached)
             .count()
     }
 
@@ -823,7 +1008,12 @@ impl AgentManager {
                 && entry.waiter_count == 0
             {
                 entry.reported = true;
-                completed.push(entry.clone());
+                // Detached tasks (fire-and-forget /spawn) are reaped but
+                // never injected into the conversation — dropping them here
+                // is the designed behavior.
+                if !entry.detached {
+                    completed.push(entry.clone());
+                }
             }
         }
         // P-11: clear the flag when no unreported background tasks remain
@@ -970,6 +1160,14 @@ impl AgentManager {
     #[doc(hidden)]
     pub async fn seed_completed_for_test(&self, entry: TaskEntry) {
         self.tasks.insert(entry.id.clone(), entry);
+    }
+
+    /// Test-only helper: arm the P-11 `has_pending_background` flag the way a
+    /// real spawn does, so tests that seed entries directly can exercise the
+    /// `drain_completed` path without running a sub-agent.
+    #[doc(hidden)]
+    pub fn set_pending_background_for_test(&self) {
+        self.has_pending_background.store(true, Ordering::Relaxed);
     }
 }
 
@@ -1129,6 +1327,7 @@ mod tests {
             agent_name: "explore".to_string(),
             task_prompt: "Find auth code".to_string(),
             background: true,
+            detached: false,
             status: TaskStatus::Running,
             result: None,
             error: None,

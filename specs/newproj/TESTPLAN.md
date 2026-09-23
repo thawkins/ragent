@@ -146,6 +146,30 @@ session against a real GitHub/GitLab account where hosting tests are involved.
 - A visible warning names the unknown stack and states the base layout is used.
 - Scaffold completes otherwise as in TC-002 (buildable, ragent layout present).
 
+### TC-019 — Stack overlay on a binary app type emits a single entry point
+
+**Requirement:** FR-007
+
+**Preconditions:** ragent build with the T-019 fix; run from a shell.
+
+**Steps:**
+1. Run `ragent new --language rust --type tui --stack ratatui` in an empty
+   directory, then repeat for `--type cmdline --stack axum`,
+   `--type cmdline --stack warp`, `--type gui --stack raylib`, and
+   `--type gui --stack gtk4`.
+2. Inspect the entry-point source and run `cargo build` in one scaffold.
+
+**Test data:** `ratatui`/`axum`/`warp`/`raylib`/`gtk4` overlays on their
+matching app types.
+
+**Expected results:**
+- `src/main.rs` declares exactly **one** `fn main`; the base
+  `Hello, world! (tui|gui starter)` entry point is gone.
+- `cargo build` succeeds with no edits; running the ratatui scaffold draws the
+  `Hello, world!` terminal UI (previously the generated file declared two
+  `main`s and only compiled once one was deleted manually, after which the
+  binary printed nothing).
+
 ### TC-007 — GitHub remote create and push
 
 **Requirement:** FR-008, FR-011

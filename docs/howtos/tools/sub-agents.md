@@ -33,10 +33,20 @@ call with a comprehensive prompt.
 | `agent` | string | yes | Agent name (`explore`, `build`, `plan`, `general`, or custom) | `"explore"` |
 | `task` | string | yes | Specific prompt/instructions, including all needed context | `"Find all callers of X in src/"` |
 | `background` | boolean | no | Run concurrently without blocking (default false). Use `true` whenever spawning more than one in the same response | `true` |
+| `detached` | boolean | no | Only with `background: true`. Fire-and-forget: excluded from `list_agents`, not awaitable via `wait_agents`, completion NOT injected back into the session | `true` |
 | `model` | string | no | Provider/model override | `"anthropic/claude-sonnet-4-20250514"` |
 
 Concurrency: at most 32 background tasks per session; use `wait_agents` to
 free slots before spawning more.
+
+A **detached** task (`background: true, detached: true`) runs and shows in the
+Agents panel but is invisible to the delegation surface: `list_agents` omits it,
+`wait_agents` (with or without `task_ids`) never returns it, and its completion
+is reaped without a chat injection while still appearing in `tasks_snapshot`.
+Because nothing reads its reply body, a detached prompt whose deliverable is a
+report MUST name a file to write; the run's full output is additionally persisted
+to `log/subagents/<task-id>.md` on completion. The TUI `/spawn` command is the
+user-facing equivalent.
 
 **Example:**
 ```text

@@ -120,7 +120,8 @@ fn test_stack_overlay_layers_import_and_starter_on_source() {
 
     let source = &layout.files[1];
     assert_eq!(source.path, "src/main.rs");
-    // Import block first, then the base hello-world body, then the starter.
+    // Import block first, then the framework starter (the base entry point is
+    // replaced, not kept alongside the starter's own `main`).
     assert!(
         source
             .content
@@ -129,16 +130,49 @@ fn test_stack_overlay_layers_import_and_starter_on_source() {
     assert!(source.content.contains("fn main()"));
     assert!(source.content.contains("Hello, world!"));
     assert!(source.content.contains("axum::serve"));
-    // Snippet order: import block before the base body, starter after it.
-    let import_end = source.content.find("fn main()").expect("base main present");
-    assert!(
-        source
-            .content
-            .find("hello_route")
-            .expect("starter route present")
-            > import_end,
-        "starter snippet must come after the base body"
+    // Exactly one entry point: the framework starter replaces the base body.
+    assert_eq!(
+        source.content.matches("fn main").count(),
+        1,
+        "overlaid source must declare exactly one main"
     );
+}
+
+/// FR-007 regression: a stack overlay on a binary app type must yield a single
+/// `main`, so the generated project builds without hand-editing and runs the
+/// framework starter (previously the base `println!("Hello, world!")` entry
+/// point was kept too, producing two `main` functions and a CLI no-output
+/// binary once one was deleted).
+#[test]
+fn test_stack_overlay_on_binary_yields_single_main() {
+    let recipe = recipe_for(Language::Rust).expect("recipe present");
+    let cases = [
+        ("axum", AppType::Cmdline),
+        ("warp", AppType::Cmdline),
+        ("raylib", AppType::Gui),
+        ("gtk4", AppType::Gui),
+        ("ratatui", AppType::Tui),
+    ];
+    for (stack_name, app_type) in cases {
+        let StackOverlay::Applied(stack) = resolve_stack_overlay(Some(stack_name), Language::Rust)
+        else {
+            panic!("{stack_name} must resolve Applied");
+        };
+        let mut layout = base(Language::Rust, app_type);
+        apply_stack_overlay(&mut layout, recipe, stack);
+
+        let source = &layout.files[1];
+        assert_eq!(
+            source.content.matches("fn main").count(),
+            1,
+            "{stack_name} overlay on {app_type} must declare exactly one main"
+        );
+        // The base entry-point body must be gone, not merely shadowed.
+        assert!(
+            !source.content.contains("tui starter") && !source.content.contains("gui starter"),
+            "{stack_name} overlay must drop the base starter comment"
+        );
+    }
 }
 
 #[test]

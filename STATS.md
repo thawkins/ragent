@@ -1,27 +1,30 @@
 # Project Statistics
 
-**Version:** 1.0.114
+**Version:** 1.0.116
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
+
+> Metrics below are measured against the v1.0.116 tree (the `spawnagent` detached
+> sub-agent change-set plus the `/simplify` and `/rust-hygiene` passes).
 
 
 ## Project-wide Metrics
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 502773 (499037 in `crates/` + 3736 in root `src/`/`examples/`) |
-| Total Rust files | 1251 (workspace crates) + 6 (root `src/`/`examples/`) |
-| Tests defined | ~9675 (7960 external test-file tests + 1679 inline `#[cfg(test)]` + 36 root `tests/`/`src/`) |
-| Test files | 628 external + ~117 inline-bearing |
-| Test binaries | ~662 (628 integration test files + 33 lib/bin targets + 1 root bin) |
+| Total Rust lines | 503,976 (500,239 in `crates/` + 3,737 in root `src/`/`examples/`) |
+| Total Rust files | 1,253 (workspace crates) + 6 (root `src/`/`examples/`) |
+| Tests defined | ~9,685 (7,972 external test-file tests + 1,677 inline `#[cfg(test)]` + 36 root `tests/`/`src/`) |
+| Test files | 629 external + ~117 inline-bearing |
+| Test binaries | ~663 (629 integration test files + 33 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 169 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 17 |
-| Specs on disk | 52 directories in `specs/` |
-| Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 20 category how-tos, 77 slash-command docs |
+| Specs on disk | 53 directories in `specs/` |
+| Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 20 category how-tos, 78 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.114 |
+| Version | 1.0.116 |
 
 ---
 
@@ -33,46 +36,46 @@ shows the file count, line count, and test-file count for each crate (including
 
 | Crate | Rust files | Rust lines | Test files |
 |---|---|---|---|
-| `ragent-agent` | 232 | 81058 | 93 |
-| `ragent-bench` | 24 | 8436 | 3 |
-| `ragent-codeindex` | 69 | 23548 | 40 |
-| `ragent-config` | 47 | 11628 | 30 |
-| `ragent-llm` | 52 | 23540 | 23 |
-| `ragent-plugins` | 52 | 18836 | 28 |
-| `ragent-research` | 114 | 60086 | 48 |
-| `ragent-server` | 11 | 5854 | 5 |
-| `ragent-specs` | 30 | 19411 | 17 |
-| `ragent-storage` | 37 | 14717 | 32 |
-| `ragent-team` | 15 | 2770 | 14 |
-| `ragent-telemetry` | 25 | 10265 | 16 |
-| `ragent-tools-core` | 56 | 17747 | 20 |
-| `ragent-tools-extended` | 203 | 74304 | 85 |
-| `ragent-tools-vcs` | 56 | 14632 | 20 |
-| `ragent-tui` | 192 | 103529 | 136 |
-| `ragent-types` | 36 | 8676 | 18 |
+| `ragent-agent` | 233 | 81,706 | 94 |
+| `ragent-bench` | 24 | 8,436 | 3 |
+| `ragent-codeindex` | 69 | 23,548 | 40 |
+| `ragent-config` | 47 | 11,628 | 30 |
+| `ragent-llm` | 52 | 23,540 | 23 |
+| `ragent-plugins` | 52 | 18,811 | 28 |
+| `ragent-research` | 114 | 60,101 | 48 |
+| `ragent-server` | 11 | 5,857 | 5 |
+| `ragent-specs` | 30 | 19,411 | 17 |
+| `ragent-storage` | 37 | 14,717 | 32 |
+| `ragent-team` | 15 | 2,770 | 14 |
+| `ragent-telemetry` | 25 | 10,265 | 16 |
+| `ragent-tools-core` | 56 | 17,747 | 20 |
+| `ragent-tools-extended` | 203 | 74,502 | 85 |
+| `ragent-tools-vcs` | 56 | 14,635 | 20 |
+| `ragent-tui` | 193 | 103,889 | 136 |
+| `ragent-types` | 36 | 8,676 | 18 |
 
 ---
 
 ## Crate Size Distribution
 
 ```
-ragent-tui             ██████████████████████████████ 103,529 lines (20.7%)
-ragent-agent           ███████████████████████ 81,058 lines (16.2%)
-ragent-tools-extended  █████████████████████ 74,304 lines (14.9%)
-ragent-research        █████████████████ 60,086 lines (12.0%)
-ragent-codeindex       ███████ 23,548 lines ( 4.7%)
-ragent-llm             ███████ 23,540 lines ( 4.7%)
-ragent-specs           ██████ 19,411 lines ( 3.9%)
-ragent-plugins         █████ 18,836 lines ( 3.8%)
-ragent-tools-core      █████ 17,747 lines ( 3.6%)
-ragent-storage         ████ 14,717 lines ( 2.9%)
-ragent-tools-vcs       ████ 14,632 lines ( 2.9%)
-ragent-config          ███ 11,628 lines ( 2.3%)
-ragent-telemetry       ███ 10,265 lines ( 2.1%)
-ragent-types           ██ 8,676 lines ( 1.7%)
-ragent-bench           ██ 8,436 lines ( 1.7%)
-ragent-server          ██ 5,854 lines ( 1.2%)
-ragent-team            █ 2,770 lines ( 0.6%)
+ragent-tui             ############################## 103,889 lines (20.8%)
+ragent-agent           ####################### 81,706 lines (16.3%)
+ragent-tools-extended  ##################### 74,502 lines (14.9%)
+ragent-research        ################# 60,101 lines (12.0%)
+ragent-codeindex       ####### 23,548 lines ( 4.7%)
+ragent-llm             ####### 23,540 lines ( 4.7%)
+ragent-specs           ###### 19,411 lines ( 3.9%)
+ragent-plugins         ##### 18,811 lines ( 3.8%)
+ragent-tools-core      ##### 17,747 lines ( 3.5%)
+ragent-storage         #### 14,717 lines ( 2.9%)
+ragent-tools-vcs       #### 14,635 lines ( 2.9%)
+ragent-config          ### 11,628 lines ( 2.3%)
+ragent-telemetry       ### 10,265 lines ( 2.1%)
+ragent-types           ## 8,676 lines ( 1.7%)
+ragent-bench           ## 8,436 lines ( 1.7%)
+ragent-server          ## 5,857 lines ( 1.2%)
+ragent-team            # 2,770 lines ( 0.6%)
 ```
 
 ---
@@ -81,9 +84,9 @@ ragent-team            █ 2,770 lines ( 0.6%)
 
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
-| `ragent-tools-extended` | 85 | ~1,892 |
-| `ragent-tui` | 136 | ~1,607 |
-| `ragent-agent` | 93 | ~804 |
+| `ragent-tools-extended` | 85 | ~1,893 |
+| `ragent-tui` | 136 | ~1,600 |
+| `ragent-agent` | 94 | ~806 |
 | `ragent-specs` | 17 | ~514 |
 | `ragent-research` | 48 | ~402 |
 | `ragent-codeindex` | 40 | ~395 |
@@ -98,12 +101,12 @@ ragent-team            █ 2,770 lines ( 0.6%)
 | `ragent-server` | 5 | ~96 |
 | `ragent-team` | 14 | ~81 |
 | `ragent-bench` | 3 | ~50 |
-| **Total (external)** | **628** | **~7,960** |
+| **Total (external)** | **629** | **~7,972** |
 
 Inline `#[cfg(test)]` modules in library sources contribute a further
-1,679 test attributes (largest contributors: `ragent-research`, `ragent-agent`,
+1,677 test attributes (largest contributors: `ragent-research`, `ragent-agent`,
 `ragent-tools-extended`, `ragent-tui`, `ragent-specs`), bringing the estimated
-total to ~9,675.
+total to ~9,685.
 
 ---
 
@@ -165,8 +168,8 @@ Notes:
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 52 lines (9,647 tests / 501,121 lines)
-- Largest crate: `ragent-tui` (103,517 lines, 20.8%)
+- Test-to-code ratio: ~1 test per 52 lines (9,685 tests / 503,976 lines)
+- Largest crate: `ragent-tui` (103,889 lines, 20.6%)
 - Smallest crate: `ragent-team` (2,770 lines, 0.6%)
 - Median crate size: 17,747 lines (`ragent-tools-core`)
 - Crates over 10k lines: 13 of 17
@@ -174,4 +177,4 @@ Notes:
 
 ---
 
-_Generated 2026-09-22 (v1.0.114 tree: Claude plugin hooks now read the `hooks.json` file and the group `{matcher, hooks: [...]}` shape, deliver `CLAUDE_PLUGIN_ROOT` and the Claude event JSON on stdin, feed a `PostToolUse` `additionalContext` back to the model, and let a blocking Stop hook continue the turn (bounded); `/plugins list` counts and details skills/agents/hooks; `/plugins add` installs a plugin enabled; a multi-target directory shipping both nested manifests resolves to Claude; and the GitHub credential chain gains a `gh` CLI fallback with an app-token downgrade. Earlier on the same tree: plugin-store providers with `git+` installs, `/plugins stores --check`, the `ragent_info` tool (169 tools), slash-command input queueing while the agent runs, and a test-isolation fix that gives the `reference::resolve` tests unique temporary directories so the workspace suite no longer flakes under parallel execution). Metrics re-measured across the workspace and docs re-rendered in the same pass._
+_Generated 2026-09-23 (v1.0.116 tree: detached fire-and-forget sub-agents via the TUI `/spawn <agent> <prompt...>` command and the `new_agent` `detached: true` parameter (spec `spawnagent`), with every completed sub-agent run now persisting its FULL output to `log/subagents/<task-id>.md` and the completion event carrying the real loop `finish_reason`; a `/simplify` code-quality pass consolidating the plugin bridge filters, the scaffold remote helpers, and the TUI queue-clear dialog helpers; and a `/rust-hygiene` pass keeping `cargo fmt`, `clippy -D warnings`, the dead-code lint and reason checks, `cargo audit`, and `cargo deny` green. Earlier on this tree: `newproj` stack overlay now emits a single entry point, and the research gather log moved to the singular `log/research/`.) Metrics re-measured across the workspace and docs re-rendered in the same pass._

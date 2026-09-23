@@ -115,6 +115,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

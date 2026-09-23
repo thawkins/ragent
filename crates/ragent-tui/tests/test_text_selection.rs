@@ -77,6 +77,7 @@ fn make_app() -> App {
         loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -226,6 +227,7 @@ fn test_clicking_active_agents_row_opens_output_view() {
         agent_name: "explore".to_string(),
         task_prompt: "x".to_string(),
         background: true,
+        detached: false,
         status: ragent_agent::task::TaskStatus::Running,
         result: None,
         error: None,
@@ -291,6 +293,7 @@ fn test_clicking_agents_button_toggles_agents_window() {
         agent_name: "explore".to_string(),
         task_prompt: "x".to_string(),
         background: true,
+        detached: false,
         status: ragent_agent::task::TaskStatus::Running,
         result: None,
         error: None,

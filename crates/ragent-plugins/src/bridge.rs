@@ -26,15 +26,28 @@
 //! These functions read the plugin manifest from disk (via
 //! [`crate::manifest::parse_plugin_dir`]) but never execute plugin JavaScript.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use ragent_config::McpServerConfig;
 
 use crate::manifest::{
-    AGENTS_DIR, PluginCommandDef, PluginHook, PluginMcpServer, extract_mcp_servers,
+    AGENTS_DIR, ParsedManifest, PluginCommandDef, PluginHook, PluginMcpServer, extract_mcp_servers,
 };
 use crate::store::{ScannedPlugin, StoreDirs, scan_dirs};
+
+/// Scan the stores once and return the parsed manifests of the **enabled**
+/// plugins (FR-016). A disabled plugin is inert and contributes nothing; a
+/// plugin whose manifest cannot be parsed is reported by discovery and skipped
+/// here. Shared by every `scanned_plugin_*` bridge so the enable/parse filter
+/// lives in one place.
+fn enabled_manifests(dirs: &StoreDirs) -> Vec<ParsedManifest> {
+    scan_dirs(dirs.clone())
+        .into_iter()
+        .filter(|plugin| plugin.enabled)
+        .filter_map(|plugin| plugin.outcome.ok())
+        .collect()
+}
 
 /// Resolve the skill directories contributed by the enabled plugins in the
 /// stores described by `dirs` (FR-029 skills bridge).
@@ -43,22 +56,11 @@ use crate::store::{ScannedPlugin, StoreDirs, scan_dirs};
 /// cannot be parsed contributes nothing (it is reported by discovery).
 #[must_use]
 pub fn scanned_plugin_skill_dirs(dirs: &StoreDirs) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = Vec::new();
-    for scanned in scan_dirs(dirs.clone()) {
-        if !scanned.enabled {
-            continue;
-        }
-        let Ok(parsed) = &scanned.outcome else {
-            continue;
-        };
-        for dir in plugin_skill_dirs(&parsed.descriptor.root, &parsed.skills) {
-            if !out.contains(&dir) {
-                out.push(dir);
-            }
-        }
+    let mut out: BTreeSet<PathBuf> = BTreeSet::new();
+    for parsed in enabled_manifests(dirs) {
+        out.extend(plugin_skill_dirs(&parsed.descriptor.root, &parsed.skills));
     }
-    out.sort();
-    out
+    out.into_iter().collect()
 }
 
 /// Resolve the MCP servers contributed by the enabled plugins in the stores
@@ -70,13 +72,7 @@ pub fn scanned_plugin_skill_dirs(dirs: &StoreDirs) -> Vec<PathBuf> {
 #[must_use]
 pub fn scanned_plugin_mcp_servers(dirs: &StoreDirs) -> Vec<(String, McpServerConfig)> {
     let mut by_id: BTreeMap<String, McpServerConfig> = BTreeMap::new();
-    for scanned in scan_dirs(dirs.clone()) {
-        if !scanned.enabled {
-            continue;
-        }
-        let Ok(parsed) = &scanned.outcome else {
-            continue;
-        };
+    for parsed in enabled_manifests(dirs) {
         for (id, config) in plugin_mcp_servers(
             &parsed.descriptor.id,
             &parsed.descriptor.root,
@@ -222,13 +218,7 @@ fn resolve_within(root: &Path, rel: &str) -> Option<PathBuf> {
 #[must_use]
 pub fn scanned_plugin_commands(dirs: &StoreDirs) -> Vec<(String, PluginCommandDef)> {
     let mut out: Vec<(String, PluginCommandDef)> = Vec::new();
-    for scanned in scan_dirs(dirs.clone()) {
-        if !scanned.enabled {
-            continue;
-        }
-        let Ok(parsed) = &scanned.outcome else {
-            continue;
-        };
+    for parsed in enabled_manifests(dirs) {
         for def in &parsed.commands {
             out.push((parsed.descriptor.id.clone(), def.clone()));
         }
@@ -290,22 +280,11 @@ pub fn skills_of(scanned: &ScannedPlugin) -> Vec<PathBuf> {
 /// contributes nothing (it is reported by discovery).
 #[must_use]
 pub fn scanned_plugin_agent_files(dirs: &StoreDirs) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = Vec::new();
-    for scanned in scan_dirs(dirs.clone()) {
-        if !scanned.enabled {
-            continue;
-        }
-        let Ok(parsed) = &scanned.outcome else {
-            continue;
-        };
-        for file in plugin_agent_files(&parsed.descriptor.root, &parsed.agents) {
-            if !out.contains(&file) {
-                out.push(file);
-            }
-        }
+    let mut out: BTreeSet<PathBuf> = BTreeSet::new();
+    for parsed in enabled_manifests(dirs) {
+        out.extend(plugin_agent_files(&parsed.descriptor.root, &parsed.agents));
     }
-    out.sort();
-    out
+    out.into_iter().collect()
 }
 
 /// Resolve a plugin's declared agent profiles against its root (FR-032).
@@ -349,13 +328,7 @@ fn agent_rel_path(raw: &str) -> String {
 #[must_use]
 pub fn scanned_plugin_hooks(dirs: &StoreDirs) -> Vec<PluginHook> {
     let mut out: Vec<PluginHook> = Vec::new();
-    for scanned in scan_dirs(dirs.clone()) {
-        if !scanned.enabled {
-            continue;
-        }
-        let Ok(parsed) = &scanned.outcome else {
-            continue;
-        };
+    for parsed in enabled_manifests(dirs) {
         out.extend(parsed.hooks.iter().cloned());
     }
     out.sort_by(|a, b| {

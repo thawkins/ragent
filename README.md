@@ -89,7 +89,14 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Snapshot & undo** — file snapshots before edits so changes can be rolled back
 - **Event bus** — internal tokio pub/sub for real-time UI updates across all components
 - **Background agents** — spawn and run multiple sub-agents concurrently for parallel
-  task execution, with REST API and TUI monitoring
+  task execution, with REST API and TUI monitoring; `/spawn <agent> <prompt>`
+  launches a **detached** fire-and-forget sub-agent that nothing ever waits on
+  (no `list_agents` entry, not awaitable via `wait_agents`, result never
+  injected into the chat); every completed sub-agent run (detached or not)
+  also writes its FULL output to `log/subagents/<task-id>.md`, and the
+  completion event carries the real loop `finish_reason` (`stop` /
+  `truncation` / `length` / `cancelled` / `error`) so a provider-side cut is
+  flagged in the Agents panel instead of looking like a healthy finish
 - **Prompt inspector** — `/prompt` renders the assembled system prompt an agent
   would receive (primary or subagent mode, per-agent override, roster) with the
   effective tool surface — read-only, no LLM call
@@ -473,12 +480,32 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.114** — The core architecture, tool system (169 tools across 25 categories), TUI,
+**v1.0.116** — The core architecture, tool system (169 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
+
+- **Maintenance release (v1.0.116)** — agent and plugin updates plus a
+  code-quality pass, with no behavioural regressions. The four content-sized TUI
+  modal renderers now share one `centered_rect_fixed` helper (byte-for-byte
+  identical geometry), and the sub-agent report writer streams its output
+  straight to disk instead of buffering the whole file in memory. Full CI
+  hygiene (`cargo check`, the dead-code lint and reason checks,
+  `clippy -D warnings`, `cargo fmt --check`, `cargo audit`, `cargo deny check`)
+  and the entire `cargo test --workspace` suite are green.
+
+- **Detached sub-agents + `/spawn` (v1.0.115)** — `/spawn <agent> <prompt...>`
+  launches a sub-agent directly from the chat input as a **detached**
+  fire-and-forget task: it runs concurrently and shows in the Agents panel, but
+  `list_agents`/`wait_agents` never see it and its result is never injected back
+  into the chat. Every completed sub-agent run (detached or not) now persists
+  its FULL output to `log/subagents/<task-id>.md`, and the completion event
+  carries the real loop `finish_reason` (`stop` / `truncation` / `length` /
+  `cancelled` / `error`), so a provider-side cut is flagged in the Agents panel
+  instead of looking like a healthy finish. The `new_agent` tool gained the
+  matching optional `detached: true` parameter. Spec: `specs/spawnagent/`.
 
 - **Plugin bridges (v1.0.114)** — plugin bridges for skills, MCP servers,
   slash commands, agents, and hooks (including the full Claude `hooks.json`

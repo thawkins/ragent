@@ -43,7 +43,6 @@ const SKIP_DIRS: &[&str] = &[
     "target",
     "node_modules",
     "log",
-    "logs",
     ".ragent",
     ".cargo",
     "vendor",

@@ -2,8 +2,8 @@
 //!
 //! Every web-gathering pass appends one JSON object per line to
 //! `<log_dir>/research-<name>-<timestamp>-<rand>-web.jsonl`. The caller
-//! decides `log_dir`; the agent layer passes `logs/research/` so files
-//! land at `logs/research/research-<name>-<ts>-<rand>-web.jsonl`. Each
+//! decides `log_dir`; the agent layer passes `log/research/` so files
+//! land at `log/research/research-<name>-<ts>-<rand>-web.jsonl`. Each
 //! search hit is first recorded with `"status": "considered"` and then,
 //! as the fetch/filter pipeline resolves it, with `"status": "captured"`
 //! or `"status": "rejected"` plus the rejection `reason`. The file also

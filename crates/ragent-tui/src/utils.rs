@@ -173,6 +173,24 @@ pub fn centered_rect_max(
     Rect::new(x, y, w, h)
 }
 
+/// Centre a fixed-size rectangle within `area`, clamping its dimensions so it
+/// can never exceed the available space.
+///
+/// The centring form shared by every content-sized modal (queue menu, queue
+/// show panel, clear confirmation, plugin-store panel): the caller computes the
+/// desired `width`/`height` and this function clamps them to the screen and
+/// offsets the rectangle by half the remaining space on each axis.
+pub fn centered_rect_fixed(width: u16, height: u16, area: Rect) -> Rect {
+    let w = width.min(area.width);
+    let h = height.min(area.height);
+    Rect::new(
+        area.x + area.width.saturating_sub(w) / 2,
+        area.y + area.height.saturating_sub(h) / 2,
+        w,
+        h,
+    )
+}
+
 /// Truncate text with ellipsis if it exceeds the maximum length.
 ///
 /// Returns the original string if it's within bounds, otherwise

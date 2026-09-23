@@ -884,6 +884,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Auto-decompose a goal into parallel subtasks (/swarm <prompt> | /swarm status | /swarm help)",
     },
     SlashCommandDef {
+        trigger: "spawn",
+        description: "Spawn a detached background sub-agent that nothing waits on: /spawn <agent> <prompt...> | /spawn help",
+    },
+    SlashCommandDef {
         trigger: "bash",
         description: "Manage bash command lists: /bash add|remove allow|deny <entry> [--global] | show | help",
     },
@@ -2335,6 +2339,14 @@ pub struct App {
     pub swarm_state: Option<SwarmState>,
     /// Pending result from an async `/swarm` LLM decomposition call.
     pub swarm_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// Result slot for the `/spawn` command's detached sub-agent launch.
+    ///
+    /// The `/spawn` handler performs the (async) `spawn_detached` registration
+    /// on a tokio task and deposits `Ok(task_id)` or `Err(message)` here; the
+    /// next event-loop pass publishes the outcome to the chat/status.
+    /// Only one `/spawn` launch may be pending at a time; a second invocation
+    /// while the slot is occupied is rejected with a usage warning.
+    pub spawn_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
     /// Pending result from a background `/bench run`.
     pub bench_result: Arc<std::sync::Mutex<Option<Result<ragent_bench::BenchRunOutcome, String>>>>,
     /// Active output overlay state.

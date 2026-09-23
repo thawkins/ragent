@@ -36,8 +36,16 @@ mod reverse;
 mod session_ops;
 pub mod skillgen;
 mod slash;
+mod spawn;
 mod swarm;
 pub mod toolchain;
+
+/// Test hook: expose the private `/spawn` poll to the integration test suite
+/// (`tests/test_slash_commands.rs`) without widening the production surface.
+#[doc(hidden)]
+pub fn poll_spawn_result_for_tests(app: &mut App) {
+    app.poll_spawn_result();
+}
 
 pub use self::loop_dialog::{
     LoopOverrides, LoopSetupField, LoopSetupState, apply_loop_overrides, build_spec_from_state,

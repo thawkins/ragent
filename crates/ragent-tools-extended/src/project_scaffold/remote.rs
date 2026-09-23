@@ -161,29 +161,137 @@ fn api_json(
     }
     let response = request.send().map_err(|err| err.to_string())?;
     let status = response.status().as_u16();
-    let value = response.json::<Value>().unwrap_or(Value::Null);
+    // A non-JSON body (HTML error page, gateway error, truncated response)
+    // must not be silently discarded: surface a short snippet so the failure
+    // message names the real cause instead of "(no message)".
+    let text = response.text().unwrap_or_default();
+    let value = match serde_json::from_str::<Value>(&text) {
+        Ok(value) => value,
+        Err(_) if text.trim().is_empty() => Value::Null,
+        Err(_) => Value::String(format!(
+            "non-JSON body: {}",
+            text.chars().take(200).collect::<String>()
+        )),
+    };
     Ok((status, value))
 }
 
 /// Extract GitHub's human-readable `message` field from an error body.
 fn api_message(value: &Value) -> String {
+    match value {
+        Value::String(snippet) => snippet.clone(),
+        _ => value
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("(no message)")
+            .to_owned(),
+    }
+}
+
+/// Extract a required non-empty string field from a response body, mapping a
+/// missing/empty value onto a [`RemoteFailure`] naming `step` and carrying the
+/// caller's `missing` remediation. Shared by the `html_url`/`web_url` push-URL
+/// readers and the `GET /user` identity readers.
+fn required_str_field(
+    value: &Value,
+    key: &str,
+    step: RemoteStep,
+    missing: &str,
+) -> Result<String, RemoteFailure> {
     value
-        .get("message")
+        .get(key)
         .and_then(Value::as_str)
-        .unwrap_or("(no message)")
-        .to_owned()
+        .map(str::to_owned)
+        .filter(|field| !field.is_empty())
+        .ok_or_else(|| RemoteFailure {
+            step,
+            message: missing.to_owned(),
+        })
 }
 
 /// Extract the `html_url` field used as the `origin` push URL.
 fn html_url(value: &Value) -> Result<String, RemoteFailure> {
-    value
-        .get("html_url")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .filter(|url| !url.is_empty())
+    required_str_field(
+        value,
+        "html_url",
+        RemoteStep::RepoCreate,
+        "GitHub response missing html_url",
+    )
+}
+
+/// Resolve an existing same-name repository/project for the FR-015 idempotent
+/// retry: fetch `path`, require HTTP 200, and extract the push URL with
+/// `url_of`. Shared by the GitHub (422) and GitLab (400 "already taken") reuse
+/// arms, which otherwise duplicate the block verbatim.
+///
+/// # Errors
+///
+/// [`RemoteFailure`] naming `step` when the fetch fails or does not return
+/// `200`.
+fn reuse_existing(
+    client: &Client,
+    base_url: &str,
+    token: &str,
+    flavor: ApiFlavor,
+    path: &str,
+    read_endpoint: &str,
+    noun: &str,
+    repo_name: &str,
+    step: RemoteStep,
+    url_of: fn(&Value) -> Result<String, RemoteFailure>,
+) -> Result<String, RemoteFailure> {
+    let (status, value) = api_json(
+        client,
+        reqwest::Method::GET,
+        base_url,
+        path,
+        token,
+        None,
+        flavor,
+    )
+    .map_err(|message| RemoteFailure {
+        step,
+        message: format!("{noun} '{repo_name}' already exists but could not be read: {message}"),
+    })?;
+    if status != 200 {
+        return Err(RemoteFailure {
+            step,
+            message: format!(
+                "{noun} '{repo_name}' already exists but GET {read_endpoint} returned \
+                 {status}: {}",
+                api_message(&value)
+            ),
+        });
+    }
+    url_of(&value)
+}
+
+/// Build the blocking HTTP client used by both hosting flows, mapping a
+/// builder failure onto `step`.
+fn build_client(step: RemoteStep) -> Result<Client, RemoteFailure> {
+    Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|err| RemoteFailure {
+            step,
+            message: err.to_string(),
+        })
+}
+
+/// Trim and validate a hosting token, returning the usable `&str` or an
+/// [`RemoteFailure`] naming `step` with the provider-specific `message`
+/// remediation (the local scaffold is always intact).
+fn require_token<'a>(
+    token: Option<&'a str>,
+    step: RemoteStep,
+    message: &str,
+) -> Result<&'a str, RemoteFailure> {
+    token
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
         .ok_or_else(|| RemoteFailure {
-            step: RemoteStep::RepoCreate,
-            message: "GitHub response missing html_url".to_owned(),
+            step,
+            message: message.to_owned(),
         })
 }
 
@@ -299,23 +407,14 @@ pub fn init_github_remote_with_token(
     repo_name: &str,
     private: bool,
 ) -> Result<RemoteReport, RemoteFailure> {
-    let token = token
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .ok_or_else(|| RemoteFailure {
-            step: RemoteStep::Auth,
-            message: "no GitHub token found; run `/github login` or set GITHUB_TOKEN, then \
-                      retry the hosting step - the local scaffold is intact"
-                .to_owned(),
-        })?;
+    let token = require_token(
+        token,
+        RemoteStep::Auth,
+        "no GitHub token found; run `/github login` or set GITHUB_TOKEN, then retry the hosting \
+         step - the local scaffold is intact",
+    )?;
 
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|err| RemoteFailure {
-            step: RemoteStep::RepoCreate,
-            message: err.to_string(),
-        })?;
+    let client = build_client(RemoteStep::RepoCreate)?;
 
     // 1. Identify the authenticated account (login needed for the FR-015
     //    existing-repository reuse path).
@@ -340,19 +439,13 @@ pub fn init_github_remote_with_token(
                 .to_owned(),
         });
     }
-    let login = value
-        .get("login")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    if login.is_empty() {
-        return Err(RemoteFailure {
-            step: RemoteStep::Auth,
-            message: "could not read the GitHub login from GET /user; the token may lack the \
-                      required scopes - the local scaffold is intact"
-                .to_owned(),
-        });
-    }
+    let login = required_str_field(
+        &value,
+        "login",
+        RemoteStep::Auth,
+        "could not read the GitHub login from GET /user; the token may lack the required scopes - \
+         the local scaffold is intact",
+    )?;
 
     // 2. Create the hosting repository, or reuse an existing same-name
     //    repository (GitHub answers 422 "already exists" on retry).
@@ -376,32 +469,19 @@ pub fn init_github_remote_with_token(
             // FR-015 idempotent retry: the repository already exists on the
             // account; resolve its URL and continue with the push.
             let path = format!("/repos/{login}/{repo_name}");
-            let (status, value) = api_json(
+            let url = reuse_existing(
                 &client,
-                reqwest::Method::GET,
                 base_url,
-                &path,
                 token,
-                None,
                 ApiFlavor::GitHub,
-            )
-            .map_err(|message| RemoteFailure {
-                step: RemoteStep::RepoCreate,
-                message: format!(
-                    "repository '{repo_name}' already exists but could not be read: {message}"
-                ),
-            })?;
-            if status != 200 {
-                return Err(RemoteFailure {
-                    step: RemoteStep::RepoCreate,
-                    message: format!(
-                        "repository '{repo_name}' already exists but GET /repos returned \
-                         {status}: {}",
-                        api_message(&value)
-                    ),
-                });
-            }
-            (false, html_url(&value)?)
+                &path,
+                "/repos",
+                "repository",
+                repo_name,
+                RemoteStep::RepoCreate,
+                html_url,
+            )?;
+            (false, url)
         }
         401 => {
             return Err(RemoteFailure {
@@ -476,15 +556,12 @@ pub fn load_gitlab_base_url() -> String {
 /// Extract the `web_url` field GitLab uses as the project's browser URL
 /// (the `origin` push URL).
 fn web_url(value: &Value) -> Result<String, RemoteFailure> {
-    value
-        .get("web_url")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .filter(|url| !url.is_empty())
-        .ok_or_else(|| RemoteFailure {
-            step: RemoteStep::GitLabRepoCreate,
-            message: "GitLab response missing web_url".to_owned(),
-        })
+    required_str_field(
+        value,
+        "web_url",
+        RemoteStep::GitLabRepoCreate,
+        "GitLab response missing web_url",
+    )
 }
 
 /// True when the GitLab error body indicates the project path is already
@@ -543,23 +620,14 @@ pub fn init_gitlab_remote_with_token(
     repo_name: &str,
     private: bool,
 ) -> Result<RemoteReport, RemoteFailure> {
-    let token = token
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .ok_or_else(|| RemoteFailure {
-            step: RemoteStep::GitLabAuth,
-            message: "no GitLab token found; run `/gitlab setup` or set GITLAB_TOKEN, then \
-                      retry the hosting step - the local scaffold is intact"
-                .to_owned(),
-        })?;
+    let token = require_token(
+        token,
+        RemoteStep::GitLabAuth,
+        "no GitLab token found; run `/gitlab setup` or set GITLAB_TOKEN, then retry the hosting \
+         step - the local scaffold is intact",
+    )?;
 
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|err| RemoteFailure {
-            step: RemoteStep::GitLabRepoCreate,
-            message: err.to_string(),
-        })?;
+    let client = build_client(RemoteStep::GitLabRepoCreate)?;
 
     // 1. Identify the authenticated account (username needed for the
     //    FR-015 existing-project reuse path). `root` requires `sudo`.
@@ -591,19 +659,13 @@ pub fn init_gitlab_remote_with_token(
             message: format!("GitLab API error {status}: {}", api_message(&value)),
         });
     }
-    let username = value
-        .get("username")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    if username.is_empty() {
-        return Err(RemoteFailure {
-            step: RemoteStep::GitLabAuth,
-            message: "could not read the GitLab username from GET /user; the token may lack \
-                      the required scopes - the local scaffold is intact"
-                .to_owned(),
-        });
-    }
+    let username = required_str_field(
+        &value,
+        "username",
+        RemoteStep::GitLabAuth,
+        "could not read the GitLab username from GET /user; the token may lack the required scopes \
+         - the local scaffold is intact",
+    )?;
 
     // 2. Create the hosting project, or reuse an existing same-name project
     //    (GitLab answers 400 "has already been taken" on a retry).
@@ -627,32 +689,19 @@ pub fn init_gitlab_remote_with_token(
             // FR-015 idempotent retry: the project already exists on the
             // account; resolve its URL and continue with the push.
             let path = format!("/api/v4/projects/{}%2F{repo_name}", username);
-            let (status, value) = api_json(
+            let url = reuse_existing(
                 &client,
-                reqwest::Method::GET,
                 base_url,
-                &path,
                 token,
-                None,
                 ApiFlavor::GitLab,
-            )
-            .map_err(|message| RemoteFailure {
-                step: RemoteStep::GitLabRepoCreate,
-                message: format!(
-                    "project '{repo_name}' already exists but could not be read: {message}"
-                ),
-            })?;
-            if status != 200 {
-                return Err(RemoteFailure {
-                    step: RemoteStep::GitLabRepoCreate,
-                    message: format!(
-                        "project '{repo_name}' already exists but GET /projects returned \
-                         {status}: {}",
-                        api_message(&value)
-                    ),
-                });
-            }
-            (false, web_url(&value)?)
+                &path,
+                "/projects",
+                "project",
+                repo_name,
+                RemoteStep::GitLabRepoCreate,
+                web_url,
+            )?;
+            (false, url)
         }
         401 | 403 => {
             return Err(RemoteFailure {

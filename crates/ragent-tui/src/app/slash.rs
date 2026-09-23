@@ -3985,7 +3985,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
 | `/log` | Toggle the log panel on/off |
 | `/log clear subagents` | Delete all files in `log/subagents/` |
 | `/log clear panics` | Delete all files in `log/panics/` |
-| `/log clear research` | Delete all files in `logs/research/` |
+| `/log clear research` | Delete all files in `log/research/` |
 | `/log clear editlog` | Delete all files in `log/editlog/` |
 | `/log clear logwindow` | Delete all files in `log/logwindow/` |
 | `/log help` | Show this help |
@@ -4008,7 +4008,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                                 clear_log_subdir(self, "log", "panics", "log: panics cleared");
                             }
                             "research" => {
-                                clear_log_subdir(self, "logs", "research", "log: research cleared");
+                                clear_log_subdir(self, "log", "research", "log: research cleared");
                             }
                             "editlog" => {
                                 clear_log_subdir(self, "log", "editlog", "log: editlog cleared");
@@ -6725,6 +6725,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         });
                     }
                 }
+            }
+
+            "spawn" => {
+                self.handle_spawn_command(args);
             }
 
             // ── /autopilot ──────────────────────────────────────────────────

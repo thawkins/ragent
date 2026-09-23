@@ -443,6 +443,7 @@ impl App {
             agent_name: "bench".to_string(),
             task_prompt: raw_command.to_string(),
             background: true,
+            detached: false,
             status: ragent_agent::task::TaskStatus::Running,
             result: Some(Arc::from("benchmark run in progress")),
             error: None,

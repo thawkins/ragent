@@ -101,6 +101,16 @@ handler for `axum`) on top of the FR-005 base, only for stacks the scaffolder kn
 **if/when** the stack is unknown, the scaffolder shall warn and continue with the
 base layout.
 
+The starter snippet is a complete binary entry point (it declares `main`), so on a
+binary app type (`cmdline`, `tui`, `gui`) it shall **replace** the FR-005 base entry
+point rather than be appended after it: the generated source declares exactly one
+`main`, builds untouched with the language's default toolchain, and runs the
+framework starter as generated. Any non-entry-point base content (a library body) is
+retained alongside the starter. Appending the starter after the base entry point is
+explicitly rejected because it yields two `main` functions in one file - a source
+that only compiles once the base function is deleted, and whose surviving binary is
+the base `Hello, world!` print rather than the framework starter.
+
 ### FR-008 — Remote-initialisation flags (optional feature)
 
 **If/when** `--github` or `--gitlab` is supplied, the scaffolder shall initialise a git

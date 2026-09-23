@@ -1027,7 +1027,7 @@ pub struct WebGatherer {
     /// (Milestone H-002). Subsequent retries double the delay. Defaults to
     /// [`DEFAULT_SEARCH_RETRY_BASE_DELAY_MS`] (200 ms).
     search_retry_base_delay_ms: u64,
-    /// JSONL URL log (`log/research-<name>-<ts>-<rand>-web.jsonl`) recording
+    /// JSONL URL log (`log/research/research-<name>-<ts>-<rand>-web.jsonl`) recording
     /// every search hit as `considered`/`captured`/`rejected` with a reason.
     /// `None` disables logging. Set via [`with_gather_log`].
     gather_log: Option<Arc<Mutex<GatherLog>>>,

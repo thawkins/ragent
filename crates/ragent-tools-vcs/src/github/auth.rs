@@ -40,6 +40,9 @@ fn read_cached_token(path: &Path) -> Option<String> {
         Err(_) => None,
     };
 
+    // Deliberately do NOT cache the missing-file case (`mtime == None`): the
+    // cache is cleared instead, so the token is re-read once the file appears.
+    // A negative cache would go stale the moment `/github login` writes it.
     *cache = mtime.map(|mtime| (path.to_path_buf(), mtime, value.clone()));
     value
 }

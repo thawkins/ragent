@@ -162,6 +162,8 @@ pub fn run_plugin_subcommand(
     // real surface.
     let mut surface = ScratchSurface::seeded(existing_tools, existing_commands);
     let mut session = PluginSession::start(dirs, config, &mut surface);
-    run_control_command(&mut session, &mut surface, sub, rest)
-        .or_else(|| Some(crate::help::render_help(sub)))
+    Some(
+        run_control_command(&mut session, &mut surface, sub, rest)
+            .unwrap_or_else(|| crate::help::render_help(sub)),
+    )
 }

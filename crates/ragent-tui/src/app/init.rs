@@ -391,6 +391,7 @@ impl App {
             focused_teammate: None,
             swarm_state: None,
             swarm_result: Arc::new(std::sync::Mutex::new(None)),
+            spawn_result: Arc::new(std::sync::Mutex::new(None)),
             bench_result: Arc::new(std::sync::Mutex::new(None)),
             output_view: None,
             research_view: None,

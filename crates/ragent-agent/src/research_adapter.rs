@@ -44,7 +44,7 @@ use ragent_research::{
 /// LLM-backed analysis engine is wired in so the final `RESEARCH.md` contains
 /// synthesized summary/findings/cross-references/open questions.
 /// * `research_name` — when `Some`, is sanitised and used in the JSONL
-///   gather-log file name (`logs/research/research-<name>-<ts>-<rand>-web.jsonl`)
+///   gather-log file name (`log/research/research-<name>-<ts>-<rand>-web.jsonl`)
 ///   recording every considered/captured/rejected URL.
 #[allow(clippy::too_many_arguments)]
 pub fn build_research_session(
@@ -146,7 +146,7 @@ pub fn build_research_session(
         None => session,
     };
     let session = match research_name.map(|n| {
-        ragent_research::gather_log::GatherLog::new(&working_dir.join("logs").join("research"), n)
+        ragent_research::gather_log::GatherLog::new(&working_dir.join("log").join("research"), n)
     }) {
         Some(Ok(log)) => session.with_gather_log(log),
         Some(Err(e)) => {

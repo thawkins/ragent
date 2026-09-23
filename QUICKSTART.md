@@ -990,7 +990,17 @@ Agent uses:
 /agents     # Open the Agents panel to see running background tasks
 /cancel abc # Cancel a background task by ID prefix
 /task list  # List session tasks (the task-service equivalent of old todos)
+/spawn explore "Find every call site of resolve_agent"   # detached, fire-and-forget
 ```
+
+`/spawn <agent> <prompt...>` launches a **detached** sub-agent straight from the
+input line. It runs concurrently and appears in the Agents panel, but nothing ever
+waits on it: it is absent from `list_agents`, cannot be awaited with `wait_agents`,
+and its result is never injected back into the chat. Use it for side-effect-only
+work (writing a file, refreshing the index). Because nothing reads the reply body,
+give the prompt a file to write; every completed sub-agent (detached or not) also
+persists its full output to `log/subagents/<task-id>.md`. A second `/spawn` while
+one is still registering is refused.
 
 **Via REST API:**
 
@@ -1035,6 +1045,10 @@ Control background agent limits in `ragent.json`:
 
 When a background task completes, the result is automatically injected into the parent
 session as a system message, allowing the agent to act on it in the next iteration.
+
+A **detached** task (`/spawn`, or `new_agent` with `detached: true`) is the exception:
+its completion is reaped but nothing is injected into the chat, and the full output is
+written to `log/subagents/<task-id>.md` for retrieval with the `read` tool.
 
 ---
 
@@ -1457,6 +1471,7 @@ Type `/` in the input to open an autocomplete menu:
 | `/spec list \|search \|show \|validate \|status \|task` | Spec lifecycle commands |
 | `/new --language <lang> --type <type> [--stack <name>] [--github\|--gitlab]` | Scaffold a new project in the current directory (46 canonical languages spanning the codeindex scanner set, from rust/python to json/sql/cmake; library/cmdline/tui/gui; optional GitHub/GitLab hosting + push) |
 | `/new help` | Show `/new` usage, flag table, and supported values |
+| `/spawn <agent> <prompt...>` | Launch a **detached** fire-and-forget background sub-agent from the chat input (not listed by `list_agents`, not awaitable, result never injected back); `/spawn help` for usage |
 
 ### New in v1.0.79
 
@@ -1799,6 +1814,44 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.116
+
+- **Maintenance release** — agent and plugin updates plus a code-quality pass,
+  with no behavioural regressions: the four content-sized TUI modal renderers
+  now share one `centered_rect_fixed` helper (byte-for-byte identical geometry),
+  and the sub-agent report writer streams its output straight to disk instead
+  of buffering the whole file in memory. `cargo check --workspace`, the dead-code
+  lint and reason checks, `cargo clippy --workspace -- -D warnings`,
+  `cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`, and the full
+  `cargo test --workspace` suite all pass.
+
+## Version 1.0.115
+
+- **Detached sub-agents (`/spawn`)** — `/spawn <agent> <prompt...>` launches a
+  **detached** fire-and-forget background sub-agent directly from the input line.
+  It runs concurrently and shows in the Agents panel, but is absent from
+  `list_agents`, cannot be awaited with `wait_agents`, is untouched by
+  `team_wait`, and its result is never injected back into the chat. The
+  `new_agent` tool gained the matching optional `detached: true` parameter. A
+  second `/spawn` while one is still registering is refused; cancel with
+  `/cancel <prefix>`. Every completed sub-agent run (detached or not) now writes
+  its FULL output to `log/subagents/<task-id>.md`, and the completion event
+  carries the real loop `finish_reason` (`stop` / `truncation` / `length` /
+  `cancelled` / `error`), so a provider-side cut is flagged in the Agents panel
+  instead of looking like a healthy finish. Spec: `specs/spawnagent/`; manual:
+  [`docs/howtos/slashcommands/spawn.md`](docs/howtos/slashcommands/spawn.md).
+- **`/new` stack overlay single entry point** — a Rust project scaffolded with
+  `--stack` on a binary app type now declares exactly one `fn main` (the base
+  hello-world entry point is replaced by the framework starter), so the
+  generated project builds and runs as generated.
+- **Research gather log path** — the web-gather JSONL log now lands at
+  `log/research/` (the singular top-level `log/` root) instead of `logs/research/`;
+  `/log clear research` and the `alog`/`log` howtos are corrected to match.
+- **Code-quality and hygiene pass** — a `/simplify` + `/rust-hygiene` pair
+  consolidates the plugin bridge filters, the scaffold remote helpers, and the
+  TUI queue-clear dialog helpers, and keeps `cargo fmt`, `clippy -D warnings`,
+  the dead-code lint and reason checks, `cargo audit`, and `cargo deny` green.
 
 ## Version 1.0.114
 

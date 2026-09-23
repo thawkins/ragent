@@ -2,8 +2,11 @@
 //!
 //! Layers an optional `--stack` value on top of the FR-005/FR-006 base
 //! layout: the framework dependency is added to the language manifest and
-//! the hello-world source is extended with a minimal framework-specific
-//! starter snippet (e.g. an HTTP route handler for `axum`).
+//! the hello-world source is overlain with a minimal framework-specific
+//! binary starter (e.g. an HTTP route handler for `axum`). For a binary app
+//! type the base source's `main` entry point is replaced by the starter's own
+//! entry point, so the overlaid project builds and runs as generated; any
+//! non-`main` base content (a library body) is retained above the starter.
 //!
 //! Known stacks are defined in [`STACK_RECIPES`], scoped per language so
 //! `--stack axum` only applies to Rust projects. Unknown stacks resolve to
@@ -55,20 +58,132 @@ impl StackRecipe {
         self.language == Language::Rust
     }
 
-    /// Rendered overlay source: import block, base body, then the starter
-    /// snippet.
+    /// Rendered overlay source: import block, then the framework starter.
+    ///
+    /// The base source's `main` entry point is dropped before the starter is
+    /// appended. Every starter snippet is a complete binary entry point in its
+    /// own right (it declares `fn main`), so keeping the base
+    /// `println!("Hello, world!")` entry point would emit **two** `main`
+    /// functions into a single file - a program that only compiles once the
+    /// base function is deleted, and that never reaches the framework starter.
+    /// Removing the base entry point keeps exactly one `main` (the framework
+    /// one), so an overlaid command-line or TUI project builds and shows the
+    /// expected output as generated. Non-`main` base content (e.g. a library
+    /// body) is retained underneath the starter.
     fn overlay_source(&self, base_source: &str) -> String {
+        let base_body = strip_entry_point(base_source);
         let mut content = String::with_capacity(
-            self.import_snippet.len() + base_source.len() + self.starter_snippet.len(),
+            self.import_snippet.len() + base_body.len() + self.starter_snippet.len(),
         );
         content.push_str(self.import_snippet);
-        content.push_str(base_source);
-        if !base_source.ends_with('\n') {
+        content.push_str(&base_body);
+        if !base_body.is_empty() && !base_body.ends_with('\n') {
             content.push('\n');
         }
         content.push_str(self.starter_snippet);
         content
     }
+}
+
+/// Remove the `main` entry-point function from a base scaffold source.
+///
+/// Used by [`StackRecipe::overlay_source`] so a framework starter that
+/// declares its own `fn main` replaces the base entry point instead of
+/// duplicating it. Returns the source unchanged when it declares no
+/// `fn main` (e.g. a library body), and the source with that one function
+/// removed when it does. The entry point is located by its signature (the
+/// `main` identifier must be followed by `(`), and its body is removed by
+/// brace-balanced scanning that ignores braces inside string literals and
+/// comments, so neither a longer name (`fn main_helper`) nor an escaped brace
+/// in a literal can end the block early.
+fn strip_entry_point(base_source: &str) -> String {
+    let Some(fn_start) = find_entry_point(base_source) else {
+        return base_source.to_owned();
+    };
+    let Some(body_open) = base_source[fn_start..].find('{').map(|off| fn_start + off) else {
+        return base_source.to_owned();
+    };
+    let Some(close) = matching_brace(base_source, body_open) else {
+        return base_source.to_owned();
+    };
+
+    // Drop the function body plus the single newline that follows it, if any,
+    // leaving the surrounding (non-entry-point) base content intact.
+    let mut end = close + 1;
+    if base_source[end..].starts_with('\n') {
+        end += 1;
+    }
+
+    let mut stripped = String::with_capacity(base_source.len());
+    stripped.push_str(&base_source[..fn_start]);
+    stripped.push_str(&base_source[end..]);
+    stripped
+}
+
+/// Locate the byte offset of the `fn` keyword of the `main` entry point.
+///
+/// The `main` identifier must be followed (after optional whitespace) by `(`,
+/// so a longer name such as `fn main_helper` or `fn mainloop` is never
+/// mistaken for the entry point.
+fn find_entry_point(source: &str) -> Option<usize> {
+    source.match_indices("fn main").find_map(|(start, _)| {
+        let after = &source[start + "fn main".len()..];
+        after.trim_start().starts_with('(').then_some(start)
+    })
+}
+
+/// Return the offset of the `}` that closes the brace opened at `open`.
+///
+/// Braces inside `"..."` string literals and `//` / `/* ... */` comments are
+/// ignored, so a literal such as `"{{ escaped }}"` cannot end the block early.
+/// Returns `None` when the block is never closed.
+fn matching_brace(source: &str, open: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut depth = 0usize;
+    let mut i = open;
+    let mut in_string = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        let next = bytes.get(i + 1).copied();
+        if in_line_comment {
+            in_line_comment = byte != b'\n';
+        } else if in_block_comment {
+            if byte == b'*' && next == Some(b'/') {
+                in_block_comment = false;
+                i += 1;
+            }
+        } else if in_string {
+            if byte == b'\\' {
+                i += 1; // skip the escaped byte
+            } else if byte == b'"' {
+                in_string = false;
+            }
+        } else {
+            match byte {
+                b'"' => in_string = true,
+                b'/' if next == Some(b'/') => {
+                    in_line_comment = true;
+                    i += 1;
+                }
+                b'/' if next == Some(b'*') => {
+                    in_block_comment = true;
+                    i += 1;
+                }
+                b'{' => depth += 1,
+                b'}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Known-stack registry (FR-007): one entry per supported framework.

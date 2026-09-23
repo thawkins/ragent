@@ -33,6 +33,7 @@ fn entry(id: &str, status: ragent_agent::task::TaskStatus) -> TaskEntry {
         agent_name: "explore".to_string(),
         task_prompt: "x".to_string(),
         background: true,
+        detached: false,
         status,
         result: None,
         error: None,
@@ -225,6 +226,7 @@ async fn test_poll_end_to_end_with_registry_backed_manager() {
         loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
     });
 
     let manager = Arc::new(ragent_agent::task::AgentManager::new(

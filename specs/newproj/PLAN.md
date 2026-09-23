@@ -76,6 +76,7 @@ Add a self-contained `project-scaffold` module family plus `/new` command wiring
 | T-016 | Implement `/new help` detailed help renderer (purpose, per-argument docs, registry-derived values, worked examples) | FR-018, NFR-001 | S | High | completed | T-002, T-004, T-011 |
 | T-017 | Generate README.md, QUICKSTART.md, STATS.md, and docs/ folder from language recipe data | FR-019, NFR-002 | M | High | completed | T-002, T-005 |
 | T-018 | Fix GitHub token resolution (app-token downgrade to `gh` CLI) and the CLI `--github` runtime-drop panic | FR-008, FR-010 | S | High | completed | T-009 |
+| T-019 | Fix stack overlay duplicating the entry point: replace the base `main` with the framework starter's single entry point | FR-007 | S | High | completed | T-004 |
 
 ## Task Notes
 
@@ -109,4 +110,13 @@ Add a self-contained `project-scaffold` module family plus `/new` command wiring
   runtime-owning worker so the `reqwest::blocking` client never drops a runtime from an
   async context; the TUI path already runs on a worker `std::thread`. Coverage: the
   `crates/ragent-config/tests/test_github_token.rs` unit suite plus the live
-  `--github` CLI run.
+  `--github` CLI run.- **T-019** — `StackRecipe::overlay_source` now runs the base source through
+  `strip_entry_point`, which removes the single `fn main { … }` function
+  (brace-balanced scan, so nested braces do not end it early) before the
+  framework starter is appended. Every FR-007 starter declares its own `main`,
+  so the emitted binary source has exactly one entry point and the scaffolded
+  project builds and runs as generated; a base source with no `fn main` (a
+  library body) is left intact. Covered by the new
+  `test_stack_overlay_on_binary_yields_single_main` regression test across all
+  five Rust stacks plus the strengthened
+  `test_stack_overlay_layers_import_and_starter_on_source` single-`main` assert.

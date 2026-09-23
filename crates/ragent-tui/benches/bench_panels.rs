@@ -89,6 +89,7 @@ fn build_active_tasks(count: usize, parent_session: &str) -> Vec<TaskEntry> {
             agent_name: format!("explore-{i}"),
             task_prompt: format!("Explore directory #{i}"),
             background: i % 3 == 0,
+            detached: false,
             status: if i % 4 == 0 {
                 TaskStatus::Running
             } else {

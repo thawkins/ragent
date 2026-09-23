@@ -23,6 +23,8 @@ pub mod utils;
 pub mod widgets;
 
 pub use app::App;
+#[doc(hidden)]
+pub use app::poll_spawn_result_for_tests;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -805,6 +807,9 @@ pub async fn run_tui(
 
             // Check for completed /bench background runs.
             app.poll_pending_bench();
+
+            // Check for completed /spawn detached-launch registrations.
+            app.poll_spawn_result();
 
             // Reap spinner latches that outlived their staleness caps (dropped
             // `*Finished` events after a broadcast Lagged burst).

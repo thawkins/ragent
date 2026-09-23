@@ -31,6 +31,7 @@ fn bench_task_entry_clone(c: &mut Criterion) {
             agent_name: "explore".to_string(),
             task_prompt: "Summarise the architecture".to_string(),
             background: true,
+            detached: false,
             status: ragent_agent::task::TaskStatus::Completed,
             result: Some(std::sync::Arc::from(result.as_str())),
             error: None,

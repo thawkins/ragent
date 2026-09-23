@@ -4,6 +4,34 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.116)
+
+- **Maintenance release** — agent and plugin updates plus a code-quality pass,
+  with no behavioural regressions: the four content-sized TUI modal renderers
+  (queue menu, queue show panel, plugin-store panel, queue clear confirmation)
+  now share one `centered_rect_fixed` helper with byte-for-byte identical
+  geometry, and the sub-agent report writer streams its output straight to disk
+  instead of buffering the whole file in memory. Full CI hygiene
+  (`cargo check`, dead-code lint + reason checks, `clippy -D warnings`,
+  `cargo fmt --check`, `cargo audit`, `cargo deny check`, `cargo test`) is green.
+
+## Highlights (v1.0.115)
+
+- **`/spawn` detached sub-agents** — `/spawn <agent> <prompt...>` launches a
+  background sub-agent straight from the chat input as a **detached**
+  fire-and-forget task. It runs concurrently and shows in the Agents panel, but
+  nothing ever waits on it: it is absent from `list_agents`, cannot be awaited
+  with `wait_agents`, and its result is never injected back into the chat. Use it
+  for side-effect-only work; give the prompt a file to write, because the reply
+  body is not returned. Cancellable with `/cancel <prefix>`; a second `/spawn`
+  while one is still registering is refused. Every completed sub-agent run
+  (detached or not) now persists its FULL output to `log/subagents/<task-id>.md`
+  and the completion event carries the real loop `finish_reason` (`stop` /
+  `truncation` / `length` / `cancelled` / `error`), so a provider-side cut is
+  flagged in the Agents panel instead of looking like a healthy finish. The
+  `new_agent` tool gained the matching optional `detached: true` parameter. See
+  [`docs/howtos/slashcommands/spawn.md`](docs/howtos/slashcommands/spawn.md).
+
 ## Highlights (v1.0.110..v1.0.114)
 
 - **Plugin bridges (v1.0.114)** — plugin bridge extensions: `/plugins list`
@@ -1356,7 +1384,7 @@ shortcut again to close the panel.
 ## Next steps
 
 - Read the full `QUICKSTART.md` for CLI, server, and configuration options.
-- Browse the per-command howtos in `docs/howtos/slashcommands/` (INDEX.md lists all 74 commands).
+- Browse the per-command howtos in `docs/howtos/slashcommands/` (INDEX.md lists every command).
 - See `docs/custom-agents.md` to create your own agent profiles.
 - See `docs/howtos/teams.md` to coordinate multi-agent teams.
 - Run `ragent --help` for a complete list of command-line options.

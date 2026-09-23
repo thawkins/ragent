@@ -203,6 +203,7 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
         loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -349,6 +350,7 @@ async fn test_pre_send_compaction_skipped_when_auto_disabled() {
         loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -585,6 +587,7 @@ async fn test_emergency_overflow_compaction_retries_once() {
         loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -734,6 +737,7 @@ async fn test_emergency_overflow_compaction_skipped_with_partial_output() {
         loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -936,6 +940,7 @@ async fn test_pre_send_compaction_skipped_notice_emitted_once_per_turn() {
         loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager

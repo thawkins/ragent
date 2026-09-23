@@ -1,5 +1,144 @@
 # Changelog
 
+## [1.0.116] - 2026-09-23
+
+Maintenance release over the v1.0.115 tree: agent and plugin updates plus a
+code-quality pass, with no behavioural regressions. Documented from the
+uncommitted working-tree change-set.
+
+### Changed
+
+- **TUI modal-centring helper.** The four content-sized modal renderers in
+  `crates/ragent-tui` (queue menu, queue show panel, plugin-store panel, queue
+  clear confirmation) each inlined the same clamp-then-centre rectangle
+  geometry; it is now one `centered_rect_fixed(width, height, area)` helper in
+  `ragent-tui/src/utils.rs` (net `-37/+2` across the four call sites,
+  byte-for-byte identical geometry).
+- **Streamed sub-agent report write.** `persist_task_output` in
+  `crates/ragent-agent/src/task/mod.rs` now streams the header plus the reply
+  body straight into a `BufWriter<File>` and then renames, instead of building
+  the whole `header + content` in one `format!` String first — halving peak
+  memory while the full untruncated sub-agent report is written, with identical
+  on-disk bytes.
+
+### Verified
+
+- `cargo check --workspace`, `cargo check --tests --workspace`, the dead-code
+  lint, the dead-code-reason check, `cargo clippy --workspace -- -D warnings`,
+  `cargo fmt --all -- --check`, `cargo audit`, and `cargo deny check` all pass;
+  the full `cargo test --workspace` suite is green.
+
+## [1.0.115] - 2026-09-23
+
+Detached fire-and-forget sub-agents (`/spawn` + `new_agent detached: true`), the
+`spawnagent` report-file / finish-reason fixes, the `newproj` single-entry-point
+overlay fix, the research gather-log path correction, and a `/simplify` +
+`/rust-hygiene` code-quality pass. Documented from the last 10 commits plus the
+uncommitted working-tree change-set.
+
+### Added
+
+- **`spawnagent` — `/spawn <agent> <prompt...>` launches a detached
+  fire-and-forget sub-agent (FR-001..FR-005).** The TUI can now start a
+  background sub-agent directly from the chat input without asking the primary
+  agent to call `new_agent`. The task is **detached**: it runs concurrently and
+  appears in the Agents panel, but nothing ever waits on it — it is excluded
+  from `list_agents` and `running_background_count`, cannot be awaited via
+  `wait_agents` (with or without `task_ids`), is untouched by `team_wait`, and
+  its completion is **never** injected back into the chat as a background-task
+  result (`drain_completed` marks it reported and drops it while still reaping
+  the entry, so `tasks_snapshot` still shows it). Layers: `TaskEntry.detached`
+  (serde default `false`), `AgentManager::spawn_detached` sharing a single
+  `spawn_background_mode` implementation with `spawn_background`, the optional
+  `new_agent` `detached` parameter (the model-facing equivalent), and the TUI
+  `/spawn` slash command with roster validation via `app::prompt::resolve_agent`
+  plus an `App::spawn_result` poll slot. Cancellable with `/cancel <prefix>`;
+  a second `/spawn` while one is still registering is refused. Docs:
+  `docs/howtos/slashcommands/spawn.md`, `docs/howtos/slashcommands/INDEX.md`,
+  `docs/howtos/tools/sub-agents.md`. Spec: `specs/spawnagent/`.
+
+- **`/simplify` code-quality pass over the `spawnagent` change-set.** The
+  duplicated per-bridge enable/parse filter in `ragent-plugins` is now one
+  `enabled_manifests` helper shared by every `scanned_plugin_*` bridge (and the
+  skills bridge builds its set with a `BTreeSet` instead of a linear
+  `Vec::contains` scan); the `project_scaffold` remote helpers merge
+  `required_url` + `required_field` into a single `required_str_field`; the
+  `ragent-tui` queue-clear confirmation toggle/yes-check move into
+  `App::queue_clear_confirm_toggle` / `queue_clear_confirm_is_yes` (removing a
+  duplicated inline branch in `input.rs`); the `ragent-agent` custom-agent
+  discovery fast path compares the cached `dir_mtimes` set directly instead of
+  re-statting every directory; and `text_toolcalls` narrows its two helpers to
+  `pub(crate)` with a documented lint allow.
+
+- **`/rust-hygiene` full-workspace CI pass.** `cargo check`,
+  `cargo-machete`, `cargo check --tests`, `cargo test`, the dead-code lint
+  (`-D unreachable_pub -D dead_code -D unused_imports`), the dead-code-reason
+  check, `cargo clippy --all-targets -D warnings`, `cargo fmt --all --check`,
+  `cargo audit`, and `cargo deny check` all pass; the `spawnagent` FR-004a/b/c
+  fixes and the `/spawn` classification are covered by
+  `crates/ragent-agent/tests/test_spawn_detached.rs` (now 6 tests, including a
+  consistent-classification regression test).
+
+- **`uncommitted` — TUI modal-centring helper and streamed sub-agent report
+  write.** The four content-sized modal renderers in `crates/ragent-tui` (queue
+  menu, queue show panel, plugin-store panel, queue clear confirmation) each
+  inlined the same clamp-then-centre rectangle geometry; it is now one
+  `centered_rect_fixed(width, height, area)` helper in `ragent-tui/src/utils.rs`
+  (net `-37/+2` across the four call sites, byte-for-byte identical geometry).
+  `persist_task_output` in `crates/ragent-agent/src/task/mod.rs` now streams the
+  header plus the reply body straight into a `BufWriter<File>` and then renames,
+  instead of building the whole `header + content` in one `format!` String first
+  — halving peak memory while the full untruncated sub-agent report is written,
+  with identical on-disk bytes. No behaviour change; `cargo fmt`, `cargo clippy
+  --all-targets`, and the `ragent-tui` / `ragent-agent` test suites pass.
+
+### Changed
+
+- **Research gather-log path corrected to `log/research/`.** The JSONL URL log
+  now lands at `log/research/research-<name>-<ts>-<rand>-web.jsonl` (the
+  singular top-level `log/` root, matching every other ragent log directory)
+  instead of the plural `logs/research/`; `/log clear research` and the
+  `alog`/`log` howtos are corrected to match.
+
+### Fixed
+
+- **`spawnagent` — `/spawn` runs ended without `agent_complete`, delivered no
+  report file, and claimed a healthy finish (FR-004a/b/c).** Three gaps made a
+  `/spawn general … write ANTIPAT.md` run look like a no-op: **(a)** the task
+  layer never wrote `log/subagents/<task-id>.md` and never set
+  `TaskEntry.output_file`, so the "full report at log/subagents/<id>.md"
+  recovery path documented in `wait_agents`/`list_agents` pointed at a file
+  that did not exist; **(b)** `SubagentComplete.finish_reason` was hard-coded
+  `"stop"` on every success, so a run cut off by the provider's silent
+  end-of-stream still logged "[ok] Task completed" and the Agents panel row
+  showed Complete; **(c)** the Subagent completion protocol mandated
+  `agent_complete` but said nothing about the requested file, so a sub-agent
+  could answer in plain text and exit without producing the deliverable.
+  Fixes: `AgentManager::spawn_background_mode` now persists the FULL output to
+  `log/subagents/<task-id>.md` under the parent session's working directory
+  (temp-file + rename) and records the path on the entry; the session loop
+  records its terminal `MessageEnd` reason into
+  `SessionProcessor::last_message_end_reason` and the completion event maps it
+  to `"truncation"`/`"length"`/`"cancelled"`/`"stop"` (the TUI Agents panel
+  maps the truncation labels onto the TRUNCATED marker); and the Subagent
+  system prompt gained a *Deliverable Enforcement* section — a prompt that
+  asks for a file MUST call `write` before `agent_complete`, verify the file,
+  and never claim a write that did not happen. Regression coverage in
+  `crates/ragent-agent/tests/test_spawn_detached.rs`.
+
+- **`newproj` — `/new` stack overlay duplicated the entry point (FR-007).**
+  A Rust project scaffolded with `--language rust --type tui --stack ratatui`
+  (or any stack on a binary app type: `axum`/`warp` on `cmdline`, `raylib`/
+  `gtk4` on `gui`) emitted two `fn main` functions into `src/main.rs` — the base
+  hello-world entry point plus the framework starter's own entry point. The
+  generated file did not compile until one `main` was deleted by hand, and the
+  binary that survived printed nothing. `StackRecipe::overlay_source` now
+  removes the base `main` entry point (brace-balanced scan, so nested braces do
+  not end it early) before appending the framework starter, so the emitted
+  source declares exactly one `main` and the scaffold builds and runs as
+  generated; a base source with no `fn main` (a library body) is left intact
+  above the starter.
+
 ## [1.0.114] - 2026-09-22
 
 Missing plugin components plus the `newproj` GitHub credential chain, the

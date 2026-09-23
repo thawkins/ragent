@@ -1958,6 +1958,28 @@ impl App {
         self.needs_redraw = true;
     }
 
+    /// Flip the `Clear the input queue?` dialog selection between `Yes` and
+    /// `No` (spec `inputqueue` FR-034, FR-035, NFR-011).
+    ///
+    /// The dialog has exactly two options, so any horizontal move (`Left` /
+    /// `Right` / `Tab` / `BackTab`) simply toggles the current selection. The
+    /// redraw flag is set so the change paints on the next frame.
+    pub fn queue_clear_confirm_toggle(&mut self) {
+        self.queue_clear_confirm_selected = if self.queue_clear_confirm_is_yes() {
+            crate::app::QUEUE_CLEAR_CONFIRM_NO
+        } else {
+            crate::app::QUEUE_CLEAR_CONFIRM_YES
+        };
+        self.needs_redraw = true;
+    }
+
+    /// Whether the `Clear the input queue?` dialog currently has `Yes`
+    /// selected (spec `inputqueue` FR-037).
+    #[must_use]
+    pub fn queue_clear_confirm_is_yes(&self) -> bool {
+        self.queue_clear_confirm_selected == crate::app::QUEUE_CLEAR_CONFIRM_YES
+    }
+
     pub(crate) fn assert_input_cursor_invariant(&self) {
         debug_assert!(self.input_cursor <= self.input_len_chars());
     }
