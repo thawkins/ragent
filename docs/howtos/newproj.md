@@ -123,7 +123,7 @@ Scaffold a new project in the current working directory.
 | Flag | Required | Values | Default when omitted |
 | ---- | -------- | ------ | -------------------- |
 | `--language <lang>` | yes | any value from `/new help`: 46 canonical languages spanning the codeindex scanner set (application languages such as `rust`, `python`, `go`, `typescript`, `shell`; data and build formats such as `json`, `yaml`, `sql`, `cmake`, `maven`); dialect aliases `ts`/`tsx`, `js`/`jsx`, `c++`, `c_header`/`cpp_header`, `sh`/`bash`, `yml`, `sv`, `vhd`, `tf`, `scad`, `kts` | none — validation error |
-| `--type <type>` | yes | `library`, `cmdline`, `tui`, `gui` | none — validation error |
+| `--type <type>` | yes | `library`, `cmdline`, `tui`, `gui`, `webapp` | none — validation error |
 | `--stack <name>` | no | known stacks for the language, e.g. `axum`, `warp`, `raylib`, `gtk4` (Rust) | no stack layer applied |
 | `--github` | no | flag | no remote is created and nothing is pushed |
 | `--gitlab` | no | flag | no remote is created and nothing is pushed |
@@ -437,7 +437,7 @@ ready for custom agents.
 
 ## 11. Workflow integration
 
-`/new` is the entry point of the greenfield pipeline; `/reverse` is its
+`/new` is the entry point of the greenfield pipeline; `/spec reverse` is its
 counterpart for existing repositories:
 
 ```text
@@ -448,7 +448,7 @@ counterpart for existing repositories:
 /spec tasks my-feature
 
 # Brownfield: reverse-engineer, then specify
-/reverse owner/repo --create my-clone
+/spec reverse owner/repo --create my-clone
 ```
 
 The scaffolded `AGENTS.md`, `specs/`, and `.ragent/` layout are the same

@@ -785,7 +785,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "history",
-        description: "Browse and re-use previous inputs; /history [filter] restricts to matching entries (↑/↓ to select, Enter to insert); /history help",
+        description: "Browse and re-use previous inputs; /history [filter] restricts to matching entries (↑/↓ to select, Enter to insert, c to copy to clipboard); /history help",
     },
     SlashCommandDef {
         trigger: "inputdiag",
@@ -910,10 +910,6 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "research",
         description: "Research system: /research create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> | list | open | search | show | delete | archive | cluster",
-    },
-    SlashCommandDef {
-        trigger: "reverse",
-        description: "Reverse-engineer a GitHub repo: /reverse <owner/repo | URL> [--tech <stack>] [--create <name>]",
     },
     SlashCommandDef {
         trigger: "new",
@@ -2205,11 +2201,17 @@ pub struct App {
     /// Pending plan delegation: `(task, context)` set by `AgentSwitchRequested`,
     /// consumed by `MessageEnd` to auto-send the task to the plan agent.
     pub pending_plan_task: Option<(String, String)>,
-    /// Pending `/reverse --create <name>` chaining: the spec name is stored
+    /// Pending `/spec reverse --create <name>` chaining: the spec name is stored
     /// here before the LLM generation task spawns, and consumed by `MessageEnd`
     /// to invoke `/spec create <name> <generated-prompt>` once the LLM
     /// finishes (FR-012).
     pub pending_reverse_create: Option<String>,
+    /// Pending `/spec reverse --folder <path> --create <name>` chaining: the
+    /// scaffolded project folder, when one was scaffolded. Consumed by
+    /// `MessageEnd` alongside [`Self::pending_reverse_create`] so the chained
+    /// `/spec create` writes `specs/<name>/` inside the scaffolded project
+    /// rather than the invoking directory (FR-027).
+    pub pending_reverse_create_folder: Option<String>,
     /// Pending agent restore: summary from `AgentRestoreRequested`,
     /// consumed by `MessageEnd` to pop the agent stack and inject the summary.
     pub pending_plan_restore: Option<String>,

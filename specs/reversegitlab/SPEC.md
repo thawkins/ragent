@@ -182,8 +182,9 @@ segments. (State-driven)
 
 ### FR-023
 
-The system shall accept the `--tech` and `--create` flags for both GitHub
-and GitLab repositories without modification to their parsing or behavior.
+The system shall accept the `/new` scaffold flags (`--language`/`--type`/
+`--stack`) and `--create`/`--depth` for both GitHub and GitLab repositories
+without modification to their parsing or behavior.
 (Ubiquitous)
 
 ### FR-024

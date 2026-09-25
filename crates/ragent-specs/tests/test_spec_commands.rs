@@ -14,7 +14,7 @@ fn parse_help() {
 fn parse_create() {
     let cmd = SpecCommand::parse("create my-spec Add auth");
     assert!(
-        matches!(cmd, SpecCommand::Create { specname, feature, from_research: None } if specname == "my-spec" && feature == "Add auth")
+        matches!(cmd, SpecCommand::Create { specname, feature, from_research: None, folder: None } if specname == "my-spec" && feature == "Add auth")
     );
 }
 

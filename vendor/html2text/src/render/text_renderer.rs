@@ -1665,7 +1665,9 @@ impl<A: PartialEq + Eq + Clone + Debug + Default> std::fmt::Display for LineSet<
 impl<A> LineSet<A> {
     fn cell_height(&self) -> usize {
         let tot_lines = self.lines.len();
-        if self.rowspan == 1 {
+        // A rowspan of zero (from `rowspan="0"`) or a broken overhang
+        // bookkeeping must never divide by zero; treat it as a single row.
+        if self.rowspan <= 1 {
             tot_lines
         } else {
             // Divide the height by the rowspan

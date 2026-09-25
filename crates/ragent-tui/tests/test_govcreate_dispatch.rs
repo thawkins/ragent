@@ -122,6 +122,56 @@ fn test_spec_help_advertises_govcreate_with_worked_example() {
     );
 }
 
+/// `/spec govcreate` (or any usage-error subcommand) must report the cause in
+/// the message window, not only a status line (NFR-005).
+#[test]
+fn test_spec_usage_error_subcommands_report_cause_in_message_window() {
+    let cases = [
+        (
+            "/spec govcreate",
+            "/spec govcreate",
+            "missing required argument",
+        ),
+        (
+            "/spec govcreate payments-arch",
+            "/spec govcreate",
+            "missing required argument",
+        ),
+        (
+            "/spec reverse",
+            "/spec reverse",
+            "missing required argument",
+        ),
+        (
+            "/spec status",
+            "incomplete arguments",
+            "missing required argument",
+        ),
+    ];
+
+    for (command, expected, cause) in cases {
+        let mut app = make_app();
+        app.session_id = Some("s1".to_string());
+
+        app.execute_slash_command(command);
+
+        let text = app.messages.last().expect("usage message").text_content();
+        assert!(
+            text.contains(cause),
+            "{command} must state the cause '{cause}' in the message window: {text}"
+        );
+        assert!(
+            text.contains(expected),
+            "{command} must render the usage block containing '{expected}': {text}"
+        );
+        assert!(
+            app.status.contains("Usage: /spec"),
+            "{command} must point at `/spec help` from the status line: {}",
+            app.status
+        );
+    }
+}
+
 #[test]
 fn test_govcreate_usage_block_is_ascii_and_prefixed() {
     // FR-003 / NFR-005: the dedicated usage block exists on the same surface
@@ -151,11 +201,13 @@ fn test_spec_help_govcreate_row_keeps_positionals_in_command_column() {
     assert_eq!(header.matches('|').count(), 4, "three columns: {header}");
 
     // Identify the govcreate row (the multi-line block that mentions
-    // "govcreate").
+    // "govcreate"). The row runs from the line carrying the govcreate command
+    // span to the closing border; continuation lines are cell data, so the
+    // only reliable terminator is the `+-…-+` border.
     let mut in_row = false;
     let mut row_text = String::new();
     for line in body.lines() {
-        if line.contains("/spec govcreate") || in_row && line.starts_with("|`") {
+        if !in_row && line.contains("/spec govcreate") {
             in_row = true;
         }
         if in_row {
@@ -172,28 +224,57 @@ fn test_spec_help_govcreate_row_keeps_positionals_in_command_column() {
     );
 
     // The command column wraps over several lines; the first line carries
-    // `/spec govcreate <specid>` and the arguments column starts with
-    // `required`.  The remaining two positionals appear on the continuation
-    // lines of the same cell.
-    let first_data_line = row_text
-        .lines()
-        .find(|l| l.starts_with('|') && l.contains("/spec govcreate") && l.contains("<specid>"))
+    // `/spec govcreate` and a continuation line carries `<specid>`, while the
+    // arguments column starts with `required`. The remaining positionals
+    // appear on the continuation lines of the same cell.
+    //
+    // Continuations are located by cell content rather than row position: a
+    // table row may be followed by blank or non-cell lines, so "line 2" is not
+    // reliably a cell line.
+    let command_cell = |line: &str| -> String {
+        line.split('|')
+            .nth(1)
+            .map(|cell| cell.trim().to_string())
+            .unwrap_or_default()
+    };
+    let arguments_cell = |line: &str| -> String {
+        line.split('|')
+            .nth(2)
+            .map(|cell| cell.trim().to_string())
+            .unwrap_or_default()
+    };
+    let description_cell = |line: &str| -> String {
+        line.split('|')
+            .nth(3)
+            .map(|cell| cell.trim().to_string())
+            .unwrap_or_default()
+    };
+    let row_lines: Vec<&str> = row_text.lines().filter(|l| l.starts_with('|')).collect();
+    let first_data_line = row_lines
+        .first()
+        .copied()
         .unwrap_or_else(|| panic!("first govcreate row line: {row_text}"));
-    let cells: Vec<&str> = first_data_line.split('|').skip(1).collect();
-    assert!(cells.len() >= 3, "row line has 3 cells: {first_data_line}");
-    let (col1, col2, col3) = (cells[0].trim(), cells[1].trim(), cells[2].trim());
+    let specid_line = row_lines
+        .iter()
+        .copied()
+        .find(|l| command_cell(l).contains("<specid>"))
+        .unwrap_or_else(|| panic!("specid continuation line: {row_text}"));
     assert!(
-        col1.contains("/spec govcreate") && col1.contains("<specid>"),
+        command_cell(first_data_line).contains("/spec govcreate"),
         "command column starts the code span: {first_data_line}"
     );
     assert!(
-        col2.starts_with("required"),
+        command_cell(specid_line).contains("<specid>"),
+        "specid stays in the command column: {specid_line}"
+    );
+    assert!(
+        arguments_cell(first_data_line).starts_with("required"),
         "arguments column starts with required: {first_data_line}"
     );
     assert!(
-        !col3.contains("specid")
-            && !col3.contains("content-ref")
-            && !col3.contains("target-folder"),
+        !description_cell(first_data_line).contains("specid")
+            && !description_cell(first_data_line).contains("content-ref")
+            && !description_cell(first_data_line).contains("target-folder"),
         "positionals must not bleed into the Description column: {first_data_line}"
     );
 

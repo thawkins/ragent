@@ -46,6 +46,13 @@ impl App {
                 self.input = chosen;
                 self.set_cursor_char_index_clamped(self.input_len_chars());
             }
+            KeyCode::Char('c') => {
+                // Copy the highlighted entry to the clipboard without closing
+                // the picker, so several entries can be copied in one session.
+                let chosen = picker.entries[picker.selected].clone();
+                crate::clipboard::set_clipboard_text(&chosen);
+                self.status = "history: copied to clipboard".to_string();
+            }
             _ => {}
         }
     }

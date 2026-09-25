@@ -7187,7 +7187,7 @@ fn render_history_picker(frame: &mut Frame, app: &App) {
         .collect();
 
     let title = format!(
-        " History ({} entries) — ↑/↓ navigate · Enter select · Esc close ",
+        " History ({} entries) — ↑/↓ navigate · Enter select · c copy · Esc close ",
         total
     );
     let block = Block::default()

@@ -231,20 +231,20 @@ before launching ragent.
 - A synthetic creation prompt is generated for the project.
 - No "project not found" error appears.
 
-### TC-009: GitLab with `--tech` flag
+### TC-009: GitLab with the scaffold flags
 
-**Title:** `/reverse gitlab:gitlab-org/gitlab-runner --tech Rust` constrains the prompt
+**Title:** `/spec reverse gitlab:gitlab-org/gitlab-runner --language rust --type cmdline` constrains the prompt
 
 **Preconditions:**
 - Same as TC-004
 
 **Steps:**
-1. Type `/reverse gitlab:gitlab-org/gitlab-runner --tech Rust` in the TUI
+1. Type `/spec reverse gitlab:gitlab-org/gitlab-runner --language rust --type cmdline` in the TUI
    input box.
 2. Press Enter.
 
 **Test data:**
-- Command: `/reverse gitlab:gitlab-org/gitlab-runner --tech Rust`
+- Command: `/spec reverse gitlab:gitlab-org/gitlab-runner --language rust --type cmdline`
 
 **Expected results:**
 - The generated synthetic creation prompt targets the Rust technology stack.
@@ -558,21 +558,21 @@ before launching ragent.
   between 1 and 10.
 - No API call is made.
 
-### TC-024: `--depth` combined with `--tech` and `--create`
+### TC-024: `--depth` combined with the scaffold flags and `--create`
 
-**Title:** `/reverse gitlab:gitlab-org/gitlab-runner --depth 2 --tech Rust --create runner-deep` works end-to-end
+**Title:** `/spec reverse gitlab:gitlab-org/gitlab-runner --depth 2 --language rust --type cmdline --create runner-deep` works end-to-end
 
 **Preconditions:**
 - GitLab token configured
 - LLM provider available
 
 **Steps:**
-1. Type `/reverse gitlab:gitlab-org/gitlab-runner --depth 2 --tech Rust --create runner-deep`
+1. Type `/spec reverse gitlab:gitlab-org/gitlab-runner --depth 2 --language rust --type cmdline --create runner-deep`
    in the TUI input box.
 2. Press Enter.
 
 **Test data:**
-- Command: `/reverse gitlab:gitlab-org/gitlab-runner --depth 2 --tech Rust --create runner-deep`
+- Command: `/spec reverse gitlab:gitlab-org/gitlab-runner --depth 2 --language rust --type cmdline --create runner-deep`
 
 **Expected results:**
 - A synthetic creation prompt is generated with:

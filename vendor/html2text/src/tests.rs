@@ -1596,7 +1596,11 @@ fn test_nbsp_indent() {
 #[test]
 fn test_deeply_nested() {
     use ::std::iter::repeat;
-    let html = repeat("<foo>").take(1000).collect::<Vec<_>>().concat();
+    // Kept below MAX_HTML_DEPTH: the depth guard deliberately fails deeper
+    // documents with a recoverable error, which is exercised by
+    // test_deeply_nested_html_errors_instead_of_overflowing.
+    let rpt = crate::MAX_HTML_DEPTH / 2;
+    let html = repeat("<foo>").take(rpt).collect::<Vec<_>>().concat();
     test_html(html.as_bytes(), "", 10);
 }
 
@@ -1605,7 +1609,9 @@ fn test_deeply_nested() {
 #[test]
 fn test_deeply_nested_table() {
     use ::std::iter::repeat;
-    let rpt = 1000;
+    // Kept below MAX_HTML_DEPTH: nested tables nest the DOM too, so a depth
+    // beyond the guard is rejected with a recoverable error by design.
+    let rpt = crate::MAX_HTML_DEPTH / 8;
     let html = repeat("<table><tr><td>hi</td><td>")
         .take(rpt)
         .collect::<Vec<_>>()
@@ -2675,6 +2681,39 @@ fn test_rowspan_underflow() {
     );
 }
 
+/// `rowspan="0"` is invalid HTML (zero is not a valid row span) but appears in
+/// the wild, and a zero rowspan divides by zero while calculating cell heights.
+/// It must be clamped to one row instead of panicking.
+#[test]
+fn test_rowspan_zero_does_not_panic() {
+    test_html(
+        br#"<table>
+  <tr><td rowspan="0">A</td><td>B</td></tr>
+  <tr><td>C</td><td>D</td></tr>
+</table>"#,
+        "─┬─\nA│B\n─┼─\nC│D\n─┴─\n",
+        20,
+    );
+}
+
+/// The zero rowspan guard also has to hold when a nested table with
+/// `rowspan="0"` sits inside a rowspan-carrying outer cell, which exercises
+/// the overhang bookkeeping path that consumed the bad value.
+#[test]
+fn test_rowspan_zero_nested_table_does_not_panic() {
+    test_html(
+        br#"<table>
+  <tr><td rowspan="2">Outer</td><td>
+    <table><tr><td rowspan="0">Inner</td><td>X</td></tr>
+      <tr><td>Y</td><td>Z</td></tr></table>
+  </td></tr>
+  <tr><td>tail</td></tr>
+</table>"#,
+        "─────┬─────┬───\nOuter│Inner│X  \n     │─────┼───\n     │Y    │Z  \n     ├─────┴───\n     │tail     \n─────┴─────────\n",
+        20,
+    );
+}
+
 #[test]
 fn test_issue_187() {
     let html = br#"<div><table><tbody><tr><td><div><table><tbody><tr><td><div><pre>na na na na na na na na na na na na na na na</p></div></td></tr>/<tbody></table></div></td></tr>/<tbody></table></div>"#;
@@ -2740,6 +2779,39 @@ fn test_serialise_full() {
     dom.serialize(&mut result).unwrap();
     let s = str::from_utf8(&result).unwrap();
     assert_eq!(s, "<html><head></head><body><p>Hello</p></body></html>");
+}
+
+/// Pathologically nested HTML must be rejected with a recoverable error
+/// rather than overflowing the stack and aborting the process.
+#[test]
+fn test_deeply_nested_html_errors_instead_of_overflowing() {
+    // Build `<b><b><b>...</b></b></b>` nesting far beyond MAX_HTML_DEPTH.
+    let depth = crate::MAX_HTML_DEPTH * 4;
+    let mut html = String::from("<p>");
+    for _ in 0..depth {
+        html.push_str("<b>");
+    }
+    html.push('x');
+    for _ in 0..depth {
+        html.push_str("</b>");
+    }
+    html.push_str("</p>");
+
+    let result = crate::config::plain().string_from_read(html.as_bytes(), 80);
+    assert_eq!(
+        result.err(),
+        Some(crate::Error::Fail),
+        "deeply nested HTML should fail with a recoverable error"
+    );
+}
+
+/// Normal, shallowly nested HTML is unaffected by the depth guard.
+#[test]
+fn test_shallow_html_renders_under_depth_guard() {
+    let result = crate::config::plain()
+        .string_from_read(&b"<p>Hello <b>bold</b> world</p>"[..], 80)
+        .unwrap();
+    assert!(result.contains("Hello **bold** world"));
 }
 
 #[cfg(feature = "css")]

@@ -47,6 +47,22 @@ pub fn poll_spawn_result_for_tests(app: &mut App) {
     app.poll_spawn_result();
 }
 
+/// Test hook: re-render a parsed `/spec reverse` invocation into the
+/// `/reverse` argument string, so the integration tests can assert the
+/// tokenizer round-trip without widening the production surface.
+#[doc(hidden)]
+pub fn spec_reverse_args_for_tests(
+    repo: String,
+    create: Option<String>,
+    depth: Option<String>,
+    scaffold: Option<ragent_tools_extended::project_scaffold::ScaffoldRequest>,
+    folder: Option<String>,
+) -> String {
+    reverse::render_spec_reverse_args_for_tests(&reverse::build_spec_reverse_args(
+        repo, create, depth, scaffold, folder,
+    ))
+}
+
 pub use self::loop_dialog::{
     LoopOverrides, LoopSetupField, LoopSetupState, apply_loop_overrides, build_spec_from_state,
     handle_loop_setup_key, open_loop_setup, parse_comma_list, parse_loop_flags, parse_optional_u64,

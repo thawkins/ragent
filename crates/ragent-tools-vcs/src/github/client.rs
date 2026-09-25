@@ -408,7 +408,7 @@ impl GitHubClient {
         Self::parse_repo_url(input).ok_or_else(|| {
             format!(
                 "Invalid repository identifier: '{input}'.\n\
-                 Usage: /reverse <owner/repo | https://github.com/owner/repo | \
+                 Usage: /spec reverse <owner/repo | https://github.com/owner/repo | \
                  git@github.com:owner/repo.git>\n\
                  The identifier must resolve to exactly two non-empty path segments \
                  (owner and repo)."
@@ -773,6 +773,13 @@ pub const README_MAX_CHARS: usize = 8000;
 /// the section is omitted entirely, preserving backward compatibility with
 /// callers that do not supply a provider label.
 ///
+/// When `scaffold` is `Some(spec)`, a `## Project Scaffold` section is emitted
+/// immediately after the repository source, naming the target language, app
+/// type, and optional stack the `/new` command would scaffold. Each field is
+/// an optional line (`- Language: …`, `- Type: …`, `- Stack: …`); fields that
+/// are `None` are omitted, so a scaffold with no stack produces only the
+/// language and type lines.
+///
 /// # README truncation
 ///
 /// The README content is truncated to [`README_MAX_CHARS`] (8000) characters
@@ -789,6 +796,8 @@ pub const README_MAX_CHARS: usize = 8000;
 /// - `tech` — optional technology-stack constraint to include in the context.
 /// - `provider_label` — optional VCS provider label for the `## Repository
 ///   Source` section (FR-016). Pass `None` to omit the section.
+/// - `scaffold` — optional target scaffold, as `(language, app_type, stack)`.
+///   Pass `None` to omit the `## Project Scaffold` section.
 #[must_use]
 pub fn build_reverse_prompt(
     metadata: &RepoMetadata,
@@ -796,12 +805,25 @@ pub fn build_reverse_prompt(
     readme: Option<&str>,
     tech: Option<&str>,
     provider_label: Option<&str>,
+    scaffold: Option<(&str, Option<&str>, Option<&str>)>,
 ) -> String {
     let mut sections: Vec<String> = Vec::new();
 
     // --- Optional provider source (FR-016) ---
     if let Some(label) = provider_label {
         sections.push(format!("## Repository Source\n{label}"));
+    }
+
+    // --- Optional target project scaffold ---
+    if let Some((language, app_type, stack)) = scaffold {
+        let mut lines = vec![format!("- Language: {language}")];
+        if let Some(app_type) = app_type {
+            lines.push(format!("- Type: {app_type}"));
+        }
+        if let Some(stack) = stack {
+            lines.push(format!("- Stack: {stack}"));
+        }
+        sections.push(format!("## Project Scaffold\n{}", lines.join("\n")));
     }
 
     // --- Repo metadata ---
@@ -817,7 +839,7 @@ pub fn build_reverse_prompt(
     }
     sections.push(format!("## Repository Metadata\n{}", meta_lines.join("\n")));
 
-    // --- Optional tech-stack constraint ---
+    // --- Optional technology-stack constraint ---
     if let Some(stack) = tech {
         sections.push(format!("## Technology Stack Constraint\n{stack}"));
     }

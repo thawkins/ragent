@@ -21,7 +21,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/inbox` | [inbox](inbox.md) | Triage inbox: /inbox list\|claim <id>\|dismiss <id>\|clear\|help |
 | `/cost` | [cost](cost.md) | Show session token usage and estimated cost |
 | `/help` | [help](help.md) | Show available slash commands |
-| `/history` | [history](history.md) | Browse and re-use previous inputs; /history [filter] restricts to matching entries (arrow keys to select, Enter to insert); /history help |
+| `/history` | [history](history.md) | Browse and re-use previous inputs; /history [filter] restricts to matching entries (arrow keys to select, Enter to insert, c to copy to clipboard); /history help |
 | `/inputdiag` | [inputdiag](inputdiag.md) | Dump input/cursor/selection diagnostics for troubleshooting |
 | `/log` | [log](log.md) | Log panel: /log [clear subagents\|panics\|research\|editlog\|help] |
 | `/loop` | [loop](loop.md) | Goal-driven agent loop: /loop opens setup, /loop <agent> <goal> starts, /loop help shows usage |
@@ -53,7 +53,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/spec` | [spec](spec.md) | Specification management: /spec create\|add\|delete\|list\|search\|validate\|status\|task\|govcreate\|help |
 | `/plugins` | [plugins](plugins.md) | Plugin management: /plugins list [--verbose] \| add <source> [--force] \| remove <pluginid> \| enable <pluginid> \| disable <pluginid> \| test <pluginid> \| help |
 | `/research` | [research](research.md) | Research system: /research create [--mode tiered\|supervisor\|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> \| list \| open \| search \| show \| delete \| archive \| cluster |
-| `/reverse` | [reverse](reverse.md) | Reverse-engineer a GitHub repo: /reverse <owner/repo \| URL> [--tech <stack>] [--create <name>] |
+| `/spec reverse` | [reverse](specreverse.md) | Reverse-engineer a GitHub repo: /spec reverse <owner/repo \| URL> [--language <lang> --type <type> [--stack <name>]] [--create <name>] [--depth <N>] [--folder <path>] [--github \| --gitlab] |
 | `/new` | [new](new.md) | Scaffold a new project: /new --language <lang> --type <type> [--stack <name>] [--github \| --gitlab] \| /new help |
 | `/autopilot` | [autopilot](autopilot.md) | Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] \| off \| status \| help |
 | `/plan` | [plan](plan.md) | Delegate planning to the plan agent: /plan <task description> \| /plan help |

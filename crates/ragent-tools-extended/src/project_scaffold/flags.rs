@@ -240,6 +240,12 @@ pub enum AppType {
     Tui,
     /// GUI starter.
     Gui,
+    /// Web-application starter (HTTP-server or static front-end, language
+    /// dependent). Only the application languages (`rust`, `python`, `go`,
+    /// `typescript`, `javascript`) currently define a webapp source; every
+    /// other language degrades to a manifest-only layout, exactly as
+    /// data/DSL formats degrade for `tui`/`gui`.
+    Webapp,
 }
 
 impl AppType {
@@ -250,12 +256,19 @@ impl AppType {
             Self::Cmdline => "cmdline",
             Self::Tui => "tui",
             Self::Gui => "gui",
+            Self::Webapp => "webapp",
         }
     }
 
     /// All canonical values, in registry order.
     pub fn all() -> &'static [Self] {
-        &[Self::Library, Self::Cmdline, Self::Tui, Self::Gui]
+        &[
+            Self::Library,
+            Self::Cmdline,
+            Self::Tui,
+            Self::Gui,
+            Self::Webapp,
+        ]
     }
 }
 
@@ -608,7 +621,10 @@ fn next_value<'a>(
 ) -> Result<&'a str, ScaffoldError> {
     *i += 1;
     match args.get(*i) {
-        Some(value) => Ok(value),
+        Some(value) if !value.is_empty() && !value.starts_with("--") => Ok(value),
+        Some(value) => Err(ScaffoldError::UnknownFlag(format!(
+            "{flag} requires a value (got '{value}')"
+        ))),
         None => Err(ScaffoldError::UnknownFlag(format!(
             "{flag} requires a value"
         ))),
@@ -675,6 +691,7 @@ fn match_app_type_value(value: &str) -> Result<AppType, ScaffoldError> {
         "cmdline" => Ok(AppType::Cmdline),
         "tui" => Ok(AppType::Tui),
         "gui" => Ok(AppType::Gui),
+        "webapp" | "web" => Ok(AppType::Webapp),
         other => Err(ScaffoldError::UnknownAppType(other.to_owned())),
     }
 }

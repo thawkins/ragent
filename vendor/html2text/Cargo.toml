@@ -96,3 +96,8 @@ version = "5.2.0"
 
 [target."cfg(unix)".dev-dependencies.termion]
 version = "4.0"
+
+# The crate is vendored into the ragent workspace but consumed via a path
+# dependency; this empty workspace table keeps it out of ragent's workspace
+# resolution so its own tests can be run standalone from this directory.
+[workspace]

@@ -51,6 +51,7 @@ fn end_to_end_research_then_spec() {
             specname,
             feature,
             from_research: _,
+            folder: _,
         } => {
             assert_eq!(specname, "async-await");
             assert!(feature.contains("async/await ergonomics"));

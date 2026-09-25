@@ -27,6 +27,7 @@ fn test_slash_spec_create_starts_generation() {
         specname,
         feature,
         from_research: _,
+        folder: _,
     } = cmd
     else {
         panic!("expected Create command, got {cmd:?}");
@@ -1052,6 +1053,7 @@ fn test_spec_command_create_with_from_research() {
         specname,
         feature,
         from_research,
+        folder: _,
     } = cmd
     else {
         panic!("expected Create command, got {cmd:?}");
@@ -1068,6 +1070,7 @@ fn test_spec_command_create_without_from_research() {
         specname,
         feature,
         from_research,
+        folder: _,
     } = cmd
     else {
         panic!("expected Create command, got {cmd:?}");

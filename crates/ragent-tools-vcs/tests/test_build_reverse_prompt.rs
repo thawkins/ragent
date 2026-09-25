@@ -32,7 +32,7 @@ fn test_build_all_fields_present() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello World\n\nThis is a test.".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
     assert!(prompt.contains("## Repository Metadata"));
     assert!(prompt.contains("Description: A hello-world app"));
@@ -61,7 +61,7 @@ fn test_build_all_fields_present() {
 fn test_build_readme_none_shows_placeholder() {
     let md = sample_metadata();
     let tree = sample_tree();
-    let prompt = build_reverse_prompt(&md, &tree, None, None, None);
+    let prompt = build_reverse_prompt(&md, &tree, None, None, None, None);
 
     assert!(prompt.contains("## README"));
     assert!(prompt.contains("(no README found)"));
@@ -73,7 +73,7 @@ fn test_build_readme_none_shows_placeholder() {
 fn test_build_readme_empty_string_shows_placeholder() {
     let md = sample_metadata();
     let tree = sample_tree();
-    let prompt = build_reverse_prompt(&md, &tree, Some(""), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(""), None, None, None);
 
     assert!(prompt.contains("(no README found)"));
 }
@@ -86,7 +86,7 @@ fn test_build_readme_truncated_at_8000_chars() {
     let tree = sample_tree();
     // Create a README with 10000 characters.
     let readme = "x".repeat(10_000);
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
     assert!(prompt.contains("## README"));
     assert!(prompt.contains("[... README truncated at 8000 characters ...]"));
@@ -109,7 +109,7 @@ fn test_build_readme_exactly_8000_chars_not_truncated() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "y".repeat(README_MAX_CHARS);
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
     // Exactly at the limit — no truncation notice.
     assert!(!prompt.contains("[... README truncated"));
@@ -121,7 +121,7 @@ fn test_build_readme_just_over_8000_chars_truncated() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "z".repeat(README_MAX_CHARS + 1);
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
     assert!(prompt.contains("[... README truncated at 8000 characters ...]"));
 }
@@ -136,7 +136,7 @@ fn test_build_readme_truncation_char_boundary_safe() {
     // '€' is 3 bytes in UTF-8. 4000 '€' = 12000 bytes, 4000 chars.
     // We need >8000 chars, so use 9000 '€'.
     let readme = "€".repeat(9000);
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
     assert!(prompt.contains("[... README truncated at 8000 characters ...]"));
     // The truncated content should be exactly 8000 '€' characters.
@@ -162,7 +162,7 @@ fn test_build_tech_stack_included() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), Some("Rust + Tokio"), None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), Some("Rust + Tokio"), None, None);
 
     assert!(prompt.contains("## Technology Stack Constraint"));
     assert!(prompt.contains("Rust + Tokio"));
@@ -173,7 +173,7 @@ fn test_build_tech_stack_none_omitted() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
     assert!(!prompt.contains("## Technology Stack Constraint"));
 }
@@ -184,7 +184,7 @@ fn test_build_tech_stack_empty_string_still_included() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), Some(""), None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), Some(""), None, None);
 
     assert!(prompt.contains("## Technology Stack Constraint"));
 }
@@ -196,7 +196,7 @@ fn test_build_empty_tree_shows_placeholder() {
     let md = sample_metadata();
     let tree: Vec<String> = vec![];
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
     assert!(prompt.contains("## Root File Tree"));
     assert!(prompt.contains("(empty repository)"));
@@ -215,7 +215,7 @@ fn test_build_empty_topics_shows_none() {
     };
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
     assert!(prompt.contains("Topics: (none)"));
 }
@@ -227,7 +227,7 @@ fn test_build_section_ordering_metadata_before_tree_before_readme() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), Some("Tech"), None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), Some("Tech"), None, None);
 
     let meta_pos = prompt
         .find("## Repository Metadata")
@@ -249,7 +249,7 @@ fn test_build_provider_label_github_emits_source_section() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitHub"));
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitHub"), None);
 
     assert!(prompt.contains("## Repository Source"));
     assert!(prompt.contains("GitHub"));
@@ -266,6 +266,7 @@ fn test_build_provider_label_gitlab_self_hosted_emits_source_section() {
         Some(&readme),
         None,
         Some("GitLab (gitlab.example.com)"),
+        None,
     );
 
     assert!(prompt.contains("## Repository Source"));
@@ -277,7 +278,7 @@ fn test_build_provider_label_none_omits_source_section() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
     assert!(!prompt.contains("## Repository Source"));
 }
@@ -288,7 +289,7 @@ fn test_build_provider_label_empty_string_still_emits_section() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some(""));
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some(""), None);
 
     assert!(prompt.contains("## Repository Source"));
 }
@@ -300,7 +301,7 @@ fn test_build_provider_label_section_before_metadata() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitHub"));
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitHub"), None);
 
     let source_pos = prompt.find("## Repository Source").expect("source section");
     let meta_pos = prompt
@@ -325,6 +326,7 @@ fn test_build_provider_label_with_tech_stack_full_ordering() {
         Some(&readme),
         Some("Rust"),
         Some("GitLab (gitlab.example.com)"),
+        None,
     );
 
     let source_pos = prompt.find("## Repository Source").expect("source section");
@@ -359,7 +361,7 @@ fn test_build_reuse_for_github_metadata() {
     let tree = vec!["src".to_string(), "package.json".to_string()];
     let readme = "# GitHub Project".to_string();
 
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitHub"));
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitHub"), None);
 
     assert!(prompt.contains("## Repository Source\nGitHub"));
     assert!(prompt.contains("Description: A GitHub repo"));
@@ -390,6 +392,7 @@ fn test_build_reuse_for_gitlab_metadata() {
         Some(&readme),
         None,
         Some("GitLab (gitlab.example.com)"),
+        None,
     );
 
     assert!(prompt.contains("## Repository Source\nGitLab (gitlab.example.com)"));
@@ -415,9 +418,15 @@ fn test_build_reuse_same_metadata_different_provider_label() {
     let tree = vec!["main.go".to_string()];
     let readme = "# Shared".to_string();
 
-    let github_prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitHub"));
-    let gitlab_prompt =
-        build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitLab (gitlab.com)"));
+    let github_prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitHub"), None);
+    let gitlab_prompt = build_reverse_prompt(
+        &md,
+        &tree,
+        Some(&readme),
+        None,
+        Some("GitLab (gitlab.com)"),
+        None,
+    );
 
     // Both prompts contain the same metadata/tree/readme content.
     assert!(github_prompt.contains("Description: Shared repo"));
@@ -445,10 +454,22 @@ fn test_build_reuse_with_tech_constraint_both_providers() {
     let tree = vec!["train.py".to_string()];
     let readme = "# ML".to_string();
 
-    let github_prompt =
-        build_reverse_prompt(&md, &tree, Some(&readme), Some("PyTorch"), Some("GitHub"));
-    let gitlab_prompt =
-        build_reverse_prompt(&md, &tree, Some(&readme), Some("PyTorch"), Some("GitLab"));
+    let github_prompt = build_reverse_prompt(
+        &md,
+        &tree,
+        Some(&readme),
+        Some("PyTorch"),
+        Some("GitHub"),
+        None,
+    );
+    let gitlab_prompt = build_reverse_prompt(
+        &md,
+        &tree,
+        Some(&readme),
+        Some("PyTorch"),
+        Some("GitLab"),
+        None,
+    );
 
     assert!(github_prompt.contains("## Technology Stack Constraint\nPyTorch"));
     assert!(gitlab_prompt.contains("## Technology Stack Constraint\nPyTorch"));
@@ -462,7 +483,7 @@ fn test_build_provider_label_gitlab_default_instance() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitLab"));
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some("GitLab"), None);
 
     assert!(prompt.contains("## Repository Source\nGitLab"));
     // Ensure the label is exactly "GitLab" not "GitLab (".
@@ -486,6 +507,7 @@ fn test_build_provider_label_gitlab_self_hosted_with_port() {
         Some(&readme),
         None,
         Some("GitLab (gitlab.corp.local:8443)"),
+        None,
     );
 
     assert!(prompt.contains("## Repository Source\nGitLab (gitlab.corp.local:8443)"));
@@ -504,6 +526,7 @@ fn test_build_provider_label_does_not_appear_in_other_sections() {
         Some(&readme),
         None,
         Some("GitLab (unique-marker-xyz)"),
+        None,
     );
 
     // The marker should appear exactly once (in the source section).
@@ -518,7 +541,14 @@ fn test_build_provider_label_section_is_first() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), Some("Rust"), Some("GitHub"));
+    let prompt = build_reverse_prompt(
+        &md,
+        &tree,
+        Some(&readme),
+        Some("Rust"),
+        Some("GitHub"),
+        None,
+    );
 
     assert!(
         prompt.starts_with("## Repository Source\n"),
@@ -533,7 +563,7 @@ fn test_build_no_provider_label_metadata_is_first() {
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None);
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
     assert!(
         prompt.starts_with("## Repository Metadata\n"),
@@ -548,7 +578,7 @@ fn test_build_provider_label_with_empty_tree_and_no_readme() {
     // README is missing.
     let md = sample_metadata();
     let tree: Vec<String> = vec![];
-    let prompt = build_reverse_prompt(&md, &tree, None, None, Some("GitHub"));
+    let prompt = build_reverse_prompt(&md, &tree, None, None, Some("GitHub"), None);
 
     assert!(prompt.contains("## Repository Source\nGitHub"));
     assert!(prompt.contains("(empty repository)"));
@@ -562,7 +592,139 @@ fn test_build_provider_label_multiline_label_preserved() {
     let tree = sample_tree();
     let readme = "# Hello".to_string();
     let label = "GitLab\nSelf-hosted instance";
-    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some(label));
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, Some(label), None);
 
     assert!(prompt.contains("## Repository Source\nGitLab\nSelf-hosted instance"));
+}
+
+// --- Project scaffold ---
+
+#[test]
+fn test_build_scaffold_none_omits_project_scaffold_section() {
+    let md = sample_metadata();
+    let tree = sample_tree();
+    let readme = "# Hello".to_string();
+    let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
+
+    assert!(!prompt.contains("## Project Scaffold"));
+    assert!(!prompt.contains("- Language: "));
+    assert!(!prompt.contains("- Type: "));
+    assert!(!prompt.contains("- Stack: "));
+}
+
+#[test]
+fn test_build_scaffold_language_and_type_no_stack() {
+    let md = sample_metadata();
+    let tree = sample_tree();
+    let readme = "# Hello".to_string();
+    let prompt = build_reverse_prompt(
+        &md,
+        &tree,
+        Some(&readme),
+        None,
+        None,
+        Some(("rust", Some("cmdline"), None)),
+    );
+
+    assert!(prompt.contains("## Project Scaffold"));
+    assert!(prompt.contains("- Language: rust"));
+    assert!(prompt.contains("- Type: cmdline"));
+    assert!(!prompt.contains("- Stack:"));
+}
+
+#[test]
+fn test_build_scaffold_language_type_and_stack() {
+    let md = sample_metadata();
+    let tree = sample_tree();
+    let readme = "# Hello".to_string();
+    let prompt = build_reverse_prompt(
+        &md,
+        &tree,
+        Some(&readme),
+        None,
+        None,
+        Some(("rust", Some("tui"), Some("ratatui"))),
+    );
+
+    assert!(prompt.contains("## Project Scaffold"));
+    assert!(prompt.contains("- Language: rust"));
+    assert!(prompt.contains("- Type: tui"));
+    assert!(prompt.contains("- Stack: ratatui"));
+}
+
+#[test]
+fn test_build_scaffold_language_only() {
+    let md = sample_metadata();
+    let tree = sample_tree();
+    let readme = "# Hello".to_string();
+    let prompt = build_reverse_prompt(
+        &md,
+        &tree,
+        Some(&readme),
+        None,
+        None,
+        Some(("rust", None, None)),
+    );
+
+    assert!(prompt.contains("## Project Scaffold"));
+    assert!(prompt.contains("- Language: rust"));
+    assert!(!prompt.contains("- Type:"));
+    assert!(!prompt.contains("- Stack:"));
+}
+
+#[test]
+fn test_build_scaffold_after_source_before_metadata() {
+    // Scaffold ordering: with a provider label, ## Project Scaffold appears
+    // AFTER ## Repository Source and BEFORE ## Repository Metadata.
+    let md = sample_metadata();
+    let tree = sample_tree();
+    let readme = "# Hello".to_string();
+    let prompt = build_reverse_prompt(
+        &md,
+        &tree,
+        Some(&readme),
+        None,
+        Some("GitHub"),
+        Some(("rust", Some("cmdline"), None)),
+    );
+
+    let source_pos = prompt.find("## Repository Source").expect("source section");
+    let scaffold_pos = prompt
+        .find("## Project Scaffold")
+        .expect("scaffold section");
+    let meta_pos = prompt
+        .find("## Repository Metadata")
+        .expect("metadata section");
+
+    assert!(source_pos < scaffold_pos, "source before scaffold");
+    assert!(scaffold_pos < meta_pos, "scaffold before metadata");
+}
+
+#[test]
+fn test_build_scaffold_with_tech_constraint_emits_both_sections() {
+    let md = sample_metadata();
+    let tree = sample_tree();
+    let readme = "# Hello".to_string();
+    let prompt = build_reverse_prompt(
+        &md,
+        &tree,
+        Some(&readme),
+        Some("Rust"),
+        None,
+        Some(("rust", Some("tui"), Some("ratatui"))),
+    );
+
+    assert!(prompt.contains("## Technology Stack Constraint"));
+    assert!(prompt.contains("## Project Scaffold"));
+    assert!(prompt.contains("- Language: rust"));
+    assert!(prompt.contains("- Type: tui"));
+    assert!(prompt.contains("- Stack: ratatui"));
+
+    let tech_pos = prompt
+        .find("## Technology Stack Constraint")
+        .expect("tech section");
+    let scaffold_pos = prompt
+        .find("## Project Scaffold")
+        .expect("scaffold section");
+    assert!(scaffold_pos < tech_pos, "scaffold before tech constraint");
 }

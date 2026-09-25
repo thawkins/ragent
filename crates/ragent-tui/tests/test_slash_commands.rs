@@ -3091,10 +3091,169 @@ fn test_slash_spec_update_missing_spec_id_shows_usage_error() {
     );
 }
 
+/// `/spec reverse` with a missing or invalid flag must report the specific
+/// cause in the message window, not only a status line (NFR-005).
+#[test]
+fn test_slash_spec_reverse_usage_errors_report_cause() {
+    let cases = [
+        ("/spec reverse", "missing required argument"),
+        (
+            "/spec reverse octocat/Hello-World --stack axum",
+            "missing required flag --language",
+        ),
+        (
+            "/spec reverse octocat/Hello-World --language rust",
+            "missing required flag --type",
+        ),
+        (
+            "/spec reverse octocat/Hello-World --bogus",
+            "unknown option '--bogus'",
+        ),
+        (
+            "/spec reverse octocat/Hello-World --create",
+            "--create requires a value",
+        ),
+        (
+            "/spec reverse octocat/Hello-World extra",
+            "unexpected argument 'extra'",
+        ),
+        (
+            "/spec reverse octocat/Hello-World --folder ./x",
+            "--folder requires --language and --type",
+        ),
+        (
+            "/spec reverse --language rust --type cmdline --stack gtk4",
+            "the first argument after `/spec reverse` must be `<repo>`",
+        ),
+    ];
+
+    for (command, expected) in cases {
+        let mut app = make_app();
+        app.session_id = Some("s1".to_string());
+
+        app.execute_slash_command(command);
+
+        let text: String = app
+            .messages
+            .iter()
+            .map(|m| m.text_content())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains(expected),
+            "{command} should report '{expected}' in the message window, got: {text}"
+        );
+        let status = app.status.to_lowercase();
+        assert!(
+            status.contains("reverse") && status.contains("usage"),
+            "{command} should keep the pointer in the status line, got: {}",
+            app.status
+        );
+    }
+}
+
+/// FR-027: `/spec reverse <flags> --folder <path>` runs the shared `/new`
+/// scaffold engine against `<path>` before generating the prompt, so the target
+/// folder is created and populated rather than left untouched.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_slash_spec_reverse_folder_scaffolds_project() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    let dir = std::env::temp_dir().join(format!(
+        "ragent-reverse-folder-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+
+    app.execute_slash_command(&format!(
+        "/spec reverse octocat/Hello-World --language rust --type cmdline \
+         --folder {}",
+        dir.display()
+    ));
+
+    // The folder now holds the `/new` scaffold, including the specs root the
+    // chained `/spec create` writes into.
+    assert!(
+        dir.join("specs").is_dir(),
+        "the scaffold must create <folder>/specs/: {:?}",
+        dir
+    );
+    assert!(
+        dir.join("AGENTS.md").is_file(),
+        "the scaffold must create <folder>/AGENTS.md: {:?}",
+        dir
+    );
+
+    let joined: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        joined.contains("project scaffolded in"),
+        "the run must report the scaffold outcome: {joined}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A valid `/spec reverse` invocation must forward the validated values to the
+/// `/reverse` handler rather than silently dropping them (FR-026/FR-027).
+#[tokio::test(flavor = "multi_thread")]
+async fn test_slash_spec_reverse_valid_scaffold_reaches_reverse_handler() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command(
+        "/spec reverse octocat/Hello-World --create my-spec --depth 2 \
+         --language rust --type cmdline --stack axum",
+    );
+
+    // The handler reports a `reverse:` status (auth/invalid-repo/wait) or
+    // starts fetching; what matters is that it was reached rather than the
+    // parse producing a usage error.
+    assert!(
+        !app.status.contains("spec: reverse usage"),
+        "a valid scaffold invocation must not be a usage error: {}",
+        app.status
+    );
+    assert!(
+        app.status.contains("reverse:"),
+        "the /reverse handler must be reached: {}",
+        app.status
+    );
+
+    let rendered = ragent_tui::app::spec_reverse_args_for_tests(
+        "octocat/Hello-World".to_string(),
+        Some("my-spec".to_string()),
+        Some("2".to_string()),
+        Some(
+            ragent_tools_extended::project_scaffold::parse_flags(&[
+                "--language",
+                "rust",
+                "--type",
+                "cmdline",
+                "--stack",
+                "axum",
+            ])
+            .expect("valid scaffold flags"),
+        ),
+        None,
+    );
+    assert_eq!(
+        rendered,
+        "octocat/Hello-World --tech \"language: rust; type: cmdline; stack: axum\" \
+         --create my-spec --depth 2"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_slash_spec_task_lists_tasks() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec task testspec");
 

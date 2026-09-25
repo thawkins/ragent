@@ -785,8 +785,14 @@ impl App {
                 vec![
                     "help".to_string(),
                     "--help".to_string(),
-                    "--tech".to_string(),
+                    "--language".to_string(),
+                    "--type".to_string(),
+                    "--stack".to_string(),
                     "--create".to_string(),
+                    "--depth".to_string(),
+                    "--folder".to_string(),
+                    "--github".to_string(),
+                    "--gitlab".to_string(),
                 ]
             }
             "new" => {
@@ -4240,7 +4246,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             "history" => {
                 if is_help_args(args) {
                     self.append_assistant_text(
-                        "From: /history help\n\n## /history — Input history\n\n| Subcommand | Description |\n|---|---|\n| `/history` | Open the history picker (newest first; ↑/↓ to select, Enter to insert) |\n| `/history <filter>` | Restrict the picker to entries containing `<filter>` |\n| `/history help` | Show this help |",
+                        "From: /history help\n\n## /history — Input history\n\n| Subcommand | Description |\n|---|---|\n| `/history` | Open the history picker (newest first; ↑/↓ to select, Enter to insert, c to copy to clipboard) |\n| `/history <filter>` | Restrict the picker to entries containing `<filter>` |\n| `/history help` | Show this help |",
                     );
                     self.status = "history: help".to_string();
                     return;
@@ -6876,11 +6882,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 self.status = "plugins".to_string();
             }
 
-            // ── /reverse ────────────────────────────────────────────────
-            "reverse" => {
-                self.handle_reverse_command(args);
-            }
-
             // ── /new ────────────────────────────────────────────────────
             "new" => {
                 self.handle_new_command(args);
@@ -6914,6 +6915,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         specname,
                         feature,
                         from_research,
+                        folder,
                     } => {
                         let sid = self.session_id.clone().unwrap_or_default();
                         self.append_assistant_text(&SpecCommand::build_create_message(&specname));
@@ -6924,11 +6926,26 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                         let agent = self.select_general_agent();
 
-                        let task = SpecCommand::build_create_prompt(
-                            &specname,
-                            &feature,
-                            from_research.as_deref(),
-                        );
+                        // FR-027: an explicit `--folder <path>` targets that
+                        // project's `specs/` root (used by `/spec reverse
+                        // --folder` chaining); otherwise the invoking directory
+                        // is used, as before.
+                        let task = match folder {
+                            Some(target) => format!(
+                                "{}\n\nWrite the spec directory under `{target}/specs/` \
+                                 (absolute path), not the current directory.",
+                                SpecCommand::build_create_prompt(
+                                    &specname,
+                                    &feature,
+                                    from_research.as_deref(),
+                                )
+                            ),
+                            None => SpecCommand::build_create_prompt(
+                                &specname,
+                                &feature,
+                                from_research.as_deref(),
+                            ),
+                        };
                         let msg = Message::user_text(&sid, &task);
                         self.messages.push(msg);
 
@@ -7821,9 +7838,38 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             || sub == "plan"
                             || sub == "tasks"
                             || sub == "feedback"
-                            || sub == "govcreate" =>
+                            || sub == "govcreate"
+                            || sub == "reverse" =>
                     {
-                        self.status = format!("Usage: /spec {} — try /spec help", sub);
+                        // NFR-005: a missing or invalid flag must never be
+                        // reported by a status line alone. Each usage-error
+                        // subcommand states the specific cause (and its usage
+                        // block) in the message window, then leaves a short
+                        // pointer in the status line.
+                        match sub.as_str() {
+                            "reverse" => {
+                                self.append_assistant_text(&format!(
+                                    "[err] **missing required argument** — no repository given \
+                                     (the first argument after `/spec reverse` must be `<repo>`)\n\n{}",
+                                    crate::app::reverse::reverse_help_message()
+                                ));
+                            }
+                            "govcreate" => {
+                                self.append_assistant_text(&format!(
+                                    "[err] **missing required argument** — `/spec govcreate` \
+                                     requires `<specid> <content-ref> <target-folder>`\n\n{}",
+                                    SpecCommand::build_govcreate_help_message()
+                                ));
+                            }
+                            other => {
+                                self.append_assistant_text(&format!(
+                                    "[err] **missing required argument** — `/spec {other}` was \
+                                     given incomplete arguments\n\n{}",
+                                    SpecCommand::build_help_message()
+                                ));
+                            }
+                        }
+                        self.status = format!("Usage: /spec {sub} — try /spec help");
                     }
                     SpecCommand::Add { spec_id, feature } => {
                         self.append_assistant_text(&SpecCommand::build_add_message(
@@ -8090,7 +8136,20 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         });
                     }
                     SpecCommand::Unknown(sub) => {
-                        self.status = format!("Unknown /spec subcommand: {sub}. Try /spec help");
+                        if let Some(reason) = sub.strip_prefix("reverse-usage: ") {
+                            // `/spec reverse` parsed but the invocation was
+                            // invalid (unknown or duplicate flag, or a `/new`
+                            // scaffold-flag validation failure). `SpecCommand::
+                            // parse` puts the specific cause after the prefix.
+                            self.append_assistant_text(&format!(
+                                "From: /spec reverse\n\n[err] **{reason}**\n\n{}",
+                                crate::app::reverse::reverse_help_message()
+                            ));
+                            self.status = "spec: reverse usage".to_string();
+                        } else {
+                            self.status =
+                                format!("Unknown /spec subcommand: {sub}. Try /spec help");
+                        }
                     }
                     SpecCommand::Specify {
                         specname,
@@ -8604,6 +8663,31 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             SpecCommand::build_govcreate_help_message()
                         ));
                         self.status = "spec: govcreate usage".to_string();
+                    }
+                    SpecCommand::Reverse {
+                        repo,
+                        create,
+                        depth,
+                        scaffold,
+                        folder,
+                    } => {
+                        // The validated values are handed straight to the
+                        // reverse handler; the scaffold request and its folder
+                        // are not part of the `/reverse` flag grammar, so
+                        // rendering them back to text would drop them.
+                        self.run_spec_reverse(crate::app::reverse::build_spec_reverse_args(
+                            repo, create, depth, scaffold, folder,
+                        ));
+                    }
+                    SpecCommand::ReverseUsage(reason) => {
+                        // A parseable but invalid invocation reports the
+                        // specific cause; `reverse_help_message` already opens
+                        // with its own `From: /spec reverse` header.
+                        self.append_assistant_text(&format!(
+                            "[err] **{reason}**\n\n{}",
+                            crate::app::reverse::reverse_help_message()
+                        ));
+                        self.status = "spec: reverse usage".to_string();
                     }
                 }
             }

@@ -121,17 +121,23 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   Jobs-To-Be-Done analysis on existing specs; `/spec update` regenerates
   `PLAN.md` and `TESTPLAN.md` from an edited `SPEC.md`; `/spec create` now
   also emits a manual `TESTPLAN.md` test-plan artifact
-- **GitHub repo reverse-engineering** — `/reverse <owner/repo | URL>` fetches
+- **GitHub repo reverse-engineering** — `/spec reverse <owner/repo | URL>` fetches
   a public repo's metadata, root file tree, and README via the GitHub API,
   then asks the currently selected LLM model to generate a synthetic creation
-  prompt; optional `--tech <stack>` constrains the technology stack and
-  `--create <name>` chains into `/spec create` to auto-generate a spec from
-  the reverse-engineered prompt
+  prompt; the `/new` scaffold flags (`--language <lang> --type <type>
+  [--stack <name>]`) steer the prompt towards a target language, app type, and
+  framework stack, and with those flags `--folder <path>` scaffolds a real
+  project (default: the current directory) while `--github` / `--gitlab`
+  create a private remote and push it; `--create <name>` chains into
+  `/spec create` to auto-generate a spec from the reverse-engineered prompt,
+  written under the scaffolded project (`<folder>/specs/<name>/`) when
+  `--folder` was used
 - **Project scaffolding** — `/new --language <lang> --type <type>` scaffolds a
   new project in an empty directory: the ragent workspace (`.ragent/`, `specs/`,
   `log/`, `.gitignore`, `AGENTS.md`), a runnable hello-world artifact set for
   26 application languages (rust, python, go, typescript, shell, ...) with
-  library/cmdline/tui/gui layouts plus sample-document stubs for 20 data,
+  library/cmdline/tui/gui layouts (plus a webapp HTTP server for the five web
+  languages) plus sample-document stubs for 20 data,
   markup, and build formats (json, yaml, sql, cmake, maven, ...) covering every
   codeindex scanner language, optional
   stack layers (`--stack axum`), starter docs (`README.md`, `QUICKSTART.md`,
@@ -372,7 +378,7 @@ ragent new --language rust --type cmdline
 The command validates the directory is empty, generates the ragent workspace
 (`.ragent/`, `specs/`, `log/`, `.gitignore`, `AGENTS.md`), a runnable
 hello-world artifact set for `rust`/`python`/`go`/`typescript` in
-`library`/`cmdline`/`tui`/`gui` layouts, starter documentation (`README.md`,
+`library`/`cmdline`/`tui`/`gui`/`webapp` layouts, starter documentation (`README.md`,
 `QUICKSTART.md`, `STATS.md`, `docs/`), initialises git with an initial
 commit, and — with `--github` or `--gitlab` — creates a private hosting
 repository, sets it as `origin`, and pushes.
@@ -480,21 +486,29 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.116** — The core architecture, tool system (169 tools across 25 categories), TUI,
+**v1.0.117** — The core architecture, tool system (169 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
 
-- **Maintenance release (v1.0.116)** — agent and plugin updates plus a
-  code-quality pass, with no behavioural regressions. The four content-sized TUI
-  modal renderers now share one `centered_rect_fixed` helper (byte-for-byte
-  identical geometry), and the sub-agent report writer streams its output
-  straight to disk instead of buffering the whole file in memory. Full CI
-  hygiene (`cargo check`, the dead-code lint and reason checks,
-  `clippy -D warnings`, `cargo fmt --check`, `cargo audit`, `cargo deny check`)
-  and the entire `cargo test --workspace` suite are green.
+- **`/spec reverse --folder` scaffolds and hosts the target project (v1.0.117)** —
+  `/spec reverse` now accepts `--folder <path>` plus `--github` / `--gitlab`
+  (with the `/new` scaffold flags present) and creates the project in the target
+  folder before synthesising the prompt; a chained `--create <name>` writes the
+  spec into `<folder>/specs/<name>/`. Usage errors now state the specific cause
+  instead of the bare usage line.
+- **`webapp` app type (v1.0.117)** — `--type webapp` is a first-class registered
+  value for `/new`, `/spec reverse`, and `/spec govcreate`; it generates a tiny
+  dependency-free HTTP-server starter for `rust`, `python`, `go`, `typescript`,
+  and `javascript`, and degrades to a manifest-only layout elsewhere.
+- **`lopdf` joins the lint suite (v1.0.117)** — the vendored `lopdf` crate
+  carries crate-level allowances (matching `vendor/pdf-extract`) so the dead-code
+  lint and `cargo-machete` are green. Full CI hygiene (`cargo check`, the
+  dead-code lint and reason checks, `clippy -D warnings`, `cargo fmt --check`,
+  `cargo audit`, `cargo deny check`) and the entire `cargo test --workspace`
+  suite are green.
 
 - **Detached sub-agents + `/spawn` (v1.0.115)** — `/spawn <agent> <prompt...>`
   launches a sub-agent directly from the chat input as a **detached**

@@ -14,8 +14,9 @@ fetches the repo's metadata, root file tree, and README content via the GitHub
 API, then passes all that context to the currently selected LLM model to
 generate the final prompt.
 
-Optional flags let the user constrain the technology stack (`--tech`) and
-automatically feed the generated prompt into `/spec create` (`--create <name>`).
+Optional flags let the user constrain the target project shape with the same
+flags `/new` accepts (`--language`/`--type`/`--stack`) and automatically feed
+the generated prompt into `/spec create` (`--create <name>`).
 
 ## Background
 
@@ -62,12 +63,54 @@ The existing `GitHubClient::detect_repo` parses git-remote URLs; a new
 
 ### FR-001 — Slash command registered (ubiquitous)
 
-The system **shall** register a `/reverse` slash command in the
-`SLASH_COMMANDS` table in `crates/ragent-tui/src/app/state.rs` with a trigger of
-`reverse` and a description documenting its usage.
+The system **shall** register a `/spec reverse` slash command through the
+`/spec` subcommand table in `crates/ragent-specs/src/commands.rs` (dispatched
+from `crates/ragent-tui/src/app/slash.rs`) with a trigger of `reverse` and a
+description documenting its usage.
 
 > *Ubiquitous requirement — applies to all environments where the TUI is
 > available.*
+
+### FR-026 — Scaffold-only `--folder` and hosting flags (optional)
+
+Where the `/new` scaffold flags (`--language <lang> --type <type>`) are present,
+the system **shall** accept an optional `--folder <path>` target and the
+mutually exclusive `--github` / `--gitlab` hosting flags, parsed with the same
+`/new` flag parser; supplying `--folder`, `--github`, or `--gitlab` without
+both scaffold flags **shall** be a usage error.
+
+> *Optional requirement — the flags are inert unless requested.*
+
+### FR-027 — Scaffold the target project (event-driven)
+
+When scaffold flags are present, the system **shall** scaffold the target
+folder (defaulting to the current working directory) with the same engine
+`/new` and `/spec govcreate` use, including workspace artifacts, the language
+starter, git init and initial commit, and — with `--github` / `--gitlab` — a
+private remote set as `origin` plus a push. The step **shall** run before
+prompt synthesis.
+
+> *Event-driven requirement — triggered by the presence of scaffold flags.*
+
+### FR-028 — Scaffold refusal is reported, not fatal (unwanted)
+
+If the scaffold step fails (non-empty target folder, or a hosting failure), the
+system **shall** report the specific cause with an `[err]` line and the
+blocking entries or failing step, **shall** leave any local scaffold intact,
+and **shall** continue to generate the creation prompt.
+
+> *Unwanted-behaviour requirement — prevents a scaffold refusal from silently
+> dropping either the scaffold or the prompt.*
+
+### FR-029 — Chained `--create` targets the scaffolded project (event-driven)
+
+When both `--create <name>` and a scaffold target are supplied, the system
+**shall** write the chained `specs/<name>/` under the scaffolded project folder
+rather than the invoking directory, accepting an explicit `--folder <path>` on
+`/spec create` to name that target.
+
+> *Event-driven requirement — triggered by the combination of `--create` and a
+> scaffold run; without it the spec would land outside the new project.*
 
 ### FR-002 — Repo URL or shorthand required (ubiquitous)
 
@@ -151,13 +194,17 @@ as an assistant message so the user can read, copy, or reuse it.
 
 > *Ubiquitous requirement — applies on every successful generation.*
 
-### FR-011 — `--tech` flag (optional)
+### FR-011 — `/new` scaffold flags (optional)
 
-The system **may** accept an optional `--tech <stack>` flag that constrains the
-generated prompt to the specified technology stack. When provided, the tech
-stack **shall** be included in the context block sent to the LLM.
+The system **may** accept the same `/language`, `--type`, and `--stack` flags
+`/new` accepts, parsed and validated by the shared `/new` parser so accepted
+values and error text cannot drift from `/new`. When supplied, the target
+language, app type, and optional stack **shall** be included in the context
+block sent to the LLM (and in the wrapping instruction prompt) so the generated
+prompt targets that project shape. The former free-form `--tech <stack>` flag
+is replaced by these flags.
 
-> *Optional requirement — the flag is not required for the command to
+> *Optional requirement — the flags are not required for the command to
 > function.*
 
 ### FR-012 — `--create <name>` flag (optional)

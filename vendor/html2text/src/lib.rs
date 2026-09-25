@@ -1321,7 +1321,10 @@ fn td_to_render_tree<'a, T: Write>(
             }
             if &attr.name.local == "rowspan" {
                 let v: &str = &attr.value;
-                rowspan = v.parse().unwrap_or(1);
+                // `rowspan="0"` is invalid HTML but appears in the wild, and a
+                // zero rowspan divides by zero during height calculation, so
+                // clamp to the minimum of one row.
+                rowspan = v.parse().unwrap_or(1).max(1);
             }
         }
     }
@@ -1371,6 +1374,22 @@ enum TreeMapResult<'a, C, N, R> {
     /// Nothing (e.g. a comment or other ignored element).
     Nothing,
 }
+
+/// Maximum DOM nesting depth the iterative tree walker will descend to.
+///
+/// `tree_map_reduce` re-uses the call stack for nested nodes: entering a node
+/// with pending children pushes a frame. Pathologically nested HTML (tens of
+/// thousands of unclosed inline tags, as produced by some scraped pages) can
+/// therefore exhaust the thread stack and abort the process with a stack
+/// overflow — which cannot be caught by `catch_unwind` and takes down the
+/// whole binary (observed as a coredump from a spawned `html2text` thread).
+///
+/// Guarding the depth turns that process abort into a recoverable
+/// `Err(Error::Fail)`, which every caller already degrades to its raw-text
+/// fallback. The limit is set to 64: ordinary article HTML nests only a
+/// handful of levels, so the cap is far above any real document while
+/// keeping the walker's stack usage bounded.
+pub(crate) const MAX_HTML_DEPTH: usize = 64;
 
 fn tree_map_reduce<'a, C, N, R, M>(
     context: &mut C,
@@ -1423,6 +1442,9 @@ where
                     prefn,
                     postfn,
                 } => {
+                    if pending_stack.len() >= MAX_HTML_DEPTH {
+                        return Err(Error::Fail);
+                    }
                     pending_stack.push(last);
                     last = PendingNode {
                         construct: cons,

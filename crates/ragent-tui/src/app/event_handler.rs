@@ -510,11 +510,12 @@ impl App {
                     self.execute_plan_delegation(session_id, task, context);
                 }
 
-                // FR-012: /reverse --create <name> chaining — after the LLM
+                // FR-012: /spec reverse --create <name> chaining — after the LLM
                 // finishes generating the synthetic prompt, invoke
                 // `/spec create <name> <generated-prompt>` using the last
                 // assistant message as the prompt text.
                 if let Some(spec_name) = self.pending_reverse_create.take() {
+                    let scaffold_folder = self.pending_reverse_create_folder.take();
                     if *reason != FinishReason::Cancelled {
                         let prompt = self
                             .messages
@@ -524,7 +525,15 @@ impl App {
                             .map(|m| m.text_content())
                             .unwrap_or_default();
                         if !prompt.is_empty() {
-                            let cmd = format!("/spec create {spec_name} {prompt}");
+                            // FR-027: a `--folder` run already scaffolded the
+                            // project, so its `specs/` root must receive the
+                            // generated spec rather than the invoking directory.
+                            let cmd = match scaffold_folder {
+                                Some(folder) => {
+                                    format!("/spec create {spec_name} --folder {folder} {prompt}")
+                                }
+                                None => format!("/spec create {spec_name} {prompt}"),
+                            };
                             self.execute_slash_command(&cmd);
                         }
                     }

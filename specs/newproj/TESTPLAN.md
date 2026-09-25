@@ -40,7 +40,8 @@ session against a real GitHub/GitLab account where hosting tests are involved.
 **Expected results:**
 - Usage text is displayed in the message window showing the flag table
   (`--language`, `--type`, `--stack`, `--github`, `--gitlab`) and the supported
-  values (`rust`, `python`, `go`, `typescript`; `library`, `cmdline`, `tui`, `gui`).
+  values (`rust`, `python`, `go`, `typescript`; `library`, `cmdline`, `tui`, `gui`,
+  `webapp`).
 - No files or directories are created in the working directory.
 - No git repository is initialised.
 
@@ -100,14 +101,15 @@ session against a real GitHub/GitLab account where hosting tests are involved.
 **Steps:**
 1. Run `/new --language rust` (missing `--type`) and press `Enter`.
 2. Run `/new --type tui` (missing `--language`) and press `Enter`.
-3. Run `/new --language rust --type webapp` (invalid `--type` value) and press `Enter`.
+3. Run `/new --language rust --type not-a-type` (invalid `--type` value) and press
+   `Enter`.
 4. After each, verify the directory in a shell.
 
 **Test data:** the three invocations above.
 
 **Expected results:**
 - Each invocation displays a usage message listing valid values for the missing or
-  invalid flag(s) (`library`, `cmdline`, `tui`, `gui`).
+  invalid flag(s) (`library`, `cmdline`, `tui`, `gui`, `webapp`).
 - No files are created after any of the three invocations.
 
 ### TC-005 — Library type produces no binary entrypoint
@@ -436,6 +438,30 @@ GitHub App token (`ghu_`), and an authenticated `gh` CLI (`gh auth status` shows
 - No panic report is written to `log/panics/`.
 - The remote half runs inside a blocking worker, so the `reqwest::blocking` client
   can create and destroy its private runtime without an ambient async context.
+
+### TC-020 — Webapp starter for a web language; manifest-only for the rest
+
+**Requirement:** FR-006
+
+**Preconditions:** ragent running in the TUI inside empty directory
+`~/scratch/newproj-tests/tc020/`.
+
+**Steps:**
+1. Type `/new --language rust --type webapp` and press `Enter`.
+2. Quit ragent and inspect the directory.
+3. Repeat with `/new --language go --type webapp` and
+   `/new --language java --type webapp` in their own empty directories.
+
+**Test data:** `/new --language rust --type webapp`; `--language go`; a language
+with no web idiom such as `java`.
+
+**Expected results:**
+- rust: `src/main.rs` exists, contains a `Hello, world!` greeting, and
+  `cargo build` succeeds.
+- go: `main.go` exists, contains a `Hello, world!` greeting, and `go build .`
+  succeeds.
+- java: the manifest (and no app source) is created — the layout degrades to
+  manifest-only, matching how data/DSL formats degrade for `tui`/`gui`.
 
 ## Cleanup
 

@@ -52,7 +52,7 @@ fn test_choose_token_app_token_defers_to_gh() {
 #[test]
 fn test_choose_token_app_token_without_gh_is_kept() {
     // No `gh` credential: keep the app token so read-only GitHub tooling
-    // (issues, PRs, /reverse) still authenticates.
+    // (issues, PRs, /spec reverse) still authenticates.
     assert_eq!(
         choose_token(Some("ghu_app".to_owned()), None),
         Some("ghu_app".to_owned())

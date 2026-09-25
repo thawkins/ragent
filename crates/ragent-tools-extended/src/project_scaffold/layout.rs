@@ -11,7 +11,9 @@
 //!   `{name}.go`, `src/index.ts`);
 //! - `cmdline` — console-entry layout;
 //! - `tui` — terminal-UI starter;
-//! - `gui` — GUI starter appropriate to the language.
+//! - `gui` — GUI starter appropriate to the language;
+//! - `webapp` — web-application starter where the language has a web idiom
+//!   (HTTP server or static front-end), otherwise manifest-only.
 
 use super::flags::AppType;
 use super::recipes::LanguageRecipe;

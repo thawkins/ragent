@@ -12,6 +12,10 @@ use ragent_agent::event::Event;
 use ragent_agent::github::{GitHubClient, build_reverse_prompt};
 use ragent_agent::gitlab::GitLabClient;
 use ragent_agent::message::Message;
+use ragent_tools_extended::archdoc::{
+    GovCreateScaffoldError, ScaffoldStageOutcome, run_govcreate_scaffold,
+};
+use ragent_tools_extended::project_scaffold::{ScaffoldRequest, ScaffoldSummary};
 use ragent_tools_vcs::vcs_provider::{VcsProvider, parse_reverse_repo};
 
 use crate::app::state::{App, LogLevel};
@@ -29,12 +33,12 @@ struct ReverseArgs {
     depth: Option<String>,
 }
 
-/// Tokenize `/reverse` arguments into shell-like tokens: runs of
-/// whitespace split tokens unless they appear inside single or double
-/// quotes, so `--tech "Next.js + Rails"` yields the single token
-/// `Next.js + Rails`.  The quote characters themselves are stripped;
-/// adjacent unquoted text is preserved (`--tech"Next.js"` -> `--techNext.js`
-/// mirrors POSIX behaviour, though in practice values are separated).
+/// Tokenize `/reverse` arguments into shell-like tokens.
+///
+/// Only the test module drives this directly now: `/spec reverse` hands its
+/// validated values to [`App::run_spec_reverse`] as a struct, and the struct
+/// fields are what the handler consumes.
+#[allow(dead_code)]
 fn tokenize_reverse_args(args: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -87,6 +91,10 @@ fn tokenize_reverse_args(args: &str) -> Vec<String> {
 /// Flags may appear in any order after the positional repo argument.
 /// Quoted flag values (single or double quotes) are captured whole, so
 /// `--tech "Next.js + Rails"` yields the stack `Next.js + Rails`.
+///
+/// Driven by [`App::handle_reverse_command`]; `/spec reverse` bypasses the text
+/// form entirely (see [`App::run_spec_reverse`]).
+#[allow(dead_code)]
 fn parse_reverse_args(args: &str) -> Option<ReverseArgs> {
     let args = args.trim();
     if args.is_empty() || args == "help" {
@@ -220,6 +228,143 @@ fn build_llm_task(context: &str, tech: Option<&str>) -> String {
     )
 }
 
+// ---------------------------------------------------------------------------
+// `/spec reverse` argument marshalling
+// ---------------------------------------------------------------------------
+
+// `SpecReverseArgs`, `build_spec_reverse_args`, `render_spec_reverse_args_for_tests`
+// and `reverse_help_message` are reached from the `slash` sibling module through
+// this private `app::reverse` module, so `pub(crate)` is narrower than the
+// `pub` clippy's `redundant_pub_crate` lint suggests.
+
+/// Arguments the `/spec reverse` dispatcher forwards to
+/// [`App::handle_reverse_command`].
+///
+/// `/spec reverse` parses and validates its flags in
+/// [`ragent_specs::SpecCommand::parse`]; this struct is the small bridge that
+/// re-renders the validated values into the `/reverse` argument string the
+/// handler already understands, so the fetch/generate path stays in one place.
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) struct SpecReverseArgs {
+    /// Repository identifier (URL, SSH URL, or `owner/repo` shorthand).
+    repo: String,
+    /// Optional technology-stack constraint rendered from the scaffold flags.
+    tech: Option<String>,
+    /// Optional `/spec create <name>` chain.
+    create: Option<String>,
+    /// Optional tree-fetch depth (`--depth <N>`), raw string.
+    depth: Option<String>,
+    /// Validated `/new` scaffold flags; `Some` when `--language`/`--type` were
+    /// supplied and the project should be scaffolded like `/new` (FR-027).
+    scaffold: Option<ScaffoldRequest>,
+    /// Target folder for the scaffold (`--folder <path>`), used only when
+    /// [`Self::scaffold`] is `Some`; `None` means the current directory.
+    folder: Option<String>,
+}
+
+/// Render a [`ScaffoldRequest`] as the `/reverse --tech` constraint.
+///
+/// `/reverse` already accepts a free-form `--tech <stack>` value, so the
+/// validated `/new` scaffold flags are folded into that single token (e.g.
+/// `language: rust; type: gui; stack: gtk4`). The generated prompt therefore
+/// still targets the requested language and app type.
+fn scaffold_constraint(request: &ScaffoldRequest) -> String {
+    let mut parts = vec![format!("language: {}", request.language().as_str())];
+    parts.push(format!("type: {}", request.app_type().as_str()));
+    if let Some(stack) = request.stack() {
+        parts.push(format!("stack: {stack}"));
+    }
+    parts.join("; ")
+}
+
+/// Wrap a value for the `/reverse` tokenizer.
+///
+/// The handler re-tokenizes the rendered argument string, so a value that
+/// contains whitespace must be quoted or it would split into extra tokens.
+#[allow(dead_code)]
+fn quote_arg(value: &str) -> String {
+    if value.chars().any(char::is_whitespace) {
+        format!("\"{}\"", value.replace('"', "'"))
+    } else {
+        value.to_string()
+    }
+}
+
+/// Build the `/reverse` argument string for a `/spec reverse` invocation.
+///
+/// `repo` is the mandatory repository positional; `scaffold` carries the
+/// validated `/new` scaffold flags (kept intact so the handler can run the
+/// real `/new` engine rather than a re-derived approximation), and `folder`
+/// is the scaffold target.
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn build_spec_reverse_args(
+    repo: String,
+    create: Option<String>,
+    depth: Option<String>,
+    scaffold: Option<ScaffoldRequest>,
+    folder: Option<String>,
+) -> SpecReverseArgs {
+    SpecReverseArgs {
+        repo,
+        tech: scaffold.as_ref().map(scaffold_constraint),
+        create,
+        depth,
+        scaffold,
+        folder,
+    }
+}
+
+/// Render a [`SpecReverseArgs`] into the legacy `/reverse` argument string.
+///
+/// Superseded by [`App::run_spec_reverse`], which hands the struct straight to
+/// the handler; retained because the test hook below still exercises the text
+/// form.
+#[allow(dead_code)]
+fn render_spec_reverse_args(args: &SpecReverseArgs) -> String {
+    let mut rendered = vec![quote_arg(&args.repo)];
+    if let Some(tech) = &args.tech {
+        rendered.push("--tech".to_string());
+        rendered.push(quote_arg(tech));
+    }
+    if let Some(create) = &args.create {
+        rendered.push("--create".to_string());
+        rendered.push(quote_arg(create));
+    }
+    if let Some(depth) = &args.depth {
+        rendered.push("--depth".to_string());
+        rendered.push(quote_arg(depth));
+    }
+    rendered.join(" ")
+}
+
+/// Test hook: render a built [`SpecReverseArgs`] into the `/reverse` argument
+/// string (`app::spec_reverse_args_for_tests` re-exports this).
+#[doc(hidden)]
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn render_spec_reverse_args_for_tests(args: &SpecReverseArgs) -> String {
+    render_spec_reverse_args(args)
+}
+
+impl App {
+    /// Run a parsed `/spec reverse` invocation.
+    ///
+    /// `/spec reverse` reuses the `/reverse` fetch-and-generate handler, but it
+    /// keeps its validated values on a [`SpecReverseArgs`] struct rather than
+    /// round-tripping through the `/reverse` tokenizer: the scaffold request and
+    /// its target folder are *not* part of the `/reverse` flag grammar, so
+    /// rendering them to text and parsing them back would silently drop them
+    /// (the reported `--folder` no-op). The struct is passed straight through.
+    pub(crate) fn run_spec_reverse(&mut self, args: SpecReverseArgs) {
+        let mut parsed = ReverseArgs {
+            repo_input: args.repo,
+            tech: args.tech,
+            create: args.create,
+            depth: args.depth,
+        };
+        self.handle_reverse_parsed(&mut parsed, args.scaffold, args.folder);
+    }
+}
+
 impl App {
     /// Resolve the GitLab Personal Access Token for the `/reverse` command
     /// (FR-007).
@@ -252,9 +397,10 @@ impl App {
     /// status, then spawns an async task that fetches repo metadata + tree +
     /// README, builds a context block, and dispatches it to the LLM via
     /// `process_message`.
+    #[allow(dead_code)]
     pub(crate) fn handle_reverse_command(&mut self, args: &str) {
         // FR-013: parse args via the shared `parse_reverse_args` helper.
-        let parsed = match parse_reverse_args(args) {
+        let mut parsed = match parse_reverse_args(args) {
             Some(p) => p,
             None => {
                 self.append_assistant_text(&reverse_help_message());
@@ -262,7 +408,23 @@ impl App {
                 return;
             }
         };
+        // `/reverse` has no scaffold grammar, so it never scaffolds a project.
+        self.handle_reverse_parsed(&mut parsed, None, None);
+    }
 
+    /// Run the `/reverse` fetch-and-generate path for already-parsed arguments.
+    ///
+    /// `scaffold` / `folder` are supplied by `/spec reverse` (which owns the
+    /// `/new` flag grammar). When `scaffold` is `Some`, the same `/new` engine
+    /// `/spec govcreate` uses runs against `folder` (or the current directory)
+    /// **before** the async fetch is spawned, so a refusal is reported
+    /// immediately and the prompt is still generated (FR-027, FR-028).
+    fn handle_reverse_parsed(
+        &mut self,
+        parsed: &mut ReverseArgs,
+        scaffold: Option<ScaffoldRequest>,
+        folder: Option<String>,
+    ) {
         // FR-024: delegate repo validation to `parse_reverse_repo` so that
         // provider dispatch happens in one place (FR-014).
         let provider = match parse_reverse_repo(&parsed.repo_input) {
@@ -318,6 +480,19 @@ impl App {
             }
         }
 
+        // FR-027/FR-028: `/spec reverse <flags> --folder <path>` scaffolds a
+        // real project with the shared `/new` engine before the prompt is
+        // generated. A refusal (or a hosting failure) is reported immediately
+        // and the run continues, so the prompt is always produced.
+        if let Some(request) = scaffold.as_ref() {
+            let target = folder_for_scaffold(folder.as_deref());
+            self.append_assistant_text(&format!(
+                "From: /spec reverse\n\n[wait] **Scaffolding project in `{target}`…**"
+            ));
+            let outcome = run_govcreate_scaffold(request, std::path::Path::new(&target));
+            self.append_assistant_text(&render_scaffold_outcome(&target, outcome));
+        }
+
         // Ensure we have a session
         if !self.ensure_session() {
             return;
@@ -357,6 +532,7 @@ impl App {
         let provider_label_for_spawn = provider_label.clone();
         let tech_for_spawn = parsed.tech.clone();
         let create_for_spawn = parsed.create.clone();
+        let folder_for_spawn = folder.clone();
         let repo_id_for_spawn = repo_id.clone();
         let depth_for_spawn = depth;
         let gitlab_token = self.resolve_gitlab_token_for_reverse();
@@ -370,6 +546,15 @@ impl App {
         if let Some(ref name) = parsed.create {
             self.pending_reverse_create = Some(name.clone());
         }
+
+        // FR-027: when a project folder was scaffolded, the chained
+        // `specs/<name>/` must land inside it (the scaffold stage already created
+        // `<folder>/specs/`). Record the folder so the `MessageEnd` chain can
+        // retarget `/spec create` at the scaffolded project.
+        self.pending_reverse_create_folder = match (scaffold.is_some(), folder.as_deref()) {
+            (true, Some(path)) if !path.trim().is_empty() => Some(path.to_string()),
+            _ => None,
+        };
 
         // FR-017: user feedback includes the provider label.
         self.append_assistant_text(&format!(
@@ -487,6 +672,11 @@ impl App {
                 readme.as_deref(),
                 tech_for_spawn.as_deref(),
                 Some(&provider_label_for_spawn),
+                // Scaffold flags are reported by `/spec reverse`'s dispatcher
+                // (`build_spec_reverse_args` calls this path through the
+                // `/reverse` handler); pass `None` so the section is omitted
+                // rather than drifting from the parser's contract.
+                None,
             );
             let task = build_llm_task(&context, tech_for_spawn.as_deref());
 
@@ -500,10 +690,15 @@ impl App {
             }
 
             // FR-017: notices include the provider label.
+            // FR-027: the scaffolded project's spec folder is named after the
+            // hosting/spec identifier (`--create <name>`), not the folder, so a
+            // `--folder` run lands `specs/<name>/` inside the scaffolded project.
             if let Some(name) = &create_for_spawn {
+                let project = folder_for_scaffold(folder_for_spawn.as_deref());
                 let notice = format!(
                     "reverse: generated prompt for {repo_id_for_spawn} via \
-                     {provider_label_for_spawn}. Chaining into /spec create {name}…"
+                     {provider_label_for_spawn}. Chaining into /spec create {name} \
+                     (spec written to {project}/specs/{name}/)…"
                 );
                 event_bus.publish(Event::AgentNotice {
                     session_id: sid.clone(),
@@ -521,8 +716,56 @@ impl App {
     }
 }
 
+/// Resolve the scaffold target for `/spec reverse --folder <path>` (FR-027).
+///
+/// An explicit non-empty path is used verbatim; otherwise the scaffold runs in
+/// the current working directory, exactly as `ragent new` with no positional
+/// path does.
+fn folder_for_scaffold(folder: Option<&str>) -> String {
+    match folder {
+        Some(path) if !path.trim().is_empty() => path.to_string(),
+        _ => crate::app::helpers::current_working_dir()
+            .to_string_lossy()
+            .into_owned(),
+    }
+}
+
+/// Render the outcome of the `/spec reverse` scaffold stage (FR-027, FR-028).
+///
+/// Mirrors `/spec govcreate`'s mapping: a guard refusal names the blocking
+/// entries and a hosting/emission failure names the cause, in both cases stating
+/// that nothing was scaffolded so the generated prompt still follows.
+fn render_scaffold_outcome(
+    target: &str,
+    outcome: Result<ScaffoldStageOutcome, GovCreateScaffoldError>,
+) -> String {
+    match outcome {
+        Ok(stage) => {
+            let summary: ScaffoldSummary = stage.summary;
+            let mut text = format!(
+                "[ ok ] project scaffolded in {target}\n{}",
+                summary.render()
+            );
+            if !stage.stack_note.trim().is_empty() {
+                text.push('\n');
+                text.push_str(stage.stack_note.trim_end());
+            }
+            text
+        }
+        Err(GovCreateScaffoldError::Guard(err)) => format!(
+            "[err] target folder is not empty: {err}\n\
+             [note] nothing was scaffolded; the generated prompt continues without a project"
+        ),
+        Err(other) => format!(
+            "[err] scaffold failed: {other}\n\
+             [note] nothing was scaffolded; the generated prompt continues without a project"
+        ),
+    }
+}
+
 /// Build the help message for `/reverse help` (FR-013).
-fn reverse_help_message() -> String {
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn reverse_help_message() -> String {
     "From: /reverse\n\n\
      **Reverse-engineer a repository into a synthetic creation prompt.**\n\n\
      **Usage:**\n\
@@ -674,6 +917,76 @@ mod tests {
         let args = parse_reverse_args("--tech Rust octocat/Hello-World").unwrap();
         assert_eq!(args.repo_input, "octocat/Hello-World");
         assert_eq!(args.tech.as_deref(), Some("Rust"));
+    }
+
+    #[test]
+    fn test_quote_arg_wraps_values_with_whitespace() {
+        assert_eq!(quote_arg("rust"), "rust");
+        assert_eq!(
+            quote_arg("next: rust; stack: axum"),
+            "\"next: rust; stack: axum\""
+        );
+        assert_eq!(quote_arg("say \"hi\" now"), "\"say 'hi' now\"");
+    }
+
+    #[test]
+    fn test_build_spec_reverse_args_folds_scaffold_into_tech() {
+        // The validated `/new` flags are rendered as the free-form `--tech`
+        // constraint `/reverse` already understands.
+        let scaffold = ragent_tools_extended::project_scaffold::parse_flags(&[
+            "--language",
+            "rust",
+            "--type",
+            "gui",
+            "--stack",
+            "gtk4",
+        ])
+        .expect("valid scaffold flags");
+        let args = build_spec_reverse_args(
+            "octocat/Hello-World".to_string(),
+            Some("my-spec".to_string()),
+            Some("3".to_string()),
+            Some(scaffold),
+            Some("./out".to_string()),
+        );
+        assert_eq!(args.repo, "octocat/Hello-World");
+        assert_eq!(args.create.as_deref(), Some("my-spec"));
+        assert_eq!(args.depth.as_deref(), Some("3"));
+        assert_eq!(
+            args.tech.as_deref(),
+            Some("language: rust; type: gui; stack: gtk4")
+        );
+    }
+
+    #[test]
+    fn test_run_spec_reverse_renders_parseable_args() {
+        // The rendered argument string must survive the `/reverse` tokenizer
+        // unchanged so a scaffolded invocation reaches the same parser.
+        let scaffold = ragent_tools_extended::project_scaffold::parse_flags(&[
+            "--language",
+            "rust",
+            "--type",
+            "cmdline",
+        ])
+        .expect("valid scaffold flags");
+        let args = build_spec_reverse_args(
+            "octocat/Hello-World".to_string(),
+            None,
+            None,
+            Some(scaffold),
+            None,
+        );
+        let rendered = format!(
+            "{} --tech {}",
+            quote_arg(&args.repo),
+            quote_arg(args.tech.as_deref().unwrap_or_default())
+        );
+        let parsed = parse_reverse_args(&rendered).expect("rendered args parse");
+        assert_eq!(parsed.repo_input, "octocat/Hello-World");
+        assert_eq!(
+            parsed.tech.as_deref(),
+            Some("language: rust; type: cmdline")
+        );
     }
 
     #[test]

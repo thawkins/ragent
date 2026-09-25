@@ -1,11 +1,12 @@
 # Project Statistics
 
-**Version:** 1.0.116
+**Version:** 1.0.117
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
-> Metrics below are measured against the v1.0.116 tree (the `spawnagent` detached
-> sub-agent change-set plus the `/simplify` and `/rust-hygiene` passes).
+> Metrics below are measured against the v1.0.117 tree (the `/spec reverse
+> --folder` scaffold fix, the first-class `webapp` app type, and the vendored
+> `lopdf` lint-suite integration).
 
 
 ## Project-wide Metrics
@@ -24,7 +25,7 @@
 | Specs on disk | 53 directories in `specs/` |
 | Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 20 category how-tos, 78 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.116 |
+| Version | 1.0.117 |
 
 ---
 
@@ -177,4 +178,4 @@ Notes:
 
 ---
 
-_Generated 2026-09-23 (v1.0.116 tree: detached fire-and-forget sub-agents via the TUI `/spawn <agent> <prompt...>` command and the `new_agent` `detached: true` parameter (spec `spawnagent`), with every completed sub-agent run now persisting its FULL output to `log/subagents/<task-id>.md` and the completion event carrying the real loop `finish_reason`; a `/simplify` code-quality pass consolidating the plugin bridge filters, the scaffold remote helpers, and the TUI queue-clear dialog helpers; and a `/rust-hygiene` pass keeping `cargo fmt`, `clippy -D warnings`, the dead-code lint and reason checks, `cargo audit`, and `cargo deny` green. Earlier on this tree: `newproj` stack overlay now emits a single entry point, and the research gather log moved to the singular `log/research/`.) Metrics re-measured across the workspace and docs re-rendered in the same pass._
+_Generated 2026-09-25 (v1.0.117 tree: `/spec reverse --folder` now scaffolds and hosts the target project before prompt synthesis, with a chained `--create <name>` writing the spec into `<folder>/specs/<name>/`, and `/spec reverse` usage errors reporting the specific cause; the scaffolder gains `webapp` as a first-class registered `--type` value (dependency-free HTTP-server starter for `rust`/`python`/`go`/`typescript`/`javascript`, manifest-only elsewhere); and the vendored `lopdf` crate carries crate-level allowances so the dead-code lint and `cargo-machete` are green. All verification checks pass: `cargo check --workspace`, `cargo-machete`, `cargo check --tests --workspace`, `cargo test --workspace`, the dead-code lint and reason checks, `cargo clippy --workspace -- -D warnings`, `cargo fmt --all -- --check`, `cargo audit`, and `cargo deny check`.) Metrics re-measured across the workspace and docs re-rendered in the same pass._

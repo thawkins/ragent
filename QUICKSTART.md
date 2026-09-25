@@ -1221,7 +1221,7 @@ ragent new --language rust --type cmdline
 The scaffold generates the ragent workspace (`.ragent/`, `specs/`, `log/`,
 `.gitignore`, `AGENTS.md`), a runnable hello-world artifact set for 26
 application languages (`rust`, `python`, `go`, `typescript`, `shell`, ...) in
-`library`/`cmdline`/`tui`/`gui` layouts plus sample-document stubs for data,
+`library`/`cmdline`/`tui`/`gui`/`webapp` layouts plus sample-document stubs for data,
 markup, and build formats (`json`, `yaml`, `sql`, `cmake`, `maven`, ...) —
 run `/new help` for the full list —
 starter documentation (`README.md`, `QUICKSTART.md`, `STATS.md`, `docs/`),
@@ -1469,7 +1469,7 @@ Type `/` in the input to open an autocomplete menu:
 | `/spec feedback <name> <note>` | Append a production feedback note to FEEDBACK.md |
 | `/spec jtbd <name> [--force] [--agent <name>]` | Perform JTBD analysis on an existing spec |
 | `/spec list \|search \|show \|validate \|status \|task` | Spec lifecycle commands |
-| `/new --language <lang> --type <type> [--stack <name>] [--github\|--gitlab]` | Scaffold a new project in the current directory (46 canonical languages spanning the codeindex scanner set, from rust/python to json/sql/cmake; library/cmdline/tui/gui; optional GitHub/GitLab hosting + push) |
+| `/new --language <lang> --type <type> [--stack <name>] [--github\|--gitlab]` | Scaffold a new project in the current directory (46 canonical languages spanning the codeindex scanner set, from rust/python to json/sql/cmake; library/cmdline/tui/gui/webapp; optional GitHub/GitLab hosting + push) |
 | `/new help` | Show `/new` usage, flag table, and supported values |
 | `/spawn <agent> <prompt...>` | Launch a **detached** fire-and-forget background sub-agent from the chat input (not listed by `list_agents`, not awaitable, result never injected back); `/spawn help` for usage |
 
@@ -1815,14 +1815,22 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
-## Version 1.0.116
+## Version 1.0.117
 
-- **Maintenance release** — agent and plugin updates plus a code-quality pass,
-  with no behavioural regressions: the four content-sized TUI modal renderers
-  now share one `centered_rect_fixed` helper (byte-for-byte identical geometry),
-  and the sub-agent report writer streams its output straight to disk instead
-  of buffering the whole file in memory. `cargo check --workspace`, the dead-code
-  lint and reason checks, `cargo clippy --workspace -- -D warnings`,
+- **`/spec reverse --folder` scaffolds and hosts the target project** —
+  `/spec reverse` accepts `--folder <path>` plus `--github` / `--gitlab` (with
+  the `/new` scaffold flags present) and creates the project in the target
+  folder before synthesising the prompt; a chained `--create <name>` writes the
+  spec into `<folder>/specs/<name>/`. Usage errors now state the specific cause
+  instead of the bare usage line.
+- **`webapp` app type** — `--type webapp` is a first-class registered value for
+  `/new`, `/spec reverse`, and `/spec govcreate`; it generates a tiny
+  dependency-free HTTP-server starter for `rust`, `python`, `go`, `typescript`,
+  and `javascript`, and degrades to a manifest-only layout elsewhere.
+- **`lopdf` joins the lint suite** — the vendored `lopdf` crate carries
+  crate-level allowances (matching `vendor/pdf-extract`), keeping the dead-code
+  lint and `cargo-machete` green. `cargo check --workspace`, the dead-code lint
+  and reason checks, `cargo clippy --workspace -- -D warnings`,
   `cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`, and the full
   `cargo test --workspace` suite all pass.
 

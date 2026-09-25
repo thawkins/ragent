@@ -38,7 +38,7 @@ no LLM turn is consumed. Progress streams live in the message window.
 | Option | Description |
 | ------ | ----------- |
 | `--language <lang>` | Language id. 46 canonical ids are accepted, including aliases such as `sh` -> `shell` and `yml` -> `yaml` |
-| `--type <type>` | Layout: `library`, `cmdline`, `tui`, or `gui`. Data and DSL languages degrade to manifest-only scaffolds |
+| `--type <type>` | Layout: `library`, `cmdline`, `tui`, `gui`, or `webapp`. Data and DSL languages degrade to manifest-only scaffolds |
 | `--stack <name>` | Optional stack layer. Rust stacks: `axum`, `warp`, `raylib`, `gtk4`, `ratatui` |
 | `--github` | Create a private GitHub repository, set it as `origin`, and push |
 | `--gitlab` | The same flow for GitLab. `--github` and `--gitlab` are mutually exclusive |
@@ -104,6 +104,6 @@ The final summary prints as `From: /new`.
 ## Related
 
 - Howto manual: `docs/howtos/newproj.md`
-- `/spec` - spec lifecycle commands; `/reverse --create` chains into
+- `/spec` - spec lifecycle commands; `/spec reverse --create` chains into
   `/spec create`
-- `/reverse` - reverse-engineer a repo and seed a spec
+- `/spec reverse` - reverse-engineer a repo and seed a spec

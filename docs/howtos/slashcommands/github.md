@@ -93,9 +93,9 @@ Remove stored credentials:
 
 - The stored token lives in `~/.ragent/github_token`; `logout` removes
   stored credentials.
-- `/reverse` fetches repos through the GitHub API.
+- `/spec reverse` fetches repos through the GitHub API.
 
 ## Related
 
 - `/gitlab` - the GitLab counterpart
-- `/reverse` - uses the GitHub API
+- `/spec reverse` - uses the GitHub API

@@ -106,6 +106,9 @@ pub fn render_detailed_help(
          \x20       cmdline  console-entry layout\n\
          \x20       tui      terminal-UI starter\n\
          \x20       gui      GUI starter appropriate to the language\n\
+         \x20       webapp   web-application starter: a tiny HTTP server\n\
+         \x20                (rust/python/go/typescript/javascript);\n\
+         \x20                other languages degrade to the manifest only\n\
          \x20     Omitted: validation error; nothing is created.\n\
          \n\
          \x20 --stack <name>\n\

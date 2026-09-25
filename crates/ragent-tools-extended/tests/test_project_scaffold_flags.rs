@@ -141,8 +141,10 @@ fn test_flags_unknown_language_rejected() {
 
 #[test]
 fn test_flags_unknown_type_rejected() {
-    match parse_flags(&["--language", "rust", "--type", "webapp"]) {
-        Err(ScaffoldError::UnknownAppType(value)) => assert_eq!(value, "webapp"),
+    // `webapp` is a registered app type (it appears in `app_type_value_list`),
+    // so an unregistered value must be used to exercise the rejection path.
+    match parse_flags(&["--language", "rust", "--type", "not-a-type"]) {
+        Err(ScaffoldError::UnknownAppType(value)) => assert_eq!(value, "not-a-type"),
         other => panic!("expected UnknownAppType, got {other:?}"),
     }
 }
@@ -252,7 +254,7 @@ fn test_flags_value_lists_cover_registry() {
          sql, markdown, protobuf, verilog, vhdl, terraform, openscad, cmake, \
          gradle, gradle_kts, maven, nix, hcl"
     );
-    assert_eq!(app_type_value_list(), "library, cmdline, tui, gui");
+    assert_eq!(app_type_value_list(), "library, cmdline, tui, gui, webapp");
 }
 
 // ---------------------------------------------------------------- FR-009 ---

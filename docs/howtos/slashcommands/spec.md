@@ -83,7 +83,7 @@ Flags come after the positionals. The `/new` flags behave exactly as in `/new`; 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--language <lang>` | `rust` | One of the languages accepted by `/new`. |
-| `--type <type>` | `cmdline` | One of `library`, `cmdline`, `tui`, `gui`. |
+| `--type <type>` | `cmdline` | One of `library`, `cmdline`, `tui`, `gui`, `webapp`. |
 | `--stack <name>` | none | A framework stack available for the language (e.g. `--stack axum`). |
 | `--github` | off | Create the project on GitHub (mutually exclusive with `--gitlab`). |
 | `--gitlab` | off | Create the project on GitLab (mutually exclusive with `--github`). |

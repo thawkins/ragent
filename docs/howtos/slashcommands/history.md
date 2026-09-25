@@ -1,13 +1,15 @@
 # /history
 
-> Browse and re-use previous inputs; /history [filter] restricts to matching entries (arrow keys to select, Enter to insert); /history help
+> Browse and re-use previous inputs; /history [filter] restricts to matching entries (arrow keys to select, Enter to insert, c to copy to clipboard); /history help
 
 ## Overview
 
 `/history` opens an interactive picker over the inputs you have typed this
-session, newest first. Use the up/down arrow keys to move the selection and
+session, newest first. Use the up/down arrow keys to move the selection,
 Enter to insert the chosen entry back into the input box for editing and
-resubmission. An optional argument filters the list to entries containing that
+resubmission, or `c` to copy the selected entry to the system clipboard
+(the picker stays open so several entries can be copied in one session).
+An optional argument filters the list to entries containing that
 substring (case-insensitive).
 
 If there is no input history yet, or the filter matches nothing, the status bar
@@ -25,7 +27,7 @@ reports it and no picker opens. `/history help` prints the subcommand table.
 
 | Form | Description |
 | --- | --- |
-| `/history` | Open the history picker (newest first; up/down to select, Enter to insert) |
+| `/history` | Open the history picker (newest first; up/down to select, Enter to insert, c to copy to clipboard) |
 | `/history <filter>` | Restrict the picker to entries containing `<filter>` |
 | `/history help` | Show the `/history` help table |
 
@@ -37,6 +39,8 @@ Notes:
   Enter cleanly replaces whatever was being typed.
 - Entries are shown in reverse chronological order (newest first) and the
   picker starts with the newest entry selected.
+- `c` copies the highlighted entry to the system clipboard and leaves the
+  picker open; the status bar shows `history: copied to clipboard`.
 
 ## Examples
 
@@ -62,7 +66,7 @@ cargo commands).
 
 | Subcommand | Description |
 |---|---|
-| `/history` | Open the history picker (newest first; up/down to select, Enter to insert) |
+| `/history` | Open the history picker (newest first; up/down to select, Enter to insert, c to copy to clipboard) |
 | `/history <filter>` | Restrict the picker to entries containing `<filter>` |
 | `/history help` | Show this help |
 ```
@@ -88,9 +92,12 @@ No history entries contain "zzz"
   table; status shows `history: help`.
 - Empty history: status bar `No input history yet`.
 - No filter matches: status bar `No history entries contain "<filter>"`.
+- `c` pressed: the highlighted entry is written to the system clipboard and
+  the status bar shows `history: copied to clipboard`; the picker stays open.
 
 ## Related
 
 - `/clear`  -  wipe the displayed message history (input history is separate)
 - `/session`  -  resume stored sessions
 - The picker supports text selection and clipboard copy of entries
+- `c` copies the highlighted entry to the clipboard directly from the picker

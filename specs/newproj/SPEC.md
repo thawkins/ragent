@@ -20,7 +20,7 @@ The command takes the following flags:
 | Flag | Purpose | Values |
 | ---- | ------- | ------ |
 | `--language` | Computer language to scaffold | e.g. `rust`, `python`, `go`, `ts` |
-| `--type` | Type of application | `library`, `cmdline`, `tui`, `gui` |
+| `--type` | Type of application | `library`, `cmdline`, `tui`, `gui`, `webapp` |
 | `--stack` | Optional framework(s) to include | e.g. `axum`, `warp`, `raylib`, `gtk4`, `ratatui`, … |
 | `--github` / `--gitlab` | Initialise remote hosting and push | flag, mutually exclusive |
 
@@ -33,8 +33,8 @@ ragent already contains most of the machinery needed for this feature:
 
 - **Slash-command registry** — commands are declared as static trigger entries in
   `crates/ragent-tui/src/app/state.rs` and dispatched in
-  `crates/ragent-tui/src/app/slash.rs`. `/reverse` demonstrates flag-parsing precedent
-  (`--tech`, `--create`).
+  `crates/ragent-tui/src/app/slash.rs`. `/spec reverse` demonstrates flag-parsing
+  precedent (the `/new` scaffold flags, `--create`).
 - **VCS tooling** — `crates/ragent-tools-vcs` exposes GitHub and GitLab clients
   (auth, client, issues, PRs/MRs, pipelines) plus a full local `git` tool family
   (init is a trivial addition to the existing family).
@@ -91,7 +91,10 @@ layout (no binary entrypoint; exported module with a public function);
 **while** `--type` is `cmdline`, the scaffolder shall generate a console-entry
 layout; **while** `--type` is `tui`, the scaffolder shall generate a terminal-UI
 starter; **while** `--type` is `gui`, the scaffolder shall generate a
-GUI starter appropriate to the language.
+GUI starter appropriate to the language; **while** `--type` is `webapp`,
+the scaffolder shall generate a web-application starter (a tiny HTTP server)
+for every language that defines one, and degrade to a manifest-only layout for
+the rest.
 
 ### FR-007 — Stack layering (optional feature)
 

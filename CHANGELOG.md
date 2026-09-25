@@ -1,5 +1,129 @@
 # Changelog
 
+## [1.0.117] - 2026-09-25
+
+Release over the v1.0.116 tree: the `/spec reverse --folder` scaffold path now
+actually creates the project and writes the spec into it, the scaffolder gains a
+first-class `webapp` app type, and the vendored `lopdf` crate joins the workspace
+lint suite. All changes carry tests and keep `cargo check`, the dead-code lint
+and reason checks, `cargo clippy --workspace -- -D warnings`,
+`cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`, and the full
+`cargo test --workspace` suite green.
+
+### Fixed
+
+- **Deeply nested HTML can no longer abort the process with a stack overflow.**
+  `html2text`'s DOM walker (`tree_map_reduce`) re-used the thread stack for
+  every nested node, so pathologically nested markup from a scraped page
+  overflowed the stack and aborted the binary — a stack overflow cannot be
+  caught by `catch_unwind`, so the existing panic isolation could not help
+  (recorded as a coredump from the `mf-html2text` worker thread). The walker
+  now enforces a maximum DOM nesting depth of 32 and returns the recoverable
+  `Error::Fail` instead; every caller already degrades that to its raw-text
+  fallback. The vendored `html2text` is patched in place
+  (`vendor/html2text/src/lib.rs`).
+
+- **`/spec reverse --folder` now actually scaffolds the project.** The
+  `/spec reverse` dispatcher re-rendered its validated values into a `/reverse`
+  argument string and parsed it back, but neither the scaffold request nor
+  `--folder` is part of the `/reverse` flag grammar, so both were dropped: the
+  command printed its status, generated the prompt, and left the target folder
+  uncreated. The parsed values are now handed straight to the reverse handler,
+  the scaffold runs before the async fetch is spawned, and the target folder is
+  created and populated (workspace, language starter, docs, git init plus
+  initial commit, and a private remote with `--github` / `--gitlab`).
+- **Chained `--create` writes the spec into the scaffolded project.**
+  `/spec reverse --folder <dir> --create <name>` chained into
+  `/spec create <name> <prompt>`, which always wrote `specs/<name>/` under the
+  invoking directory. `/spec create` now accepts an optional `--folder <path>`
+  and the chain passes the scaffold target, so the spec lands at
+  `<dir>/specs/<name>/` inside the new project.
+- **A `/spec reverse` invocation starting with a flag reports the missing
+  `<repo>`.** `/spec reverse --language rust --type cmdline` split the flag into
+  the subcommand position and produced an unknown-subcommand status line with no
+  explanation. It now reports
+  ``the first argument after `/spec reverse` must be `<repo>`, got '--language'``
+  alongside the usage block, and no API call is made.
+- **`/spec reverse` usage errors now print the specific cause.** An invalid
+  flag tail (a missing `--type`, an unregistered `--language`, a duplicate or
+  empty flag value, or `--github` together with `--gitlab`) previously
+  collapsed to the bare `Usage: /spec reverse - try /spec help` status line
+  with no explanation. Those failures are now reported as the dedicated usage
+  message: the shared `/new` parser's own error text followed by the
+  `/spec reverse` usage block. A bare word after `<repo>` is likewise reported
+  rather than being silently discarded, and a missing `<repo>` is never read as
+  a flag value.
+- **Every `/spec` usage-error subcommand now states the cause in the message
+  window, not only in the status line.** `/spec reverse` (missing `<repo>`),
+  `/spec govcreate` (missing positionals), and every other subcommand with
+  incomplete arguments previously left only `Usage: /spec <sub> - try
+  /spec help` on the status line. Each now emits an `[err] **missing required
+  argument**` message with the offending subcommand's usage block before the
+  status pointer, so a missing or incorrect argument is never silent.
+- **`/spec reverse` now forwards its validated flags to the `/reverse`
+  handler.** The `/new` scaffold flags (`--language`/`--type`/`--stack`) are
+  folded into the `/reverse --tech` constraint and `--create`/`--depth` are
+  passed through, so a valid `/spec reverse` invocation reaches the single
+  fetch-and-generate implementation instead of being parsed and dropped.
+- **The scaffolder's `webapp` app type is now a first-class registered value.**
+  `--type webapp` is accepted by `/new`, `/spec reverse`, and `/spec govcreate`
+  (it is in the derived value list and the detailed help page) and generates a
+  tiny dependency-free HTTP-server starter for the five web-capable languages
+  (`rust`, `python`, `go`, `typescript`, `javascript`); every other language
+  degrades to a manifest-only webapp layout, exactly as data/DSL formats
+  degrade for `tui`/`gui`. Previously `webapp` was not a registered value, so
+  the recipe-registry test that iterates every app type failed on the first
+  language without a webapp source.
+- **The vendored `lopdf` crate no longer trips the workspace lint suite.**
+  `vendor/lopdf` is a pinned third-party crate whose upstream source exposes
+  `pub` internals and retains unused helpers; it now carries crate-level
+  `#![allow(unreachable_pub)]` / `#![allow(dead_code)]` /
+  `#![allow(unused_imports)]` allowances (the same treatment
+  `vendor/pdf-extract` already used), and its genuine `cargo-machete` false
+  positives (`md-5`, used via the renamed `md5` path, and `getrandom`, behind
+  `wasm_js`/`rand`) are listed in `[package.metadata.cargo-machete]`. The
+  dead-code lint, `cargo check`, and `cargo-machete` are green again.
+
+### Added
+
+- **`/spec reverse` scaffolds and can host the target project.** With the
+  `/new` scaffold flags present (`--language <lang> --type <type>`), `/spec
+  reverse` now accepts `--folder <path>` (default: the current directory) and
+  the mutually exclusive `--github` / `--gitlab` hosting flags. The scaffold
+  runs the same engine `/new` and `/spec govcreate` share
+  (`archdoc::run_govcreate_scaffold`), so the target folder gets the identical
+  workspace artifacts, language starter, docs, git init plus initial commit,
+  and — with a hosting flag — a private remote set as `origin` and pushed. The
+  step runs before prompt synthesis; a refusal (non-empty target, hosting
+  failure) is reported with `[err]` plus the blocking entries or failing step
+  and the run continues to generate the prompt. `--folder`, `--github`, and
+  `--gitlab` only take effect with `--language` and `--type`; supplying any of
+  them alone is a usage error. The hosting flags are forwarded verbatim to the
+  shared `/new` parser, so accepted values, mutual exclusion, and error text
+  cannot drift. Help text and autocomplete list the new flags.
+
+### Changed
+
+- **`/reverse` is now `/spec reverse`.** Repository reverse-engineering moved
+  under the `/spec` command family. Argument parsing now lives in the shared
+  `ragent_specs::SpecCommand` parser, so `/spec reverse` accepts the same
+  `--create <name>` and `--depth <N>` flags as before plus the `/new` scaffold
+  flags (`--language <lang>`, `--type <type>`, `--stack <name>`), parsed and
+  validated by the same `/new` parser. The standalone `/reverse` slash command
+  has been removed. The how-to moved to
+  `docs/howtos/slashcommands/specreverse.md`.
+
+### Removed
+
+- **`/spec reverse --tech <stack>` replaced by the `/new` scaffold flags.**
+  The free-form `--tech <stack>` constraint is gone; it is now spelled with
+  the same flags `/new` uses: `--language <lang> --type <type> [--stack
+  <name>]`, with the same accepted values and purpose (steering the generated
+  prompt towards a target language/type/stack). The context block sent to the
+  model gained a `## Project Scaffold` section naming the target language,
+  type, and stack (each line omitted when unset), replacing the old
+  `## Technology Stack Constraint` section for scaffold-driven runs.
+
 ## [1.0.116] - 2026-09-23
 
 Maintenance release over the v1.0.115 tree: agent and plugin updates plus a
@@ -406,7 +530,7 @@ non-async `run_new_scaffold`). No user-visible behaviour change.
   (`ghp_`/`gho_`/`github_pat_`) is used unchanged and a read-only app token is still
   used when no `gh` credential exists. Set `RAGENT_GITHUB_NO_GH_CLI=1` to disable the
   `gh` fallback. The VCS tool family and the `/new` scaffolder both consume the shared
-  resolver, so `/reverse` and the GitHub issue/PR tools benefit from the same fix.
+  resolver, so `/spec reverse` and the GitHub issue/PR tools benefit from the same fix.
 
 - **Multi-target plugins (both nested manifests) now install** (spec `plugins`
   T-025; FR-002) — some upstream trees ship more than one host manifest in the same
@@ -2699,7 +2823,7 @@ Working-tree changes (staged + unstaged) on top of commit `429c9190`
   behaviour (`PreToolUse` runs unwrapped), tool category counts (168 static
   tools + dynamic `mcp_tool`), the finance tool-visibility family (now 8
   tools including `stock_recommendations`), quoted `--tech` values in
-  `/reverse`, config sections 7.35 `loop` / 7.36 `activity_log` and
+  `/spec reverse`, config sections 7.35 `loop` / 7.36 `activity_log` and
   `dirs.allowed_roots`, and stale cross-references. The PDF set under
   `docs/howtos/pdf/` was regenerated from the updated sources (18 A4
   xelatex PDFs).
@@ -2712,7 +2836,7 @@ Working-tree changes (staged + unstaged) on top of commit `429c9190`
   advertised `stock_recommendations` to the model. It is now a member of the
   family (8 tools), with a regression assertion in
   `test_tool_visibility.rs` and updated `docs/howtos/tool-visibility.md`.
-- **Quoted `--tech` values silently truncated in `/reverse`** —
+- **Quoted `--tech` values silently truncated in `/spec reverse`** —
   `parse_reverse_args` split the argument string on whitespace only, so
   `/reverse owner/repo --tech "Next.js + Rails"` silently truncated the
   stack to `Next.js`. A new shell-like tokenizer (`tokenize_reverse_args`)
@@ -4226,7 +4350,7 @@ marker for this documentation pass.
 
 ## Version: 1.0.47
 
-### Added — GitLab Support for `/reverse`
+### Added — GitLab Support for `/spec reverse`
 
 - **Provider-agnostic repository parsing** — new `VcsProvider` enum and
   `parse_reverse_repo` function (`crates/ragent-tools-vcs/src/vcs_provider.rs`)
@@ -4255,7 +4379,7 @@ marker for this documentation pass.
   expands directories up to a configurable depth via
   `GET /repos/{owner}/{repo}/contents/{path}`, with trailing-slash directory
   markers and tolerated per-directory failures
-- **`--depth <N>` flag for `/reverse`** — controls tree-fetch depth (1–10,
+- **`--depth <N>` flag for `/spec reverse`** — controls tree-fetch depth (1–10,
   default 1). Validated by `validate_depth`; invalid values produce a
   human-readable error
 - **Provider label in reverse-engineering context** — `build_reverse_prompt`
@@ -4264,9 +4388,9 @@ marker for this documentation pass.
   section before metadata
 - **`GitHubClient::with_base_url`** — constructor for pointing the client at
   a custom base URL (primarily for mock-server tests)
-- **GitLab token resolution** for `/reverse` — priority chain:
+- **GitLab token resolution** for `/spec reverse` — priority chain:
   `GITLAB_TOKEN` env → `ragent.json` → encrypted database via `/gitlab setup`
-- **`--depth` and GitLab formats in `/reverse` help message** — updated
+- **`--depth` and GitLab formats in `/spec reverse` help message** — updated
   `reverse_help_message` to list `--depth`, `gitlab:`, `/gitlab setup`, and all
   accepted URL formats
 - 4 new test files: `test_backward_compat.rs`, `test_gitlab_fetch_methods.rs`,
@@ -4293,9 +4417,9 @@ marker for this documentation pass.
 
 ## Version: 1.0.46
 
-### Added — GitHub Repository Reverse-Engineering (`/reverse`)
+### Added — GitHub Repository Reverse-Engineering (`/spec reverse`)
 
-- **New `/reverse` slash command** — takes a public GitHub repository URL (or
+- **New `/spec reverse` slash command** — takes a public GitHub repository URL (or
   `owner/repo` shorthand), fetches the repo's metadata, root file tree, and
   README via the GitHub API, then passes the assembled context to the
   currently selected LLM model to generate a synthetic creation prompt.
@@ -4331,7 +4455,7 @@ marker for this documentation pass.
   transitions, task management, SDD workflow, SDD configuration, validation
   details, implementation orchestration, JTBD analysis, production feedback,
   and end-to-end examples (36,577 bytes).
-- **New `docs/howtos/reverse.md`** — extensive documentation for the `/reverse`
+- **New `docs/howtos/reverse.md`** — extensive documentation for the `/spec reverse`
   command system covering purpose, capabilities, command syntax, GitHub API
   interaction, synthetic prompt generation, `--tech` and `--create` flags,
   CLI equivalents, and end-to-end examples (20,767 bytes).

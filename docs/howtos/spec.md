@@ -537,7 +537,7 @@ then the flags:
   written to `<target-folder>/specs/<specid>/`.
 
 Flags after the positionals: `--language` (default `rust`), `--type` (default
-`cmdline`; one of `library`, `cmdline`, `tui`, `gui`), `--stack <name>` (a
+`cmdline`; one of `library`, `cmdline`, `tui`, `gui`, `webapp`), `--stack <name>` (a
 framework stack for the language), `--github` / `--gitlab` (mutually exclusive
 remote hosting), and govcreate-specific `--force` (overwrite an existing
 `<target-folder>/specs/<specid>/`; refused otherwise).

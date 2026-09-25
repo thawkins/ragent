@@ -1,7 +1,7 @@
 //! Tests for GitHub API error handling (FR-014, FR-015, FR-017).
 //!
 //! Covers `classify_api_error`, `extract_rate_limit_reset`, and
-//! `format_reset_time` — the pure helpers behind the /reverse command's
+//! `format_reset_time` — the pure helpers behind the /spec reverse command's
 //! error reporting.
 
 use ragent_tools_vcs::github::{classify_api_error, format_reset_time};

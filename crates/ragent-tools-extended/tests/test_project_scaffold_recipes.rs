@@ -149,17 +149,59 @@ fn test_recipes_lookup_by_all_enum_variants() {
 
 #[test]
 fn test_recipes_every_language_has_all_app_types() {
+    // Every application language defines the four core app-type starters. The
+    // `webapp` starter is optional — only the languages with a web idiom define
+    // one (asserted separately below); the rest degrade to a manifest-only
+    // layout via `plan_app_layout`.
     for (language, name) in APPLICATION_LANGUAGES {
         let recipe = recipe_for(language).expect("recipe present");
-        for app_type in AppType::all() {
+        for app_type in [
+            AppType::Library,
+            AppType::Cmdline,
+            AppType::Tui,
+            AppType::Gui,
+        ] {
             let source = recipe
-                .source_for(*app_type)
+                .source_for(app_type)
                 .unwrap_or_else(|| panic!("{name} recipe missing source for {app_type:?}"));
             assert!(!source.path.is_empty(), "{name}/{app_type:?}: empty path");
             assert!(
                 source.content.contains("Hello, world!"),
                 "{name}/{app_type:?}: source is not a hello-world"
             );
+        }
+    }
+}
+
+/// Application languages that define a `webapp` starter. Every other language
+/// (including the remaining application languages) degrades to a manifest-only
+/// webapp layout.
+const WEBAPP_LANGUAGES: [Language; 5] = [
+    Language::Rust,
+    Language::Python,
+    Language::Go,
+    Language::TypeScript,
+    Language::JavaScript,
+];
+
+#[test]
+fn test_recipes_webapp_sources_cover_web_languages() {
+    // The `webapp` starter exists exactly for the languages with a web idiom,
+    // and each one is a hello-world. A stray or missing webapp source fails
+    // here, so the registry and `WEBAPP_LANGUAGES` cannot drift apart.
+    for (language, name) in APPLICATION_LANGUAGES {
+        let recipe = recipe_for(language).expect("recipe present");
+        let expected = WEBAPP_LANGUAGES.contains(&language);
+        match recipe.source_for(AppType::Webapp) {
+            Some(source) => {
+                assert!(expected, "{name}: unexpected webapp source");
+                assert!(!source.path.is_empty(), "{name}/webapp: empty path");
+                assert!(
+                    source.content.contains("Hello, world!"),
+                    "{name}/webapp: source is not a hello-world"
+                );
+            }
+            None => assert!(!expected, "{name}: webapp source is missing"),
         }
     }
 }

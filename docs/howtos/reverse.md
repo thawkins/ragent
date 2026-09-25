@@ -1,6 +1,6 @@
 # ragent Repository Reverse-Engineering Manual
 
-This guide explains how to use ragent's `/reverse` command to reverse-engineer
+This guide explains how to use ragent's `/spec reverse` command to reverse-engineer
 the purpose, architecture, and function of public GitHub repositories. The
 command fetches a repository's metadata, root file tree, and README via the
 GitHub API, then asks the currently selected LLM model to generate a synthetic
@@ -9,8 +9,11 @@ reproduce the repository from scratch.
 
 The same functionality is available as the `ragent reverse` CLI subcommand.
 
-> **Scope:** `/reverse` slash commands, the `--tech` and `--create` flags,
-> GitHub API interaction, synthetic prompt generation, and spec chaining.
+> **Scope:** `/spec reverse` slash commands, the `/new` scaffold flags
+> (`--language` / `--type` / `--stack`), the scaffold-only `--folder` and
+> `--github` / `--gitlab` flags, the `--create` and `--depth` flags, GitHub and
+> GitLab API interaction, synthetic prompt generation, project scaffolding, and
+> spec chaining.
 > For spec management commands, see `docs/howtos/spec.md`. For research
 > commands, see `docs/howtos/research.md`.
 
@@ -18,12 +21,12 @@ The same functionality is available as the `ragent reverse` CLI subcommand.
 
 ## 1. Purpose and capabilities
 
-The `/reverse` command answers a common question when encountering an
+The `/spec reverse` command answers a common question when encountering an
 unfamiliar repository: **"What does this project do, and how would I build
 something like it?"**
 
 Instead of manually browsing a repo's file tree, reading the README, and
-guessing at the architecture, `/reverse` automates the entire process:
+guessing at the architecture, `/spec reverse` automates the entire process:
 
 - **Fetches repository metadata** via the GitHub REST API — description,
   primary language, license, star count, topics, creation date, and homepage
@@ -35,9 +38,14 @@ guessing at the architecture, `/reverse` automates the entire process:
   to the currently selected LLM model and asks it to produce a comprehensive
   prompt that describes how to recreate the repository from scratch, including
   architecture, key modules, technology choices, and implementation order.
-- **Optionally constrains the technology stack** — the `--tech` flag lets you
-  specify a target technology stack so the generated prompt is tailored to
-  that stack rather than the repository's original languages.
+- **Optionally constrains the target project shape** — the `/new` scaffold
+  flags (`--language`, `--type`, and the optional `--stack`) let you specify a
+  target language, app type, and framework stack so the generated prompt is
+  tailored to that shape rather than the repository's original languages.
+- **Optionally scaffolds the project** — with the scaffold flags present,
+  `--folder <path>` runs the same `/new` engine `/spec govcreate` uses to
+  scaffold a real project (default: the current directory), and `--github` /
+  `--gitlab` create a private remote and push the initial commit.
 - **Optionally chains into spec creation** — the `--create` flag feeds the
   generated prompt directly into `/spec create`, auto-generating a formal
   specification from the reverse-engineered prompt.
@@ -59,7 +67,8 @@ guessing at the architecture, `/reverse` automates the entire process:
 - It does not work with private repositories unless `GITHUB_TOKEN` is set
   with appropriate access.
 - It does not generate code — it generates a prompt that *describes* how to
-  build code.
+  build code. (With scaffold flags it emits the same runnable hello-world
+  starter `/new` produces, not a re-implementation of the source repo.)
 
 ---
 
@@ -68,7 +77,7 @@ guessing at the architecture, `/reverse` automates the entire process:
 Open ragent and run:
 
 ```text
-/reverse thrivethrough/omitme
+/spec reverse thrivethrough/omitme
 ```
 
 The TUI will:
@@ -82,7 +91,7 @@ The TUI will:
 To chain directly into spec creation:
 
 ```text
-/reverse thrivethrough/omitme --create omitme-clone
+/spec reverse thrivethrough/omitme --create omitme-clone
 ```
 
 This fetches the repository, generates the creation prompt, and immediately
@@ -93,12 +102,13 @@ passes it to `/spec create` to produce a formal specification under
 
 ## 3. Command syntax
 
-### 3.1 `/reverse <owner/repo>`
+### 3.1 `/spec reverse <owner/repo>`
 
 Fetch a public GitHub repository and generate a synthetic creation prompt.
 
 ```text
-/reverse <repo> [--tech <stack>] [--create <name>] [--depth <N>]
+/spec reverse <repo> [--language <lang> --type <type> [--stack <name>]] [--create <name>] [--depth <N>]
+/spec reverse <repo> --language <lang> --type <type> [--stack <name>] [--folder <path>] [--github | --gitlab]
 ```
 
 #### Arguments
@@ -111,9 +121,29 @@ Fetch a public GitHub repository and generate a synthetic creation prompt.
 
 | Flag | Required | Description |
 |------|----------|-------------|
-| `--tech <stack>` | No | Constrain the generated prompt to a specific technology stack (e.g. `rust`, `python`, `typescript`). Values containing spaces must be **quoted** — `--tech "Next.js + Rails"` is captured whole; unquoted values are single tokens, so hyphenated forms like `rust-axum-sqlx` also work |
-| `--create <name>` | No | Chain into `/spec create` using the generated prompt, creating a spec under `specs/<name>/` |
+| `--language <lang>` | No | Target language for the generated prompt — the same values `/new` accepts (`rust`, `python`, `go`, `typescript`, ...). Must be supplied with `--type` |
+| `--type <type>` | No | Target app type — the same values `/new` accepts: `library`, `cmdline`, `tui`, `gui`, `webapp`. Must be supplied with `--language` |
+| `--stack <name>` | No | Optional framework stack layer — the same values `/new` accepts (`axum`, `warp`, `raylib`, `gtk4`, `ratatui`). Requires `--language` and `--type` |
+| `--create <name>` | No | Chain into `/spec create` using the generated prompt. With `--folder`, the spec is written to `<folder>/specs/<name>/` |
 | `--depth <N>` | No | Directory levels to fetch from the tree (1–10, default 1). See [Section 10](#10-the-depth-flag). |
+| `--folder <path>` | No | With scaffold flags, scaffold the project in `<path>` (created if missing; default: the current directory). See [Section 6.1](#61-scaffolding-with-folder) |
+| `--github` | No | With scaffold flags, create a private GitHub repository, set it as `origin`, and push the initial commit. Mutually exclusive with `--gitlab` |
+| `--gitlab` | No | With scaffold flags, create a private GitLab repository, set it as `origin`, and push the initial commit. Mutually exclusive with `--github` |
+
+`--language`, `--type`, and `--stack` are the `/new` scaffold flags, parsed and
+validated by the same `/new` parser, so they take exactly the same values and
+have the same purpose: they steer the generated prompt towards a target
+project shape. `--language` and `--type` are all-or-nothing — supplying one
+without the other (or a lone `--stack`) is a usage error, exactly as with
+`/new`. Run `/new help` for the full accepted-value lists.
+
+`--folder`, `--github`, and `--gitlab` only take effect when the scaffold
+flags are present — supplying any of them without `--language` and `--type` is
+a usage error.
+
+`<repo>` must be the first argument after `reverse`. An invocation that starts
+with a flag (e.g. `/spec reverse --language rust --type cmdline`) is a usage
+error that names the offending token, not a silent no-op.
 
 ### 3.2 Input formats
 
@@ -121,34 +151,40 @@ The command accepts several input formats:
 
 ```text
 # owner/repo shorthand
-/reverse thrivethrough/omitme
+/spec reverse thrivethrough/omitme
 
 # Full GitHub URL
-/reverse https://github.com/thrivethrough/omitme
+/spec reverse https://github.com/thrivethrough/omitme
 
-# With technology constraint
-/reverse thrivethrough/omitme --tech rust
+# With a target scaffold (language + app type)
+/spec reverse thrivethrough/omitme --language rust --type cmdline
 
 # With spec creation
-/reverse thrivethrough/omitme --create omitme-clone
+/spec reverse thrivethrough/omitme --create omitme-clone
 
-# With both flags
-/reverse thrivethrough/omitme --tech rust --create omitme-rust-port
+# With both
+/spec reverse thrivethrough/omitme --language rust --type cmdline --create omitme-rust-port
+
+# Scaffold a project from the reverse-engineered prompt
+/spec reverse thrivethrough/omitme --language rust --type cmdline --folder ./omitme-clone
+
+# Scaffold it and create a private GitHub repository
+/spec reverse thrivethrough/omitme --language rust --type cmdline --folder ./omitme-clone --github
 ```
 
-### 3.3 `/reverse help`
+### 3.3 `/spec reverse help`
 
 Show the command reference.
 
 ```text
-/reverse help
+/spec reverse help
 ```
 
 ---
 
 ## 4. What the command gathers
 
-When you run `/reverse <owner/repo>`, the system fetches three pieces of
+When you run `/spec reverse <owner/repo>`, the system fetches three pieces of
 information from the GitHub REST API:
 
 ### 4.1 Repository metadata
@@ -187,7 +223,7 @@ repository's purpose and design.
 
 ## 5. The synthetic creation prompt
 
-The core output of `/reverse` is a **synthetic creation prompt** — a
+The core output of `/spec reverse` is a **synthetic creation prompt** — a
 natural-language description of how to recreate the repository from scratch.
 
 The LLM receives the repository metadata, root file tree, and README, and is
@@ -256,20 +292,24 @@ The project consists of the following top-level modules:
 
 ---
 
-## 6. The `--tech` flag
+## 6. The scaffold flags (`--language` / `--type` / `--stack`)
 
 By default, the generated prompt reflects the repository's original
-technology stack. The `--tech <stack>` flag constrains the prompt to a
-specific target stack, making it useful for planning a port or rewrite.
-Multi-word stacks are supported when quoted: single and double quotes
-group the value into one token and the quote characters are stripped.
+technology stack. The `/new`-style scaffold flags — `--language <lang>`,
+`--type <type>`, and the optional `--stack <name>` — constrain the prompt to
+a specific target project shape, making the result useful for planning a port
+or rewrite. They are parsed and validated by the same `/new` parser, so they
+take exactly the same values `/new` accepts: `--language rust --type cmdline`
+or `--language rust --type tui --stack ratatui`. `--language` and `--type`
+must be supplied together; a lone `--stack` is rejected with the same usage
+error `/new` produces. Run `/new help` for the full accepted-value lists.
 
 ### How it works
 
-When `--tech` is supplied, the LLM is instructed to:
+When the scaffold flags are supplied, the LLM is instructed to:
 
 - Describe how to recreate the repository's *functionality* using the
-  specified technology stack.
+  specified language, app type, and stack.
 - Map the original architecture to equivalent components in the target
   stack.
 - Note where the target stack differs from the original and what
@@ -277,28 +317,69 @@ When `--tech` is supplied, the LLM is instructed to:
 
 ### Examples
 
-Port a Python project to Rust:
+Port a Python project to a Rust command-line app:
 
 ```text
-/reverse example/flask-api --tech rust
+/spec reverse example/flask-api --language rust --type cmdline
 ```
 
 Port a Node.js project to Python:
 
 ```text
-/reverse example/express-server --tech python
+/spec reverse example/express-server --language python --type cmdline
 ```
 
-Port a Go project to TypeScript:
+Port a Go project to a TypeScript web app:
 
 ```text
-/reverse example/go-microservice --tech typescript
+/spec reverse example/go-microservice --language typescript --type webapp
 ```
 
-Specify a more detailed stack:
+Target a Rust TUI app on the ratatui stack:
 
 ```text
-/reverse example/legacy-java-app --tech "Rust with axum and SQLx"
+/spec reverse example/legacy-java-app --language rust --type tui --stack ratatui
+```
+
+### 6.1 Scaffolding with `--folder`
+
+With the scaffold flags present, `--folder <path>` does more than steer the
+prompt: it scaffolds a real project in `<path>` using the same engine `/new`
+and `/spec govcreate` use. The engine is shared, so the result is byte-for-byte
+what `/new` would produce for those flags — workspace artifacts (`.ragent/`,
+`specs/`, `log/`, `.gitignore`, `AGENTS.md`), the language layout and
+hello-world starter, `README.md` / `QUICKSTART.md` / `STATS.md` / `docs/`, a
+`git init` with an initial commit, and, with `--github` / `--gitlab`, a private
+remote set as `origin` plus a push.
+
+`<path>` is created if it does not exist. When `--folder` is omitted, the
+current directory is scaffolded in place (mirroring `ragent new`). The target
+must be empty apart from `.ragent/`, `log/`, and `target/` — the same guard
+`/new` runs.
+
+The scaffold step runs **before** prompt synthesis, so a refusal is reported
+immediately:
+
+- a non-empty target folder reports `[err] target folder is not empty` with
+  the blocking entries and the run continues to generate the prompt;
+- a hosting failure (e.g. no GitHub token) reports the failing step and the
+  local scaffold remains intact.
+
+In either case nothing is scaffolded and the generated prompt is still
+produced, so the command is safe to re-run after fixing the cause.
+
+When `--create <name>` is supplied alongside `--folder`, the chained spec is
+written into the scaffolded project (`<folder>/specs/<name>/`), not the
+invoking directory — see [Section 7](#7-the-create-flag).
+
+Examples:
+
+```text
+# Scaffold a Rust command-line project, keeping the prompt steering
+/spec reverse example/legacy-java-app --language rust --type cmdline --folder ./legacy-port
+
+# Scaffold it and create a private GitLab repository
+/spec reverse example/go-microservice --language python --type library --folder ./svc --gitlab
 ```
 
 ---
@@ -311,32 +392,34 @@ reverse-engineered prompt.
 
 ### How it works
 
-1. `/reverse` fetches the repository and generates the synthetic creation
+1. `/spec reverse` fetches the repository and generates the synthetic creation
    prompt.
 2. The generated prompt is passed as the feature description to
-   `/spec create <name>`.
+   `/spec create <name>` — with `--folder`, as
+   `/spec create <name> --folder <path> <prompt>`, so the spec root is the
+   scaffolded project's.
 3. The spec system creates `specs/<name>/SPEC.md` (EARS requirements),
    `specs/<name>/PLAN.md` (implementation plan), and
-   `specs/<name>/TESTPLAN.md` (manual test plan).
+   `specs/<name>/TESTPLAN.md` (manual test plan) under that root.
 
 ### Examples
 
 Reverse-engineer a repo and create a spec:
 
 ```text
-/reverse thrivethrough/omitme --create omitme-clone
+/spec reverse thrivethrough/omitme --create omitme-clone
 ```
 
 Reverse-engineer with a tech constraint and create a spec:
 
 ```text
-/reverse thrivethrough/omitme --tech rust --create omitme-rust-port
+/spec reverse thrivethrough/omitme --language rust --type cmdline --create omitme-rust-port
 ```
 
 Reverse-engineer a large project into a spec:
 
 ```text
-/reverse tokio-rs/tokio --create tokio-study
+/spec reverse tokio-rs/tokio --create tokio-study
 ```
 
 ### What you get
@@ -350,6 +433,9 @@ specs/omitme-clone/
 └── TESTPLAN.md      # Manual test plan with test cases
 ```
 
+With `--folder <path>`, the same tree is written to `<path>/specs/omitme-clone/`
+inside the scaffolded project.
+
 You can then use the standard `/spec` commands to validate, plan, and
 implement the spec (see `docs/howtos/spec.md` for details).
 
@@ -359,9 +445,9 @@ implement the spec (see `docs/howtos/spec.md` for details).
 
 ### GitHub authentication
 
-A GitHub token is a **prerequisite**: `/reverse` refuses to run without one
+A GitHub token is a **prerequisite**: `/spec reverse` refuses to run without one
 and reports "No GitHub token configured. Run `/github login` to
-authenticate, then re-run `/reverse`." The token is resolved via
+authenticate, then re-run `/spec reverse`." The token is resolved via
 `/github login` (OAuth device flow, stored in `~/.ragent/github_token`) or
 the `GITHUB_TOKEN` environment variable. Unauthenticated GitHub API access
 allows only 60 requests per hour per IP; an authenticated token raises this
@@ -412,6 +498,9 @@ avoid hitting the rate limit.
 | `network error` | Connection issue | Check network connectivity and retry |
 | `gitlab token missing` | No GitLab token configured | Set `GITLAB_TOKEN` env var or run `/gitlab setup` |
 | `invalid depth` | `--depth` value out of range | Use a value between 1 and 10 |
+| `target folder is not empty` | `--folder` target has entries other than `.ragent/`, `log/`, `target/` | Empty the folder or choose another `--folder`; the prompt is still generated |
+| `--folder requires --language and --type` | `--folder`/`--github`/`--gitlab` used without scaffold flags | Add `--language <lang> --type <type>` |
+| no GitHub/GitLab token for `--github`/`--gitlab` | Hosting requested without credentials | Run `/github login` or `/gitlab setup`; the local scaffold remains intact |
 
 > **Silent degradation on GitHub fetch failures:** metadata/tree fetch
 > failures on the GitHub path are swallowed (`unwrap_or_default()`), so an
@@ -425,7 +514,7 @@ avoid hitting the rate limit.
 
 ## 9. CLI equivalents
 
-The TUI `/reverse` command is the primary entry point; the equivalent
+The TUI `/spec reverse` command is the primary entry point; the equivalent
 `ragent reverse` CLI subcommand is not currently registered in the clap CLI
 (`run`, `serve`, `session`, `memory`, `auth`, `models`, `config`,
 `research` are the available subcommands). The examples below describe the
@@ -436,7 +525,7 @@ intended CLI surface and will become accurate when the subcommand ships:
 ragent reverse thrivethrough/omitme
 
 # With technology constraint
-ragent reverse thrivethrough/omitme --tech rust
+ragent reverse thrivethrough/omitme --language rust --type cmdline
 
 # With spec creation
 ragent reverse thrivethrough/omitme --create omitme-clone
@@ -445,7 +534,10 @@ ragent reverse thrivethrough/omitme --create omitme-clone
 ragent reverse https://github.com/thrivethrough/omitme
 
 # Both flags
-ragent reverse thrivethrough/omitme --tech rust --create omitme-rust-port
+ragent reverse thrivethrough/omitme --language rust --type cmdline --create omitme-rust-port
+
+# Scaffold the project (and optionally a private hosting remote)
+ragent reverse thrivethrough/omitme --language rust --type cmdline --folder ./omitme-clone --github
 ```
 
 The CLI command prints the generated prompt to stdout, making it easy to
@@ -456,14 +548,14 @@ pipe into other tools or save to a file:
 ragent reverse thrivethrough/omitme > omitme-prompt.md
 
 # Pipe through jq for structured output
-ragent reverse thrivethrough/omitme --tech rust 2>&1 | tee omitme-rust.md
+ragent reverse thrivethrough/omitme --language rust --type cmdline 2>&1 | tee omitme-rust.md
 ```
 
 ---
 
 ## 10. The `--depth` flag
 
-By default, `/reverse` fetches only the root-level file tree (depth 1). The
+By default, `/spec reverse` fetches only the root-level file tree (depth 1). The
 `--depth <N>` flag controls how many levels of subdirectories are expanded.
 
 | Depth | What you get |
@@ -483,13 +575,13 @@ when fetching deep trees.
 
 ```text
 # Default depth (root only)
-/reverse thrivethrough/omitme
+/spec reverse thrivethrough/omitme
 
 # Two levels deep
-/reverse thrivethrough/omitme --depth 2
+/spec reverse thrivethrough/omitme --depth 2
 
 # Maximum depth for a large project
-/reverse torvalds/linux --depth 5 --tech rust
+/spec reverse torvalds/linux --depth 5 --language rust --type cmdline
 ```
 
 ---
@@ -501,7 +593,7 @@ when fetching deep trees.
 You find an interesting repository and want to understand what it does:
 
 ```text
-/reverse thrivethrough/omitme
+/spec reverse thrivethrough/omitme
 ```
 
 The generated prompt gives you a comprehensive overview of the project's
@@ -513,7 +605,7 @@ code yourself.
 You want to port a Python project to Rust:
 
 ```text
-/reverse example/flask-api --tech rust
+/spec reverse example/flask-api --language rust --type cmdline
 ```
 
 The generated prompt describes how to recreate the Flask API's
@@ -525,7 +617,7 @@ functionality using Rust, mapping each component to its Rust equivalent
 You want to create a formal spec based on an existing open-source project:
 
 ```text
-/reverse tokio-rs/tokio --create tokio-study
+/spec reverse tokio-rs/tokio --create tokio-study
 ```
 
 This generates a spec under `specs/tokio-study/` with EARS requirements,
@@ -537,7 +629,7 @@ reverse-engineered creation prompt.
 You want to study how a well-known project is structured:
 
 ```text
-/reverse burntsushi/regex
+/spec reverse burntsushi/regex
 ```
 
 The generated prompt breaks down the regex crate's architecture, module
@@ -548,7 +640,7 @@ structure, and key design decisions, giving you a learning roadmap.
 You want to rewrite a legacy application using a modern stack:
 
 ```text
-/reverse example/legacy-monolith --tech "Rust with axum, SQLx, and Redis"
+/spec reverse example/legacy-monolith --language rust --type cmdline --stack axum
 ```
 
 The quotes are required here: an unquoted value would stop at the first
@@ -557,11 +649,11 @@ modern Rust microservice architecture with specific crate recommendations.
 
 ### Example 6: Reverse-engineer and immediately implement
 
-Combine `/reverse` with `/spec impl` for a full pipeline:
+Combine `/spec reverse` with `/spec impl` for a full pipeline:
 
 ```text
 # Step 1: Reverse-engineer and create a spec
-/reverse thrivethrough/omitme --tech rust --create omitme-rust
+/spec reverse thrivethrough/omitme --language rust --type cmdline --create omitme-rust
 
 # Step 2: Validate the generated spec
 /spec validate omitme-rust
@@ -578,8 +670,8 @@ Combine `/reverse` with `/spec impl` for a full pipeline:
 Reverse-engineer two competing projects to compare their approaches:
 
 ```text
-/reverse project-a/repo --create study-a
-/reverse project-b/repo --create study-b
+/spec reverse project-a/repo --create study-a
+/spec reverse project-b/repo --create study-b
 ```
 
 Then compare the generated specs to understand the architectural differences
@@ -591,7 +683,7 @@ You want a creation prompt focused on the testing infrastructure of a
 project:
 
 ```text
-/reverse example/well-tested-app --tech rust-proptest
+/spec reverse example/well-tested-app --language rust --type cmdline
 ```
 
 The generated prompt emphasises how to recreate the project's testing
@@ -601,43 +693,47 @@ approach using the specified testing tools.
 
 ```text
 # Self-hosted GitLab with nested namespace
-/reverse gitlab:gitlab.example.com/group/subgroup/project --depth 3
+/spec reverse gitlab:gitlab.example.com/group/subgroup/project --depth 3
 
 # GitLab.com with spec creation
-/reverse gitlab:my-namespace/my-project --create my-project-clone
+/spec reverse gitlab:my-namespace/my-project --create my-project-clone
 
 # Full GitLab URL
-/reverse https://gitlab.com/my-namespace/my-project --tech python --create my-py-port
+/spec reverse https://gitlab.com/my-namespace/my-project --language python --type cmdline --create my-py-port
 ```
 
 ---
 
 ## 12. Tips for good results
 
-- **Use specific tech stacks.** `--tech rust` is good, but unquoted values
-  end at the first space — quote multi-word stacks
-  (`--tech "Rust with axum and SQLx"`) or use hyphenated descriptors
-  like `--tech rust-axum-sqlx` for more targeted prompts.
+- **Use the scaffold flags for targeting.** `--language rust --type cmdline`
+  is good; add `--stack ratatui` (or `--stack axum`) when you want the prompt
+  to reach for a specific framework. Values come from the `/new` registry, so
+  an unknown value is reported as a usage error before any fetch happens.
 - **Review the generated prompt before acting.** The synthetic prompt is a
   starting point — review it for accuracy and adjust before feeding it to
   a coding agent.
 - **Use `--create` for structured workflows.** Chaining into `/spec create`
   gives you a formal spec, plan, and test plan — much more actionable than
   a raw prompt.
+- **Use `--folder` to get a runnable starting point.** Scaffolding emits the
+  same starter `/new` produces (not a re-implementation of the source repo),
+  which is often a better base than hand-writing the first files.
 - **Set `GITHUB_TOKEN` for frequent use.** A token is required to run the
   command at all; the unauthenticated API allows only 60 requests/hour,
   authenticated is 5,000/hour.
-- **Use full URLs for clarity.** `/reverse https://github.com/owner/repo`
-  is unambiguous; `/reverse owner/repo` is faster to type.
+- **Use full URLs for clarity.** `/spec reverse https://github.com/owner/repo`
+  is unambiguous; `/spec reverse owner/repo` is faster to type.
 - **Combine with `/spec` commands.** After `--create`, use `/spec validate`,
   `/spec plan`, `/spec tasks`, and `/spec impl` for a complete
   spec-driven workflow.
-- **Use `--tech` for port planning.** When planning a port, always specify
-  the target stack so the prompt maps to the right technologies.
+- **Use the scaffold flags for port planning.** When planning a port, always
+  specify the target language and app type so the prompt maps to the right
+  technologies.
 - **Try different models.** The generated prompt quality depends on the
   selected LLM model. Try different models (e.g. Claude, GPT-4) to compare
   output quality.
-- **Study well-architected projects.** Use `/reverse` on projects you admire
+- **Study well-architected projects.** Use `/spec reverse` on projects you admire
   to learn about their architecture and design patterns.
 
 ---
@@ -653,18 +749,27 @@ approach using the specified testing tools.
 | `network error` | Connection issue | Check network connectivity and retry |
 | `invalid repository format` | Malformed input | Use `owner/repo` or a full GitHub URL |
 | `spec already exists` | `--create` target name already used | Choose a different name or delete the existing spec |
-| Prompt mentions wrong technologies | `--tech` not specified or too vague | Use a more specific `--tech` value |
+| Prompt mentions wrong technologies | `--language`/`--type`/`--stack` not specified or too vague | Specify a more precise scaffold (e.g. `--language rust --type cmdline --stack axum`) |
 
 ---
 
 ## 14. Workflow integration
 
-The `/reverse` command integrates with ragent's spec management system to
+The `/spec reverse` command integrates with ragent's spec management system to
 provide a complete reverse-engineering-to-implementation pipeline:
 
 ```
-/reverse <owner/repo>
+/spec reverse <owner/repo>
     │
+    ├── scaffold flags + --folder/--github/--gitlab?
+    │   │
+    │   ▼
+    │ ┌─────────────────────┐
+    │ │  /new scaffold engine│
+    │ │  (emit + git init +  │
+    │ │   optional remote)   │
+    │ └─────────┬───────────┘
+    │           │ refusal reported, run continues
     ▼
 ┌─────────────────────┐
 │  GitHub API fetch    │
@@ -697,7 +802,7 @@ provide a complete reverse-engineering-to-implementation pipeline:
 
 ```text
 # 1. Reverse-engineer a project
-/reverse thrivethrough/omitme --tech rust --create omitme-rust
+/spec reverse thrivethrough/omitme --language rust --type cmdline --create omitme-rust
 
 # 2. Validate the generated spec
 /spec validate omitme-rust

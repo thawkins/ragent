@@ -19,7 +19,7 @@
 | T-013 | Update status messages and log entries to include provider label | FR-017 | S | Medium | completed | T-010 |
 | T-014 | Update `--create` chaining notice to include provider label | FR-018 | S | Low | completed | T-010 |
 | T-015 | Update `reverse_help_message` with `github:`, `gitlab:`, and `--depth` documentation | FR-019, FR-025 | S | High | completed | T-004, T-021 |
-| T-016 | Verify `--tech`, `--create`, and `--depth` flags work with GitLab repos end-to-end | FR-023, FR-025 | S | High | completed | T-010, T-021 |
+| T-016 | Verify the `/new` scaffold flags, `--create`, and `--depth` work with GitLab repos end-to-end | FR-023, FR-025 | S | High | completed | T-010, T-021 |
 | T-017 | Add unit tests for `parse_reverse_repo` covering all input formats | FR-012, FR-013 | M | High | completed | T-004, T-005, T-006, T-007, T-008 |
 | T-018 | Add unit tests for GitLab fetch methods with mock responses | FR-008, FR-009, FR-010, FR-011 | M | High | completed | T-001, T-002, T-003 |
 | T-019 | Add unit tests for `build_reverse_prompt` with provider label | FR-015, FR-016 | S | Medium | completed | T-012 |

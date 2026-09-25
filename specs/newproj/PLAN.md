@@ -8,7 +8,7 @@ Add a self-contained `project-scaffold` module family plus `/new` command wiring
 
 1. **Scaffold engine** — a new module set in `crates/ragent-tools-extended`
    (`project_scaffold/`) holding: flag parsing/validation, the language registry
-   (`rust`/`python`/`go`/`typescript`), per-type layout templates (library/cmdline/tui/gui),
+   (`rust`/`python`/`go`/`typescript`), per-type layout templates (library/cmdline/tui/gui/webapp),
    stack overlay snippets, and the ragent workspace initialiser (`.ragent/`, `specs/`,
    `log/`, `.gitignore`, `AGENTS.md`). Pure functions — no I/O at the decision layer —
    so recipes are unit-testable as data.
@@ -60,7 +60,7 @@ Add a self-contained `project-scaffold` module family plus `/new` command wiring
 |----|-------|-------------|--------|----------|--------|--------------|
 | T-001 | Define scaffold flag types, validation, and error enum (pure logic) | FR-002, FR-003, FR-009 | M | Critical | completed | — |
 | T-002 | Build language registry with per-language recipes (rust/python/go/typescript) | FR-005, FR-017 | L | Critical | completed | T-001 |
-| T-003 | Implement app-type layout mapping (library/cmdline/tui/gui) per language | FR-006 | L | Critical | completed | T-002 |
+| T-003 | Implement app-type layout mapping (library/cmdline/tui/gui/webapp) per language | FR-006 | L | Critical | completed | T-002 |
 | T-004 | Implement stack overlay system with known-stack snippets and unknown-stack warning | FR-007 | M | High | completed | T-003 |
 | T-005 | Implement ragent workspace initialiser (`.ragent/`, `specs/`, `log/`, `.gitignore`, `AGENTS.md`) | FR-004 | S | Critical | completed | T-001 |
 | T-006 | Implement empty-directory guard with artifact allowlist | FR-002 | S | Critical | completed | T-001 |

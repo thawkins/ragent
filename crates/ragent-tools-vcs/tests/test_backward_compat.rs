@@ -2,7 +2,7 @@
 //!
 //! These tests verify that bare `owner/repo` identifiers and bare GitHub URLs
 //! (no provider prefix) still route to the GitHub API, preserving backward
-//! compatibility with existing `/reverse` usage before the GitLab support was
+//! compatibility with existing `/spec reverse` usage before the GitLab support was
 //! added.
 
 use ragent_tools_vcs::vcs_provider::{VcsProvider, parse_reverse_repo};

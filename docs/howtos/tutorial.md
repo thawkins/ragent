@@ -348,13 +348,20 @@ command family.
 ### 5.5 Generating code from a reference repository
 
 ```text
-/reverse BurntSushi/toml-rs --tech rust
+/spec reverse BurntSushi/toml-rs --language rust --type cmdline
 ```
 
 Chain into spec creation:
 
 ```text
-/reverse BurntSushi/toml-rs --create toml-clone
+/spec reverse BurntSushi/toml-rs --create toml-clone
+```
+
+Or scaffold a real project from the reverse-engineered prompt (and optionally
+create a private GitHub repository for it):
+
+```text
+/spec reverse BurntSushi/toml-rs --language rust --type cmdline --folder ./toml-clone --github
 ```
 
 See `docs/howtos/reverse.md` for the full command syntax and flags.

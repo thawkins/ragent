@@ -342,6 +342,7 @@ impl App {
             agent_stack: Vec::new(),
             pending_plan_task: None,
             pending_reverse_create: None,
+            pending_reverse_create_folder: None,
             pending_plan_restore: None,
             pending_forcecleanup: None,
             pending_rollback: None,

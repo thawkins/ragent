@@ -103,24 +103,24 @@ are executed by a human in the ragent TUI.
 
 ---
 
-### TC-004 — `--tech` flag constrains the prompt
+### TC-004 — scaffold flags constrain the prompt
 
-**Title:** `/reverse --tech rust` injects the tech stack into the prompt
+**Title:** `/spec reverse --language rust --type cmdline` injects the target scaffold into the prompt
 
 **Preconditions:**
 - Same as TC-001.
 
 **Instructions:**
 1. In the TUI input field, type
-   `/reverse --tech rust https://github.com/thawkins/ragent` and press `Enter`.
+   `/spec reverse https://github.com/thawkins/ragent --language rust --type cmdline` and press `Enter`.
 2. Wait for completion.
 
 **Test data to enter:**
-- Input: `/reverse --tech rust https://github.com/thawkins/ragent`
+- Input: `/spec reverse https://github.com/thawkins/ragent --language rust --type cmdline`
 
 **Expected results:**
 - The status bar shows `⏳ reverse: thawkins/ragent…`.
-- The generated prompt explicitly mentions Rust as the technology stack, either
+- The generated prompt explicitly mentions Rust and a command-line app, either
   in the opening sentence or in a dedicated section.
 - The prompt references the repo's actual file structure and README.
 
@@ -157,25 +157,25 @@ are executed by a human in the ragent TUI.
 
 ---
 
-### TC-006 — `--tech` and `--create` combined
+### TC-006 — scaffold flags and `--create` combined
 
-**Title:** `/reverse --tech python --create py-spec` works together
+**Title:** `/spec reverse --language python --type cmdline --create py-spec` works together
 
 **Preconditions:**
 - Same as TC-001 and TC-005.
 
 **Instructions:**
 1. In the TUI input field, type
-   `/reverse --tech python --create py-spec https://github.com/octocat/Hello-World`
+   `/spec reverse https://github.com/octocat/Hello-World --language python --type cmdline --create py-spec`
    and press `Enter`.
 2. Wait for both the reverse and spec-create phases to finish.
 3. Check the filesystem.
 
 **Test data to enter:**
-- Input: `/reverse --tech python --create py-spec https://github.com/octocat/Hello-World`
+- Input: `/spec reverse https://github.com/octocat/Hello-World --language python --type cmdline --create py-spec`
 
 **Expected results:**
-- The generated prompt mentions Python as the tech stack.
+- The generated prompt mentions Python and a command-line app.
 - `specs/py-spec/` is created with `SPEC.md`, `PLAN.md`, and `TESTPLAN.md`.
 
 ---
@@ -196,7 +196,7 @@ are executed by a human in the ragent TUI.
 **Expected results:**
 - An assistant message appears showing the usage of `/reverse`, including:
   - The required repo URL or `owner/repo` argument.
-  - The optional `--tech <stack>` flag.
+  - The optional `/new` scaffold flags (`--language` / `--type` / `--stack`).
   - The optional `--create <name>` flag.
 - No API calls are made (no `⏳` status appears).
 
@@ -374,6 +374,115 @@ are executed by a human in the ragent TUI.
 - The status bar changes to indicate the agent is halting.
 - No further assistant messages from the `/reverse` task appear.
 - The TUI remains responsive and the user can type a new command.
+
+---
+
+### TC-016 — scaffold-only flags scaffold a project folder
+
+**Title:** `/spec reverse ... --language rust --type cmdline --folder <dir>` scaffolds a runnable project
+
+**Preconditions:**
+- Same as TC-001.
+- `<dir>` does not exist (or exists and is empty apart from `.ragent/`, `log/`, `target/`).
+
+**Instructions:**
+1. In the TUI input field, type
+   `/spec reverse https://github.com/thawkins/ragent --language rust --type cmdline --folder <dir>` and press `Enter`.
+2. Wait for completion.
+
+**Test data to enter:**
+- Input: `/spec reverse https://github.com/thawkins/ragent --language rust --type cmdline --folder <dir>`
+
+**Expected results:**
+- An `[ ok ] project scaffolded in <dir>` summary appears before the fetch status,
+  listing the git init and (when requested) remote outcome.
+- `<dir>` contains the `/new` workspace (`src/main.rs`, `Cargo.toml`, `.ragent/`, `docs/`)
+  and a git repository with an initial commit.
+- The generated prompt still follows in the chat window.
+
+---
+
+### TC-017 — non-empty `--folder` target is reported without stopping
+
+**Title:** a non-empty `--folder` target reports `[err]` and the prompt still generates
+
+**Preconditions:**
+- Same as TC-001.
+- `<dir>` exists and contains at least one file that is not `.ragent/`, `log/`, or `target/`.
+
+**Instructions:**
+1. Run `/spec reverse https://github.com/thawkins/ragent --language rust --type cmdline --folder <dir>`.
+2. Wait for completion.
+
+**Expected results:**
+- The message window shows `[err] target folder is not empty` with the blocking
+  entries and a `[note] nothing was scaffolded` line.
+- The repository fetch and prompt generation continue and produce the prompt.
+
+---
+
+### TC-019 — chained `--create` writes the spec into the scaffolded project
+
+**Title:** `/spec reverse ... --folder <dir> --create <name>` leaves `<dir>/specs/<name>/` populated
+
+**Preconditions:**
+- Same as TC-001.
+- `<dir>` does not exist (or is empty apart from `.ragent/`, `log/`, `target/`).
+
+**Instructions:**
+1. Run `/spec reverse https://github.com/thawkins/ragent --language rust --type cmdline \
+   --folder <dir> --create port-spec`.
+2. Wait for the generated prompt and the chained `/spec create` to finish.
+
+**Expected results:**
+- The scaffold summary reports `[ ok ] project scaffolded in <dir>`.
+- The chaining notice names the target as `<dir>/specs/port-spec/`.
+- `<dir>/specs/port-spec/` contains `SPEC.md`, `PLAN.md`, and `TESTPLAN.md`.
+- The invoking directory does **not** gain a `specs/port-spec/` directory.
+
+---
+
+### TC-020 — a first-token flag reports the missing `<repo>` positional
+
+**Title:** `/spec reverse --language rust --type cmdline` reports a usage error instead of doing nothing
+
+**Preconditions:**
+- Same as TC-001.
+
+**Instructions:**
+1. Run `/spec reverse --language rust --type cmdline --stack gtk4` (no repo positional).
+2. Run `/spec reverse --bogus`.
+
+**Expected results:**
+- The first invocation reports
+  ``the first argument after `/spec reverse` must be `<repo>`, got '--language'``.
+- The second reports the same wording for `'--bogus'`.
+- Both leave the status line at `spec: reverse usage`; neither makes an API call.
+
+---
+
+### TC-018 — `--github` / `--gitlab` create a remote
+
+**Title:** `/spec reverse ... --folder <dir> --github` creates a private remote and pushes
+
+**Preconditions:**
+- Same as TC-016.
+- A GitHub token is configured (`/github login`) and `git` is on `PATH`.
+
+**Instructions:**
+1. Run
+   `/spec reverse https://github.com/thawkins/ragent --language rust --type cmdline --folder <dir> --github`.
+2. Wait for completion.
+
+**Expected results:**
+- The scaffold summary reports the created remote URL and the push outcome.
+- `git -C <dir> remote -v` shows the created repository as `origin`.
+- Supplying `--github --gitlab` together reports
+  `--github and --gitlab are mutually exclusive; supply at most one`.
+- Supplying `--folder` (or `--github`) without `--language`/`--type` reports a
+  usage error and scaffolds nothing.
+
+---
 
 ## Cleanup
 

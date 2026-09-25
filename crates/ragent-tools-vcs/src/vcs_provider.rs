@@ -1,4 +1,4 @@
-//! VCS-agnostic provider parsing for the `/reverse` command (FR-012, FR-013,
+//! VCS-agnostic provider parsing for the `/spec reverse` command (FR-012, FR-013,
 //! FR-022).
 //!
 //! The [`VcsProvider`] enum carries the resolved provider and parsed project

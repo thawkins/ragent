@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.116"
+version = "1.0.117"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -283,6 +283,12 @@ pdf-extract = { path = "vendor/pdf-extract" }
 # `WrappedBlock::flush_word` — upstream 0.16.7 computes `self.width - self.line.len`
 # with plain subtraction. See vendor/html2text/src/render/text_renderer.rs.
 html2text = { path = "vendor/html2text" }
+# Vendored (0.38, the version `pdf-extract` uses) to bound the recursion depth
+# of the array/dictionary object parser. A PDF of a few thousand nested `[`
+# overflowed the native stack; the resulting SIGSEGV is converted to SIGABRT
+# and aborts the process, which `catch_unwind`/thread isolation cannot stop.
+# See vendor/lopdf/src/parser/mod.rs `MAX_OBJECT_DEPTH`.
+lopdf = { path = "vendor/lopdf" }
 
 [[bin]]
 name = "ragent"

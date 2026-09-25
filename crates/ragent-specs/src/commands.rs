@@ -16,6 +16,11 @@ pub enum SpecCommand {
         feature: String,
         /// Optional research artifact name linked via `--from-research` (FR-010).
         from_research: Option<String>,
+        /// Optional target project folder whose `specs/` root receives the
+        /// generated spec (`--folder <path>`). Used by `/spec reverse --folder`
+        /// chaining so the spec lands in the scaffolded project rather than the
+        /// invoking directory. `None` means the invoking directory (FR-027).
+        folder: Option<String>,
     },
     /// Validate a spec or all specs for EARS compliance.
     Validate {
@@ -170,22 +175,81 @@ pub enum SpecCommand {
     /// Carries the specific cause so the caller can print it alongside the
     /// usage block; [`SpecCommand::is_usage_error`] reports `true` for it.
     GovCreateUsage(String),
+    /// Reverse-engineer a public repository into a synthetic creation prompt
+    /// (FR-001, FR-011, FR-013).
+    ///
+    /// Produced by [`parse_reverse`] from a `reverse <repo> [flags]` tail. The
+    /// TUI feeds these validated values straight to the reverse handler, so the
+    /// fetch-and-generate path stays in one place.
+    Reverse {
+        /// Repository positional: an `owner/repo` shorthand, an `https://`
+        /// URL, or an SSH-style URL.
+        repo: String,
+        /// Optional `--create <name>` chain into `/spec create`.
+        create: Option<String>,
+        /// Optional tree-fetch depth (`--depth <N>`), raw string.
+        depth: Option<String>,
+        /// Validated `/new` scaffold request (`--language` + `--type`, optional
+        /// `--stack`) produced by the shared `parse_flags` parser (FR-011).
+        scaffold: Option<ragent_tools_extended::project_scaffold::ScaffoldRequest>,
+        /// Optional `--folder <path>` scaffold target; requires the scaffold
+        /// flags (FR-026).
+        folder: Option<String>,
+    },
+    /// A `/spec reverse` invocation that was parseable but invalid: an
+    /// unknown flag, a duplicate flag, or a `/new` flag validation failure
+    /// (FR-011, FR-026).
+    ///
+    /// Carries the specific cause so the caller can print it alongside the
+    /// usage block; [`SpecCommand::is_usage_error`] reports `true` for it.
+    ReverseUsage(String),
     /// Unknown subcommand (preserves the raw name for error messages).
     Unknown(String),
 }
 
-/// Extract `specname`, `feature`, and optional `--from-research` name from
-/// the raw argument tail of `create` or `specify` (FR-010).
+/// Extract `specname`, `feature`, optional `--from-research` name, and optional
+/// `--folder <path>` target from the raw argument tail of `create` or `specify`
+/// (FR-010, FR-027).
 ///
-/// The `--from-research <name>` flag may appear at the end of the feature
-/// text. If present, it is stripped from the feature and returned as the
-/// third element. If absent, `None` is returned.
-fn parse_feature_with_research(rest: &str) -> (String, String, Option<String>) {
+/// The `--from-research <name>` flag may appear at the end of the feature text;
+/// the `--folder <path>` flag is consumed by `/spec reverse --folder` chaining so
+/// the generated spec lands in the scaffolded project. Both flags are stripped
+/// from the feature text. The folder is returned as the fourth element (`None`
+/// when absent); `specify` ignores it.
+fn parse_feature_with_research(rest: &str) -> (String, String, Option<String>, Option<String>) {
     let (specname, after_specname) = rest
         .split_once(char::is_whitespace)
         .map_or((rest, ""), |(s, r)| (s.trim(), r.trim()));
-    let (feature, from_research) = extract_from_research(after_specname);
-    (specname.to_string(), feature, from_research)
+    let (after_folder, folder) = extract_folder_flag(after_specname);
+    let (feature, from_research) = extract_from_research(&after_folder);
+    (specname.to_string(), feature, from_research, folder)
+}
+
+/// Split `--folder <path>` from the argument tail of `/spec create`.
+///
+/// Returns `(remainder_without_flag, Some(path))` when the flag is present with
+/// a value, or `(args, None)` when it is not. A dangling flag with no value is
+/// stripped so it is not passed through into the generated prompt.
+fn extract_folder_flag(args: &str) -> (String, Option<String>) {
+    let tokens: Vec<&str> = args.split_whitespace().collect();
+    let Some(flag_pos) = tokens.iter().position(|t| *t == "--folder") else {
+        return (args.to_string(), None);
+    };
+    let path = tokens
+        .get(flag_pos + 1)
+        .copied()
+        .filter(|t| !t.starts_with("--"))
+        .map(String::from);
+    // Rebuild from the tokens before the flag, keeping the tokens after the
+    // flag value so `--folder <path>` can appear mid-argument.
+    let mut before: Vec<&str> = tokens[..flag_pos].to_vec();
+    let after_start = if path.is_some() {
+        flag_pos + 2
+    } else {
+        flag_pos + 1
+    };
+    before.extend_from_slice(&tokens[after_start..]);
+    (before.join(" "), path)
 }
 
 /// Split `--from-research <name>` from the end of a feature string.
@@ -323,6 +387,162 @@ fn parse_govcreate(rest: &str) -> SpecCommand {
     }
 }
 
+/// Parse the `/spec reverse` argument tail (FR-001, FR-011, FR-013, FR-026).
+///
+/// The first token is the mandatory repository positional (an `owner/repo`
+/// shorthand, an `https://` URL, or an SSH-style URL); the remainder is a flag
+/// tail. `--create <name>` and `--depth <N>` are reverse-level flags; the
+/// `/new` scaffold flags (`--language <lang>`, `--type <type>`, `--stack
+/// <name>`) are collected verbatim and validated by the shared `/new` parser
+/// so accepted values and error text cannot drift from `/new` (FR-011).
+/// `--folder <path>` names the scaffold target and `--github` / `--gitlab`
+/// request a private remote; both require the scaffold flags (FR-026).
+///
+/// A missing repository, an unknown/duplicate flag, or a `/new` validation
+/// failure produces [`SpecCommand::ReverseUsage`] carrying the specific cause.
+/// A flag token placed where `<repo>` belongs never reaches this function (the
+/// subcommand splitter hands it to `Self::Unknown`), which
+/// [`SpecCommand::is_usage_error`] reports as a usage error for `reverse`.
+fn parse_reverse(rest: &str) -> SpecCommand {
+    let tokens = tokenize_govcreate_args(rest);
+
+    // FR-002: the repository positional must be present. A bare-word tail
+    // (`--language` swallowing the `repo` slot) is rejected below, not here,
+    // so the tokenizer stays value-agnostic.
+    let Some(repo) = tokens.first() else {
+        return SpecCommand::Unknown("reverse".to_string());
+    };
+    if repo.starts_with("--") {
+        // A flag in the positional slot is a missing repository; report it as
+        // the usage-error `Unknown("reverse")` form.
+        return SpecCommand::Unknown("reverse".to_string());
+    }
+    let repo = repo.clone();
+
+    let mut create: Option<String> = None;
+    let mut depth: Option<String> = None;
+    let mut folder: Option<String> = None;
+    let mut scaffold_flags: Vec<String> = Vec::new();
+    let mut hosting_flags_only: Vec<String> = Vec::new();
+
+    let mut i = 1;
+    while i < tokens.len() {
+        let token = tokens[i].as_str();
+        match token {
+            "--create" => {
+                if create.is_some() {
+                    return SpecCommand::ReverseUsage("--create given twice".to_string());
+                }
+                i += 1;
+                let Some(value) = tokens.get(i) else {
+                    return SpecCommand::ReverseUsage(
+                        "--create requires a value, e.g. --create my-spec".to_string(),
+                    );
+                };
+                create = Some(value.clone());
+            }
+            "--depth" => {
+                if depth.is_some() {
+                    return SpecCommand::ReverseUsage("--depth given twice".to_string());
+                }
+                i += 1;
+                let Some(value) = tokens.get(i) else {
+                    return SpecCommand::ReverseUsage(
+                        "--depth requires a value, e.g. --depth 2".to_string(),
+                    );
+                };
+                depth = Some(value.clone());
+            }
+            "--folder" => {
+                if folder.is_some() {
+                    return SpecCommand::ReverseUsage("--folder given twice".to_string());
+                }
+                i += 1;
+                let Some(value) = tokens.get(i) else {
+                    return SpecCommand::ReverseUsage(
+                        "--folder requires a value, e.g. --folder ./my-app".to_string(),
+                    );
+                };
+                folder = Some(value.clone());
+            }
+            // FR-011: the /new scaffold flags are forwarded verbatim.
+            "--language" | "--type" | "--stack" => {
+                scaffold_flags.push(token.to_string());
+                i += 1;
+                let Some(value) = tokens.get(i) else {
+                    return SpecCommand::ReverseUsage(format!("{token} requires a value"));
+                };
+                scaffold_flags.push(value.clone());
+            }
+            // FR-026: bare hosting flags are forwarded verbatim; their value
+            // and mutual-exclusion rules stay owned by the shared /new parser.
+            "--github" | "--gitlab" => {
+                if !scaffold_flags.is_empty() {
+                    scaffold_flags.push(token.to_string());
+                } else {
+                    // FR-026: the hosting flags are scaffold-only. Without the
+                    // /new scaffold flags there is no recipe, and the shared
+                    // parser would report "missing required flag --language"
+                    // rather than naming the flag actually supplied.
+                    hosting_flags_only.push(token.to_string());
+                }
+            }
+            // A bare word that is not a flag is a stray positional; surfacing
+            // it keeps the invocation from being silently misinterpreted.
+            other if !other.starts_with("--") => {
+                return SpecCommand::ReverseUsage(format!("unexpected argument '{other}'"));
+            }
+            other => {
+                return SpecCommand::ReverseUsage(format!("unknown option '{other}'"));
+            }
+        }
+        i += 1;
+    }
+
+    // FR-026: --folder and the hosting flags are scaffold-only. Without the
+    // /new scaffold flags there is no recipe to scaffold with, and silently
+    // dropping the flag would be worse than refusing it.
+    if scaffold_flags.is_empty() {
+        if let Some(path) = &folder {
+            return SpecCommand::ReverseUsage(format!(
+                "--folder requires --language and --type (it scaffolds like /new): '{path}'"
+            ));
+        }
+        if let Some(flag) = hosting_flags_only.first() {
+            return SpecCommand::ReverseUsage(format!(
+                "{flag} requires --language and --type (it scaffolds like /new)"
+            ));
+        }
+    }
+
+    // A flag tail that fails /new validation keeps the command parseable and
+    // carries the shared parser's own error text, so a
+    // `/spec reverse --language` typo reports the real cause instead of being
+    // dropped by the dispatcher. The `Err` arm folds it into the usage-error
+    // `Unknown("reverse-usage")` form: a `/spec reverse` invocation whose
+    // *first* token is a flag never reaches `parse_reverse` at all (the
+    // subcommand split puts the flag in `sub`), and both shapes must report
+    // the same specific cause via a parser the caller can dispatch on.
+    let mut scaffold: Option<ragent_tools_extended::project_scaffold::ScaffoldRequest> = None;
+    if !scaffold_flags.is_empty() {
+        let flag_refs: Vec<&str> = scaffold_flags.iter().map(String::as_str).collect();
+        match ragent_tools_extended::project_scaffold::parse_flags(&flag_refs) {
+            Ok(request) => scaffold = Some(request),
+            Err(err) => {
+                return SpecCommand::Unknown(format!("reverse-usage: {}", err));
+            }
+        }
+    }
+
+    SpecCommand::Reverse {
+        repo,
+        create,
+        depth,
+        scaffold,
+        folder,
+    }
+}
+
 /// Subcommands that signal missing-argument usage errors via
 /// `Self::Unknown(<name>)`. Kept in one place so [`SpecCommand::parse`]
 /// construction sites and [`SpecCommand::is_usage_error`] stay in sync.
@@ -343,6 +563,7 @@ const USAGE_SUBCOMMANDS: &[&str] = &[
     "tasks",
     "feedback",
     "govcreate",
+    "reverse",
 ];
 
 impl SpecCommand {
@@ -358,7 +579,7 @@ impl SpecCommand {
         match sub {
             "help" | "--help" | "-h" | "" => Self::Help,
             "create" => {
-                let (specname, feature, from_research) = parse_feature_with_research(rest);
+                let (specname, feature, from_research, folder) = parse_feature_with_research(rest);
                 if specname.is_empty() || feature.is_empty() {
                     // Caller should treat this as a usage error.
                     Self::Unknown("create".to_string())
@@ -367,6 +588,7 @@ impl SpecCommand {
                         specname,
                         feature,
                         from_research,
+                        folder,
                     }
                 }
             }
@@ -537,7 +759,9 @@ impl SpecCommand {
                 }
             }
             "specify" => {
-                let (specname, feature, from_research) = parse_feature_with_research(rest);
+                // `--folder` is accepted by the shared parser but only
+                // `/spec create` acts on it; `specify` ignores it.
+                let (specname, feature, from_research, _folder) = parse_feature_with_research(rest);
                 if specname.is_empty() || feature.is_empty() {
                     Self::Unknown("specify".to_string())
                 } else {
@@ -585,6 +809,23 @@ impl SpecCommand {
                 }
             }
             "govcreate" => parse_govcreate(rest),
+            "reverse" => parse_reverse(rest),
+            // A `/spec reverse` invocation whose *first* token after `reverse`
+            // is a flag (no `<repo>` positional) never reaches `parse_reverse`:
+            // the subcommand split puts that flag in `sub`. Route it into the
+            // dedicated usage form so the caller reports the real cause instead
+            // of silently dropping the command. The `reverse` name itself is
+            // handled above, so `starts_with` cannot shadow it.
+            other if other.starts_with("reverse") => {
+                let hint = if other.starts_with("--") {
+                    format!(
+                        "the first argument after `/spec reverse` must be `<repo>`, got '{other}'"
+                    )
+                } else {
+                    format!("unexpected argument '{other}'")
+                };
+                Self::Unknown(format!("reverse-usage: {hint}"))
+            }
             other => Self::Unknown(other.to_string()),
         }
     }
@@ -596,11 +837,15 @@ impl SpecCommand {
     /// accepted names come from [`USAGE_SUBCOMMANDS`] so they cannot drift
     /// from the subcommands parsed above. A `/spec govcreate` invocation that
     /// parsed but failed validation (bad spec ID or bad `/new` flags) is also a
-    /// usage error, reported as [`SpecCommand::GovCreateUsage`].
+    /// usage error, reported as [`SpecCommand::GovCreateUsage`], and a
+    /// `/spec reverse` invocation that failed validation is reported as
+    /// [`SpecCommand::ReverseUsage`] or as the `Unknown("reverse-usage: ...")`
+    /// form when the failure was detected before a repo positional was seen.
     #[must_use]
     pub fn is_usage_error(&self) -> bool {
-        matches!(self, Self::GovCreateUsage(_))
-            || matches!(self, Self::Unknown(s) if USAGE_SUBCOMMANDS.contains(&s.as_str()))
+        matches!(self, Self::GovCreateUsage(_) | Self::ReverseUsage(_))
+            || matches!(self, Self::Unknown(s) if USAGE_SUBCOMMANDS.contains(&s.as_str())
+                || s.starts_with("reverse-usage"))
     }
 
     /// Build the static help message shown by `/spec help`.
@@ -613,6 +858,7 @@ impl SpecCommand {
                     | `/spec help` | none | Show this command reference table. |\n\
                     | `/spec create <specname> <feature description> [--from-research <name>]` | required `specname` + `feature description`, optional `--from-research` | Generate `specs/<specname>/SPEC.md` (EARS spec) and `specs/<specname>/PLAN.md` (implementation plan). `--from-research` pre-populates a `## Related Research` section. |\n\
                     | `/spec govcreate <specid> <content-ref> <target-folder> [--language <lang>] [--type <type>] [--stack <name>] [--github \\| --gitlab] [--force]` | required `specid` + `content-ref` + `target-folder`, optional `/new` flags and `--force` | Create a project from an architecture document: acquire the URL or local file/folder content, extract the architecture structure, author `SPEC.md`/`PLAN.md`/`TESTPLAN.md` into `<target-folder>/specs/<specid>/`, and scaffold the project with the `/new` engine (see `/spec govcreate help` for the full usage block). Example: `/spec govcreate payments-arch https://docs.example.gov/arch ./payments-svc --language rust --type cmdline --stack axum` |\n\
+                    | `/spec reverse <repo> [--create <name>] [--depth <N>] [--language <lang> --type <type> [--stack <name>]] [--folder <path>] [--github \\| --gitlab]` | required `repo`, optional `--create` + `--depth` + the `/new` scaffold flags | Reverse-engineer a public GitHub/GitLab repository into a synthetic creation prompt; with the `/new` scaffold flags it also scaffolds the target project (`--folder`, default: the current directory) and, with `--github`/`--gitlab`, creates a private remote and pushes. |\n\
                     | `/spec add <spec-id> <feature description>` | required `spec-id` + `feature description` | Incrementally add requirements to an existing spec and update its plan. |\n\
                     | `/spec delete <spec-id> [--yes]` | required `spec-id`, optional `--yes` | Delete a spec directory. Use `--yes` to skip the confirmation prompt. |\n\
                     | `/spec validate [specname]` | optional `specname` | Validate EARS compliance. Without argument, validates all specs. |\n\

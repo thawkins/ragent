@@ -107,6 +107,26 @@ const RUST_GUI_MAIN: &str = "fn main() {\n\
     println!(\"Hello, world! (gui starter)\");\n\
 }\n";
 
+const RUST_WEBAPP_MAIN: &str = "// Web-app starter: a tiny dependency-free HTTP/1.1 server.\n\
+use std::io::{Read, Write};\n\
+use std::net::TcpListener;\n\n\
+fn main() {\n\
+    let listener = TcpListener::bind(\"127.0.0.1:8080\").expect(\"bind 127.0.0.1:8080\");\n\
+    println!(\"Hello, world! (webapp starter) - listening on http://127.0.0.1:8080\");\n\
+    for stream in listener.incoming() {\n\
+    \x20   let mut stream = stream.expect(\"accept\");\n\
+    \x20   let mut buf = [0u8; 1024];\n\
+    \x20   let _ = stream.read(&mut buf);\n\
+    \x20   let body = \"Hello, world!\";\n\
+    \x20   let response = format!(\n\
+    \x20       \"HTTP/1.1 200 OK\\r\\nContent-Type: text/plain\\r\\nContent-Length: {}\\r\\n\\r\\n{}\",\n\
+    \x20       body.len(),\n\
+    \x20       body\n\
+    \x20   );\n\
+    \x20   let _ = stream.write_all(response.as_bytes());\n\
+    }\n\
+}\n";
+
 // ----------------------------------------------------------------- Python ---
 
 const PYTHON_MANIFEST: &str = "[project]\n\
@@ -129,6 +149,26 @@ const PYTHON_GUI_MAIN: &str = "def main() -> None:\n\
     print(\"Hello, world! (gui starter)\")\n\n\n\
 if __name__ == \"__main__\":\n    main()\n";
 
+const PYTHON_WEBAPP_MAIN: &str = "\"\"\"Web-app starter: a tiny stdlib-only HTTP server.\"\"\"\n\
+import http.server\n\n\
+PORT = 8080\n\n\
+class Handler(http.server.BaseHTTPRequestHandler):\n\
+    def do_GET(self) -> None:\n\
+        body = b\"Hello, world!\"\n\
+        self.send_response(200)\n\
+        self.send_header(\"Content-Type\", \"text/plain\")\n\
+        self.send_header(\"Content-Length\", str(len(body)))\n\
+        self.end_headers()\n\
+        self.wfile.write(body)\n\n\
+    def log_message(self, *args: object) -> None:\n\
+        pass\n\n\n\
+def main() -> None:\n\
+    print(\n\
+        \"Hello, world! (webapp starter) - listening on http://127.0.0.1:%d\" % PORT\n\
+    )\n\
+    http.server.HTTPServer((\"127.0.0.1\", PORT), Handler).serve_forever()\n\n\n\
+if __name__ == \"__main__\":\n    main()\n";
+
 // --------------------------------------------------------------------- Go ---
 
 const GO_MANIFEST: &str = "module {name}\n\ngo 1.24\n";
@@ -144,6 +184,19 @@ func main() {\n\tfmt.Println(\"Hello, world! (tui starter)\")\n}\n";
 
 const GO_GUI_MAIN: &str = "package main\n\nimport \"fmt\"\n\n\
 func main() {\n\tfmt.Println(\"Hello, world! (gui starter)\")\n}\n";
+
+const GO_WEBAPP_MAIN: &str = "// Web-app starter: a tiny stdlib-only HTTP server.\n\
+package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\n\
+func main() {\n\
+\taddr := \"127.0.0.1:8080\"\n\
+\tfmt.Printf(\"Hello, world! (webapp starter) - listening on http://%s\\n\", addr)\n\
+\thttp.HandleFunc(\"/\", func(w http.ResponseWriter, r *http.Request) {\n\
+\t\tfmt.Fprint(w, \"Hello, world!\")\n\
+\t})\n\
+\tif err := http.ListenAndServe(addr, nil); err != nil {\n\
+\t\tpanic(err)\n\
+\t}\n\
+}\n";
 
 // ------------------------------------------------------------- TypeScript ---
 
@@ -161,6 +214,19 @@ const TS_TUI_MAIN: &str = "function main(): void {\n\
 const TS_GUI_MAIN: &str = "function main(): void {\n\
   console.log(\"Hello, world! (gui starter)\");\n}\n\nmain();\n";
 
+const TS_WEBAPP_MAIN: &str = "// Web-app starter: a tiny Node http server serving a hello-world page.\n\
+import { createServer } from \"node:http\";\n\n\
+const port = 8080;\n\n\
+const server = createServer((_req, res) => {\n\
+    res.writeHead(200, { \"Content-Type\": \"text/html\" });\n\
+    res.end(\"<!doctype html>\\n<h1>Hello, world!</h1>\\n\");\n\
+});\n\n\
+server.listen(port, () => {\n\
+    console.log(\n\
+        `Hello, world! (webapp starter) - listening on http://127.0.0.1:${port}`,\n\
+    );\n\
+});\n";
+
 // ------------------------------------------------------------- JavaScript ---
 
 const JS_MANIFEST: &str = "{\n  \"name\": \"{name}\",\n  \"version\": \"0.1.0\",\n\
@@ -177,6 +243,19 @@ const JS_TUI_MAIN: &str = "function main() {\n\
 
 const JS_GUI_MAIN: &str = "function main() {\n\
   console.log(\"Hello, world! (gui starter)\");\n}\n\nmain();\n";
+
+const JS_WEBAPP_MAIN: &str = "// Web-app starter: a tiny Node http server serving a hello-world page.\n\
+const { createServer } = require(\"node:http\");\n\n\
+const port = 8080;\n\n\
+const server = createServer((_req, res) => {\n\
+    res.writeHead(200, { \"Content-Type\": \"text/html\" });\n\
+    res.end(\"<!doctype html>\\n<h1>Hello, world!</h1>\\n\");\n\
+});\n\n\
+server.listen(port, () => {\n\
+    console.log(\n\
+        `Hello, world! (webapp starter) - listening on http://127.0.0.1:${port}`,\n\
+    );\n\
+});\n";
 
 // --------------------------------------------------------------------- C ---
 
@@ -990,6 +1069,13 @@ pub static REGISTRY: &[LanguageRecipe] = &[
                     content: RUST_GUI_MAIN,
                 },
             ),
+            (
+                AppType::Webapp,
+                SourceFile {
+                    path: "src/main.rs",
+                    content: RUST_WEBAPP_MAIN,
+                },
+            ),
         ],
         run_command: "cargo run",
         test_command: "cargo test",
@@ -1026,6 +1112,13 @@ pub static REGISTRY: &[LanguageRecipe] = &[
                 SourceFile {
                     path: "main.py",
                     content: PYTHON_GUI_MAIN,
+                },
+            ),
+            (
+                AppType::Webapp,
+                SourceFile {
+                    path: "main.py",
+                    content: PYTHON_WEBAPP_MAIN,
                 },
             ),
         ],
@@ -1066,6 +1159,13 @@ pub static REGISTRY: &[LanguageRecipe] = &[
                     content: GO_GUI_MAIN,
                 },
             ),
+            (
+                AppType::Webapp,
+                SourceFile {
+                    path: "main.go",
+                    content: GO_WEBAPP_MAIN,
+                },
+            ),
         ],
         run_command: "go run .",
         test_command: "go test ./...",
@@ -1104,6 +1204,13 @@ pub static REGISTRY: &[LanguageRecipe] = &[
                     content: TS_GUI_MAIN,
                 },
             ),
+            (
+                AppType::Webapp,
+                SourceFile {
+                    path: "src/main.ts",
+                    content: TS_WEBAPP_MAIN,
+                },
+            ),
         ],
         run_command: "npx tsx src/main.ts",
         test_command: "npm test",
@@ -1140,6 +1247,13 @@ pub static REGISTRY: &[LanguageRecipe] = &[
                 SourceFile {
                     path: "src/main.js",
                     content: JS_GUI_MAIN,
+                },
+            ),
+            (
+                AppType::Webapp,
+                SourceFile {
+                    path: "src/main.js",
+                    content: JS_WEBAPP_MAIN,
                 },
             ),
         ],

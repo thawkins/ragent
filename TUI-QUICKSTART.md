@@ -4,16 +4,23 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.116)
+## Highlights (v1.0.117)
 
-- **Maintenance release** — agent and plugin updates plus a code-quality pass,
-  with no behavioural regressions: the four content-sized TUI modal renderers
-  (queue menu, queue show panel, plugin-store panel, queue clear confirmation)
-  now share one `centered_rect_fixed` helper with byte-for-byte identical
-  geometry, and the sub-agent report writer streams its output straight to disk
-  instead of buffering the whole file in memory. Full CI hygiene
-  (`cargo check`, dead-code lint + reason checks, `clippy -D warnings`,
-  `cargo fmt --check`, `cargo audit`, `cargo deny check`, `cargo test`) is green.
+- **`/spec reverse --folder` scaffolds and hosts the target project** —
+  `/spec reverse` accepts `--folder <path>` plus `--github` / `--gitlab` (with
+  the `/new` scaffold flags present) and creates the project in the target folder
+  before synthesising the prompt; a chained `--create <name>` writes the spec
+  into `<folder>/specs/<name>/`. Usage errors now state the specific cause
+  instead of the bare usage line.
+- **`webapp` app type** — `--type webapp` is a first-class registered value for
+  `/new`, `/spec reverse`, and `/spec govcreate`; it generates a tiny
+  dependency-free HTTP-server starter for `rust`, `python`, `go`, `typescript`,
+  and `javascript`, and degrades to a manifest-only layout elsewhere.
+- **`lopdf` joins the lint suite** — the vendored `lopdf` crate carries
+  crate-level allowances (matching `vendor/pdf-extract`) so the dead-code lint
+  and `cargo-machete` are green. Full CI hygiene (`cargo check`, dead-code lint +
+  reason checks, `clippy -D warnings`, `cargo fmt --check`, `cargo audit`,
+  `cargo deny check`, `cargo test`) is green.
 
 ## Highlights (v1.0.115)
 
