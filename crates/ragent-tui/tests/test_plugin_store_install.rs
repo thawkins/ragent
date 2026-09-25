@@ -106,8 +106,8 @@ fn drain_install(app: &mut App) {
 
 // ── ENTER installs and re-colours (FR-006, FR-011) ──────────────────────────
 
-#[test]
-fn enter_installs_a_local_source_and_the_row_re_colours() {
+#[tokio::test]
+async fn enter_installs_a_local_source_and_the_row_re_colours() {
     let temp = temp_dir("install-ok");
     let source = codex_source(&temp, "codex-weather");
     let mut app = open_with_entries(
@@ -115,7 +115,7 @@ fn enter_installs_a_local_source_and_the_row_re_colours() {
         vec![entry("codex-weather", source.to_str().unwrap())],
     );
 
-    let action = handle_key(&mut app, key(KeyCode::Enter));
+    let action = handle_key(&mut app, key(KeyCode::Enter)).await;
 
     assert!(action.is_none(), "ENTER is routed to the panel");
     assert_eq!(
@@ -147,8 +147,8 @@ fn enter_installs_a_local_source_and_the_row_re_colours() {
     );
 }
 
-#[test]
-fn the_installed_plugin_lands_in_the_store_scan() {
+#[tokio::test]
+async fn the_installed_plugin_lands_in_the_store_scan() {
     let temp = temp_dir("install-scan");
     let source = codex_source(&temp, "codex-weather");
     let mut app = open_with_entries(
@@ -156,7 +156,7 @@ fn the_installed_plugin_lands_in_the_store_scan() {
         vec![entry("codex-weather", source.to_str().unwrap())],
     );
 
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
     drain_install(&mut app);
 
     // The install committed into the project store the app's cwd resolves to.
@@ -170,8 +170,8 @@ fn the_installed_plugin_lands_in_the_store_scan() {
 
 // ── Double-install guard (FR-014) ───────────────────────────────────────────
 
-#[test]
-fn a_second_enter_on_an_installed_result_is_refused_without_writing() {
+#[tokio::test]
+async fn a_second_enter_on_an_installed_result_is_refused_without_writing() {
     let temp = temp_dir("install-double");
     let source = codex_source(&temp, "codex-weather");
     let mut app = open_with_entries(
@@ -179,12 +179,12 @@ fn a_second_enter_on_an_installed_result_is_refused_without_writing() {
         vec![entry("codex-weather", source.to_str().unwrap())],
     );
 
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
     drain_install(&mut app);
     assert!(app.plugin_store_install_result.lock().unwrap().is_none());
 
     // Second ENTER on the now-installed row: refused, no install requested.
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
 
     let browser = app.plugin_store.as_ref().expect("panel open");
     assert_eq!(
@@ -200,15 +200,15 @@ fn a_second_enter_on_an_installed_result_is_refused_without_writing() {
 
 // ── Failure reporting (FR-024, FR-025) ──────────────────────────────────────
 
-#[test]
-fn a_non_https_source_is_refused_and_reported_without_panic() {
+#[tokio::test]
+async fn a_non_https_source_is_refused_and_reported_without_panic() {
     let temp = temp_dir("install-bad-scheme");
     let mut app = open_with_entries(
         temp.clone(),
         vec![entry("codex-weather", "http://example.com/plugin.zip")],
     );
 
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
     drain_install(&mut app);
 
     let browser = app.plugin_store.as_ref().expect("panel open");
@@ -229,12 +229,12 @@ fn a_non_https_source_is_refused_and_reported_without_panic() {
     assert!(app.plugin_store.is_some());
 }
 
-#[test]
-fn a_missing_source_is_reported_as_a_failure() {
+#[tokio::test]
+async fn a_missing_source_is_reported_as_a_failure() {
     let temp = temp_dir("install-missing");
     let mut app = open_with_entries(temp.clone(), vec![entry("codex-weather", "does/not/exist")]);
 
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
     drain_install(&mut app);
 
     let browser = app.plugin_store.as_ref().expect("panel open");
@@ -345,8 +345,8 @@ fn a_foreign_store_result_never_fills_another_stores_panel() {
 
 // ── No install without ENTER (FR-022) ───────────────────────────────────────
 
-#[test]
-fn typing_and_moving_never_spawn_an_install() {
+#[tokio::test]
+async fn typing_and_moving_never_spawn_an_install() {
     let temp = temp_dir("install-no-enter");
     let source = codex_source(&temp, "codex-weather");
     let mut app = open_with_entries(
@@ -354,10 +354,10 @@ fn typing_and_moving_never_spawn_an_install() {
         vec![entry("codex-weather", source.to_str().unwrap())],
     );
 
-    handle_key(&mut app, key(KeyCode::Char('w')));
-    handle_key(&mut app, key(KeyCode::Down));
-    handle_key(&mut app, key(KeyCode::Up));
-    handle_key(&mut app, key(KeyCode::Backspace));
+    handle_key(&mut app, key(KeyCode::Char('w'))).await;
+    handle_key(&mut app, key(KeyCode::Down)).await;
+    handle_key(&mut app, key(KeyCode::Up)).await;
+    handle_key(&mut app, key(KeyCode::Backspace)).await;
 
     assert!(
         app.plugin_store_install_result.lock().unwrap().is_none(),
@@ -369,8 +369,8 @@ fn typing_and_moving_never_spawn_an_install() {
     );
 }
 
-#[test]
-fn enter_with_no_result_highlighted_records_a_neutral_notice_and_installs_nothing() {
+#[tokio::test]
+async fn enter_with_no_result_highlighted_records_a_neutral_notice_and_installs_nothing() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.open_plugin_store(StoreKind::Codex, "", false);
@@ -379,7 +379,7 @@ fn enter_with_no_result_highlighted_records_a_neutral_notice_and_installs_nothin
         PluginStoreStatus::Loading
     );
 
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
 
     assert_eq!(
         app.plugin_store

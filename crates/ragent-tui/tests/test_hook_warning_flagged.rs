@@ -10,8 +10,8 @@ use ragent_tui::app::LogLevel;
 #[path = "support/mod.rs"]
 mod support;
 
-#[test]
-fn test_hook_warning_current_session_sets_transient_status_and_logs() {
+#[tokio::test]
+async fn test_hook_warning_current_session_sets_transient_status_and_logs() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
@@ -20,7 +20,8 @@ fn test_hook_warning_current_session_sets_transient_status_and_logs() {
         hook_command: "hooks/warn.sh".to_string(),
         tool: "bash".to_string(),
         stderr: "suspicious network call".to_string(),
-    });
+    })
+    .await;
 
     assert!(
         app.status.contains("hook warning"),
@@ -61,8 +62,8 @@ fn test_hook_warning_current_session_sets_transient_status_and_logs() {
     );
 }
 
-#[test]
-fn test_hook_warning_long_stderr_is_truncated_safely_in_status() {
+#[tokio::test]
+async fn test_hook_warning_long_stderr_is_truncated_safely_in_status() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     let long_reason = "a".repeat(200);
@@ -72,7 +73,8 @@ fn test_hook_warning_long_stderr_is_truncated_safely_in_status() {
         hook_command: "hooks/warn.sh".to_string(),
         tool: "write".to_string(),
         stderr: long_reason.clone(),
-    });
+    })
+    .await;
 
     // The status toast must be truncated to keep the status bar readable.
     assert!(app.status.len() < long_reason.len() + 20);
@@ -87,8 +89,8 @@ fn test_hook_warning_long_stderr_is_truncated_safely_in_status() {
     assert!(entry.message.contains(&long_reason));
 }
 
-#[test]
-fn test_hook_warning_other_session_is_ignored() {
+#[tokio::test]
+async fn test_hook_warning_other_session_is_ignored() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.status = "ready".to_string();
@@ -98,7 +100,8 @@ fn test_hook_warning_other_session_is_ignored() {
         hook_command: "hooks/warn.sh".to_string(),
         tool: "bash".to_string(),
         stderr: "suspicious".to_string(),
-    });
+    })
+    .await;
 
     assert!(app.log_entries.is_empty(), "no log entry for other session");
     assert_eq!(app.status, "ready", "status should remain unchanged");
@@ -108,8 +111,8 @@ fn test_hook_warning_other_session_is_ignored() {
     );
 }
 
-#[test]
-fn test_hook_warning_transient_status_expires_to_ready() {
+#[tokio::test]
+async fn test_hook_warning_transient_status_expires_to_ready() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
@@ -118,7 +121,8 @@ fn test_hook_warning_transient_status_expires_to_ready() {
         hook_command: "hooks/warn.sh".to_string(),
         tool: "bash".to_string(),
         stderr: "suspicious".to_string(),
-    });
+    })
+    .await;
     assert!(app.status_set_at.is_some());
 
     // Simulate the grace period having elapsed by backdating the armed instant.
@@ -134,8 +138,8 @@ fn test_hook_warning_transient_status_expires_to_ready() {
     assert!(app.status_set_at.is_none());
 }
 
-#[test]
-fn test_tool_result_flagged_current_session_logs_marker_and_sets_status() {
+#[tokio::test]
+async fn test_tool_result_flagged_current_session_logs_marker_and_sets_status() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
@@ -144,7 +148,8 @@ fn test_tool_result_flagged_current_session_logs_marker_and_sets_status() {
         tool: "bash".to_string(),
         hook_command: "hooks/flag.sh".to_string(),
         reason: "policy violation: rm -rf /".to_string(),
-    });
+    })
+    .await;
 
     assert!(
         app.status.contains("bash"),
@@ -181,8 +186,8 @@ fn test_tool_result_flagged_current_session_logs_marker_and_sets_status() {
     );
 }
 
-#[test]
-fn test_tool_result_flagged_other_session_is_ignored() {
+#[tokio::test]
+async fn test_tool_result_flagged_other_session_is_ignored() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.status = "ready".to_string();
@@ -192,7 +197,8 @@ fn test_tool_result_flagged_other_session_is_ignored() {
         tool: "bash".to_string(),
         hook_command: "hooks/flag.sh".to_string(),
         reason: "policy violation".to_string(),
-    });
+    })
+    .await;
 
     assert!(app.log_entries.is_empty(), "no log entry for other session");
     assert_eq!(app.status, "ready", "status should remain unchanged");

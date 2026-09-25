@@ -103,6 +103,7 @@ fn cwd_test_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+#[allow(clippy::await_holding_lock)]
 fn cwd_lock() -> MutexGuard<'static, ()> {
     let lock = cwd_test_lock().lock();
     match lock {
@@ -164,7 +165,7 @@ async fn test_spec_jtbd_no_args_shows_usage() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/spec jtbd");
+    app.execute_slash_command("/spec jtbd").await;
 
     // Usage-error subcommand → status reports the usage hint.
     assert!(
@@ -191,7 +192,7 @@ async fn test_spec_jtbd_invalid_spec_id_rejected() {
     app.session_id = Some("s1".to_string());
 
     // `bad!id` contains `!` which is invalid per SpecId::new.
-    app.execute_slash_command("/spec jtbd bad!id");
+    app.execute_slash_command("/spec jtbd bad!id").await;
 
     assert!(
         app.status.contains("invalid spec ID"),
@@ -213,6 +214,7 @@ async fn test_spec_jtbd_invalid_spec_id_rejected() {
 /// FR-008: a spec ID that is valid syntactically but refers to a non-existent
 /// spec directory must be rejected with a "not found" error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::await_holding_lock)]
 async fn test_spec_jtbd_unknown_spec_not_found() {
     let _lock = cwd_lock();
     let (_temp, _guard) = temp_cwd();
@@ -221,7 +223,8 @@ async fn test_spec_jtbd_unknown_spec_not_found() {
     app.session_id = Some("s1".to_string());
 
     // `nonexistent-spec` is a valid SpecId but no specs/ dir exists for it.
-    app.execute_slash_command("/spec jtbd nonexistent-spec");
+    app.execute_slash_command("/spec jtbd nonexistent-spec")
+        .await;
 
     assert!(
         app.status.contains("not found"),
@@ -243,6 +246,7 @@ async fn test_spec_jtbd_unknown_spec_not_found() {
 /// FR-009: if `SPEC.md` exists but is empty, the command must error rather than
 /// silently proceeding.
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::await_holding_lock)]
 async fn test_spec_jtbd_empty_spec_md_rejected() {
     let _lock = cwd_lock();
     let (_temp, _guard) = temp_cwd();
@@ -252,7 +256,7 @@ async fn test_spec_jtbd_empty_spec_md_rejected() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/spec jtbd emptyspec");
+    app.execute_slash_command("/spec jtbd emptyspec").await;
 
     assert!(
         app.status.contains("empty"),
@@ -268,6 +272,7 @@ async fn test_spec_jtbd_empty_spec_md_rejected() {
 /// FR-003: if `JTBD.md` already exists and `--force` is not supplied, the
 /// command must refuse and tell the user to re-run with `--force`.
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::await_holding_lock)]
 async fn test_spec_jtbd_guard_refuses_existing_without_force() {
     let _lock = cwd_lock();
     let (_temp, _guard) = temp_cwd();
@@ -278,7 +283,7 @@ async fn test_spec_jtbd_guard_refuses_existing_without_force() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/spec jtbd myspec");
+    app.execute_slash_command("/spec jtbd myspec").await;
 
     // Guard status: "spec jtbd: <id> already has JTBD.md"
     assert!(
@@ -311,6 +316,7 @@ async fn test_spec_jtbd_guard_refuses_existing_without_force() {
 
 /// FR-004: `--force` bypasses the guard and starts the JTBD generation task.
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::await_holding_lock)]
 async fn test_spec_jtbd_force_bypasses_guard() {
     let _lock = cwd_lock();
     let (_temp, _guard) = temp_cwd();
@@ -321,7 +327,7 @@ async fn test_spec_jtbd_force_bypasses_guard() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/spec jtbd myspec --force");
+    app.execute_slash_command("/spec jtbd myspec --force").await;
 
     // FR-011: status should match build_jtbd_status pattern
     assert!(
@@ -338,6 +344,7 @@ async fn test_spec_jtbd_force_bypasses_guard() {
 /// FR-002 / FR-011: a valid spec without an existing JTBD.md should start the
 /// generation task with status, message, and log parity matching `/spec create`.
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::await_holding_lock)]
 async fn test_spec_jtbd_starts_generation() {
     let _lock = cwd_lock();
     let (_temp, _guard) = temp_cwd();
@@ -347,7 +354,7 @@ async fn test_spec_jtbd_starts_generation() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/spec jtbd validspec");
+    app.execute_slash_command("/spec jtbd validspec").await;
 
     // FR-011: status parity — should be a "spec jtbd: …" status string
     assert!(
@@ -386,6 +393,7 @@ async fn test_spec_jtbd_starts_generation() {
 /// FR-005: `--agent <name>` with a name not in the cycleable agents list must
 /// be rejected with an error and no task should be spawned.
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::await_holding_lock)]
 async fn test_spec_jtbd_unknown_agent_rejected() {
     let _lock = cwd_lock();
     let (_temp, _guard) = temp_cwd();
@@ -395,7 +403,8 @@ async fn test_spec_jtbd_unknown_agent_rejected() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/spec jtbd validspec --agent nonexistent-agent");
+    app.execute_slash_command("/spec jtbd validspec --agent nonexistent-agent")
+        .await;
 
     assert!(
         app.status.contains("agent") && app.status.contains("not found"),
@@ -417,6 +426,7 @@ async fn test_spec_jtbd_unknown_agent_rejected() {
 /// FR-005: `--agent <name>` with a valid built-in agent name should start the
 /// generation task (agent override accepted).
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::await_holding_lock)]
 async fn test_spec_jtbd_valid_agent_override_starts() {
     let _lock = cwd_lock();
     let (_temp, _guard) = temp_cwd();
@@ -427,7 +437,8 @@ async fn test_spec_jtbd_valid_agent_override_starts() {
     app.session_id = Some("s1".to_string());
 
     // `general` is always in the built-in agent roster.
-    app.execute_slash_command("/spec jtbd validspec --agent general");
+    app.execute_slash_command("/spec jtbd validspec --agent general")
+        .await;
 
     assert!(
         app.status.contains("spec jtbd") && app.status.contains("validspec"),

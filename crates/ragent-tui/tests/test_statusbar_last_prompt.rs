@@ -92,10 +92,10 @@ fn test_prompt_display_text_multibyte_chars_counted_as_chars() {
 // Slash-command submissions populate the tag
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[test]
-fn test_execute_slash_command_sets_last_prompt() {
+#[tokio::test]
+async fn test_execute_slash_command_sets_last_prompt() {
     let mut app = support::make_app();
-    app.execute_slash_command("/about");
+    app.execute_slash_command("/about").await;
     assert_eq!(
         app.last_prompt, "/about",
         "slash command must be recorded as the last prompt so the status-bar \
@@ -103,19 +103,19 @@ fn test_execute_slash_command_sets_last_prompt() {
     );
 }
 
-#[test]
-fn test_execute_slash_command_trims_whitespace() {
+#[tokio::test]
+async fn test_execute_slash_command_trims_whitespace() {
     let mut app = support::make_app();
-    app.execute_slash_command("  /agents  ");
+    app.execute_slash_command("  /agents  ").await;
     assert_eq!(app.last_prompt, "/agents");
 }
 
-#[test]
-fn test_statusbar_renders_slash_command_tag() {
+#[tokio::test]
+async fn test_statusbar_renders_slash_command_tag() {
     let mut app = support::make_app();
     // `/about` runs without a tokio runtime and leaves a short status, so the
     // tag fits the line even with the status text on the right.
-    app.execute_slash_command("/about");
+    app.execute_slash_command("/about").await;
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
     assert!(
@@ -125,12 +125,13 @@ fn test_statusbar_renders_slash_command_tag() {
     );
 }
 
-#[test]
-fn test_statusbar_slash_command_tag_truncated_like_prompts() {
+#[tokio::test]
+async fn test_statusbar_slash_command_tag_truncated_like_prompts() {
     let mut app = support::make_app();
     // Unknown command suffix is ignored; `/about` keeps the status short so
     // the tag has room to render.
-    app.execute_slash_command(&format!("/about {}", "c".repeat(40)));
+    app.execute_slash_command(&format!("/about {}", "c".repeat(40)))
+        .await;
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
     let expected = format!("[/about {}....]", "c".repeat(25));

@@ -65,8 +65,8 @@ fn app_with_session() -> App {
 }
 
 /// Open the menu the way the user would (`ALT-Q`) and assert it opened.
-fn open_menu_with_alt_q(app: &mut App) {
-    app.handle_key_event(alt(KeyCode::Char('q')));
+async fn open_menu_with_alt_q(app: &mut App) {
+    app.handle_key_event(alt(KeyCode::Char('q'))).await;
     assert!(
         app.queue_menu_open,
         "precondition: ALT-Q must open the queue-control menu"
@@ -74,12 +74,13 @@ fn open_menu_with_alt_q(app: &mut App) {
 }
 
 /// Deliver a `MessageEnd` for the current session with the given reason.
-fn message_end(app: &mut App, reason: FinishReason) {
+async fn message_end(app: &mut App, reason: FinishReason) {
     app.handle_event(Event::MessageEnd {
         session_id: "test-session".to_string(),
         message_id: "msg-1".to_string(),
         reason,
-    });
+    })
+    .await;
 }
 
 /// Count user messages in the conversation.
@@ -117,10 +118,10 @@ fn menu_row(terminal: &Terminal<TestBackend>, app: &App, needle: &str) -> String
 // FR-021 / FR-022 / FR-031 — opening the menu through ALT-Q
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_alt_q_opens_a_menu_with_exactly_the_four_options() {
+#[tokio::test]
+async fn test_alt_q_opens_a_menu_with_exactly_the_four_options() {
     let mut app = app_with_session();
-    open_menu_with_alt_q(&mut app);
+    open_menu_with_alt_q(&mut app).await;
 
     let labels = app.queue_menu_labels();
     assert_eq!(labels.len(), 4, "FR-021: exactly four options");
@@ -129,8 +130,8 @@ fn test_alt_q_opens_a_menu_with_exactly_the_four_options() {
     assert_eq!(labels[3], "Show", "FR-021: fourth option is `Show`");
 }
 
-#[test]
-fn test_alt_q_opens_without_disturbing_the_draft_or_running_turn() {
+#[tokio::test]
+async fn test_alt_q_opens_without_disturbing_the_draft_or_running_turn() {
     let mut app = app_with_session();
     app.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
@@ -140,7 +141,7 @@ fn test_alt_q_opens_without_disturbing_the_draft_or_running_turn() {
     app.pending_attachments
         .push(PathBuf::from("/tmp/probe.png"));
 
-    open_menu_with_alt_q(&mut app);
+    open_menu_with_alt_q(&mut app).await;
 
     assert_eq!(
         app.input, "INTEG-DRAFT",
@@ -172,10 +173,10 @@ fn test_alt_q_opens_without_disturbing_the_draft_or_running_turn() {
 // FR-023 — the `Next` row is selectable only while the queue is non-empty
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_next_row_selectability_tracks_the_queue_end_to_end() {
+#[tokio::test]
+async fn test_next_row_selectability_tracks_the_queue_end_to_end() {
     let mut app = app_with_session();
-    open_menu_with_alt_q(&mut app);
+    open_menu_with_alt_q(&mut app).await;
 
     // Empty queue: the `Next` row is painted dimmed and carries no marker.
     let empty = render(&mut app, 120, 40);
@@ -205,8 +206,8 @@ async fn test_alt_q_next_dispatches_oldest_entry_and_preserves_fifo() {
     app.input_queue.push_back(entry("INTEG-QUEUE-1"));
     app.input_queue.push_back(entry("INTEG-QUEUE-2"));
 
-    open_menu_with_alt_q(&mut app);
-    app.queue_menu_select_next();
+    open_menu_with_alt_q(&mut app).await;
+    app.queue_menu_select_next().await;
 
     assert!(
         !app.queue_menu_open,
@@ -222,8 +223,8 @@ async fn test_alt_q_next_dispatches_oldest_entry_and_preserves_fifo() {
         "FR-024: only the oldest entry is consumed"
     );
 
-    open_menu_with_alt_q(&mut app);
-    app.queue_menu_select_next();
+    open_menu_with_alt_q(&mut app).await;
+    app.queue_menu_select_next().await;
 
     assert_eq!(
         app.last_prompt, "INTEG-QUEUE-2",
@@ -244,8 +245,8 @@ async fn test_alt_q_next_stops_running_turn_then_dispatches_at_the_boundary() {
     app.cancel_flag = Some(flag.clone());
     app.input_queue.push_back(entry("INTEG-STOP-THEN-RUN"));
 
-    open_menu_with_alt_q(&mut app);
-    app.queue_menu_select_next();
+    open_menu_with_alt_q(&mut app).await;
+    app.queue_menu_select_next().await;
 
     assert!(
         flag.load(Ordering::Relaxed),
@@ -267,7 +268,7 @@ async fn test_alt_q_next_stops_running_turn_then_dispatches_at_the_boundary() {
     );
 
     // The cancel settles; the deferred entry runs at the boundary.
-    message_end(&mut app, FinishReason::Cancelled);
+    message_end(&mut app, FinishReason::Cancelled).await;
 
     assert_eq!(
         app.last_prompt, "INTEG-STOP-THEN-RUN",
@@ -284,8 +285,8 @@ async fn test_alt_q_next_stops_running_turn_then_dispatches_at_the_boundary() {
 // FR-025 / FR-029 — `Stop` halts without advancing the queue
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_alt_q_stop_halts_without_advancing_the_queue() {
+#[tokio::test]
+async fn test_alt_q_stop_halts_without_advancing_the_queue() {
     let mut app = app_with_session();
     app.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
@@ -294,7 +295,7 @@ fn test_alt_q_stop_halts_without_advancing_the_queue() {
     app.input_queue.push_back(entry("STOP-B"));
     let before = user_message_count(&app);
 
-    open_menu_with_alt_q(&mut app);
+    open_menu_with_alt_q(&mut app).await;
     assert_eq!(
         app.queue_menu_halt_label(),
         "Stop",
@@ -338,14 +339,14 @@ async fn test_alt_q_halt_row_reads_resume_and_resumes_after_a_stop() {
     app.input_queue.push_back(entry("RESUME-A"));
 
     // Stop the turn through the menu, then let the cancel settle.
-    open_menu_with_alt_q(&mut app);
+    open_menu_with_alt_q(&mut app).await;
     assert_eq!(
         app.queue_menu_halt_label(),
         "Stop",
         "FR-026: while executing the row reads `Stop`"
     );
     app.queue_menu_select_halt();
-    message_end(&mut app, FinishReason::Cancelled);
+    message_end(&mut app, FinishReason::Cancelled).await;
 
     assert!(
         !app.is_processing,
@@ -357,7 +358,7 @@ async fn test_alt_q_halt_row_reads_resume_and_resumes_after_a_stop() {
     );
 
     // Reopen: the same row now reads `Resume` and restarts the work.
-    open_menu_with_alt_q(&mut app);
+    open_menu_with_alt_q(&mut app).await;
     assert_eq!(
         app.queue_menu_halt_label(),
         "Resume",
@@ -389,13 +390,13 @@ async fn test_alt_q_halt_row_reads_resume_and_resumes_after_a_stop() {
 // FR-028 — `Clear` opens the confirmation dialog without emptying the queue
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_alt_q_clear_opens_the_confirmation_dialog_without_emptying() {
+#[tokio::test]
+async fn test_alt_q_clear_opens_the_confirmation_dialog_without_emptying() {
     let mut app = app_with_session();
     app.input_queue.push_back(entry("CLEAR-A"));
     app.input_queue.push_back(entry("CLEAR-B"));
 
-    open_menu_with_alt_q(&mut app);
+    open_menu_with_alt_q(&mut app).await;
     assert_eq!(
         app.queue_menu_labels()[2],
         "Clear",
@@ -426,8 +427,8 @@ fn test_alt_q_clear_opens_the_confirmation_dialog_without_emptying() {
 // FR-031 / FR-032 — Esc dismisses the menu without mutating state
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_alt_q_esc_dismisses_without_mutating_input_or_queue() {
+#[tokio::test]
+async fn test_alt_q_esc_dismisses_without_mutating_input_or_queue() {
     let mut app = app_with_session();
     app.is_processing = true;
     app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
@@ -438,8 +439,8 @@ fn test_alt_q_esc_dismisses_without_mutating_input_or_queue() {
     app.input_queue.push_back(entry("KEEP-A"));
     app.input_queue.push_back(entry("KEEP-B"));
 
-    open_menu_with_alt_q(&mut app);
-    app.handle_key_event(key(KeyCode::Esc));
+    open_menu_with_alt_q(&mut app).await;
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(!app.queue_menu_open, "FR-032: Esc dismisses the menu");
     assert_eq!(
@@ -477,8 +478,8 @@ async fn test_next_row_never_mutates_the_live_draft() {
         .push(PathBuf::from("/tmp/diagram.png"));
     app.input_queue.push_back(entry("RUN-ME"));
 
-    open_menu_with_alt_q(&mut app);
-    app.queue_menu_select_next();
+    open_menu_with_alt_q(&mut app).await;
+    app.queue_menu_select_next().await;
 
     assert_eq!(
         app.input, "unfinished draft",

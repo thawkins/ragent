@@ -32,8 +32,8 @@ fn reasoning_entry() -> ModelPickerEntry {
     }
 }
 
-#[test]
-fn test_model_selection_opens_thinking_selector_for_reasoning_models() {
+#[tokio::test]
+async fn test_model_selection_opens_thinking_selector_for_reasoning_models() {
     let mut app = support::make_app();
     app.provider_setup = Some(ProviderSetupStep::SelectModel {
         provider_id: "anthropic".to_string(),
@@ -42,7 +42,8 @@ fn test_model_selection_opens_thinking_selector_for_reasoning_models() {
         selected: 0,
     });
 
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     match app.provider_setup.as_ref() {
         Some(ProviderSetupStep::SelectThinkingLevel {
@@ -63,8 +64,8 @@ fn test_model_selection_opens_thinking_selector_for_reasoning_models() {
     }
 }
 
-#[test]
-fn test_thinking_selector_confirm_persists_selected_level() {
+#[tokio::test]
+async fn test_thinking_selector_confirm_persists_selected_level() {
     let mut app = support::make_app();
     app.provider_setup = Some(ProviderSetupStep::SelectThinkingLevel {
         provider_id: "anthropic".to_string(),
@@ -73,7 +74,8 @@ fn test_thinking_selector_confirm_persists_selected_level() {
         selected: 4,
     });
 
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert_eq!(
         app.selected_model.as_deref(),
@@ -98,8 +100,8 @@ fn test_thinking_selector_confirm_persists_selected_level() {
     }
 }
 
-#[test]
-fn test_ollama_model_with_empty_levels_still_opens_thinking_selector() {
+#[tokio::test]
+async fn test_ollama_model_with_empty_levels_still_opens_thinking_selector() {
     let mut app = support::make_app();
     app.provider_setup = Some(ProviderSetupStep::SelectModel {
         provider_id: "ollama".to_string(),
@@ -123,7 +125,8 @@ fn test_ollama_model_with_empty_levels_still_opens_thinking_selector() {
         selected: 0,
     });
 
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     match app.provider_setup.as_ref() {
         Some(ProviderSetupStep::SelectThinkingLevel {
@@ -142,8 +145,8 @@ fn test_ollama_model_with_empty_levels_still_opens_thinking_selector() {
     }
 }
 
-#[test]
-fn test_ollama_reasoning_model_defaults_to_low_thinking() {
+#[tokio::test]
+async fn test_ollama_reasoning_model_defaults_to_low_thinking() {
     let mut app = support::make_app();
     app.provider_setup = Some(ProviderSetupStep::SelectModel {
         provider_id: "ollama".to_string(),
@@ -167,7 +170,8 @@ fn test_ollama_reasoning_model_defaults_to_low_thinking() {
         selected: 0,
     });
 
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     match app.provider_setup.as_ref() {
         Some(ProviderSetupStep::SelectThinkingLevel { selected, .. }) => {

@@ -12,7 +12,7 @@
 // 2024. It is a single-threaded test that restores the previous value.
 #![allow(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ragent_config::{PluginStoreEndpoint, PluginStoresConfig, PluginsConfig};
 use ragent_plugins::{
@@ -209,8 +209,15 @@ fn run_plugin_subcommand_handles_stores_without_a_session() {
     // SAFETY: single-threaded test; the value is restored below.
     unsafe { std::env::set_var("XDG_CONFIG_HOME", &config_home) };
 
-    let report = run_plugin_subcommand(tree.path(), "stores", "", BTreeSet::new(), BTreeSet::new())
-        .expect("stores must be handled by the shared dispatch ladder");
+    let report = run_plugin_subcommand(
+        tree.path(),
+        "stores",
+        "",
+        BTreeSet::new(),
+        BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .expect("stores must be handled by the shared dispatch ladder");
 
     match saved_xdg {
         Some(prev) => unsafe { std::env::set_var("XDG_CONFIG_HOME", prev) },

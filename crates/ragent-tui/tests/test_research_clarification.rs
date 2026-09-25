@@ -94,8 +94,8 @@ fn make_app(event_bus: Arc<EventBus>) -> App {
 /// The dialog side of the clarification round-trip: a free-text question
 /// queued via `QuestionRequested` is answered by typing text and pressing
 /// Enter, which publishes `QuestionAnswered` with the submitted answer.
-#[test]
-fn test_research_clarification_dialog_round_trip_publishes_answer() {
+#[tokio::test]
+async fn test_research_clarification_dialog_round_trip_publishes_answer() {
     let event_bus = Arc::new(EventBus::default());
     let mut rx = event_bus.subscribe();
     let mut app = make_app(event_bus.clone());
@@ -109,7 +109,8 @@ fn test_research_clarification_dialog_round_trip_publishes_answer() {
         question: "Could you narrow this down? Which aspect of 'rust' should the research cover?"
             .to_string(),
         options: Vec::new(),
-    });
+    })
+    .await;
     assert_eq!(app.question_queue.len(), 1, "dialog should be queued");
 
     // Type the answer and submit it with Enter (the free-text dialog path).
@@ -117,7 +118,8 @@ fn test_research_clarification_dialog_round_trip_publishes_answer() {
     let _ = ragent_tui::input::handle_key(
         &mut app,
         crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Enter),
-    );
+    )
+    .await;
 
     assert!(
         app.question_queue.is_empty(),
@@ -143,8 +145,8 @@ fn test_research_clarification_dialog_round_trip_publishes_answer() {
 /// Esc on the free-text dialog publishes the dismissal marker; the
 /// clarification gate must treat that answer as "cancelled" rather than
 /// folding it into the topic.
-#[test]
-fn test_research_clarification_dismissed_marker_rejected() {
+#[tokio::test]
+async fn test_research_clarification_dismissed_marker_rejected() {
     let event_bus = Arc::new(EventBus::default());
     let mut rx = event_bus.subscribe();
     let mut app = make_app(event_bus.clone());
@@ -156,12 +158,14 @@ fn test_research_clarification_dismissed_marker_rejected() {
         question: "This topic is a bit broad. What specific angle should the research focus on?"
             .to_string(),
         options: Vec::new(),
-    });
+    })
+    .await;
 
     let _ = ragent_tui::input::handle_key(
         &mut app,
         crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Esc),
-    );
+    )
+    .await;
 
     assert!(app.question_queue.is_empty(), "dialog should be consumed");
     let answer = rx

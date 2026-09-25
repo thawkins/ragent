@@ -32,7 +32,7 @@ fn prompt_report(input: &str) -> String {
         .expect("multi-thread runtime")
         .block_on(async move {
             let mut app = make_app();
-            app.execute_slash_command(input);
+            app.execute_slash_command(input).await;
             app.messages
                 .last()
                 .map(|m| m.text_content())
@@ -48,11 +48,11 @@ fn test_prompt_no_llm_request_token_usage_unchanged() {
         .expect("multi-thread runtime")
         .block_on(async move {
             let mut app = make_app();
-            app.execute_slash_command("/prompt help"); // creates the session via the shared gate
+            app.execute_slash_command("/prompt help").await; // creates the session via the shared gate
             let before = app.token_usage;
-            app.execute_slash_command("/prompt general");
-            app.execute_slash_command("/prompt subagent general");
-            app.execute_slash_command("/prompt primary general");
+            app.execute_slash_command("/prompt general").await;
+            app.execute_slash_command("/prompt subagent general").await;
+            app.execute_slash_command("/prompt primary general").await;
             assert_eq!(
                 app.token_usage, before,
                 "FR-012: /prompt must make no LLM request (token usage unchanged)"
@@ -73,7 +73,7 @@ fn test_prompt_persists_nothing_to_session_history() {
         .expect("multi-thread runtime")
         .block_on(async move {
             let mut app = make_app();
-            app.execute_slash_command("/prompt help"); // creates the session via the shared gate
+            app.execute_slash_command("/prompt help").await; // creates the session via the shared gate
             let sid = app
                 .session_id
                 .clone()
@@ -84,8 +84,8 @@ fn test_prompt_persists_nothing_to_session_history() {
                 .get_messages(&sid)
                 .expect("read persisted session history");
 
-            app.execute_slash_command("/prompt general");
-            app.execute_slash_command("/prompt subagent general");
+            app.execute_slash_command("/prompt general").await;
+            app.execute_slash_command("/prompt subagent general").await;
 
             let persisted_after = app
                 .session_processor

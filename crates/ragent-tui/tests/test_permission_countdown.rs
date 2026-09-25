@@ -216,8 +216,8 @@ fn test_countdown_formats_correctly() {
     }
 }
 
-#[test]
-fn test_permission_requested_event_queues_120_second_timeout() {
+#[tokio::test]
+async fn test_permission_requested_event_queues_120_second_timeout() {
     let mut app = make_app();
     app.session_id = Some("session-1".to_string());
 
@@ -227,7 +227,8 @@ fn test_permission_requested_event_queues_120_second_timeout() {
         permission: "file:write".to_string(),
         description: "create: crates/ragent-tui/tests/test_permission_countdown.rs".to_string(),
         options: vec![],
-    });
+    })
+    .await;
 
     let request = app
         .permission_queue

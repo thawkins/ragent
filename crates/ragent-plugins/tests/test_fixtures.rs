@@ -8,7 +8,7 @@
 //! a fixture copy into a sandboxed temp store (`target/temp/`, per AGENTS.md)
 //! via the real `add` path, then drives discovery / enable / disable / test.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -437,9 +437,14 @@ fn acceptance_8_master_switch_disables_the_subsystem() {
 
     // Control subcommands report the disabled subsystem and change no state.
     for sub in ["list", "enable", "disable"] {
-        let report =
-            ragent_plugins::run_control_command(&mut session, &mut surface, sub, "codex-weather")
-                .expect("control subcommand handled");
+        let report = ragent_plugins::run_control_command(
+            &mut session,
+            &mut surface,
+            sub,
+            "codex-weather",
+            &BTreeMap::new(),
+        )
+        .expect("control subcommand handled");
         assert!(report.contains("[err]"), "{sub}: {report}");
         assert!(report.contains("disabled"), "{sub}: {report}");
     }

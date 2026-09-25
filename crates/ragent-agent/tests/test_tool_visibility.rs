@@ -153,3 +153,53 @@ fn test_runtime_merge_preserves_unspecified_tool_visibility_switches() {
     assert!(merged.tool_visibility.agents);
     assert!(merged.tool_visibility.plan);
 }
+
+#[test]
+fn test_hidden_definitions_tracks_set_hidden() {
+    let registry = ragent_agent::tool::create_default_registry();
+    assert!(
+        registry.hidden_definitions().is_empty(),
+        "no tools should be hidden by default"
+    );
+
+    registry.set_hidden(&["read".to_string()]);
+    let hidden = registry.hidden_definitions();
+    assert_eq!(hidden.len(), 1);
+    assert_eq!(hidden[0].name, "read");
+    // A hidden tool is excluded from `definitions()`.
+    assert!(!registry.definitions().iter().any(|d| d.name == "read"));
+}
+
+#[test]
+fn test_hidden_definitions_complements_visible_definitions() {
+    let registry = ragent_agent::tool::create_default_registry();
+    let total = registry.list().len();
+
+    registry.set_hidden(&[
+        "codeindex_search".to_string(),
+        "gitlab_list_issues".to_string(),
+    ]);
+
+    let visible = registry.definitions().len();
+    let hidden = registry.hidden_definitions().len();
+    assert_eq!(
+        visible + hidden,
+        total,
+        "visible + hidden must account for every registered tool"
+    );
+    assert!(
+        registry
+            .hidden_definitions()
+            .iter()
+            .any(|d| d.name == "codeindex_search")
+    );
+}
+
+#[test]
+fn test_hidden_definitions_ignores_unknown_names() {
+    let registry = ragent_agent::tool::create_default_registry();
+    registry.set_hidden(&["read".to_string(), "not_a_real_tool".to_string()]);
+    let hidden = registry.hidden_definitions();
+    assert_eq!(hidden.len(), 1);
+    assert_eq!(hidden[0].name, "read");
+}

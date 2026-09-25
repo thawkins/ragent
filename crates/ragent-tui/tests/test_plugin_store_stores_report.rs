@@ -80,6 +80,7 @@ impl Drop for LaunchEnv {
 /// Enter an isolated empty project (no `.ragent/ragent.json` at all), with the
 /// global config dir redirected into the tempdir so the developer's real config
 /// is never read.
+#[allow(clippy::await_holding_lock)]
 fn enter_empty_project() -> (MutexGuard<'static, ()>, LaunchEnv, tempfile::TempDir) {
     let guard = launch_lock().lock().unwrap_or_else(|e| e.into_inner());
     let env = LaunchEnv::new();
@@ -129,13 +130,14 @@ fn flat_text(app: &App) -> String {
 
 // -- No-config launch emits no error and opens the panel (FR-036) --------------
 
-#[test]
-fn codex_launch_with_no_config_opens_the_panel_and_prints_nothing() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn codex_launch_with_no_config_opens_the_panel_and_prints_nothing() {
     let (_lock, _env, _temp) = enter_empty_project();
     let mut app = app_with_fixture_seam();
     let before = assistant_count(&app);
 
-    app.execute_slash_command("/plugins codex");
+    app.execute_slash_command("/plugins codex").await;
 
     let browser = app
         .plugin_store
@@ -154,13 +156,14 @@ fn codex_launch_with_no_config_opens_the_panel_and_prints_nothing() {
     );
 }
 
-#[test]
-fn claude_launch_with_no_config_opens_the_panel_and_prints_nothing() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn claude_launch_with_no_config_opens_the_panel_and_prints_nothing() {
     let (_lock, _env, _temp) = enter_empty_project();
     let mut app = app_with_fixture_seam();
     let before = assistant_count(&app);
 
-    app.execute_slash_command("/plugins claude");
+    app.execute_slash_command("/plugins claude").await;
 
     let browser = app
         .plugin_store
@@ -171,8 +174,9 @@ fn claude_launch_with_no_config_opens_the_panel_and_prints_nothing() {
     assert_eq!(assistant_count(&app), before);
 }
 
-#[test]
-fn both_stores_launch_with_no_config_and_emit_no_error() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn both_stores_launch_with_no_config_and_emit_no_error() {
     // FR-036: with no `plugins.stores` block, the launch path emits no
     // configuration error and opens the browse panel for BOTH stores.
     let (_lock, _env, _temp) = enter_empty_project();
@@ -184,7 +188,7 @@ fn both_stores_launch_with_no_config_and_emit_no_error() {
     ] {
         app.close_plugin_store();
         let before = assistant_count(&app);
-        app.execute_slash_command(invocation);
+        app.execute_slash_command(invocation).await;
         assert_eq!(
             assistant_count(&app),
             before,
@@ -200,14 +204,15 @@ fn both_stores_launch_with_no_config_and_emit_no_error() {
 
 // -- `/plugins stores` tags default-sourced endpoints (FR-038) -----------------
 
-#[test]
-fn stores_report_tags_both_endpoints_as_default_with_no_config() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn stores_report_tags_both_endpoints_as_default_with_no_config() {
     // FR-038: with no `plugins.stores` block, the report tags each store's
     // effective endpoint as sourced from the compiled default.
     let (_lock, _env, _temp) = enter_empty_project();
     let mut app = app_with_fixture_seam();
 
-    app.execute_slash_command("/plugins stores");
+    app.execute_slash_command("/plugins stores").await;
     let raw = last_text(&app);
     let text = flat_text(&app);
 
@@ -242,14 +247,15 @@ fn stores_report_tags_both_endpoints_as_default_with_no_config() {
     );
 }
 
-#[test]
-fn stores_report_matches_the_direct_provenance_resolution() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn stores_report_matches_the_direct_provenance_resolution() {
     // The TUI report and the pure provenance resolver agree: with no config both
     // stores resolve to `EndpointSource::Default` and their compiled URL.
     let (_lock, _env, _temp) = enter_empty_project();
     let mut app = app_with_fixture_seam();
 
-    app.execute_slash_command("/plugins stores");
+    app.execute_slash_command("/plugins stores").await;
     let text = flat_text(&app);
 
     let stores = ragent_config::PluginsConfig::default().stores_or_default();

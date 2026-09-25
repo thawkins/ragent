@@ -42,8 +42,9 @@ fn draw(app: &mut App, cols: u16, rows: u16) -> ratatui::backend::TestBackend {
 }
 
 /// Send the Alt+C key chord TC-001 presses.
-fn press_alt_c(app: &mut App) {
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::ALT));
+async fn press_alt_c(app: &mut App) {
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::ALT))
+        .await;
 }
 
 /// Wait for a scheduled background snapshot to be adopted (FR-015 refresh
@@ -79,7 +80,7 @@ async fn tc001_alt_c_toggles_panel_open_and_closed() {
     assert!(!app.show_context_panel, "precondition: panel starts hidden");
 
     // Step 1: the first Alt+C opens the panel.
-    press_alt_c(&mut app);
+    press_alt_c(&mut app).await;
     assert!(app.show_context_panel, "step 1: panel opens");
     assert_eq!(app.status, "context panel visible");
 
@@ -108,7 +109,7 @@ async fn tc001_alt_c_toggles_panel_open_and_closed() {
     drain_snapshot_polling(&mut app).await;
 
     // Step 3: the second Alt+C closes it; full width returns.
-    press_alt_c(&mut app);
+    press_alt_c(&mut app).await;
     assert!(!app.show_context_panel, "step 3: panel closes");
     assert_eq!(app.status, "context panel hidden");
     draw(&mut app, 100, 30);
@@ -117,7 +118,7 @@ async fn tc001_alt_c_toggles_panel_open_and_closed() {
 
     // Step 5: the third Alt+C reopens it in the same place (the plan's step 4
     // is only a pause between key presses).
-    press_alt_c(&mut app);
+    press_alt_c(&mut app).await;
     assert!(app.show_context_panel, "step 5: panel reopens");
     draw(&mut app, 100, 30);
     assert_eq!(app.context_panel_area, first_area);

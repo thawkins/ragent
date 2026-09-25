@@ -1312,6 +1312,32 @@ impl ToolRegistry {
         self.invalidate_definitions_cache();
     }
 
+    /// Returns the currently hidden tool names, sorted alphabetically.
+    ///
+    /// A tool is hidden when it is excluded from [`definitions`](Self::definitions)
+    /// and the system-prompt tool listing, but remains registered and executable.
+    /// Used by the `/tools` report to render hidden entries distinctly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_agent::tool::create_default_registry;
+    ///
+    /// let registry = create_default_registry();
+    /// registry.set_hidden(&["read".to_string()]);
+    /// assert!(registry.hidden().contains(&"read".to_string()));
+    /// ```
+    #[must_use]
+    pub fn hidden(&self) -> Vec<String> {
+        let hidden = self
+            .hidden
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut names: Vec<String> = hidden.iter().cloned().collect();
+        names.sort();
+        names
+    }
+
     /// Registers a tool, keyed by its [`Tool::name`].
     ///
     /// # Examples
@@ -1435,6 +1461,46 @@ impl ToolRegistry {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             *guard = Some(defs.clone());
         }
+        defs
+    }
+
+    /// Returns [`ToolDefinition`] descriptors for the registered tools that are
+    /// currently hidden by [`set_hidden`](Self::set_hidden), sorted by name.
+    ///
+    /// Used by the `/tools` report so a hidden tool is still listed (matching
+    /// the count of [`definitions`](Self::definitions)) but marked as disabled.
+    /// Hidden tools remain registered and executable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_agent::tool::create_default_registry;
+    ///
+    /// let registry = create_default_registry();
+    /// registry.set_hidden(&["read".to_string()]);
+    /// let hidden = registry.hidden_definitions();
+    /// assert_eq!(hidden.len(), 1);
+    /// assert_eq!(hidden[0].name, "read");
+    /// ```
+    pub fn hidden_definitions(&self) -> Vec<ToolDefinition> {
+        let tools = self
+            .tools
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let hidden = self
+            .hidden
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut defs: Vec<ToolDefinition> = tools
+            .values()
+            .filter(|t| hidden.contains(t.name()))
+            .map(|t| ToolDefinition {
+                name: t.name().to_string(),
+                description: t.description().to_string(),
+                parameters: t.parameters_schema(),
+            })
+            .collect();
+        defs.sort_by(|a, b| a.name.cmp(&b.name));
         defs
     }
 }

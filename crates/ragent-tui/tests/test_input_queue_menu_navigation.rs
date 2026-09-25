@@ -39,12 +39,12 @@ fn entry(text: &str) -> QueuedInput {
 }
 
 /// Open the menu the way the user would (`ALT-Q`).
-fn menu_open(queue_len: usize) -> App {
+async fn menu_open(queue_len: usize) -> App {
     let mut app = support::make_app();
     for i in 0..queue_len {
         app.input_queue.push_back(entry(&format!("entry-{i}")));
     }
-    app.handle_key_event(alt(KeyCode::Char('q')));
+    app.handle_key_event(alt(KeyCode::Char('q'))).await;
     assert!(app.queue_menu_open, "precondition: ALT-Q opened the menu");
     app
 }
@@ -53,11 +53,11 @@ fn menu_open(queue_len: usize) -> App {
 // Up/Down move the highlight
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_down_moves_the_highlight_to_the_next_row() {
-    let mut app = menu_open(2);
+#[tokio::test]
+async fn test_down_moves_the_highlight_to_the_next_row() {
+    let mut app = menu_open(2).await;
 
-    app.handle_key_event(key(KeyCode::Down));
+    app.handle_key_event(key(KeyCode::Down)).await;
 
     assert_eq!(
         app.queue_menu_selected, QUEUE_MENU_ROW_HALT,
@@ -66,13 +66,13 @@ fn test_down_moves_the_highlight_to_the_next_row() {
     assert!(app.needs_redraw, "the move must repaint on the next frame");
 }
 
-#[test]
-fn test_up_moves_the_highlight_back_to_the_first_row() {
-    let mut app = menu_open(2);
-    app.handle_key_event(key(KeyCode::Down));
+#[tokio::test]
+async fn test_up_moves_the_highlight_back_to_the_first_row() {
+    let mut app = menu_open(2).await;
+    app.handle_key_event(key(KeyCode::Down)).await;
     app.queue_menu_selected = QUEUE_MENU_ROW_CLEAR;
 
-    app.handle_key_event(key(KeyCode::Up));
+    app.handle_key_event(key(KeyCode::Up)).await;
 
     assert_eq!(
         app.queue_menu_selected, QUEUE_MENU_ROW_HALT,
@@ -80,12 +80,12 @@ fn test_up_moves_the_highlight_back_to_the_first_row() {
     );
 }
 
-#[test]
-fn test_down_stops_at_the_last_row() {
-    let mut app = menu_open(2);
+#[tokio::test]
+async fn test_down_stops_at_the_last_row() {
+    let mut app = menu_open(2).await;
     app.queue_menu_selected = QUEUE_MENU_ROW_SHOW;
 
-    app.handle_key_event(key(KeyCode::Down));
+    app.handle_key_event(key(KeyCode::Down)).await;
 
     assert_eq!(
         app.queue_menu_selected, QUEUE_MENU_ROW_SHOW,
@@ -93,12 +93,12 @@ fn test_down_stops_at_the_last_row() {
     );
 }
 
-#[test]
-fn test_up_stops_at_the_first_row() {
-    let mut app = menu_open(2);
+#[tokio::test]
+async fn test_up_stops_at_the_first_row() {
+    let mut app = menu_open(2).await;
     assert_eq!(app.queue_menu_selected, QUEUE_MENU_ROW_NEXT);
 
-    app.handle_key_event(key(KeyCode::Up));
+    app.handle_key_event(key(KeyCode::Up)).await;
 
     assert_eq!(
         app.queue_menu_selected, QUEUE_MENU_ROW_NEXT,
@@ -110,16 +110,16 @@ fn test_up_stops_at_the_first_row() {
 // Navigation skips the non-selectable empty-queue `Next` row (FR-023)
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_down_skips_the_non_selectable_next_row_when_the_queue_is_empty() {
-    let mut app = menu_open(0);
+#[tokio::test]
+async fn test_down_skips_the_non_selectable_next_row_when_the_queue_is_empty() {
+    let mut app = menu_open(0).await;
     assert_eq!(app.queue_menu_selected, QUEUE_MENU_ROW_NEXT);
     assert!(
         !app.queue_menu_row_selectable(QUEUE_MENU_ROW_NEXT),
         "precondition: `Next` is non-selectable on an empty queue"
     );
 
-    app.handle_key_event(key(KeyCode::Down));
+    app.handle_key_event(key(KeyCode::Down)).await;
 
     assert_eq!(
         app.queue_menu_selected, QUEUE_MENU_ROW_HALT,
@@ -127,12 +127,12 @@ fn test_down_skips_the_non_selectable_next_row_when_the_queue_is_empty() {
     );
 }
 
-#[test]
-fn test_up_skips_the_non_selectable_next_row_when_the_queue_is_empty() {
-    let mut app = menu_open(0);
+#[tokio::test]
+async fn test_up_skips_the_non_selectable_next_row_when_the_queue_is_empty() {
+    let mut app = menu_open(0).await;
     app.queue_menu_selected = QUEUE_MENU_ROW_HALT;
 
-    app.handle_key_event(key(KeyCode::Up));
+    app.handle_key_event(key(KeyCode::Up)).await;
 
     assert_eq!(
         app.queue_menu_selected, QUEUE_MENU_ROW_HALT,
@@ -140,12 +140,12 @@ fn test_up_skips_the_non_selectable_next_row_when_the_queue_is_empty() {
     );
 }
 
-#[test]
-fn test_up_reaches_next_once_an_entry_is_queued() {
-    let mut app = menu_open(1);
+#[tokio::test]
+async fn test_up_reaches_next_once_an_entry_is_queued() {
+    let mut app = menu_open(1).await;
     app.queue_menu_selected = QUEUE_MENU_ROW_HALT;
 
-    app.handle_key_event(key(KeyCode::Up));
+    app.handle_key_event(key(KeyCode::Up)).await;
 
     assert_eq!(
         app.queue_menu_selected, QUEUE_MENU_ROW_NEXT,
@@ -157,15 +157,15 @@ fn test_up_reaches_next_once_an_entry_is_queued() {
 // Enter activates the highlighted row
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_enter_on_the_halt_row_halts_the_running_turn() {
-    let mut app = menu_open(1);
+#[tokio::test]
+async fn test_enter_on_the_halt_row_halts_the_running_turn() {
+    let mut app = menu_open(1).await;
     app.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
     app.cancel_flag = Some(flag.clone());
     app.queue_menu_selected = QUEUE_MENU_ROW_HALT;
 
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert!(
         flag.load(std::sync::atomic::Ordering::Relaxed),
@@ -174,12 +174,12 @@ fn test_enter_on_the_halt_row_halts_the_running_turn() {
     assert!(!app.queue_menu_open, "activating a row closes the menu");
 }
 
-#[test]
-fn test_enter_on_the_clear_row_opens_the_confirmation_dialog() {
-    let mut app = menu_open(1);
+#[tokio::test]
+async fn test_enter_on_the_clear_row_opens_the_confirmation_dialog() {
+    let mut app = menu_open(1).await;
     app.queue_menu_selected = QUEUE_MENU_ROW_CLEAR;
 
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert!(
         app.queue_clear_confirm_open,
@@ -191,12 +191,12 @@ fn test_enter_on_the_clear_row_opens_the_confirmation_dialog() {
     );
 }
 
-#[test]
-fn test_enter_on_the_show_row_opens_the_queue_entry_panel() {
-    let mut app = menu_open(2);
+#[tokio::test]
+async fn test_enter_on_the_show_row_opens_the_queue_entry_panel() {
+    let mut app = menu_open(2).await;
     app.queue_menu_selected = QUEUE_MENU_ROW_SHOW;
 
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert!(
         app.queue_show_open,
@@ -205,13 +205,13 @@ fn test_enter_on_the_show_row_opens_the_queue_entry_panel() {
     assert!(!app.queue_menu_open, "the menu closes when the panel opens");
 }
 
-#[test]
-fn test_enter_on_the_non_selectable_next_row_is_a_noop() {
-    let mut app = menu_open(0);
+#[tokio::test]
+async fn test_enter_on_the_non_selectable_next_row_is_a_noop() {
+    let mut app = menu_open(0).await;
     app.queue_menu_selected = QUEUE_MENU_ROW_NEXT;
     app.is_processing = true;
 
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert!(
         app.queue_menu_open,
@@ -229,17 +229,17 @@ fn test_enter_on_the_non_selectable_next_row_is_a_noop() {
 // Navigation never mutates the editable input buffer (FR-031)
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_navigation_keys_do_not_mutate_the_input_buffer() {
-    let mut app = menu_open(2);
+#[tokio::test]
+async fn test_navigation_keys_do_not_mutate_the_input_buffer() {
+    let mut app = menu_open(2).await;
     app.input = "KEEP".to_string();
     app.input_cursor = app.input_len_chars();
     app.pending_attachments
         .push(std::path::PathBuf::from("/tmp/keep.png"));
 
-    app.handle_key_event(key(KeyCode::Down));
-    app.handle_key_event(key(KeyCode::Up));
-    app.handle_key_event(key(KeyCode::Down));
+    app.handle_key_event(key(KeyCode::Down)).await;
+    app.handle_key_event(key(KeyCode::Up)).await;
+    app.handle_key_event(key(KeyCode::Down)).await;
 
     assert_eq!(app.input, "KEEP", "FR-031: navigation must not edit input");
     assert_eq!(app.input_cursor, app.input_len_chars());
@@ -250,13 +250,13 @@ fn test_navigation_keys_do_not_mutate_the_input_buffer() {
     );
 }
 
-#[test]
-fn test_esc_still_closes_the_menu_after_navigating() {
-    let mut app = menu_open(2);
-    app.handle_key_event(key(KeyCode::Down));
+#[tokio::test]
+async fn test_esc_still_closes_the_menu_after_navigating() {
+    let mut app = menu_open(2).await;
+    app.handle_key_event(key(KeyCode::Down)).await;
     app.queue_menu_selected = QUEUE_MENU_ROW_SHOW;
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(!app.queue_menu_open, "FR-032: Esc dismisses the menu");
     assert_eq!(

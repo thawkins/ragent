@@ -534,6 +534,38 @@ pub(crate) fn plugin_store_dirs(working_dir: &std::path::Path) -> ragent_plugins
     ragent_plugins::store_dirs(working_dir, override_dir.as_deref())
 }
 
+/// Resolve the project working directory the loaded config was anchored at.
+///
+/// [`ragent_config::Config::load`] resolves the project config as the relative
+/// path `.ragent/ragent.json`, i.e. relative to the process working directory
+/// at load time (the value [`ragent_tui`] passes around is the *process*
+/// working directory, which the TUI can change when the user runs `/cd`). When
+/// the loaded config recorded a project path that is no longer relative to
+/// `cwd`, the config moved with the user: re-anchor the path on `cwd` so the
+/// plugin store scan reads the plugins beside the active project config rather
+/// than the launch directory. Falls back to `cwd` when no project config was
+/// recorded.
+#[must_use]
+pub fn effective_plugin_store_root(cwd: &std::path::Path) -> std::path::PathBuf {
+    let Ok(config) = ragent_config::Config::load() else {
+        return cwd.to_path_buf();
+    };
+    let Some(project) = config
+        .config_paths
+        .iter()
+        .find(|p| p.file_name().is_some_and(|n| n == "ragent.json"))
+        .filter(|p| p.is_relative())
+    else {
+        return cwd.to_path_buf();
+    };
+    let Some(parent) = project.parent() else {
+        return cwd.to_path_buf();
+    };
+    let mut root = cwd.to_path_buf();
+    root.push(parent);
+    root
+}
+
 #[cfg(test)]
 #[path = "../../tests/inline/skill_mod.rs"]
 mod tests_tests;

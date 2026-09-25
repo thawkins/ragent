@@ -37,12 +37,13 @@ fn app_with_session() -> App {
 }
 
 /// Deliver a `MessageEnd` for the current session with the given reason.
-fn message_end(app: &mut App, reason: FinishReason) {
+async fn message_end(app: &mut App, reason: FinishReason) {
     app.handle_event(Event::MessageEnd {
         session_id: "test-session".to_string(),
         message_id: "msg-1".to_string(),
         reason,
-    });
+    })
+    .await;
 }
 
 /// Count user messages in the conversation.
@@ -56,7 +57,7 @@ async fn test_message_end_drains_oldest_entry() {
     app.is_processing = true;
     app.input_queue.push_back(entry("first queued"));
 
-    message_end(&mut app, FinishReason::Stop);
+    message_end(&mut app, FinishReason::Stop).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -83,16 +84,16 @@ async fn test_message_end_drains_strict_fifo_order() {
     app.input_queue.push_back(entry("B"));
     app.input_queue.push_back(entry("C"));
 
-    message_end(&mut app, FinishReason::Stop);
+    message_end(&mut app, FinishReason::Stop).await;
     assert_eq!(app.last_prompt, "A", "FR-019: oldest entry goes first");
     assert_eq!(app.input_queue_len(), 2);
 
     // The dispatched turn ends, opening the next boundary.
-    message_end(&mut app, FinishReason::Stop);
+    message_end(&mut app, FinishReason::Stop).await;
     assert_eq!(app.last_prompt, "B");
     assert_eq!(app.input_queue_len(), 1);
 
-    message_end(&mut app, FinishReason::Stop);
+    message_end(&mut app, FinishReason::Stop).await;
     assert_eq!(app.last_prompt, "C");
     assert_eq!(app.input_queue_len(), 0);
 }
@@ -103,7 +104,7 @@ async fn test_cancelled_turn_retains_the_queue() {
     app.is_processing = true;
     app.input_queue.push_back(entry("keep me"));
 
-    message_end(&mut app, FinishReason::Cancelled);
+    message_end(&mut app, FinishReason::Cancelled).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -122,7 +123,7 @@ async fn test_empty_queue_is_a_noop_at_the_boundary() {
     let mut app = app_with_session();
     app.is_processing = true;
 
-    message_end(&mut app, FinishReason::Stop);
+    message_end(&mut app, FinishReason::Stop).await;
 
     assert_eq!(app.input_queue_len(), 0);
     assert_eq!(user_message_count(&app), 0);
@@ -137,7 +138,7 @@ async fn test_drain_is_skipped_while_compaction_owns_the_turn() {
     app.compact_in_progress = true;
     app.input_queue.push_back(entry("deferred"));
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -153,7 +154,7 @@ async fn test_drain_is_skipped_while_auto_compaction_owns_the_turn() {
     app.auto_compact_in_progress = true;
     app.input_queue.push_back(entry("deferred"));
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -169,7 +170,7 @@ async fn test_drain_is_skipped_while_still_processing() {
     app.is_processing = true;
     app.input_queue.push_back(entry("deferred"));
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -184,7 +185,7 @@ async fn test_drain_is_skipped_without_an_active_session() {
     let mut app = support::make_app();
     app.input_queue.push_back(entry("no session"));
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -200,7 +201,7 @@ async fn test_drain_is_skipped_when_a_post_compact_send_is_pending() {
     app.pending_send_after_compact = Some(("in flight".to_string(), Vec::new()));
     app.input_queue.push_back(entry("deferred"));
 
-    message_end(&mut app, FinishReason::Stop);
+    message_end(&mut app, FinishReason::Stop).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -217,7 +218,7 @@ async fn test_drain_requests_redraw_for_the_decremented_counter() {
     app.input_queue.push_back(entry("two"));
     app.needs_redraw = false;
 
-    message_end(&mut app, FinishReason::Stop);
+    message_end(&mut app, FinishReason::Stop).await;
 
     assert!(
         app.needs_redraw,
@@ -231,7 +232,7 @@ async fn test_drain_uses_the_async_dispatch_path_without_blocking() {
     app.is_processing = true;
     app.input_queue.push_back(entry("async"));
 
-    message_end(&mut app, FinishReason::Stop);
+    message_end(&mut app, FinishReason::Stop).await;
 
     // NFR-004: dispatch_user_message spawns the turn on a tokio task and arms a
     // cancel flag; it never runs the turn inline, so the UI thread stays free.
@@ -251,7 +252,7 @@ async fn test_multiple_boundaries_drain_the_queue_to_empty() {
 
     for _ in 0..total {
         app.is_processing = true;
-        message_end(&mut app, FinishReason::Stop);
+        message_end(&mut app, FinishReason::Stop).await;
     }
 
     assert_eq!(
@@ -276,7 +277,7 @@ async fn test_drained_entry_with_attachments_is_dispatched() {
         image_paths: vec![std::path::PathBuf::from("/tmp/shot.png")],
     });
 
-    message_end(&mut app, FinishReason::Stop);
+    message_end(&mut app, FinishReason::Stop).await;
 
     assert_eq!(app.input_queue_len(), 0);
     assert!(

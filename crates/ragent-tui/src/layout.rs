@@ -6484,8 +6484,8 @@ const KEYBINDINGS: &[(&str, &str)] = &[
 
 fn render_shortcuts_panel(frame: &mut Frame) {
     let full = frame.area();
-    // Responsive sizing: up to 80 wide, up to (rows+2) tall, capped at screen.
-    let w = 80u16.min(full.width.saturating_sub(4));
+    // Responsive sizing: up to 120 wide, up to (rows+2) tall, capped at screen.
+    let w = 120u16.min(full.width.saturating_sub(4));
     let content_h = KEYBINDINGS.len() as u16 + 2; // rows + footer + borders
     let h = content_h.min(full.height.saturating_sub(2));
     let area = Rect {
@@ -6541,9 +6541,7 @@ fn render_shortcuts_panel(frame: &mut Frame) {
                 .add_modifier(Modifier::BOLD),
         ));
 
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
 }
 

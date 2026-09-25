@@ -18,15 +18,16 @@ fn app_with_session() -> ragent_tui::App {
     app
 }
 
-#[test]
-fn test_tool_event_sequence_updates_state() {
+#[tokio::test]
+async fn test_tool_event_sequence_updates_state() {
     let mut app = app_with_session();
 
     app.handle_event(Event::ToolCallStart {
         session_id: "sess-1".to_string(),
         call_id: "c1".to_string(),
         tool: "read".to_string(),
-    });
+    })
+    .await;
 
     assert!(app.needs_redraw, "ToolCallStart must request a redraw");
     let part = app.messages[0].parts[0].clone();
@@ -42,7 +43,8 @@ fn test_tool_event_sequence_updates_state() {
         call_id: "c1".to_string(),
         tool: "read".to_string(),
         args: r#"{"path":"src/main.rs"}"#.to_string(),
-    });
+    })
+    .await;
 
     assert!(app.needs_redraw, "ToolCallArgs must request a redraw");
     let part = app.messages[0].parts[0].clone();
@@ -58,7 +60,8 @@ fn test_tool_event_sequence_updates_state() {
         tool: "read".to_string(),
         error: None,
         duration_ms: 1234,
-    });
+    })
+    .await;
 
     assert!(app.needs_redraw, "ToolCallEnd must request a redraw");
     let part = app.messages[0].parts[0].clone();
@@ -69,15 +72,16 @@ fn test_tool_event_sequence_updates_state() {
     assert_eq!(state.duration_ms, Some(1234));
 }
 
-#[test]
-fn test_tool_call_batch_updates_status_and_duration() {
+#[tokio::test]
+async fn test_tool_call_batch_updates_status_and_duration() {
     let mut app = app_with_session();
 
     app.handle_event(Event::ToolCallStart {
         session_id: "sess-1".to_string(),
         call_id: "c2".to_string(),
         tool: "bash".to_string(),
-    });
+    })
+    .await;
     app.needs_redraw = false;
 
     app.handle_event(Event::ToolCallBatch {
@@ -94,7 +98,8 @@ fn test_tool_call_batch_updates_status_and_duration() {
             metadata: None,
             success: true,
         }],
-    });
+    })
+    .await;
 
     assert!(app.needs_redraw, "ToolCallBatch must request a redraw");
     let part = app.messages[0].parts[0].clone();
@@ -105,8 +110,8 @@ fn test_tool_call_batch_updates_status_and_duration() {
     assert_eq!(state.duration_ms, Some(999));
 }
 
-#[test]
-fn test_tool_call_batch_creates_missing_part() {
+#[tokio::test]
+async fn test_tool_call_batch_creates_missing_part() {
     let mut app = app_with_session();
 
     app.handle_event(Event::ToolCallBatch {
@@ -123,7 +128,8 @@ fn test_tool_call_batch_creates_missing_part() {
             metadata: None,
             success: true,
         }],
-    });
+    })
+    .await;
 
     let part = app.messages[0].parts[0].clone();
     let MessagePart::ToolCall { tool, state, .. } = part else {
@@ -134,15 +140,16 @@ fn test_tool_call_batch_creates_missing_part() {
     assert_eq!(state.duration_ms, Some(42));
 }
 
-#[test]
-fn test_tool_call_batch_marks_error() {
+#[tokio::test]
+async fn test_tool_call_batch_marks_error() {
     let mut app = app_with_session();
 
     app.handle_event(Event::ToolCallStart {
         session_id: "sess-1".to_string(),
         call_id: "c4".to_string(),
         tool: "read".to_string(),
-    });
+    })
+    .await;
 
     app.handle_event(Event::ToolCallBatch {
         session_id: "sess-1".to_string(),
@@ -158,7 +165,8 @@ fn test_tool_call_batch_marks_error() {
             metadata: None,
             success: false,
         }],
-    });
+    })
+    .await;
 
     let part = app.messages[0].parts[0].clone();
     let MessagePart::ToolCall { state, .. } = part else {
@@ -172,8 +180,8 @@ fn test_tool_call_batch_marks_error() {
 /// already exists (i.e. the Start handler was somehow processed without
 /// consuming the buffer), the next tool-lifecycle event must drain the buffer
 /// into the part so the header summary still shows the parameters.
-#[test]
-fn test_pending_args_drained_by_next_lifecycle_event() {
+#[tokio::test]
+async fn test_pending_args_drained_by_next_lifecycle_event() {
     let mut app = app_with_session();
 
     // Args arrive first; the part doesn't exist yet, so they are buffered.
@@ -182,7 +190,8 @@ fn test_pending_args_drained_by_next_lifecycle_event() {
         call_id: "c9".to_string(),
         tool: "bash".to_string(),
         args: r#"{"command":"ls -la"}"#.to_string(),
-    });
+    })
+    .await;
 
     // Simulate the Start handler having been processed by a path that created
     // the part without consuming the pending args (mirrors the reported bug:
@@ -209,7 +218,8 @@ fn test_pending_args_drained_by_next_lifecycle_event() {
         call_id: "c10".to_string(),
         tool: "read".to_string(),
         args: r#"{"path":"src/main.rs"}"#.to_string(),
-    });
+    })
+    .await;
 
     let part = app
         .messages
@@ -237,7 +247,8 @@ fn test_pending_args_drained_by_next_lifecycle_event() {
         session_id: "sess-1".to_string(),
         call_id: "c10".to_string(),
         tool: "read".to_string(),
-    });
+    })
+    .await;
     let part = app
         .messages
         .iter()
@@ -250,8 +261,8 @@ fn test_pending_args_drained_by_next_lifecycle_event() {
     assert_eq!(state.input["path"], "src/main.rs");
 }
 
-#[test]
-fn test_tool_call_batch_args_populate_missing_input() {
+#[tokio::test]
+async fn test_tool_call_batch_args_populate_missing_input() {
     let mut app = app_with_session();
 
     // The per-call ToolCallStart fired (part exists with null input), but the
@@ -261,7 +272,8 @@ fn test_tool_call_batch_args_populate_missing_input() {
         session_id: "sess-1".to_string(),
         call_id: "c5".to_string(),
         tool: "read".to_string(),
-    });
+    })
+    .await;
 
     app.handle_event(Event::ToolCallBatch {
         session_id: "sess-1".to_string(),
@@ -277,7 +289,8 @@ fn test_tool_call_batch_args_populate_missing_input() {
             metadata: None,
             success: true,
         }],
-    });
+    })
+    .await;
 
     let part = app.messages[0].parts[0].clone();
     let MessagePart::ToolCall { state, .. } = part else {

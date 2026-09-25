@@ -811,7 +811,7 @@ impl App {
     /// Dispatch a key event to the active UI region (history picker, agent /
     /// teams dialog, slash menu, context menu, or the main input editor).
     /// Asserts UI invariants and logs the transition for diagnostics.
-    pub fn handle_key_event(&mut self, key: KeyEvent) {
+    pub async fn handle_key_event(&mut self, key: KeyEvent) {
         let before_input = self.input.clone();
         let before_cursor = self.input_cursor;
         // Self-heal any selection/menu anchored on a panel that a recent
@@ -919,7 +919,7 @@ impl App {
             }
         }
 
-        if let Some(action) = input::handle_key(self, key) {
+        if let Some(action) = input::handle_key(self, key).await {
             match action {
                 InputAction::BangCommand(text) => {
                     // Create session if needed, then run the command.
@@ -1640,7 +1640,7 @@ impl App {
                             self.input_cursor = self.input_len_chars();
                         }
                     } else {
-                        self.execute_slash_command(&cmd);
+                        self.execute_slash_command(&cmd).await;
                     }
                 }
                 InputAction::CancelAgent => {
@@ -1656,7 +1656,8 @@ impl App {
                     if self.pending_forcecleanup.is_some() {
                         // Clear pending modal state and invoke forcecleanup with confirm arg.
                         self.pending_forcecleanup = None;
-                        self.execute_slash_command("/team forcecleanup confirm");
+                        self.execute_slash_command("/team forcecleanup confirm")
+                            .await;
                     }
                 }
                 InputAction::CancelForceCleanup => {

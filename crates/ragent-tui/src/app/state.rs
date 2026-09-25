@@ -2154,8 +2154,31 @@ pub struct App {
     pub agents_close_button_area: Rect,
     /// Cached click target for Teams popup close button.
     pub teams_close_button_area: Rect,
-    /// Snapshot of discovered MCP servers (populated by `/mcp discover`).
+    /// MCP server display list for `/mcp` and `/plugins list`: the configured
+    /// `mcp` section plus every server an enabled plugin bridges (ids
+    /// `<plugin-id>.<server>`), with the live status and tool list adopted from
+    /// the shared `McpClient`. `/mcp` lists each server with its tool COUNT (the
+    /// names are the model-facing surface, reachable via `/tools`);
+    /// `/plugins list --mcp` prints the full per-server tool names.
     pub mcp_servers: Vec<McpServer>,
+    /// Live MCP connection status per server id, fed by
+    /// `Event::McpStatusChanged` from the background connect loop. The
+    /// `mcp_servers` display list only tracks a status for a server it has
+    /// seen before, so without this the `/mcp` list shows a freshly connected
+    /// startup server as `disabled` (BUG-001).
+    pub mcp_status_map: std::collections::HashMap<String, ragent_agent::mcp::McpStatus>,
+    /// True once the shared `McpClient` has been read into `mcp_servers`.
+    ///
+    /// The startup MCP connect loop in `src/main.rs` publishes its
+    /// `McpStatusChanged` events from a task spawned before the TUI subscribes
+    /// to the event bus, so those events can be lost. The client itself is the
+    /// authoritative record; this latch stops the housekeeping pass re-reading
+    /// it on every wake once it has been adopted.
+    pub mcp_client_adopted: bool,
+    /// Persisted global enable state per MCP server id (the
+    /// `mcp_state.json` ledger): `true` enabled, `false` disabled. An id absent
+    /// from the map is enabled, so a newly added server shows as enabled.
+    pub mcp_enabled_map: std::collections::HashMap<String, bool>,
     /// Optional code index for codebase search and symbol lookup.
     pub code_index: Option<Arc<ragent_codeindex::CodeIndex>>,
     /// Whether code indexing is enabled in configuration.
@@ -2899,6 +2922,196 @@ impl App {
         self.jobs_last_poll = std::time::Instant::now();
         self.housekeeping_runs = self.housekeeping_runs.saturating_add(1);
         true
+    }
+
+    /// Adopt the shared `McpClient`'s server list into the `/mcp` display list.
+    ///
+    /// The startup MCP connect loop (`src/main.rs`) is spawned before the TUI
+    /// subscribes to the event bus, so its per-server `McpStatusChanged` events
+    /// can be published before any subscriber exists and are then dropped (the
+    /// broadcast bus has no replay buffer). The client held by
+    /// `SessionProcessor::mcp_client` is the authoritative record of every
+    /// server's real status and tool list; this reads it so `/mcp` reports the
+    /// truth regardless of event delivery.
+    ///
+    /// A no-op once [`Self::mcp_client_adopted`] is set, and a no-op while the
+    /// connect loop has not yet published the client (the per-server events
+    /// cover that window).
+    pub async fn adopt_mcp_client_state(
+        &mut self,
+        session_processor: &ragent_agent::session::processor::SessionProcessor,
+    ) {
+        if self.mcp_client_adopted {
+            return;
+        }
+        let Some(client) = session_processor.mcp_client.get() else {
+            return;
+        };
+        let servers = {
+            let guard = client.read().await;
+            guard.servers().to_vec()
+        };
+        self.mcp_status_map.clear();
+        for server in servers {
+            self.mcp_status_map
+                .insert(server.id.clone(), server.status.clone());
+            match self.mcp_servers.iter_mut().find(|s| s.id == server.id) {
+                Some(tracked) => {
+                    tracked.status = server.status;
+                    tracked.tools = server.tools;
+                }
+                None => self.mcp_servers.push(server),
+            }
+        }
+        // Re-sort so the display order (server id) is stable regardless of the
+        // order the connect loop populated the client.
+        self.mcp_servers.sort_by(|a, b| a.id.cmp(&b.id));
+        self.refresh_mcp_enabled_map();
+        self.mcp_client_adopted = true;
+        self.needs_redraw = true;
+    }
+
+    /// Reload the persisted global MCP enable state into
+    /// [`Self::mcp_enabled_map`].
+    ///
+    /// This is a plain file read of the `mcp_state.json` ledger; the TUI keeps
+    /// the map so `/mcp` and `/plugins` can report enabled/disabled without a
+    /// disk read per row.
+    pub fn refresh_mcp_enabled_map(&mut self) {
+        self.mcp_enabled_map = ragent_agent::mcp::McpEnableLedger::load().to_map();
+    }
+
+    /// Persist a new enabled state for one MCP server and apply it live.
+    ///
+    /// The switch is written to the global ledger first, so the choice survives
+    /// a restart and reaches `src/main.rs`'s startup filter. Then the live
+    /// [`ragent_agent::mcp::McpClient`] is updated: enabling connects the
+    /// server immediately (its tools are registered into the session tool
+    /// registry), disabling disconnects it and drops its tools. Returns the
+    /// report to print.
+    pub async fn set_mcp_server_enabled(&mut self, server_id: &str, enabled: bool) -> String {
+        // One config load serves both the direct lookup and the plugin-bridge
+        // fallback; a second load would read and parse the same files again.
+        let configured = ragent_agent::Config::load()
+            .map(|cfg| cfg.mcp)
+            .unwrap_or_default();
+        let config = configured.get(server_id).cloned().or_else(|| {
+            ragent_agent::plugin::plugin_mcp_servers(&self.cwd_path, &configured)
+                .into_iter()
+                .find(|(id, _)| id == server_id)
+                .map(|(_, cfg)| cfg)
+        });
+
+        // Persist to the global ledger first: a failure must leave the running
+        // state untouched rather than diverging from what will happen at the
+        // next startup.
+        let mut ledger = ragent_agent::mcp::McpEnableLedger::load();
+        if enabled {
+            // An enabled server is the default, so drop the explicit entry
+            // instead of recording `true`: a later change to ragent.json is
+            // then not shadowed by a stale ledger row.
+            ledger.clear(server_id);
+        } else {
+            ledger.set_enabled(server_id, false);
+        }
+        if let Err(e) = ledger.save() {
+            return format!(
+                "From: /mcp\n\n[err] could not persist the enable state for `{server_id}`: {e}"
+            );
+        }
+        self.refresh_mcp_enabled_map();
+
+        let Some(client) = self.session_processor.mcp_client.get() else {
+            // The connect loop has not published the client yet; the persisted
+            // choice takes effect at the next startup.
+            return format!(
+                "From: /mcp\n\n[ok] `{server_id}` is now {}. \
+                 The MCP client is not live yet; the change applies at the next start.",
+                if enabled { "enabled" } else { "disabled" }
+            );
+        };
+
+        if enabled {
+            let Some(config) = config else {
+                return format!(
+                    "From: /mcp\n\n[err] `{server_id}` is not a known MCP server \
+                     (not in ragent.json and not contributed by a plugin)."
+                );
+            };
+            let outcome = {
+                let mut guard = client.write().await;
+                guard.connect(server_id, config).await
+            };
+            match outcome {
+                Ok(()) => {
+                    self.register_mcp_tools_and_refresh(std::sync::Arc::clone(&client))
+                        .await;
+                    format!("From: /mcp\n\n[ok] `{server_id}` is connected.")
+                }
+                Err(e) => format!("From: /mcp\n\n[err] `{server_id}` could not connect: {e}"),
+            }
+        } else {
+            let outcome = {
+                let mut guard = client.write().await;
+                guard.disconnect(server_id).await
+            };
+            self.register_mcp_tools_and_refresh(std::sync::Arc::clone(&client))
+                .await;
+            match outcome {
+                Ok(()) => format!(
+                    "From: /mcp\n\n[ok] `{server_id}` is disabled and disconnected. \
+                     The choice is persisted globally."
+                ),
+                Err(e) => format!(
+                    "From: /mcp\n\n[err] `{server_id}` was persisted as disabled but \
+                     disconnecting failed: {e}"
+                ),
+            }
+        }
+    }
+
+    /// Re-register the live MCP tools into the session tool registry and adopt
+    /// the client's state into the display list.
+    ///
+    /// `set_mcp_client` only runs once at startup, so a server connected later
+    /// would otherwise have its tools missing from the registry. The client is
+    /// re-read and its connected servers' tools registered by name (the
+    /// registry is keyed by name, so a repeat registration is idempotent).
+    async fn register_mcp_tools_and_refresh(
+        &mut self,
+        client: std::sync::Arc<tokio::sync::RwLock<ragent_agent::mcp::McpClient>>,
+    ) {
+        let pairs = {
+            let guard = client.read().await;
+            guard
+                .servers()
+                .iter()
+                .filter(|s| s.status == ragent_agent::mcp::McpStatus::Connected)
+                .flat_map(|s| {
+                    s.tools
+                        .iter()
+                        .map(move |t| (s.id.clone(), t.clone()))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        for (server_id, tool) in pairs {
+            self.session_processor
+                .tool_registry
+                .register(std::sync::Arc::new(
+                    ragent_agent::tool::McpToolWrapper::new(
+                        &server_id,
+                        &tool.name,
+                        &tool.description,
+                        tool.parameters,
+                        client.clone(),
+                    ),
+                ));
+        }
+        self.session_processor.invalidate_tool_cache();
+        let processor = std::sync::Arc::clone(&self.session_processor);
+        self.mcp_client_adopted = false;
+        self.adopt_mcp_client_state(&processor).await;
     }
 
     /// PERF-045: the instant the next housekeeping pass is due.

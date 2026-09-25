@@ -55,9 +55,10 @@ pub mod tool_adapter;
 
 pub use add::{AddError, AddOutcome, GitSource, MAX_ARCHIVE_BYTES, add, parse_git_source};
 pub use bridge::{
-    plugin_agent_files, plugin_mcp_servers, plugin_skill_dirs, plugin_skill_names,
-    scanned_plugin_agent_files, scanned_plugin_commands, scanned_plugin_hooks,
-    scanned_plugin_mcp_servers, scanned_plugin_skill_dirs, skills_of,
+    PluginMcpContribution, plugin_agent_files, plugin_mcp_servers, plugin_skill_dirs,
+    plugin_skill_names, scanned_plugin_agent_files, scanned_plugin_commands, scanned_plugin_hooks,
+    scanned_plugin_mcp_contributions, scanned_plugin_mcp_servers, scanned_plugin_skill_dirs,
+    skills_of,
 };
 pub use command_adapter::{
     PluginCommandAdapter, dispatch_command_sandbox, substitute_command_args,
@@ -70,7 +71,7 @@ pub use commands::{
 pub use control::{
     ControlArgError, ControlCommand, disable_error_report, disable_report,
     disabled_subsystem_report, enable_error_report, enable_report, parse_control_command,
-    render_list, run_control_command,
+    render_list, render_list_with_mcp_tools, run_control_command,
 };
 pub use descriptor::{
     CLAUDE_MANIFEST_FILE, CLAUDE_NESTED_MANIFEST, CODEX_MANIFEST_FILE, CODEX_MARKER_FIELD,

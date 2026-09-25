@@ -100,3 +100,26 @@ pub fn plugin_commands(working_dir: &Path, existing: &BTreeSet<String>) -> Vec<P
     out.sort_by(|a, b| a.trigger.cmp(&b.trigger));
     out
 }
+
+/// Resolve the MCP servers contributed by enabled plugins for `working_dir`,
+/// each tagged with the plugin that declared it.
+///
+/// The owning plugin id is kept alongside the bridged `<plugin-id>.<server>` id
+/// because a surface that reports a plugin's MCP servers beside its other
+/// contributions (`/plugins list`) cannot recover the plugin id from the
+/// bridged id alone. The plugin store root is derived from the loaded config's
+/// path (a relative `.ragent/ragent.json` is anchored at the current working
+/// directory) so a caller resolves the same store the session's config load
+/// did.
+#[must_use]
+pub fn plugin_mcp_contributions(working_dir: &Path) -> Vec<ragent_plugins::PluginMcpContribution> {
+    let store_root = crate::skill::effective_plugin_store_root(working_dir);
+    let override_dir = ragent_config::Config::load()
+        .ok()
+        .and_then(|config| config.plugins)
+        .and_then(|plugins| plugins.store_dir);
+    ragent_plugins::scanned_plugin_mcp_contributions(&ragent_plugins::store_dirs(
+        &store_root,
+        override_dir.as_deref(),
+    ))
+}

@@ -70,13 +70,13 @@ fn test_queue_command_is_registered() {
 // /queue list — names the entries in order
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_queue_list_names_entries_in_order() {
+#[tokio::test]
+async fn test_queue_list_names_entries_in_order() {
     let mut app = app_with_session();
     app.input_queue.push_back(entry("QUEUE-CMD-1"));
     app.input_queue.push_back(entry("QUEUE-CMD-2"));
 
-    app.execute_slash_command("/queue list");
+    app.execute_slash_command("/queue list").await;
 
     let text = last_assistant_text(&app);
     assert!(
@@ -96,12 +96,12 @@ fn test_queue_list_names_entries_in_order() {
     assert_eq!(app.status, "queue: 2 entries");
 }
 
-#[test]
-fn test_bare_queue_defaults_to_list() {
+#[tokio::test]
+async fn test_bare_queue_defaults_to_list() {
     let mut app = app_with_session();
     app.input_queue.push_back(entry("BARE-QUEUE"));
 
-    app.execute_slash_command("/queue");
+    app.execute_slash_command("/queue").await;
 
     let text = last_assistant_text(&app);
     assert!(
@@ -110,11 +110,11 @@ fn test_bare_queue_defaults_to_list() {
     );
 }
 
-#[test]
-fn test_queue_list_empty_reports_empty() {
+#[tokio::test]
+async fn test_queue_list_empty_reports_empty() {
     let mut app = app_with_session();
 
-    app.execute_slash_command("/queue list");
+    app.execute_slash_command("/queue list").await;
 
     let text = last_assistant_text(&app);
     assert!(
@@ -128,14 +128,14 @@ fn test_queue_list_empty_reports_empty() {
 // /queue clear — empties the queue without dispatching
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_queue_clear_empties_the_queue() {
+#[tokio::test]
+async fn test_queue_clear_empties_the_queue() {
     let mut app = app_with_session();
     app.input_queue.push_back(entry("QUEUE-CMD-1"));
     app.input_queue.push_back(entry("QUEUE-CMD-2"));
     let before = user_message_count(&app);
 
-    app.execute_slash_command("/queue clear");
+    app.execute_slash_command("/queue clear").await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -155,13 +155,13 @@ fn test_queue_clear_empties_the_queue() {
     assert_eq!(app.status, "queue: cleared");
 }
 
-#[test]
-fn test_queue_clear_leaves_the_running_turn_untouched() {
+#[tokio::test]
+async fn test_queue_clear_leaves_the_running_turn_untouched() {
     let mut app = app_with_session();
     app.is_processing = true;
     app.input_queue.push_back(entry("QUEUE-CMD-1"));
 
-    app.execute_slash_command("/queue clear");
+    app.execute_slash_command("/queue clear").await;
 
     assert!(
         app.is_processing,
@@ -171,11 +171,11 @@ fn test_queue_clear_leaves_the_running_turn_untouched() {
     assert_eq!(app.input_queue_len(), 0);
 }
 
-#[test]
-fn test_queue_clear_on_empty_queue_is_a_noop() {
+#[tokio::test]
+async fn test_queue_clear_on_empty_queue_is_a_noop() {
     let mut app = app_with_session();
 
-    app.execute_slash_command("/queue clear");
+    app.execute_slash_command("/queue clear").await;
 
     assert_eq!(app.input_queue_len(), 0);
     let text = last_assistant_text(&app);
@@ -195,7 +195,7 @@ async fn test_queue_next_dispatches_oldest_entry_when_free() {
     app.input_queue.push_back(entry("NEXT-QUEUE-1"));
     app.input_queue.push_back(entry("NEXT-QUEUE-2"));
 
-    app.execute_slash_command("/queue next");
+    app.execute_slash_command("/queue next").await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -215,14 +215,14 @@ async fn test_queue_next_dispatches_oldest_entry_when_free() {
     assert_eq!(app.status, "queue: next dispatched");
 }
 
-#[test]
-fn test_queue_next_deferrs_while_the_agent_is_executing() {
+#[tokio::test]
+async fn test_queue_next_deferrs_while_the_agent_is_executing() {
     let mut app = app_with_session();
     app.is_processing = true;
     app.input_queue.push_back(entry("DEFER-QUEUE-1"));
     let before = user_message_count(&app);
 
-    app.execute_slash_command("/queue next");
+    app.execute_slash_command("/queue next").await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -242,11 +242,11 @@ fn test_queue_next_deferrs_while_the_agent_is_executing() {
     );
 }
 
-#[test]
-fn test_queue_next_on_empty_queue_reports_empty() {
+#[tokio::test]
+async fn test_queue_next_on_empty_queue_reports_empty() {
     let mut app = app_with_session();
 
-    app.execute_slash_command("/queue next");
+    app.execute_slash_command("/queue next").await;
 
     assert_eq!(app.input_queue_len(), 0);
     assert_eq!(app.status, "queue: next empty");
@@ -261,11 +261,11 @@ fn test_queue_next_on_empty_queue_reports_empty() {
 // /queue help + unknown sub-commands
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_queue_help_lists_subcommands() {
+#[tokio::test]
+async fn test_queue_help_lists_subcommands() {
     let mut app = app_with_session();
 
-    app.execute_slash_command("/queue help");
+    app.execute_slash_command("/queue help").await;
 
     let text = last_assistant_text(&app);
     for needle in ["From: /queue help", "list", "clear", "next", "help"] {
@@ -274,21 +274,21 @@ fn test_queue_help_lists_subcommands() {
     assert_eq!(app.status, "queue: help");
 }
 
-#[test]
-fn test_queue_help_accepts_flag_aliases() {
+#[tokio::test]
+async fn test_queue_help_accepts_flag_aliases() {
     for args in ["--help", "-h"] {
         let mut app = app_with_session();
-        app.execute_slash_command(&format!("/queue {args}"));
+        app.execute_slash_command(&format!("/queue {args}")).await;
         assert_eq!(app.status, "queue: help", "/queue {args} must show help");
     }
 }
 
-#[test]
-fn test_queue_unknown_subcommand_is_rejected() {
+#[tokio::test]
+async fn test_queue_unknown_subcommand_is_rejected() {
     let mut app = app_with_session();
     app.input_queue.push_back(entry("UNTOUCHED-QUEUE"));
 
-    app.execute_slash_command("/queue bogus");
+    app.execute_slash_command("/queue bogus").await;
 
     assert_eq!(
         app.input_queue_len(),

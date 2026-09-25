@@ -4,6 +4,37 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.118)
+
+- **Durable, global MCP server enable/disable state** — whether an MCP server is
+  actually started is a persisted choice (`<global state dir>/mcp_state.json`),
+  not an implicit side effect of being listed in `ragent.json`. A server id
+  **absent** from the ledger is enabled, so a newly added server (written into
+  `ragent.json` or bridged from a plugin's `mcpServers` section) starts enabled
+  with no extra step; `mcp.<id>.disabled: true` in `ragent.json` always
+  disables a server. `/mcp connect <id>` enables and connects a server live
+  (registering its tools immediately) and `/mcp disconnect <id>` disables and
+  disconnects it live; both survive a restart and apply to every project.
+- **`/mcp` lists plugin-contributed servers and their live status** — the
+  display list is built from the same merged server set the connect path uses
+  (`plugin_mcp_servers`), so a plugin-bridged `<plugin-id>.<server>` shows in
+  `/mcp` even with no `ragent.json` entry. `/mcp` prints `enabled yes/no` and
+  `tools: N` per server (the individual tool names live in
+  `/plugins list --mcp`).
+- **`/plugins list` shows MCP server and tool counts** — the table gains `MCP`
+  and `MCP Tools` columns and the contributions block renders
+  `mcp [<id> (<n> tools)] (S server(s), T tool(s))`. A server whose count is not
+  yet known renders `?`, never `0`.
+- **`/tools` lists visibility-disabled tools** — a family switched off
+  (`/tools github off`) no longer vanishes from the report; the listing prints
+  `Visible Tools (N total, M disabled)` followed by a `Disabled by visibility`
+  section, backed by `ToolRegistry::hidden_definitions()`.
+- **Plugin `mcpServers` entries are bridged by default** — a plugin's MCP-server
+  transport section (inline, or the Claude `"mcpServers": "./mcp.json"` file
+  reference) connects as `<plugin-id>.<server>` and is listed as an MCP server;
+  `McpToolWrapper::execute` refuses to call a disabled server's tools, naming the
+  command that re-enables it.
+
 ## Highlights (v1.0.117)
 
 - **`/spec reverse --folder` scaffolds and hosts the target project** —

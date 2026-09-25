@@ -45,8 +45,8 @@ fn user_message_count(app: &App) -> usize {
 // FR-033 — selecting Clear opens the confirmation dialog and closes the menu
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_clear_row_opens_the_confirmation_dialog() {
+#[tokio::test]
+async fn test_clear_row_opens_the_confirmation_dialog() {
     let mut app = app_with_session();
     app.queue_menu_open = true;
 
@@ -58,8 +58,8 @@ fn test_clear_row_opens_the_confirmation_dialog() {
     );
 }
 
-#[test]
-fn test_clear_row_closes_the_menu_and_resets_selection() {
+#[tokio::test]
+async fn test_clear_row_closes_the_menu_and_resets_selection() {
     let mut app = app_with_session();
     app.queue_menu_open = true;
     app.queue_menu_selected = 2;
@@ -76,8 +76,8 @@ fn test_clear_row_closes_the_menu_and_resets_selection() {
     );
 }
 
-#[test]
-fn test_dialog_opens_even_with_an_empty_queue() {
+#[tokio::test]
+async fn test_dialog_opens_even_with_an_empty_queue() {
     let mut app = app_with_session();
     app.queue_menu_open = true;
 
@@ -96,8 +96,8 @@ fn test_dialog_opens_even_with_an_empty_queue() {
 // FR-028 / FR-037 — the queue is untouched until the user confirms
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_clear_row_does_not_empty_the_queue() {
+#[tokio::test]
+async fn test_clear_row_does_not_empty_the_queue() {
     let mut app = app_with_session();
     app.input_queue.push_back(entry("first"));
     app.input_queue.push_back(entry("second"));
@@ -111,8 +111,8 @@ fn test_clear_row_does_not_empty_the_queue() {
     );
 }
 
-#[test]
-fn test_clear_row_does_not_dispatch_any_entry() {
+#[tokio::test]
+async fn test_clear_row_does_not_dispatch_any_entry() {
     let mut app = app_with_session();
     app.input_queue.push_back(entry("first"));
     let before = user_message_count(&app);
@@ -130,8 +130,8 @@ fn test_clear_row_does_not_dispatch_any_entry() {
 // Non-mutation — input buffer, attachments, and the running turn are untouched
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_clear_row_leaves_input_buffer_and_attachments_untouched() {
+#[tokio::test]
+async fn test_clear_row_leaves_input_buffer_and_attachments_untouched() {
     let mut app = app_with_session();
     app.input = "DRAFT".to_string();
     app.input_cursor = app.input_len_chars();
@@ -150,8 +150,8 @@ fn test_clear_row_leaves_input_buffer_and_attachments_untouched() {
     );
 }
 
-#[test]
-fn test_clear_row_leaves_the_running_turn_untouched() {
+#[tokio::test]
+async fn test_clear_row_leaves_the_running_turn_untouched() {
     let mut app = app_with_session();
     app.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
@@ -178,8 +178,8 @@ fn test_clear_row_leaves_the_running_turn_untouched() {
 // NFR-008 — the action repaints on the next frame
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_clear_row_sets_the_redraw_flag() {
+#[tokio::test]
+async fn test_clear_row_sets_the_redraw_flag() {
     let mut app = app_with_session();
     app.needs_redraw = false;
 

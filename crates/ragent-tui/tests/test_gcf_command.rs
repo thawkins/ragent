@@ -28,6 +28,7 @@ mod support;
 
 /// The GCF runtime flag is process-global and the cwd/env mutations below are
 /// too; one mutex serialises every test in this binary against both.
+#[allow(clippy::await_holding_lock)]
 fn test_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -36,10 +37,10 @@ fn test_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 /// Toggle the GCF flag for the duration of `f` and always restore it.
-fn with_gcf(enabled: bool, f: impl FnOnce()) {
+async fn with_gcf(enabled: bool, f: impl AsyncFnOnce()) {
     let previous = ragent_config::gcf::is_enabled();
     ragent_config::gcf::set_enabled(enabled);
-    f();
+    f().await;
     ragent_config::gcf::set_enabled(previous);
 }
 
@@ -81,6 +82,7 @@ impl Drop for EnvGuard {
 /// with an isolated global config dir and a scratch project config, so
 /// `persist_gcf` writes to the tempdir's `.ragent/ragent.json` and never to
 /// the developer's real global config.
+#[allow(clippy::await_holding_lock)]
 fn enter_isolated_config_project() -> (
     std::sync::MutexGuard<'static, ()>,
     EnvGuard,
@@ -126,11 +128,12 @@ fn scratch_config_path() -> std::path::PathBuf {
 // Help / no-op paths (FR-003, AC-8)
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_gcf_help_renders_usage_without_state_change() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_gcf_help_renders_usage_without_state_change() {
     let _guard = test_lock();
     let mut app = support::make_app();
-    app.execute_slash_command("/gcf help");
+    app.execute_slash_command("/gcf help").await;
 
     let text = last_message_text(&app);
     assert!(
@@ -151,12 +154,13 @@ fn test_gcf_help_renders_usage_without_state_change() {
     assert!(!persisted, "help must not persist gcf.enabled");
 }
 
-#[test]
-fn test_gcf_help_aliases_bare_dashdash_and_h() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_gcf_help_aliases_bare_dashdash_and_h() {
     let _guard = test_lock();
     for input in ["/gcf", "/gcf --help", "/gcf -h"] {
         let mut app = support::make_app();
-        app.execute_slash_command(input);
+        app.execute_slash_command(input).await;
         let text = last_message_text(&app);
         assert!(
             text.contains("/gcf on"),
@@ -170,11 +174,12 @@ fn test_gcf_help_aliases_bare_dashdash_and_h() {
 // Unknown subcommand rejection (FR-003 unwanted path, AC-7)
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_gcf_unknown_subcommand_rejected_without_state_change() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_gcf_unknown_subcommand_rejected_without_state_change() {
     let _guard = test_lock();
     let mut app = support::make_app();
-    app.execute_slash_command("/gcf bogus");
+    app.execute_slash_command("/gcf bogus").await;
     let text = last_message_text(&app);
 
     assert!(
@@ -202,14 +207,15 @@ fn test_gcf_unknown_subcommand_rejected_without_state_change() {
 // the persisted value and the runtime flag; the tempdir isolates the write.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_gcf_on_persists_enabled_to_config_source() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_gcf_on_persists_enabled_to_config_source() {
     let (_guard, _env, _temp) = enter_isolated_config_project();
-    with_gcf(false, || {
+    with_gcf(false, async || {
         let config_path = scratch_config_path();
 
         let mut app = support::make_app();
-        app.execute_slash_command("/gcf on");
+        app.execute_slash_command("/gcf on").await;
 
         // The runtime flag is applied (live session, FR-002).
         assert!(
@@ -234,17 +240,19 @@ fn test_gcf_on_persists_enabled_to_config_source() {
             "confirmation notice must mention persistence, got: {text}"
         );
         assert_eq!(app.status, "gcf: on", "/gcf on status");
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_gcf_off_persists_disabled_to_config_source() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_gcf_off_persists_disabled_to_config_source() {
     let (_guard, _env, _temp) = enter_isolated_config_project();
-    with_gcf(true, || {
+    with_gcf(true, async || {
         let config_path = scratch_config_path();
 
         let mut app = support::make_app();
-        app.execute_slash_command("/gcf off");
+        app.execute_slash_command("/gcf off").await;
 
         assert!(
             !ragent_config::gcf::is_enabled(),
@@ -263,15 +271,17 @@ fn test_gcf_off_persists_disabled_to_config_source() {
             "disabled state must omit the gcf key from the config file, got: {file_text}"
         );
         assert_eq!(app.status, "gcf: off", "/gcf off status");
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_gcf_show_reports_effective_state_and_source() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_gcf_show_reports_effective_state_and_source() {
     let (_guard, _env, _temp) = enter_isolated_config_project();
-    with_gcf(true, || {
+    with_gcf(true, async || {
         let mut app = support::make_app();
-        app.execute_slash_command("/gcf show");
+        app.execute_slash_command("/gcf show").await;
 
         let text = last_message_text(&app);
         assert!(
@@ -283,17 +293,18 @@ fn test_gcf_show_reports_effective_state_and_source() {
             "show must attribute the runtime-only state to an unsaved in-session change, got: {text}"
         );
         assert_eq!(app.status, "gcf: show", "/gcf show status");
-    });
+    }).await;
 }
 
 /// `/gcf show` with no runtime-flag change and no gcf section in the file
 /// must report the default-off source (FR-003).
-#[test]
-fn test_gcf_show_reports_default_off_source() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_gcf_show_reports_default_off_source() {
     let (_guard, _env, _temp) = enter_isolated_config_project();
-    with_gcf(false, || {
+    with_gcf(false, async || {
         let mut app = support::make_app();
-        app.execute_slash_command("/gcf show");
+        app.execute_slash_command("/gcf show").await;
 
         let text = last_message_text(&app);
         assert!(
@@ -304,5 +315,6 @@ fn test_gcf_show_reports_default_off_source() {
             text.contains("default-off"),
             "show must report the default-off source, got: {text}"
         );
-    });
+    })
+    .await;
 }

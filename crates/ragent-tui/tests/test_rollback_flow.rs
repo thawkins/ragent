@@ -238,11 +238,11 @@ async fn arm_capture(app: &App) -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 /// FR-020: a change summary arms the rollback offer and hints at the keys.
-#[test]
-fn test_rollback_offer_arms_on_change_summary() {
+#[tokio::test]
+async fn test_rollback_offer_arms_on_change_summary() {
     let mut app = make_scripted_app();
     app.session_id = Some("sess-rollback".to_string());
-    app.handle_event(change_summary("sess-rollback"));
+    app.handle_event(change_summary("sess-rollback")).await;
 
     let offer = app.pending_rollback.as_ref().expect("offer armed");
     assert_eq!(offer.session_id, "sess-rollback");
@@ -258,11 +258,11 @@ fn test_rollback_offer_arms_on_change_summary() {
 }
 
 /// FR-020: the offer is not armed for a different session's summary.
-#[test]
-fn test_rollback_offer_ignores_other_sessions() {
+#[tokio::test]
+async fn test_rollback_offer_ignores_other_sessions() {
     let mut app = make_scripted_app();
     app.session_id = Some("sess-rollback".to_string());
-    app.handle_event(change_summary("sess-other"));
+    app.handle_event(change_summary("sess-other")).await;
     assert!(
         app.pending_rollback.is_none(),
         "a foreign session's summary must not arm the offer"
@@ -275,12 +275,12 @@ async fn test_rollback_accept_restores_snapshot() -> Result<()> {
     let mut app = make_scripted_app();
     let (_dir_guard, target) = arm_capture(&app).await;
     app.session_id = Some("sess-rollback".to_string());
-    app.handle_event(change_summary("sess-rollback"));
+    app.handle_event(change_summary("sess-rollback")).await;
     assert!(app.pending_rollback.is_some());
 
     // Route through the App handler so the returned InputAction is
     // dispatched exactly as the runtime does.
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     // The spawned task restores the captured contents and drops the capture.
     for _ in 0..200 {
@@ -317,9 +317,9 @@ async fn test_rollback_decline_keeps_changes() -> Result<()> {
     let mut app = make_scripted_app();
     let (_dir_guard, target) = arm_capture(&app).await;
     app.session_id = Some("sess-rollback".to_string());
-    app.handle_event(change_summary("sess-rollback"));
+    app.handle_event(change_summary("sess-rollback")).await;
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     for _ in 0..200 {
         if app
@@ -387,8 +387,8 @@ fn last_transcript(app: &App) -> String {
 
 /// T-025 (FR-019): each termination status renders a distinct banner with the
 /// icon, phrase, and iteration count; verification/reason detail is appended.
-#[test]
-fn test_loop_terminated_banner_is_status_aware() {
+#[tokio::test]
+async fn test_loop_terminated_banner_is_status_aware() {
     let cases = [
         ("completed", "✓", "Goal loop completed", 2, "2 iterations"),
         ("error", "✗", "Goal loop failed", 1, "1 iteration"),
@@ -404,7 +404,8 @@ fn test_loop_terminated_banner_is_status_aware() {
     for (status, icon, phrase, iterations, iterations_label) in cases {
         let mut app = make_scripted_app();
         app.session_id = Some("sess-rollback".to_string());
-        app.handle_event(terminated("sess-rollback", status, iterations));
+        app.handle_event(terminated("sess-rollback", status, iterations))
+            .await;
         let transcript = last_transcript(&app);
         assert!(
             transcript.contains(icon) && transcript.contains(phrase),
@@ -419,7 +420,8 @@ fn test_loop_terminated_banner_is_status_aware() {
     // completed carries the verification outcome; error carries the reason.
     let mut app = make_scripted_app();
     app.session_id = Some("sess-rollback".to_string());
-    app.handle_event(terminated("sess-rollback", "completed", 2));
+    app.handle_event(terminated("sess-rollback", "completed", 2))
+        .await;
     assert!(
         last_transcript(&app).contains("check.py: ok"),
         "verification outcome appended for completed"
@@ -427,7 +429,8 @@ fn test_loop_terminated_banner_is_status_aware() {
 
     let mut app = make_scripted_app();
     app.session_id = Some("sess-rollback".to_string());
-    app.handle_event(terminated("sess-rollback", "interrupted", 3));
+    app.handle_event(terminated("sess-rollback", "interrupted", 3))
+        .await;
     let transcript = last_transcript(&app);
     assert!(
         transcript.contains("test reason"),
@@ -437,7 +440,7 @@ fn test_loop_terminated_banner_is_status_aware() {
     // A foreign session's termination is not rendered.
     let mut app = make_scripted_app();
     app.session_id = Some("sess-rollback".to_string());
-    app.handle_event(terminated("sess-other", "error", 1));
+    app.handle_event(terminated("sess-other", "error", 1)).await;
     assert!(
         !last_transcript(&app).contains("Goal loop"),
         "foreign session termination must not render"
@@ -446,11 +449,11 @@ fn test_loop_terminated_banner_is_status_aware() {
 
 /// T-025 (FR-019): the change summary renders as a diffstat line in the
 /// message window together with the rollback offer prompt (FR-020).
-#[test]
-fn test_change_summary_renders_diffstat_and_rollback_offer() {
+#[tokio::test]
+async fn test_change_summary_renders_diffstat_and_rollback_offer() {
     let mut app = make_scripted_app();
     app.session_id = Some("sess-rollback".to_string());
-    app.handle_event(change_summary("sess-rollback"));
+    app.handle_event(change_summary("sess-rollback")).await;
 
     let transcript = last_transcript(&app);
     assert!(

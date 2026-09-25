@@ -1815,8 +1815,39 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
-## Version 1.0.117
+## Version 1.0.118
 
+- **Durable, global MCP server enable/disable state** — whether an MCP server is
+  actually started is now a persisted choice (`<global state dir>/mcp_state.json`)
+  rather than an implicit side effect of being listed in `ragent.json`. A server
+  id absent from the ledger is enabled, so a newly added server (in `ragent.json`
+  or bridged from a plugin) starts enabled with no extra step;
+  `mcp.<id>.disabled: true` in `ragent.json` always disables a server.
+  `/mcp connect <id>` enables and connects a server live (registering its tools
+  immediately) and `/mcp disconnect <id>` disables and disconnects it live; both
+  survive a restart and apply to every project. `McpToolWrapper::execute` refuses
+  to call a disabled server's tools even when the tool is still registered,
+  naming the command that re-enables it.
+- **`/mcp` lists plugin-contributed servers and their real status** — the display
+  list is built from the same merged server set the connect path uses
+  (`plugin_mcp_servers`), so a plugin-bridged `<plugin-id>.<server>` appears in
+  `/mcp` even when it has no `ragent.json` entry; live status and tool counts are
+  read from the session's MCP client. `/mcp` prints `enabled yes/no` and
+  `tools: N` per server (not the tool names; see `/plugins list --mcp` for the
+  full inventory).
+- **`/plugins list` shows MCP server and tool counts** — the table gains `MCP`
+  and `MCP Tools` columns and the contributions block renders
+  `mcp [<id> (<n> tools)] (S server(s), T tool(s))`. A server whose count is not
+  yet known renders `?`, never `0`.
+- **`/tools` lists visibility-disabled tools** — a family switched off
+  (`/tools github off`) no longer vanishes; the listing prints
+  `Visible Tools (N total, M disabled)` followed by a `Disabled by visibility`
+  section, backed by the new `ToolRegistry::hidden_definitions()`.
+- **Plugin `mcpServers` entries are bridged by default** — a plugin's MCP-server
+  transport section (inline or the Claude `"mcpServers": "./mcp.json"` file
+  reference) connects as `<plugin-id>.<server>` and is listed as an MCP server;
+  the `mcp server transports` unsupported label is retained only for entry
+  shapes the bridge cannot satisfy.
 - **`/spec reverse --folder` scaffolds and hosts the target project** —
   `/spec reverse` accepts `--folder <path>` plus `--github` / `--gitlab` (with
   the `/new` scaffold flags present) and creates the project in the target

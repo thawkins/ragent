@@ -31,7 +31,8 @@ JavaScript runtime.
 
 | Command | Arguments | Description |
 |---|---|---|
-| `/plugins list [--verbose]` | optional `--verbose` | List discovered plugins with state, contributions, and (with `--verbose`) telemetry counters. |
+| `/plugins list [--verbose]` | optional `--verbose` | List discovered plugins with state, contributions, and (with `--verbose`) telemetry counters. The `MCP` and `MCP Tools` columns give each plugin's MCP server count and the total tools those servers advertise (`?` until the server connects). |
+| `/plugins list --mcp` | optional `--mcp` | Print the live MCP tool inventory: every connected MCP server (including those bridged from a plugin's `mcpServers` section) with its status, tool count, and each tool's registry name. |
 | `/plugins add <source> [--force]` | required `source`, optional `--force` | Install a plugin and validate its manifest. It is enabled and loads at the next session start. |
 | `/plugins remove <pluginid>` | required `pluginid` | Uninstall a plugin from the store. Refused while the plugin is enabled. |
 | `/plugins enable <pluginid>` | required `pluginid` | Mark a plugin enabled, load it now, and register its tools and commands. |

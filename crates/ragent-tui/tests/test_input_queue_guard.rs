@@ -52,7 +52,7 @@ async fn test_guard_defers_while_the_primary_agent_is_processing() {
     app.input_queue.push_back(entry("deferred"));
 
     // A running turn cannot be dispatched over; the queue is untouched.
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(
         app.input_queue_len(),
         1,
@@ -66,7 +66,7 @@ async fn test_guard_defers_while_the_primary_agent_is_processing() {
 
     // The turn finishes: the retained entry runs at the next boundary.
     app.is_processing = false;
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(user_message_count(&app), 1);
     assert_eq!(app.last_prompt, "deferred");
     assert_eq!(app.input_queue_len(), 0);
@@ -82,7 +82,7 @@ async fn test_guard_defers_while_compaction_is_in_progress() {
     app.compact_in_progress = true;
     app.input_queue.push_back(entry("deferred"));
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(
         app.input_queue_len(),
         1,
@@ -91,7 +91,7 @@ async fn test_guard_defers_while_compaction_is_in_progress() {
     assert_eq!(user_message_count(&app), 0);
 
     app.compact_in_progress = false;
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(app.last_prompt, "deferred");
     assert_eq!(app.input_queue_len(), 0);
 }
@@ -102,7 +102,7 @@ async fn test_guard_defers_while_auto_compaction_is_in_progress() {
     app.auto_compact_in_progress = true;
     app.input_queue.push_back(entry("deferred"));
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(
         app.input_queue_len(),
         1,
@@ -111,7 +111,7 @@ async fn test_guard_defers_while_auto_compaction_is_in_progress() {
     assert_eq!(user_message_count(&app), 0);
 
     app.auto_compact_in_progress = false;
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(app.last_prompt, "deferred");
     assert_eq!(app.input_queue_len(), 0);
 }
@@ -122,7 +122,7 @@ async fn test_guard_defers_when_a_post_compact_send_is_pending() {
     app.pending_send_after_compact = Some(("in flight".to_string(), Vec::new()));
     app.input_queue.push_back(entry("deferred"));
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(
         app.input_queue_len(),
         1,
@@ -131,7 +131,7 @@ async fn test_guard_defers_when_a_post_compact_send_is_pending() {
     assert_eq!(user_message_count(&app), 0);
 
     app.pending_send_after_compact = None;
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(app.last_prompt, "deferred");
     assert_eq!(app.input_queue_len(), 0);
 }
@@ -150,19 +150,19 @@ async fn test_guard_holds_until_every_overlap_signal_clears() {
     app.input_queue.push_back(entry("deferred"));
 
     // Clear the signals one at a time; the guard holds while any remain set.
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(app.input_queue_len(), 1, "all four signals set");
 
     app.is_processing = false;
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(app.input_queue_len(), 1, "compaction signals remain");
 
     app.compact_in_progress = false;
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(app.input_queue_len(), 1, "auto-compaction remains");
 
     app.auto_compact_in_progress = false;
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(
         app.input_queue_len(),
         1,
@@ -170,7 +170,7 @@ async fn test_guard_holds_until_every_overlap_signal_clears() {
     );
 
     app.pending_send_after_compact = None;
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(
         app.input_queue_len(),
         0,
@@ -190,7 +190,7 @@ async fn test_guard_defers_pending_next_while_processing() {
     app.queue_next_pending = true;
     app.input_queue.push_back(entry("next-entry"));
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(
         app.input_queue_len(),
         1,
@@ -204,7 +204,7 @@ async fn test_guard_defers_pending_next_while_processing() {
 
     // Safe boundary: the pending dispatch fires exactly once.
     app.is_processing = false;
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(app.last_prompt, "next-entry");
     assert_eq!(app.input_queue_len(), 0);
     assert!(
@@ -220,7 +220,7 @@ async fn test_guard_defers_pending_next_during_compaction() {
     app.queue_next_pending = true;
     app.input_queue.push_back(entry("next-entry"));
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
     assert_eq!(app.input_queue_len(), 1);
     assert!(
         app.queue_next_pending,
@@ -238,7 +238,7 @@ async fn test_guard_allows_dispatch_at_a_fully_idle_boundary() {
     let mut app = app_with_session();
     app.input_queue.push_back(entry("ready"));
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
 
     assert_eq!(
         app.input_queue_len(),

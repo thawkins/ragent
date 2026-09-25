@@ -69,6 +69,7 @@ impl Drop for LaunchEnv {
 /// Enter an isolated project whose `.ragent/ragent.json` holds `config_json`,
 /// with the global config dir redirected into the tempdir so the developer's
 /// real config is never read.
+#[allow(clippy::await_holding_lock)]
 fn enter_project(config_json: &str) -> (MutexGuard<'static, ()>, LaunchEnv, tempfile::TempDir) {
     let guard = launch_lock().lock().unwrap_or_else(|e| e.into_inner());
     let env = LaunchEnv::new();
@@ -102,13 +103,14 @@ const NO_PLUGINS_BLOCK: &str = r#"{"defaultAgent": "general"}"#;
 
 // ── Launch with no `plugins.stores` block (FR-030, FR-036) ──────────────────
 
-#[test]
-fn codex_launch_with_no_stores_block_opens_the_panel() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn codex_launch_with_no_stores_block_opens_the_panel() {
     let (_lock, _env, _temp) = enter_project(NO_PLUGINS_BLOCK);
     let mut app = app_with_session();
     let before = assistant_count(&app);
 
-    app.execute_slash_command("/plugins codex");
+    app.execute_slash_command("/plugins codex").await;
 
     let browser = app
         .plugin_store
@@ -127,13 +129,14 @@ fn codex_launch_with_no_stores_block_opens_the_panel() {
     );
 }
 
-#[test]
-fn claude_launch_with_no_stores_block_opens_the_panel() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn claude_launch_with_no_stores_block_opens_the_panel() {
     let (_lock, _env, _temp) = enter_project(NO_PLUGINS_BLOCK);
     let mut app = app_with_session();
     let before = assistant_count(&app);
 
-    app.execute_slash_command("/plugins claude");
+    app.execute_slash_command("/plugins claude").await;
 
     let browser = app
         .plugin_store
@@ -144,15 +147,16 @@ fn claude_launch_with_no_stores_block_opens_the_panel() {
     assert_eq!(assistant_count(&app), before);
 }
 
-#[test]
-fn launch_reports_no_configuration_error_for_either_store() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn launch_reports_no_configuration_error_for_either_store() {
     let (_lock, _env, _temp) = enter_project(NO_PLUGINS_BLOCK);
     let mut app = app_with_session();
 
     for invocation in ["/plugins codex", "/plugins claude"] {
         app.close_plugin_store();
         let before = assistant_count(&app);
-        app.execute_slash_command(invocation);
+        app.execute_slash_command(invocation).await;
         assert_eq!(
             assistant_count(&app),
             before,
@@ -208,8 +212,9 @@ fn the_default_endpoints_are_https_and_pass_the_endpoint_guard() {
     }
 }
 
-#[test]
-fn a_configured_url_overrides_the_default_on_the_launch_path() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn a_configured_url_overrides_the_default_on_the_launch_path() {
     // Isolate env/cwd and serialise against the other env-mutating cases: the
     // launch below reads the resolved config.
     let (_lock, _env, _temp) = enter_project(NO_PLUGINS_BLOCK);
@@ -243,7 +248,7 @@ fn a_configured_url_overrides_the_default_on_the_launch_path() {
 
     // The launch itself still opens the panel, now against the override.
     let mut app = app_with_session();
-    app.execute_slash_command("/plugins codex");
+    app.execute_slash_command("/plugins codex").await;
     assert_eq!(
         app.plugin_store.as_ref().expect("panel open").kind,
         StoreKind::Codex
@@ -252,24 +257,28 @@ fn a_configured_url_overrides_the_default_on_the_launch_path() {
 
 // ── Query and `--refresh` parsing on launch (FR-020, FR-021) ────────────────
 
-#[test]
-fn trailing_query_is_prefilled_and_refresh_is_recorded() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn trailing_query_is_prefilled_and_refresh_is_recorded() {
     let (_lock, _env, _temp) = enter_project(NO_PLUGINS_BLOCK);
     let mut app = app_with_session();
 
-    app.execute_slash_command("/plugins codex weather --refresh");
+    app.execute_slash_command("/plugins codex weather --refresh")
+        .await;
 
     let browser = app.plugin_store.as_ref().expect("panel open");
     assert_eq!(browser.query, "weather");
     assert!(browser.refresh, "`--refresh` must be recorded");
 }
 
-#[test]
-fn a_multi_word_query_is_joined_and_refresh_defaults_off() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn a_multi_word_query_is_joined_and_refresh_defaults_off() {
     let (_lock, _env, _temp) = enter_project(NO_PLUGINS_BLOCK);
     let mut app = app_with_session();
 
-    app.execute_slash_command("/plugins claude time helper");
+    app.execute_slash_command("/plugins claude time helper")
+        .await;
 
     let browser = app.plugin_store.as_ref().expect("panel open");
     assert_eq!(browser.query, "time helper");
@@ -278,13 +287,14 @@ fn a_multi_word_query_is_joined_and_refresh_defaults_off() {
 
 // ── Disabled subsystem (SPEC configuration schema) ──────────────────────────
 
-#[test]
-fn a_disabled_subsystem_reports_and_opens_no_panel() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn a_disabled_subsystem_reports_and_opens_no_panel() {
     let (_lock, _env, _temp) =
         enter_project(r#"{"defaultAgent": "general", "plugins": {"enabled": false}}"#);
     let mut app = app_with_session();
 
-    app.execute_slash_command("/plugins codex");
+    app.execute_slash_command("/plugins codex").await;
 
     assert!(
         app.plugin_store.is_none(),
@@ -303,13 +313,14 @@ fn a_disabled_subsystem_reports_and_opens_no_panel() {
 
 // ── Non-store subcommands still report (regression) ─────────────────────────
 
-#[test]
-fn help_and_unknown_subcommands_still_render_the_usage_block() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn help_and_unknown_subcommands_still_render_the_usage_block() {
     let (_lock, _env, _temp) = enter_project(NO_PLUGINS_BLOCK);
     let mut app = app_with_session();
 
     for invocation in ["/plugins help", "/plugins", "/plugins bogus"] {
-        app.execute_slash_command(invocation);
+        app.execute_slash_command(invocation).await;
         let text = app
             .messages
             .last()

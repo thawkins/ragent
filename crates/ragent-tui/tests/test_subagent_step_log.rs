@@ -23,8 +23,8 @@ fn tool_call_lines<'a>(entries: &'a [ragent_tui::app::LogEntry], needle: &str) -
         .collect()
 }
 
-#[test]
-fn test_tool_call_start_tracked_subagent_is_logged_with_step_tag() {
+#[tokio::test]
+async fn test_tool_call_start_tracked_subagent_is_logged_with_step_tag() {
     let mut app = support::make_app();
     app.session_id = Some("lead-sess".to_string());
 
@@ -36,7 +36,8 @@ fn test_tool_call_start_tracked_subagent_is_logged_with_step_tag() {
         agent: "explore".to_string(),
         task: "find callers".to_string(),
         background: false,
-    });
+    })
+    .await;
 
     // The processor set the child session's loop step to 2 and is executing
     // its first tool call of that step.
@@ -45,7 +46,8 @@ fn test_tool_call_start_tracked_subagent_is_logged_with_step_tag() {
         session_id: "child-sess-1".to_string(),
         call_id: "call-1".to_string(),
         tool: "grep".to_string(),
-    });
+    })
+    .await;
 
     let lines = tool_call_lines(&app.log_entries, "tool call: grep");
     assert_eq!(lines.len(), 1, "exactly one tool-call log line: {lines:?}");
@@ -68,8 +70,8 @@ fn test_tool_call_start_tracked_subagent_is_logged_with_step_tag() {
     );
 }
 
-#[test]
-fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
+#[tokio::test]
+async fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
     let mut app = support::make_app();
     app.session_id = Some("lead-sess".to_string());
 
@@ -80,7 +82,8 @@ fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
         agent: "build".to_string(),
         task: "build the crate".to_string(),
         background: true,
-    });
+    })
+    .await;
 
     // Simulate 3 tool calls across 2 loop steps (second step runs 2 calls).
     // The processor increments the bus counter once per ToolCallStart; the
@@ -94,14 +97,16 @@ fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
             session_id: "child-sess-2".to_string(),
             call_id: format!("call-a{i}"),
             tool: (*tool).to_string(),
-        });
+        })
+        .await;
     }
     app.event_bus.set_step("child-sess-2", 2);
     app.handle_event(Event::ToolCallStart {
         session_id: "child-sess-2".to_string(),
         call_id: "call-a2".to_string(),
         tool: "bash".to_string(),
-    });
+    })
+    .await;
 
     let expected = app.event_bus.current_tool_calls("child-sess-2");
 
@@ -121,8 +126,8 @@ fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
     );
 }
 
-#[test]
-fn test_tool_call_end_tracked_subagent_is_logged_with_step_tag() {
+#[tokio::test]
+async fn test_tool_call_end_tracked_subagent_is_logged_with_step_tag() {
     let mut app = support::make_app();
     app.session_id = Some("lead-sess".to_string());
 
@@ -133,21 +138,24 @@ fn test_tool_call_end_tracked_subagent_is_logged_with_step_tag() {
         agent: "plan".to_string(),
         task: "make a plan".to_string(),
         background: false,
-    });
+    })
+    .await;
 
     app.event_bus.set_step("child-sess-3", 1);
     app.handle_event(Event::ToolCallStart {
         session_id: "child-sess-3".to_string(),
         call_id: "call-b1".to_string(),
         tool: "read".to_string(),
-    });
+    })
+    .await;
     app.handle_event(Event::ToolCallEnd {
         session_id: "child-sess-3".to_string(),
         call_id: "call-b1".to_string(),
         tool: "read".to_string(),
         error: None,
         duration_ms: 42,
-    });
+    })
+    .await;
 
     let lines = tool_call_lines(&app.log_entries, "tool read completed");
     assert_eq!(lines.len(), 1, "exactly one completion line: {lines:?}");
@@ -162,14 +170,16 @@ fn test_tool_call_end_tracked_subagent_is_logged_with_step_tag() {
         session_id: "child-sess-3".to_string(),
         call_id: "call-b2".to_string(),
         tool: "write".to_string(),
-    });
+    })
+    .await;
     app.handle_event(Event::ToolCallEnd {
         session_id: "child-sess-3".to_string(),
         call_id: "call-b2".to_string(),
         tool: "write".to_string(),
         error: Some("denied".to_string()),
         duration_ms: 5,
-    });
+    })
+    .await;
     let failed: Vec<_> = app
         .log_entries
         .iter()
@@ -184,8 +194,8 @@ fn test_tool_call_end_tracked_subagent_is_logged_with_step_tag() {
     );
 }
 
-#[test]
-fn test_tool_call_batch_tracked_subagent_logs_untagged_calls() {
+#[tokio::test]
+async fn test_tool_call_batch_tracked_subagent_logs_untagged_calls() {
     let mut app = support::make_app();
     app.session_id = Some("lead-sess".to_string());
 
@@ -196,7 +206,8 @@ fn test_tool_call_batch_tracked_subagent_logs_untagged_calls() {
         agent: "debug".to_string(),
         task: "debug it".to_string(),
         background: false,
-    });
+    })
+    .await;
 
     app.event_bus.set_step("child-sess-4", 1);
     // Both calls arrive only via the atomic batch (their per-call Start
@@ -228,7 +239,8 @@ fn test_tool_call_batch_tracked_subagent_logs_untagged_calls() {
                 success: true,
             },
         ],
-    });
+    })
+    .await;
 
     let lines = tool_call_lines(&app.log_entries, "[debug-55667788] ");
     assert_eq!(
@@ -246,8 +258,8 @@ fn test_tool_call_batch_tracked_subagent_logs_untagged_calls() {
     );
 }
 
-#[test]
-fn test_team_member_tool_calls_logged_with_teammate_name() {
+#[tokio::test]
+async fn test_team_member_tool_calls_logged_with_teammate_name() {
     let mut app = support::make_app();
     app.session_id = Some("lead-sess".to_string());
     app.active_team = Some(TeamConfig::new("alpha", "lead-sess"));
@@ -261,7 +273,8 @@ fn test_team_member_tool_calls_logged_with_teammate_name() {
         session_id: "tm-session-9".to_string(),
         call_id: "call-d1".to_string(),
         tool: "read".to_string(),
-    });
+    })
+    .await;
 
     let lines = tool_call_lines(&app.log_entries, "tool call: read");
     assert_eq!(lines.len(), 1, "exactly one tool-call log line: {lines:?}");
@@ -272,8 +285,8 @@ fn test_team_member_tool_calls_logged_with_teammate_name() {
     );
 }
 
-#[test]
-fn test_untracked_session_tool_calls_are_not_logged() {
+#[tokio::test]
+async fn test_untracked_session_tool_calls_are_not_logged() {
     let mut app = support::make_app();
     app.session_id = Some("lead-sess".to_string());
 
@@ -282,7 +295,8 @@ fn test_untracked_session_tool_calls_are_not_logged() {
         session_id: "stranger-sess".to_string(),
         call_id: "call-e1".to_string(),
         tool: "read".to_string(),
-    });
+    })
+    .await;
 
     assert!(
         !app.log_entries

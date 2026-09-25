@@ -134,12 +134,12 @@ async fn drive_probe(app: &mut App) {
 
 // ── `--check` probes each store off-loop (FR-031 `--check`) ─────────────────
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stores_check_probes_both_defaults_and_reports_availability() {
     let (_lock, _env, _temp) = enter_empty_project();
     let mut app = app_with_seam(FixtureStoreFetcher::new().with_default_endpoints());
 
-    app.execute_slash_command("/plugins stores --check");
+    app.execute_slash_command("/plugins stores --check").await;
 
     // The acknowledgement renders immediately; the probe completes off-loop.
     assert!(
@@ -174,14 +174,14 @@ async fn stores_check_probes_both_defaults_and_reports_availability() {
     assert!(text.is_ascii(), "the report must be ASCII only: {text}");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stores_check_reports_unavailable_with_no_registered_fixture() {
     let (_lock, _env, _temp) = enter_empty_project();
     // An empty seam: no endpoint is registered, so the probe is unavailable for
     // both stores without any live request (NFR-003).
     let mut app = app_with_seam(FixtureStoreFetcher::new());
 
-    app.execute_slash_command("/plugins stores --check");
+    app.execute_slash_command("/plugins stores --check").await;
     drive_probe(&mut app).await;
 
     let text = flat_text(&app);
@@ -195,7 +195,7 @@ async fn stores_check_reports_unavailable_with_no_registered_fixture() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stores_check_uses_the_injected_seam_for_every_store() {
     // Both compiled defaults are served by the fixture seam, proving the probe
     // routes through the injectable fetcher rather than the live HTTPS one.
@@ -204,7 +204,7 @@ async fn stores_check_uses_the_injected_seam_for_every_store() {
     let expected = seam.endpoints().len();
     let mut app = app_with_seam(seam);
 
-    app.execute_slash_command("/plugins stores --check");
+    app.execute_slash_command("/plugins stores --check").await;
     drive_probe(&mut app).await;
 
     assert_eq!(expected, 2, "the seam is seeded for both compiled defaults");
@@ -222,7 +222,7 @@ async fn plain_stores_touches_no_probe_slot_and_carries_no_availability() {
     let (_lock, _env, _temp) = enter_empty_project();
     let mut app = app_with_seam(FixtureStoreFetcher::new().with_default_endpoints());
 
-    app.execute_slash_command("/plugins stores");
+    app.execute_slash_command("/plugins stores").await;
 
     let text = last_text(&app);
     assert!(text.contains("From: /plugins stores"), "{text}");
@@ -245,15 +245,15 @@ async fn plain_stores_touches_no_probe_slot_and_carries_no_availability() {
 
 // ── No reactor: the probe degrades to the plain config report ───────────────
 
-#[test]
-fn stores_check_without_a_reactor_deposits_the_plain_config_report() {
+#[tokio::test]
+async fn stores_check_without_a_reactor_deposits_the_plain_config_report() {
     // A plain `#[test]` has no async reactor, so `begin_plugin_store_probe`
     // cannot run off-loop. It must degrade to the plain config report rather
     // than block or panic, and the poll must still surface it.
     let (_lock, _env, _temp) = enter_empty_project();
     let mut app = app_with_seam(FixtureStoreFetcher::new().with_default_endpoints());
 
-    app.execute_slash_command("/plugins stores --check");
+    app.execute_slash_command("/plugins stores --check").await;
     assert!(
         app.plugin_store_probe_result.lock().unwrap().is_some(),
         "without a reactor the plain report is deposited synchronously"

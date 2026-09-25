@@ -209,14 +209,14 @@ pub enum InputAction {
 /// # use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 /// # use ragent_tui::App;
 /// # use ragent_tui::input::handle_key;
-/// # fn example(app: &mut App) {
+/// # async fn example(app: &mut App) {
 /// let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-/// if let Some(action) = handle_key(app, key) {
+/// if let Some(action) = handle_key(app, key).await {
 ///     println!("Action: {action:?}");
 /// }
 /// # }
 /// ```
-pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
+pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     if matches!(key.kind, KeyEventKind::Release) {
         return None;
     }
@@ -320,7 +320,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         match key.code {
             KeyCode::Up => app.queue_menu_move_up(),
             KeyCode::Down => app.queue_menu_move_down(),
-            KeyCode::Enter => app.queue_menu_activate_selected(),
+            KeyCode::Enter => app.queue_menu_activate_selected().await,
             KeyCode::Esc => {
                 app.close_queue_menu();
                 app.needs_redraw = true;

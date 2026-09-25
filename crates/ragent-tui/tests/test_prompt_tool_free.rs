@@ -34,7 +34,7 @@ fn prompt_report(input: &str) -> (String, String) {
         .expect("multi-thread runtime")
         .block_on(async move {
             let mut app = make_app();
-            app.execute_slash_command(input);
+            app.execute_slash_command(input).await;
             let text = app
                 .messages
                 .last()
@@ -121,7 +121,7 @@ fn test_prompt_primary_tool_free_custom_agent_reports_no_tools() {
         .block_on(async move {
             let mut app = make_app();
             app.custom_agent_defs = vec![def];
-            app.execute_slash_command("/prompt primary oneliner");
+            app.execute_slash_command("/prompt primary oneliner").await;
             let text = app
                 .messages
                 .last()
@@ -183,7 +183,8 @@ fn test_prompt_subagent_tool_free_custom_agent_reports_no_tools() {
         .block_on(async move {
             let mut app = make_app();
             app.custom_agent_defs = vec![def];
-            app.execute_slash_command("/prompt subagent oneliner-sub");
+            app.execute_slash_command("/prompt subagent oneliner-sub")
+                .await;
             let text = app
                 .messages
                 .last()

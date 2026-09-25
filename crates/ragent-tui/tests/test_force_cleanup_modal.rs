@@ -9,8 +9,9 @@ use std::sync::Mutex;
 mod support;
 static CWD_LOCK: Mutex<()> = Mutex::new(());
 
-#[test]
-fn test_forcecleanup_modal_confirm_flow() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_forcecleanup_modal_confirm_flow() {
     let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
@@ -32,7 +33,7 @@ fn test_forcecleanup_modal_confirm_flow() {
     m.status = MemberStatus::Working;
     app.team_members.push(m);
 
-    app.execute_slash_command("/team forcecleanup");
+    app.execute_slash_command("/team forcecleanup").await;
 
     assert!(
         app.pending_forcecleanup.is_some(),
@@ -47,7 +48,8 @@ fn test_forcecleanup_modal_confirm_flow() {
     );
 
     // Press Enter to confirm
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert!(
         app.pending_forcecleanup.is_none(),
@@ -63,8 +65,8 @@ fn test_forcecleanup_modal_confirm_flow() {
     let _ = std::env::set_current_dir(original_dir);
 }
 
-#[test]
-fn test_forcecleanup_modal_cancel_flow() {
+#[tokio::test]
+async fn test_forcecleanup_modal_cancel_flow() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("force-team", "s1"));
@@ -72,14 +74,15 @@ fn test_forcecleanup_modal_cancel_flow() {
     m.status = MemberStatus::Working;
     app.team_members.push(m);
 
-    app.execute_slash_command("/team forcecleanup");
+    app.execute_slash_command("/team forcecleanup").await;
     assert!(
         app.pending_forcecleanup.is_some(),
         "pending modal should be set"
     );
 
     // Press Esc to cancel
-    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await;
 
     assert!(
         app.pending_forcecleanup.is_none(),

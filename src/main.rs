@@ -704,6 +704,10 @@ async fn async_main() -> Result<()> {
     // FR-030 MCP bridge: enabled plugins also contribute MCP servers (their
     // manifest `mcpServers` section). Configured servers take precedence on an
     // id collision; the merged set connects exactly like before.
+    //
+    // Enable state: whether a server is started is a durable, global choice
+    // recorded in the MCP enable-state ledger. A server absent from the ledger
+    // is enabled, so a newly added server starts connected.
     let mcp_configs: Vec<(String, ragent_agent::McpServerConfig)> = {
         let working_dir = std::env::current_dir().unwrap_or_else(|e| {
             tracing::warn!(
@@ -723,15 +727,39 @@ async fn async_main() -> Result<()> {
         );
 
         let sp = Arc::clone(&session_processor);
+        let bus = event_bus.clone();
         tokio::spawn(async move {
             let mut mcp_client = ragent_agent::mcp::McpClient::new();
+            let ledger = ragent_agent::mcp::McpEnableLedger::load();
             let mut mcp_connected = 0u32;
             for (id, cfg) in mcp_configs {
-                if let Err(e) = mcp_client.connect(&id, cfg).await {
-                    tracing::warn!(server_id = %id, error = %e, "MCP server connection failed at startup");
-                } else {
-                    mcp_connected += 1;
+                // A server switched off in the ledger (or in ragent.json) is
+                // registered as disabled so `/mcp` can still list it and offer
+                // to re-enable it, but no child process is spawned.
+                if !ragent_agent::mcp::is_server_enabled(&cfg, &ledger, &id) {
+                    mcp_client.register_disabled(&id, cfg);
+                    bus.publish(ragent_agent::event::Event::McpServerEnabledChanged {
+                        server_id: id,
+                        enabled: false,
+                    });
+                    continue;
                 }
+                let status = match mcp_client.connect(&id, cfg).await {
+                    Ok(()) => {
+                        mcp_connected += 1;
+                        "connected"
+                    }
+                    Err(e) => {
+                        tracing::warn!(server_id = %id, error = %e, "MCP server connection failed at startup");
+                        "failed"
+                    }
+                };
+                // Publish per-server status so the TUI (`/mcp`) reflects the
+                // real connection state instead of assuming `disabled`.
+                bus.publish(ragent_agent::event::Event::McpStatusChanged {
+                    server_id: id,
+                    status: status.to_string(),
+                });
             }
             let shared_client = Arc::new(tokio::sync::RwLock::new(mcp_client));
             sp.set_mcp_client(shared_client).await;

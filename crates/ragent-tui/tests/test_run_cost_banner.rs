@@ -13,8 +13,8 @@ use ragent_tui::app::LogLevel;
 mod support;
 
 /// A `RunCostSummary` for the current session should set the banner and log.
-#[test]
-fn test_run_cost_summary_sets_banner_and_logs() {
+#[tokio::test]
+async fn test_run_cost_summary_sets_banner_and_logs() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
@@ -25,7 +25,8 @@ fn test_run_cost_summary_sets_banner_and_logs() {
         output_tokens: 567,
         total_cost_usd: 0.012_345_6,
         duration_ms: 4_250,
-    });
+    })
+    .await;
 
     let banner = app
         .run_cost_banner
@@ -68,8 +69,8 @@ fn test_run_cost_summary_sets_banner_and_logs() {
 }
 
 /// A `RunCostSummary` for a different session should be ignored entirely.
-#[test]
-fn test_run_cost_summary_other_session_is_ignored() {
+#[tokio::test]
+async fn test_run_cost_summary_other_session_is_ignored() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
@@ -80,7 +81,8 @@ fn test_run_cost_summary_other_session_is_ignored() {
         output_tokens: 50,
         total_cost_usd: 0.01,
         duration_ms: 1_000,
-    });
+    })
+    .await;
 
     assert!(
         app.run_cost_banner.is_none(),
@@ -94,8 +96,8 @@ fn test_run_cost_summary_other_session_is_ignored() {
 
 /// A non-character keypress (Esc) should dismiss the transient run-cost banner
 /// and be consumed.
-#[test]
-fn test_run_cost_banner_dismissed_on_keypress() {
+#[tokio::test]
+async fn test_run_cost_banner_dismissed_on_keypress() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.run_cost_banner = Some("⟡ run complete · 1+2 tokens · $0.01 · 1.0s".to_string());
@@ -104,7 +106,8 @@ fn test_run_cost_banner_dismissed_on_keypress() {
     // dismiss the banner.
     app.handle_key_event(crossterm::event::KeyEvent::from(
         crossterm::event::KeyCode::Esc,
-    ));
+    ))
+    .await;
 
     assert!(
         app.run_cost_banner.is_none(),
@@ -115,8 +118,8 @@ fn test_run_cost_banner_dismissed_on_keypress() {
 /// A plain printable character should dismiss the banner AND be added to the
 /// input buffer so the first typed character is not lost (fix for first-char
 /// loss after run completion).
-#[test]
-fn test_run_cost_banner_printable_char_not_consumed() {
+#[tokio::test]
+async fn test_run_cost_banner_printable_char_not_consumed() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.run_cost_banner = Some("⟡ run complete · 1+2 tokens · $0.01 · 1.0s".to_string());
@@ -126,7 +129,7 @@ fn test_run_cost_banner_printable_char_not_consumed() {
         crossterm::event::KeyCode::Char('h'),
         crossterm::event::KeyModifiers::NONE,
     );
-    app.handle_key_event(key);
+    app.handle_key_event(key).await;
 
     // Banner should be cleared.
     assert!(

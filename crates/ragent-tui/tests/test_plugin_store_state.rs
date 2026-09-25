@@ -211,11 +211,11 @@ fn query_editing_removes_one_whole_unicode_character() {
     assert!(browser.query.is_empty());
 }
 
-#[test]
-fn edit_or_close_edits_a_non_empty_query_and_only_dismisses_on_empty() {
+#[tokio::test]
+async fn edit_or_close_edits_a_non_empty_query_and_only_dismisses_on_empty() {
     let mut app = support::make_app();
     app.open_plugin_store(StoreKind::Codex, "", false);
-    handle_key(&mut app, key(KeyCode::Char('a')));
+    handle_key(&mut app, key(KeyCode::Char('a'))).await;
 
     assert!(
         app.plugin_store_edit_or_close(),

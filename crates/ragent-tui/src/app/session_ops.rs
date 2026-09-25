@@ -1062,12 +1062,12 @@ impl App {
     /// confirmation dialog, and `Show` opens the queue-entry panel. A
     /// non-selectable row (the empty-queue `Next`) is a no-op, so a stray
     /// `Enter` can never act on a dead row (FR-023).
-    pub fn queue_menu_activate_selected(&mut self) {
+    pub async fn queue_menu_activate_selected(&mut self) {
         if !self.queue_menu_row_selectable(self.queue_menu_selected) {
             return;
         }
         match self.queue_menu_selected {
-            crate::app::QUEUE_MENU_ROW_NEXT => self.queue_menu_select_next(),
+            crate::app::QUEUE_MENU_ROW_NEXT => self.queue_menu_select_next().await,
             crate::app::QUEUE_MENU_ROW_HALT => self.queue_menu_select_halt(),
             crate::app::QUEUE_MENU_ROW_CLEAR => self.queue_menu_select_clear(),
             crate::app::QUEUE_MENU_ROW_SHOW => self.queue_show_open_panel(),
@@ -1537,14 +1537,21 @@ impl App {
         let stores = plugins.stores_or_default();
         let slot = Arc::clone(&self.plugin_store_probe_result);
         let fetcher = Arc::clone(&self.plugin_store_fetcher);
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        if let Ok(handle) = tokio::runtime::Handle::try_current()
+            && handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
+        {
+            // Only a multi-thread reactor can run the blocking probe alongside
+            // the caller; on a current-thread reactor `spawn_blocking` would
+            // queue the probe without ever letting it make progress (the test
+            // reactor is dropped before the task runs), so the plain report is
+            // deposited instead — matching the no-reactor branch.
             handle.spawn_blocking(move || {
                 let probes = probe_stores(&stores, fetcher.as_ref());
                 let report = render_stores_report_with_probes(&stores, Some(&probes));
                 *recover_poisoned(slot.lock(), "plugin_store_probe_result") = Some(report);
             });
         } else {
-            // No reactor: report the plain config view rather than block.
+            // No usable reactor: report the plain config view rather than block.
             let report = render_stores_report_with_probes(&stores, None);
             *recover_poisoned(slot.lock(), "plugin_store_probe_result") = Some(report);
         }
@@ -1701,7 +1708,7 @@ impl App {
     /// instead of re-arming at every later boundary. A `Next`-triggered dispatch
     /// preserves whatever draft the user is editing, so selecting the row never
     /// mutates the editable input buffer (FR-031).
-    pub fn advance_input_queue(&mut self) {
+    pub async fn advance_input_queue(&mut self) {
         // FR-017 amendment: a queued *synchronous* slash command never sets
         // `is_processing`, so no `MessageEnd`/`AgentError` boundary follows it and
         // the rest of the queue would otherwise stall behind it. Drain in a loop
@@ -1737,7 +1744,8 @@ impl App {
                 let saved_input = std::mem::take(&mut self.input);
                 let saved_cursor = self.input_cursor;
                 let saved_anchor = self.kb_select_anchor;
-                self.dispatch_queued_input(entry.text, entry.image_paths);
+                self.dispatch_queued_input(entry.text, entry.image_paths)
+                    .await;
                 self.input = saved_input;
                 self.input_cursor = saved_cursor;
                 self.kb_select_anchor = saved_anchor;
@@ -1746,7 +1754,10 @@ impl App {
             // A plain message starts an asynchronous turn that sets `is_processing`,
             // so it ends the drain; a synchronous slash command leaves the boundary
             // free and the loop continues with the next queued entry.
-            if self.dispatch_queued_input(entry.text, entry.image_paths) {
+            if self
+                .dispatch_queued_input(entry.text, entry.image_paths)
+                .await
+            {
                 return;
             }
         }
@@ -1766,13 +1777,13 @@ impl App {
     /// Returns `true` when a chat turn was started (a plain message, which leaves
     /// the boundary busy and ends the drain) and `false` when a synchronous slash
     /// command ran and left the boundary free for the next queued entry.
-    fn dispatch_queued_input(
+    async fn dispatch_queued_input(
         &mut self,
         text: String,
         image_paths: Vec<std::path::PathBuf>,
     ) -> bool {
         if text.starts_with('/') {
-            self.execute_slash_command(&text);
+            self.execute_slash_command(&text).await;
             false
         } else {
             self.dispatch_user_message(text, image_paths);
@@ -1800,7 +1811,7 @@ impl App {
     /// [`App::queue_menu_select_halt`]. The Up/Down/Enter menu key handling that
     /// invokes it is added by the menu key-handling task; it is not part of this
     /// action.
-    pub fn queue_menu_select_next(&mut self) {
+    pub async fn queue_menu_select_next(&mut self) {
         if self.input_queue.is_empty() {
             // FR-023: the `Next` row is non-selectable with an empty queue, so
             // this is only reachable defensively; report and close.
@@ -1853,7 +1864,7 @@ impl App {
                 format!("queue: Next — dispatching oldest queued entry: {text}"),
             );
             self.queue_next_pending = true;
-            self.advance_input_queue();
+            self.advance_input_queue().await;
         }
         self.close_queue_menu();
         self.needs_redraw = true;

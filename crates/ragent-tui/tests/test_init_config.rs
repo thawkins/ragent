@@ -40,8 +40,9 @@ fn restore_xdg_config_home(original: Option<String>) {
 
 /// `/init config` should create a default `ragent.json` inside the global
 /// config directory.
-#[test]
-fn test_slash_init_config_creates_default_global_config() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_slash_init_config_creates_default_global_config() {
     let _lock = env_lock()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -57,7 +58,7 @@ fn test_slash_init_config_creates_default_global_config() {
     let config_path = config_dir.join("ragent.json");
     assert!(!config_path.exists(), "config should not exist pre-test");
 
-    app.execute_slash_command("/init config");
+    app.execute_slash_command("/init config").await;
 
     assert_eq!(app.status, "init config: created");
     assert!(
@@ -86,8 +87,9 @@ fn test_slash_init_config_creates_default_global_config() {
 }
 
 /// `/init config` should not overwrite an existing global config.
-#[test]
-fn test_slash_init_config_skips_when_config_exists() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_slash_init_config_skips_when_config_exists() {
     let _lock = env_lock()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -104,7 +106,7 @@ fn test_slash_init_config_skips_when_config_exists() {
     let existing = r#"{"default_agent":"coder"}"#;
     std::fs::write(&config_path, existing).expect("write existing config");
 
-    app.execute_slash_command("/init config");
+    app.execute_slash_command("/init config").await;
 
     assert_eq!(app.status, "init config: already exists");
 
@@ -125,8 +127,9 @@ fn test_slash_init_config_skips_when_config_exists() {
 /// directory can be determined.  This is a defensive check — on real platforms
 /// `dirs::config_dir()` always returns `Some`, but the branch should still
 /// produce a clean status rather than panicking.
-#[test]
-fn test_slash_init_config_produces_status_message() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_slash_init_config_produces_status_message() {
     let _lock = env_lock()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -137,7 +140,7 @@ fn test_slash_init_config_produces_status_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let original_xdg = with_temp_xdg_config_home(&temp);
 
-    app.execute_slash_command("/init config");
+    app.execute_slash_command("/init config").await;
 
     // Status should be one of the known init-config statuses.
     assert!(

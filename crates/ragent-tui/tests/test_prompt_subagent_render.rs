@@ -29,7 +29,7 @@ fn prompt_report(input: &str) -> String {
         .expect("multi-thread runtime")
         .block_on(async move {
             let mut app = make_app();
-            app.execute_slash_command(input);
+            app.execute_slash_command(input).await;
             app.messages
                 .last()
                 .map(|m| m.text_content())

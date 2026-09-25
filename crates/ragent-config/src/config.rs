@@ -2351,6 +2351,17 @@ impl Config {
         Self::union_into(&mut base.dirs.denylist, overlay.dirs.denylist);
         Self::union_into(&mut base.dirs.allowed_roots, overlay.dirs.allowed_roots);
 
+        // Config provenance: the paths that contributed to the resolved config
+        // are accumulated here (the loader pushes each leg separately), so a
+        // consumer that needs to locate the active project config — for
+        // example the plugin store bridge — can read them off the value
+        // returned by `load`, not just the intermediate `config` binding.
+        for path in overlay.config_paths {
+            if !base.config_paths.contains(&path) {
+                base.config_paths.push(path);
+            }
+        }
+
         base
     }
 

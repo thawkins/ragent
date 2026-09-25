@@ -9,8 +9,8 @@ use ragent_tui::app::{ConfiguredProvider, ProviderSetupStep};
 #[path = "support/mod.rs"]
 mod support;
 
-#[test]
-fn test_router_save_confirm_persists_and_activates() {
+#[tokio::test]
+async fn test_router_save_confirm_persists_and_activates() {
     let mut app = support::make_app();
     app.storage
         .set_provider_auth("anthropic", "sk-test")
@@ -54,7 +54,8 @@ fn test_router_save_confirm_persists_and_activates() {
     app.config_paths = vec![config_path.clone()];
 
     // Press Ctrl+S to trigger the save confirmation modal.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .await;
 
     assert!(
         app.pending_router_save.is_some(),
@@ -69,7 +70,8 @@ fn test_router_save_confirm_persists_and_activates() {
     );
 
     // Confirm with Enter.
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert!(
         app.pending_router_save.is_none(),
@@ -107,8 +109,8 @@ fn test_router_save_confirm_persists_and_activates() {
     let _ = std::fs::remove_file(&config_path);
 }
 
-#[test]
-fn test_router_save_cancel_does_not_persist() {
+#[tokio::test]
+async fn test_router_save_cancel_does_not_persist() {
     let mut app = support::make_app();
     app.storage
         .set_provider_auth("anthropic", "sk-test")
@@ -153,10 +155,12 @@ fn test_router_save_cancel_does_not_persist() {
     std::fs::write(&config_path, "{}").expect("seed empty config so read_to_string succeeds");
 
     // Press Ctrl+S to trigger the save confirmation modal.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .await;
 
     // Cancel with Esc.
-    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await;
 
     assert!(
         app.pending_router_save.is_none(),

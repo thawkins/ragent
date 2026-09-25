@@ -22,24 +22,24 @@ fn alt(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::ALT)
 }
 
-#[test]
-fn test_alt_q_returns_open_queue_menu() {
+#[tokio::test]
+async fn test_alt_q_returns_open_queue_menu() {
     let mut app = support::make_app();
-    let action = handle_key(&mut app, alt(KeyCode::Char('q')));
+    let action = handle_key(&mut app, alt(KeyCode::Char('q'))).await;
     assert!(
         matches!(action, Some(InputAction::OpenQueueMenu)),
         "FR-021: ALT-Q must produce InputAction::OpenQueueMenu, got {action:?}"
     );
 }
 
-#[test]
-fn test_alt_q_opens_menu_without_mutating_input() {
+#[tokio::test]
+async fn test_alt_q_opens_menu_without_mutating_input() {
     let mut app = support::make_app();
     app.input = "MENU-OPEN-PROBE".to_string();
     app.input_cursor = app.input_len_chars();
     app.pending_attachments = vec![std::path::PathBuf::from("/tmp/probe.png")];
 
-    app.handle_key_event(alt(KeyCode::Char('q')));
+    app.handle_key_event(alt(KeyCode::Char('q'))).await;
 
     assert!(app.queue_menu_open, "FR-021: the menu must be marked open");
     assert_eq!(
@@ -63,12 +63,12 @@ fn test_alt_q_opens_menu_without_mutating_input() {
     );
 }
 
-#[test]
-fn test_alt_q_opens_menu_while_processing() {
+#[tokio::test]
+async fn test_alt_q_opens_menu_while_processing() {
     let mut app = support::make_app();
     app.is_processing = true;
 
-    app.handle_key_event(alt(KeyCode::Char('q')));
+    app.handle_key_event(alt(KeyCode::Char('q'))).await;
 
     assert!(
         app.queue_menu_open,
@@ -81,11 +81,11 @@ fn test_alt_q_opens_menu_while_processing() {
     assert!(app.is_processing, "FR-022: the running turn is untouched");
 }
 
-#[test]
-fn test_alt_q_does_not_insert_q_into_input() {
+#[tokio::test]
+async fn test_alt_q_does_not_insert_q_into_input() {
     let mut app = support::make_app();
 
-    app.handle_key_event(alt(KeyCode::Char('q')));
+    app.handle_key_event(alt(KeyCode::Char('q'))).await;
 
     assert!(
         app.input.is_empty(),
@@ -93,12 +93,12 @@ fn test_alt_q_does_not_insert_q_into_input() {
     );
 }
 
-#[test]
-fn test_alt_q_resets_menu_selection_to_first_row() {
+#[tokio::test]
+async fn test_alt_q_resets_menu_selection_to_first_row() {
     let mut app = support::make_app();
     app.queue_menu_selected = 2;
 
-    app.handle_key_event(alt(KeyCode::Char('q')));
+    app.handle_key_event(alt(KeyCode::Char('q'))).await;
 
     assert_eq!(
         app.queue_menu_selected, 0,
@@ -106,12 +106,12 @@ fn test_alt_q_resets_menu_selection_to_first_row() {
     );
 }
 
-#[test]
-fn test_alt_q_sets_redraw_flag() {
+#[tokio::test]
+async fn test_alt_q_sets_redraw_flag() {
     let mut app = support::make_app();
     app.needs_redraw = false;
 
-    app.handle_key_event(alt(KeyCode::Char('q')));
+    app.handle_key_event(alt(KeyCode::Char('q'))).await;
 
     assert!(
         app.needs_redraw,
@@ -119,14 +119,14 @@ fn test_alt_q_sets_redraw_flag() {
     );
 }
 
-#[test]
-fn test_alt_q_does_not_dispatch_or_enqueue_a_message() {
+#[tokio::test]
+async fn test_alt_q_does_not_dispatch_or_enqueue_a_message() {
     let mut app = support::make_app();
     app.is_processing = true;
     app.input = "typed but not sent".to_string();
     app.input_cursor = app.input_len_chars();
 
-    app.handle_key_event(alt(KeyCode::Char('q')));
+    app.handle_key_event(alt(KeyCode::Char('q'))).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -139,11 +139,11 @@ fn test_alt_q_does_not_dispatch_or_enqueue_a_message() {
     );
 }
 
-#[test]
-fn test_plain_q_still_types_into_input() {
+#[tokio::test]
+async fn test_plain_q_still_types_into_input() {
     let mut app = support::make_app();
 
-    app.handle_key_event(key(KeyCode::Char('q')));
+    app.handle_key_event(key(KeyCode::Char('q'))).await;
 
     assert_eq!(
         app.input, "q",
@@ -155,17 +155,17 @@ fn test_plain_q_still_types_into_input() {
     );
 }
 
-#[test]
-fn test_other_alt_keys_are_unaffected() {
+#[tokio::test]
+async fn test_other_alt_keys_are_unaffected() {
     let mut app = support::make_app();
 
-    let action = handle_key(&mut app, alt(KeyCode::Char('l')));
+    let action = handle_key(&mut app, alt(KeyCode::Char('l'))).await;
     assert!(
         matches!(action, Some(InputAction::ToggleLog)),
         "NFR-009: ALT-L must still toggle the log panel, got {action:?}"
     );
 
-    let action = handle_key(&mut app, alt(KeyCode::Char('t')));
+    let action = handle_key(&mut app, alt(KeyCode::Char('t'))).await;
     assert!(
         matches!(action, Some(InputAction::ToggleTasksPanel)),
         "NFR-009: ALT-T must still toggle the tasks panel, got {action:?}"

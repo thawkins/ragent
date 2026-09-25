@@ -84,8 +84,9 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   `~/.local/share/ragent/`) into the system prompt so agents follow project-specific
   conventions
 - **MCP client** — Model Context Protocol support with auto-discovery of 9 known
-  server types, stdio client, tool bridging, and TUI commands (`/mcp discover`,
-  `/mcp list`, `/mcp call`)
+  server types, stdio client, and tool bridging; TUI commands (`/mcp` /
+  `/mcp status`, `/mcp discover`, `/mcp connect <id>`, `/mcp disconnect <id>`) with
+  durable global enable/disable state (`mcp_state.json`) and live connect/disconnect
 - **Snapshot & undo** — file snapshots before edits so changes can be rolled back
 - **Event bus** — internal tokio pub/sub for real-time UI updates across all components
 - **Background agents** — spawn and run multiple sub-agents concurrently for parallel
@@ -486,13 +487,23 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.117** — The core architecture, tool system (169 tools across 25 categories), TUI,
+**v1.0.118** — The core architecture, tool system (169 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
 
+- **Durable MCP server enable/disable + plugin-bridged servers (v1.0.118)** —
+  whether an MCP server is started is now a persisted choice
+  (`<global state dir>/mcp_state.json`) rather than an implicit effect of being
+  listed in `ragent.json`; a server absent from the ledger is enabled, and
+  `mcp.<id>.disabled: true` always wins. `/mcp connect <id>` / `/mcp disconnect
+  <id>` enable/disable a server live and the choice survives a restart; `/mcp`
+  lists plugin-contributed servers with their live `enabled` state and tool
+  count, and `/plugins list` gains `MCP` / `MCP Tools` columns. Plugin
+  `mcpServers` entries are bridged as `<plugin-id>.<server>` by default. `/tools`
+  now also lists the tools a visibility switch has hidden.
 - **`/spec reverse --folder` scaffolds and hosts the target project (v1.0.117)** —
   `/spec reverse` now accepts `--folder <path>` plus `--github` / `--gitlab`
   (with the `/new` scaffold flags present) and creates the project in the target

@@ -322,6 +322,15 @@ pub async fn run_tui(
     // This includes the startup init exchange. If we spawn that exchange before
     // subscribing, streamed startup deltas can be treated as "dropped" and
     // produce a large burst of warning logs.
+    //
+    // The startup MCP connect loop (`src/main.rs`) publishes its per-server
+    // `McpStatusChanged` events from a task spawned *before* `run_tui` is
+    // called, so those sends can land before this subscribe and be discarded
+    // by the broadcast channel (no replay buffer). The TUI therefore ALSO
+    // reads the authoritative connection state off the shared `McpClient`
+    // below, so `/mcp` reports the real status even when every event was
+    // missed.
+    //
     // Bridge the broadcast channel to an unbounded mpsc channel so the TUI never
     // loses events.  The broadcast channel can drop events for slow receivers
     // (Lagged error) during burst scenarios (many parallel tool calls, rapid
@@ -353,6 +362,20 @@ pub async fn run_tui(
             }
         });
     }
+
+    // -- Adopt the startup MCP connection state (race-free `/mcp` status) --
+    // `src/main.rs` spawns the MCP connect loop before `run_tui` is called, so
+    // the loop's `McpStatusChanged` events can be published before the TUI
+    // subscribed above and are then lost (the broadcast bus has no replay
+    // buffer). The `SessionProcessor` holds the single shared `McpClient` once
+    // that loop finishes, and it is the authoritative record of every server's
+    // real status and tool list. Read it here so `/mcp` reports the truth even
+    // when every event was missed.
+    //
+    // When the connect loop has not finished yet the client is absent; the
+    // per-server events cover that case, and the main loop's housekeeping pass
+    // re-runs this adoption until the client appears.
+    app.adopt_mcp_client_state(&session_processor).await;
 
     // -- Auto-initialize a session at startup if not resuming --
     let t0 = Instant::now();
@@ -707,7 +730,7 @@ pub async fn run_tui(
         // Drain ALL pending events before rendering so the screen
         // always reflects the latest state.
         while let Ok(event) = event_rx.try_recv() {
-            app.handle_event(event);
+            app.handle_event(event).await;
         }
 
         // Poll the background code-index startup result (non-blocking).
@@ -837,6 +860,12 @@ pub async fn run_tui(
             // Refresh cached stats on their throttled intervals.
             app.refresh_code_index_stats();
             app.refresh_memory_stats();
+
+            // Adopt the startup MCP connect loop's client the first time it
+            // appears. `run_tui` adopts it up front, but the loop can still be
+            // connecting; without this retry `/mcp` would keep showing the
+            // seeded `disabled` for a late-finishing server.
+            app.adopt_mcp_client_state(&session_processor).await;
         }
 
         // Copy the latest off-thread memory count into the status bar cache
@@ -874,7 +903,7 @@ pub async fn run_tui(
                     Some(event) => {
                         let mut got_input = false;
                         match event {
-                            CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
+                            CtEvent::Key(key) => { app.handle_key_event(key).await; got_input = true; }
                             CtEvent::Mouse(mouse)
                                 // Only process mouse events when mouse mode is enabled
                                 if app.mouse_enabled => {
@@ -916,7 +945,7 @@ pub async fn run_tui(
             // Wake up when a new event arrives from the lossless mpsc bridge
             event = event_rx.recv() => {
                 match event {
-                    Some(event) => app.handle_event(event),
+                    Some(event) => app.handle_event(event).await,
                     None => {
                         // Event-bus bridge exited (broadcast Closed). Without
                         // this break the arm resolves immediately forever,

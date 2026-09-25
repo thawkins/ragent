@@ -20,6 +20,7 @@ handlers.
 
 ```
 /plugins list [--verbose]      # list discovered plugins
+/plugins list --mcp            # live MCP tool inventory (servers, status, tools)
 /plugins add <source> [--force]  # install a plugin (enabled on install)
 /plugins remove <pluginid>     # uninstall (refused while enabled)
 /plugins enable <pluginid>     # enable, load, register tools/commands
@@ -32,7 +33,8 @@ handlers.
 
 | Form | Description |
 | --- | --- |
-| `/plugins list [--verbose]` | One row per discovered plugin showing id, name, version, dialect, state (`disabled`/`enabled`/`loaded`/`errored`), and contributed tool/command names, plus a totals summary. `--verbose` (or `-v`) appends per-plugin telemetry counters. |
+| `/plugins list [--verbose]` | One row per discovered plugin showing id, name, version, dialect, state (`disabled`/`enabled`/`loaded`/`errored`), and contributed tool/command names, plus `MCP` / `MCP Tools` server and tool counts, and a totals summary. `--verbose` (or `-v`) appends per-plugin telemetry counters. |
+| `/plugins list --mcp` | Print the live MCP tool inventory: every connected MCP server (including those bridged from a plugin's `mcpServers` section) with its status, tool count, and each tool's registry name (`<tool> -> mcp_<server>_<tool>`). |
 | `/plugins add <source> [--force]` | Install a plugin and validate its manifest; reports the plugin id and dialect. The plugin is recorded enabled and loads at the next session start; turn it off with `/plugins disable`. Refuses a duplicate id unless `--force` is given. |
 | `/plugins remove <pluginid>` | Uninstall a plugin from the store. Refused while the plugin is enabled. |
 | `/plugins enable <pluginid>` | Mark the plugin enabled, load it into the current session, and register its tools and commands. Reports the declared permissions and the load outcome. |
@@ -77,17 +79,21 @@ Unload without deleting files:
 
 Reports are prefixed with a `From: /plugins <sub>` attribution line. `list`
 renders a fixed-width table with one count column per contribution kind
-(`Tools`, `Commands`, `Skills`, `Agents`, `Hooks`):
+(`Tools`, `Commands`, `Skills`, `Agents`, `Hooks`) plus two MCP columns - `MCP`
+(the number of MCP servers the plugin declares) and `MCP Tools` (the total tools
+those servers advertise, summed from the live MCP client; `?` when a server has
+not connected, never `0`):
 
 ```
-| ID |Name |Version |Dialect |State    |Tools|Commands|Skills|Agents|Hooks|
+| ID |Name |Version |Dialect |State    |Tools|Commands|Skills|Agents|Hooks|MCP|MCP Tools|
 ```
 
 followed by `Contributions:`, `Unsupported capabilities:`, and `Errors:`
 sections — the `Contributions:` block lists the detailed names for each kind,
 e.g. `skills [db-setup]; agents [agents/security-reviewer.md]; hooks
-[PreToolUse, SessionStart]` — and a summary line (`Total: N plugin(s) - X
-enabled, X disabled, X errored`, with loaded plugins counted as enabled).
+[PreToolUse, SessionStart]; mcp [mongodb.mongodb (35 tools)] (1 server(s), 35
+tool(s))` — and a summary line (`Total: N plugin(s) - X enabled, X disabled, X
+errored`, with loaded plugins counted as enabled).
 
 `test` renders one line per harness step:
 

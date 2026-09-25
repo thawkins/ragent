@@ -30,6 +30,11 @@ pub struct McpToolWrapper {
     pub input_schema: Value,
     /// Shared MCP client handle.
     pub client: Arc<RwLock<McpClient>>,
+    /// Fallback config used for the enable check when the client no longer
+    /// holds a record for this server (the tool is still registered from a
+    /// previous connection). Always `disabled: false`, so the check then
+    /// defers entirely to the global enable ledger.
+    config_probe: ragent_config::McpServerConfig,
 }
 
 impl McpToolWrapper {
@@ -50,6 +55,7 @@ impl McpToolWrapper {
             description: description.to_string(),
             input_schema,
             client,
+            config_probe: ragent_config::McpServerConfig::default(),
         }
     }
 }
@@ -80,7 +86,32 @@ impl Tool for McpToolWrapper {
     }
 
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
+        // Read the ledger before taking the client lock: the check is a file
+        // read, and tool calls run in a loop, so holding the client lock across
+        // disk I/O would serialise unrelated MCP calls behind it.
+        let ledger = crate::mcp::McpEnableLedger::load();
         let client = self.client.read().await;
+        // A server switched off in the global enable ledger keeps its tool
+        // registration until the next restart (`set_mcp_client` registers once),
+        // so refuse to call it here rather than reaching a server the user has
+        // disabled. The refusal names the fix.
+        if !crate::mcp::enable_state::is_server_enabled(
+            client
+                .servers()
+                .iter()
+                .find(|s| s.id == self.server_id)
+                .map_or(&self.config_probe, |s| &s.config),
+            &ledger,
+            &self.server_id,
+        ) {
+            anyhow::bail!(
+                "MCP server `{}` is disabled; enable it with `/mcp connect {}` \
+                 (or set `mcp.{}.disabled = false` in ragent.json) and restart",
+                self.server_id,
+                self.server_id,
+                self.server_id,
+            );
+        }
         let result = client
             .call_tool(&self.server_id, &self.tool_name, input)
             .await?;

@@ -413,7 +413,7 @@ async fn enter_installs_the_default_sourced_entry_for_both_stores() {
             kind.token()
         );
 
-        let action = handle_key(&mut app, key(KeyCode::Enter));
+        let action = handle_key(&mut app, key(KeyCode::Enter)).await;
         assert!(action.is_none(), "ENTER is routed to the panel");
 
         drain_install(&mut app);

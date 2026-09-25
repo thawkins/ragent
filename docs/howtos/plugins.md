@@ -315,7 +315,7 @@ reported, never silently dropped**. The stable labels surfaced by
 
 | Label | Source |
 | --- | --- |
-| `mcp server transports` | `mcp_servers` in either dialect |
+| `mcp server transports` | `mcp_servers` whose entry shape the bridge cannot satisfy (e.g. an array of transports); an inline object or a `"mcpServers": "./mcp.json"` file reference is bridged and connected instead |
 | `claude desktop mounts` | Claude `mounts` |
 | `claude desktop window` | Claude `window` |
 | `codex permissions.fs` | Codex `permissions.fs` |
@@ -1047,7 +1047,7 @@ at an 800 ms budget).
 | Tool call fails with a serialisation error | Handler returned a value `JSON.stringify` cannot serialise (e.g. cyclic) | Return a plain object or string |
 | `[err] Plugin subsystem is disabled` | `plugins.enabled` is `false` | Set `plugins.enabled: true` in `ragent.json` |
 | A capability is missing from the `ragent` object | The plugin's `plugins.permissions` grant omits that group | Add the capability (or `"*"`) to the grant list |
-| `mcp server transports` under Unsupported | Plugin declares MCP servers, which ragent does not run | Expected; the plugin's other contributions still load |
+| `mcp server transports` under Unsupported | Plugin declares an `mcpServers` entry shape the bridge cannot satisfy (e.g. an array of transports) | Often none - an inline object or a `"mcpServers": "./mcp.json"` file reference is bridged and connected as `<plugin-id>.<server>`; only the unparseable shape is reported |
 
 ---
 

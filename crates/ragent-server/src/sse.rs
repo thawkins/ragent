@@ -124,6 +124,14 @@ struct ServerStatus<'a> {
     status: &'a str,
 }
 
+/// Payload for `mcp_server_enabled_changed`: an MCP server's persisted
+/// enable/disable state changed.
+#[derive(Serialize)]
+struct McpEnabledChanged<'a> {
+    server_id: &'a str,
+    enabled: bool,
+}
+
 #[derive(Serialize)]
 struct TokenUsageP<'a> {
     session_id: &'a str,
@@ -325,6 +333,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::AgentNotice { .. } => "agent_notice",
         Event::AgentError { .. } => "agent_error",
         Event::McpStatusChanged { .. } => "mcp_status_changed",
+        Event::McpServerEnabledChanged { .. } => "mcp_server_enabled_changed",
         Event::TokenUsage { .. } => "token_usage",
         Event::RunCostSummary { .. } => "run_cost_summary",
         Event::LoopTerminated { .. } => "loop_terminated",
@@ -531,6 +540,11 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
         Event::McpStatusChanged { server_id, status } => {
             to_data(&ServerStatus { server_id, status })
         }
+
+        Event::McpServerEnabledChanged { server_id, enabled } => to_data(&McpEnabledChanged {
+            server_id,
+            enabled: *enabled,
+        }),
 
         Event::TokenUsage {
             session_id,

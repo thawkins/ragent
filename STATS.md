@@ -1,31 +1,29 @@
 # Project Statistics
 
-**Version:** 1.0.117
+**Version:** 1.0.118
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
-> Metrics below are measured against the v1.0.117 tree (the `/spec reverse
-> --folder` scaffold fix, the first-class `webapp` app type, and the vendored
-> `lopdf` lint-suite integration).
+> Metrics below are measured against the v1.0.118 tree.
 
 
 ## Project-wide Metrics
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 503,976 (500,239 in `crates/` + 3,737 in root `src/`/`examples/`) |
-| Total Rust files | 1,253 (workspace crates) + 6 (root `src/`/`examples/`) |
-| Tests defined | ~9,685 (7,972 external test-file tests + 1,677 inline `#[cfg(test)]` + 36 root `tests/`/`src/`) |
-| Test files | 629 external + ~117 inline-bearing |
-| Test binaries | ~663 (629 integration test files + 33 lib/bin targets + 1 root bin) |
+| Total Rust lines | 508,364 (504,596 in `crates/` + 3,768 in root `src/`/`examples/`) |
+| Total Rust files | 1,255 (workspace crates) + 6 (root `src/`/`examples/`) |
+| Tests defined | ~9,689 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
+| Test files | 630 external + ~200 inline-bearing |
+| Test binaries | ~664 (630 integration test files + 33 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 169 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 17 |
-| Specs on disk | 53 directories in `specs/` |
+| Specs on disk | 54 directories in `specs/` |
 | Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 20 category how-tos, 78 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.117 |
+| Version | 1.0.118 |
 
 ---
 
@@ -37,46 +35,46 @@ shows the file count, line count, and test-file count for each crate (including
 
 | Crate | Rust files | Rust lines | Test files |
 |---|---|---|---|
-| `ragent-agent` | 233 | 81,706 | 94 |
+| `ragent-agent` | 234 | 82,238 | 94 |
 | `ragent-bench` | 24 | 8,436 | 3 |
 | `ragent-codeindex` | 69 | 23,548 | 40 |
-| `ragent-config` | 47 | 11,628 | 30 |
+| `ragent-config` | 47 | 11,639 | 30 |
 | `ragent-llm` | 52 | 23,540 | 23 |
-| `ragent-plugins` | 52 | 18,811 | 28 |
-| `ragent-research` | 114 | 60,101 | 48 |
-| `ragent-server` | 11 | 5,857 | 5 |
-| `ragent-specs` | 30 | 19,411 | 17 |
+| `ragent-plugins` | 52 | 19,249 | 28 |
+| `ragent-research` | 114 | 60,102 | 48 |
+| `ragent-server` | 11 | 5,871 | 5 |
+| `ragent-specs` | 31 | 20,000 | 18 |
 | `ragent-storage` | 37 | 14,717 | 32 |
 | `ragent-team` | 15 | 2,770 | 14 |
 | `ragent-telemetry` | 25 | 10,265 | 16 |
 | `ragent-tools-core` | 56 | 17,747 | 20 |
-| `ragent-tools-extended` | 203 | 74,502 | 85 |
-| `ragent-tools-vcs` | 56 | 14,635 | 20 |
-| `ragent-tui` | 193 | 103,889 | 136 |
-| `ragent-types` | 36 | 8,676 | 18 |
+| `ragent-tools-extended` | 203 | 74,682 | 85 |
+| `ragent-tools-vcs` | 56 | 14,819 | 20 |
+| `ragent-tui` | 193 | 106,282 | 136 |
+| `ragent-types` | 36 | 8,691 | 18 |
 
 ---
 
 ## Crate Size Distribution
 
 ```
-ragent-tui             ############################## 103,889 lines (20.8%)
-ragent-agent           ####################### 81,706 lines (16.3%)
-ragent-tools-extended  ##################### 74,502 lines (14.9%)
-ragent-research        ################# 60,101 lines (12.0%)
+ragent-tui             ############################## 106,282 lines (21.1%)
+ragent-agent           ####################### 82,238 lines (16.3%)
+ragent-tools-extended  ##################### 74,682 lines (14.8%)
+ragent-research        ################# 60,102 lines (11.9%)
 ragent-codeindex       ####### 23,548 lines ( 4.7%)
 ragent-llm             ####### 23,540 lines ( 4.7%)
-ragent-specs           ###### 19,411 lines ( 3.9%)
-ragent-plugins         ##### 18,811 lines ( 3.8%)
+ragent-specs           ###### 20,000 lines ( 4.0%)
+ragent-plugins         ##### 19,249 lines ( 3.8%)
 ragent-tools-core      ##### 17,747 lines ( 3.5%)
+ragent-tools-vcs       #### 14,819 lines ( 2.9%)
 ragent-storage         #### 14,717 lines ( 2.9%)
-ragent-tools-vcs       #### 14,635 lines ( 2.9%)
-ragent-config          ### 11,628 lines ( 2.3%)
-ragent-telemetry       ### 10,265 lines ( 2.1%)
-ragent-types           ## 8,676 lines ( 1.7%)
+ragent-config          ### 11,639 lines ( 2.3%)
+ragent-telemetry       ### 10,265 lines ( 2.0%)
+ragent-types           ## 8,691 lines ( 1.7%)
 ragent-bench           ## 8,436 lines ( 1.7%)
-ragent-server          ## 5,857 lines ( 1.2%)
-ragent-team            # 2,770 lines ( 0.6%)
+ragent-server          ## 5,871 lines ( 1.2%)
+ragent-team            # 2,770 lines ( 0.5%)
 ```
 
 ---
@@ -85,14 +83,14 @@ ragent-team            # 2,770 lines ( 0.6%)
 
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
-| `ragent-tools-extended` | 85 | ~1,893 |
-| `ragent-tui` | 136 | ~1,600 |
-| `ragent-agent` | 94 | ~806 |
-| `ragent-specs` | 17 | ~514 |
+| `ragent-tools-extended` | 85 | ~1,894 |
+| `ragent-tui` | 136 | ~1,557 |
+| `ragent-agent` | 94 | ~814 |
+| `ragent-specs` | 18 | ~538 |
 | `ragent-research` | 48 | ~402 |
 | `ragent-codeindex` | 40 | ~395 |
-| `ragent-plugins` | 28 | ~392 |
-| `ragent-tools-vcs` | 20 | ~298 |
+| `ragent-plugins` | 28 | ~397 |
+| `ragent-tools-vcs` | 20 | ~304 |
 | `ragent-storage` | 32 | ~285 |
 | `ragent-llm` | 23 | ~273 |
 | `ragent-config` | 30 | ~258 |
@@ -102,12 +100,12 @@ ragent-team            # 2,770 lines ( 0.6%)
 | `ragent-server` | 5 | ~96 |
 | `ragent-team` | 14 | ~81 |
 | `ragent-bench` | 3 | ~50 |
-| **Total (external)** | **629** | **~7,972** |
+| **Total (external)** | **630** | **~7,973** |
 
 Inline `#[cfg(test)]` modules in library sources contribute a further
-1,677 test attributes (largest contributors: `ragent-research`, `ragent-agent`,
+~1,600 test attributes (largest contributors: `ragent-research`, `ragent-agent`,
 `ragent-tools-extended`, `ragent-tui`, `ragent-specs`), bringing the estimated
-total to ~9,685.
+total to ~9,689.
 
 ---
 
@@ -169,13 +167,19 @@ Notes:
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 52 lines (9,685 tests / 503,976 lines)
-- Largest crate: `ragent-tui` (103,889 lines, 20.6%)
-- Smallest crate: `ragent-team` (2,770 lines, 0.6%)
+- Test-to-code ratio: ~1 test per 52 lines (9,689 tests / 508,364 lines)
+- Largest crate: `ragent-tui` (106,282 lines, 21.1%)
+- Smallest crate: `ragent-team` (2,770 lines, 0.5%)
 - Median crate size: 17,747 lines (`ragent-tools-core`)
 - Crates over 10k lines: 13 of 17
 - Crates under 5k lines: 1 of 17 (team)
 
 ---
 
-_Generated 2026-09-25 (v1.0.117 tree: `/spec reverse --folder` now scaffolds and hosts the target project before prompt synthesis, with a chained `--create <name>` writing the spec into `<folder>/specs/<name>/`, and `/spec reverse` usage errors reporting the specific cause; the scaffolder gains `webapp` as a first-class registered `--type` value (dependency-free HTTP-server starter for `rust`/`python`/`go`/`typescript`/`javascript`, manifest-only elsewhere); and the vendored `lopdf` crate carries crate-level allowances so the dead-code lint and `cargo-machete` are green. All verification checks pass: `cargo check --workspace`, `cargo-machete`, `cargo check --tests --workspace`, `cargo test --workspace`, the dead-code lint and reason checks, `cargo clippy --workspace -- -D warnings`, `cargo fmt --all -- --check`, `cargo audit`, and `cargo deny check`.) Metrics re-measured across the workspace and docs re-rendered in the same pass._
+_Generated 2026-09-25 (v1.0.118 tree: the uncommitted MCP-enablement work folded
+in at release — `/mcp` lists plugin-contributed servers and reports their live
+status, `/mcp connect <id>` / `/mcp disconnect <id>` enable/disable a server live
+with the choice persisted in a global `mcp_state.json` ledger, `/plugins list`
+shows each plugin's MCP server and tool counts, `/tools` lists visibility-disabled
+tools, and plugin `mcpServers` entries are bridged by default. Metrics
+re-measured across the workspace and docs re-rendered in the same pass.)_

@@ -19,6 +19,7 @@
 //! and one set of guards, mirroring the store-command glue in
 //! [`crate::commands`].
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::bridge::plugin_skill_names;
@@ -113,6 +114,10 @@ pub fn parse_control_command(
 /// the next family; refusals and lifecycle errors render as `[err]` text rather
 /// than a returned `Err`, so the surfaces never have to branch on failure.
 ///
+/// `mcp_tool_counts` is the live tool count per bridged MCP server id, supplied
+/// by a surface that holds an MCP client (FR-030); an empty map leaves every
+/// server's tool count as `?` (unknown, not zero).
+///
 /// When the master switch `plugins.enabled` is false the subsystem is inert: no
 /// discovery runs and the subcommand reports the disabled subsystem (SPEC
 /// configuration schema; acceptance criterion 8).
@@ -121,13 +126,16 @@ pub fn run_control_command(
     surface: &mut impl PluginSurface,
     sub: &str,
     args: &str,
+    mcp_tool_counts: &BTreeMap<String, usize>,
 ) -> Option<String> {
     let parsed = parse_control_command(sub, args)?;
     if !session.manager().config().is_enabled() {
         return Some(disabled_subsystem_report(sub));
     }
     let report = match parsed {
-        Ok(ControlCommand::List { verbose }) => render_list(session.manager(), verbose),
+        Ok(ControlCommand::List { verbose }) => {
+            render_list_with_mcp_tools(session.manager(), verbose, mcp_tool_counts)
+        }
         Ok(ControlCommand::Enable { plugin_id }) => match session.enable(&plugin_id, surface) {
             Ok(outcome) => enable_report(&outcome),
             Err(err) => enable_error_report(&plugin_id, &err),
@@ -170,22 +178,91 @@ struct Row {
     agents: Vec<String>,
     /// Declared hook trigger names (FR-033).
     hooks: Vec<String>,
+    /// Bridged MCP server ids declared by this plugin's `mcpServers` section
+    /// (FR-030), so a plugin that contributes only MCP servers is still listed
+    /// with its contribution.
+    mcp_servers: Vec<String>,
+    /// Live tool count per connected MCP server id (FR-030), keyed by the
+    /// *unprefixed* declared server name (e.g. `mongodb`) as well as by the
+    /// bridged id (`<plugin-id>.<server>`). Populated from the session's MCP
+    /// client when the caller supplies live counts; a server absent from the map
+    /// renders as `?` — unknown, not zero.
+    mcp_tool_counts: BTreeMap<String, usize>,
     unsupported: Vec<String>,
     error: Option<String>,
     store: PathBuf,
 }
 
+impl Row {
+    /// The total number of MCP tools this plugin's servers advertise.
+    ///
+    /// `None` when a declared server has no live count (the surface has no MCP
+    /// client, or the server never connected), so a total is never presented as
+    /// an exact figure that is actually unknown.
+    fn mcp_tool_total(&self) -> Option<usize> {
+        self.mcp_servers
+            .iter()
+            .map(|id| {
+                self.mcp_tool_counts.get(id).copied().or_else(|| {
+                    declared_server_name(id).and_then(|n| self.mcp_tool_counts.get(n).copied())
+                })
+            })
+            .try_fold(0usize, |acc, count| count.map(|c| acc + c))
+    }
+
+    /// The `(server count, tool count)` cell pair for the `/plugins list` table.
+    ///
+    /// The tool count is the `mcp_tool_total` or `?` when any server count is
+    /// unknown.
+    fn mcp_cell(&self) -> (usize, String) {
+        let tools = self
+            .mcp_tool_total()
+            .map_or_else(|| "?".to_string(), |total| total.to_string());
+        (self.mcp_servers.len(), tools)
+    }
+}
+
+/// The declared server name from a bridged MCP server id
+/// (`<plugin-id>.<server>`).
+fn declared_server_name(server_id: &str) -> Option<&str> {
+    server_id.rsplit_once('.').map(|(_, name)| name)
+}
+
 /// Render the `/plugins list` table (FR-009). Discovery parses manifests only
 /// and executes no plugin code (FR-023); `verbose` appends per-plugin telemetry
 /// counters (FR-022).
+///
+/// MCP server tool counts are reported as `?` because discovery has no live MCP
+/// client. A surface that does have one (the TUI `/plugins list`) calls
+/// [`render_list_with_mcp_tools`] with the live per-server counts instead.
 #[must_use]
 pub fn render_list(manager: &PluginManager, verbose: bool) -> String {
+    render_list_with_mcp_tools(manager, verbose, &BTreeMap::new())
+}
+
+/// Render the `/plugins list` table with live MCP tool counts (FR-009, FR-030).
+///
+/// `mcp_tool_counts` maps a bridged MCP server id (`<plugin-id>.<server>`) to
+/// the number of tools that server currently advertises. A server absent from
+/// the map renders as `?` — unknown, not zero, so a discovery-only render is
+/// never mistaken for a server that contributed nothing. The counts come from
+/// the surface's live MCP client and can never be derived from the manifest
+/// (which declares servers, not their tools).
+#[must_use]
+pub fn render_list_with_mcp_tools(
+    manager: &PluginManager,
+    verbose: bool,
+    mcp_tool_counts: &BTreeMap<String, usize>,
+) -> String {
     let scanned = manager.discover();
     if scanned.is_empty() {
         return format!("{}\n\nNo plugins discovered.", attribution("list"));
     }
 
-    let rows: Vec<Row> = scanned.iter().map(|p| row_for(p, manager)).collect();
+    let rows: Vec<Row> = scanned
+        .iter()
+        .map(|p| row_for(p, manager, mcp_tool_counts))
+        .collect();
 
     let mut lines = vec![attribution("list"), String::new()];
     lines.push(table_header());
@@ -202,6 +279,7 @@ pub fn render_list(manager: &PluginManager, verbose: bool) -> String {
                 || !r.skills.is_empty()
                 || !r.agents.is_empty()
                 || !r.hooks.is_empty()
+                || !r.mcp_servers.is_empty()
         })
         .collect();
     if !with_contributions.is_empty() {
@@ -220,6 +298,31 @@ pub fn render_list(manager: &PluginManager, verbose: bool) -> String {
             }
             if !row.hooks.is_empty() {
                 parts.push(format!("hooks [{}]", row.hooks.join(", ")));
+            }
+            if !row.mcp_servers.is_empty() {
+                let servers: Vec<String> = row
+                    .mcp_servers
+                    .iter()
+                    .map(|id| {
+                        let count = row.mcp_tool_counts.get(id).map_or_else(
+                            || {
+                                declared_server_name(id)
+                                    .and_then(|name| row.mcp_tool_counts.get(name))
+                                    .map_or_else(|| "?".to_string(), usize::to_string)
+                            },
+                            usize::to_string,
+                        );
+                        format!("{id} ({count} tools)")
+                    })
+                    .collect();
+                let total = row
+                    .mcp_tool_total()
+                    .map_or_else(|| "?".to_string(), |total| total.to_string());
+                parts.push(format!(
+                    "mcp [{}] ({} server(s), {total} tool(s))",
+                    servers.join(", "),
+                    row.mcp_servers.len(),
+                ));
             }
             lines.push(format!("- {}: {}", row.id, parts.join("; ")));
         }
@@ -262,7 +365,11 @@ pub fn render_list(manager: &PluginManager, verbose: bool) -> String {
 }
 
 /// Build the display row for one discovered plugin.
-fn row_for(plugin: &ScannedPlugin, manager: &PluginManager) -> Row {
+fn row_for(
+    plugin: &ScannedPlugin,
+    manager: &PluginManager,
+    mcp_tool_counts: &BTreeMap<String, usize>,
+) -> Row {
     let id = match &plugin.outcome {
         Ok(parsed) => parsed.descriptor.id.clone(),
         Err(_) => plugin
@@ -331,6 +438,13 @@ fn row_for(plugin: &ScannedPlugin, manager: &PluginManager) -> Row {
         ),
         Err(_) => (Vec::new(), Vec::new(), Vec::new()),
     };
+    // FR-030: MCP servers come from the manifest's `mcpServers` section (inline
+    // or an external file), bridged through the same resolver the session uses,
+    // so the list can never disagree with what is actually connectable.
+    let mcp_servers = match &plugin.outcome {
+        Ok(parsed) => ragent_plugin_mcp_ids(parsed),
+        Err(_) => Vec::new(),
+    };
     Row {
         id,
         name,
@@ -342,10 +456,28 @@ fn row_for(plugin: &ScannedPlugin, manager: &PluginManager) -> Row {
         skills,
         agents,
         hooks,
+        mcp_servers,
+        mcp_tool_counts: mcp_tool_counts.clone(),
         unsupported,
         error,
         store: plugin.store.clone(),
     }
+}
+
+/// The bridged MCP server ids declared by one parsed plugin manifest.
+///
+/// Split out so [`row_for`] stays readable and the mapping lives next to the
+/// bridge it mirrors.
+fn ragent_plugin_mcp_ids(parsed: &crate::manifest::ParsedManifest) -> Vec<String> {
+    crate::bridge::plugin_mcp_servers(
+        &parsed.descriptor.id,
+        &parsed.descriptor.root,
+        &parsed.mcp_servers,
+        parsed.raw_mcp.as_ref(),
+    )
+    .into_iter()
+    .map(|(id, _config)| id)
+    .collect()
 }
 
 const W_ID: usize = 28;
@@ -358,10 +490,12 @@ const W_COMMANDS: usize = 8;
 const W_SKILLS: usize = 6;
 const W_AGENTS: usize = 6;
 const W_HOOKS: usize = 5;
+const W_MCP: usize = 3;
+const W_MCP_TOOLS: usize = 9;
 
 fn table_header() -> String {
     format!(
-        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>wt$} | {:>wc$} | {:>ws$} | {:>wa$} | {:>wh$} |",
+        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>wt$} | {:>wc$} | {:>ws$} | {:>wa$} | {:>wh$} | {:>wm$} | {:>wmt$} |",
         "ID",
         "Name",
         "Version",
@@ -372,6 +506,8 @@ fn table_header() -> String {
         "Skills",
         "Agents",
         "Hooks",
+        "MCP",
+        "MCP Tools",
         w_id = W_ID,
         w_name = W_NAME,
         w_ver = W_VERSION,
@@ -382,13 +518,15 @@ fn table_header() -> String {
         ws = W_SKILLS,
         wa = W_AGENTS,
         wh = W_HOOKS,
+        wm = W_MCP,
+        wmt = W_MCP_TOOLS,
     )
 }
 
 fn table_separator() -> String {
     let cell = |w: usize| "-".repeat(w + 2);
     format!(
-        "|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
+        "|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
         cell(W_ID),
         cell(W_NAME),
         cell(W_VERSION),
@@ -399,12 +537,15 @@ fn table_separator() -> String {
         cell(W_SKILLS),
         cell(W_AGENTS),
         cell(W_HOOKS),
+        cell(W_MCP),
+        cell(W_MCP_TOOLS),
     )
 }
 
 fn table_row(row: &Row) -> String {
+    let (mcp_servers, mcp_tools) = row.mcp_cell();
     format!(
-        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>wt$} | {:>wc$} | {:>ws$} | {:>wa$} | {:>wh$} |",
+        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>wt$} | {:>wc$} | {:>ws$} | {:>wa$} | {:>wh$} | {:>wm$} | {:>wmt$} |",
         truncate(&row.id, W_ID),
         truncate(&row.name, W_NAME),
         truncate(&row.version, W_VERSION),
@@ -415,6 +556,8 @@ fn table_row(row: &Row) -> String {
         row.skills.len(),
         row.agents.len(),
         row.hooks.len(),
+        mcp_servers,
+        mcp_tools,
         w_id = W_ID,
         w_name = W_NAME,
         w_ver = W_VERSION,
@@ -425,6 +568,8 @@ fn table_row(row: &Row) -> String {
         ws = W_SKILLS,
         wa = W_AGENTS,
         wh = W_HOOKS,
+        wm = W_MCP,
+        wmt = W_MCP_TOOLS,
     )
 }
 

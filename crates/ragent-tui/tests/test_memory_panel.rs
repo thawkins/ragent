@@ -481,13 +481,13 @@ fn test_right_click_outside_memory_area_does_not_open_memory_menu() {
 // T-012: Alt+M toggle flips `show_memory` (FR-003)
 // ═════════════════════════════════════════════════════════════════════════════
 
-#[test]
-fn test_alt_m_maps_to_toggle_memory_action() {
+#[tokio::test]
+async fn test_alt_m_maps_to_toggle_memory_action() {
     // FR-003: Alt+M must produce InputAction::ToggleMemory when no modal is
     // active (no permission dialog, no provider setup, no slash menu).
     let mut app = make_app();
     let key = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT);
-    let action = handle_key(&mut app, key);
+    let action = handle_key(&mut app, key).await;
     // InputAction does not derive PartialEq, so we match on the variant
     // explicitly instead of using assert_eq!.
     assert!(
@@ -496,28 +496,32 @@ fn test_alt_m_maps_to_toggle_memory_action() {
     );
 }
 
-#[test]
-fn test_toggle_memory_flips_show_memory_flag() {
+#[tokio::test]
+async fn test_toggle_memory_flips_show_memory_flag() {
     // FR-003: dispatching ToggleMemory via the full key-event path flips
     // `show_memory` on each press.
     let mut app = make_app();
     assert!(!app.show_memory, "show_memory should start false");
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert!(app.show_memory, "first Alt+M should set show_memory=true");
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert!(
         !app.show_memory,
         "second Alt+M should set show_memory=false"
     );
 }
 
-#[test]
-fn test_toggle_memory_status_message_reflects_state() {
+#[tokio::test]
+async fn test_toggle_memory_status_message_reflects_state() {
     // FR-014: the status bar message reflects the new panel state.
     let mut app = make_app();
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert_eq!(app.status, "memory panel visible");
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert_eq!(app.status, "memory panel hidden");
 }
 
@@ -525,8 +529,8 @@ fn test_toggle_memory_status_message_reflects_state() {
 // T-012: Mutual exclusion with log / tasks / profile panels (FR-004)
 // ═════════════════════════════════════════════════════════════════════════════
 
-#[test]
-fn test_toggle_memory_mutually_excludes_log_panel() {
+#[tokio::test]
+async fn test_toggle_memory_mutually_excludes_log_panel() {
     // FR-004: enabling the Memory panel must hide the log panel, and
     // enabling the log panel must hide the Memory panel.
     let mut app = make_app();
@@ -534,7 +538,8 @@ fn test_toggle_memory_mutually_excludes_log_panel() {
     app.show_memory = false;
 
     // Enable Memory panel — log must be dismissed.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert!(app.show_memory, "Memory panel should be visible");
     assert!(
         !app.show_log,
@@ -542,7 +547,8 @@ fn test_toggle_memory_mutually_excludes_log_panel() {
     );
 
     // Re-enable log panel — Memory must be dismissed.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::ALT))
+        .await;
     assert!(app.show_log, "log panel should be visible");
     assert!(
         !app.show_memory,
@@ -550,15 +556,16 @@ fn test_toggle_memory_mutually_excludes_log_panel() {
     );
 }
 
-#[test]
-fn test_toggle_memory_mutually_excludes_tasks_panel() {
+#[tokio::test]
+async fn test_toggle_memory_mutually_excludes_tasks_panel() {
     // FR-004: enabling the Memory panel must hide the Tasks panel, and
     // enabling the Tasks panel must hide the Memory panel.
     let mut app = make_app();
     app.show_tasks_panel = true;
     app.show_memory = false;
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert!(app.show_memory);
     assert!(
         !app.show_tasks_panel,
@@ -566,7 +573,8 @@ fn test_toggle_memory_mutually_excludes_tasks_panel() {
     );
 
     // Re-enable Tasks panel — Memory must be dismissed.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT))
+        .await;
     assert!(app.show_tasks_panel);
     assert!(
         !app.show_memory,
@@ -574,8 +582,8 @@ fn test_toggle_memory_mutually_excludes_tasks_panel() {
     );
 }
 
-#[test]
-fn test_toggle_memory_mutually_excludes_profile_panel() {
+#[tokio::test]
+async fn test_toggle_memory_mutually_excludes_profile_panel() {
     // FR-004: enabling the Memory panel must hide the profile panel, and
     // enabling the profile panel must hide the Memory panel. Profile toggle
     // routes through `set_profile_panel_enabled` which dismisses every other
@@ -584,7 +592,8 @@ fn test_toggle_memory_mutually_excludes_profile_panel() {
     app.show_profile = true;
     app.show_memory = false;
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert!(app.show_memory);
     assert!(
         !app.show_profile,
@@ -592,7 +601,8 @@ fn test_toggle_memory_mutually_excludes_profile_panel() {
     );
 
     // Re-enable profile panel — Memory must be dismissed.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT))
+        .await;
     assert!(app.show_profile);
     assert!(
         !app.show_memory,
@@ -600,8 +610,8 @@ fn test_toggle_memory_mutually_excludes_profile_panel() {
     );
 }
 
-#[test]
-fn test_toggle_memory_clears_memory_selection_and_context_menu_on_hide() {
+#[tokio::test]
+async fn test_toggle_memory_clears_memory_selection_and_context_menu_on_hide() {
     // FR-005: when the Memory panel becomes hidden, any active Memory-pane
     // text selection or context menu is cleared.
     let mut app = make_app();
@@ -618,7 +628,8 @@ fn test_toggle_memory_clears_memory_selection_and_context_menu_on_hide() {
     // context-menu key router in `handle_key` swallows all keys until the
     // menu is dismissed, which would prevent the Alt+M mapping from running.
     app.context_menu = None;
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert!(!app.show_memory);
     assert!(
         app.text_selection.is_none(),
@@ -626,8 +637,8 @@ fn test_toggle_memory_clears_memory_selection_and_context_menu_on_hide() {
     );
 }
 
-#[test]
-fn test_toggle_memory_clears_memory_context_menu_on_hide() {
+#[tokio::test]
+async fn test_toggle_memory_clears_memory_context_menu_on_hide() {
     // FR-005 (context-menu half): driving ToggleMemory to hide the panel
     // clears an active Memory-pane context menu.
     let mut app = make_app();
@@ -648,7 +659,8 @@ fn test_toggle_memory_clears_memory_context_menu_on_hide() {
     // The context-menu key router in `handle_key` swallows all keys until
     // the menu is dismissed, so we dismiss it first and then toggle.
     app.context_menu = None;
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert!(!app.show_memory);
     assert!(
         app.context_menu.is_none(),
@@ -660,8 +672,8 @@ fn test_toggle_memory_clears_memory_context_menu_on_hide() {
 // T-012: Alt+M does not insert `m` into the input buffer (FR-011)
 // ═════════════════════════════════════════════════════════════════════════════
 
-#[test]
-fn test_alt_m_does_not_insert_m_into_input() {
+#[tokio::test]
+async fn test_alt_m_does_not_insert_m_into_input() {
     // FR-011: pressing Alt+M must toggle the Memory panel and must NOT insert
     // the character `m` into the chat input buffer. The Alt+M mapping in
     // `input.rs` is placed before the generic `KeyCode::Char(c)` insertion
@@ -669,7 +681,8 @@ fn test_alt_m_does_not_insert_m_into_input() {
     let mut app = make_app();
     assert!(app.input.is_empty(), "input should start empty");
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert!(
         app.input.is_empty(),
         "Alt+M must not insert 'm' into input; got {:?}",
@@ -678,14 +691,15 @@ fn test_alt_m_does_not_insert_m_into_input() {
     assert!(app.show_memory, "Alt+M should have toggled show_memory on");
 }
 
-#[test]
-fn test_alt_m_does_not_insert_m_when_panel_already_visible() {
+#[tokio::test]
+async fn test_alt_m_does_not_insert_m_when_panel_already_visible() {
     // FR-011 regression guard: toggling the panel off via Alt+M must also
     // not leak an `m` into the input buffer.
     let mut app = make_app();
     app.show_memory = true;
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
+        .await;
     assert!(
         app.input.is_empty(),
         "Alt+M must not insert 'm' when hiding the panel; got {:?}",
@@ -877,8 +891,8 @@ fn test_render_memory_panel_sets_max_scroll_when_content_overflows() {
     );
 }
 
-#[test]
-fn test_log_scroll_down_on_memory_does_not_underflow_below_zero() {
+#[tokio::test]
+async fn test_log_scroll_down_on_memory_does_not_underflow_below_zero() {
     // FR-009 bounds: LogScrollDown decrements `memory_scroll_offset` with
     // saturating subtraction, so it must never underflow past 0. The key
     // binding for LogScrollDown is Ctrl+PageDown (see `input.rs`).
@@ -889,15 +903,16 @@ fn test_log_scroll_down_on_memory_does_not_underflow_below_zero() {
     app.show_tasks_panel = false;
     app.memory_scroll_offset = 0;
 
-    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL))
+        .await;
     assert_eq!(
         app.memory_scroll_offset, 0,
         "LogScrollDown at offset 0 must saturate at 0, not underflow"
     );
 }
 
-#[test]
-fn test_log_scroll_up_on_memory_increments_offset() {
+#[tokio::test]
+async fn test_log_scroll_up_on_memory_increments_offset() {
     // FR-009 bounds: LogScrollUp increments `memory_scroll_offset` by 3
     // when the Memory panel is the visible side panel. The key binding for
     // LogScrollUp is Ctrl+PageUp (see `input.rs`).
@@ -908,7 +923,8 @@ fn test_log_scroll_up_on_memory_increments_offset() {
     app.show_tasks_panel = false;
     assert_eq!(app.memory_scroll_offset, 0);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL))
+        .await;
     assert_eq!(
         app.memory_scroll_offset, 3,
         "LogScrollUp should increment memory_scroll_offset by 3"
@@ -1076,8 +1092,8 @@ fn test_render_memory_panel_omits_tags_line_when_memory_has_no_tags() {
     );
 }
 
-#[test]
-fn test_memory_stored_event_marks_panel_cache_dirty() {
+#[tokio::test]
+async fn test_memory_stored_event_marks_panel_cache_dirty() {
     // When `memory_store` writes a new structured memory, the tool emits
     // `Event::MemoryStored`.  The TUI event handler must mark the panel cache
     // dirty so the next Alt+M render shows the new row instead of stale data.
@@ -1102,15 +1118,16 @@ fn test_memory_stored_event_marks_panel_cache_dirty() {
         session_id: "sess-dirty".to_string(),
         id: 1,
         category: "fact".to_string(),
-    });
+    })
+    .await;
     assert!(
         app.memory_cache_dirty,
         "MemoryStored must mark the panel cache dirty"
     );
 }
 
-#[test]
-fn test_memory_panel_refreshes_after_stored_event() {
+#[tokio::test]
+async fn test_memory_panel_refreshes_after_stored_event() {
     // End-to-end: the MemoryStored event path causes the panel to refresh
     // from SQLite even though the cache was previously clean.
     let dir = TempDir::new().expect("tempdir");
@@ -1136,7 +1153,8 @@ fn test_memory_panel_refreshes_after_stored_event() {
         session_id: "sess-refresh".to_string(),
         id: 1,
         category: "fact".to_string(),
-    });
+    })
+    .await;
 
     let text = render_app_to_string(&mut app, 140, 40);
     assert!(
@@ -1195,8 +1213,8 @@ fn test_render_memory_panel_uses_real_cwd_path_not_tilde_display() {
 // FR-016: interactive cursor, open, and delete in the Alt+M panel
 // ═════════════════════════════════════════════════════════════════════════════
 
-#[test]
-fn test_memory_cursor_down_and_up_moves_selection() {
+#[tokio::test]
+async fn test_memory_cursor_down_and_up_moves_selection() {
     // Cursor Down/Up in the visible Memory panel changes memory_cursor and
     // keeps it clamped to the number of rows.
     let dir = TempDir::new().expect("tempdir");
@@ -1215,23 +1233,27 @@ fn test_memory_cursor_down_and_up_moves_selection() {
     assert_eq!(app.memory_row_count, 2);
     assert_eq!(app.memory_cursor, 0);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.memory_cursor, 1);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await;
     // Cannot move past the last row.
     assert_eq!(app.memory_cursor, 1);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.memory_cursor, 0);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+        .await;
     // Cannot move above the first row.
     assert_eq!(app.memory_cursor, 0);
 }
 
-#[test]
-fn test_memory_enter_with_non_empty_input_sends_message() {
+#[tokio::test]
+async fn test_memory_enter_with_non_empty_input_sends_message() {
     // Regression: when the Memory panel is visible and the main prompt input
     // contains text, Enter must submit the message rather than opening the
     // selected memory.
@@ -1255,15 +1277,16 @@ fn test_memory_enter_with_non_empty_input_sends_message() {
     assert_eq!(app.memory_row_count, 1);
 
     let action =
-        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await;
     assert!(
         matches!(action, Some(InputAction::SendMessage(ref text)) if text == "send this message"),
         "Enter with a non-empty prompt must send the message, not open memory, got: {action:?}"
     );
 }
 
-#[test]
-fn test_memory_enter_opens_full_memory_view() {
+#[tokio::test]
+async fn test_memory_enter_opens_full_memory_view() {
     // Pressing Enter on the selected memory opens the full-memory overlay.
     let dir = TempDir::new().expect("tempdir");
     let _guard = with_cwd(dir.path());
@@ -1284,7 +1307,8 @@ fn test_memory_enter_opens_full_memory_view() {
     let _ = render_app_to_string(&mut app, 140, 40);
     assert_eq!(app.memory_row_count, 1);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(
         app.memory_view.is_some(),
         "Enter on a selected memory must open the memory view overlay"
@@ -1294,8 +1318,8 @@ fn test_memory_enter_opens_full_memory_view() {
     assert!(view.row.content.contains("gamma-omega"));
 }
 
-#[test]
-fn test_memory_delete_shows_confirmation_and_cancel_clears_it() {
+#[tokio::test]
+async fn test_memory_delete_shows_confirmation_and_cancel_clears_it() {
     // Pressing Delete on a selected memory shows a confirmation dialog; Esc
     // cancels it without deleting.
     let dir = TempDir::new().expect("tempdir");
@@ -1312,14 +1336,16 @@ fn test_memory_delete_shows_confirmation_and_cancel_clears_it() {
     let _ = render_app_to_string(&mut app, 140, 40);
     assert_eq!(app.memory_row_count, 1);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
     assert!(
         app.pending_memory_delete.is_some(),
         "Delete must show the confirmation dialog"
     );
     assert_eq!(app.pending_memory_delete.as_ref().unwrap().id, 1);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await;
     assert!(
         app.pending_memory_delete.is_none(),
         "Esc must cancel the confirmation dialog"
@@ -1334,8 +1360,8 @@ fn test_memory_delete_shows_confirmation_and_cancel_clears_it() {
     );
 }
 
-#[test]
-fn test_memory_delete_confirmation_deletes_memory() {
+#[tokio::test]
+async fn test_memory_delete_confirmation_deletes_memory() {
     // Confirming the delete dialog removes the memory and refreshes the panel.
     let dir = TempDir::new().expect("tempdir");
     let _guard = with_cwd(dir.path());
@@ -1351,8 +1377,10 @@ fn test_memory_delete_confirmation_deletes_memory() {
     let _ = render_app_to_string(&mut app, 140, 40);
     assert_eq!(app.memory_row_count, 1);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert!(
         app.pending_memory_delete.is_none(),
@@ -1371,8 +1399,8 @@ fn test_memory_delete_confirmation_deletes_memory() {
     );
 }
 
-#[test]
-fn test_memory_cursor_scrolls_selection_into_view_with_wrapped_lines() {
+#[tokio::test]
+async fn test_memory_cursor_scrolls_selection_into_view_with_wrapped_lines() {
     // Regression for the block-cursor scrolling bug: the cursor is tracked in
     // wrapped-line coordinates, so as soon as the selected memory preview would
     // fall below the visible area the panel scrolls. We use long memory
@@ -1403,7 +1431,8 @@ fn test_memory_cursor_scrolls_selection_into_view_with_wrapped_lines() {
 
     // Move the cursor down several rows.
     for _ in 0..6 {
-        app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+            .await;
     }
 
     let cursor_line = app
@@ -1422,8 +1451,8 @@ fn test_memory_cursor_scrolls_selection_into_view_with_wrapped_lines() {
     );
 }
 
-#[test]
-fn test_memory_cursor_scrolls_selection_into_view() {
+#[tokio::test]
+async fn test_memory_cursor_scrolls_selection_into_view() {
     // Moving the cursor to a row below the visible area adjusts the scroll
     // offset so the selected row remains visible.
     let dir = TempDir::new().expect("tempdir");
@@ -1448,7 +1477,8 @@ fn test_memory_cursor_scrolls_selection_into_view() {
 
     // Move the cursor to the last row.
     for _ in 0..29 {
-        app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+            .await;
     }
 
     assert!(

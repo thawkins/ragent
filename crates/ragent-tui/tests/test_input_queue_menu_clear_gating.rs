@@ -87,18 +87,18 @@ fn input_row_text(terminal: &Terminal<TestBackend>, app: &App) -> String {
 // FR-036 — `Yes` drains the queue and refreshes the counter
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_yes_removes_every_entry_and_closes_the_dialog() {
+#[tokio::test]
+async fn test_yes_removes_every_entry_and_closes_the_dialog() {
     let mut app = app_with_dialog_open();
     assert_eq!(app.input_queue_len(), 2, "precondition: two entries queued");
 
     // Move the selection to `Yes` (Right toggles No -> Yes), then confirm.
-    app.handle_key_event(key(KeyCode::Right));
+    app.handle_key_event(key(KeyCode::Right)).await;
     assert_eq!(
         app.queue_clear_confirm_selected, QUEUE_CLEAR_CONFIRM_YES,
         "precondition: Right selects `Yes`"
     );
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -111,8 +111,8 @@ fn test_yes_removes_every_entry_and_closes_the_dialog() {
     );
 }
 
-#[test]
-fn test_yes_updates_the_painted_queue_counter() {
+#[tokio::test]
+async fn test_yes_updates_the_painted_queue_counter() {
     let mut app = app_with_dialog_open();
     app.input = "draft".to_string();
     app.input_cursor = app.input_len_chars();
@@ -124,8 +124,8 @@ fn test_yes_updates_the_painted_queue_counter() {
         input_row_text(&before, &app)
     );
 
-    app.handle_key_event(key(KeyCode::Right));
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Right)).await;
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     let after = render(&mut app, 80, 24);
     assert!(
@@ -135,13 +135,13 @@ fn test_yes_updates_the_painted_queue_counter() {
     );
 }
 
-#[test]
-fn test_yes_resets_the_selection_and_arms_a_redraw() {
+#[tokio::test]
+async fn test_yes_resets_the_selection_and_arms_a_redraw() {
     let mut app = app_with_dialog_open();
-    app.handle_key_event(key(KeyCode::Right));
+    app.handle_key_event(key(KeyCode::Right)).await;
     app.needs_redraw = false;
 
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert_eq!(
         app.queue_clear_confirm_selected, QUEUE_CLEAR_CONFIRM_NO,
@@ -153,13 +153,13 @@ fn test_yes_resets_the_selection_and_arms_a_redraw() {
     );
 }
 
-#[test]
-fn test_yes_drops_a_pending_queue_control_next() {
+#[tokio::test]
+async fn test_yes_drops_a_pending_queue_control_next() {
     let mut app = app_with_dialog_open();
     app.queue_next_pending = true;
-    app.handle_key_event(key(KeyCode::Right));
+    app.handle_key_event(key(KeyCode::Right)).await;
 
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert!(
         !app.queue_next_pending,
@@ -167,13 +167,13 @@ fn test_yes_drops_a_pending_queue_control_next() {
     );
 }
 
-#[test]
-fn test_yes_on_an_empty_queue_is_a_safe_noop() {
+#[tokio::test]
+async fn test_yes_on_an_empty_queue_is_a_safe_noop() {
     let mut app = app_with_dialog_open();
     app.input_queue.clear();
 
-    app.handle_key_event(key(KeyCode::Right));
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Right)).await;
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -190,12 +190,12 @@ fn test_yes_on_an_empty_queue_is_a_safe_noop() {
 // FR-035 / FR-037 — `No` and `Esc` leave the queue unchanged
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_no_keeps_every_entry() {
+#[tokio::test]
+async fn test_no_keeps_every_entry() {
     let mut app = app_with_dialog_open();
 
     // Enter on the default `No` selection.
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -208,13 +208,13 @@ fn test_no_keeps_every_entry() {
     );
 }
 
-#[test]
-fn test_esc_keeps_every_entry() {
+#[tokio::test]
+async fn test_esc_keeps_every_entry() {
     let mut app = app_with_dialog_open();
     // Select `Yes` first to prove Esc cancels regardless of the highlight.
-    app.handle_key_event(key(KeyCode::Right));
+    app.handle_key_event(key(KeyCode::Right)).await;
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -227,8 +227,8 @@ fn test_esc_keeps_every_entry() {
     );
 }
 
-#[test]
-fn test_opening_the_dialog_never_removes_an_entry() {
+#[tokio::test]
+async fn test_opening_the_dialog_never_removes_an_entry() {
     let mut app = app_with_session();
     app.input_queue.push_back(entry("GATE-QUEUE-1"));
     app.input_queue.push_back(entry("GATE-QUEUE-2"));

@@ -99,8 +99,8 @@ fn render_app_to_string(app: &mut App) -> String {
     text
 }
 
-#[test]
-fn test_multiple_choice_question_renders_options() {
+#[tokio::test]
+async fn test_multiple_choice_question_renders_options() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
@@ -113,7 +113,8 @@ fn test_multiple_choice_question_renders_options() {
             "openai".to_string(),
             "ollama".to_string(),
         ],
-    });
+    })
+    .await;
 
     let text = render_app_to_string(&mut app);
 
@@ -129,8 +130,8 @@ fn test_multiple_choice_question_renders_options() {
     assert!(text.contains("to navigate"));
 }
 
-#[test]
-fn test_multiple_choice_question_shows_selected_option() {
+#[tokio::test]
+async fn test_multiple_choice_question_shows_selected_option() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
@@ -139,7 +140,8 @@ fn test_multiple_choice_question_shows_selected_option() {
         request_id: "r1".to_string(),
         question: "Pick one".to_string(),
         options: vec!["A".to_string(), "B".to_string()],
-    });
+    })
+    .await;
 
     let text = render_app_to_string(&mut app);
 
@@ -147,8 +149,8 @@ fn test_multiple_choice_question_shows_selected_option() {
     assert!(text.contains("▶ A"));
 }
 
-#[test]
-fn test_multiple_choice_selection_navigates_down() {
+#[tokio::test]
+async fn test_multiple_choice_selection_navigates_down() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
@@ -157,13 +159,15 @@ fn test_multiple_choice_selection_navigates_down() {
         request_id: "r1".to_string(),
         question: "Pick".to_string(),
         options: vec!["first".to_string(), "second".to_string()],
-    });
+    })
+    .await;
 
     // Simulate pressing Down (Char('j')).
     let _ = ragent_tui::input::handle_key(
         &mut app,
         crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('j')),
-    );
+    )
+    .await;
 
     let text = render_app_to_string(&mut app);
 
@@ -171,8 +175,8 @@ fn test_multiple_choice_selection_navigates_down() {
     assert!(text.contains("▶ second"));
 }
 
-#[test]
-fn test_free_text_question_does_not_show_options() {
+#[tokio::test]
+async fn test_free_text_question_does_not_show_options() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
@@ -181,7 +185,8 @@ fn test_free_text_question_does_not_show_options() {
         request_id: "r1".to_string(),
         question: "Type your answer".to_string(),
         options: vec![],
-    });
+    })
+    .await;
 
     let text = render_app_to_string(&mut app);
 

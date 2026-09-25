@@ -7,8 +7,12 @@
 //!
 //! Use [`McpClient::discover`] to scan `PATH`, npm global packages, and
 //! MCP registry directories for available servers (see [`discovery`] module).
+//!
+//! Whether a server is started is a durable, global choice recorded in
+//! `<global state dir>/mcp_state.json`; see [`enable_state`].
 
 pub mod discovery;
+pub mod enable_state;
 pub mod http;
 
 use std::collections::HashMap;
@@ -28,6 +32,7 @@ use tokio::sync::{RwLock, Semaphore};
 use ragent_config::{McpServerConfig, McpTransport};
 
 pub use discovery::{DiscoveredMcpServer, McpDiscoverySource, discover as discover_servers};
+pub use enable_state::{McpEnableLedger, global_state_path, is_server_enabled};
 
 // ── MCP config validation ────────────────────────────────────────────────────
 
@@ -147,6 +152,22 @@ pub enum McpStatus {
     },
     /// The server requires authentication before connecting.
     NeedsAuth,
+}
+
+impl std::fmt::Display for McpStatus {
+    /// Render a short, human-readable status label.
+    ///
+    /// The single source of truth for the wording every surface (`/mcp`,
+    /// `/plugins list --mcp`) prints, so the two views cannot drift. `Failed`
+    /// includes its error so a surface needs no second branch.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Connected => f.write_str("connected"),
+            Self::Disabled => f.write_str("disabled"),
+            Self::NeedsAuth => f.write_str("needs auth"),
+            Self::Failed { error } => write!(f, "failed: {error}"),
+        }
+    }
 }
 
 /// A registered MCP server with its configuration, connection status, and
@@ -358,17 +379,28 @@ impl McpClient {
     /// # Ok(())
     /// # }
     /// ```
+    /// Register an MCP server that exists but must not be started.
+    ///
+    /// The server is recorded as [`McpStatus::Disabled`] with no tools and no
+    /// connection, so every surface (`/mcp`, `/plugins`) can list it and offer
+    /// to re-enable it. Used for a server switched off in `ragent.json`
+    /// (`disabled: true`) or in the global enable-state ledger.
+    pub fn register_disabled(&mut self, id: &str, config: McpServerConfig) {
+        let server = McpServer {
+            id: id.to_string(),
+            config,
+            status: McpStatus::Disabled,
+            tools: Vec::new(),
+        };
+        self.servers.push(server);
+        self.rebuild_tool_index();
+        tracing::info!(server_id = id, "MCP server registered as disabled");
+    }
+
+    /// Connect to an MCP server using the configured transport.
     pub async fn connect(&mut self, id: &str, config: McpServerConfig) -> anyhow::Result<()> {
         if config.disabled {
-            let server = McpServer {
-                id: id.to_string(),
-                config,
-                status: McpStatus::Disabled,
-                tools: Vec::new(),
-            };
-            self.servers.push(server);
-            self.rebuild_tool_index();
-            tracing::info!(server_id = id, "MCP server registered as disabled");
+            self.register_disabled(id, config);
             return Ok(());
         }
 
@@ -841,6 +873,22 @@ impl McpClient {
     #[must_use]
     pub fn servers(&self) -> &[McpServer] {
         &self.servers
+    }
+
+    /// Record a connected server without spawning a child process.
+    ///
+    /// Test seam for the UI paths that read the client's server list as the
+    /// authoritative MCP state (`/mcp`), so a test can assert what the display
+    /// shows for a connected server without starting a real MCP process.
+    #[doc(hidden)]
+    pub fn register_connected_for_tests(&mut self, id: &str, tools: Vec<McpToolDef>) {
+        self.servers.push(McpServer {
+            id: id.to_string(),
+            config: McpServerConfig::default(),
+            status: McpStatus::Connected,
+            tools,
+        });
+        self.rebuild_tool_index();
     }
 
     /// Disconnect a specific server by ID.

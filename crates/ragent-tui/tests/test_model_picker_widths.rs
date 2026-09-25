@@ -147,8 +147,8 @@ fn test_select_router_model_renders_widest_cells_untruncated() {
     );
 }
 
-#[test]
-fn test_model_picker_down_moves_selection_indicator() {
+#[tokio::test]
+async fn test_model_picker_down_moves_selection_indicator() {
     // The indicator prefix moves with the selection, and the new row's cell
     // must also render fully (column widths account for both prefixes).
     let mut app = support::make_app();
@@ -163,7 +163,7 @@ fn test_model_picker_down_moves_selection_indicator() {
         selected: 0,
     });
 
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)).await;
 
     let text = render_to_string(&mut app, 120, 40);
     assert!(

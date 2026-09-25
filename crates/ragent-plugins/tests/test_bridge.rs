@@ -223,6 +223,32 @@ fn scanned_plugin_mcp_servers_prefix_ids_and_only_include_enabled() {
     assert_eq!(servers[0].1.args, expected.args);
 }
 
+/// The `/plugins list` report groups MCP servers under the plugin that declares
+/// them, so the attributed view must carry the owning plugin id even when the
+/// bridged id alone would be ambiguous.
+#[test]
+fn scanned_plugin_mcp_contributions_attribute_each_server_to_its_plugin() {
+    let tree = TempTree::new("mcp-contributions");
+    stage_plugin(&tree.store());
+
+    assert!(
+        ragent_plugins::scanned_plugin_mcp_contributions(&tree.dirs()).is_empty(),
+        "a disabled plugin contributes nothing"
+    );
+
+    enable(&tree.dirs(), "mongodb");
+    let contributions = ragent_plugins::scanned_plugin_mcp_contributions(&tree.dirs());
+    assert_eq!(contributions.len(), 1);
+    assert_eq!(contributions[0].plugin_id, "mongodb");
+    assert_eq!(contributions[0].server_id, "mongodb.mongodb");
+    assert_eq!(contributions[0].config.command.as_deref(), Some("npx"));
+
+    // The deduplicated view stays consistent with the attributed one.
+    let deduped = scanned_plugin_mcp_servers(&tree.dirs());
+    assert_eq!(deduped.len(), contributions.len());
+    assert_eq!(deduped[0].0, contributions[0].server_id);
+}
+
 // ── FR-032: agents bridge ───────────────────────────────────────────────────
 
 #[test]

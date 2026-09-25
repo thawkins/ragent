@@ -640,6 +640,113 @@ fn is_help_args(args: &str) -> bool {
     matches!(args.trim(), "help" | "--help" | "-h")
 }
 
+/// Build the `/mcp` display list from the merged MCP server set.
+///
+/// The merged set is the `ragent.json` `mcp` section plus every server
+/// contributed by an enabled plugin (ids prefixed `<plugin-id>.<server>`,
+/// FR-030), exactly the set the startup connect loop connects. Without the
+/// plugin leg the `/mcp` list shows nothing on a project whose only MCP
+/// servers come from plugins, even though those servers are connected and
+/// their tools are registered.
+///
+/// `previous` is the current display list: a server already tracked keeps its
+/// live status and tool count. A server not in `previous` takes its status from
+/// `live` (the `Event::McpStatusChanged` map) when present, so the background
+/// startup connect loop's status is not lost; otherwise it starts `Disabled`
+/// until the connect path reports otherwise.
+pub fn mcp_display_servers<S, H>(
+    previous: &[ragent_agent::mcp::McpServer],
+    configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
+    working_dir: &std::path::Path,
+    live: &std::collections::HashMap<String, ragent_agent::mcp::McpStatus, H>,
+) -> Vec<ragent_agent::mcp::McpServer>
+where
+    S: std::hash::BuildHasher,
+    H: std::hash::BuildHasher,
+{
+    let mut merged = ragent_agent::plugin::plugin_mcp_servers(working_dir, configured);
+    // Preserve servers the live client reports that are not in the merged
+    // configuration set (e.g. a server registered after startup); the display
+    // list must never forget a connected server just because a config reload
+    // did not re-read it.
+    for tracked in previous {
+        if !merged.iter().any(|(id, _)| id == &tracked.id) {
+            merged.push((tracked.id.clone(), tracked.config.clone()));
+        }
+    }
+    merged.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut servers: Vec<ragent_agent::mcp::McpServer> = Vec::with_capacity(merged.len());
+    for (id, config) in merged {
+        let tracked = previous.iter().find(|s| s.id == id);
+        let status = tracked
+            .map(|s| s.status.clone())
+            .or_else(|| live.get(&id).cloned())
+            .unwrap_or(ragent_agent::mcp::McpStatus::Disabled);
+        servers.push(ragent_agent::mcp::McpServer {
+            status,
+            tools: tracked.map_or_else(Vec::new, |s| s.tools.clone()),
+            id,
+            config,
+        });
+    }
+    servers
+}
+
+/// Whether an MCP server is enabled, for display purposes.
+///
+/// `enabled` (the persisted global enable-state map) is the authoritative
+/// answer when it carries an entry for the server; an absent entry means
+/// enabled, matching [`ragent_agent::mcp::is_server_enabled`]. A server with no
+/// map entry but a `disabled: true` in its own config is reported disabled.
+#[must_use]
+pub fn server_is_enabled(
+    server: &ragent_agent::mcp::McpServer,
+    enabled: &std::collections::HashMap<String, bool>,
+) -> bool {
+    ragent_agent::mcp::is_server_enabled(&server.config, &ledger_from_map(enabled), &server.id)
+}
+
+/// The registry name an MCP tool is registered under, mirroring
+/// [`ragent_agent::tool::McpToolWrapper::ragent_name`] (`mcp_<server>_<tool>`
+/// with `-`, `.` and `/` replaced by `_`).
+#[must_use]
+pub fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
+    let safe_server = server_id.replace(['-', '.', '/'], "_");
+    let safe_tool = tool_name.replace(['-', '.', '/'], "_");
+    format!("mcp_{safe_server}_{safe_tool}")
+}
+
+/// Build a ledger view over a plain `server_id -> enabled` map (the TUI's
+/// cached copy of the persisted global enable state).
+fn ledger_from_map(
+    enabled: &std::collections::HashMap<String, bool>,
+) -> ragent_agent::mcp::McpEnableLedger {
+    let mut ledger = ragent_agent::mcp::McpEnableLedger::default();
+    for (id, on) in enabled {
+        ledger.set_enabled(id, *on);
+    }
+    ledger
+}
+
+/// Map an `Event::McpStatusChanged` status string onto an [`McpStatus`].
+///
+/// Unknown strings map to `Disabled` so a malformed event cannot wedge the
+/// display list in a bogus state.
+#[must_use]
+pub fn mcp_status_from_event(status: &str) -> ragent_agent::mcp::McpStatus {
+    match status {
+        "connected" => ragent_agent::mcp::McpStatus::Connected,
+        "needs_auth" => ragent_agent::mcp::McpStatus::NeedsAuth,
+        other if other.starts_with("failed") => ragent_agent::mcp::McpStatus::Failed {
+            error: other
+                .strip_prefix("failed")
+                .map(|r| r.trim_start_matches([':', ' ']).to_string())
+                .unwrap_or_default(),
+        },
+        _ => ragent_agent::mcp::McpStatus::Disabled,
+    }
+}
+
 // Re-export status types from theme
 
 impl App {
@@ -2701,7 +2808,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
     /// command in input history, dispatches to the inner implementation, and
     /// emits a "Finished" log entry once complete (unless a background task
     /// is still pending).
-    pub fn execute_slash_command(&mut self, raw: &str) {
+    pub async fn execute_slash_command(&mut self, raw: &str) {
         // Top-level wrapper: single entry and single exit. Log invocation and
         // call the inner implementation which may return early. On return,
         // log completion and number of assistant output lines added.
@@ -2720,7 +2827,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         self.add_to_history(raw.to_string());
 
         // Call the original implementation moved to an inner function.
-        self.execute_slash_command_inner(raw);
+        Box::pin(self.execute_slash_command_inner(raw)).await;
 
         // If the command spawned an async task (status begins with [wait]), defer
         // the "Finished" log entry — poll_*_result will emit it once the
@@ -2746,7 +2853,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
     /// This is the inner entry point for slash-command dispatch. The caller is
     /// responsible for updating the UI mode and input buffer if needed; this
     /// method handles command-specific side effects and logging.
-    pub fn execute_slash_command_inner(&mut self, raw: &str) {
+    pub async fn execute_slash_command_inner(&mut self, raw: &str) {
         let stripped = raw.strip_prefix('/').unwrap_or(raw).trim();
         self.input.clear();
         self.input_cursor = 0;
@@ -4578,45 +4685,26 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 if do_mcp {
                     match ragent_agent::Config::load() {
                         Ok(cfg) => {
-                            // Rebuild the display list from config, preserving connected status
-                            let mut new_servers: Vec<ragent_agent::mcp::McpServer> = Vec::new();
-                            for (id, mcp_cfg) in &cfg.mcp {
-                                let existing_status = self
-                                    .mcp_servers
-                                    .iter()
-                                    .find(|s| &s.id == id)
-                                    .map(|s| s.status.clone())
-                                    .unwrap_or(if mcp_cfg.disabled {
-                                        ragent_agent::mcp::McpStatus::Disabled
-                                    } else {
-                                        ragent_agent::mcp::McpStatus::Disabled
-                                    });
-                                let existing_tools = self
-                                    .mcp_servers
-                                    .iter()
-                                    .find(|s| &s.id == id)
-                                    .map(|s| s.tools.clone())
-                                    .unwrap_or_default();
-                                new_servers.push(ragent_agent::mcp::McpServer {
-                                    id: id.clone(),
-                                    config: mcp_cfg.clone(),
-                                    status: existing_status,
-                                    tools: existing_tools,
-                                });
-                            }
+                            // Rebuild the display list from the merged server set
+                            // (`ragent.json` + plugin-contributed), preserving the
+                            // connected status/tools the startup connect loop already
+                            // established so a `/reload mcp` does not forget them.
+                            let merged = mcp_display_servers(
+                                &self.mcp_servers,
+                                &cfg.mcp,
+                                &self.cwd_path,
+                                &self.mcp_status_map,
+                            );
                             let prev = self.mcp_servers.len();
-                            self.mcp_servers = new_servers;
+                            self.mcp_servers = merged;
                             report.push_str(&format!(
-                                "✓ MCP reloaded — {} server(s) in config (was {})\n",
+                                "✓ MCP reloaded — {} server(s) (was {})\n",
                                 self.mcp_servers.len(),
                                 prev,
                             ));
                             self.push_log_no_agent(
                                 LogLevel::Info,
-                                format!(
-                                    "reload mcp: {} server(s) in config",
-                                    self.mcp_servers.len()
-                                ),
+                                format!("reload mcp: {} server(s)", self.mcp_servers.len()),
                             );
                         }
                         Err(e) => {
@@ -4895,7 +4983,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 match sub {
                     "help" => {
                         self.append_assistant_text(
-                            "From: /mcp help\n\n## /mcp \u{2014} Model Context Protocol servers\n\n| Subcommand | Description |\n|---|---|\n| `/mcp` | Show all registered servers and their connection status |\n| `/mcp discover` | Scan the environment for known MCP servers and open the discover dialog |\n| `/mcp connect <id>` | Connect to a server configured in `ragent.json` (placeholder \u{2014} not yet implemented) |\n| `/mcp disconnect <id>` | Disconnect a server (placeholder \u{2014} not yet implemented) |\n| `/mcp help` | Show this help |",
+                            "From: /mcp help\n\n## /mcp \u{2014} Model Context Protocol servers\n\n| Subcommand | Description |\n|---|---|\n| `/mcp` | Show all registered servers, their enabled state and their tools |\n| `/mcp discover` | Scan the environment for known MCP servers and open the discover dialog |\n| `/mcp connect <id>` | Enable a server and connect it now (no restart needed) |\n| `/mcp disconnect <id>` | Disable a server and disconnect it now; the choice persists globally |\n| `/mcp help` | Show this help |\n\nEnabled state is stored globally in `<state dir>/mcp_state.json`, so a server\ndisabled here stays disabled in every project. A newly added server is enabled\nby default.",
                         );
                         self.status = "mcp: help".to_string();
                         return;
@@ -4917,15 +5005,11 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     }
                     "connect" => {
                         if let Some(&id) = mcp_args.get(1) {
-                            let config = ragent_agent::Config::load()
-                                .ok()
-                                .and_then(|c| c.mcp.get(id).cloned());
-                            if let Some(_cfg) = config {
-                                self.status =
-                                    format!("MCP connect not yet implemented for '{}'", id);
-                            } else {
-                                self.status = format!("MCP '{}' not found in config", id);
-                            }
+                            let report = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.set_mcp_server_enabled(id, true))
+                            });
+                            self.append_assistant_text(&report);
                         } else {
                             self.status = "Usage: /mcp connect <id>".to_string();
                         }
@@ -4934,8 +5018,11 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     }
                     "disconnect" => {
                         if let Some(&id) = mcp_args.get(1) {
-                            self.status =
-                                format!("MCP disconnect not yet implemented for '{}'", id);
+                            let report = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.set_mcp_server_enabled(id, false))
+                            });
+                            self.append_assistant_text(&report);
                         } else {
                             self.status = "Usage: /mcp disconnect <id>".to_string();
                         }
@@ -4943,12 +5030,35 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                         return;
                     }
                     _ => {
-                        // Show all registered servers and status.
+                        // Adopt the shared client first so the tool inventory is
+                        // the live one, then refresh the display list from the
+                        // merged server set so plugin-contributed servers appear
+                        // here too (they are connected at startup but were
+                        // previously invisible).
+                        self.mcp_client_adopted = false;
+                        {
+                            let processor = std::sync::Arc::clone(&self.session_processor);
+                            self.adopt_mcp_client_state(&processor).await;
+                        }
+                        let configured = ragent_agent::Config::load()
+                            .map(|cfg| cfg.mcp)
+                            .unwrap_or_default();
+                        self.mcp_servers = mcp_display_servers(
+                            &self.mcp_servers,
+                            &configured,
+                            &self.cwd_path,
+                            &self.mcp_status_map,
+                        );
+                        // Show all registered servers, enabled state and status.
                         let mut out = String::from("From: /mcp\nMCP Servers:\n\n");
                         if self.mcp_servers.is_empty() {
                             out.push_str("  (no MCP servers configured)\n\n");
                             out.push_str("Run /mcp discover to scan for available servers.\n");
                             out.push_str("Then add them to 'mcp' in ragent.json to activate.\n");
+                            out.push_str(
+                                "Enabled plugins that declare an 'mcpServers' section are \
+                                 bridged automatically.\n",
+                            );
                         } else {
                             for s in &self.mcp_servers {
                                 let status_icon = match &s.status {
@@ -4959,10 +5069,17 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                                         &format!("🔴 failed: {}", error)
                                     }
                                 };
-                                out.push_str(&format!("  {:<18} {}\n", s.id, status_icon));
-                                if !s.tools.is_empty() {
-                                    out.push_str(&format!("    tools: {}\n", s.tools.len()));
-                                }
+                                out.push_str(&format!(
+                                    "  {:<18} enabled {:<3} {}\n",
+                                    s.id,
+                                    if server_is_enabled(s, &self.mcp_enabled_map) {
+                                        "yes"
+                                    } else {
+                                        "no"
+                                    },
+                                    status_icon
+                                ));
+                                out.push_str(&format!("    tools: {}\n", s.tools.len()));
                             }
                             let connected = self
                                 .mcp_servers
@@ -6641,7 +6758,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.handle_swarm_status();
                     }
                     "cancel" => {
-                        self.handle_swarm_cancel();
+                        self.handle_swarm_cancel().await;
                     }
                     _ => {
                         // /swarm <prompt> — decompose and execute
@@ -10824,7 +10941,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             // ── /inbox ────────────────────────────────────
             "inbox" => self.handle_inbox_command(args),
             // ── /queue ───────────────────────────────────────────────────
-            "queue" => self.handle_queue_command(args),
+            "queue" => self.handle_queue_command(args).await,
             // ── /loop ────────────────────────────────────────────────────
             "loop" => handle_loop_command(self, args),
             _ => {
@@ -12212,12 +12329,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     /// executing turn: `next` only dispatches when the turn boundary is free
     /// (FR-016/FR-030), otherwise it reports that the action is deferred, so a
     /// queued entry can never overlap a running turn or a compaction.
-    fn handle_queue_command(&mut self, args: &str) {
+    async fn handle_queue_command(&mut self, args: &str) {
         let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
         match sub.as_str() {
             "list" | "" => self.handle_queue_list(),
             "clear" => self.handle_queue_clear(),
-            "next" => self.handle_queue_next(),
+            "next" => self.handle_queue_next().await,
             "help" | "--help" | "-h" => self.handle_queue_help(),
             _ => {
                 self.append_assistant_text(&format!(
@@ -12273,7 +12390,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     /// guard (FR-016/FR-030): it dispatches only when no turn is executing and
     /// no compaction is in progress, so `next` can never overlap a running turn.
     /// When the guard defers, the queue is left untouched and the user is told.
-    fn handle_queue_next(&mut self) {
+    async fn handle_queue_next(&mut self) {
         if self.input_queue_len() == 0 {
             self.append_assistant_text(
                 "From: /queue next\n\nℹ️  The input queue is empty — nothing to run.",
@@ -12295,7 +12412,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             .front()
             .map(|e| crate::app::helpers::truncate_to_char_boundary(&e.text, 120))
             .unwrap_or_default();
-        self.advance_input_queue();
+        self.advance_input_queue().await;
         self.push_log_no_agent(
             LogLevel::Info,
             format!("queue: dispatching next entry: {text}"),

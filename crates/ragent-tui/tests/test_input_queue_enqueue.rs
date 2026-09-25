@@ -37,18 +37,18 @@ fn app_ready_to_send() -> App {
 }
 
 /// Simulate the user typing `text` at the end of the prompt and pressing Enter.
-fn type_and_submit(app: &mut App, text: &str) {
+async fn type_and_submit(app: &mut App, text: &str) {
     app.input = text.to_string();
     app.input_cursor = app.input_len_chars();
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 }
 
-#[test]
-fn test_enter_enqueues_plain_message_while_processing() {
+#[tokio::test]
+async fn test_enter_enqueues_plain_message_while_processing() {
     let mut app = app_ready_to_send();
     app.is_processing = true;
 
-    type_and_submit(&mut app, "queued while busy");
+    type_and_submit(&mut app, "queued while busy").await;
 
     assert_eq!(app.input_queue_len(), 1, "FR-005: Enter must enqueue");
     assert_eq!(app.input_queue[0].text, "queued while busy");
@@ -63,23 +63,23 @@ fn test_enter_enqueues_plain_message_while_processing() {
     );
 }
 
-#[test]
-fn test_enter_enqueues_while_compaction_is_in_progress() {
+#[tokio::test]
+async fn test_enter_enqueues_while_compaction_is_in_progress() {
     let mut app = app_ready_to_send();
     app.compact_in_progress = true;
 
-    type_and_submit(&mut app, "queued during compaction");
+    type_and_submit(&mut app, "queued during compaction").await;
 
     assert_eq!(app.input_queue_len(), 1);
     assert!(app.messages.is_empty(), "no dispatch while compacting");
 }
 
-#[test]
-fn test_enqueue_adds_to_history_at_submission_time() {
+#[tokio::test]
+async fn test_enqueue_adds_to_history_at_submission_time() {
     let mut app = app_ready_to_send();
     app.is_processing = true;
 
-    type_and_submit(&mut app, "HISTORY-PROBE");
+    type_and_submit(&mut app, "HISTORY-PROBE").await;
 
     // FR-003: the entry is in history before it has been executed.
     assert_eq!(
@@ -88,21 +88,21 @@ fn test_enqueue_adds_to_history_at_submission_time() {
     );
     assert!(app.history_index.is_none(), "history browsing resets");
 
-    type_and_submit(&mut app, "HISTORY-PROBE-2");
+    type_and_submit(&mut app, "HISTORY-PROBE-2").await;
     assert_eq!(
         app.input_history.last().map(String::as_str),
         Some("HISTORY-PROBE-2")
     );
 }
 
-#[test]
-fn test_enqueue_preserves_fifo_order_across_submissions() {
+#[tokio::test]
+async fn test_enqueue_preserves_fifo_order_across_submissions() {
     let mut app = app_ready_to_send();
     app.is_processing = true;
 
-    type_and_submit(&mut app, "first");
-    type_and_submit(&mut app, "second");
-    type_and_submit(&mut app, "third");
+    type_and_submit(&mut app, "first").await;
+    type_and_submit(&mut app, "second").await;
+    type_and_submit(&mut app, "third").await;
 
     let queued: Vec<&str> = app
         .input_queue
@@ -116,13 +116,13 @@ fn test_enqueue_preserves_fifo_order_across_submissions() {
     );
 }
 
-#[test]
-fn test_enqueue_keeps_staged_image_attachments() {
+#[tokio::test]
+async fn test_enqueue_keeps_staged_image_attachments() {
     let mut app = app_ready_to_send();
     app.is_processing = true;
     app.pending_attachments = vec![std::path::PathBuf::from("/tmp/shot.png")];
 
-    type_and_submit(&mut app, "see attached");
+    type_and_submit(&mut app, "see attached").await;
 
     assert_eq!(app.input_queue_len(), 1);
     assert_eq!(
@@ -136,16 +136,16 @@ fn test_enqueue_keeps_staged_image_attachments() {
     );
 }
 
-#[test]
-fn test_enqueue_rejects_overflow_and_keeps_typed_text() {
+#[tokio::test]
+async fn test_enqueue_rejects_overflow_and_keeps_typed_text() {
     let mut app = app_ready_to_send();
     app.is_processing = true;
     app.input_queue_capacity = 1;
 
-    type_and_submit(&mut app, "accepted");
+    type_and_submit(&mut app, "accepted").await;
     assert_eq!(app.input_queue_len(), 1);
 
-    type_and_submit(&mut app, "rejected");
+    type_and_submit(&mut app, "rejected").await;
 
     assert_eq!(app.input_queue_len(), 1, "FR-004: the cap is enforced");
     assert_eq!(app.input_queue[0].text, "accepted", "FR-019: no reordering");
@@ -161,15 +161,15 @@ fn test_enqueue_rejects_overflow_and_keeps_typed_text() {
     );
 }
 
-#[test]
-fn test_enqueue_rejection_restores_staged_attachments() {
+#[tokio::test]
+async fn test_enqueue_rejection_restores_staged_attachments() {
     let mut app = app_ready_to_send();
     app.is_processing = true;
     app.input_queue_capacity = 1;
-    type_and_submit(&mut app, "accepted");
+    type_and_submit(&mut app, "accepted").await;
 
     app.pending_attachments = vec![std::path::PathBuf::from("/tmp/shot.png")];
-    type_and_submit(&mut app, "rejected");
+    type_and_submit(&mut app, "rejected").await;
 
     assert_eq!(
         app.pending_attachments,
@@ -178,15 +178,15 @@ fn test_enqueue_rejection_restores_staged_attachments() {
     );
 }
 
-#[test]
-fn test_enqueue_respects_configured_capacity() {
+#[tokio::test]
+async fn test_enqueue_respects_configured_capacity() {
     let mut app = app_ready_to_send();
     app.is_processing = true;
     app.input_queue_capacity = 2;
 
-    type_and_submit(&mut app, "one");
-    type_and_submit(&mut app, "two");
-    type_and_submit(&mut app, "three");
+    type_and_submit(&mut app, "one").await;
+    type_and_submit(&mut app, "two").await;
+    type_and_submit(&mut app, "three").await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -199,13 +199,13 @@ fn test_enqueue_respects_configured_capacity() {
     );
 }
 
-#[test]
-fn test_enqueue_requests_redraw_for_the_counter() {
+#[tokio::test]
+async fn test_enqueue_requests_redraw_for_the_counter() {
     let mut app = app_ready_to_send();
     app.is_processing = true;
     app.needs_redraw = false;
 
-    type_and_submit(&mut app, "queue me");
+    type_and_submit(&mut app, "queue me").await;
 
     assert!(
         app.needs_redraw,
@@ -213,13 +213,13 @@ fn test_enqueue_requests_redraw_for_the_counter() {
     );
 }
 
-#[test]
-fn test_enqueue_echoes_queued_notice_with_post_append_depth() {
+#[tokio::test]
+async fn test_enqueue_echoes_queued_notice_with_post_append_depth() {
     let mut app = app_ready_to_send();
     app.is_processing = true;
     app.log_entries.clear();
 
-    type_and_submit(&mut app, "first");
+    type_and_submit(&mut app, "first").await;
 
     assert_eq!(
         app.log_entries.len(),
@@ -228,7 +228,7 @@ fn test_enqueue_echoes_queued_notice_with_post_append_depth() {
     );
     assert_eq!(app.log_entries[0].message, "queued (1 in queue)");
 
-    type_and_submit(&mut app, "second");
+    type_and_submit(&mut app, "second").await;
 
     assert_eq!(app.log_entries.len(), 2, "each enqueue echoes one notice");
     assert_eq!(
@@ -237,18 +237,18 @@ fn test_enqueue_echoes_queued_notice_with_post_append_depth() {
     );
 }
 
-#[test]
-fn test_enqueue_overflow_does_not_echo_a_success_notice() {
+#[tokio::test]
+async fn test_enqueue_overflow_does_not_echo_a_success_notice() {
     let mut app = app_ready_to_send();
     app.is_processing = true;
     app.input_queue_capacity = 1;
     app.log_entries.clear();
 
-    type_and_submit(&mut app, "accepted");
+    type_and_submit(&mut app, "accepted").await;
     assert_eq!(app.log_entries.len(), 1);
 
     // FR-004: the second submission is rejected, so no queued notice is echoed.
-    type_and_submit(&mut app, "rejected");
+    type_and_submit(&mut app, "rejected").await;
 
     assert_eq!(
         app.log_entries.len(),

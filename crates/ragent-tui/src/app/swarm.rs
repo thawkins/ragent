@@ -343,7 +343,7 @@ impl App {
         self.append_assistant_text(&output);
     }
 
-    pub(crate) fn handle_swarm_cancel(&mut self) {
+    pub(crate) async fn handle_swarm_cancel(&mut self) {
         let Some(swarm) = self.swarm_state.take() else {
             self.append_assistant_text("From: /swarm cancel\n\nNo active swarm to cancel.\n");
             return;
@@ -353,7 +353,8 @@ impl App {
         let team_name = swarm.team_name.clone();
 
         // Trigger team cleanup
-        self.execute_slash_command(&format!("/team close {}", team_name));
+        self.execute_slash_command(&format!("/team close {team_name}"))
+            .await;
 
         self.append_assistant_text(&format!(
             "From: /swarm cancel\n## 🐝 Swarm Cancelled\n\n\

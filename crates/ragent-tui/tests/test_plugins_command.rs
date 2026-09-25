@@ -108,15 +108,16 @@ fn plugins_suggestions_list_all_subcommands() {
     );
 }
 
-#[test]
-fn help_bare_and_unknown_all_render_the_usage_block() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn help_bare_and_unknown_all_render_the_usage_block() {
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
 
     for invocation in ["/plugins help", "/plugins", "/plugins bogus"] {
-        app.execute_slash_command(invocation);
+        app.execute_slash_command(invocation).await;
         let text = last_text(&app);
         // FR-014: all three print the usage block with a `/plugins` attribution.
         assert!(
@@ -148,8 +149,9 @@ fn help_bare_and_unknown_all_render_the_usage_block() {
     }
 }
 
-#[test]
-fn stores_reports_both_endpoints_as_default_without_a_stores_block() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn stores_reports_both_endpoints_as_default_without_a_stores_block() {
     // FR-031/FR-038: with no `plugins.stores` block, `/plugins stores` lists
     // both stores, tags each `default`, and names its compiled https endpoint.
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -157,7 +159,7 @@ fn stores_reports_both_endpoints_as_default_without_a_stores_block() {
 
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
-    app.execute_slash_command("/plugins stores");
+    app.execute_slash_command("/plugins stores").await;
     let raw = last_text(&app);
     let text = flat_text(&app);
 
@@ -178,8 +180,9 @@ fn stores_reports_both_endpoints_as_default_without_a_stores_block() {
     );
 }
 
-#[test]
-fn stores_tags_a_configured_endpoint_as_config() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn stores_tags_a_configured_endpoint_as_config() {
     // FR-031: a non-empty `plugins.stores.<name>.url` override is tagged
     // `config` and names its URL; the other store keeps its default.
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -192,7 +195,7 @@ fn stores_tags_a_configured_endpoint_as_config() {
 
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
-    app.execute_slash_command("/plugins stores");
+    app.execute_slash_command("/plugins stores").await;
     let text = flat_text(&app);
 
     assert!(
@@ -205,15 +208,16 @@ fn stores_tags_a_configured_endpoint_as_config() {
     );
 }
 
-#[test]
-fn help_creates_no_files() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn help_creates_no_files() {
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (_guard, temp) = enter_temp_dir();
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
 
     for invocation in ["/plugins help", "/plugins", "/plugins bogus"] {
-        app.execute_slash_command(invocation);
+        app.execute_slash_command(invocation).await;
     }
 
     // FR-014: help creates or modifies no files. In particular it must not
@@ -239,8 +243,9 @@ fn write_codex_plugin(dir: &std::path::Path, id: &str) {
     .expect("entry");
 }
 
-#[test]
-fn list_reports_a_discovered_plugin_as_disabled() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn list_reports_a_discovered_plugin_as_disabled() {
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (_guard, temp) = enter_temp_dir();
     write_codex_plugin(
@@ -254,7 +259,7 @@ fn list_reports_a_discovered_plugin_as_disabled() {
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/plugins list");
+    app.execute_slash_command("/plugins list").await;
     let listed = last_text(&app);
     assert!(
         listed.contains("codex-weather"),
@@ -266,8 +271,111 @@ fn list_reports_a_discovered_plugin_as_disabled() {
     );
 }
 
-#[test]
-fn add_from_a_local_directory_installs_and_reports_enabled() {
+/// Write a minimal Claude-dialect plugin that declares one MCP server.
+fn write_claude_mcp_plugin(dir: &std::path::Path, id: &str) {
+    std::fs::create_dir_all(dir.join(".claude-plugin")).expect("plugin dir");
+    std::fs::write(
+        dir.join(".claude-plugin/plugin.json"),
+        format!(r#"{{ "name": "{id}", "version": "1.0.0", "mcpServers": "./mcp.json" }}"#),
+    )
+    .expect("manifest");
+    std::fs::write(
+        dir.join("mcp.json"),
+        format!(
+            r#"{{ "mcpServers": {{ "{id}": {{ "command": "npx", "args": ["-y", "server"] }} }} }}"#
+        ),
+    )
+    .expect("mcp config");
+}
+
+/// FR-030: `/plugins list` must show how many MCP servers a plugin installs and
+/// how many tools those servers provide, in the table.
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn list_shows_mcp_server_and_tool_counts() {
+    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_guard, temp) = enter_temp_dir();
+    write_claude_mcp_plugin(
+        &temp.path().join(".ragent").join("plugins").join("mongodb"),
+        "mongodb",
+    );
+    let mut app = support::make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/plugins list").await;
+    let listed = last_text(&app);
+    assert!(
+        listed.contains("MCP Tools"),
+        "the list table must carry an MCP Tools column: {listed}"
+    );
+    assert!(
+        listed.contains("MCP server")
+            || listed
+                .lines()
+                .any(|l| l.contains("mongodb") && l.trim_end().ends_with("| 1   | ?         |")),
+        "the mongodb row must report one MCP server: {listed}"
+    );
+    assert!(
+        listed.contains("mcp [mongodb.mongodb"),
+        "the contributions block must name the bridged MCP server: {listed}"
+    );
+}
+
+/// FR-030: the table's `MCP Tools` cell is the LIVE tool count from the shared
+/// MCP client once the server has connected — `?` (unknown, not zero) is only
+/// for a server whose tool list the surface cannot see.
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::await_holding_lock)]
+async fn list_shows_live_mcp_tool_count_after_connect() {
+    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_guard, temp) = enter_temp_dir();
+    write_claude_mcp_plugin(
+        &temp.path().join(".ragent").join("plugins").join("mongodb"),
+        "mongodb",
+    );
+    let mut app = support::make_app();
+    app.session_id = Some("test-session".to_string());
+    // `App::new` captured the pre-test cwd; point it at the temp project so the
+    // plugin scan sees the staged store.
+    app.cwd_path = temp.path().to_path_buf();
+
+    // Stand in for the completed startup connect loop: the bridged server is
+    // connected and advertises two tools.
+    let mut client = ragent_agent::mcp::McpClient::new();
+    let tools = ["find", "count"]
+        .iter()
+        .map(|name| ragent_agent::mcp::McpToolDef {
+            name: (*name).to_string(),
+            description: "tool".to_string(),
+            parameters: serde_json::json!({ "type": "object" }),
+        })
+        .collect();
+    client.register_connected_for_tests("mongodb.mongodb", tools);
+    app.session_processor
+        .mcp_client
+        .set(std::sync::Arc::new(tokio::sync::RwLock::new(client)))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+    let processor = std::sync::Arc::clone(&app.session_processor);
+    app.adopt_mcp_client_state(&processor).await;
+
+    app.execute_slash_command("/plugins list").await;
+    let listed = last_text(&app);
+    assert!(
+        listed
+            .lines()
+            .any(|l| l.contains("mongodb") && l.trim_end().ends_with("| 1   | 2         |")),
+        "the mongodb row must report the live tool count, not '?': {listed}"
+    );
+    assert!(
+        listed.contains("mcp [mongodb.mongodb (2 tools)]"),
+        "the contributions block must report the live tool count: {listed}"
+    );
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn add_from_a_local_directory_installs_and_reports_enabled() {
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (_guard, temp) = enter_temp_dir();
 
@@ -278,7 +386,8 @@ fn add_from_a_local_directory_installs_and_reports_enabled() {
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command(&format!("/plugins add {}", src.display()));
+    app.execute_slash_command(&format!("/plugins add {}", src.display()))
+        .await;
     let added = last_text(&app);
     assert!(added.contains("[ok]"), "add must succeed: {added}");
     assert!(
@@ -296,7 +405,7 @@ fn add_from_a_local_directory_installs_and_reports_enabled() {
             .exists(),
         "the plugin must be installed into the store"
     );
-    app.execute_slash_command("/plugins list");
+    app.execute_slash_command("/plugins list").await;
     let listed = last_text(&app);
     assert!(
         listed.contains("enabled"),
@@ -304,8 +413,9 @@ fn add_from_a_local_directory_installs_and_reports_enabled() {
     );
 }
 
-#[test]
-fn test_harness_reports_per_step_results_without_touching_the_session() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_harness_reports_per_step_results_without_touching_the_session() {
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (_guard, temp) = enter_temp_dir();
     write_codex_plugin(
@@ -319,7 +429,8 @@ fn test_harness_reports_per_step_results_without_touching_the_session() {
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/plugins test codex-weather");
+    app.execute_slash_command("/plugins test codex-weather")
+        .await;
     let report = last_text(&app);
     assert!(
         report.contains("[ ok ]"),
@@ -331,8 +442,9 @@ fn test_harness_reports_per_step_results_without_touching_the_session() {
     );
 }
 
-#[test]
-fn enable_loads_the_plugin_and_disable_unloads_it() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn enable_loads_the_plugin_and_disable_unloads_it() {
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (_guard, temp) = enter_temp_dir();
     write_codex_plugin(
@@ -347,7 +459,8 @@ fn enable_loads_the_plugin_and_disable_unloads_it() {
     app.session_id = Some("test-session".to_string());
 
     // FR-011: enable loads it and states the declared permissions.
-    app.execute_slash_command("/plugins enable codex-weather");
+    app.execute_slash_command("/plugins enable codex-weather")
+        .await;
     let enabled = last_text(&app);
     assert!(enabled.contains("[ok]"), "enable must succeed: {enabled}");
     assert!(
@@ -356,7 +469,8 @@ fn enable_loads_the_plugin_and_disable_unloads_it() {
     );
 
     // FR-012: disable unloads it and confirms deregistration.
-    app.execute_slash_command("/plugins disable codex-weather");
+    app.execute_slash_command("/plugins disable codex-weather")
+        .await;
     let disabled = last_text(&app);
     assert!(
         disabled.contains("[ok]") && disabled.contains("deregistered"),
@@ -364,8 +478,9 @@ fn enable_loads_the_plugin_and_disable_unloads_it() {
     );
 }
 
-#[test]
-fn master_switch_disables_the_subsystem() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn master_switch_disables_the_subsystem() {
     // Acceptance criterion 8: `plugins.enabled: false` makes `/plugins list`
     // report the disabled subsystem and discover nothing (FR-016).
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -387,7 +502,7 @@ fn master_switch_disables_the_subsystem() {
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/plugins list");
+    app.execute_slash_command("/plugins list").await;
     let listed = last_text(&app);
     assert!(
         listed.contains("[err]") && listed.contains("disabled"),

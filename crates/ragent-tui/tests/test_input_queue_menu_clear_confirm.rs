@@ -94,8 +94,8 @@ fn dialog_rows(terminal: &Terminal<TestBackend>, app: &App) -> Vec<String> {
 // FR-033 — the dialog presents the message and exactly Yes / No
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_clear_row_opens_the_dialog_with_yes_and_no() {
+#[tokio::test]
+async fn test_clear_row_opens_the_dialog_with_yes_and_no() {
     let mut app = app_with_session();
     app.queue_menu_open = true;
 
@@ -190,30 +190,30 @@ fn test_closed_dialog_is_not_painted_and_area_is_cleared() {
 // NFR-010 — the dialog is a modal reusing the shared key dispatch
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_left_right_toggle_the_selection() {
+#[tokio::test]
+async fn test_left_right_toggle_the_selection() {
     let mut app = app_with_dialog_open();
     assert_eq!(app.queue_clear_confirm_selected, QUEUE_CLEAR_CONFIRM_NO);
 
-    app.handle_key_event(key(KeyCode::Left));
+    app.handle_key_event(key(KeyCode::Left)).await;
     assert_eq!(
         app.queue_clear_confirm_selected, QUEUE_CLEAR_CONFIRM_YES,
         "Left moves the selection to the other option"
     );
 
-    app.handle_key_event(key(KeyCode::Right));
+    app.handle_key_event(key(KeyCode::Right)).await;
     assert_eq!(
         app.queue_clear_confirm_selected, QUEUE_CLEAR_CONFIRM_NO,
         "Right moves the selection back"
     );
 }
 
-#[test]
-fn test_selection_change_sets_the_redraw_flag() {
+#[tokio::test]
+async fn test_selection_change_sets_the_redraw_flag() {
     let mut app = app_with_dialog_open();
     app.needs_redraw = false;
 
-    app.handle_key_event(key(KeyCode::Right));
+    app.handle_key_event(key(KeyCode::Right)).await;
 
     assert!(
         app.needs_redraw,
@@ -225,13 +225,13 @@ fn test_selection_change_sets_the_redraw_flag() {
 // FR-034 — Enter with the default selection does not confirm `Yes`
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_enter_on_default_returns_cancel_not_confirm() {
+#[tokio::test]
+async fn test_enter_on_default_returns_cancel_not_confirm() {
     let mut app = app_with_dialog_open();
 
     // The default selection is `No`, so Enter must produce the cancel action,
     // never the confirm action (FR-034).
-    let action = handle_key(&mut app, key(KeyCode::Enter));
+    let action = handle_key(&mut app, key(KeyCode::Enter)).await;
 
     assert!(
         matches!(action, Some(InputAction::CancelQueueClear)),
@@ -239,12 +239,12 @@ fn test_enter_on_default_returns_cancel_not_confirm() {
     );
 }
 
-#[test]
-fn test_enter_after_selecting_yes_returns_confirm() {
+#[tokio::test]
+async fn test_enter_after_selecting_yes_returns_confirm() {
     let mut app = app_with_dialog_open();
     app.queue_clear_confirm_selected = QUEUE_CLEAR_CONFIRM_YES;
 
-    let action = handle_key(&mut app, key(KeyCode::Enter));
+    let action = handle_key(&mut app, key(KeyCode::Enter)).await;
 
     assert!(
         matches!(action, Some(InputAction::ConfirmQueueClear)),
@@ -252,11 +252,11 @@ fn test_enter_after_selecting_yes_returns_confirm() {
     );
 }
 
-#[test]
-fn test_esc_returns_cancel() {
+#[tokio::test]
+async fn test_esc_returns_cancel() {
     let mut app = app_with_dialog_open();
 
-    let action = handle_key(&mut app, key(KeyCode::Esc));
+    let action = handle_key(&mut app, key(KeyCode::Esc)).await;
 
     assert!(
         matches!(action, Some(InputAction::CancelQueueClear)),
@@ -268,12 +268,12 @@ fn test_esc_returns_cancel() {
 // FR-035 / FR-037 — dismissing closes the dialog and leaves the queue
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_cancel_closes_the_dialog_and_leaves_the_queue_unchanged() {
+#[tokio::test]
+async fn test_cancel_closes_the_dialog_and_leaves_the_queue_unchanged() {
     let mut app = app_with_dialog_open();
     let before = app.input_queue_len();
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(
         !app.queue_clear_confirm_open,
@@ -286,13 +286,13 @@ fn test_cancel_closes_the_dialog_and_leaves_the_queue_unchanged() {
     );
 }
 
-#[test]
-fn test_dismiss_sets_the_redraw_flag_and_resets_the_default() {
+#[tokio::test]
+async fn test_dismiss_sets_the_redraw_flag_and_resets_the_default() {
     let mut app = app_with_dialog_open();
     app.queue_clear_confirm_selected = QUEUE_CLEAR_CONFIRM_YES;
     app.needs_redraw = false;
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(
         app.needs_redraw,
@@ -304,14 +304,14 @@ fn test_dismiss_sets_the_redraw_flag_and_resets_the_default() {
     );
 }
 
-#[test]
-fn test_plain_character_is_swallowed_while_dialog_is_open() {
+#[tokio::test]
+async fn test_plain_character_is_swallowed_while_dialog_is_open() {
     let mut app = app_with_dialog_open();
     app.input = "KEEP-ME".to_string();
     app.input_cursor = app.input_len_chars();
     app.pending_attachments = vec![std::path::PathBuf::from("/tmp/keep.png")];
 
-    app.handle_key_event(key(KeyCode::Char('z')));
+    app.handle_key_event(key(KeyCode::Char('z'))).await;
 
     assert_eq!(
         app.input, "KEEP-ME",
@@ -328,14 +328,14 @@ fn test_plain_character_is_swallowed_while_dialog_is_open() {
     );
 }
 
-#[test]
-fn test_dismiss_leaves_the_running_turn_untouched() {
+#[tokio::test]
+async fn test_dismiss_leaves_the_running_turn_untouched() {
     let mut app = app_with_dialog_open();
     app.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
     app.cancel_flag = Some(flag.clone());
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(
         app.is_processing,

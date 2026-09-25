@@ -1,5 +1,198 @@
 # Changelog
 
+## [Unreleased]
+
+## [1.0.118] - 2026-09-25
+
+Release over the v1.0.117 tree. This version folds in the uncommitted MCP
+enablement, plugin-bridge, and tool-visibility work plus a fix to the research
+and spec subsystems. All changes carry tests and keep `cargo check --workspace
+--all-targets` clean and `cargo audit` free of new advisories.
+
+### Added
+
+- **`/plugins list` shows each plugin's MCP server and MCP tool counts.** The
+  list table gains `MCP` (the number of MCP servers the plugin declares) and
+  `MCP Tools` (the total tools those servers advertise) columns, and the
+  contributions block now renders `mcp [<id> (<n> tools)] (S server(s), T
+  tool(s))`. The live counts are read from the session's MCP client and passed
+  into the shared `render_list_with_mcp_tools` renderer as its `mcp_tool_counts`
+  map (the CLI parity surface has no connected client and passes an empty map),
+  keyed by the bridged `<plugin-id>.<server>` id. A server whose tool count is
+  not yet known (it has not connected) renders `?`, never `0`, and an unknown
+  count makes the plugin's tool total `?` too rather than an inexact figure.
+
+- **Durable, global MCP server enable/disable state.** Whether an MCP server is
+  actually started is now a persisted choice (`<global state dir>/mcp_state.json`)
+  rather than an implicit side effect of being listed in `ragent.json`:
+  - A server id **absent** from the ledger is enabled, so a newly added server —
+    whether written into `ragent.json` or bridged from a plugin's `mcpServers`
+    section — starts **enabled** with no extra step.
+  - `mcp.<id>.disabled: true` in `ragent.json` still always disables the server
+    (the config flag is the harder switch). A server switched off in the ledger
+    is registered with `McpStatus::Disabled` and **no child process is spawned**,
+    so `/mcp` can still list it and offer to re-enable it.
+  - `/mcp connect <id>` enables and connects a server live (its tools are
+    registered into the session tool registry immediately);
+    `/mcp disconnect <id>` disables and disconnects it live. Both persist the
+    choice globally, so it survives a restart and applies to every project.
+  - `McpToolWrapper::execute` refuses to call a disabled server's tools even
+    when the tool is still registered from an earlier connection, naming the
+    command that re-enables it.
+
+- **`/mcp` lists each server's tool count, not its tools.** The `/mcp` listing
+  prints `enabled yes/no` with the number of tools the server advertises
+  (`tools: N`, also for a server with none). The individual tool names are the
+  model-facing surface and are not enumerated here; the full per-server
+  inventory with the registry name each tool is callable under
+  (`<tool> -> mcp_<server>_<tool>`) remains available via
+  `/plugins list --mcp`.
+
+- **`/plugins list` shows a plugin's MCP servers.** The contributions block gains
+  an `mcp [...]` section listing the bridged server ids declared by the plugin's
+  `mcpServers` section, resolved through the same bridge the session connects,
+  so the plugin listing and `/mcp` can never disagree. A plugin that contributes
+  only MCP servers is now listed in the contributions block too.
+
+- **`/plugins list --mcp` reports how many tools each MCP server provides.**
+  A plugin's `mcpServers` entry is a separate process, so the number of tools it
+  exposes is only known once it has connected — it cannot be counted from the
+  manifest. `/plugins list --mcp` therefore prints the live inventory from the
+  session's MCP client: one row per server (`<id> <status> N tool(s)`) followed
+  by every advertised tool and the registry name it is callable under
+  (`<tool> -> mcp_<server>_<tool>`), e.g. `mongodb.mongodb connected 35 tool(s)`.
+  The `mcp [...]` section of a plain `/plugins list` now also annotates each
+  bridged server with its live tool count, or `?` when no live client is
+  available (CLI parity, discovery-only rendering) so a server that has not yet
+  connected is never reported as contributing zero tools.
+
+- **`ragent_plugins::scanned_plugin_mcp_contributions`** (and the
+  `ragent_agent::plugin::plugin_mcp_contributions` wrapper): the MCP bridge with
+  the owning plugin id retained, so a surface can attribute a bridged
+  `<plugin-id>.<server>` id to its plugin.
+
+- **`McpClient::register_disabled`**: register a server that exists but must not
+  be started, without a spawn permit or transport handshake.
+
+- **MCP servers are now enabled by default whether they live in a plugin's
+  `mcpServers` map or in `ragent.json`.** A plugin's MCP-server
+  transport section was previously recorded only as an unsupported capability
+  (`/plugins list` showed `mcp server transports`), even though the session also
+  connected the very same servers. The bridge is now the single source of truth:
+  a plugin `mcpServers` entry (inline `{"<id>": {command, args, ...}}` or the
+  Claude `"mcpServers": "./mcp.json"` file-reference shape) is bridged as
+  `<plugin-id>.<server>`, connects at startup, and is listed as an MCP server.
+  The `mcp server transports` label is retained only for entry shapes the bridge
+  cannot satisfy (for example the `claude-mcp` fixture's array-of-transports
+  form).
+
+### Changed
+
+- **`App::execute_slash_command`, `App::handle_event`, `App::handle_key_event`,
+  `App::advance_input_queue`, and `input::handle_key` are now `async`** (and
+  return futures where they previously returned values), so the new `/mcp
+  connect` and `/mcp disconnect` arms can drive the async `McpClient` inline.
+  The async recursion through `/queue next` (a queued slash command that may
+  dispatch the next entry) is boxed at the single recursion point. TUI tests
+  that drive these entry points were converted to `#[tokio::test]`
+  (multi-thread where the code under test uses `block_in_place`).
+
+### Fixed
+
+- **`/mcp` reports the real MCP server status, and the display list no longer
+  drops a connected server.** Two defects combined to make the plugin-bridged
+  `mongodb` server show as `disabled`:
+  - The startup connect loop in `src/main.rs` is spawned *before* the TUI calls
+    `event_bus.subscribe()`, and `EventBus` is a plain `broadcast` channel with
+    no replay buffer — every `McpStatusChanged` published in that window was
+    discarded, so the TUI's live status map stayed empty and `/mcp` fell back to
+    the seeded `Disabled`. The TUI now also reads the authoritative
+    `McpClient` held by `SessionProcessor::mcp_client` (status and tool list per
+    server) at startup and on the housekeeping pass until the client appears, so
+    `/mcp` is correct regardless of event delivery.
+  - `mcp_display_servers` rebuilt the list from the merged config set alone, so
+    a server present in the live client but absent from `ragent.json` and the
+    plugin store (e.g. after a store change) was silently dropped from the
+    display. Servers tracked in the previous list are now preserved.
+
+- **`/mcp` now lists MCP servers contributed by plugins.** A plugin that
+  declares an `mcpServers` section (inline or, as the Claude `mongodb` plugin
+  does, via `"mcpServers": "./mcp.json"`) has its servers bridged as
+  `<plugin-id>.<server>` and connected at startup, but the TUI's `/mcp` listing
+  rebuilt its display list from the `ragent.json` `mcp` section alone — so on a
+  project whose only MCP servers come from a plugin the command reported
+  "(no MCP servers configured)" while the server was in fact connected and its
+  tools registered. The display list is now built from the same merged set the
+  connect path uses (`ragent_agent::plugin::plugin_mcp_servers`), at init, on
+  `/mcp` and on `/reload mcp`, preserving tracked status and tool counts.
+
+- **`Config` merge now propagates config provenance.** `Config::merge` dropped
+  the `config_paths` accumulated by the loader, so a caller holding the value
+  returned by `Config::load` (rather than the loader's intermediate binding)
+  could not tell whether a project config had been loaded. `merge` now carries
+  the contributing paths forward.
+
+- **Plugin store resolution follows the active project config.** The plugin
+  store root is derived from the loaded config's project path, anchored on the
+  current working directory, so `/cd` into another project reads that project's
+  `.ragent/plugins/` rather than the launch directory's.
+
+- **`/tools` lists the tools disabled by a visibility switch.** The
+  report previously printed only the tools the model currently sees, so a family
+  switched off (`/tools github off`) silently vanished from the list. The
+  listing now prints `Visible Tools (N total, M disabled)` followed by a
+  `Disabled by visibility (M)` section listing every hidden-but-still-registered
+  tool. Both sections share one column layout and header (name / source /
+  description) so the rows stay directly comparable; the disabled rows are no
+  longer wrapped in `[red]…[/red]`, since belonging to a separate section
+  already conveys the state. Backed by the new
+  `ToolRegistry::hidden_definitions()` (and `ToolRegistry::hidden()`), the
+  complement of `definitions()`.
+
+- **`/tools` output now keeps every preformatted table.** The slash-output
+  extractor previously captured only the first bare triple-backtick block, so
+  the tool list and its disabled section were discarded for any command that
+  prints more than one table (the `/tools` switch table came first). The
+  extractor now lifts every blank-line-separated fenced block, preserving the
+  prose between them.
+
+- **`[red]…[/red]` spans survive the markdown pass.** The markdown pipeline
+  parses the intermediate HTML with html5ever, which silently drops C0 control
+  bytes, so an ANSI-colour sentinel was stripped before it could be restored.
+  The red-span sentinel is now a printable token (`@@ragent-red@@`), converted
+  back into `[red]…[/red]` markers after rendering and styled by the message
+  widget.
+
+### Fixed (working tree)
+
+- **Dead API removed from the MCP/plugin bridge surface.** `plugin_contributed_mcp_servers`
+  (`crates/ragent-agent/src/plugin.rs`) and `McpEnableLedger::enabled_servers`
+  plus its `mcp/mod.rs` re-export had zero callers; both are deleted.
+- **`McpEnableLedger::to_map` added.** The ledger now exposes
+  `to_map(&self) -> HashMap<String, bool>` in
+  `crates/ragent-agent/src/mcp/enable_state.rs`, replacing the copy-pasted
+  `BTreeMap`-to-`HashMap` chain in `crates/ragent-tui/src/app/init.rs` and
+  `app/state.rs::refresh_mcp_enabled_map`.
+- **`set_mcp_server_enabled` loads the config once.** The TUI handler called
+  `Config::load()` twice; it now loads once and derives the configured `mcp`
+  section from that single value.
+- **`McpStatus` implements `Display`.** `crates/ragent-agent/src/mcp/mod.rs`
+  gains `impl std::fmt::Display for McpStatus` (`connected` / `disabled` /
+  `needs auth` / `failed: {error}`), and the TUI-local `mcp_status_label` helper
+  in `app/plugin.rs` is deleted; `/plugins list --mcp` prints `{server.status}`.
+- **`McpToolWrapper::execute` no longer holds the client lock across a file
+  read.** `McpEnableLedger::load()` now runs before `self.client.read().await`,
+  so a per-tool-call disk read does not block on the client lock.
+- **Comment corrected** in `md_worker.rs`: the red-span sentinel is described as
+  a printable token, matching the `@@ragent-red@@` design.
+
+### Verified (working tree)
+
+- `cargo fmt --all -- --check` clean, `cargo check --workspace --all-targets`
+  clean, `cargo clippy` shows only the 8 pre-existing `ragent-research`
+  `redundant_pub_crate` warnings, and the `ragent-tui` and `ragent-agent` test
+  suites are green.
+
 ## [1.0.117] - 2026-09-25
 
 Release over the v1.0.116 tree: the `/spec reverse --folder` scaffold path now

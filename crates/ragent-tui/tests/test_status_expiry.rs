@@ -86,12 +86,12 @@ fn make_app() -> App {
 
 /// A slash command that sets a specific status should keep it immediately after
 /// execution (the grace period hasn't elapsed yet).
-#[test]
-fn test_slash_status_preserved_immediately_after_command() {
+#[tokio::test]
+async fn test_slash_status_preserved_immediately_after_command() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
 
     // Right after the command, the status is the command-specific value.
     assert_eq!(app.status, "help");
@@ -101,12 +101,12 @@ fn test_slash_status_preserved_immediately_after_command() {
 
 /// After the grace period elapses (and the status hasn't changed), the status
 /// should transition to "ready".
-#[test]
-fn test_slash_status_expires_to_ready() {
+#[tokio::test]
+async fn test_slash_status_expires_to_ready() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
     assert_eq!(app.status, "help");
 
     // Simulate the grace period having elapsed by backdating the armed instant.
@@ -124,12 +124,12 @@ fn test_slash_status_expires_to_ready() {
 
 /// If something else changes the status during the grace period, the timer
 /// should NOT overwrite the new status.
-#[test]
-fn test_slash_status_expiry_skips_if_status_changed() {
+#[tokio::test]
+async fn test_slash_status_expiry_skips_if_status_changed() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
     assert_eq!(app.status, "help");
 
     // Simulate the agent starting to process and setting a "busy" status.
@@ -186,12 +186,12 @@ fn test_slash_status_expiry_not_armed_for_ready() {
 
 /// Before the grace period elapses, polling should keep the timer armed and
 /// the status unchanged.
-#[test]
-fn test_slash_status_expiry_keeps_timer_before_grace_period() {
+#[tokio::test]
+async fn test_slash_status_expiry_keeps_timer_before_grace_period() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
     assert_eq!(app.status, "help");
 
     // Poll immediately — the grace period hasn't elapsed.
@@ -202,13 +202,13 @@ fn test_slash_status_expiry_keeps_timer_before_grace_period() {
 }
 
 /// A slash command that errors (⚠ status) should not arm the expiry timer.
-#[test]
-fn test_slash_error_status_not_armed() {
+#[tokio::test]
+async fn test_slash_error_status_not_armed() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
     // /cancel with no argument produces an error status.
-    app.execute_slash_command("/cancel");
+    app.execute_slash_command("/cancel").await;
 
     assert!(app.status.starts_with("[warn]"));
     assert!(

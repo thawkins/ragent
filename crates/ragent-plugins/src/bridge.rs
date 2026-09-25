@@ -63,6 +63,50 @@ pub fn scanned_plugin_skill_dirs(dirs: &StoreDirs) -> Vec<PathBuf> {
     out.into_iter().collect()
 }
 
+/// One MCP server contributed by an enabled plugin, with its owning plugin id.
+///
+/// The `/plugins list` report groups contributions by plugin, so it needs the
+/// owning plugin id alongside the bridged id, which it cannot recover from the
+/// `<plugin-id>.<server>` string alone (both halves may themselves contain
+/// dots).
+#[derive(Debug, Clone)]
+pub struct PluginMcpContribution {
+    /// The plugin that declared the server.
+    pub plugin_id: String,
+    /// The bridged server id (`<plugin-id>.<server>`).
+    pub server_id: String,
+    /// The transport configuration the session would connect with.
+    pub config: McpServerConfig,
+}
+
+/// Resolve the MCP servers contributed by the enabled plugins in the stores
+/// described by `dirs`, grouped by owning plugin (FR-030 MCP bridge).
+///
+/// Unlike [`scanned_plugin_mcp_servers`] the ids are not de-duplicated across
+/// plugins, so a caller can attribute every contribution to its plugin. The
+/// list is sorted by server id for stable output.
+#[must_use]
+pub fn scanned_plugin_mcp_contributions(dirs: &StoreDirs) -> Vec<PluginMcpContribution> {
+    let mut out: Vec<PluginMcpContribution> = Vec::new();
+    for parsed in enabled_manifests(dirs) {
+        let plugin_id = parsed.descriptor.id.clone();
+        for (server_id, config) in plugin_mcp_servers(
+            &plugin_id,
+            &parsed.descriptor.root,
+            &parsed.mcp_servers,
+            parsed.raw_mcp.as_ref(),
+        ) {
+            out.push(PluginMcpContribution {
+                plugin_id: plugin_id.clone(),
+                server_id,
+                config,
+            });
+        }
+    }
+    out.sort_by(|a, b| a.server_id.cmp(&b.server_id));
+    out
+}
+
 /// Resolve the MCP servers contributed by the enabled plugins in the stores
 /// described by `dirs` (FR-030 MCP bridge).
 ///
@@ -72,15 +116,10 @@ pub fn scanned_plugin_skill_dirs(dirs: &StoreDirs) -> Vec<PathBuf> {
 #[must_use]
 pub fn scanned_plugin_mcp_servers(dirs: &StoreDirs) -> Vec<(String, McpServerConfig)> {
     let mut by_id: BTreeMap<String, McpServerConfig> = BTreeMap::new();
-    for parsed in enabled_manifests(dirs) {
-        for (id, config) in plugin_mcp_servers(
-            &parsed.descriptor.id,
-            &parsed.descriptor.root,
-            &parsed.mcp_servers,
-            parsed.raw_mcp.as_ref(),
-        ) {
-            by_id.entry(id).or_insert(config);
-        }
+    for contribution in scanned_plugin_mcp_contributions(dirs) {
+        by_id
+            .entry(contribution.server_id)
+            .or_insert(contribution.config);
     }
     by_id.into_iter().collect()
 }

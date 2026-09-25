@@ -43,7 +43,7 @@ JavaScript runtime.
 
 | Command | Arguments | Description |
 |---|---|---|
-| `ragent plugins list [--verbose]` | optional `--verbose` | List discovered plugins with state, contributions, and (with `--verbose`) telemetry counters. |
+| `ragent plugins list [--verbose]` | optional `--verbose` | List discovered plugins with state, contributions, and (with `--verbose`) telemetry counters. The `MCP` and `MCP Tools` columns give each plugin's MCP server count and the total tools those servers advertise (`?` until the server connects). |
 | `ragent plugins add <source> [--force]` | required `source`, optional `--force` | Install a plugin and validate its manifest. It is enabled and loads at the next session start. |
 | `ragent plugins remove <pluginid>` | required `pluginid` | Uninstall a plugin from the store. Refused while the plugin is enabled. |
 | `ragent plugins enable <pluginid>` | required `pluginid` | Mark a plugin enabled, load it now, and register its tools and commands. |
@@ -95,7 +95,9 @@ pub fn run_cli(args: &[String]) -> Result<()> {
     let workdir = std::env::current_dir()?;
     // Seed the collision surface (FR-024) from the built-in tool registry and the
     // `SLASH_COMMANDS` triggers so it matches the live TUI surface, then run the
-    // shared dispatch ladder (store / test / control).
+    // shared dispatch ladder (store / test / control). No MCP client is connected
+    // for a one-shot CLI invocation, so a plugin's MCP tool counts stay `?`
+    // (unknown, not zero): the count is only known from a live connection.
     let registry = ragent_agent::tool::create_default_registry();
     let report = run_plugin_subcommand(
         &workdir,
@@ -106,6 +108,7 @@ pub fn run_cli(args: &[String]) -> Result<()> {
             .iter()
             .map(|c| c.trigger.to_string())
             .collect(),
+        &std::collections::BTreeMap::new(),
     )
     .unwrap_or_else(|| render_help(sub));
     print!("{}", cli_body(&report));

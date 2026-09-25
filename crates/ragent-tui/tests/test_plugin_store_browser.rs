@@ -146,13 +146,13 @@ fn opening_the_panel_leaves_a_running_turn_and_the_queue_untouched() {
 
 // ── Key routing while the panel is open (FR-008, FR-009, FR-010, FR-015) ────
 
-#[test]
-fn a_printable_key_types_into_the_panel_query_not_the_input_buffer() {
+#[tokio::test]
+async fn a_printable_key_types_into_the_panel_query_not_the_input_buffer() {
     let mut app = support::make_app();
     app.input = "draft".to_string();
     app.open_plugin_store(StoreKind::Codex, "", false);
 
-    let action = handle_key(&mut app, key(KeyCode::Char('w')));
+    let action = handle_key(&mut app, key(KeyCode::Char('w'))).await;
 
     assert!(action.is_none(), "the panel consumes the key");
     assert_eq!(query(&app), "w");
@@ -160,8 +160,8 @@ fn a_printable_key_types_into_the_panel_query_not_the_input_buffer() {
     assert_eq!(app.input, "draft");
 }
 
-#[test]
-fn typing_filters_the_loaded_entries_case_insensitively() {
+#[tokio::test]
+async fn typing_filters_the_loaded_entries_case_insensitively() {
     let app_entries = vec![
         entry("codex-weather", "Weather", "Weather lookups", &["http"]),
         entry("codex-time", "Time", "Clock tools", &["clock"]),
@@ -169,7 +169,7 @@ fn typing_filters_the_loaded_entries_case_insensitively() {
     let mut app = open_with_entries(StoreKind::Codex, app_entries);
 
     for c in "WEATH".chars() {
-        handle_key(&mut app, key(KeyCode::Char(c)));
+        handle_key(&mut app, key(KeyCode::Char(c))).await;
     }
 
     let browser = app.plugin_store.as_ref().expect("panel open");
@@ -179,35 +179,35 @@ fn typing_filters_the_loaded_entries_case_insensitively() {
     assert_eq!(browser.cursor, 0, "the cursor resets to the first survivor");
 }
 
-#[test]
-fn backspace_edits_the_query_and_keeps_the_panel_open() {
+#[tokio::test]
+async fn backspace_edits_the_query_and_keeps_the_panel_open() {
     let mut app = support::make_app();
     app.open_plugin_store(StoreKind::Codex, "", false);
-    handle_key(&mut app, key(KeyCode::Char('a')));
-    handle_key(&mut app, key(KeyCode::Char('b')));
+    handle_key(&mut app, key(KeyCode::Char('a'))).await;
+    handle_key(&mut app, key(KeyCode::Char('b'))).await;
 
-    let action = handle_key(&mut app, key(KeyCode::Backspace));
+    let action = handle_key(&mut app, key(KeyCode::Backspace)).await;
 
     assert!(action.is_none());
     assert!(app.plugin_store.is_some(), "the panel stays open");
     assert_eq!(query(&app), "a");
 }
 
-#[test]
-fn esc_on_a_non_empty_query_edits_rather_than_closing() {
+#[tokio::test]
+async fn esc_on_a_non_empty_query_edits_rather_than_closing() {
     let mut app = support::make_app();
     app.open_plugin_store(StoreKind::Codex, "", false);
-    handle_key(&mut app, key(KeyCode::Char('x')));
+    handle_key(&mut app, key(KeyCode::Char('x'))).await;
 
-    let action = handle_key(&mut app, key(KeyCode::Esc));
+    let action = handle_key(&mut app, key(KeyCode::Esc)).await;
 
     assert!(action.is_none());
     assert!(app.plugin_store.is_some(), "the panel stays open (FR-009)");
     assert!(query(&app).is_empty());
 }
 
-#[test]
-fn esc_on_an_empty_query_dismisses_the_panel_without_side_effects() {
+#[tokio::test]
+async fn esc_on_an_empty_query_dismisses_the_panel_without_side_effects() {
     let mut app = support::make_app();
     app.input = "draft".to_string();
     app.input_cursor = 5;
@@ -217,7 +217,7 @@ fn esc_on_an_empty_query_dismisses_the_panel_without_side_effects() {
     });
     app.open_plugin_store(StoreKind::Codex, "", false);
 
-    let action = handle_key(&mut app, key(KeyCode::Esc));
+    let action = handle_key(&mut app, key(KeyCode::Esc)).await;
 
     assert!(action.is_none());
     assert!(
@@ -230,12 +230,12 @@ fn esc_on_an_empty_query_dismisses_the_panel_without_side_effects() {
     assert_eq!(app.input_queue.len(), 1);
 }
 
-#[test]
-fn backspace_on_an_empty_query_dismisses_the_panel() {
+#[tokio::test]
+async fn backspace_on_an_empty_query_dismisses_the_panel() {
     let mut app = support::make_app();
     app.open_plugin_store(StoreKind::Codex, "", false);
 
-    handle_key(&mut app, key(KeyCode::Backspace));
+    handle_key(&mut app, key(KeyCode::Backspace)).await;
 
     assert!(
         app.plugin_store.is_none(),
@@ -243,8 +243,8 @@ fn backspace_on_an_empty_query_dismisses_the_panel() {
     );
 }
 
-#[test]
-fn up_and_down_move_the_block_cursor_within_the_filtered_set() {
+#[tokio::test]
+async fn up_and_down_move_the_block_cursor_within_the_filtered_set() {
     let entries = vec![
         entry("a", "A", "", &[]),
         entry("b", "B", "", &[]),
@@ -252,30 +252,30 @@ fn up_and_down_move_the_block_cursor_within_the_filtered_set() {
     ];
     let mut app = open_with_entries(StoreKind::Codex, entries);
 
-    handle_key(&mut app, key(KeyCode::Down));
-    handle_key(&mut app, key(KeyCode::Down));
+    handle_key(&mut app, key(KeyCode::Down)).await;
+    handle_key(&mut app, key(KeyCode::Down)).await;
     assert_eq!(app.plugin_store.as_ref().expect("panel").cursor, 2);
 
     // Down at the bottom clamps.
-    handle_key(&mut app, key(KeyCode::Down));
+    handle_key(&mut app, key(KeyCode::Down)).await;
     assert_eq!(app.plugin_store.as_ref().expect("panel").cursor, 2);
 
-    handle_key(&mut app, key(KeyCode::Up));
+    handle_key(&mut app, key(KeyCode::Up)).await;
     assert_eq!(app.plugin_store.as_ref().expect("panel").cursor, 1);
 
     // Up at the top clamps.
-    handle_key(&mut app, key(KeyCode::Up));
-    handle_key(&mut app, key(KeyCode::Up));
+    handle_key(&mut app, key(KeyCode::Up)).await;
+    handle_key(&mut app, key(KeyCode::Up)).await;
     assert_eq!(app.plugin_store.as_ref().expect("panel").cursor, 0);
 }
 
-#[test]
-fn an_unhandled_key_is_swallowed_and_changes_nothing() {
+#[tokio::test]
+async fn an_unhandled_key_is_swallowed_and_changes_nothing() {
     let entries = vec![entry("a", "A", "", &[])];
     let mut app = open_with_entries(StoreKind::Codex, entries);
     app.input = "draft".to_string();
 
-    let action = handle_key(&mut app, key(KeyCode::Tab));
+    let action = handle_key(&mut app, key(KeyCode::Tab)).await;
 
     assert!(action.is_none(), "the panel swallows every other key");
     assert!(app.plugin_store.is_some());
@@ -377,15 +377,15 @@ fn refresh_installed_set_is_a_noop_without_a_panel() {
     assert!(app.plugin_store.is_none());
 }
 
-#[test]
-fn enter_on_a_not_installed_result_starts_an_install() {
+#[tokio::test]
+async fn enter_on_a_not_installed_result_starts_an_install() {
     // T-009/FR-011: ENTER spawns the off-loop install; the panel shows a
     // progress notice until the worker's result is polled. The install pipeline
     // itself is covered by `test_plugin_store_install.rs`.
     let entries = vec![entry("codex-weather", "Weather", "", &[])];
     let mut app = open_with_entries(StoreKind::Codex, entries);
 
-    let action = handle_key(&mut app, key(KeyCode::Enter));
+    let action = handle_key(&mut app, key(KeyCode::Enter)).await;
 
     assert!(action.is_none(), "ENTER is routed to the panel");
     let browser = app.plugin_store.as_ref().expect("panel open");
@@ -396,8 +396,8 @@ fn enter_on_a_not_installed_result_starts_an_install() {
     );
 }
 
-#[test]
-fn enter_on_an_installed_result_reports_already_installed() {
+#[tokio::test]
+async fn enter_on_an_installed_result_reports_already_installed() {
     // FR-014: a re-install on an installed id is refused with a notice.
     let entries = vec![entry("codex-weather", "Weather", "", &[])];
     let mut app = open_with_entries(StoreKind::Codex, entries);
@@ -406,7 +406,7 @@ fn enter_on_an_installed_result_reports_already_installed() {
         .expect("panel open")
         .set_installed(installed(&["codex-weather"]));
 
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
 
     let browser = app.plugin_store.as_ref().expect("panel open");
     assert_eq!(
@@ -415,13 +415,13 @@ fn enter_on_an_installed_result_reports_already_installed() {
     );
 }
 
-#[test]
-fn enter_with_no_result_highlighted_records_a_neutral_notice() {
+#[tokio::test]
+async fn enter_with_no_result_highlighted_records_a_neutral_notice() {
     // An empty (still-loading or filtered-to-nothing) result set must not panic.
     let mut app = support::make_app();
     app.open_plugin_store(StoreKind::Codex, "", false);
 
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
 
     let browser = app.plugin_store.as_ref().expect("panel open");
     assert_eq!(
@@ -430,14 +430,14 @@ fn enter_with_no_result_highlighted_records_a_neutral_notice() {
     );
 }
 
-#[test]
-fn enter_on_the_panel_never_reaches_the_message_input() {
+#[tokio::test]
+async fn enter_on_the_panel_never_reaches_the_message_input() {
     // FR-015: the panel owns the keyboard, so ENTER cannot submit the draft.
     let entries = vec![entry("a", "A", "", &[])];
     let mut app = open_with_entries(StoreKind::Codex, entries);
     app.input = "draft".to_string();
 
-    let action = handle_key(&mut app, key(KeyCode::Enter));
+    let action = handle_key(&mut app, key(KeyCode::Enter)).await;
 
     assert!(action.is_none());
     assert_eq!(app.input, "draft", "the draft is untouched");

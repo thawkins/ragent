@@ -14,19 +14,21 @@ mod support;
 
 /// Two consecutive notices for the current session must produce two separate
 /// assistant messages, each starting with the notice sentinel.
-#[test]
-fn test_consecutive_agent_notices_get_separate_messages() {
+#[tokio::test]
+async fn test_consecutive_agent_notices_get_separate_messages() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.handle_event(Event::AgentNotice {
         session_id: "s1".to_string(),
         message: "First notice item".to_string(),
-    });
+    })
+    .await;
     app.handle_event(Event::AgentNotice {
         session_id: "s1".to_string(),
         message: "Second notice item".to_string(),
-    });
+    })
+    .await;
 
     let notices: Vec<&str> = app
         .messages
@@ -57,19 +59,21 @@ fn test_consecutive_agent_notices_get_separate_messages() {
 
 /// Assistant text streamed after a notice must not merge into the notice
 /// bubble (a notice is a system annotation, not the agent's own output).
-#[test]
-fn test_agent_notice_does_not_absorb_subsequent_streamed_text() {
+#[tokio::test]
+async fn test_agent_notice_does_not_absorb_subsequent_streamed_text() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.handle_event(Event::AgentNotice {
         session_id: "s1".to_string(),
         message: "Waiting for model response... (30s)".to_string(),
-    });
+    })
+    .await;
     app.handle_event(Event::TextDelta {
         session_id: "s1".to_string(),
         text: "Here is the actual answer.".to_string(),
-    });
+    })
+    .await;
 
     let assistant_texts: Vec<&str> = app
         .messages
@@ -93,23 +97,26 @@ fn test_agent_notice_does_not_absorb_subsequent_streamed_text() {
 
 /// A notice arriving mid-stream must split the streamed assistant message so
 /// the notice bubble does not swallow the trailing streamed text.
-#[test]
-fn test_agent_notice_splits_streamed_message() {
+#[tokio::test]
+async fn test_agent_notice_splits_streamed_message() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.handle_event(Event::TextDelta {
         session_id: "s1".to_string(),
         text: "partial answer".to_string(),
-    });
+    })
+    .await;
     app.handle_event(Event::AgentNotice {
         session_id: "s1".to_string(),
         message: "Waiting for model response... (60s)".to_string(),
-    });
+    })
+    .await;
     app.handle_event(Event::TextDelta {
         session_id: "s1".to_string(),
         text: "rest of answer".to_string(),
-    });
+    })
+    .await;
 
     let assistant_texts: Vec<&str> = app
         .messages

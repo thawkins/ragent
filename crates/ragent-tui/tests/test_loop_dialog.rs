@@ -47,8 +47,8 @@ fn open_dialog(app: &mut App) {
 }
 
 /// Type a character by routing it through the dialog key handler.
-fn type_char(app: &mut App, c: char) {
-    handle_key(app, key(KeyCode::Char(c)));
+async fn type_char(app: &mut App, c: char) {
+    handle_key(app, key(KeyCode::Char(c))).await;
 }
 
 /// The current goal text of the open dialog.
@@ -72,9 +72,9 @@ fn dialog_max_steps(app: &App) -> String {
 }
 
 /// Advance the active field forward `n` times.
-fn tab_n(app: &mut App, n: usize) {
+async fn tab_n(app: &mut App, n: usize) {
     for _ in 0..n {
-        handle_key(app, key(KeyCode::Tab));
+        handle_key(app, key(KeyCode::Tab)).await;
     }
 }
 
@@ -98,58 +98,58 @@ fn test_dialog_opens_with_agent_picker_focused() {
     );
 }
 
-#[test]
-fn test_agent_picker_arrow_keys_wrap() {
+#[tokio::test]
+async fn test_agent_picker_arrow_keys_wrap() {
     let mut app = support::make_app();
     open_dialog(&mut app);
     let len = app.loop_setup.as_ref().expect("open").agents.len();
     let start = app.loop_setup.as_ref().expect("open").selected_agent;
 
     // Up wraps past the first agent to the last.
-    handle_key(&mut app, key(KeyCode::Up));
+    handle_key(&mut app, key(KeyCode::Up)).await;
     let after_up = app.loop_setup.as_ref().expect("open").selected_agent;
     let expected_up = if start == 0 { len - 1 } else { start - 1 };
     assert_eq!(after_up, expected_up, "Up wraps past the first");
 
     // Down returns to the original selection.
-    handle_key(&mut app, key(KeyCode::Down));
+    handle_key(&mut app, key(KeyCode::Down)).await;
     let after_down = app.loop_setup.as_ref().expect("open").selected_agent;
     assert_eq!(after_down, start, "Down wraps past the last");
 
     // Forward navigation moves +1 (mod len).
-    handle_key(&mut app, key(KeyCode::Down));
+    handle_key(&mut app, key(KeyCode::Down)).await;
     let after_down2 = app.loop_setup.as_ref().expect("open").selected_agent;
     assert_eq!(after_down2, (start + 1) % len);
 }
 
 // ── FR-002: text fields ─────────────────────────────
-#[test]
-fn test_tab_moves_between_fields_and_chars_route_to_active_field() {
+#[tokio::test]
+async fn test_tab_moves_between_fields_and_chars_route_to_active_field() {
     let mut app = support::make_app();
     open_dialog(&mut app);
     // Tab from the agent picker lands on the goal field.
-    handle_key(&mut app, key(KeyCode::Tab));
+    handle_key(&mut app, key(KeyCode::Tab)).await;
     assert_eq!(
         app.loop_setup.as_ref().expect("open").active_field,
         LoopSetupField::Goal
     );
-    type_char(&mut app, 'f');
-    type_char(&mut app, 'i');
+    type_char(&mut app, 'f').await;
+    type_char(&mut app, 'i').await;
     assert_eq!(dialog_goal(&app), "fi");
 }
 
-#[test]
-fn test_typing_goes_only_to_the_active_field() {
+#[tokio::test]
+async fn test_typing_goes_only_to_the_active_field() {
     let mut app = support::make_app();
     open_dialog(&mut app);
-    tab_n(&mut app, 1); // Agent -> Goal
-    type_char(&mut app, 'g');
-    type_char(&mut app, 'o');
+    tab_n(&mut app, 1).await; // Agent -> Goal
+    type_char(&mut app, 'g').await;
+    type_char(&mut app, 'o').await;
     assert_eq!(dialog_goal(&app), "go");
 
     // Move to the verify-cmd field; characters must NOT append to goal.
-    handle_key(&mut app, key(KeyCode::Tab));
-    type_char(&mut app, 'x');
+    handle_key(&mut app, key(KeyCode::Tab)).await;
+    type_char(&mut app, 'x').await;
     assert_eq!(dialog_goal(&app), "go", "goal unchanged while unfocused");
     let verify = app
         .loop_setup
@@ -160,36 +160,36 @@ fn test_typing_goes_only_to_the_active_field() {
     assert_eq!(verify, "x");
 
     // BackTab returns to goal; further typing appends there.
-    handle_key(&mut app, key(KeyCode::BackTab));
-    type_char(&mut app, '!');
+    handle_key(&mut app, key(KeyCode::BackTab)).await;
+    type_char(&mut app, '!').await;
     assert_eq!(dialog_goal(&app), "go!");
 }
 
-#[test]
-fn test_arrow_keys_move_fields_and_toggle_checkpoints() {
+#[tokio::test]
+async fn test_arrow_keys_move_fields_and_toggle_checkpoints() {
     let mut app = support::make_app();
     open_dialog(&mut app);
     // Focus the checkpoints toggle: BackTab to Agent, then wrap the ring
     // forward 8 steps (9 fields total) to land back on Checkpoints.
-    tab_n(&mut app, 1); // -> Goal
-    handle_key(&mut app, key(KeyCode::BackTab)); // -> Agent
-    tab_n(&mut app, 8); // wrap the ring -> Checkpoints
+    tab_n(&mut app, 1).await; // -> Goal
+    handle_key(&mut app, key(KeyCode::BackTab)).await; // -> Agent
+    tab_n(&mut app, 8).await; // wrap the ring -> Checkpoints
     assert_eq!(
         app.loop_setup.as_ref().expect("open").active_field,
         LoopSetupField::Checkpoints
     );
 
     // Up/Down toggle the switch; Space also toggles it.
-    handle_key(&mut app, key(KeyCode::Up));
+    handle_key(&mut app, key(KeyCode::Up)).await;
     assert!(!app.loop_setup.as_ref().expect("open").checkpoints);
-    handle_key(&mut app, key(KeyCode::Down));
+    handle_key(&mut app, key(KeyCode::Down)).await;
     assert!(app.loop_setup.as_ref().expect("open").checkpoints);
-    handle_key(&mut app, key(KeyCode::Char(' ')));
+    handle_key(&mut app, key(KeyCode::Char(' '))).await;
     assert!(!app.loop_setup.as_ref().expect("open").checkpoints);
 
     // Tab from checkpoints wraps to the agent picker (arrows toggle the
     // switch in place; Tab is the field-mover).
-    handle_key(&mut app, key(KeyCode::Tab));
+    handle_key(&mut app, key(KeyCode::Tab)).await;
     assert_eq!(
         app.loop_setup.as_ref().expect("open").active_field,
         LoopSetupField::Agent
@@ -197,28 +197,29 @@ fn test_arrow_keys_move_fields_and_toggle_checkpoints() {
 }
 
 // ── FR-004: Esc cancels without starting, values preserved ─────────────────────────────
-#[test]
-fn test_esc_cancels_without_starting_and_preserves_values() {
+#[tokio::test]
+async fn test_esc_cancels_without_starting_and_preserves_values() {
     let mut app = support::make_app();
     app.session_id = Some("sess-loop".to_string());
     open_dialog(&mut app);
-    tab_n(&mut app, 1);
-    type_char(&mut app, 'g');
-    type_char(&mut app, 'o');
-    type_char(&mut app, 'a');
-    type_char(&mut app, 'l');
-    tab_n(&mut app, 5); // Goal -> MaxSteps
+    tab_n(&mut app, 1).await;
+    type_char(&mut app, 'g').await;
+    type_char(&mut app, 'o').await;
+    type_char(&mut app, 'a').await;
+    type_char(&mut app, 'l').await;
+    tab_n(&mut app, 5).await; // Goal -> MaxSteps
     // The step-limit field is pre-filled with the config default; clear it
     // with Ctrl+U before typing so the preserved value is unambiguous.
     handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
-    );
-    type_char(&mut app, '9');
+    )
+    .await;
+    type_char(&mut app, '9').await;
     let max_steps_before = dialog_max_steps(&app);
     let goal_before = dialog_goal(&app);
 
-    handle_key(&mut app, key(KeyCode::Esc));
+    handle_key(&mut app, key(KeyCode::Esc)).await;
     assert!(app.loop_setup.is_none(), "dialog closed");
     assert!(
         app.loop_setup_draft.is_some(),
@@ -246,10 +247,10 @@ async fn test_fresh_open_after_confirm_does_not_restore_draft() {
     });
     app.selected_model = Some("ollama/qwen3:latest".to_string());
     open_dialog(&mut app);
-    tab_n(&mut app, 1);
-    type_char(&mut app, 'g');
-    type_char(&mut app, 'o');
-    handle_key(&mut app, key(KeyCode::Enter));
+    tab_n(&mut app, 1).await;
+    type_char(&mut app, 'g').await;
+    type_char(&mut app, 'o').await;
+    handle_key(&mut app, key(KeyCode::Enter)).await;
     assert!(app.loop_setup.is_none(), "dialog closed after confirm");
     assert!(
         app.loop_setup_draft.is_none(),
@@ -261,12 +262,12 @@ async fn test_fresh_open_after_confirm_does_not_restore_draft() {
 }
 
 // ── FR-005: empty goal rejected ─────────────────────────────
-#[test]
-fn test_confirm_with_empty_goal_returns_to_dialog_with_error() {
+#[tokio::test]
+async fn test_confirm_with_empty_goal_returns_to_dialog_with_error() {
     let mut app = support::make_app();
     app.session_id = Some("sess-loop".to_string());
     open_dialog(&mut app);
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
     let state = app.loop_setup.as_ref().expect("dialog still open");
     let error = state.error.clone().expect("error set");
     assert!(error.contains("goal"), "error names the field: {error}");
@@ -452,11 +453,11 @@ fn make_scripted_app() -> (App, Arc<Mutex<Vec<ChatRequest>>>) {
 async fn test_confirm_starts_loop_and_sends_goal() -> Result<()> {
     let (mut app, captured) = make_scripted_app();
     open_dialog(&mut app);
-    tab_n(&mut app, 1); // Agent -> Goal
+    tab_n(&mut app, 1).await; // Agent -> Goal
     for c in "fix the flaky test".chars() {
-        type_char(&mut app, c);
+        type_char(&mut app, c).await;
     }
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
 
     assert!(app.loop_setup.is_none(), "dialog closed after confirm");
     assert!(
@@ -504,28 +505,28 @@ async fn test_confirm_spec_fields_reach_the_processor() -> Result<()> {
     let mut rx = app.event_bus.subscribe();
     open_dialog(&mut app);
     // Select the second agent in the picker.
-    handle_key(&mut app, key(KeyCode::Down));
+    handle_key(&mut app, key(KeyCode::Down)).await;
     let chosen_agent = app
         .loop_setup
         .as_ref()
         .expect("open")
         .selected_agent_name()
         .to_string();
-    tab_n(&mut app, 1); // -> Goal
+    tab_n(&mut app, 1).await; // -> Goal
     for c in "reach the goal".chars() {
-        type_char(&mut app, c);
+        type_char(&mut app, c).await;
     }
-    tab_n(&mut app, 6); // Goal -> MaxSteps
+    tab_n(&mut app, 6).await; // Goal -> MaxSteps
     for c in "7".chars() {
-        type_char(&mut app, c);
+        type_char(&mut app, c).await;
     }
-    tab_n(&mut app, 1); // -> CostLimit
+    tab_n(&mut app, 1).await; // -> CostLimit
     for c in "999".chars() {
-        type_char(&mut app, c);
+        type_char(&mut app, c).await;
     }
-    tab_n(&mut app, 1); // -> Checkpoints
-    handle_key(&mut app, key(KeyCode::Char(' '))); // checkpoints off
-    handle_key(&mut app, key(KeyCode::Enter));
+    tab_n(&mut app, 1).await; // -> Checkpoints
+    handle_key(&mut app, key(KeyCode::Char(' '))).await; // checkpoints off
+    handle_key(&mut app, key(KeyCode::Enter)).await;
 
     // Wait for the spawned task to register the loop and process the goal.
     for _ in 0..200 {
@@ -569,7 +570,7 @@ async fn test_confirm_uses_spec_agent_preset() -> Result<()> {
     state.selected_agent = target.min(state.agents.len() - 1);
     state.goal_field.insert_str("use the picked agent preset");
     app.loop_setup = Some(state);
-    handle_key(&mut app, key(KeyCode::Enter));
+    handle_key(&mut app, key(KeyCode::Enter)).await;
 
     for _ in 0..200 {
         if !captured.lock().expect("captured lock").is_empty() {
@@ -599,10 +600,10 @@ async fn test_confirm_uses_spec_agent_preset() -> Result<()> {
 // ── T-015: `/loop` slash-command registration (FR-001, FR-003, FR-005) ──────
 
 /// FR-001: `/loop` with no arguments opens the setup dialog.
-#[test]
-fn test_slash_loop_no_arg_opens_dialog() {
+#[tokio::test]
+async fn test_slash_loop_no_arg_opens_dialog() {
     let mut app = support::make_app();
-    app.execute_slash_command("/loop");
+    app.execute_slash_command("/loop").await;
     assert!(
         app.loop_setup.is_some(),
         "no-arg /loop must open the setup dialog"
@@ -610,11 +611,11 @@ fn test_slash_loop_no_arg_opens_dialog() {
 }
 
 /// FR-001: `/loop` appears in `/help` output for autocomplete visibility.
-#[test]
-fn test_help_lists_loop_command() {
+#[tokio::test]
+async fn test_help_lists_loop_command() {
     let mut app = support::make_app();
     app.session_id = Some("sess-help".to_string());
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
     let text = app
         .messages
         .last()
@@ -631,7 +632,8 @@ fn test_help_lists_loop_command() {
 #[tokio::test]
 async fn test_slash_loop_one_shot_starts_loop() -> Result<()> {
     let (mut app, captured) = make_scripted_app();
-    app.execute_slash_command("/loop coder fix the flaky login test");
+    app.execute_slash_command("/loop coder fix the flaky login test")
+        .await;
     // Dialog must not open; the goal went straight to the loop path.
     assert!(
         app.loop_setup.is_none(),
@@ -664,7 +666,7 @@ async fn test_slash_loop_one_shot_starts_loop() -> Result<()> {
 #[tokio::test]
 async fn test_slash_loop_empty_goal_shows_error() -> Result<()> {
     let (mut app, captured) = make_scripted_app();
-    app.execute_slash_command("/loop coder");
+    app.execute_slash_command("/loop coder").await;
     let text = app
         .messages
         .last()
@@ -703,7 +705,8 @@ async fn test_slash_loop_one_shot_starts_with_documented_defaults() -> Result<()
         file_mtimes: Vec::new(),
         env_overrides_present: false,
     });
-    app.execute_slash_command("/loop coder list the files and stop");
+    app.execute_slash_command("/loop coder list the files and stop")
+        .await;
     let session_id = app.session_id.clone().expect("session id");
 
     // The spec appears as soon as the spawned task registers the loop; grab
@@ -757,7 +760,8 @@ async fn test_slash_loop_one_shot_starts_with_documented_defaults() -> Result<()
 async fn test_slash_loop_one_shot_records_telemetry_once() -> Result<()> {
     let (mut app, captured) = make_scripted_app();
     let mut rx = app.event_bus.subscribe();
-    app.execute_slash_command("/loop coder finish immediately");
+    app.execute_slash_command("/loop coder finish immediately")
+        .await;
 
     // Wait for the goal conversation, then for the termination event.
     for _ in 0..200 {
@@ -798,10 +802,10 @@ async fn test_slash_loop_one_shot_records_telemetry_once() -> Result<()> {
 
 /// `/loop help` shows the usage help for every loop command and option and
 /// does not start a loop or open the setup dialog.
-#[test]
-fn test_slash_loop_help_shows_usage() {
+#[tokio::test]
+async fn test_slash_loop_help_shows_usage() {
     let (mut app, captured) = make_scripted_app();
-    app.execute_slash_command("/loop help");
+    app.execute_slash_command("/loop help").await;
     let text = app
         .messages
         .last()
@@ -935,7 +939,8 @@ async fn test_slash_loop_one_shot_flags_override_budgets() -> Result<()> {
     let (mut app, captured) = make_scripted_app();
     app.execute_slash_command(
         "/loop coder --max-steps 9 --cost_limit 12345 --timeout 60 fix the flaky login test",
-    );
+    )
+    .await;
     let session_id = app.session_id.clone().expect("session id");
 
     let spec = {
@@ -990,7 +995,8 @@ async fn test_slash_loop_one_shot_flags_override_budgets() -> Result<()> {
 #[tokio::test]
 async fn test_slash_loop_invalid_flag_value_does_not_start() -> Result<()> {
     let (mut app, captured) = make_scripted_app();
-    app.execute_slash_command("/loop coder --max-steps abc fix it");
+    app.execute_slash_command("/loop coder --max-steps abc fix it")
+        .await;
     let text = app
         .messages
         .last()

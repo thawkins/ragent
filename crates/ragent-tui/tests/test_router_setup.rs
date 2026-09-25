@@ -345,13 +345,13 @@ fn temp_config_path() -> std::path::PathBuf {
     path
 }
 
-#[test]
-fn test_slash_provider_router_opens_setup_router() {
+#[tokio::test]
+async fn test_slash_provider_router_opens_setup_router() {
     let mut app = make_app();
     app.storage
         .set_provider_auth("anthropic", "sk-test")
         .expect("store key");
-    app.execute_slash_command("/provider router");
+    app.execute_slash_command("/provider router").await;
     assert!(
         matches!(
             app.provider_setup,
@@ -361,15 +361,16 @@ fn test_slash_provider_router_opens_setup_router() {
     );
 }
 
-#[test]
-fn test_router_setup_space_toggles_provider() {
+#[tokio::test]
+async fn test_router_setup_space_toggles_provider() {
     let mut app = router_setup_with_providers(mem_storage());
     // Initially anthropic is selected in the palette.
     // Space on the selected provider removes it.
     ragent_tui::input::handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
-    );
+    )
+    .await;
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::SetupRouter {
             selected_provider_ids,
@@ -381,11 +382,12 @@ fn test_router_setup_space_toggles_provider() {
     }
 
     // Move down to openai and add it to the palette.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)).await;
     ragent_tui::input::handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
-    );
+    )
+    .await;
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::SetupRouter {
             selected_provider_ids,
@@ -399,10 +401,10 @@ fn test_router_setup_space_toggles_provider() {
     }
 }
 
-#[test]
-fn test_router_setup_tab_switches_pane_focus() {
+#[tokio::test]
+async fn test_router_setup_tab_switches_pane_focus() {
     let mut app = router_setup_with_providers(mem_storage());
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)).await;
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::SetupRouter {
             left_pane_focused,
@@ -416,11 +418,12 @@ fn test_router_setup_tab_switches_pane_focus() {
     }
 }
 
-#[test]
-fn test_router_setup_assigns_model_to_bucket() {
+#[tokio::test]
+async fn test_router_setup_assigns_model_to_bucket() {
     let mut app = router_setup_with_providers(mem_storage());
     // Enter opens the model picker for the selected anthropic provider.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(
         matches!(
             app.provider_setup,
@@ -430,7 +433,8 @@ fn test_router_setup_assigns_model_to_bucket() {
     );
 
     // Confirm the first model.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::SetupRouter {
             draft_config,
@@ -452,21 +456,25 @@ fn test_router_setup_assigns_model_to_bucket() {
     }
 }
 
-#[test]
-fn test_router_setup_save_persists_cluster_and_enables_router() {
+#[tokio::test]
+async fn test_router_setup_save_persists_cluster_and_enables_router() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
     app.config_paths = vec![config_path.clone()];
 
     // Assign a model to the SIMPLE bucket.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     // Save with Ctrl+S.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .await;
 
     // Confirm the save modal with Enter.
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert!(
         app.provider_setup.is_none(),
@@ -515,8 +523,8 @@ fn test_router_setup_save_persists_cluster_and_enables_router() {
     assert!(!simple.is_empty(), "SIMPLE tier must contain a model");
 }
 
-#[test]
-fn test_router_setup_rejects_empty_cluster_on_save() {
+#[tokio::test]
+async fn test_router_setup_rejects_empty_cluster_on_save() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
     app.config_paths = vec![config_path.clone()];
@@ -524,7 +532,8 @@ fn test_router_setup_rejects_empty_cluster_on_save() {
     ragent_tui::input::handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
-    );
+    )
+    .await;
 
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::SetupRouter { error, .. } => {
@@ -545,8 +554,8 @@ fn test_router_setup_rejects_empty_cluster_on_save() {
     assert!(json.get("provider").is_none() || json["provider"].get("router").is_none());
 }
 
-#[test]
-fn test_router_setup_preserves_weights_and_boundaries() {
+#[tokio::test]
+async fn test_router_setup_preserves_weights_and_boundaries() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
 
@@ -586,10 +595,14 @@ fn test_router_setup_preserves_weights_and_boundaries() {
     app.config_paths = vec![config_path.clone()];
 
     // Assign a model and save.
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     let raw = std::fs::read_to_string(&config_path).expect("read saved config");
     let json: serde_json::Value = serde_json::from_str(&raw).expect("parse saved config");
@@ -601,8 +614,8 @@ fn test_router_setup_preserves_weights_and_boundaries() {
     assert_eq!(router["boundaries"]["complex_reasoning"], 0.85);
 }
 
-#[test]
-fn test_router_setup_rejects_recursive_router_assignment() {
+#[tokio::test]
+async fn test_router_setup_rejects_recursive_router_assignment() {
     let mut app = make_app();
     // Directly open the router model picker with a router target to exercise
     // the recursive-routing guard, bypassing the filtered provider palette.
@@ -641,7 +654,8 @@ fn test_router_setup_rejects_recursive_router_assignment() {
     });
 
     // Confirming the assignment should be rejected.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::SetupRouter { error, .. } => {
             assert!(
@@ -656,8 +670,8 @@ fn test_router_setup_rejects_recursive_router_assignment() {
     }
 }
 
-#[test]
-fn test_router_setup_empty_state_when_no_providers() {
+#[tokio::test]
+async fn test_router_setup_empty_state_when_no_providers() {
     // Disable any concrete provider that might be auto-discovered from the
     // environment so the empty-state path is exercised deterministically.
     let mut app = make_app();
@@ -666,7 +680,7 @@ fn test_router_setup_empty_state_when_no_providers() {
             .storage
             .set_setting(&format!("provider_{pid}_disabled"), "true");
     }
-    app.execute_slash_command("/provider router");
+    app.execute_slash_command("/provider router").await;
     assert!(app.provider_setup.is_none());
     assert_eq!(
         app.status,
@@ -674,18 +688,22 @@ fn test_router_setup_empty_state_when_no_providers() {
     );
 }
 
-#[test]
-fn test_router_setup_reorder_models_within_bucket() {
+#[tokio::test]
+async fn test_router_setup_reorder_models_within_bucket() {
     let mut app = router_setup_with_providers(mem_storage());
     // Assign two models to the SIMPLE bucket.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     // Re-open the picker and move down to select a different anthropic model,
     // then assign it as a second fallback in the SIMPLE bucket.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)).await;
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     // Focus should now be in the bucket pane on the second model.
     match app.provider_setup.as_ref().expect("setup") {
@@ -704,7 +722,8 @@ fn test_router_setup_reorder_models_within_bucket() {
     }
 
     // Ctrl+Up should move the selected model up one slot.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL))
+        .await;
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::SetupRouter {
             draft_config,
@@ -721,19 +740,23 @@ fn test_router_setup_reorder_models_within_bucket() {
     }
 }
 
-#[test]
-fn test_slash_provider_show_includes_router_when_configured() {
+#[tokio::test]
+async fn test_slash_provider_show_includes_router_when_configured() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
     app.config_paths = vec![config_path];
 
     // Save a minimal cluster.
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
-    app.execute_slash_command("/provider show");
+    app.execute_slash_command("/provider show").await;
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::ShowProviderConfig { providers, .. } => {
             assert!(providers.iter().any(|p| p.id == "router"));
@@ -742,19 +765,23 @@ fn test_slash_provider_show_includes_router_when_configured() {
     }
 }
 
-#[test]
-fn test_provider_show_renders_router_cluster() {
+#[tokio::test]
+async fn test_provider_show_renders_router_cluster() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
     app.config_paths = vec![config_path];
 
     // Save a cluster.
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
-    app.execute_slash_command("/provider show");
+    app.execute_slash_command("/provider show").await;
 
     // Find the router entry and press Enter to render its report.
     let (router_index, selected) = if let ProviderSetupStep::ShowProviderConfig {
@@ -773,12 +800,15 @@ fn test_provider_show_renders_router_cluster() {
         panic!("expected ShowProviderConfig");
     };
     for _ in 0..router_index.saturating_sub(selected) {
-        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+            .await;
     }
     for _ in 0..selected.saturating_sub(router_index) {
-        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+            .await;
     }
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     let text = app.messages.last().expect("report message").text_content();
     assert!(text.contains("Model Router"));
@@ -786,17 +816,21 @@ fn test_provider_show_renders_router_cluster() {
     assert!(text.contains("### SIMPLE"));
 }
 
-#[test]
-fn test_router_setup_restores_router_state_at_startup() {
+#[tokio::test]
+async fn test_router_setup_restores_router_state_at_startup() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
     app.config_paths = vec![config_path];
 
     // Assign a model and save the cluster.
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     // Simulate a fresh session by resetting in-memory state and re-running the
     // same restore logic `App::new` performs at startup.
@@ -877,8 +911,8 @@ fn test_router_setup_provider_list_excludes_router() {
     assert!(for_router.iter().any(|p| p.id == "anthropic"));
 }
 
-#[test]
-fn test_router_model_picker_enter_preserves_providers() {
+#[tokio::test]
+async fn test_router_model_picker_enter_preserves_providers() {
     let mut app = router_setup_with_providers(mem_storage());
     let providers_before = app
         .provider_setup
@@ -890,7 +924,8 @@ fn test_router_model_picker_enter_preserves_providers() {
         .expect("setup router state");
 
     // Enter on the selected provider opens the model picker.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(
         matches!(
             app.provider_setup,
@@ -910,7 +945,8 @@ fn test_router_model_picker_enter_preserves_providers() {
     );
 
     // Select the first model and confirm.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     match app.provider_setup.as_ref().expect("setup present") {
         ProviderSetupStep::SetupRouter {
             providers,
@@ -944,8 +980,8 @@ fn test_router_model_picker_enter_preserves_providers() {
     }
 }
 
-#[test]
-fn test_router_model_picker_esc_preserves_providers() {
+#[tokio::test]
+async fn test_router_model_picker_esc_preserves_providers() {
     let mut app = router_setup_with_providers(mem_storage());
     let providers_before = app
         .provider_setup
@@ -957,14 +993,15 @@ fn test_router_model_picker_esc_preserves_providers() {
         .expect("setup router state");
 
     // Open the model picker.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(matches!(
         app.provider_setup,
         Some(ProviderSetupStep::SelectRouterModel { .. })
     ));
 
     // Cancel with Esc.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)).await;
     match app.provider_setup.as_ref().expect("setup present") {
         ProviderSetupStep::SetupRouter {
             providers,
@@ -988,8 +1025,8 @@ fn test_router_model_picker_esc_preserves_providers() {
 // ── FR-025: selecting "Model Router" from the provider picker opens the
 // router cluster setup panel (not the generic API-key dialog) ──────────────
 
-#[test]
-fn test_provider_picker_router_opens_setup_router() {
+#[tokio::test]
+async fn test_provider_picker_router_opens_setup_router() {
     let storage = mem_storage();
     storage
         .set_provider_auth("anthropic", "sk-test")
@@ -1004,7 +1041,8 @@ fn test_provider_picker_router_opens_setup_router() {
         selected: router_idx,
         force_key_entry: false,
     });
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(
         matches!(
             app.provider_setup,
@@ -1014,8 +1052,8 @@ fn test_provider_picker_router_opens_setup_router() {
     );
 }
 
-#[test]
-fn test_provider_picker_router_no_concrete_providers_keeps_picker() {
+#[tokio::test]
+async fn test_provider_picker_router_no_concrete_providers_keeps_picker() {
     let storage = mem_storage();
     let mut app = make_app_with_storage(storage);
     // Suppress any provider that could be auto-discovered from the environment
@@ -1044,7 +1082,8 @@ fn test_provider_picker_router_no_concrete_providers_keeps_picker() {
         selected: router_idx,
         force_key_entry: false,
     });
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(
         matches!(
             app.provider_setup,
@@ -1082,11 +1121,11 @@ fn render_router_setup_to_string(app: &mut App, width: u16, height: u16) -> Stri
     cells.iter().map(ratatui::buffer::Cell::symbol).collect()
 }
 
-#[test]
-fn test_router_setup_renders_full_tier_names_in_bucket_titles() {
+#[tokio::test]
+async fn test_router_setup_renders_full_tier_names_in_bucket_titles() {
     let mut app = router_setup_with_providers(mem_storage());
     // Move focus to the bucket pane so the right-hand titles render.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)).await;
 
     let text = render_router_setup_to_string(&mut app, 120, 40);
     // The full tier names must appear in the bucket titles, not single chars.
@@ -1108,13 +1147,15 @@ fn test_router_setup_renders_full_tier_names_in_bucket_titles() {
     );
 }
 
-#[test]
-fn test_router_setup_bucket_displays_retained_model_properties() {
+#[tokio::test]
+async fn test_router_setup_bucket_displays_retained_model_properties() {
     let mut app = router_setup_with_providers(mem_storage());
 
     // Assign the first anthropic model to the SIMPLE bucket.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     // Render and confirm the bucket shows retained model properties (context
     // window + features). The anthropic default catalog advertises context
@@ -1138,11 +1179,12 @@ fn test_router_setup_bucket_displays_retained_model_properties() {
     );
 }
 
-#[test]
-fn test_router_model_picker_renders_property_columns() {
+#[tokio::test]
+async fn test_router_model_picker_renders_property_columns() {
     let mut app = router_setup_with_providers(mem_storage());
     // Open the model picker for the selected anthropic provider.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(matches!(
         app.provider_setup,
         Some(ProviderSetupStep::SelectRouterModel { .. })
@@ -1175,24 +1217,28 @@ fn test_router_model_picker_renders_property_columns() {
 
 // ── Re-opening setup seeds the draft from the persisted config ───────────
 
-#[test]
-fn test_router_setup_reopen_seeds_draft_from_persisted_config() {
+#[tokio::test]
+async fn test_router_setup_reopen_seeds_draft_from_persisted_config() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
     app.config_paths = vec![config_path];
 
     // Assign a model to the SIMPLE bucket (anthropic is pre-selected in the
     // palette) and save the cluster.
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(app.provider_setup.is_none(), "setup closed after save");
 
     // Re-open the router setup via `/provider router`. The draft should be
     // seeded from the just-saved `provider.router` block rather than starting
     // from an empty cluster.
-    app.execute_slash_command("/provider router");
+    app.execute_slash_command("/provider router").await;
 
     match app.provider_setup.as_ref().expect("setup reopened") {
         ProviderSetupStep::SetupRouter {
@@ -1222,8 +1268,8 @@ fn test_router_setup_reopen_seeds_draft_from_persisted_config() {
     }
 }
 
-#[test]
-fn test_router_setup_reopen_without_saved_config_uses_empty_draft() {
+#[tokio::test]
+async fn test_router_setup_reopen_without_saved_config_uses_empty_draft() {
     // First-time setup: no `provider.router` block on disk. Re-opening (or
     // opening for the first time) must still present four empty buckets rather
     // than the built-in default tier models.
@@ -1233,7 +1279,7 @@ fn test_router_setup_reopen_without_saved_config_uses_empty_draft() {
         .expect("store key");
     app.config_paths = vec![temp_config_path()];
 
-    app.execute_slash_command("/provider router");
+    app.execute_slash_command("/provider router").await;
 
     match app.provider_setup.as_ref().expect("setup opened") {
         ProviderSetupStep::SetupRouter {
@@ -1255,17 +1301,21 @@ fn test_router_setup_reopen_without_saved_config_uses_empty_draft() {
     }
 }
 
-#[test]
-fn test_router_setup_delete_removes_selected_model_in_bucket() {
+#[tokio::test]
+async fn test_router_setup_delete_removes_selected_model_in_bucket() {
     let mut app = router_setup_with_providers(mem_storage());
     // Assign two models to the SIMPLE bucket.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     // Re-open the picker and assign a second model to SIMPLE.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)).await;
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     // Sanity check: two models present and bucket pane is focused.
     match app.provider_setup.as_ref().expect("setup") {
@@ -1283,7 +1333,8 @@ fn test_router_setup_delete_removes_selected_model_in_bucket() {
     }
 
     // Delete the selected (second) model.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::SetupRouter {
             draft_config,
@@ -1303,11 +1354,12 @@ fn test_router_setup_delete_removes_selected_model_in_bucket() {
     }
 }
 
-#[test]
-fn test_router_setup_delete_does_nothing_in_provider_pane() {
+#[tokio::test]
+async fn test_router_setup_delete_does_nothing_in_provider_pane() {
     let mut app = router_setup_with_providers(mem_storage());
     // Focus is initially in the left provider pane.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::SetupRouter {
             selected_provider_ids,
@@ -1324,12 +1376,14 @@ fn test_router_setup_delete_does_nothing_in_provider_pane() {
     }
 }
 
-#[test]
-fn test_router_setup_delete_on_last_model_adjusts_index() {
+#[tokio::test]
+async fn test_router_setup_delete_on_last_model_adjusts_index() {
     let mut app = router_setup_with_providers(mem_storage());
     // Assign one model to the SIMPLE bucket and move cursor to it.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     // Sanity: one model at index 0, bucket pane focused.
     match app.provider_setup.as_ref().expect("setup") {
@@ -1347,7 +1401,8 @@ fn test_router_setup_delete_on_last_model_adjusts_index() {
     }
 
     // Delete the only model; index should remain 0.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
     match app.provider_setup.as_ref().expect("setup") {
         ProviderSetupStep::SetupRouter {
             draft_config,
@@ -1367,18 +1422,21 @@ fn test_router_setup_delete_on_last_model_adjusts_index() {
 
 // ── Regression: router save confirmation modal must render on top ────────────
 
-#[test]
-fn test_router_save_confirmation_renders_above_setup_dialog() {
+#[tokio::test]
+async fn test_router_save_confirmation_renders_above_setup_dialog() {
     let mut app = router_setup_with_providers(mem_storage());
     // Assign the first model to the SIMPLE bucket so the draft has content.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     // Press Ctrl+S to arm the save confirmation modal.
     ragent_tui::input::handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
-    );
+    )
+    .await;
     assert!(
         app.pending_router_save.is_some(),
         "pending_router_save should be set after Ctrl+S"
@@ -1398,8 +1456,8 @@ fn test_router_save_confirmation_renders_above_setup_dialog() {
 // ── Regression: selecting an already-configured Model Router from the provider
 // picker must open the router setup UI, not the single-entry model picker. ───
 
-#[test]
-fn test_provider_picker_already_configured_router_opens_setup_router() {
+#[tokio::test]
+async fn test_provider_picker_already_configured_router_opens_setup_router() {
     let storage = mem_storage();
     storage
         .set_provider_auth("anthropic", "sk-test")
@@ -1421,7 +1479,8 @@ fn test_provider_picker_already_configured_router_opens_setup_router() {
         force_key_entry: false,
     });
 
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert!(
         matches!(

@@ -2,7 +2,7 @@
 //! command family (spec `plugins` T-013; FR-009, FR-011, FR-012, FR-016,
 //! FR-022, FR-025).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -243,6 +243,152 @@ fn list_shows_skill_agent_and_hook_counts_and_details() {
     );
 }
 
+/// FR-030: a plugin that contributes MCP servers must show them in the
+/// `/plugins list` contributions block, with the same bridged ids the session
+/// connects, so the list can never disagree with what is actually connectable.
+#[test]
+fn list_shows_mcp_server_contributions() {
+    let tree = TempTree::new("list-mcp");
+    let plugin_dir = tree.store().join("mongodb");
+    std::fs::create_dir_all(plugin_dir.join(".claude-plugin")).unwrap();
+    std::fs::write(
+        plugin_dir.join(".claude-plugin/plugin.json"),
+        r#"{ "name": "mongodb", "version": "1.2.1", "mcpServers": "./mcp.json" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        plugin_dir.join("mcp.json"),
+        r#"{ "mcpServers": { "mongodb": { "command": "npx", "args": ["-y", "mongodb-mcp-server"] } } }"#,
+    )
+    .unwrap();
+    let manager =
+        ragent_plugins::PluginManager::new(tree.dirs(), ragent_config::PluginsConfig::default());
+
+    let out = render_list(&manager, false);
+    assert!(
+        out.contains("mcp [mongodb.mongodb (? tools)]"),
+        "the bridged MCP server id is listed under its plugin with an unknown \
+         tool count (no live client during discovery): {out}"
+    );
+}
+
+/// FR-030: with live MCP counts supplied, the contributions block reports the
+/// real per-server tool total rather than the discovery-time `?`.
+#[test]
+fn list_shows_live_mcp_tool_counts() {
+    let tree = TempTree::new("list-mcp-counts");
+    let plugin_dir = tree.store().join("mongodb");
+    std::fs::create_dir_all(plugin_dir.join(".claude-plugin")).unwrap();
+    std::fs::write(
+        plugin_dir.join(".claude-plugin/plugin.json"),
+        r#"{ "name": "mongodb", "version": "1.2.1", "mcpServers": "./mcp.json" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        plugin_dir.join("mcp.json"),
+        r#"{ "mcpServers": { "mongodb": { "command": "npx", "args": ["-y", "mongodb-mcp-server"] } } }"#,
+    )
+    .unwrap();
+    let manager =
+        ragent_plugins::PluginManager::new(tree.dirs(), ragent_config::PluginsConfig::default());
+
+    let counts = std::collections::BTreeMap::from([("mongodb.mongodb".to_string(), 35usize)]);
+    let out = ragent_plugins::render_list_with_mcp_tools(&manager, false, &counts);
+    assert!(
+        out.contains("mcp [mongodb.mongodb (35 tools)]"),
+        "the live tool count is reported per server: {out}"
+    );
+    assert!(
+        !out.contains("(? tools)"),
+        "a server with a live count must not fall back to unknown: {out}"
+    );
+}
+
+/// FR-030: the `/plugins list` table gives each plugin's MCP server count and the
+/// total tools its servers advertise, so a plugin that contributes only MCP
+/// servers still shows what it installs at a glance.
+#[test]
+fn list_table_shows_mcp_server_and_tool_totals() {
+    let tree = TempTree::new("list-mcp-table");
+    let plugin_dir = tree.store().join("mongodb");
+    std::fs::create_dir_all(plugin_dir.join(".claude-plugin")).unwrap();
+    std::fs::write(
+        plugin_dir.join(".claude-plugin/plugin.json"),
+        r#"{ "name": "mongodb", "version": "1.2.1", "mcpServers": "./mcp.json" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        plugin_dir.join("mcp.json"),
+        r#"{ "mcpServers": { "mongodb": { "command": "npx", "args": ["-y", "mongodb-mcp-server"] },
+                            "mongodb-tools": { "command": "npx", "args": ["-y", "tools"] } } }"#,
+    )
+    .unwrap();
+    let manager =
+        ragent_plugins::PluginManager::new(tree.dirs(), ragent_config::PluginsConfig::default());
+
+    // Discovery alone: the server count is known, the tool total is not.
+    let discovery = render_list(&manager, false);
+    assert!(
+        discovery.contains("MCP") && discovery.contains("MCP Tools"),
+        "the table must carry MCP server and tool columns: {discovery}"
+    );
+    assert!(
+        discovery.contains("|   2 |         ? |"),
+        "two declared servers with an unknown tool total: {discovery}"
+    );
+
+    // With live counts the table shows the summed tool total for the plugin.
+    let counts = std::collections::BTreeMap::from([
+        ("mongodb.mongodb".to_string(), 34usize),
+        ("mongodb.mongodb-tools".to_string(), 12usize),
+    ]);
+    let live = ragent_plugins::render_list_with_mcp_tools(&manager, false, &counts);
+    assert!(
+        live.contains("|   2 |        46 |"),
+        "the live tool total sums the plugin's servers: {live}"
+    );
+}
+
+/// FR-030: a plugin that declares two MCP servers reports both servers and the
+/// summed live tool count in the table and the contributions block.
+#[test]
+fn list_table_totals_counts_across_a_plugins_servers() {
+    let tree = TempTree::new("list-mcp-two-servers");
+    let plugin_dir = tree.store().join("mongodb");
+    std::fs::create_dir_all(plugin_dir.join(".claude-plugin")).unwrap();
+    std::fs::write(
+        plugin_dir.join(".claude-plugin/plugin.json"),
+        r#"{ "name": "mongodb", "version": "1.2.1", "mcpServers": "./mcp.json" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        plugin_dir.join("mcp.json"),
+        r#"{ "mcpServers": {
+             "mongodb": { "command": "npx", "args": ["-y", "mongodb-mcp-server"] },
+             "atlas": { "command": "npx", "args": ["-y", "atlas-mcp-server"] }
+           } }"#,
+    )
+    .unwrap();
+    let manager =
+        ragent_plugins::PluginManager::new(tree.dirs(), ragent_config::PluginsConfig::default());
+
+    let counts = std::collections::BTreeMap::from([
+        ("mongodb.mongodb".to_string(), 35usize),
+        ("mongodb.atlas".to_string(), 4usize),
+    ]);
+    let out = ragent_plugins::render_list_with_mcp_tools(&manager, false, &counts);
+    assert!(
+        out.contains("|   2 |        39 |"),
+        "the table reports both servers and their summed tool count: {out}"
+    );
+    assert!(
+        out.contains(
+            "mcp [mongodb.atlas (4 tools), mongodb.mongodb (35 tools)] (2 server(s), 39 tool(s))"
+        ),
+        "the contributions block reports each server's count: {out}"
+    );
+}
+
 #[test]
 fn list_verbose_includes_telemetry_counters() {
     let tree = TempTree::new("list-verbose");
@@ -305,8 +451,14 @@ fn run_enable_loads_registers_and_reports_state() {
         &mut surface,
     );
 
-    let out = run_control_command(&mut session, &mut surface, "enable", "codex-weather")
-        .expect("handled");
+    let out = run_control_command(
+        &mut session,
+        &mut surface,
+        "enable",
+        "codex-weather",
+        &BTreeMap::new(),
+    )
+    .expect("handled");
     assert!(out.contains("From: /plugins enable codex-weather"));
     assert!(out.contains("[ok]"));
     assert!(out.contains("Declared permissions: none"));
@@ -340,8 +492,14 @@ fn run_enable_states_declared_permissions() {
         &mut surface,
     );
 
-    let out = run_control_command(&mut session, &mut surface, "enable", "codex-weather")
-        .expect("handled");
+    let out = run_control_command(
+        &mut session,
+        &mut surface,
+        "enable",
+        "codex-weather",
+        &BTreeMap::new(),
+    )
+    .expect("handled");
     assert!(
         out.contains("Declared permissions: network.outbound"),
         "got:\n{out}"
@@ -370,8 +528,14 @@ fn run_enable_is_idempotent_when_the_plugin_is_already_loaded() {
         "session start loaded the enabled plugin"
     );
 
-    let out = run_control_command(&mut session, &mut surface, "enable", "codex-weather")
-        .expect("handled");
+    let out = run_control_command(
+        &mut session,
+        &mut surface,
+        "enable",
+        "codex-weather",
+        &BTreeMap::new(),
+    )
+    .expect("handled");
     assert!(out.contains("[ok]"), "re-enable succeeds: {out}");
     assert!(
         out.contains("registered 1 tool(s) and 1 command(s)"),
@@ -390,7 +554,14 @@ fn run_enable_unknown_plugin_is_reported_not_returned() {
         &mut surface,
     );
 
-    let out = run_control_command(&mut session, &mut surface, "enable", "ghost").expect("handled");
+    let out = run_control_command(
+        &mut session,
+        &mut surface,
+        "enable",
+        "ghost",
+        &BTreeMap::new(),
+    )
+    .expect("handled");
     assert!(out.contains("[err]"));
     assert!(out.contains("unknown plugin"));
 }
@@ -405,7 +576,8 @@ fn run_enable_without_id_reports_usage() {
         &mut surface,
     );
 
-    let out = run_control_command(&mut session, &mut surface, "enable", "").expect("handled");
+    let out = run_control_command(&mut session, &mut surface, "enable", "", &BTreeMap::new())
+        .expect("handled");
     assert!(out.contains("[err] Missing <pluginid>"));
     assert!(out.contains("Usage: `/plugins enable <pluginid>`"));
 }
@@ -421,11 +593,24 @@ fn run_disable_unloads_and_deregisters() {
         &mut surface,
     );
 
-    run_control_command(&mut session, &mut surface, "enable", "codex-weather").unwrap();
+    run_control_command(
+        &mut session,
+        &mut surface,
+        "enable",
+        "codex-weather",
+        &BTreeMap::new(),
+    )
+    .unwrap();
     assert!(surface.tools.contains("plugin_codex-weather_get_weather"));
 
-    let out = run_control_command(&mut session, &mut surface, "disable", "codex-weather")
-        .expect("handled");
+    let out = run_control_command(
+        &mut session,
+        &mut surface,
+        "disable",
+        "codex-weather",
+        &BTreeMap::new(),
+    )
+    .expect("handled");
     assert!(out.contains("From: /plugins disable codex-weather"));
     assert!(out.contains("[ok]"));
     assert!(out.contains("deregistered 1 tool(s) and 1 command(s)"));
@@ -462,7 +647,14 @@ fn run_disable_unknown_plugin_is_reported() {
         &mut surface,
     );
 
-    let out = run_control_command(&mut session, &mut surface, "disable", "ghost").expect("handled");
+    let out = run_control_command(
+        &mut session,
+        &mut surface,
+        "disable",
+        "ghost",
+        &BTreeMap::new(),
+    )
+    .expect("handled");
     assert!(out.contains("[err]"));
     assert!(out.contains("unknown plugin"));
 }
@@ -476,8 +668,19 @@ fn run_control_command_returns_none_for_other_subcommands() {
         ragent_config::PluginsConfig::default(),
         &mut surface,
     );
-    assert!(run_control_command(&mut session, &mut surface, "add", "/tmp/x").is_none());
-    assert!(run_control_command(&mut session, &mut surface, "remove", "x").is_none());
+    assert!(
+        run_control_command(
+            &mut session,
+            &mut surface,
+            "add",
+            "/tmp/x",
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(
+        run_control_command(&mut session, &mut surface, "remove", "x", &BTreeMap::new()).is_none()
+    );
 }
 
 #[test]
@@ -501,7 +704,7 @@ fn run_control_command_reports_disabled_subsystem_master_switch() {
         ("enable", "codex-weather"),
         ("disable", "codex-weather"),
     ] {
-        let out = run_control_command(&mut session, &mut surface, sub, args)
+        let out = run_control_command(&mut session, &mut surface, sub, args, &BTreeMap::new())
             .unwrap_or_else(|| panic!("{sub} must be handled"));
         assert!(out.contains("[err]"), "{sub}: {out}");
         assert!(out.contains("plugins.enabled = false"), "{sub}: {out}");
@@ -521,7 +724,14 @@ fn run_lifecycle_uses_ledger_store_and_reloads_next_session() {
         ragent_config::PluginsConfig::default(),
         &mut surface,
     );
-    run_control_command(&mut session, &mut surface, "enable", "codex-weather").unwrap();
+    run_control_command(
+        &mut session,
+        &mut surface,
+        "enable",
+        "codex-weather",
+        &BTreeMap::new(),
+    )
+    .unwrap();
     session.shutdown(&mut surface);
 
     // The enable flag persisted: a fresh session loads it at start.

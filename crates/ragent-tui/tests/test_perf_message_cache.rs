@@ -46,8 +46,8 @@ fn primed_app(count: usize) -> ragent_tui::App {
 
 // ── PERF-043: watermark staleness scan ──────────────────────────────────
 
-#[test]
-fn test_idle_frame_only_scans_dirty_groups() {
+#[tokio::test]
+async fn test_idle_frame_only_scans_dirty_groups() {
     let mut app = primed_app(50);
     assert_eq!(
         app.message_cache_dirty_from, 50,
@@ -58,7 +58,8 @@ fn test_idle_frame_only_scans_dirty_groups() {
     app.handle_event(ragent_agent::event::Event::TextDelta {
         session_id: "s1".to_string(),
         text: " tail".to_string(),
-    });
+    })
+    .await;
     assert_eq!(
         app.message_cache_dirty_from,
         app.messages.len() - 1,
@@ -86,8 +87,8 @@ fn test_idle_frame_only_scans_dirty_groups() {
     );
 }
 
-#[test]
-fn test_tool_call_status_update_lowers_watermark_only() {
+#[tokio::test]
+async fn test_tool_call_status_update_lowers_watermark_only() {
     let mut app = primed_app(30);
     app.messages[0].parts.clear();
     app.messages[0].parts.push(MessagePart::ToolCall {
@@ -111,7 +112,8 @@ fn test_tool_call_status_update_lowers_watermark_only() {
         tool: "read".to_string(),
         error: None,
         duration_ms: 12,
-    });
+    })
+    .await;
     assert_eq!(
         app.message_cache_dirty_from, 0,
         "the mutated group (index 0) is the only one pending"
@@ -120,8 +122,8 @@ fn test_tool_call_status_update_lowers_watermark_only() {
 
 // ── PERF-042: streaming throttle ──────────────────────────────────────────
 
-#[test]
-fn test_streaming_group_renders_immediately_when_never_populated() {
+#[tokio::test]
+async fn test_streaming_group_renders_immediately_when_never_populated() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     render(&mut app);
@@ -129,7 +131,8 @@ fn test_streaming_group_renders_immediately_when_never_populated() {
     app.handle_event(ragent_agent::event::Event::TextDelta {
         session_id: "s1".to_string(),
         text: "first token".to_string(),
-    });
+    })
+    .await;
     render(&mut app);
 
     // A brand-new group must never be left blank by the throttle.
@@ -145,8 +148,8 @@ fn test_streaming_group_renders_immediately_when_never_populated() {
     );
 }
 
-#[test]
-fn test_streaming_re_render_is_throttled_to_one_per_window() {
+#[tokio::test]
+async fn test_streaming_re_render_is_throttled_to_one_per_window() {
     let mut app = primed_app(1);
 
     // First token after priming: already-populated group, so the throttle
@@ -154,7 +157,8 @@ fn test_streaming_re_render_is_throttled_to_one_per_window() {
     app.handle_event(ragent_agent::event::Event::TextDelta {
         session_id: "s1".to_string(),
         text: " alpha".to_string(),
-    });
+    })
+    .await;
     let pending_edit_seq = app.messages[0].edit_seq;
     render(&mut app);
     assert_eq!(
@@ -171,7 +175,8 @@ fn test_streaming_re_render_is_throttled_to_one_per_window() {
     app.handle_event(ragent_agent::event::Event::TextDelta {
         session_id: "s1".to_string(),
         text: " beta".to_string(),
-    });
+    })
+    .await;
     render(&mut app);
     assert_eq!(app.message_cache_dirty_from, 0, "still pending");
 
@@ -212,8 +217,8 @@ fn test_idle_frame_does_not_rebuild_copy_buffer_when_nothing_changed() {
     );
 }
 
-#[test]
-fn test_copy_buffer_rebuilds_on_demand_after_streaming() {
+#[tokio::test]
+async fn test_copy_buffer_rebuilds_on_demand_after_streaming() {
     let mut app = primed_app(5);
 
     // Stream a token, then force a copy refresh *before* the throttled frame
@@ -222,7 +227,8 @@ fn test_copy_buffer_rebuilds_on_demand_after_streaming() {
     app.handle_event(ragent_agent::event::Event::TextDelta {
         session_id: "s1".to_string(),
         text: " freshly streamed".to_string(),
-    });
+    })
+    .await;
     render(&mut app);
 
     app.ensure_copy_content_lines();

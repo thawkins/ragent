@@ -36,9 +36,9 @@ fn entry(text: &str) -> QueuedInput {
 }
 
 /// Open the menu the way the user would, then return the app.
-fn app_with_menu_open() -> App {
+async fn app_with_menu_open() -> App {
     let mut app = support::make_app();
-    app.handle_key_event(alt(KeyCode::Char('q')));
+    app.handle_key_event(alt(KeyCode::Char('q'))).await;
     assert!(app.queue_menu_open, "precondition: ALT-Q opened the menu");
     app
 }
@@ -47,11 +47,11 @@ fn app_with_menu_open() -> App {
 // FR-032 — Esc closes the menu taking no action
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_esc_closes_the_menu() {
-    let mut app = app_with_menu_open();
+#[tokio::test]
+async fn test_esc_closes_the_menu() {
+    let mut app = app_with_menu_open().await;
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(
         !app.queue_menu_open,
@@ -59,12 +59,12 @@ fn test_esc_closes_the_menu() {
     );
 }
 
-#[test]
-fn test_esc_resets_the_selection_for_the_next_open() {
-    let mut app = app_with_menu_open();
+#[tokio::test]
+async fn test_esc_resets_the_selection_for_the_next_open() {
+    let mut app = app_with_menu_open().await;
     app.queue_menu_selected = 2;
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert_eq!(
         app.queue_menu_selected, 0,
@@ -72,12 +72,12 @@ fn test_esc_resets_the_selection_for_the_next_open() {
     );
 }
 
-#[test]
-fn test_esc_sets_the_redraw_flag() {
-    let mut app = app_with_menu_open();
+#[tokio::test]
+async fn test_esc_sets_the_redraw_flag() {
+    let mut app = app_with_menu_open().await;
     app.needs_redraw = false;
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(
         app.needs_redraw,
@@ -89,14 +89,14 @@ fn test_esc_sets_the_redraw_flag() {
 // FR-031 — the menu never mutates the editable input buffer
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_esc_leaves_input_buffer_and_attachments_untouched() {
-    let mut app = app_with_menu_open();
+#[tokio::test]
+async fn test_esc_leaves_input_buffer_and_attachments_untouched() {
+    let mut app = app_with_menu_open().await;
     app.input = "KEEP-ME".to_string();
     app.input_cursor = app.input_len_chars();
     app.pending_attachments = vec![std::path::PathBuf::from("/tmp/keep.png")];
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert_eq!(
         app.input, "KEEP-ME",
@@ -114,13 +114,13 @@ fn test_esc_leaves_input_buffer_and_attachments_untouched() {
     );
 }
 
-#[test]
-fn test_esc_leaves_the_queue_untouched() {
-    let mut app = app_with_menu_open();
+#[tokio::test]
+async fn test_esc_leaves_the_queue_untouched() {
+    let mut app = app_with_menu_open().await;
     app.input_queue.push_back(entry("first"));
     app.input_queue.push_back(entry("second"));
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -129,16 +129,16 @@ fn test_esc_leaves_the_queue_untouched() {
     );
 }
 
-#[test]
-fn test_esc_leaves_the_running_turn_untouched() {
+#[tokio::test]
+async fn test_esc_leaves_the_running_turn_untouched() {
     let mut app = support::make_app();
     app.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
     app.cancel_flag = Some(flag.clone());
-    app.handle_key_event(alt(KeyCode::Char('q')));
+    app.handle_key_event(alt(KeyCode::Char('q'))).await;
     let status_before = app.status.clone();
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(
         app.is_processing,
@@ -158,13 +158,13 @@ fn test_esc_leaves_the_running_turn_untouched() {
 // FR-031 — every other key is swallowed while the menu is open
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_plain_character_is_swallowed_while_menu_is_open() {
-    let mut app = app_with_menu_open();
+#[tokio::test]
+async fn test_plain_character_is_swallowed_while_menu_is_open() {
+    let mut app = app_with_menu_open().await;
     app.input = "PROBE".to_string();
     app.input_cursor = app.input_len_chars();
 
-    app.handle_key_event(key(KeyCode::Char('z')));
+    app.handle_key_event(key(KeyCode::Char('z'))).await;
 
     assert_eq!(
         app.input, "PROBE",
@@ -176,13 +176,13 @@ fn test_plain_character_is_swallowed_while_menu_is_open() {
     );
 }
 
-#[test]
-fn test_backspace_is_swallowed_while_menu_is_open() {
-    let mut app = app_with_menu_open();
+#[tokio::test]
+async fn test_backspace_is_swallowed_while_menu_is_open() {
+    let mut app = app_with_menu_open().await;
     app.input = "PROBE".to_string();
     app.input_cursor = app.input_len_chars();
 
-    app.handle_key_event(key(KeyCode::Backspace));
+    app.handle_key_event(key(KeyCode::Backspace)).await;
 
     assert_eq!(
         app.input, "PROBE",
@@ -190,13 +190,13 @@ fn test_backspace_is_swallowed_while_menu_is_open() {
     );
 }
 
-#[test]
-fn test_enter_is_swallowed_while_menu_is_open() {
-    let mut app = app_with_menu_open();
+#[tokio::test]
+async fn test_enter_is_swallowed_while_menu_is_open() {
+    let mut app = app_with_menu_open().await;
     app.input = "typed but not sent".to_string();
     app.input_cursor = app.input_len_chars();
 
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert!(
         app.messages.is_empty(),
@@ -217,15 +217,15 @@ fn test_enter_is_swallowed_while_menu_is_open() {
 // Esc keeps its normal behaviour when the menu is not open
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_esc_still_cancels_a_running_turn_when_menu_is_closed() {
+#[tokio::test]
+async fn test_esc_still_cancels_a_running_turn_when_menu_is_closed() {
     let mut app = support::make_app();
     app.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
     app.cancel_flag = Some(flag.clone());
     assert!(!app.queue_menu_open, "precondition: the menu is closed");
 
-    app.handle_key_event(key(KeyCode::Esc));
+    app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(
         flag.load(Ordering::Relaxed),

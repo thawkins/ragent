@@ -173,12 +173,12 @@ fn test_skillgen_overwrites_existing() {
     );
 }
 
-#[test]
-fn test_codeindex_skillgen_help_lists_subcommand() {
+#[tokio::test]
+async fn test_codeindex_skillgen_help_lists_subcommand() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/codeindex help");
+    app.execute_slash_command("/codeindex help").await;
 
     let text = app.messages.last().expect("help message").text_content();
     assert!(
@@ -187,13 +187,13 @@ fn test_codeindex_skillgen_help_lists_subcommand() {
     );
 }
 
-#[test]
-fn test_codeindex_skillgen_unknown_fallback_lists_subcommand() {
+#[tokio::test]
+async fn test_codeindex_skillgen_unknown_fallback_lists_subcommand() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
     // An unknown subcommand should show the usage string which now lists skillgen.
-    app.execute_slash_command("/codeindex unknownxyz");
+    app.execute_slash_command("/codeindex unknownxyz").await;
 
     let text = app.messages.last().expect("usage message").text_content();
     assert!(

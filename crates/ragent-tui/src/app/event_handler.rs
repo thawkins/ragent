@@ -153,7 +153,7 @@ impl App {
     /// Dispatch a single [`Event`] from the event bus to the appropriate UI
     /// handler. Marks the UI dirty on every event so the next render reflects
     /// the state change.
-    pub fn handle_event(&mut self, event: Event) {
+    pub async fn handle_event(&mut self, event: Event) {
         // After the previous event, re-apply any buffered tool args to parts
         // that may have been created out-of-order since (safety net for the
         // rare pending_args-leak path; see `drain_pending_tool_args`).
@@ -534,7 +534,7 @@ impl App {
                                 }
                                 None => format!("/spec create {spec_name} {prompt}"),
                             };
-                            self.execute_slash_command(&cmd);
+                            self.execute_slash_command(&cmd).await;
                         }
                     }
                 }
@@ -604,7 +604,7 @@ impl App {
                 // the very boundary its own cancel opened — otherwise the deferred
                 // run would never fire on the cancelled path.
                 if *reason != FinishReason::Cancelled || self.queue_next_pending {
-                    self.advance_input_queue();
+                    self.advance_input_queue().await;
                 }
             }
             Event::PermissionRequested {
@@ -959,7 +959,7 @@ impl App {
                 // been cleared above, so the oldest entry becomes the next user
                 // turn via the shared asynchronous dispatch path; a failed turn
                 // never discards the remaining entries.
-                self.advance_input_queue();
+                self.advance_input_queue().await;
             }
             Event::TokenUsage {
                 ref session_id,
@@ -1980,6 +1980,21 @@ impl App {
                 if self.is_current_session(session_id) {
                     self.append_assistant_text(&summary);
                     self.status = format!("{} failed to start", service);
+                }
+            }
+            Event::McpStatusChanged {
+                ref server_id,
+                ref status,
+            } => {
+                // Track the live status per server id. The background startup
+                // connect loop publishes this; without it the `/mcp` display
+                // list has no way to learn a fresh server's real state and
+                // shows it as `disabled` (BUG-001).
+                let mapped = super::slash::mcp_status_from_event(status);
+                self.mcp_status_map
+                    .insert(server_id.clone(), mapped.clone());
+                if let Some(server) = self.mcp_servers.iter_mut().find(|s| s.id == *server_id) {
+                    server.status = mapped;
                 }
             }
             _ => {}

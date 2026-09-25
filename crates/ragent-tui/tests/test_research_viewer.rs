@@ -149,62 +149,69 @@ mod interaction_tests {
         }
     }
 
-    #[test]
-    fn test_research_view_esc_closes() {
+    #[tokio::test]
+    async fn test_research_view_esc_closes() {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
-        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await;
         assert!(
             app.research_view.is_none(),
             "Esc should close research view"
         );
     }
 
-    #[test]
-    fn test_research_view_page_down_scrolls() {
+    #[tokio::test]
+    async fn test_research_view_page_down_scrolls() {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
-        app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+            .await;
         assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 5);
     }
 
-    #[test]
-    fn test_research_view_page_up_scrolls() {
+    #[tokio::test]
+    async fn test_research_view_page_up_scrolls() {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
-        app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE))
+            .await;
         assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 15);
     }
 
-    #[test]
-    fn test_research_view_down_arrow_scrolls() {
+    #[tokio::test]
+    async fn test_research_view_down_arrow_scrolls() {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
-        app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+            .await;
         assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 9);
     }
 
-    #[test]
-    fn test_research_view_up_arrow_scrolls() {
+    #[tokio::test]
+    async fn test_research_view_up_arrow_scrolls() {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
-        app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+            .await;
         assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 11);
     }
 
-    #[test]
-    fn test_research_view_ctrl_page_end_jumps_to_end() {
+    #[tokio::test]
+    async fn test_research_view_ctrl_page_end_jumps_to_end() {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
-        app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL));
+        app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL))
+            .await;
         assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 0);
     }
 
-    #[test]
-    fn test_research_view_ctrl_page_home_jumps_to_start() {
+    #[tokio::test]
+    async fn test_research_view_ctrl_page_home_jumps_to_start() {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
-        app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL));
+        app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL))
+            .await;
         assert_eq!(app.research_view.as_ref().unwrap().scroll_offset, 100);
     }
 
@@ -247,11 +254,12 @@ mod interaction_tests {
         );
     }
 
-    #[test]
-    fn test_research_view_keys_do_not_type_into_input() {
+    #[tokio::test]
+    async fn test_research_view_keys_do_not_type_into_input() {
         let mut app = support::make_app();
         app.research_view = Some(make_research_view());
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+            .await;
         assert!(app.research_view.is_some());
         assert_eq!(app.input, "");
     }

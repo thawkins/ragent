@@ -89,27 +89,98 @@ pub(super) fn handle_plugins_command(app: &mut crate::app::App, args: &str) -> O
     }
 
     let workdir = current_working_dir();
+    // A plugin's `mcpServers` entry is a separate process, so the number of tools
+    // it exposes is only known after it connects — never derivable from the
+    // manifest. `/plugins list --mcp` prints that live inventory directly.
+    if parses_mcp_flag(rest) {
+        return Some(render_mcp_tool_report(app));
+    }
     // Seed the collision surface (FR-024) from the live session: built-in tool
     // names plus the `SLASH_COMMANDS` triggers, then run the shared dispatch
     // ladder (store / test / control). The control subcommands drive an ephemeral
     // session whose sandbox contexts are dropped on return.
-    Some(
-        run_plugin_subcommand(
-            &workdir,
-            sub,
-            rest,
-            app.session_processor
-                .tool_registry
-                .list()
-                .into_iter()
-                .collect(),
-            crate::app::state::SLASH_COMMANDS
-                .iter()
-                .map(|c| c.trigger.to_string())
-                .collect(),
-        )
-        .unwrap_or_else(|| render_help(sub)),
+    let report = run_plugin_subcommand(
+        &workdir,
+        sub,
+        rest,
+        app.session_processor
+            .tool_registry
+            .list()
+            .into_iter()
+            .collect(),
+        crate::app::state::SLASH_COMMANDS
+            .iter()
+            .map(|c| c.trigger.to_string())
+            .collect(),
+        &live_mcp_tool_counts(app),
     )
+    .unwrap_or_else(|| render_help(sub));
+    Some(report)
+}
+
+/// The live MCP tool count per bridged server id, for the `/plugins list`
+/// renderer's `mcp_tool_counts` map (FR-030).
+///
+/// The count can only come from the live client: a plugin manifest declares
+/// which servers to start, never how many tools they advertise. `App::mcp_servers`
+/// is the TUI's copy of that client state, keyed by the bridged id
+/// (`<plugin-id>.<server>`) — the same key the renderer reports, so no lookup by
+/// declared server name is needed. A server with no tools yet is absent, and the
+/// renderer prints `?` (unknown), not `0`.
+fn live_mcp_tool_counts(app: &crate::app::App) -> std::collections::BTreeMap<String, usize> {
+    app.mcp_servers
+        .iter()
+        .filter(|server| !server.tools.is_empty())
+        .map(|server| (server.id.clone(), server.tools.len()))
+        .collect()
+}
+
+/// The `--mcp` flag, accepted anywhere in the argument tail.
+fn parses_mcp_flag(args: &str) -> bool {
+    args.split_whitespace().any(|token| token == "--mcp")
+}
+
+/// Render the live MCP tool inventory a `/plugins list --mcp` invocation prints.
+///
+/// The tool list comes from the session's live MCP client (`App::mcp_servers`,
+/// kept current by `adopt_mcp_client_state`), keyed by bridged server id, so it
+/// covers plugin-contributed servers (`<plugin-id>.<server>`) and configured
+/// servers alike.
+fn render_mcp_tool_report(app: &crate::app::App) -> String {
+    let mut out = String::from("From: /plugins list --mcp\nMCP tool inventory:\n\n");
+    if app.mcp_servers.is_empty() {
+        out.push_str("  (no MCP servers configured)\n");
+        out.push_str(
+            "  Enabled plugins that declare an 'mcpServers' section are bridged at startup.\n",
+        );
+        return out;
+    }
+    for server in &app.mcp_servers {
+        out.push_str(&format!(
+            "  {:<24} {:<12} {} tool(s)\n",
+            server.id,
+            server.status,
+            server.tools.len()
+        ));
+        for tool in &server.tools {
+            out.push_str(&format!(
+                "      {} -> {}\n",
+                tool.name,
+                crate::app::slash::mcp_ragent_tool_name(&server.id, &tool.name)
+            ));
+        }
+    }
+    let connected = app
+        .mcp_servers
+        .iter()
+        .filter(|s| s.status == ragent_agent::mcp::McpStatus::Connected)
+        .count();
+    out.push_str(&format!(
+        "\n{}/{} server(s) connected\n",
+        connected,
+        app.mcp_servers.len()
+    ));
+    out
 }
 
 /// Parse the optional trailing arguments of a store-browser launch

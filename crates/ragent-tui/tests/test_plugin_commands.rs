@@ -46,7 +46,7 @@ async fn prompt_plugin_command_is_injected_as_a_user_turn() {
         "Commit the staged changes.",
     )];
 
-    app.execute_slash_command("/commit");
+    app.execute_slash_command("/commit").await;
 
     // The invocation is shown as a user message and the command is handled by
     // the plugin path (not reported as an unknown command).
@@ -73,7 +73,8 @@ async fn prompt_plugin_command_substitutes_arguments_and_uses_namespaced_trigger
         "Message: $ARGUMENTS",
     )];
 
-    app.execute_slash_command("/plugin:commit-commands:commit fix the bug");
+    app.execute_slash_command("/plugin:commit-commands:commit fix the bug")
+        .await;
 
     assert_eq!(app.status, "plugin command /plugin:commit-commands:commit");
     let text = last_text(&app);
@@ -83,13 +84,13 @@ async fn prompt_plugin_command_substitutes_arguments_and_uses_namespaced_trigger
     );
 }
 
-#[test]
-fn inline_plugin_command_reports_it_needs_the_plugin_host() {
+#[tokio::test]
+async fn inline_plugin_command_reports_it_needs_the_plugin_host() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
     app.plugin_commands = vec![inline_command("clean_gone", "clean_gone")];
 
-    app.execute_slash_command("/clean_gone");
+    app.execute_slash_command("/clean_gone").await;
 
     assert_eq!(
         app.status,
@@ -103,13 +104,13 @@ fn inline_plugin_command_reports_it_needs_the_plugin_host() {
     );
 }
 
-#[test]
-fn help_lists_plugin_commands() {
+#[tokio::test]
+async fn help_lists_plugin_commands() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
     app.plugin_commands = vec![prompt_command("commit", "commit", "Commit.")];
 
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
 
     let text = last_text(&app);
     assert!(

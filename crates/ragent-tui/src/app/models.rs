@@ -226,6 +226,10 @@ impl App {
                 sanitize_for_display(text)
             }
         };
+        // `sanitize_for_display` strips the ANSI sentinel codes the worker used
+        // to protect `[red]…[/red]` spans through the markdown pass; convert
+        // those sentinels back into the TUI's own `[red]…[/red]` markers.
+        let rendered = crate::app::md_worker::restore_red_markers(&rendered);
         let cleaned = rendered
             .lines()
             .map(|l| l.trim_end())
@@ -2162,6 +2166,12 @@ impl App {
         true
     }
 
+    /// Build the `/tools` report: the tool-family visibility table, then the
+    /// full tool list — visible tools plus any disabled by a family visibility
+    /// switch (hidden from the model but still registered).
+    ///
+    /// Both listings share one column layout and one header so the disabled
+    /// section is directly comparable with the visible one.
     pub(crate) fn render_tool_visibility_table(&self) -> String {
         let mut output = String::from(
             "From: /tools\nTool Family Visibility\n\n```text\nfamily     state\n------     -----\n",
@@ -2174,25 +2184,87 @@ impl App {
         }
         output.push_str("```\n\n");
 
-        // List all currently visible tools from the registry.
+        // List all currently visible tools from the registry, plus the tools
+        // disabled by a family visibility switch (hidden from the model but
+        // still registered), shown in red.
         let defs = self.session_processor.tool_registry.definitions();
-        if defs.is_empty() {
+        let disabled = self.session_processor.tool_registry.hidden_definitions();
+        if defs.is_empty() && disabled.is_empty() {
             output.push_str("No tools are currently visible.\n");
         } else {
             output.push_str(&format!(
-                "Visible Tools ({} total):\n\n```text\n{:<24} description\n{:<24} -----------\n",
+                "Visible Tools ({} total, {} disabled):\n\n",
                 defs.len(),
-                "name",
-                "----"
+                disabled.len()
+            ));
+            output.push_str(&format!(
+                "```text\n{:<56} {:<24} description\n{:<56} {:<24} -----------\n",
+                "name", "source", "----", "------"
             ));
             for def in defs.iter() {
-                let desc = ragent_types::truncate_bytes(&def.description, 60);
-                output.push_str(&format!("{:<24} {}\n", def.name, desc));
+                // Name (56) + spacer + source (24) + spacer = 82 columns of the
+                // message window's 118 inner columns; the description is
+                // hard-truncated to 30 so no row can reach the right border.
+                output.push_str(&self.tool_row(&def.name, &def.description));
+            }
+            if !disabled.is_empty() {
+                output.push_str(&format!(
+                    "\nDisabled by visibility ({}):\n\n",
+                    disabled.len()
+                ));
+                for def in &disabled {
+                    output.push_str(&self.tool_row(&def.name, &def.description));
+                }
             }
             output.push_str("```\n");
         }
 
         output
+    }
+
+    /// Render one `/tools` table row: name (56), source (24), description (30).
+    ///
+    /// Shared by the visible and hidden tool listings so both stay aligned.
+    fn tool_row(&self, name: &str, description: &str) -> String {
+        let desc = ragent_types::truncate_bytes_no_ellipsis(description, 30);
+        let source = self.tool_source(name);
+        format!("{name:<56} {source:<24} {desc}\n")
+    }
+
+    /// Resolve where a registered tool is provided from, for the `/tools`
+    /// source column.
+    ///
+    /// Returns, in order of precedence:
+    ///
+    /// - `mcp:<server-id>` when the tool is a bridged MCP server tool
+    ///   (`McpToolWrapper` name `mcp_<server>_<tool>`);
+    /// - `plugin:<id>` when the tool was registered by a plugin
+    ///   (name `plugin_<id>_<tool>`);
+    /// - `visibility:<switch>` when the tool belongs to a tool-family
+    ///   visibility switch (`office`, `github`, `gitlab`, `teams`, `agents`,
+    ///   `plan`, `codeindex`, `masterfetch`, `browser`, `finance`);
+    /// - `internal` otherwise (a core or built-in tool).
+    fn tool_source(&self, name: &str) -> String {
+        if let Some(suffix) = name.strip_prefix("mcp_")
+            && let Some((server, _tool)) = suffix.split_once('_')
+        {
+            return format!("mcp:{server}");
+        }
+        if name.starts_with("plugin_") {
+            let rest = name.trim_start_matches("plugin_");
+            if let Some((id, _tool)) = rest.split_once('_') {
+                return format!("plugin:{id}");
+            }
+            return "plugin".to_string();
+        }
+        for (switch, _enabled) in self.tool_visibility_switches() {
+            if let Some(names) = ragent_config::tool_family_names(switch)
+                && names.contains(&name)
+            {
+                return format!("visibility:{switch}");
+            }
+        }
+        "internal".to_string()
     }
 
     pub(crate) fn sync_tool_visibility_from_config(&mut self, cfg: &ragent_agent::Config) {

@@ -33,12 +33,12 @@ fn unique_team_name(prefix: &str) -> String {
 
 // ── /team status ─────────────────────────────────────────────────────────────
 
-#[test]
-fn test_team_status_no_active_team() {
+#[tokio::test]
+async fn test_team_status_no_active_team() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team status");
+    app.execute_slash_command("/team status").await;
 
     assert_eq!(app.status, "team: status");
     let text = app.messages.last().unwrap().text_content();
@@ -52,8 +52,8 @@ fn test_team_status_no_active_team() {
     );
 }
 
-#[test]
-fn test_team_status_with_active_team() {
+#[tokio::test]
+async fn test_team_status_with_active_team() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
@@ -66,7 +66,7 @@ fn test_team_status_with_active_team() {
     m1.current_task_id = Some("task-001".to_string());
     app.team_members.push(m1);
 
-    app.execute_slash_command("/team");
+    app.execute_slash_command("/team").await;
 
     assert_eq!(app.status, "team: status");
     let text = app.messages.last().unwrap().text_content();
@@ -82,25 +82,25 @@ fn test_team_status_with_active_team() {
     assert!(text.contains("1 teammate"), "should show count: {text}");
 }
 
-#[test]
-fn test_team_status_no_args_defaults_to_status() {
+#[tokio::test]
+async fn test_team_status_no_args_defaults_to_status() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     // Without args, `/team` should behave like `/team status`
-    app.execute_slash_command("/team");
+    app.execute_slash_command("/team").await;
 
     assert_eq!(app.status, "team: status");
 }
 
 // ── /team create ─────────────────────────────────────────────────────────────
 
-#[test]
-fn test_team_create_no_name_shows_usage() {
+#[tokio::test]
+async fn test_team_create_no_name_shows_usage() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team create");
+    app.execute_slash_command("/team create").await;
 
     assert!(
         app.status.contains("Usage"),
@@ -111,8 +111,9 @@ fn test_team_create_no_name_shows_usage() {
 
 // ── /team show ───────────────────────────────────────────────────────────────
 
-#[test]
-fn test_team_show_no_name_lists_all_registered_teams() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_show_no_name_lists_all_registered_teams() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -126,7 +127,7 @@ fn test_team_show_no_name_lists_all_registered_teams() {
 
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
-    app.execute_slash_command("/team show");
+    app.execute_slash_command("/team show").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -148,8 +149,9 @@ fn test_team_show_no_name_lists_all_registered_teams() {
     assert!(text.contains("lead-b"), "should include lead info: {text}");
 }
 
-#[test]
-fn test_team_show_no_name_empty_registry_message() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_show_no_name_empty_registry_message() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -175,7 +177,7 @@ fn test_team_show_no_name_empty_registry_message() {
     // registry is actually empty.
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
-    app.execute_slash_command("/team show");
+    app.execute_slash_command("/team show").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -197,8 +199,9 @@ fn test_team_show_no_name_empty_registry_message() {
     }
 }
 
-#[test]
-fn test_team_show_loads_named_team_details() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_show_loads_named_team_details() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -215,7 +218,7 @@ fn test_team_show_loads_named_team_details() {
 
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
-    app.execute_slash_command("/team show show-team");
+    app.execute_slash_command("/team show show-team").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -234,8 +237,9 @@ fn test_team_show_loads_named_team_details() {
     assert!(text.contains("task-007"), "should include task: {text}");
 }
 
-#[test]
-fn test_teams_alias_show_loads_named_team_details() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_teams_alias_show_loads_named_team_details() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -249,7 +253,7 @@ fn test_teams_alias_show_loads_named_team_details() {
 
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
-    app.execute_slash_command("/teams show alias-team");
+    app.execute_slash_command("/teams show alias-team").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -261,8 +265,9 @@ fn test_teams_alias_show_loads_named_team_details() {
     );
 }
 
-#[test]
-fn test_teams_alias_show_no_name_lists_all_registered_teams() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_teams_alias_show_no_name_lists_all_registered_teams() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -275,7 +280,7 @@ fn test_teams_alias_show_no_name_lists_all_registered_teams() {
 
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
-    app.execute_slash_command("/teams show");
+    app.execute_slash_command("/teams show").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -289,12 +294,12 @@ fn test_teams_alias_show_no_name_lists_all_registered_teams() {
 
 // ── /team help ───────────────────────────────────────────────────────────────
 
-#[test]
-fn test_team_help_shows_command_reference() {
+#[tokio::test]
+async fn test_team_help_shows_command_reference() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team help");
+    app.execute_slash_command("/team help").await;
 
     assert_eq!(app.status, "team: help");
     let text = app.messages.last().unwrap().text_content();
@@ -319,12 +324,12 @@ fn test_team_help_shows_command_reference() {
     );
 }
 
-#[test]
-fn test_teams_alias_help_shows_command_reference() {
+#[tokio::test]
+async fn test_teams_alias_help_shows_command_reference() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/teams help");
+    app.execute_slash_command("/teams help").await;
 
     assert_eq!(app.status, "team: help");
     let text = app.messages.last().unwrap().text_content();
@@ -334,12 +339,12 @@ fn test_teams_alias_help_shows_command_reference() {
     );
 }
 
-#[test]
-fn test_team_help_creates_session_when_missing() {
+#[tokio::test]
+async fn test_team_help_creates_session_when_missing() {
     let mut app = support::make_app();
     assert!(app.session_id.is_none());
 
-    app.execute_slash_command("/team help");
+    app.execute_slash_command("/team help").await;
 
     assert!(app.session_id.is_some(), "help should create a session");
     assert_eq!(app.status, "team: help");
@@ -352,18 +357,18 @@ fn test_team_help_creates_session_when_missing() {
 
 // ── /team close ──────────────────────────────────────────────────────────────
 
-#[test]
-fn test_team_close_no_active_team() {
+#[tokio::test]
+async fn test_team_close_no_active_team() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team close");
+    app.execute_slash_command("/team close").await;
 
     assert_eq!(app.status, "No active team to close");
 }
 
-#[test]
-fn test_team_close_clears_active_team_state() {
+#[tokio::test]
+async fn test_team_close_clears_active_team_state() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("my-team", "s1"));
@@ -371,7 +376,7 @@ fn test_team_close_clears_active_team_state() {
         .push(TeamMember::new("bob", "tm-001", "general"));
     app.show_teams = true;
 
-    app.execute_slash_command("/team close");
+    app.execute_slash_command("/team close").await;
 
     assert!(app.active_team.is_none(), "active team should be cleared");
     assert!(app.team_members.is_empty(), "members should be cleared");
@@ -381,12 +386,12 @@ fn test_team_close_clears_active_team_state() {
 
 // ── /team delete ─────────────────────────────────────────────────────────────
 
-#[test]
-fn test_team_delete_no_name_shows_usage() {
+#[tokio::test]
+async fn test_team_delete_no_name_shows_usage() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team delete");
+    app.execute_slash_command("/team delete").await;
 
     assert!(
         app.status.contains("Usage"),
@@ -395,8 +400,9 @@ fn test_team_delete_no_name_shows_usage() {
     );
 }
 
-#[test]
-fn test_team_delete_removes_existing_team() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_removes_existing_team() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -413,7 +419,8 @@ fn test_team_delete_removes_existing_team() {
 
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
-    app.execute_slash_command(&format!("/team delete {team_name}"));
+    app.execute_slash_command(&format!("/team delete {team_name}"))
+        .await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -426,8 +433,9 @@ fn test_team_delete_removes_existing_team() {
     assert_eq!(app.status, "team deleted");
 }
 
-#[test]
-fn test_team_delete_active_team_clears_session_state() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_active_team_clears_session_state() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -448,7 +456,8 @@ fn test_team_delete_active_team_clears_session_state() {
         .push(TeamMember::new("bob", "tm-001", "general"));
     app.show_teams = true;
 
-    app.execute_slash_command(&format!("/team delete {team_name}"));
+    app.execute_slash_command(&format!("/team delete {team_name}"))
+        .await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -464,8 +473,9 @@ fn test_team_delete_active_team_clears_session_state() {
     assert_eq!(app.status, "team deleted");
 }
 
-#[test]
-fn test_team_delete_active_team_blocked_when_teammates_working() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_active_team_blocked_when_teammates_working() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -487,7 +497,8 @@ fn test_team_delete_active_team_blocked_when_teammates_working() {
     app.team_members.push(m);
     app.show_teams = true;
 
-    app.execute_slash_command(&format!("/team delete {team_name}"));
+    app.execute_slash_command(&format!("/team delete {team_name}"))
+        .await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -500,8 +511,9 @@ fn test_team_delete_active_team_blocked_when_teammates_working() {
     assert!(app.active_team.is_some(), "active team should remain");
 }
 
-#[test]
-fn test_team_create_sets_active_team() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_create_sets_active_team() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -515,7 +527,8 @@ fn test_team_create_sets_active_team() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team create bp1 my-test-team");
+    app.execute_slash_command("/team create bp1 my-test-team")
+        .await;
 
     std::env::set_current_dir(original_dir).unwrap();
 
@@ -546,12 +559,12 @@ fn test_team_create_sets_active_team() {
 
 // ── /team tasks ───────────────────────────────────────────────────────────────
 
-#[test]
-fn test_team_tasks_no_active_team() {
+#[tokio::test]
+async fn test_team_tasks_no_active_team() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team tasks");
+    app.execute_slash_command("/team tasks").await;
 
     assert_eq!(app.status, "no active team");
     let text = app.messages.last().unwrap().text_content();
@@ -561,8 +574,9 @@ fn test_team_tasks_no_active_team() {
     );
 }
 
-#[test]
-fn test_team_tasks_renders_table_with_status() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_tasks_renders_table_with_status() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -588,7 +602,7 @@ fn test_team_tasks_renders_table_with_status() {
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new(&team_name, "s1"));
 
-    app.execute_slash_command("/team tasks");
+    app.execute_slash_command("/team tasks").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -616,12 +630,12 @@ fn test_team_tasks_renders_table_with_status() {
 
 // ── /team clear ───────────────────────────────────────────────────────────────
 
-#[test]
-fn test_team_clear_no_active_team() {
+#[tokio::test]
+async fn test_team_clear_no_active_team() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team clear");
+    app.execute_slash_command("/team clear").await;
 
     assert_eq!(app.status, "no active team");
     let text = app.messages.last().unwrap().text_content();
@@ -631,8 +645,9 @@ fn test_team_clear_no_active_team() {
     );
 }
 
-#[test]
-fn test_team_clear_removes_tasks_for_active_team() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_clear_removes_tasks_for_active_team() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -654,7 +669,7 @@ fn test_team_clear_removes_tasks_for_active_team() {
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new(&team_name, "s1"));
 
-    app.execute_slash_command("/team clear");
+    app.execute_slash_command("/team clear").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -667,23 +682,23 @@ fn test_team_clear_removes_tasks_for_active_team() {
 
 // ── /team message ─────────────────────────────────────────────────────────────
 
-#[test]
-fn test_team_message_no_active_team() {
+#[tokio::test]
+async fn test_team_message_no_active_team() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team message alice hello");
+    app.execute_slash_command("/team message alice hello").await;
 
     assert_eq!(app.status, "No active team");
 }
 
-#[test]
-fn test_team_message_unknown_teammate() {
+#[tokio::test]
+async fn test_team_message_unknown_teammate() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("my-team", "s1"));
 
-    app.execute_slash_command("/team message ghost hello");
+    app.execute_slash_command("/team message ghost hello").await;
 
     assert!(
         app.status.contains("ghost") && app.status.contains("not found"),
@@ -692,12 +707,12 @@ fn test_team_message_unknown_teammate() {
     );
 }
 
-#[test]
-fn test_team_message_missing_text_shows_usage() {
+#[tokio::test]
+async fn test_team_message_missing_text_shows_usage() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team message");
+    app.execute_slash_command("/team message").await;
 
     assert!(
         app.status.contains("Usage"),
@@ -708,12 +723,12 @@ fn test_team_message_missing_text_shows_usage() {
 
 // ── /team cleanup ─────────────────────────────────────────────────────────────
 
-#[test]
-fn test_team_cleanup_no_active_team() {
+#[tokio::test]
+async fn test_team_cleanup_no_active_team() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team cleanup");
+    app.execute_slash_command("/team cleanup").await;
 
     assert!(
         app.status.contains("No active team"),
@@ -722,8 +737,8 @@ fn test_team_cleanup_no_active_team() {
     );
 }
 
-#[test]
-fn test_team_cleanup_clears_state() {
+#[tokio::test]
+async fn test_team_cleanup_clears_state() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("my-team", "s1"));
@@ -732,7 +747,7 @@ fn test_team_cleanup_clears_state() {
     app.show_teams = true;
 
     // Team dir does not exist on disk — cleanup should still clear in-memory state.
-    app.execute_slash_command("/team cleanup");
+    app.execute_slash_command("/team cleanup").await;
 
     assert!(app.active_team.is_none(), "active_team should be cleared");
     assert!(
@@ -743,8 +758,8 @@ fn test_team_cleanup_clears_state() {
     assert_eq!(app.status, "team cleaned up");
 }
 
-#[test]
-fn test_team_cleanup_blocked_when_teammates_active() {
+#[tokio::test]
+async fn test_team_cleanup_blocked_when_teammates_active() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("busy-team", "s1"));
@@ -754,7 +769,7 @@ fn test_team_cleanup_blocked_when_teammates_active() {
     app.team_members.push(m);
     app.show_teams = true;
 
-    app.execute_slash_command("/team cleanup");
+    app.execute_slash_command("/team cleanup").await;
 
     // Should refuse because a teammate is still working.
     assert!(
@@ -767,12 +782,12 @@ fn test_team_cleanup_blocked_when_teammates_active() {
 
 // ── /team unknown subcommand ──────────────────────────────────────────────────
 
-#[test]
-fn test_team_unknown_subcommand_shows_error() {
+#[tokio::test]
+async fn test_team_unknown_subcommand_shows_error() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team frobnicate");
+    app.execute_slash_command("/team frobnicate").await;
 
     assert!(
         app.status.contains("Unknown /team subcommand") || app.status.contains("frobnicate"),
@@ -811,8 +826,8 @@ fn test_team_members_drives_t_badge_set() {
 
 // ── Event handling — TeammateSpawned ─────────────────────────────────────────
 
-#[test]
-fn test_event_teammate_spawned_adds_member_and_shows_panel() {
+#[tokio::test]
+async fn test_event_teammate_spawned_adds_member_and_shows_panel() {
     let mut app = support::make_app();
     let sid = "sess-lead".to_string();
     app.session_id = Some(sid.clone());
@@ -823,7 +838,7 @@ fn test_event_teammate_spawned_adds_member_and_shows_panel() {
         teammate_name: "writer".to_string(),
         agent_id: "tm-001".to_string(),
     };
-    app.handle_event(event);
+    app.handle_event(event).await;
 
     assert!(app.show_teams, "show_teams should be enabled");
     assert_eq!(app.team_members.len(), 1);
@@ -837,8 +852,8 @@ fn test_event_teammate_spawned_adds_member_and_shows_panel() {
     );
 }
 
-#[test]
-fn test_event_teammate_spawned_deduplicates() {
+#[tokio::test]
+async fn test_event_teammate_spawned_deduplicates() {
     let mut app = support::make_app();
     let sid = "sess-lead".to_string();
     app.session_id = Some(sid.clone());
@@ -849,8 +864,8 @@ fn test_event_teammate_spawned_deduplicates() {
         teammate_name: "writer".to_string(),
         agent_id: "tm-001".to_string(),
     };
-    app.handle_event(event.clone());
-    app.handle_event(event);
+    app.handle_event(event.clone()).await;
+    app.handle_event(event).await;
 
     assert_eq!(
         app.team_members.len(),
@@ -859,8 +874,9 @@ fn test_event_teammate_spawned_deduplicates() {
     );
 }
 
-#[test]
-fn test_event_teammate_spawned_hydrates_session_id_from_store() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_event_teammate_spawned_hydrates_session_id_from_store() {
     let _cwd_guard = CWD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -886,7 +902,8 @@ fn test_event_teammate_spawned_hydrates_session_id_from_store() {
         team_name,
         teammate_name: "writer".to_string(),
         agent_id: "tm-001".to_string(),
-    });
+    })
+    .await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -896,6 +913,7 @@ fn test_event_teammate_spawned_hydrates_session_id_from_store() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
     let _cwd_guard = CWD_LOCK
         .lock()
@@ -924,7 +942,8 @@ async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
             "project_local": true
         })),
         success: true,
-    });
+    })
+    .await;
 
     let _ = std::env::set_current_dir(original_dir);
 
@@ -937,8 +956,8 @@ async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
 
 // ── Event handling — TeammateIdle ────────────────────────────────────────────
 
-#[test]
-fn test_event_teammate_idle_updates_status() {
+#[tokio::test]
+async fn test_event_teammate_idle_updates_status() {
     let mut app = support::make_app();
     let sid = "sess-lead".to_string();
     app.session_id = Some(sid.clone());
@@ -952,7 +971,7 @@ fn test_event_teammate_idle_updates_status() {
         team_name: "alpha".to_string(),
         agent_id: "tm-002".to_string(),
     };
-    app.handle_event(event);
+    app.handle_event(event).await;
 
     assert_eq!(app.team_members[0].status, MemberStatus::Idle);
     assert!(
@@ -963,8 +982,8 @@ fn test_event_teammate_idle_updates_status() {
 
 // ── Event handling — TeamTaskClaimed / Completed ─────────────────────────────
 
-#[test]
-fn test_event_team_task_claimed_sets_current_task() {
+#[tokio::test]
+async fn test_event_team_task_claimed_sets_current_task() {
     let mut app = support::make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
@@ -976,7 +995,8 @@ fn test_event_team_task_claimed_sets_current_task() {
         team_name: "t".to_string(),
         agent_id: "tm-001".to_string(),
         task_id: "task-007".to_string(),
-    });
+    })
+    .await;
 
     assert_eq!(app.team_members[0].status, MemberStatus::Working);
     assert_eq!(
@@ -985,8 +1005,8 @@ fn test_event_team_task_claimed_sets_current_task() {
     );
 }
 
-#[test]
-fn test_event_team_task_completed_clears_current_task() {
+#[tokio::test]
+async fn test_event_team_task_completed_clears_current_task() {
     let mut app = support::make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
@@ -1000,7 +1020,8 @@ fn test_event_team_task_completed_clears_current_task() {
         team_name: "t".to_string(),
         agent_id: "tm-001".to_string(),
         task_id: "task-007".to_string(),
-    });
+    })
+    .await;
 
     assert!(
         app.team_members[0].current_task_id.is_none(),
@@ -1010,8 +1031,8 @@ fn test_event_team_task_completed_clears_current_task() {
 
 // ── Event handling — TeamCleanedUp ────────────────────────────────────────────
 
-#[test]
-fn test_event_team_cleaned_up_resets_state() {
+#[tokio::test]
+async fn test_event_team_cleaned_up_resets_state() {
     let mut app = support::make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
@@ -1023,7 +1044,8 @@ fn test_event_team_cleaned_up_resets_state() {
     app.handle_event(Event::TeamCleanedUp {
         session_id: sid,
         team_name: "gone-team".to_string(),
-    });
+    })
+    .await;
 
     assert!(app.active_team.is_none());
     assert!(app.team_members.is_empty());
@@ -1307,8 +1329,8 @@ fn test_agents_popup_renders_tidy_table_columns() {
 
 // ── Event handling — TeammateMessage ─────────────────────────────────────────
 
-#[test]
-fn test_event_teammate_message_logs_preview() {
+#[tokio::test]
+async fn test_event_teammate_message_logs_preview() {
     let mut app = support::make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
@@ -1320,7 +1342,8 @@ fn test_event_teammate_message_logs_preview() {
         to: "lead".to_string(),
         message_type: "message".to_string(),
         preview: "here is my result".to_string(),
-    });
+    })
+    .await;
 
     assert!(
         app.log_entries
@@ -1335,8 +1358,8 @@ fn test_event_teammate_message_logs_preview() {
     );
 }
 
-#[test]
-fn test_event_teammate_message_increments_receiver_counter() {
+#[tokio::test]
+async fn test_event_teammate_message_increments_receiver_counter() {
     let mut app = support::make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
@@ -1348,7 +1371,8 @@ fn test_event_teammate_message_increments_receiver_counter() {
         to: "tm-002".to_string(),
         message_type: "message".to_string(),
         preview: "please check logs".to_string(),
-    });
+    })
+    .await;
 
     assert_eq!(
         app.team_message_counts.get("tm-002").copied(),

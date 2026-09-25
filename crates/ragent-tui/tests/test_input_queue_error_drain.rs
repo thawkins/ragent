@@ -38,11 +38,12 @@ fn app_with_session() -> App {
 
 /// Deliver an `AgentError` for the current session and capture the dispatched
 /// prompt, if any.
-fn agent_error(app: &mut App) {
+async fn agent_error(app: &mut App) {
     app.handle_event(Event::AgentError {
         session_id: "test-session".to_string(),
         error: "simulated failure".to_string(),
-    });
+    })
+    .await;
 }
 
 /// Count user messages in the conversation.
@@ -56,7 +57,7 @@ async fn test_agent_error_drains_oldest_entry() {
     app.is_processing = true;
     app.input_queue.push_back(entry("first queued"));
 
-    agent_error(&mut app);
+    agent_error(&mut app).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -83,16 +84,16 @@ async fn test_agent_error_drains_strict_fifo_order() {
     app.input_queue.push_back(entry("B"));
     app.input_queue.push_back(entry("C"));
 
-    agent_error(&mut app);
+    agent_error(&mut app).await;
     assert_eq!(app.last_prompt, "A", "FR-019: oldest entry goes first");
     assert_eq!(app.input_queue_len(), 2);
 
     // A second failing turn opens the next boundary.
-    agent_error(&mut app);
+    agent_error(&mut app).await;
     assert_eq!(app.last_prompt, "B");
     assert_eq!(app.input_queue_len(), 1);
 
-    agent_error(&mut app);
+    agent_error(&mut app).await;
     assert_eq!(app.last_prompt, "C");
     assert_eq!(app.input_queue_len(), 0);
 }
@@ -104,7 +105,7 @@ async fn test_agent_error_retains_the_remaining_entries() {
     app.input_queue.push_back(entry("ERROR-QUEUE-1"));
     app.input_queue.push_back(entry("ERROR-QUEUE-2"));
 
-    agent_error(&mut app);
+    agent_error(&mut app).await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -122,7 +123,7 @@ async fn test_agent_error_with_empty_queue_is_a_noop() {
     let mut app = app_with_session();
     app.is_processing = true;
 
-    agent_error(&mut app);
+    agent_error(&mut app).await;
 
     assert_eq!(app.input_queue_len(), 0);
     assert_eq!(user_message_count(&app), 0);
@@ -137,7 +138,7 @@ async fn test_agent_error_clears_processing_before_draining() {
     )));
     app.input_queue.push_back(entry("queued"));
 
-    agent_error(&mut app);
+    agent_error(&mut app).await;
 
     assert!(
         !app.is_processing,
@@ -159,7 +160,8 @@ async fn test_agent_error_for_another_session_does_not_drain() {
     app.handle_event(Event::AgentError {
         session_id: "other-session".to_string(),
         error: "simulated failure".to_string(),
-    });
+    })
+    .await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -183,7 +185,8 @@ async fn test_agent_error_drain_is_skipped_without_an_active_session() {
     app.handle_event(Event::AgentError {
         session_id: "test-session".to_string(),
         error: "simulated failure".to_string(),
-    });
+    })
+    .await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -200,7 +203,7 @@ async fn test_agent_error_drain_requests_redraw_for_the_counter() {
     app.input_queue.push_back(entry("two"));
     app.needs_redraw = false;
 
-    agent_error(&mut app);
+    agent_error(&mut app).await;
 
     assert!(
         app.needs_redraw,
@@ -214,7 +217,7 @@ async fn test_agent_error_drain_uses_the_async_dispatch_path() {
     app.is_processing = true;
     app.input_queue.push_back(entry("async"));
 
-    agent_error(&mut app);
+    agent_error(&mut app).await;
 
     // NFR-004: dispatch_user_message spawns the turn on a tokio task and arms a
     // cancel flag; it never runs the turn inline, so the UI thread stays free.
@@ -233,7 +236,7 @@ async fn test_error_and_message_end_boundaries_both_drain() {
     app.input_queue.push_back(entry("ERROR-QUEUE-1"));
     app.input_queue.push_back(entry("ERROR-QUEUE-2"));
 
-    agent_error(&mut app);
+    agent_error(&mut app).await;
     assert_eq!(app.last_prompt, "ERROR-QUEUE-1");
     assert_eq!(app.input_queue_len(), 1);
 
@@ -242,7 +245,8 @@ async fn test_error_and_message_end_boundaries_both_drain() {
         session_id: "test-session".to_string(),
         message_id: "msg-1".to_string(),
         reason: ragent_agent::event::FinishReason::Stop,
-    });
+    })
+    .await;
     assert_eq!(app.last_prompt, "ERROR-QUEUE-2");
     assert_eq!(app.input_queue_len(), 0);
 }

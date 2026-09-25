@@ -13,12 +13,12 @@ use support::make_app;
 mod support;
 
 /// Run `/<cmd> help` and return the last assistant message text.
-fn last_output_after_help(app: &mut App, cmd: &str) -> String {
-    last_output_after(app, &format!("/{cmd} help"))
+async fn last_output_after_help(app: &mut App, cmd: &str) -> String {
+    last_output_after(app, &format!("/{cmd} help")).await
 }
 
-fn assert_help(app: &mut App, cmd: &str, expect_status: &str) {
-    let text = last_output_after_help(app, cmd);
+async fn assert_help(app: &mut App, cmd: &str, expect_status: &str) {
+    let text = last_output_after_help(app, cmd).await;
     assert!(
         text.contains(&format!("From: /{cmd} help")),
         "/{cmd} help should emit a 'From: /{cmd} help' header, got: {text}"
@@ -26,223 +26,231 @@ fn assert_help(app: &mut App, cmd: &str, expect_status: &str) {
     assert_eq!(app.status, expect_status, "/{cmd} help status");
 }
 
-#[test]
-fn test_slash_config_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_config_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "config", "config: help");
-    assert!(last_output_after_help(&mut app, "config").contains("/config save"));
+    assert_help(&mut app, "config", "config: help").await;
+    assert!(
+        last_output_after_help(&mut app, "config")
+            .await
+            .contains("/config save")
+    );
 }
 
-#[test]
-fn test_slash_init_help_does_not_start_analysis() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_init_help_does_not_start_analysis() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "init", "init: help");
+    assert_help(&mut app, "init", "init: help").await;
     // The help arm must not spawn the analysis agent run.
     assert!(!app.is_processing, "/init help must not start processing");
-    let text = last_output_after_help(&mut app, "init");
+    let text = last_output_after_help(&mut app, "init").await;
     assert!(text.contains("/init config"));
 }
 
-#[test]
-fn test_slash_context_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_context_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "context", "context: help");
+    assert_help(&mut app, "context", "context: help").await;
 }
 
-#[test]
-fn test_slash_mcp_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_mcp_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "mcp", "mcp: help");
-    assert!(last_output_after_help(&mut app, "mcp").contains("/mcp discover"));
+    assert_help(&mut app, "mcp", "mcp: help").await;
+    assert!(
+        last_output_after_help(&mut app, "mcp")
+            .await
+            .contains("/mcp discover")
+    );
 }
 
-#[test]
-fn test_slash_profile_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_profile_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "profile", "profile: help");
+    assert_help(&mut app, "profile", "profile: help").await;
 }
 
-#[test]
-fn test_slash_perf_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_perf_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "perf", "perf: help");
+    assert_help(&mut app, "perf", "perf: help").await;
 }
 
-#[test]
-fn test_slash_model_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_model_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "model", "model: help");
+    assert_help(&mut app, "model", "model: help").await;
 }
 
-#[test]
-fn test_slash_provider_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_provider_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "provider", "provider: help");
+    assert_help(&mut app, "provider", "provider: help").await;
 }
 
-#[test]
-fn test_slash_reload_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_reload_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "reload", "reload: help");
+    assert_help(&mut app, "reload", "reload: help").await;
 }
 
-#[test]
-fn test_slash_mode_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_mode_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "mode", "mode: help");
+    assert_help(&mut app, "mode", "mode: help").await;
 }
 
-#[test]
-fn test_slash_autopilot_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_autopilot_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "autopilot", "autopilot: help");
+    assert_help(&mut app, "autopilot", "autopilot: help").await;
     // Help must not enable autopilot.
     assert!(!app.autopilot_enabled);
 }
 
-#[test]
-fn test_slash_github_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_github_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "github", "github: help");
+    assert_help(&mut app, "github", "github: help").await;
 }
 
-#[test]
-fn test_slash_gitlab_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_gitlab_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "gitlab", "gitlab: help");
+    assert_help(&mut app, "gitlab", "gitlab: help").await;
 }
 
-#[test]
-fn test_slash_update_help_does_not_check_network() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_update_help_does_not_check_network() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "update", "update: help");
+    assert_help(&mut app, "update", "update: help").await;
 }
 
-#[test]
-fn test_slash_mouse_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_mouse_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "mouse", "mouse: help");
+    assert_help(&mut app, "mouse", "mouse: help").await;
 }
 
-#[test]
-fn test_slash_yolo_help_does_not_toggle() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_yolo_help_does_not_toggle() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "yolo", "yolo: help");
+    assert_help(&mut app, "yolo", "yolo: help").await;
 }
 
-#[test]
-fn test_slash_skills_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_skills_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "skills", "skills: help");
+    assert_help(&mut app, "skills", "skills: help").await;
 }
 
-#[test]
-fn test_slash_agent_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_agent_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "agent", "agent: help");
+    assert_help(&mut app, "agent", "agent: help").await;
     // Help must not open the picker dialog.
     assert!(app.provider_setup.is_none());
 }
 
-#[test]
-fn test_slash_cancel_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_cancel_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "cancel", "cancel: help");
+    assert_help(&mut app, "cancel", "cancel: help").await;
 }
 
-#[test]
-fn test_slash_system_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_system_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "system", "system: help");
+    assert_help(&mut app, "system", "system: help").await;
 }
 
-#[test]
-fn test_slash_undo_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_undo_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "undo", "undo: help");
+    assert_help(&mut app, "undo", "undo: help").await;
 }
 
-#[test]
-fn test_slash_name_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_name_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "name", "name: help");
+    assert_help(&mut app, "name", "name: help").await;
 }
 
-#[test]
-fn test_slash_resume_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_resume_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "resume", "resume: help");
+    assert_help(&mut app, "resume", "resume: help").await;
 }
 
-#[test]
-fn test_slash_doctor_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_doctor_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "doctor", "doctor: help");
+    assert_help(&mut app, "doctor", "doctor: help").await;
 }
 
-#[test]
-fn test_slash_history_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_history_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "history", "history: help");
+    assert_help(&mut app, "history", "history: help").await;
     // Help must not open the history picker.
     assert!(app.history_picker.is_none());
 }
 
-#[test]
-fn test_slash_template_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_template_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "template", "template: help");
+    assert_help(&mut app, "template", "template: help").await;
 }
 
-#[test]
-fn test_slash_plan_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_plan_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    assert_help(&mut app, "plan", "plan: help");
+    assert_help(&mut app, "plan", "plan: help").await;
 }
 
-#[test]
-fn test_slash_help_dash_h_aliases() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_help_dash_h_aliases() {
     // `--help` / `-h` spellings resolve to the same help output on families
     // that historically only accepted the bare token.
     let mut app = make_app();
     app.session_id = Some("s".to_string());
 
-    app.execute_slash_command("/loop -h");
+    app.execute_slash_command("/loop -h").await;
     assert_eq!(app.status, "loop: help");
 }
 
-#[test]
-fn test_slash_central_help_lists_new_commands() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_central_help_lists_new_commands() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
     let text = app
         .messages
         .last()
@@ -304,18 +312,21 @@ fn test_slash_toolchain_menu_suggestions() {
 // /toolchain dispatcher tests (T-009; FR-002, FR-003, FR-014)
 // ---------------------------------------------------------------------------
 
-fn last_output_after(app: &mut App, input: &str) -> String {
-    app.execute_slash_command(input);
+async fn last_output_after(app: &mut App, input: &str) -> String {
+    // `/toolchain list` runs its probes through `tokio::task::block_in_place`,
+    // which requires the multi-thread reactor; this file's tests therefore run
+    // on the multi-thread flavour (`#[tokio::test(flavor = "multi_thread")]`).
+    app.execute_slash_command(input).await;
     app.messages
         .last()
         .map(|m| m.text_content())
         .unwrap_or_default()
 }
 
-#[test]
-fn test_toolchain_help_renders_help_page() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_help_renders_help_page() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain help");
+    let text = last_output_after(&mut app, "/toolchain help").await;
     assert!(
         text.contains("From: /toolchain help"),
         "/toolchain help must emit a 'From: /toolchain help' header (FR-003), got: {text}"
@@ -353,11 +364,11 @@ fn test_toolchain_help_renders_help_page() {
     assert_eq!(app.status, "toolchain: help");
 }
 
-#[test]
-fn test_toolchain_bare_and_aliases_route_to_help() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_bare_and_aliases_route_to_help() {
     for args in ["", "--help", "-h", "HELP"] {
         let mut app = make_app();
-        let text = last_output_after(&mut app, &format!("/toolchain {args}"));
+        let text = last_output_after(&mut app, &format!("/toolchain {args}")).await;
         assert!(
             text.contains("From: /toolchain help"),
             "`/toolchain {args}` must route to the help page (FR-002), got: {text}"
@@ -366,10 +377,10 @@ fn test_toolchain_bare_and_aliases_route_to_help() {
     }
 }
 
-#[test]
-fn test_toolchain_unknown_subcommand_correction() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_unknown_subcommand_correction() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain nope");
+    let text = last_output_after(&mut app, "/toolchain nope").await;
     // FR-014: From: /toolchain header, usage line, pointer to help.
     assert!(
         text.contains("From: /toolchain"),
@@ -405,10 +416,10 @@ fn data_row_count(table: &str) -> usize {
     borders.saturating_sub(2)
 }
 
-#[test]
-fn test_toolchain_list_language_filter_renders_only_that_row() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_language_filter_renders_only_that_row() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list rust");
+    let text = last_output_after(&mut app, "/toolchain list rust").await;
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     // FR-011: prefix and one-row report for the requested language.
     assert!(
@@ -434,11 +445,11 @@ fn test_toolchain_list_language_filter_renders_only_that_row() {
     assert_eq!(app.status, "toolchain: list");
 }
 
-#[test]
-fn test_toolchain_list_language_filter_case_insensitive() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_language_filter_case_insensitive() {
     for spelling in ["RUST", "Rust"] {
         let mut app = make_app();
-        let text = last_output_after(&mut app, &format!("/toolchain list {spelling}"));
+        let text = last_output_after(&mut app, &format!("/toolchain list {spelling}")).await;
         let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
             flat.contains("From: /toolchain list"),
@@ -456,10 +467,10 @@ fn test_toolchain_list_language_filter_case_insensitive() {
     }
 }
 
-#[test]
-fn test_toolchain_list_unknown_language_warns_and_lists_valid_ids() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_unknown_language_warns_and_lists_valid_ids() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list nosuchlang");
+    let text = last_output_after(&mut app, "/toolchain list nosuchlang").await;
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     // FR-011: warn, echo the valid id list, produce no report table.
     assert!(
@@ -485,10 +496,10 @@ fn test_toolchain_list_unknown_language_warns_and_lists_valid_ids() {
 // /toolchain list --json flag tests (T-013; FR-015)
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_toolchain_list_json_full_report_schema() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_json_full_report_schema() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list --json");
+    let text = last_output_after(&mut app, "/toolchain list --json").await;
     // FR-015: a bare JSON document, no From: prefix or markdown table.
     assert!(
         !text.contains("From: /toolchain") && !text.contains("| Language"),
@@ -524,10 +535,10 @@ fn test_toolchain_list_json_full_report_schema() {
     assert_eq!(app.status, "toolchain: list");
 }
 
-#[test]
-fn test_toolchain_list_json_with_language_filter() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_json_with_language_filter() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list rust --json");
+    let text = last_output_after(&mut app, "/toolchain list rust --json").await;
     let doc: serde_json::Value =
         serde_json::from_str(&text).expect("filtered json must parse (TC-010)");
     let languages = doc["languages"]
@@ -539,10 +550,10 @@ fn test_toolchain_list_json_with_language_filter() {
     assert_eq!(app.status, "toolchain: list");
 }
 
-#[test]
-fn test_toolchain_list_json_unknown_language_warns_without_json() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_json_unknown_language_warns_without_json() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list nosuchlang --json");
+    let text = last_output_after(&mut app, "/toolchain list nosuchlang --json").await;
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     // Unknown id + --json still warns (FR-011) and produces no JSON document.
     assert!(
@@ -560,10 +571,10 @@ fn test_toolchain_list_json_unknown_language_warns_without_json() {
 // /toolchain list blocking-thread + wait indicator (T-014; FR-016, NFR-001)
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_toolchain_list_runs_probes_off_the_event_loop_with_wait_status() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_runs_probes_off_the_event_loop_with_wait_status() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list");
+    let text = last_output_after(&mut app, "/toolchain list").await;
     // FR-016: the wait indicator is transient — once the report lands the
     // status bar reads `toolchain: list`, and the full table rendered (the
     // blocking-thread walk completed with every language row).
@@ -584,11 +595,11 @@ fn test_toolchain_list_runs_probes_off_the_event_loop_with_wait_status() {
 /// harness ceiling — the full 50-row walk plus report lands well inside a
 /// 5 s ceiling even on CI machines where dozens of child-process version
 /// probes serialise across blocking threads.
-#[test]
-fn test_toolchain_list_within_responsiveness_budget() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_within_responsiveness_budget() {
     let mut app = make_app();
     let start = std::time::Instant::now();
-    let text = last_output_after(&mut app, "/toolchain list");
+    let text = last_output_after(&mut app, "/toolchain list").await;
     let elapsed = start.elapsed();
     assert!(text.contains("From: /toolchain list"));
     // NFR-001 measures event-loop responsiveness, not total wall time; the
@@ -608,10 +619,10 @@ fn test_toolchain_list_within_responsiveness_budget() {
 /// entry even when runtimes are absent (`missing`, `nim`, `ocaml` are
 /// install-absent on the test box); the report table carries every row —
 /// absent runtimes never abort or truncate the walk.
-#[test]
-fn test_toolchain_list_absent_runtimes_do_not_truncate_report() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_absent_runtimes_do_not_truncate_report() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list");
+    let text = last_output_after(&mut app, "/toolchain list").await;
     // Every SUPPORTED_LANGUAGES id appears as a row (table-grid borders
     // minus the header block gives the data-row count, cf. T-014 test).
     let data_rows = text
@@ -648,10 +659,10 @@ fn test_toolchain_list_absent_runtimes_do_not_truncate_report() {
 /// `/toolchain list` ASCII grid are fixed at 10/10/10/50 characters, so
 /// every border line is exactly (10+2)x3 + (50+2) + 5 = 93 columns wide and
 /// every grid (pipe) line is too.
-#[test]
-fn test_toolchain_list_table_renders_at_fixed_column_widths() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_table_renders_at_fixed_column_widths() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list");
+    let text = last_output_after(&mut app, "/toolchain list").await;
     let borders = text
         .lines()
         .filter(|line| line.trim_start().starts_with("+-"))
@@ -689,10 +700,10 @@ fn test_toolchain_list_table_renders_at_fixed_column_widths() {
 /// wraps onto continuation grid lines instead of being clipped — no version
 /// text is dropped (the report still renders every row's status, and any
 /// continuation line carries text only in the Version column).
-#[test]
-fn test_toolchain_list_version_column_word_wraps() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_version_column_word_wraps() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list");
+    let text = last_output_after(&mut app, "/toolchain list").await;
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         flat.contains("installed") || flat.contains("not installed"),
@@ -702,10 +713,10 @@ fn test_toolchain_list_version_column_word_wraps() {
 }
 
 /// FR-017: a filtered single-language report uses the same fixed layout.
-#[test]
-fn test_toolchain_list_filtered_table_renders_at_fixed_column_widths() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_filtered_table_renders_at_fixed_column_widths() {
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list rust");
+    let text = last_output_after(&mut app, "/toolchain list rust").await;
     let border = text
         .lines()
         .find(|line| line.trim_start().starts_with("+-"))
@@ -721,13 +732,13 @@ fn test_toolchain_list_filtered_table_renders_at_fixed_column_widths() {
 /// FR-012: a missing version probe (the `r` runtime uses `R --version`,
 /// whose output shape varies by host) keeps its row in place with a
 /// status cell and never leaks raw probe arguments into the table.
-#[test]
-fn test_toolchain_list_probe_failure_keeps_row_with_placeholder() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_list_probe_failure_keeps_row_with_placeholder() {
     let mut app = make_app();
     // `r` (the R language) reports via `R --version` first line; on hosts
     // without R the PATH probe reports `not installed` — either way the row
     // renders with a single line version cell.
-    let text = last_output_after(&mut app, "/toolchain list r");
+    let text = last_output_after(&mut app, "/toolchain list r").await;
     // The TUI markdown pipeline may narrow-wrap the `r` id onto its own
     // grid cell, so match the flattened whole-table form instead of a
     // column-exact prefix.
@@ -763,8 +774,8 @@ fn test_toolchain_list_probe_failure_keeps_row_with_placeholder() {
 /// version commands. Verify by snapshotting the working tree's recursive
 /// file list plus every visible file's len before and after running the
 /// full command surface.
-#[test]
-fn test_toolchain_commands_leave_working_tree_untouched() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_toolchain_commands_leave_working_tree_untouched() {
     fn snapshot_tree(root: &std::path::Path) -> Vec<(String, u64)> {
         // (relative path, len) for every file, recursive.
         let mut entries = Vec::new();
@@ -813,7 +824,7 @@ fn test_toolchain_commands_leave_working_tree_untouched() {
         "/toolchain list nosuchlang",
         "/toolchain list --json",
     ] {
-        app.execute_slash_command(cmd);
+        app.execute_slash_command(cmd).await;
     }
 
     let after = (snapshot_tree(&spec_dir), snapshot_tree(&crate_src));

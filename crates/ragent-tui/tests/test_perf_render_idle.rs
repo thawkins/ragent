@@ -72,8 +72,8 @@ fn test_dirty_wake_always_renders() {
     );
 }
 
-#[test]
-fn test_pending_message_cache_group_forces_safety_paint() {
+#[tokio::test]
+async fn test_pending_message_cache_group_forces_safety_paint() {
     // Regression: a ToolCallStart that lands inside the PERF-042 throttle
     // window leaves the message group pending (`message_cache_dirty_from <
     // messages.len()`) and the pending-preserving frame both clears
@@ -92,7 +92,8 @@ fn test_pending_message_cache_group_forces_safety_paint() {
     app.handle_event(ragent_agent::event::Event::TextDelta {
         session_id: sid.clone(),
         text: "working on it".to_string(),
-    });
+    })
+    .await;
     render(&mut app);
     assert_eq!(
         app.message_cache_dirty_from,
@@ -105,7 +106,8 @@ fn test_pending_message_cache_group_forces_safety_paint() {
     app.handle_event(ragent_agent::event::Event::TextDelta {
         session_id: sid.clone(),
         text: " more".to_string(),
-    });
+    })
+    .await;
     render(&mut app); // deferred by the throttle; the group stays pending
 
     // The ToolCallStart arrives while the throttle window is still open.  Its
@@ -114,7 +116,8 @@ fn test_pending_message_cache_group_forces_safety_paint() {
         session_id: sid.clone(),
         call_id: "call-1".to_string(),
         tool: "bash".to_string(),
-    });
+    })
+    .await;
 
     // A burst of unrelated events (e.g. ToolResult/ToolCallArgs from earlier
     // calls) re-marks the UI dirty before the throttle tail wake fires; each

@@ -19,6 +19,7 @@ mod support;
 static CWD_LOCK: Mutex<()> = Mutex::new(());
 
 /// Acquire the cwd lock, ignoring a poisoned sibling test.
+#[allow(clippy::await_holding_lock)]
 fn cwd_lock() -> MutexGuard<'static, ()> {
     CWD_LOCK
         .lock()
@@ -63,13 +64,22 @@ impl Drop for CwdGuard {
 }
 
 /// Chdir into a fresh empty tempdir for the duration of the closure.
-fn in_empty_cwd<T>(f: impl FnOnce(&Path) -> T) -> T {
+///
+/// The closure must be `Send` so the returned future is `Send`: the caller
+/// runs on a multi-thread test reactor, and the `cwd_lock` guard is held across
+/// the closure's await points.
+#[allow(clippy::await_holding_lock, clippy::future_not_send)]
+async fn in_empty_cwd<T, F>(f: F) -> T
+where
+    F: AsyncFnOnce(&Path) -> T + Send,
+    T: Send,
+{
     let _lock = cwd_lock();
     let temp = tempfile::tempdir().expect("tempdir");
     let prev = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(temp.path()).expect("set cwd");
     let _guard = CwdGuard { prev };
-    f(temp.path())
+    f(temp.path()).await
 }
 
 #[test]
@@ -82,10 +92,10 @@ fn test_new_trigger_registered_in_slash_commands() {
     );
 }
 
-#[test]
-fn test_new_help_shows_usage_and_registry_values() {
+#[tokio::test]
+async fn test_new_help_shows_usage_and_registry_values() {
     let mut app = make_app();
-    app.execute_slash_command("/new help");
+    app.execute_slash_command("/new help").await;
     let text = last_output(&mut app);
     assert!(text.contains("From: /new"));
     assert!(text.contains("--language"));
@@ -101,13 +111,13 @@ fn test_new_help_shows_usage_and_registry_values() {
     assert_eq!(app.status, "new: help");
 }
 
-#[test]
-fn test_new_help_detailed_page_fully_documents_arguments() {
+#[tokio::test]
+async fn test_new_help_detailed_page_fully_documents_arguments() {
     // FR-018: the `/new help` page explains the purpose, documents every
     // argument (name, optionality, accepted values, omitted-default
     // behaviour), and includes at least two worked example invocations.
     let mut app = make_app();
-    app.execute_slash_command("/new help");
+    app.execute_slash_command("/new help").await;
     let text = last_output(&mut app);
     // The TUI surface renders the page through the markdown pipeline,
     // which re-wraps lines; phrase assertions run against a
@@ -141,47 +151,50 @@ fn test_new_help_detailed_page_fully_documents_arguments() {
     assert_eq!(app.status, "new: help");
 }
 
-#[test]
-fn test_new_bare_invocation_is_help() {
+#[tokio::test]
+async fn test_new_bare_invocation_is_help() {
     let mut app = make_app();
-    app.execute_slash_command("/new");
+    app.execute_slash_command("/new").await;
     assert!(last_output(&mut app).contains("From: /new"));
     assert_eq!(app.status, "new: help");
 }
 
-#[test]
-fn test_new_missing_flags_show_validation_error() {
+#[tokio::test]
+async fn test_new_missing_flags_show_validation_error() {
     let mut app = make_app();
-    app.execute_slash_command("/new --language rust");
+    app.execute_slash_command("/new --language rust").await;
     let text = last_output(&mut app);
     assert!(text.contains("missing required flag --type"));
     assert_eq!(app.status, "new: usage");
 }
 
-#[test]
-fn test_new_unknown_flag_shows_validation_error() {
+#[tokio::test]
+async fn test_new_unknown_flag_shows_validation_error() {
     let mut app = make_app();
-    app.execute_slash_command("/new --language rust --type tui --bogus");
+    app.execute_slash_command("/new --language rust --type tui --bogus")
+        .await;
     let text = last_output(&mut app);
     assert!(text.contains("unknown flag '--bogus'"));
     assert_eq!(app.status, "new: usage");
 }
 
-#[test]
-fn test_new_hosting_conflict_shows_conflict_error() {
+#[tokio::test]
+async fn test_new_hosting_conflict_shows_conflict_error() {
     let mut app = make_app();
-    app.execute_slash_command("/new --language rust --type cmdline --github --gitlab");
+    app.execute_slash_command("/new --language rust --type cmdline --github --gitlab")
+        .await;
     let text = last_output(&mut app);
     assert!(text.contains("mutually exclusive"));
     assert_eq!(app.status, "new: usage");
 }
 
-#[test]
-fn test_new_nonempty_directory_refuses() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+async fn test_new_nonempty_directory_refuses() {
+    in_empty_cwd(async |dir| {
         std::fs::write(dir.join("stray-file.txt"), b"occupied").expect("seed file");
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline");
+        app.execute_slash_command("/new --language rust --type cmdline")
+            .await;
         let text = last_output(&mut app);
         assert!(text.contains("directory is not empty"));
         assert!(text.contains("stray-file.txt"));
@@ -189,14 +202,16 @@ fn test_new_nonempty_directory_refuses() {
         // Zero file mutations beyond the seeded entry.
         assert!(!dir.join("Cargo.toml").exists());
         assert!(!dir.join(".git").exists());
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_new_scaffolds_project_foreground() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+async fn test_new_scaffolds_project_foreground() {
+    in_empty_cwd(async |dir| {
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline");
+        app.execute_slash_command("/new --language rust --type cmdline")
+            .await;
         wait_newproj(&mut app);
 
         // FR-014: foreground — no sub-agent processing state.
@@ -227,12 +242,13 @@ fn test_new_scaffolds_project_foreground() {
         assert!(text.contains("initialised new repository"));
         assert!(text.contains("Remote: none"));
         assert!(app.status.starts_with("new: scaffolded"));
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_new_github_hosting_without_token_fails_contained() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+async fn test_new_github_hosting_without_token_fails_contained() {
+    in_empty_cwd(async |dir| {
         // Make the GitHub token resolution deterministic: no env token, and
         // a HOME without the credential file. The remote-init step then
         // fails contained (FR-010) without any network access.
@@ -274,7 +290,8 @@ fn test_new_github_hosting_without_token_fails_contained() {
         }
 
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline --github");
+        app.execute_slash_command("/new --language rust --type cmdline --github")
+            .await;
         wait_newproj(&mut app);
 
         // FR-010: the local scaffold completed and is reported, the failed
@@ -299,12 +316,13 @@ fn test_new_github_hosting_without_token_fails_contained() {
             "failed auth must not register a remote"
         );
         assert!(app.status.starts_with("new: scaffolded"));
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_new_gitlab_hosting_without_token_fails_contained() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+async fn test_new_gitlab_hosting_without_token_fails_contained() {
+    in_empty_cwd(async |dir| {
         // Make the GitLab token resolution deterministic: no env token, and
         // a HOME without the credential file. The remote-init step then
         // fails contained (FR-010) without any network access.
@@ -342,7 +360,8 @@ fn test_new_gitlab_hosting_without_token_fails_contained() {
         }
 
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline --gitlab");
+        app.execute_slash_command("/new --language rust --type cmdline --gitlab")
+            .await;
         wait_newproj(&mut app);
 
         // FR-010: the local scaffold completed and is reported, the failed
@@ -367,16 +386,18 @@ fn test_new_gitlab_hosting_without_token_fails_contained() {
             "failed auth must not register a remote"
         );
         assert!(app.status.starts_with("new: scaffolded"));
-    });
+    })
+    .await;
 }
 
 // ---------------------------------------------------- FR-007 overlays ---
 
-#[test]
-fn test_new_known_stack_layers_dependency_and_snippet() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+async fn test_new_known_stack_layers_dependency_and_snippet() {
+    in_empty_cwd(async |dir| {
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline --stack axum");
+        app.execute_slash_command("/new --language rust --type cmdline --stack axum")
+            .await;
         wait_newproj(&mut app);
 
         // Dependency appended to the manifest (FR-007).
@@ -389,14 +410,16 @@ fn test_new_known_stack_layers_dependency_and_snippet() {
         assert!(source.starts_with("use axum::routing::get;\nuse axum::Router;\n"));
         assert!(source.contains("Hello, world!"));
         assert!(source.contains("axum::serve"));
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_new_unknown_stack_warns_and_continues_with_base_layout() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+async fn test_new_unknown_stack_warns_and_continues_with_base_layout() {
+    in_empty_cwd(async |dir| {
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline --stack nosuchstack");
+        app.execute_slash_command("/new --language rust --type cmdline --stack nosuchstack")
+            .await;
         wait_newproj(&mut app);
 
         // FR-007: warn and continue with the base layout — the scaffold
@@ -413,14 +436,16 @@ fn test_new_unknown_stack_warns_and_continues_with_base_layout() {
         let source = std::fs::read_to_string(dir.join("src/main.rs")).expect("source");
         assert!(source.contains("Hello, world!"));
         assert!(!source.contains("axum"));
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_new_stack_case_insensitive_and_docs_match_recipe() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+async fn test_new_stack_case_insensitive_and_docs_match_recipe() {
+    in_empty_cwd(async |dir| {
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline --stack AXUM");
+        app.execute_slash_command("/new --language rust --type cmdline --stack AXUM")
+            .await;
         wait_newproj(&mut app);
 
         // Case-insensitive registry match applies the overlay.
@@ -433,21 +458,25 @@ fn test_new_stack_case_insensitive_and_docs_match_recipe() {
         // NFR-002: STATS records the applied stack.
         let stats = std::fs::read_to_string(dir.join("STATS.md")).expect("stats");
         assert!(stats.contains("axum"));
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_new_stack_rerun_never_overwrites_overlay_files() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+#[allow(clippy::large_futures)]
+async fn test_new_stack_rerun_never_overwrites_overlay_files() {
+    in_empty_cwd(async |dir| {
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline --stack warp");
+        app.execute_slash_command("/new --language rust --type cmdline --stack warp")
+            .await;
         wait_newproj(&mut app);
         let manifest_first = std::fs::read_to_string(dir.join("Cargo.toml")).expect("manifest");
 
         // FR-016: a second run in the same (now non-empty) directory is
         // refused by the guard before any writes.
         let mut app2 = make_app();
-        app2.execute_slash_command("/new --language rust --type cmdline --stack warp");
+        app2.execute_slash_command("/new --language rust --type cmdline --stack warp")
+            .await;
         wait_newproj(&mut app2);
         let text2 = last_output(&mut app2);
         assert!(text2.contains("directory is not empty"));
@@ -456,15 +485,17 @@ fn test_new_stack_rerun_never_overwrites_overlay_files() {
         let manifest_second = std::fs::read_to_string(dir.join("Cargo.toml")).expect("manifest");
         assert_eq!(manifest_first, manifest_second);
         assert_eq!(manifest_second.matches("warp = \"0.3\"").count(), 1);
-    });
+    })
+    .await;
 }
 // ------------------------------------------------- T-013/FR-014 streaming ---
 
-#[test]
-fn test_new_streams_progress_lines_into_message_window() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+async fn test_new_streams_progress_lines_into_message_window() {
+    in_empty_cwd(async |dir| {
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline");
+        app.execute_slash_command("/new --language rust --type cmdline")
+            .await;
         wait_newproj(&mut app);
 
         // The run start is visible immediately: the seeded progress message
@@ -496,14 +527,16 @@ fn test_new_streams_progress_lines_into_message_window() {
         assert!(summary.contains("Remote: none"));
         assert!(dir.join("Cargo.toml").exists());
         assert_eq!(app.status, "new: scaffolded");
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_new_progress_updates_one_message_in_place() {
-    in_empty_cwd(|_dir| {
+#[tokio::test]
+async fn test_new_progress_updates_one_message_in_place() {
+    in_empty_cwd(async |_dir| {
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline");
+        app.execute_slash_command("/new --language rust --type cmdline")
+            .await;
         wait_newproj(&mut app);
 
         // The progress panel updates a single message in place: exactly one
@@ -529,15 +562,17 @@ fn test_new_progress_updates_one_message_in_place() {
             .filter(|m| m.text_content().contains("Scaffolded "))
             .count();
         assert_eq!(summary_count, 1);
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_new_guard_refusal_is_synchronous_without_streaming() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+async fn test_new_guard_refusal_is_synchronous_without_streaming() {
+    in_empty_cwd(async |dir| {
         std::fs::write(dir.join("stray-file.txt"), b"occupied").expect("seed file");
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline");
+        app.execute_slash_command("/new --language rust --type cmdline")
+            .await;
 
         // The FR-002 guard runs inline: the refusal is present without any
         // poll loop, no worker was spawned, and no progress panel exists.
@@ -555,12 +590,13 @@ fn test_new_guard_refusal_is_synchronous_without_streaming() {
             "no progress panel for a refused run"
         );
         assert_eq!(app.status, "new: directory not empty");
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_new_remote_failure_streams_contained_summary() {
-    in_empty_cwd(|dir| {
+#[tokio::test]
+async fn test_new_remote_failure_streams_contained_summary() {
+    in_empty_cwd(async |dir| {
         struct EnvGuard {
             saved: Vec<(&'static str, Option<String>)>,
         }
@@ -599,7 +635,8 @@ fn test_new_remote_failure_streams_contained_summary() {
         }
 
         let mut app = make_app();
-        app.execute_slash_command("/new --language rust --type cmdline --github");
+        app.execute_slash_command("/new --language rust --type cmdline --github")
+            .await;
         wait_newproj(&mut app);
 
         // T-013: the streamed run-start header plus step lines are present,
@@ -620,5 +657,6 @@ fn test_new_remote_failure_streams_contained_summary() {
         assert!(summary.contains("local scaffold is intact"));
         assert!(dir.join(".git").is_dir());
         assert_eq!(app.status, "new: scaffolded");
-    });
+    })
+    .await;
 }

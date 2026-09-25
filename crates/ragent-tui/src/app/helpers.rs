@@ -21,18 +21,45 @@ pub(crate) fn try_extract_research_code_block(text: &str) -> Option<String> {
     if !text.starts_with("From: /") {
         return None;
     }
-    // Opening fence must be a bare triple-backtick line: "\n```\n" preceded by
-    // a blank line so we don't accidentally match the closing fence of a
-    // language-tagged block earlier in the text.
-    let body_start = text.find("\n\n```\n")? + 5;
-    // Closing fence may be `\n```\n` (followed by more text) or `\n```\n` at
-    // end-of-string.  `\n```` would terminate early on a four-backtick fence,
-    // but we only emit triple-backtick fences from this codebase.
-    let body_end_off = text[body_start..].find("\n```")?;
-    let body_end = body_start + body_end_off;
-    let body = &text[body_start..body_end];
-    let prefix = &text[..body_start - 5];
-    Some(format!("{}\n\n{}", prefix.trim_end(), body))
+    // A message may contain several preformatted tables (e.g. `/tools` shows
+    // the visibility switch table and then the tool list).  Extract EVERY
+    // blank-line-separated bare triple-backtick block so later tables are not
+    // discarded, keeping the non-fenced text (headings, summaries) in order.
+    //
+    // The opening fence must be a bare triple-backtick line preceded by a blank
+    // line, so the closing fence of a language-tagged block earlier in the text
+    // is not mistaken for an opener.  Four-backtick fences are not emitted by
+    // this codebase, so `\n```` never terminates a block early.
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut found = false;
+    while let Some(start) = rest.find("\n\n```\n") {
+        let body_start = start + 5;
+        let Some(end_off) = rest[body_start..].find("\n```") else {
+            break;
+        };
+        let body_end = body_start + end_off;
+        // Keep the prose before the block, then the block body itself with the
+        // fences removed.
+        let prefix = rest[..start].trim_end();
+        if !prefix.is_empty() {
+            out.push_str(prefix);
+            out.push_str("\n\n");
+        }
+        out.push_str(&rest[body_start..body_end]);
+        out.push_str("\n\n");
+        found = true;
+        rest = &rest[body_end + 4..];
+    }
+    if !found {
+        return None;
+    }
+    let tail = rest.trim();
+    if !tail.is_empty() {
+        out.push_str(tail);
+        out.push('\n');
+    }
+    Some(out.trim_end().to_string())
 }
 
 pub(crate) fn parse_swarm_args(args: &str) -> (String, Option<String>) {

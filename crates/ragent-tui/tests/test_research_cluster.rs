@@ -129,7 +129,7 @@ async fn test_research_cluster_valid_sources() {
 
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
-    app.execute_slash_command("/research cluster foo");
+    app.execute_slash_command("/research cluster foo").await;
 
     assert!(app.status.starts_with("[wait]"), "status: {}", app.status);
     assert!(
@@ -150,7 +150,8 @@ async fn test_research_cluster_valid_sources_force() {
 
     let mut app = make_app();
     app.session_id = Some("s2".to_string());
-    app.execute_slash_command("/research cluster bar --force");
+    app.execute_slash_command("/research cluster bar --force")
+        .await;
 
     assert!(app.status.starts_with("[wait]"), "status: {}", app.status);
     assert!(
@@ -169,7 +170,7 @@ async fn test_research_cluster_missing_folder() {
     let mut app = make_app();
     app.session_id = Some("s3".to_string());
 
-    app.execute_slash_command("/research cluster missing");
+    app.execute_slash_command("/research cluster missing").await;
 
     assert_eq!(app.status, "research: cluster 'missing' folder missing");
     let text = app.messages.last().unwrap().text_content();
@@ -187,7 +188,8 @@ async fn test_research_cluster_no_sources_folder() {
     let mut app = make_app();
     app.session_id = Some("s4".to_string());
 
-    app.execute_slash_command("/research cluster no-sources");
+    app.execute_slash_command("/research cluster no-sources")
+        .await;
 
     assert_eq!(app.status, "research: cluster 'no-sources' no sources");
     let text = app.messages.last().unwrap().text_content();
@@ -205,7 +207,7 @@ async fn test_research_cluster_empty_sources() {
     let mut app = make_app();
     app.session_id = Some("s5".to_string());
 
-    app.execute_slash_command("/research cluster empty");
+    app.execute_slash_command("/research cluster empty").await;
 
     assert_eq!(app.status, "research: cluster 'empty' empty sources");
     let text = app.messages.last().unwrap().text_content();
@@ -225,7 +227,8 @@ async fn test_research_cluster_rejects_existing_concepts_without_force() {
     let mut app = make_app();
     app.session_id = Some("s6".to_string());
 
-    app.execute_slash_command("/research cluster existing");
+    app.execute_slash_command("/research cluster existing")
+        .await;
 
     assert_eq!(app.status, "research: cluster 'existing' already clustered");
     let text = app.messages.last().unwrap().text_content();
@@ -245,7 +248,8 @@ async fn test_research_cluster_force_overwrites_existing_concepts() {
 
     let mut app = make_app();
     app.session_id = Some("s7".to_string());
-    app.execute_slash_command("/research cluster forced --force");
+    app.execute_slash_command("/research cluster forced --force")
+        .await;
 
     assert!(app.status.starts_with("[wait]"), "status: {}", app.status);
     assert!(

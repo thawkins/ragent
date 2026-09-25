@@ -34,12 +34,13 @@ fn render_dialog_area(app: &mut ragent_tui::App) -> String {
     text
 }
 
-#[test]
-fn test_alt_x_opens_stop_confirm_dialog_while_processing() {
+#[tokio::test]
+async fn test_alt_x_opens_stop_confirm_dialog_while_processing() {
     let mut app = support::make_app();
     app.is_processing = true;
 
-    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT));
+    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
+        .await;
 
     assert!(
         app.pending_stop_confirm,
@@ -57,12 +58,13 @@ fn test_alt_x_opens_stop_confirm_dialog_while_processing() {
     );
 }
 
-#[test]
-fn test_alt_x_ignored_when_not_processing() {
+#[tokio::test]
+async fn test_alt_x_ignored_when_not_processing() {
     let mut app = support::make_app();
     app.is_processing = false;
 
-    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT));
+    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
+        .await;
 
     assert!(
         !app.pending_stop_confirm,
@@ -74,17 +76,19 @@ fn test_alt_x_ignored_when_not_processing() {
     );
 }
 
-#[test]
-fn test_stop_confirm_yes_halts_agent() {
+#[tokio::test]
+async fn test_stop_confirm_yes_halts_agent() {
     let mut app = support::make_app();
     app.is_processing = true;
     let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     app.cancel_flag = Some(std::sync::Arc::clone(&cancel_flag));
 
-    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT));
+    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
+        .await;
     assert!(app.pending_stop_confirm, "dialog open before Yes");
 
-    app.handle_key_event(key(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(key(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert!(
         !app.pending_stop_confirm,
@@ -101,15 +105,17 @@ fn test_stop_confirm_yes_halts_agent() {
     );
 }
 
-#[test]
-fn test_stop_confirm_cancel_keeps_agent_running() {
+#[tokio::test]
+async fn test_stop_confirm_cancel_keeps_agent_running() {
     let mut app = support::make_app();
     app.is_processing = true;
     let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     app.cancel_flag = Some(std::sync::Arc::clone(&cancel_flag));
 
-    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT));
-    app.handle_key_event(key(KeyCode::Esc, KeyModifiers::NONE));
+    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
+        .await;
+    app.handle_key_event(key(KeyCode::Esc, KeyModifiers::NONE))
+        .await;
 
     assert!(
         !app.pending_stop_confirm,
@@ -126,14 +132,16 @@ fn test_stop_confirm_cancel_keeps_agent_running() {
     );
 }
 
-#[test]
-fn test_stop_confirm_swallows_other_keys_until_resolved() {
+#[tokio::test]
+async fn test_stop_confirm_swallows_other_keys_until_resolved() {
     let mut app = support::make_app();
     app.is_processing = true;
 
-    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT));
+    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
+        .await;
     // Any other key is swallowed by the modal.
-    app.handle_key_event(key(KeyCode::Char('q'), KeyModifiers::NONE));
+    app.handle_key_event(key(KeyCode::Char('q'), KeyModifiers::NONE))
+        .await;
     assert!(
         app.pending_stop_confirm,
         "an unrelated key must not dismiss or confirm the dialog"
@@ -144,12 +152,13 @@ fn test_stop_confirm_swallows_other_keys_until_resolved() {
     );
 
     // Cancel closes it again.
-    app.handle_key_event(key(KeyCode::Esc, KeyModifiers::NONE));
+    app.handle_key_event(key(KeyCode::Esc, KeyModifiers::NONE))
+        .await;
     assert!(!app.pending_stop_confirm, "Esc dismisses the dialog");
 }
 
-#[test]
-fn test_stop_confirm_not_opened_while_another_modal_is_up() {
+#[tokio::test]
+async fn test_stop_confirm_not_opened_while_another_modal_is_up() {
     let mut app = support::make_app();
     app.is_processing = true;
     // The memory-delete modal outranks the stop dialog inside `handle_key`:
@@ -159,7 +168,8 @@ fn test_stop_confirm_not_opened_while_another_modal_is_up() {
         preview: "preview".to_string(),
     });
 
-    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT));
+    app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
+        .await;
 
     assert!(
         !app.pending_stop_confirm,

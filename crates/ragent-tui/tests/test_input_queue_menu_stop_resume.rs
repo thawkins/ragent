@@ -48,8 +48,8 @@ fn user_message_count(app: &App) -> usize {
 // FR-025 / FR-029 — Stop halts exactly like CancelAgent and never advances
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_stop_row_halts_the_running_turn() {
+#[tokio::test]
+async fn test_stop_row_halts_the_running_turn() {
     let mut app = app_with_session();
     app.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
@@ -68,8 +68,8 @@ fn test_stop_row_halts_the_running_turn() {
     );
 }
 
-#[test]
-fn test_stop_row_does_not_advance_the_queue() {
+#[tokio::test]
+async fn test_stop_row_does_not_advance_the_queue() {
     let mut app = app_with_session();
     app.is_processing = true;
     app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
@@ -91,8 +91,8 @@ fn test_stop_row_does_not_advance_the_queue() {
     );
 }
 
-#[test]
-fn test_stop_row_closes_the_menu_and_resets_selection() {
+#[tokio::test]
+async fn test_stop_row_closes_the_menu_and_resets_selection() {
     let mut app = app_with_session();
     app.is_processing = true;
     app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
@@ -111,8 +111,8 @@ fn test_stop_row_closes_the_menu_and_resets_selection() {
     );
 }
 
-#[test]
-fn test_stop_row_leaves_input_buffer_and_attachments_untouched() {
+#[tokio::test]
+async fn test_stop_row_leaves_input_buffer_and_attachments_untouched() {
     let mut app = app_with_session();
     app.is_processing = true;
     app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
@@ -158,7 +158,8 @@ async fn test_halt_label_is_resume_after_a_cancelled_turn() {
         session_id: "test-session".to_string(),
         message_id: "msg-1".to_string(),
         reason: FinishReason::Cancelled,
-    });
+    })
+    .await;
 
     assert!(
         !app.is_processing,
@@ -241,8 +242,8 @@ async fn test_resume_row_does_not_advance_the_queue() {
     );
 }
 
-#[test]
-fn test_resume_row_when_not_halted_reports_nothing_to_resume() {
+#[tokio::test]
+async fn test_resume_row_when_not_halted_reports_nothing_to_resume() {
     let mut app = app_with_session();
     app.agent_halted = false;
     let before = user_message_count(&app);
@@ -260,8 +261,8 @@ fn test_resume_row_when_not_halted_reports_nothing_to_resume() {
     );
 }
 
-#[test]
-fn test_resume_row_without_a_session_reports_no_active_session() {
+#[tokio::test]
+async fn test_resume_row_without_a_session_reports_no_active_session() {
     let mut app = support::make_app();
     app.session_id = None;
     app.agent_halted = true;
@@ -282,8 +283,8 @@ fn test_resume_row_without_a_session_reports_no_active_session() {
 // NFR-008 — the action repaints on the next frame
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_stop_row_sets_the_redraw_flag() {
+#[tokio::test]
+async fn test_stop_row_sets_the_redraw_flag() {
     let mut app = app_with_session();
     app.is_processing = true;
     app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
@@ -297,8 +298,8 @@ fn test_stop_row_sets_the_redraw_flag() {
     );
 }
 
-#[test]
-fn test_resume_row_sets_the_redraw_flag() {
+#[tokio::test]
+async fn test_resume_row_sets_the_redraw_flag() {
     let mut app = app_with_session();
     app.needs_redraw = false;
 

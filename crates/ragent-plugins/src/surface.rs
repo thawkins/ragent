@@ -8,7 +8,7 @@
 //! `plugins` config block and derives the store directories. Keeping one copy
 //! here means the two surfaces cannot drift.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -113,7 +113,10 @@ pub fn store_and_config(workdir: &Path) -> (StoreDirs, ragent_config::PluginsCon
 /// This is the one dispatch ladder both front ends ([`crate::run_cli`] for
 /// `ragent plugins` and the TUI `/plugins` family) drive, so the store / test /
 /// control fall-through can never drift between them. `existing_tools` and
-/// `existing_commands` seed the collision surface (FR-024).
+/// `existing_commands` seed the collision surface (FR-024). `mcp_tool_counts`
+/// carries the live tool count per bridged MCP server id (`<plugin-id>.<server>`,
+/// FR-030) for the `list` report; a surface with no live MCP client passes an
+/// empty map, and each server then renders as `?` (unknown, not zero).
 ///
 /// Returns `None` when `sub` is not a management subcommand (`add` / `remove` /
 /// `list` / `enable` / `disable` / `test`), so the caller can render its own
@@ -127,6 +130,7 @@ pub fn run_plugin_subcommand(
     rest: &str,
     existing_tools: BTreeSet<String>,
     existing_commands: BTreeSet<String>,
+    mcp_tool_counts: &BTreeMap<String, usize>,
 ) -> Option<String> {
     let (dirs, config) = store_and_config(workdir);
 
@@ -163,7 +167,7 @@ pub fn run_plugin_subcommand(
     let mut surface = ScratchSurface::seeded(existing_tools, existing_commands);
     let mut session = PluginSession::start(dirs, config, &mut surface);
     Some(
-        run_control_command(&mut session, &mut surface, sub, rest)
+        run_control_command(&mut session, &mut surface, sub, rest, mcp_tool_counts)
             .unwrap_or_else(|| crate::help::render_help(sub)),
     )
 }

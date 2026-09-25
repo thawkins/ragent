@@ -1,7 +1,7 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.117</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.118</p>
         <p style="font-size: 1.1em;">
           <strong>Date:</strong> 2026-09-20
       </p>
@@ -870,7 +870,11 @@ permissions a session uses.
 #### Agent Features
 
 - **Model binding** — Each agent can specify a `provider/model` or auto-resolve the first available model
-- **Tool visibility** — Agents can restrict which tool categories are exposed
+- **Tool visibility** — Agents can restrict which tool categories are exposed. A
+  family switched off is hidden from the model but stays registered;
+  `ToolRegistry::hidden()` / `ToolRegistry::hidden_definitions()` return the
+  complement of `definitions()`, and `/tools` prints the hidden set under a
+  `Disabled by visibility` section.
 - **Permissions** — Per-agent permission rules merge with global config
 - **Custom prompts** — Markdown/OASF profiles in `~/.ragent/agents/` or `.ragent/agents/`
 
@@ -1371,7 +1375,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/dirs` | Show configured writable directories |
 | `/profile` / `/status` / `/mouse` | UI preferences |
 | `/skill` / `/skills` | Load or inspect skill packs |
-| `/mcp discover\|list\|call` | MCP server commands |
+| `/mcp [status]\|discover\|connect <id>\|disconnect <id>` | MCP server status, discovery, and enable/disable |
 | `/update` / `/update install` | Auto-update (reserved; not implemented) |
 
 ### 6.3 TUI Component Architecture
@@ -2763,6 +2767,28 @@ generated JSON schemas. The wrapper handles:
 MCP support is functional for stdio servers. Auto-discovery and configuration
 editing are supported via `/mcp` slash commands.
 
+#### 19.4.1 Server enable/disable state
+
+Whether an MCP server is actually started is a persisted, user-owned choice
+rather than an implicit side effect of being listed in `ragent.json`. The choice
+lives in a **global ledger** (`<global state dir>/mcp_state.json`) shared by the
+connect path, the permission gate, and the `/mcp` and `/plugins` surfaces:
+
+- A server id **absent** from the ledger is enabled, so a newly added server -
+  written into `ragent.json` or bridged from a plugin's `mcpServers` section -
+  starts enabled with no extra step.
+- `mcp.<id>.disabled: true` in `ragent.json` always disables the server (the
+  config flag is the harder switch), even if the ledger says otherwise.
+- A disabled server is registered with `McpStatus::Disabled` and **no child
+  process is spawned**; `/mcp` still lists it and can re-enable it.
+- `/mcp connect <id>` enables and connects a server live, registering its tools
+  immediately; `/mcp disconnect <id>` disables and disconnects it live. Both
+  persist the choice globally, so it survives a restart and applies to every
+  project.
+- `McpToolWrapper::execute` refuses to call a disabled server's tools even when
+  the tool is still registered from an earlier connection, naming the command
+  that re-enables it.
+
 ---
 
 ## 19A. Gmail & Messaging Channels
@@ -2955,6 +2981,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.118 | 2026-09-25 | Durable, global MCP server enable/disable state: whether an MCP server is started is now a persisted choice (`<global state dir>/mcp_state.json`, a shared `McpEnableLedger`) rather than an implicit effect of being listed in `ragent.json`. A server id absent from the ledger is enabled; `mcp.<id>.disabled: true` always wins; a disabled server is registered with `McpStatus::Disabled` and no child process is spawned. `/mcp connect <id>` enables and connects live (registering tools immediately) and `/mcp disconnect <id>` disables and disconnects live, both persisting globally; `McpToolWrapper::execute` refuses a disabled server's tools. `/mcp` lists plugin-contributed servers (built from the merged `plugin_mcp_servers` set) with `enabled yes/no` and `tools: N`; `/plugins list` gains `MCP` / `MCP Tools` columns and an `mcp [...]` contributions line (`?` when a count is unknown, never `0`), and `/plugins list --mcp` keeps the full per-server tool inventory with registry names. Plugin `mcpServers` entries (inline or the Claude `"mcpServers": "./mcp.json"` file reference) are bridged as `<plugin-id>.<server>` and connected by default. `/tools` now lists visibility-disabled tools (`Visible Tools (N total, M disabled)` + a `Disabled by visibility` section) via the new `ToolRegistry::hidden_definitions()` / `hidden()`, and the slash-output extractor keeps every fenced block. A `/simplify` code-quality pass follows (dead `plugin_contributed_mcp_servers` and `McpEnableLedger::enabled_servers` removed, `McpEnableLedger::to_map` added, single config load in `set_mcp_server_enabled`, `impl Display for McpStatus`). |
 | v1.0.117 | 2026-09-25 | `/spec reverse --folder` now scaffolds and hosts the target project: the parsed scaffold request and `--folder` are handed straight to the reverse handler (not re-rendered through the `/reverse` text grammar that does not carry them), the shared `archdoc::run_govcreate_scaffold` engine runs before the async fetch, and a chained `--create <name>` writes the spec into `<folder>/specs/<name>/` via the new `/spec create --folder` flag. A `/spec reverse` invocation whose first argument is a flag, or whose flag tail is invalid (missing `--type`, unregistered `--language`, duplicate/empty value, `--github` with `--gitlab`), now reports the specific cause instead of the bare usage line; `next_value` rejects empty or `--`-prefixed values. The scaffolder gains `webapp` as a first-class registered `--type` value for `/new`, `/spec reverse`, and `/spec govcreate` (tiny dependency-free HTTP-server starter for `rust`/`python`/`go`/`typescript`/`javascript`, manifest-only elsewhere). The vendored `lopdf` crate carries crate-level allowances (matching `vendor/pdf-extract`) so the dead-code lint and `cargo-machete` are green. All verification checks pass: `cargo check --workspace`, `cargo-machete`, `cargo check --tests --workspace`, `cargo test --workspace`, the dead-code lint and reason checks, `cargo clippy --workspace -- -D warnings`, `cargo fmt --all -- --check`, `cargo audit`, and `cargo deny check`. |
 | v1.0.116 | 2026-09-23 | Maintenance release over the v1.0.115 tree: agent and plugin updates plus a code-quality pass. The four content-sized TUI modal renderers (queue menu, queue show panel, plugin-store panel, queue clear confirmation) now share one `centered_rect_fixed(width, height, area)` helper in `ragent-tui/src/utils.rs` (byte-for-byte identical geometry); `persist_task_output` in `ragent-agent/src/task/mod.rs` streams the header plus the reply body straight into a `BufWriter<File>` then renames, halving peak memory while the full untruncated sub-agent report is written, with identical on-disk bytes. `cargo check --workspace`, the dead-code lint and reason checks, `cargo clippy --workspace -- -D warnings`, `cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`, and the full `cargo test --workspace` suite all pass. |
 | v1.0.115 | 2026-09-23 | Detached fire-and-forget sub-agents (spec `spawnagent`, FR-001..FR-005): the TUI `/spawn <agent> <prompt...>` slash command and the matching `new_agent` `detached: true` parameter launch a background sub-agent that **nothing ever waits on** — it runs concurrently and shows in the Agents panel / event log, but is excluded from `list_agents` and `running_background_count`, cannot be awaited via `wait_agents` (with or without `task_ids`), is untouched by `team_wait`, and its completion is reaped by `drain_completed` without injecting anything into the parent chat while `tasks_snapshot` still shows it; `TaskEntry.detached` (serde default `false`) and `AgentManager::spawn_detached` share one `spawn_background_mode` implementation with `spawn_background`, and a second `/spawn` while one is still registering is refused. Follow-up fixes (FR-004a/b/c): every completed sub-agent run (detached or not) now persists its FULL output to `log/subagents/<task-id>.md` under the parent session's working directory (atomic temp-file + rename) and records the path on `TaskEntry.output_file`; the session loop records its terminal `MessageEnd` reason into `SessionProcessor::last_message_end_reason` and the completion event maps it to the real loop `finish_reason` (`stop`/`truncation`/`length`/`cancelled`/`error`) so a provider-side cut is flagged as TRUNCATED in the Agents panel instead of looking like a healthy finish; and the Subagent system prompt gained a *Deliverable Enforcement* section requiring a file-writing sub-agent to call `write` before `agent_complete`. Also: `/new` stack overlay now strips the base `fn main` so a generated binary declares exactly one entry point (FR-007); the research gather log moved to the singular `log/research/`; and a `/simplify` + `/rust-hygiene` pair consolidates the plugin bridge filters, the scaffold remote helpers, and the TUI queue-clear dialog helpers, keeping `cargo fmt`, `clippy -D warnings`, the dead-code lint and reason checks, `cargo audit`, and `cargo deny` green. |
@@ -3557,7 +3584,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/dirs` | Show configured writable directories |
 | `/profile` / `/status` / `/mouse` | UI preferences |
 | `/skill` / `/skills` | Load or inspect skill packs |
-| `/mcp discover\|list\|call` | MCP server commands |
+| `/mcp [status]\|discover\|connect <id>\|disconnect <id>` | MCP server status, discovery, and enable/disable |
 | `/update` / `/update install` | Auto-update (reserved; not implemented) |
 
 ### 6.3 TUI Component Architecture

@@ -209,6 +209,57 @@ pub fn preprocess_markdown_tables(markdown: &str) -> String {
     out
 }
 
+/// Sentinel tokens used to mark a `[red]…[/red]` span. `preprocess_red_markers`
+/// rewrites the markers into these before the markdown→HTML→text pass, and
+/// `restore_red_markers` converts the surviving tokens back into `[red]…[/red]`
+/// markers, so `/tools` can render disabled tool rows in red.
+///
+/// The tokens are deliberately made of printable characters: `html2text`
+/// parses the intermediate HTML with html5ever, which silently drops C0 control
+/// bytes such as `ESC`, so an ANSI escape sentinel would not survive the pass.
+/// `@@` is safe because the `/tools` table cells never contain it.
+const RED_OPEN: &str = "@@ragent-red@@";
+const RED_CLOSE: &str = "@@/ragent-red@@";
+
+/// Rewrite `[red]…[/red]` span markers into [`RED_OPEN`] / [`RED_CLOSE`]
+/// sentinels before the markdown pipeline runs.
+///
+/// The tokens are plain printable text at this stage, so they survive
+/// `html2text` untouched and `restore_red_markers` can convert them back
+/// afterwards. The match is non-greedy and may span lines; an unclosed `[red]`
+/// is dropped.
+pub(crate) fn preprocess_red_markers(md: &str) -> String {
+    const OPEN: &str = "[red]";
+    const CLOSE: &str = "[/red]";
+    let mut out = String::with_capacity(md.len());
+    let mut rest = md;
+    while let Some(start) = rest.find(OPEN) {
+        let after_open = &rest[start + OPEN.len()..];
+        let Some(end) = after_open.find(CLOSE) else {
+            // Unclosed marker: drop the tag and keep the remaining text.
+            out.push_str(&rest[..start]);
+            out.push_str(after_open);
+            return out;
+        };
+        out.push_str(&rest[..start]);
+        out.push_str(RED_OPEN);
+        out.push_str(&after_open[..end]);
+        out.push_str(RED_CLOSE);
+        rest = &after_open[end + CLOSE.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Convert [`RED_OPEN`] / [`RED_CLOSE`] sentinels back into `[red]…[/red]`
+/// markers after the markdown pipeline has rendered the text.
+pub(crate) fn restore_red_markers(text: &str) -> String {
+    if !text.contains(RED_OPEN) {
+        return text.to_string();
+    }
+    text.replace(RED_OPEN, "[red]").replace(RED_CLOSE, "[/red]")
+}
+
 /// A request to render markdown to plain text.
 struct MdRequest {
     /// Raw markdown text, pre-processed by [`preprocess_markdown_tables`].
@@ -236,6 +287,11 @@ impl MdWorker {
                 // Process requests until the channel is closed.
                 while let Ok(req) = rx.recv() {
                     let md = preprocess_markdown_tables(&req.input_markdown);
+                    // Second pass: `[red]…[/red]` spans must survive as printable
+                    // sentinel tokens until after html2text, which would strip an
+                    // ANSI escape to plain text; they are restored to markers on
+                    // the output.
+                    let md = preprocess_red_markers(&md);
                     let mut opts = pulldown_cmark::Options::empty();
                     opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
                     opts.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
@@ -243,10 +299,12 @@ impl MdWorker {
                     let parser = pulldown_cmark::Parser::new_ext(&md, opts);
                     let mut html_buf = String::new();
                     pulldown_cmark::html::push_html(&mut html_buf, parser);
-                    let result = html2text::from_read(html_buf.as_bytes(), 120);
+                    let result = html2text::from_read(html_buf.as_bytes(), 120)
+                        .map(|rendered| restore_red_markers(&rendered))
+                        .map_err(|e| format!("{e:?}"));
                     // If the response channel is closed (caller dropped), just
                     // continue to the next request.
-                    let _ = req.response_tx.send(result.map_err(|e| format!("{e:?}")));
+                    let _ = req.response_tx.send(result);
                 }
             })
             .expect("failed to spawn md-html2text worker thread");

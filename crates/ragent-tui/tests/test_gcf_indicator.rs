@@ -139,8 +139,8 @@ fn render_to_text(app: &mut App) -> String {
     cells.iter().map(ratatui::buffer::Cell::symbol).collect()
 }
 
-#[test]
-fn test_alt_g_toggles_gcf_and_status_bar_indicator() {
+#[tokio::test]
+async fn test_alt_g_toggles_gcf_and_status_bar_indicator() {
     let (_guard, _temp) = enter_isolated_config_project();
     ragent_config::gcf::set_enabled(false);
 
@@ -156,7 +156,8 @@ fn test_alt_g_toggles_gcf_and_status_bar_indicator() {
     assert!(!ragent_config::gcf::is_enabled());
 
     // Press Alt+G through the app handler so the persist path runs.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT))
+        .await;
 
     // Handler should have toggled and persisted GCF on.
     assert!(ragent_config::gcf::is_enabled());
@@ -170,7 +171,8 @@ fn test_alt_g_toggles_gcf_and_status_bar_indicator() {
     );
 
     // Toggle back off and verify.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT))
+        .await;
     assert!(!ragent_config::gcf::is_enabled());
     assert!(app.status.contains("GCF encoding disabled"));
 
@@ -181,14 +183,15 @@ fn test_alt_g_toggles_gcf_and_status_bar_indicator() {
     );
 }
 
-#[test]
-fn test_alt_g_never_inserts_g_into_input_buffer() {
+#[tokio::test]
+async fn test_alt_g_never_inserts_g_into_input_buffer() {
     let (_guard, _temp) = enter_isolated_config_project();
     ragent_config::gcf::set_enabled(false);
 
     let mut app = make_app();
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT))
+        .await;
 
     assert!(
         app.input.is_empty(),

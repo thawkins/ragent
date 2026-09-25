@@ -28,6 +28,34 @@ pub(crate) fn is_agent_notice(text: &str) -> bool {
     text.trim_start().starts_with(AGENT_NOTICE_PREFIX)
 }
 
+/// Parse a `[red]…[/red]` span marker into a red-styled [`Line`], or `None`
+/// when the line has no complete marker pair.
+///
+/// Slash-command output (e.g. the `/tools` list of disabled tools) uses
+/// `[red]` markers instead of markdown, because the markdown pass strips
+/// unknown tags to plain text.
+pub(crate) fn parse_red_marker(line: &str) -> Option<Line<'static>> {
+    const OPEN: &str = "[red]";
+    const CLOSE: &str = "[/red]";
+    let start = line.find(OPEN)?;
+    let body_start = start + OPEN.len();
+    let rel_end = line[body_start..].find(CLOSE)?;
+    let body = line[body_start..body_start + rel_end].to_string();
+    if body.is_empty() {
+        return None;
+    }
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    if start > 0 {
+        spans.push(Span::raw(line[..start].to_string()));
+    }
+    spans.push(Span::styled(body, Style::default().fg(Color::Red)));
+    let tail = &line[body_start + rel_end + CLOSE.len()..];
+    if !tail.is_empty() {
+        spans.push(Span::raw(tail.to_string()));
+    }
+    Some(Line::from(spans))
+}
+
 /// Render an agent-notice bubble as bright-yellow lines, one item per line,
 /// followed by a trailing blank line to separate the bubble from following content.
 pub(crate) fn render_agent_notice_lines(text: &str) -> Vec<Line<'static>> {
@@ -3337,6 +3365,23 @@ impl<'a> MessageWidget<'a> {
                         ),
                     };
                     for (i, line) in text.lines().enumerate() {
+                        // A `[red]…[/red]` span marker (e.g. a tool disabled by
+                        // a visibility switch in `/tools`) renders red and
+                        // takes precedence over the plain-raw path below.
+                        if let Some(styled) = parse_red_marker(line) {
+                            let mut spans = Vec::with_capacity(styled.spans.len() + 2);
+                            if i == 0 {
+                                if self.message.role == Role::User && !lines.is_empty() {
+                                    lines.push(Line::from(String::new()));
+                                }
+                                spans.push(Span::styled(dot, dot_style));
+                            } else {
+                                spans.push(Span::raw(&INDENT_SPACES[..indent]));
+                            }
+                            spans.extend(styled.spans);
+                            lines.push(Line::from(spans));
+                            continue;
+                        }
                         if i == 0 {
                             // Blank line before the "You:" prompt for visual
                             // separation — but not when this is the very

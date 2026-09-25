@@ -517,8 +517,8 @@ mod app_tests {
         );
     }
 
-    #[test]
-    fn test_tool_call_batch_applies_pending_args_when_start_dropped() {
+    #[tokio::test]
+    async fn test_tool_call_batch_applies_pending_args_when_start_dropped() {
         use ragent_agent::event::Event;
         use ragent_agent::message::MessagePart;
         use ragent_types::event::ToolCallBatchEntry;
@@ -526,7 +526,8 @@ mod app_tests {
         let mut app = test_app();
         app.handle_event(Event::SessionCreated {
             session_id: "s1".to_string(),
-        });
+        })
+        .await;
 
         // Args arrive, but the matching ToolCallStart is dropped by the bus.
         app.handle_event(Event::ToolCallArgs {
@@ -534,7 +535,8 @@ mod app_tests {
             call_id: "c1".to_string(),
             tool: "read".to_string(),
             args: r#"{"path":"src/main.rs"}"#.to_string(),
-        });
+        })
+        .await;
 
         // Batch fallback creates the missing part.
         app.handle_event(Event::ToolCallBatch {
@@ -551,7 +553,8 @@ mod app_tests {
                 metadata: None,
                 success: true,
             }],
-        });
+        })
+        .await;
 
         let part = app
             .messages
@@ -570,8 +573,8 @@ mod app_tests {
         }
     }
 
-    #[test]
-    fn test_tool_call_batch_does_not_overwrite_existing_input() {
+    #[tokio::test]
+    async fn test_tool_call_batch_does_not_overwrite_existing_input() {
         use ragent_agent::event::Event;
         use ragent_agent::message::MessagePart;
         use ragent_types::event::ToolCallBatchEntry;
@@ -579,20 +582,23 @@ mod app_tests {
         let mut app = test_app();
         app.handle_event(Event::SessionCreated {
             session_id: "s1".to_string(),
-        });
+        })
+        .await;
 
         // Normal flow: start then args.
         app.handle_event(Event::ToolCallStart {
             session_id: "s1".to_string(),
             call_id: "c1".to_string(),
             tool: "read".to_string(),
-        });
+        })
+        .await;
         app.handle_event(Event::ToolCallArgs {
             session_id: "s1".to_string(),
             call_id: "c1".to_string(),
             tool: "read".to_string(),
             args: r#"{"path":"src/lib.rs"}"#.to_string(),
-        });
+        })
+        .await;
 
         // Batch should keep the already-applied input.
         app.handle_event(Event::ToolCallBatch {
@@ -609,7 +615,8 @@ mod app_tests {
                 metadata: None,
                 success: true,
             }],
-        });
+        })
+        .await;
 
         let part = app
             .messages
@@ -628,14 +635,15 @@ mod app_tests {
         }
     }
 
-    #[test]
-    fn test_nested_subagent_events_are_tracked() {
+    #[tokio::test]
+    async fn test_nested_subagent_events_are_tracked() {
         use ragent_agent::event::Event;
 
         let mut app = test_app();
         app.handle_event(Event::SessionCreated {
             session_id: "primary".to_string(),
-        });
+        })
+        .await;
 
         // Primary spawns a direct subagent.
         app.handle_event(Event::SubagentStart {
@@ -645,7 +653,8 @@ mod app_tests {
             agent: "explore".to_string(),
             task: "inspect repo".to_string(),
             background: true,
-        });
+        })
+        .await;
         assert_eq!(app.active_tasks.len(), 1);
 
         // The direct subagent spawns its own subagent.
@@ -656,7 +665,8 @@ mod app_tests {
             agent: "build".to_string(),
             task: "fix bug".to_string(),
             background: true,
-        });
+        })
+        .await;
         assert_eq!(app.active_tasks.len(), 2);
 
         // Lifecycle updates on the nested subagent are handled even after the
@@ -669,7 +679,8 @@ mod app_tests {
             success: true,
             duration_ms: 100,
             finish_reason: "complete".to_string(),
-        });
+        })
+        .await;
         assert_eq!(app.active_tasks.len(), 1);
 
         app.handle_event(Event::SubagentComplete {
@@ -680,18 +691,20 @@ mod app_tests {
             success: true,
             duration_ms: 200,
             finish_reason: "complete".to_string(),
-        });
+        })
+        .await;
         assert!(app.active_tasks.is_empty());
     }
 
-    #[test]
-    fn test_is_current_or_descendant_session_recognises_nested_tasks() {
+    #[tokio::test]
+    async fn test_is_current_or_descendant_session_recognises_nested_tasks() {
         use ragent_agent::event::Event;
 
         let mut app = test_app();
         app.handle_event(Event::SessionCreated {
             session_id: "primary".to_string(),
-        });
+        })
+        .await;
 
         assert!(app.is_current_session("primary"));
         assert!(!app.is_current_or_descendant_session("child-1"));
@@ -703,27 +716,30 @@ mod app_tests {
             agent: "explore".to_string(),
             task: "inspect".to_string(),
             background: true,
-        });
+        })
+        .await;
 
         assert!(app.is_current_or_descendant_session("primary"));
         assert!(app.is_current_or_descendant_session("child-1"));
         assert!(!app.is_current_or_descendant_session("child-2"));
     }
 
-    #[test]
-    fn test_background_task_removed_on_completion() {
+    #[tokio::test]
+    async fn test_background_task_removed_on_completion() {
         use ragent_agent::event::Event;
 
         let mut app = test_app();
         app.handle_event(Event::SessionCreated {
             session_id: "primary".to_string(),
-        });
+        })
+        .await;
 
         app.handle_event(Event::BackgroundTaskSpawned {
             session_id: "primary".to_string(),
             task_id: "bg-1".to_string(),
             command: "sleep 1".to_string(),
-        });
+        })
+        .await;
         assert_eq!(app.bg_tasks.len(), 1);
 
         app.handle_event(Event::BackgroundTaskCompleted {
@@ -731,7 +747,8 @@ mod app_tests {
             task_id: "bg-1".to_string(),
             status: "completed".to_string(),
             exit_code: Some(0),
-        });
+        })
+        .await;
 
         assert!(
             app.bg_tasks.is_empty(),
@@ -747,27 +764,30 @@ mod app_tests {
         );
     }
 
-    #[test]
-    fn test_background_task_not_removed_until_completion_event() {
+    #[tokio::test]
+    async fn test_background_task_not_removed_until_completion_event() {
         use ragent_agent::event::Event;
 
         let mut app = test_app();
         app.handle_event(Event::SessionCreated {
             session_id: "primary".to_string(),
-        });
+        })
+        .await;
 
         app.handle_event(Event::BackgroundTaskSpawned {
             session_id: "primary".to_string(),
             task_id: "bg-2".to_string(),
             command: "sleep 5".to_string(),
-        });
+        })
+        .await;
 
         app.handle_event(Event::BackgroundTaskUpdated {
             session_id: "primary".to_string(),
             task_id: "bg-2".to_string(),
             status: "running".to_string(),
             progress: None,
-        });
+        })
+        .await;
 
         assert_eq!(
             app.bg_tasks.len(),

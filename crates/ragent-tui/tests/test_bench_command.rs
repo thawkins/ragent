@@ -34,6 +34,10 @@ fn enter_temp_project_dir() -> (tempfile::TempDir, CwdGuard) {
 ///
 /// Returns the lock guard first so it is dropped last, keeping the directory
 /// isolated from concurrent tests for the entire lifetime of the caller.
+// The returned `MutexGuard` is deliberately held for the whole test body,
+// including its await points: it serialises every test that mutates the
+// process working directory, which is process-global state.
+#[allow(clippy::await_holding_lock)]
 fn enter_isolated_project_dir() -> (
     std::sync::MutexGuard<'static, ()>,
     tempfile::TempDir,
@@ -88,11 +92,11 @@ fn all_message_text(app: &App) -> String {
         .join("\n")
 }
 
-#[test]
-fn test_bench_list_shows_suites_and_profiles() {
+#[tokio::test]
+async fn test_bench_list_shows_suites_and_profiles() {
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench list");
+    app.execute_slash_command("/bench list").await;
 
     let text = app
         .messages
@@ -117,12 +121,13 @@ fn test_bench_list_shows_suites_and_profiles() {
     assert!(text.contains("quick"));
 }
 
-#[test]
-fn test_bench_init_humaneval_creates_data_root() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_bench_init_humaneval_creates_data_root() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench init humaneval");
+    app.execute_slash_command("/bench init humaneval").await;
 
     assert!(std::path::Path::new("benches/data/humaneval/python/manifest.json").exists());
     assert!(std::path::Path::new("benches/data/humaneval/python/dataset/cases.jsonl").exists());
@@ -131,13 +136,15 @@ fn test_bench_init_humaneval_creates_data_root() {
     assert!(text.contains("Loaded `humaneval` [python]"));
 }
 
-#[test]
-fn test_bench_init_verify_only_reports_existing_state() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_bench_init_verify_only_reports_existing_state() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench init humaneval");
-    app.execute_slash_command("/bench init humaneval --verify-only");
+    app.execute_slash_command("/bench init humaneval").await;
+    app.execute_slash_command("/bench init humaneval --verify-only")
+        .await;
 
     let text = app
         .messages
@@ -148,12 +155,13 @@ fn test_bench_init_verify_only_reports_existing_state() {
     assert!(std::path::Path::new("benches/data/humaneval/python/manifest.json").exists());
 }
 
-#[test]
-fn test_bench_init_all_creates_every_suite_root() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_bench_init_all_creates_every_suite_root() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench init all");
+    app.execute_slash_command("/bench init all").await;
 
     let text = app
         .messages
@@ -168,12 +176,13 @@ fn test_bench_init_all_creates_every_suite_root() {
     assert!(std::path::Path::new("benches/data/bigcodebench/python/manifest.json").exists());
 }
 
-#[test]
-fn test_bench_init_full_reports_gated_support() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_bench_init_full_reports_gated_support() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench init full");
+    app.execute_slash_command("/bench init full").await;
 
     let text = app
         .messages
@@ -184,13 +193,14 @@ fn test_bench_init_full_reports_gated_support() {
     assert!(text.contains("apps"));
 }
 
-#[test]
-fn test_bench_run_humaneval_creates_workbook() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_bench_run_humaneval_creates_workbook() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench init humaneval");
-    app.execute_slash_command("/bench run humaneval");
+    app.execute_slash_command("/bench init humaneval").await;
+    app.execute_slash_command("/bench run humaneval").await;
     wait_for_bench_completion(&mut app);
 
     assert!(
@@ -213,13 +223,14 @@ fn test_bench_run_humaneval_creates_workbook() {
     assert!(all_text.contains("Running `humaneval` [python]"));
 }
 
-#[test]
-fn test_bench_run_all_creates_workbooks() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_bench_run_all_creates_workbooks() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench init all");
-    app.execute_slash_command("/bench run all --yes");
+    app.execute_slash_command("/bench init all").await;
+    app.execute_slash_command("/bench run all --yes").await;
     wait_for_bench_completion(&mut app);
 
     assert!(
@@ -239,14 +250,15 @@ fn test_bench_run_all_creates_workbooks() {
     assert!(text.contains("bigcodebench"));
 }
 
-#[test]
-fn test_bench_status_reports_active_run_context() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_bench_status_reports_active_run_context() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench init humaneval");
-    app.execute_slash_command("/bench run humaneval");
-    app.execute_slash_command("/bench status");
+    app.execute_slash_command("/bench init humaneval").await;
+    app.execute_slash_command("/bench run humaneval").await;
+    app.execute_slash_command("/bench status").await;
 
     let text = last_message_text(&app);
     assert!(text.contains("Active Benchmark Run"));
@@ -254,8 +266,8 @@ fn test_bench_status_reports_active_run_context() {
     assert!(text.contains("Summary"));
 }
 
-#[test]
-fn test_bench_status_reports_case_progress() {
+#[tokio::test]
+async fn test_bench_status_reports_case_progress() {
     let mut app = configured_app();
     let progress = BenchProgressHandle::default();
     progress.set(BenchRunProgress {
@@ -271,7 +283,7 @@ fn test_bench_status_reports_case_progress() {
     app.active_bench_started_at = Some(chrono::Utc::now());
     app.active_bench_progress = Some(progress);
 
-    app.execute_slash_command("/bench status");
+    app.execute_slash_command("/bench status").await;
 
     let text = last_message_text(&app);
     assert!(text.contains("Progress"));
@@ -336,16 +348,17 @@ fn test_bench_run_drains_final_progress_events_before_completion() {
     assert!(text.contains("## Benchmark Run"));
 }
 
-#[test]
-fn test_bench_open_last_shows_latest_workbook_paths() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_bench_open_last_shows_latest_workbook_paths() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench init humaneval");
-    app.execute_slash_command("/bench run humaneval");
+    app.execute_slash_command("/bench init humaneval").await;
+    app.execute_slash_command("/bench run humaneval").await;
     wait_for_bench_completion(&mut app);
 
-    app.execute_slash_command("/bench open last");
+    app.execute_slash_command("/bench open last").await;
 
     let text = app
         .messages
@@ -356,14 +369,15 @@ fn test_bench_open_last_shows_latest_workbook_paths() {
     assert!(text.contains(".xlsx"));
 }
 
-#[test]
-fn test_bench_cancel_requests_shutdown_for_active_run() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_bench_cancel_requests_shutdown_for_active_run() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench init humaneval");
-    app.execute_slash_command("/bench run humaneval");
-    app.execute_slash_command("/bench cancel");
+    app.execute_slash_command("/bench init humaneval").await;
+    app.execute_slash_command("/bench run humaneval").await;
+    app.execute_slash_command("/bench cancel").await;
 
     let text = last_message_text(&app);
     assert!(text.contains("Cancellation requested"));
@@ -375,12 +389,13 @@ fn test_bench_cancel_requests_shutdown_for_active_run() {
     );
 }
 
-#[test]
-fn test_bench_run_missing_data_fails_fast_with_init_hint() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_bench_run_missing_data_fails_fast_with_init_hint() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
-    app.execute_slash_command("/bench run humaneval");
+    app.execute_slash_command("/bench run humaneval").await;
 
     let text = app
         .messages

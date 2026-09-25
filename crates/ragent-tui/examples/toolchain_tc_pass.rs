@@ -13,8 +13,8 @@ use std::io::Write;
 
 use support::make_app;
 
-fn last_output_after(app: &mut ragent_tui::App, input: &str) -> String {
-    app.execute_slash_command(input);
+async fn last_output_after(app: &mut ragent_tui::App, input: &str) -> String {
+    app.execute_slash_command(input).await;
     app.messages
         .last()
         .map(|m| m.text_content())
@@ -43,12 +43,20 @@ fn report(name: &str, ok: bool, note: &str, failures: &mut Vec<String>) {
 }
 
 fn main() {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(run());
+}
+
+async fn run() {
     let mut failures: Vec<String> = Vec::new();
 
     // ── TC-001 / TC-002: bare + help pages ─────────────────────────────
     let mut app = make_app();
-    let bare = last_output_after(&mut app, "/toolchain");
-    let help = last_output_after(&mut app, "/toolchain help");
+    let bare = last_output_after(&mut app, "/toolchain").await;
+    let help = last_output_after(&mut app, "/toolchain help").await;
     let f = flat(&help);
     let ok = help.starts_with("From: /toolchain help")
         && app.status == "toolchain: help"
@@ -67,7 +75,7 @@ fn main() {
 
     // ── TC-003: full report ────────────────────────────────────────────
     let mut app = make_app();
-    let text = last_output_after(&mut app, "/toolchain list");
+    let text = last_output_after(&mut app, "/toolchain list").await;
     let rows = data_row_count(&text);
     let f = flat(&text);
     let ok = rows == 50
@@ -126,8 +134,8 @@ fn main() {
 
     // ── TC-005 / TC-006: language filter + case-insensitivity ─────────
     let mut app = make_app();
-    let rust = last_output_after(&mut app, "/toolchain list rust");
-    let rust_upper = last_output_after(&mut app, "/toolchain list RUST");
+    let rust = last_output_after(&mut app, "/toolchain list rust").await;
+    let rust_upper = last_output_after(&mut app, "/toolchain list RUST").await;
     let f_r = flat(&rust);
     let ok = data_row_count(&rust) == 1
         && f_r.contains("cargo")
@@ -145,7 +153,7 @@ fn main() {
 
     // ── TC-007: unknown language id ────────────────────────────────────
     let mut app = make_app();
-    let unk = last_output_after(&mut app, "/toolchain list nosuchlang");
+    let unk = last_output_after(&mut app, "/toolchain list nosuchlang").await;
     let f = flat(&unk);
     let ok = f.contains("Unknown language id `nosuchlang`")
         && f.contains("rust")
@@ -160,7 +168,7 @@ fn main() {
 
     // ── TC-008: unknown subcommand ─────────────────────────────────────
     let mut app = make_app();
-    let msg = last_output_after(&mut app, "/toolchain frobnicate");
+    let msg = last_output_after(&mut app, "/toolchain frobnicate").await;
     let f = flat(&msg);
     let ok = msg.starts_with("From: /toolchain")
         && f.contains("frobnicate")
@@ -177,7 +185,7 @@ fn main() {
 
     // ── TC-009 / TC-010: JSON output ───────────────────────────────────
     let mut app = make_app();
-    let json_full = last_output_after(&mut app, "/toolchain list --json");
+    let json_full = last_output_after(&mut app, "/toolchain list --json").await;
     let parsed: Result<serde_json::Value, _> = serde_json::from_str(&json_full);
     let ok_doc = parsed
         .as_ref()
@@ -228,7 +236,7 @@ fn main() {
         &mut failures,
     );
 
-    let filtered = last_output_after(&mut app, "/toolchain list rust --json");
+    let filtered = last_output_after(&mut app, "/toolchain list rust --json").await;
     let doc: Result<serde_json::Value, _> = serde_json::from_str(&filtered);
     let ok_filter = doc
         .map(|d| {
@@ -247,7 +255,7 @@ fn main() {
     // ── TC-011: absent runtimes do not truncate ────────────────────────
     // (same report object captured for TC-003; re-derive to be independent)
     let mut app = make_app();
-    let text2 = last_output_after(&mut app, "/toolchain list");
+    let text2 = last_output_after(&mut app, "/toolchain list").await;
     let rows2 = data_row_count(&text2);
     let f2 = flat(&text2);
     let ok = rows2 == 50
@@ -264,7 +272,7 @@ fn main() {
 
     // ── TC-012: version-probe failure containment ──────────────────────
     let mut app = make_app();
-    let rrow = last_output_after(&mut app, "/toolchain list r");
+    let rrow = last_output_after(&mut app, "/toolchain list r").await;
     let f3 = flat(&rrow);
     let ok = f3.contains("From: /toolchain list")
         && (f3.contains("not installed") || f3.contains("installed"))
@@ -317,7 +325,7 @@ fn main() {
         "/toolchain list nosuchlang",
         "/toolchain list --json",
     ] {
-        app.execute_slash_command(cmd);
+        app.execute_slash_command(cmd).await;
     }
     let after = (snapshot_tree(&spec_dir), snapshot_tree(&crate_src));
     report(
@@ -372,7 +380,7 @@ fn main() {
 
     // ── TC-015: /help index mentions toolchain ─────────────────────────
     let mut app = make_app();
-    let helptext = last_output_after(&mut app, "/help");
+    let helptext = last_output_after(&mut app, "/help").await;
     let ok = helptext.contains("/toolchain");
     report(
         "TC-015 /help central index lists /toolchain",

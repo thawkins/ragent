@@ -124,8 +124,8 @@ fn test_spec_help_advertises_govcreate_with_worked_example() {
 
 /// `/spec govcreate` (or any usage-error subcommand) must report the cause in
 /// the message window, not only a status line (NFR-005).
-#[test]
-fn test_spec_usage_error_subcommands_report_cause_in_message_window() {
+#[tokio::test]
+async fn test_spec_usage_error_subcommands_report_cause_in_message_window() {
     let cases = [
         (
             "/spec govcreate",
@@ -153,7 +153,7 @@ fn test_spec_usage_error_subcommands_report_cause_in_message_window() {
         let mut app = make_app();
         app.session_id = Some("s1".to_string());
 
-        app.execute_slash_command(command);
+        app.execute_slash_command(command).await;
 
         let text = app.messages.last().expect("usage message").text_content();
         assert!(

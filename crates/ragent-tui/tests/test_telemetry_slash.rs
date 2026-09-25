@@ -102,10 +102,10 @@ fn test_telemetry_help_is_added_to_slash_commands() {
     assert!(SLASH_COMMANDS.iter().any(|cmd| cmd.trigger == "telemetry"));
 }
 
-#[test]
-fn test_telemetry_help_appends_help_message() {
+#[tokio::test]
+async fn test_telemetry_help_appends_help_message() {
     let mut app = make_app();
-    app.execute_slash_command("/telemetry help");
+    app.execute_slash_command("/telemetry help").await;
     let last = last_message_text(&app);
     assert!(
         last.contains("/telemetry on"),
@@ -121,10 +121,10 @@ fn test_telemetry_help_appends_help_message() {
     );
 }
 
-#[test]
-fn test_telemetry_counters_appends_catalogue() {
+#[tokio::test]
+async fn test_telemetry_counters_appends_catalogue() {
     let mut app = make_app();
-    app.execute_slash_command("/telemetry counters");
+    app.execute_slash_command("/telemetry counters").await;
     let last = last_message_text(&app);
     assert!(
         last.contains("Usage metrics"),
@@ -168,10 +168,10 @@ fn test_telemetry_counters_appends_catalogue() {
     );
 }
 
-#[test]
-fn test_telemetry_setup_opens_dialog_with_defaults() {
+#[tokio::test]
+async fn test_telemetry_setup_opens_dialog_with_defaults() {
     let mut app = make_app();
-    app.execute_slash_command("/telemetry setup");
+    app.execute_slash_command("/telemetry setup").await;
     let step = app
         .provider_setup
         .as_ref()
@@ -198,10 +198,10 @@ fn test_telemetry_setup_opens_dialog_with_defaults() {
     }
 }
 
-#[test]
-fn test_telemetry_unknown_subcommand_shows_usage() {
+#[tokio::test]
+async fn test_telemetry_unknown_subcommand_shows_usage() {
     let mut app = make_app();
-    app.execute_slash_command("/telemetry frobnicate");
+    app.execute_slash_command("/telemetry frobnicate").await;
     let last = last_message_text(&app);
     assert!(
         last.contains("Usage: `/telemetry help|on|off|setup|counters`"),
@@ -209,11 +209,11 @@ fn test_telemetry_unknown_subcommand_shows_usage() {
     );
 }
 
-#[test]
-fn test_telemetry_panel_slash_command_toggles_panel() {
+#[tokio::test]
+async fn test_telemetry_panel_slash_command_toggles_panel() {
     let mut app = make_app();
     assert!(!app.show_telemetry);
-    app.execute_slash_command("/telemetry_panel");
+    app.execute_slash_command("/telemetry_panel").await;
     assert!(app.show_telemetry);
     assert!(!app.show_log);
     assert!(!app.show_profile);
@@ -221,7 +221,7 @@ fn test_telemetry_panel_slash_command_toggles_panel() {
     assert!(!app.show_memory);
     assert_eq!(app.status, "telemetry panel visible");
 
-    app.execute_slash_command("/telemetry_panel");
+    app.execute_slash_command("/telemetry_panel").await;
     assert!(!app.show_telemetry);
     assert_eq!(app.status, "telemetry panel hidden");
 }

@@ -205,6 +205,7 @@ fn cwd_test_lock() -> &'static Mutex<()> {
 }
 
 /// Acquire the cwd test lock, recovering from any prior poisoning.
+#[allow(clippy::await_holding_lock)]
 fn cwd_lock() -> MutexGuard<'static, ()> {
     let lock = cwd_test_lock().lock();
     match lock {
@@ -213,8 +214,9 @@ fn cwd_lock() -> MutexGuard<'static, ()> {
     }
 }
 
-#[test]
-fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
@@ -232,7 +234,8 @@ fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
     assert!(!ragent_config::edit_log::is_enabled());
 
     // Press Alt+E through the app handler so the persist path runs.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT))
+        .await;
 
     // Handler should have toggled and persisted edit logging on.
     assert!(ragent_config::edit_log::is_enabled());
@@ -252,7 +255,8 @@ fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
     );
 
     // Toggle back off and verify.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT))
+        .await;
     assert!(!ragent_config::edit_log::is_enabled());
     assert!(app.status.contains("Edit log disabled"));
 
@@ -269,8 +273,9 @@ fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
     );
 }
 
-#[test]
-fn test_slash_editlog_toggles_and_persists() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_slash_editlog_toggles_and_persists() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
@@ -286,14 +291,16 @@ fn test_slash_editlog_toggles_and_persists() {
     app.input = "/editlog on".to_string();
     app.input_cursor = app.input.chars().count();
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert!(ragent_config::edit_log::is_enabled());
     assert!(app.status.contains("enabled"));
 
     app.input = "/editlog off".to_string();
     app.input_cursor = app.input.chars().count();
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(!ragent_config::edit_log::is_enabled());
     assert!(app.status.contains("disabled"));
 }
@@ -375,8 +382,8 @@ fn test_huggingface_with_token_does_not_fall_back_to_static_defaults_without_dis
 
 // ── /clear ──────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_clear_empties_messages() {
+#[tokio::test]
+async fn test_slash_clear_empties_messages() {
     let mut app = make_app();
     // Add some dummy messages
     app.messages
@@ -385,7 +392,7 @@ fn test_slash_clear_empties_messages() {
         .push(ragent_agent::message::Message::user_text("s1", "world"));
     assert_eq!(app.messages.len(), 2);
 
-    app.execute_slash_command("/clear");
+    app.execute_slash_command("/clear").await;
 
     assert!(app.messages.is_empty(), "messages should be cleared");
     assert_eq!(app.scroll_offset, 0, "scroll should reset");
@@ -412,13 +419,13 @@ fn test_slash_clear_empties_messages() {
 
 // ── /help ───────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_help_shows_commands() {
+#[tokio::test]
+async fn test_slash_help_shows_commands() {
     let mut app = make_app();
     // Set a session so append_assistant_text can push messages
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
 
     assert_eq!(app.status, "help");
     // Should have created an assistant message with command list
@@ -438,44 +445,45 @@ fn test_slash_help_shows_commands() {
     assert!(text.contains("/spec"), "help should mention /spec");
 }
 
-#[test]
-fn test_slash_help_executes_in_chat_screen() {
+#[tokio::test]
+async fn test_slash_help_executes_in_chat_screen() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     // App now starts in Chat mode - home screen has been removed
     assert_eq!(app.current_screen, ScreenMode::Chat);
 
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
     // Should remain in Chat mode
     assert_eq!(app.current_screen, ScreenMode::Chat);
 }
 
 // ── /quit ───────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_quit_stops_app() {
+#[tokio::test]
+async fn test_slash_quit_stops_app() {
     let mut app = make_app();
     assert!(app.is_running);
 
-    app.execute_slash_command("/quit");
+    app.execute_slash_command("/quit").await;
     assert!(!app.is_running, "app should stop after /quit");
 }
 
-#[test]
-fn test_slash_exit_stops_app() {
+#[tokio::test]
+async fn test_slash_exit_stops_app() {
     let mut app = make_app();
     assert!(app.is_running);
 
-    app.execute_slash_command("/exit");
+    app.execute_slash_command("/exit").await;
     assert!(!app.is_running, "app should stop after /exit");
 }
 
 // ── /system ─────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_system_sets_prompt() {
+#[tokio::test]
+async fn test_slash_system_sets_prompt() {
     let mut app = make_app();
-    app.execute_slash_command("/system You are a pirate. Respond in pirate speak.");
+    app.execute_slash_command("/system You are a pirate. Respond in pirate speak.")
+        .await;
 
     assert_eq!(
         app.agent_info.prompt.as_deref(),
@@ -499,13 +507,13 @@ fn test_slash_system_sets_prompt() {
     );
 }
 
-#[test]
-fn test_slash_system_no_args_shows_current() {
+#[tokio::test]
+async fn test_slash_system_no_args_shows_current() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     let original = app.agent_info.prompt.clone();
 
-    app.execute_slash_command("/system");
+    app.execute_slash_command("/system").await;
 
     // Should display the current prompt, not change it
     assert_eq!(app.agent_info.prompt, original);
@@ -516,34 +524,34 @@ fn test_slash_system_no_args_shows_current() {
     }
 }
 
-#[test]
-fn test_slash_system_replaces_existing() {
+#[tokio::test]
+async fn test_slash_system_replaces_existing() {
     let mut app = make_app();
-    app.execute_slash_command("/system First prompt");
+    app.execute_slash_command("/system First prompt").await;
     assert_eq!(app.agent_info.prompt.as_deref(), Some("First prompt"));
 
-    app.execute_slash_command("/system Second prompt");
+    app.execute_slash_command("/system Second prompt").await;
     assert_eq!(app.agent_info.prompt.as_deref(), Some("Second prompt"));
 }
 
 // ── /agent ──────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_agent_with_name_switches() {
+#[tokio::test]
+async fn test_slash_agent_with_name_switches() {
     let mut app = make_app();
     assert_eq!(app.agent_name, "general");
 
-    app.execute_slash_command("/agent ask");
+    app.execute_slash_command("/agent ask").await;
 
     assert_eq!(app.agent_name, "ask");
     assert_eq!(app.agent_info.name, "ask");
     assert!(app.status.contains("ask"));
 }
 
-#[test]
-fn test_slash_agent_unknown_name_shows_error() {
+#[tokio::test]
+async fn test_slash_agent_unknown_name_shows_error() {
     let mut app = make_app();
-    app.execute_slash_command("/agent nonexistent");
+    app.execute_slash_command("/agent nonexistent").await;
 
     assert!(
         app.status.contains("Unknown agent"),
@@ -553,10 +561,10 @@ fn test_slash_agent_unknown_name_shows_error() {
     assert_eq!(app.agent_name, "general", "should not change agent");
 }
 
-#[test]
-fn test_slash_agent_no_args_opens_dialog() {
+#[tokio::test]
+async fn test_slash_agent_no_args_opens_dialog() {
     let mut app = make_app();
-    app.execute_slash_command("/agent");
+    app.execute_slash_command("/agent").await;
 
     assert!(
         app.provider_setup.is_some(),
@@ -566,22 +574,22 @@ fn test_slash_agent_no_args_opens_dialog() {
 
 // ── /log ────────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_log_toggles_panel() {
+#[tokio::test]
+async fn test_slash_log_toggles_panel() {
     let mut app = make_app();
     assert!(!app.show_log, "log should be hidden initially");
 
-    app.execute_slash_command("/log");
+    app.execute_slash_command("/log").await;
     assert!(app.show_log, "log should be visible after first toggle");
     assert_eq!(app.status, "log panel visible");
 
-    app.execute_slash_command("/log");
+    app.execute_slash_command("/log").await;
     assert!(!app.show_log, "log should be hidden after second toggle");
     assert_eq!(app.status, "log panel hidden");
 }
 
-#[test]
-fn test_slash_log_clear_subagents() {
+#[tokio::test]
+async fn test_slash_log_clear_subagents() {
     let _guard = enter_with_cwd();
     let subagents_dir = std::env::current_dir()
         .unwrap()
@@ -595,7 +603,7 @@ fn test_slash_log_clear_subagents() {
     assert_eq!(std::fs::read_dir(&subagents_dir).unwrap().count(), 2);
 
     let mut app = make_app();
-    app.execute_slash_command("/log clear subagents");
+    app.execute_slash_command("/log clear subagents").await;
 
     assert_eq!(app.status, "log: subagents cleared");
     // Directory is kept but emptied.
@@ -607,8 +615,8 @@ fn test_slash_log_clear_subagents() {
     );
 }
 
-#[test]
-fn test_slash_log_clear_panics() {
+#[tokio::test]
+async fn test_slash_log_clear_panics() {
     let _guard = enter_with_cwd();
     let panics_dir = std::env::current_dir().unwrap().join("log").join("panics");
 
@@ -620,7 +628,7 @@ fn test_slash_log_clear_panics() {
     assert_eq!(std::fs::read_dir(&panics_dir).unwrap().count(), 3);
 
     let mut app = make_app();
-    app.execute_slash_command("/log clear panics");
+    app.execute_slash_command("/log clear panics").await;
 
     assert_eq!(app.status, "log: panics cleared");
     assert!(panics_dir.exists(), "panics dir should still exist");
@@ -631,8 +639,8 @@ fn test_slash_log_clear_panics() {
     );
 }
 
-#[test]
-fn test_slash_log_clear_missing_dir_reports_zero() {
+#[tokio::test]
+async fn test_slash_log_clear_missing_dir_reports_zero() {
     let _guard = enter_with_cwd();
 
     // No log/subagents directory exists yet.
@@ -645,19 +653,19 @@ fn test_slash_log_clear_missing_dir_reports_zero() {
     );
 
     let mut app = make_app();
-    app.execute_slash_command("/log clear subagents");
+    app.execute_slash_command("/log clear subagents").await;
     assert_eq!(app.status, "log: subagents cleared");
 }
 
-#[test]
-fn test_slash_log_clear_no_target_shows_usage() {
+#[tokio::test]
+async fn test_slash_log_clear_no_target_shows_usage() {
     let mut app = make_app();
-    app.execute_slash_command("/log clear");
+    app.execute_slash_command("/log clear").await;
     assert_eq!(app.status, "log: clear usage");
 }
 
-#[test]
-fn test_slash_log_clear_research() {
+#[tokio::test]
+async fn test_slash_log_clear_research() {
     let _guard = enter_with_cwd();
     let research_dir = std::env::current_dir()
         .unwrap()
@@ -671,7 +679,7 @@ fn test_slash_log_clear_research() {
     assert_eq!(std::fs::read_dir(&research_dir).unwrap().count(), 2);
 
     let mut app = make_app();
-    app.execute_slash_command("/log clear research");
+    app.execute_slash_command("/log clear research").await;
 
     assert_eq!(app.status, "log: research cleared");
     assert!(research_dir.exists(), "research dir should still exist");
@@ -682,8 +690,8 @@ fn test_slash_log_clear_research() {
     );
 }
 
-#[test]
-fn test_slash_log_clear_research_missing_dir_reports_zero() {
+#[tokio::test]
+async fn test_slash_log_clear_research_missing_dir_reports_zero() {
     let _guard = enter_with_cwd();
 
     // No log/research directory exists yet.
@@ -696,19 +704,19 @@ fn test_slash_log_clear_research_missing_dir_reports_zero() {
     );
 
     let mut app = make_app();
-    app.execute_slash_command("/log clear research");
+    app.execute_slash_command("/log clear research").await;
     assert_eq!(app.status, "log: research cleared");
 }
 
-#[test]
-fn test_slash_log_help_shows_help_text() {
+#[tokio::test]
+async fn test_slash_log_help_shows_help_text() {
     let mut app = make_app();
-    app.execute_slash_command("/log help");
+    app.execute_slash_command("/log help").await;
     assert_eq!(app.status, "log: help");
 }
 
-#[test]
-fn test_slash_log_clear_editlog() {
+#[tokio::test]
+async fn test_slash_log_clear_editlog() {
     let _guard = enter_with_cwd();
     let editlog_dir = std::env::current_dir().unwrap().join("log").join("editlog");
 
@@ -719,7 +727,7 @@ fn test_slash_log_clear_editlog() {
     assert_eq!(std::fs::read_dir(&editlog_dir).unwrap().count(), 2);
 
     let mut app = make_app();
-    app.execute_slash_command("/log clear editlog");
+    app.execute_slash_command("/log clear editlog").await;
 
     assert_eq!(app.status, "log: editlog cleared");
     assert!(editlog_dir.exists(), "editlog dir should still exist");
@@ -730,8 +738,8 @@ fn test_slash_log_clear_editlog() {
     );
 }
 
-#[test]
-fn test_slash_log_clear_editlog_missing_dir_reports_zero() {
+#[tokio::test]
+async fn test_slash_log_clear_editlog_missing_dir_reports_zero() {
     let _guard = enter_with_cwd();
 
     // No log/editlog directory exists yet.
@@ -744,12 +752,12 @@ fn test_slash_log_clear_editlog_missing_dir_reports_zero() {
     );
 
     let mut app = make_app();
-    app.execute_slash_command("/log clear editlog");
+    app.execute_slash_command("/log clear editlog").await;
     assert_eq!(app.status, "log: editlog cleared");
 }
 
-#[test]
-fn test_slash_log_clear_logwindow() {
+#[tokio::test]
+async fn test_slash_log_clear_logwindow() {
     let _guard = enter_with_cwd();
     let logwindow_dir = std::env::current_dir()
         .unwrap()
@@ -763,7 +771,7 @@ fn test_slash_log_clear_logwindow() {
     assert_eq!(std::fs::read_dir(&logwindow_dir).unwrap().count(), 2);
 
     let mut app = make_app();
-    app.execute_slash_command("/log clear logwindow");
+    app.execute_slash_command("/log clear logwindow").await;
 
     assert_eq!(app.status, "log: logwindow cleared");
     assert!(logwindow_dir.exists(), "logwindow dir should still exist");
@@ -774,8 +782,8 @@ fn test_slash_log_clear_logwindow() {
     );
 }
 
-#[test]
-fn test_slash_log_clear_logwindow_missing_dir_reports_zero() {
+#[tokio::test]
+async fn test_slash_log_clear_logwindow_missing_dir_reports_zero() {
     let _guard = enter_with_cwd();
 
     // No log/logwindow directory exists yet.
@@ -788,27 +796,27 @@ fn test_slash_log_clear_logwindow_missing_dir_reports_zero() {
     );
 
     let mut app = make_app();
-    app.execute_slash_command("/log clear logwindow");
+    app.execute_slash_command("/log clear logwindow").await;
     assert_eq!(app.status, "log: logwindow cleared");
 }
 
-#[test]
-fn test_slash_log_unknown_sub_shows_usage() {
+#[tokio::test]
+async fn test_slash_log_unknown_sub_shows_usage() {
     let mut app = make_app();
-    app.execute_slash_command("/log frobnicate");
+    app.execute_slash_command("/log frobnicate").await;
     assert_eq!(app.status, "log: usage");
 }
 
 // ── /profile ────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_profile_on_enables_profiler_panel() {
+#[tokio::test]
+async fn test_slash_profile_on_enables_profiler_panel() {
     agent_loop_profiler().set_enabled(false);
 
     let mut app = make_app();
     assert!(!app.show_profile, "profile should be hidden initially");
 
-    app.execute_slash_command("/profile on");
+    app.execute_slash_command("/profile on").await;
 
     assert!(app.show_profile, "profile should be visible after enabling");
     assert_eq!(app.status, "profile panel visible");
@@ -816,14 +824,14 @@ fn test_slash_profile_on_enables_profiler_panel() {
     agent_loop_profiler().set_enabled(false);
 }
 
-#[test]
-fn test_slash_profile_off_disables_profiler_panel() {
+#[tokio::test]
+async fn test_slash_profile_off_disables_profiler_panel() {
     agent_loop_profiler().set_enabled(true);
 
     let mut app = make_app();
     app.show_profile = true;
 
-    app.execute_slash_command("/profile off");
+    app.execute_slash_command("/profile off").await;
 
     assert!(
         !app.show_profile,
@@ -832,18 +840,20 @@ fn test_slash_profile_off_disables_profiler_panel() {
     assert_eq!(app.status, "profile panel hidden");
 }
 
-#[test]
-fn test_alt_p_toggles_profiler_panel() {
+#[tokio::test]
+async fn test_alt_p_toggles_profiler_panel() {
     agent_loop_profiler().set_enabled(false);
 
     let mut app = make_app();
     assert!(!app.show_profile, "profile should be hidden initially");
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT))
+        .await;
     assert!(app.show_profile, "profile should be visible after Alt+P");
     assert_eq!(app.status, "profile panel visible");
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT))
+        .await;
     assert!(
         !app.show_profile,
         "profile should be hidden after second Alt+P"
@@ -855,8 +865,8 @@ fn test_alt_p_toggles_profiler_panel() {
 
 // ── /llmstats ───────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_llmstats_shows_average_metrics() {
+#[tokio::test]
+async fn test_slash_llmstats_shows_average_metrics() {
     let mut app = make_app();
     app.selected_model = Some("openai/gpt-4o".to_string());
     app.llm_request_stats = vec![
@@ -874,7 +884,7 @@ fn test_slash_llmstats_shows_average_metrics() {
         },
     ];
 
-    app.execute_slash_command("/llmstats");
+    app.execute_slash_command("/llmstats").await;
 
     assert_eq!(app.status, "llm stats");
     assert!(!app.messages.is_empty(), "llmstats should create a message");
@@ -887,12 +897,12 @@ fn test_slash_llmstats_shows_average_metrics() {
     assert!(text.contains("Average output"));
 }
 
-#[test]
-fn test_slash_llmstats_no_samples_shows_message() {
+#[tokio::test]
+async fn test_slash_llmstats_no_samples_shows_message() {
     let mut app = make_app();
     app.selected_model = Some("openai/gpt-4o".to_string());
 
-    app.execute_slash_command("/llmstats");
+    app.execute_slash_command("/llmstats").await;
 
     assert_eq!(app.status, "llm stats unavailable");
     assert!(!app.messages.is_empty(), "llmstats should create a message");
@@ -902,8 +912,8 @@ fn test_slash_llmstats_no_samples_shows_message() {
 
 // ── /cost ───────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_cost_shows_estimated_cost() {
+#[tokio::test]
+async fn test_slash_cost_shows_estimated_cost() {
     let mut app = make_app();
     app.llm_request_stats = vec![
         ragent_tui::app::LlmRequestStat {
@@ -920,7 +930,7 @@ fn test_slash_cost_shows_estimated_cost() {
         },
     ];
 
-    app.execute_slash_command("/cost");
+    app.execute_slash_command("/cost").await;
 
     assert_eq!(app.status, "cost summary");
     assert!(!app.messages.is_empty(), "cost should create a message");
@@ -931,11 +941,11 @@ fn test_slash_cost_shows_estimated_cost() {
     assert!(text.contains("Estimated cost"));
 }
 
-#[test]
-fn test_slash_cost_no_samples_shows_message() {
+#[tokio::test]
+async fn test_slash_cost_no_samples_shows_message() {
     let mut app = make_app();
 
-    app.execute_slash_command("/cost");
+    app.execute_slash_command("/cost").await;
 
     assert_eq!(app.status, "cost unavailable");
     assert!(!app.messages.is_empty(), "cost should create a message");
@@ -945,8 +955,8 @@ fn test_slash_cost_no_samples_shows_message() {
 
 // ── /clip ───────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_clip_copies_rendered_message_lines() {
+#[tokio::test]
+async fn test_slash_clip_copies_rendered_message_lines() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     app.messages.push(ragent_agent::message::Message::user_text(
@@ -968,7 +978,7 @@ fn test_slash_clip_copies_rendered_message_lines() {
     let expected_chars = app.message_content_lines.join("\n").len();
     let expected_lines = app.message_content_lines.len();
 
-    app.execute_slash_command("/clip");
+    app.execute_slash_command("/clip").await;
 
     assert_eq!(app.status, format!("clip: copied {expected_chars} chars"));
     assert!(!app.messages.is_empty(), "clip should create a message");
@@ -981,24 +991,24 @@ fn test_slash_clip_copies_rendered_message_lines() {
     // stalling the test on the Linux wait() workaround.
 }
 
-#[test]
-fn test_slash_clip_registered_in_help() {
+#[tokio::test]
+async fn test_slash_clip_registered_in_help() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("/clip"), "help should document /clip: {text}");
 }
 
-#[test]
-fn test_slash_clip_empty_window_shows_hint() {
+#[tokio::test]
+async fn test_slash_clip_empty_window_shows_hint() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     assert!(app.message_content_lines.is_empty(), "window starts empty");
 
-    app.execute_slash_command("/clip");
+    app.execute_slash_command("/clip").await;
 
     assert_eq!(app.status, "clip: nothing to copy");
     let text = app.messages.last().unwrap().text_content();
@@ -1008,12 +1018,12 @@ fn test_slash_clip_empty_window_shows_hint() {
 
 // ── /compact ────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_compact_no_session_shows_warning() {
+#[tokio::test]
+async fn test_slash_compact_no_session_shows_warning() {
     let mut app = make_app();
     assert!(app.session_id.is_none());
 
-    app.execute_slash_command("/compact");
+    app.execute_slash_command("/compact").await;
     assert!(
         app.status.contains("No messages"),
         "should create session then warn about empty messages: {}",
@@ -1022,13 +1032,13 @@ fn test_slash_compact_no_session_shows_warning() {
     assert!(app.session_id.is_some(), "session should be created");
 }
 
-#[test]
-fn test_slash_compact_no_messages_shows_warning() {
+#[tokio::test]
+async fn test_slash_compact_no_messages_shows_warning() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     assert!(app.messages.is_empty());
 
-    app.execute_slash_command("/compact");
+    app.execute_slash_command("/compact").await;
     assert!(
         app.status.contains("No messages"),
         "should warn about empty messages: {}",
@@ -1039,13 +1049,13 @@ fn test_slash_compact_no_messages_shows_warning() {
 // `/compress` is a deprecated alias for `/compact` (FR-009) and must
 // forward to the same compaction path.
 
-#[test]
-fn test_slash_compress_alias_forwards_to_compact() {
+#[tokio::test]
+async fn test_slash_compress_alias_forwards_to_compact() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     assert!(app.messages.is_empty());
 
-    app.execute_slash_command("/compress");
+    app.execute_slash_command("/compress").await;
     assert!(
         app.status.contains("No messages"),
         "/compress should behave like /compact when there is nothing to compact: {}",
@@ -1055,12 +1065,12 @@ fn test_slash_compress_alias_forwards_to_compact() {
 
 // ── /undo ───────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_undo_no_session_shows_warning() {
+#[tokio::test]
+async fn test_slash_undo_no_session_shows_warning() {
     let mut app = make_app();
     assert!(app.session_id.is_none());
 
-    app.execute_slash_command("/undo");
+    app.execute_slash_command("/undo").await;
     // The ensure_session() gate runs before the undo handler, so a session
     // will be created. The undo logic then checks for empty messages.
     assert!(
@@ -1071,13 +1081,13 @@ fn test_slash_undo_no_session_shows_warning() {
     assert!(app.session_id.is_some(), "session should be created");
 }
 
-#[test]
-fn test_slash_undo_no_messages_shows_warning() {
+#[tokio::test]
+async fn test_slash_undo_no_messages_shows_warning() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     assert!(app.messages.is_empty());
 
-    app.execute_slash_command("/undo");
+    app.execute_slash_command("/undo").await;
     assert!(
         app.status.contains("No messages"),
         "should warn about no messages: {}",
@@ -1085,8 +1095,8 @@ fn test_slash_undo_no_messages_shows_warning() {
     );
 }
 
-#[test]
-fn test_slash_undo_removes_last_user_assistant_pair() {
+#[tokio::test]
+async fn test_slash_undo_removes_last_user_assistant_pair() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
@@ -1112,7 +1122,7 @@ fn test_slash_undo_removes_last_user_assistant_pair() {
 
     assert_eq!(app.messages.len(), 4);
 
-    app.execute_slash_command("/undo");
+    app.execute_slash_command("/undo").await;
 
     // Should have removed the last user message and its assistant response
     assert_eq!(app.messages.len(), 2);
@@ -1123,8 +1133,8 @@ fn test_slash_undo_removes_last_user_assistant_pair() {
     assert!(app.status.contains("removed 2 message(s)"));
 }
 
-#[test]
-fn test_slash_undo_no_user_message_warns() {
+#[tokio::test]
+async fn test_slash_undo_no_user_message_warns() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
@@ -1135,7 +1145,7 @@ fn test_slash_undo_no_user_message_warns() {
             "orphan answer",
         ));
 
-    app.execute_slash_command("/undo");
+    app.execute_slash_command("/undo").await;
 
     assert!(
         app.status.contains("No user message found"),
@@ -1145,8 +1155,8 @@ fn test_slash_undo_no_user_message_warns() {
     assert_eq!(app.messages.len(), 1); // unchanged
 }
 
-#[test]
-fn test_slash_undo_removes_multiple_following_messages() {
+#[tokio::test]
+async fn test_slash_undo_removes_multiple_following_messages() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
@@ -1166,7 +1176,7 @@ fn test_slash_undo_removes_multiple_following_messages() {
 
     assert_eq!(app.messages.len(), 3);
 
-    app.execute_slash_command("/undo");
+    app.execute_slash_command("/undo").await;
 
     // Should remove user message and all following messages
     assert_eq!(app.messages.len(), 0);
@@ -1175,12 +1185,12 @@ fn test_slash_undo_removes_multiple_following_messages() {
 
 // ── /name ───────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_name_no_session_shows_warning() {
+#[tokio::test]
+async fn test_slash_name_no_session_shows_warning() {
     let mut app = make_app();
     assert!(app.session_id.is_none());
 
-    app.execute_slash_command("/name My Session");
+    app.execute_slash_command("/name My Session").await;
     // The ensure_session() gate runs before the name handler, so a session
     // will be created. The name is then set on that session.
     assert!(app.session_id.is_some(), "session should be created");
@@ -1191,8 +1201,8 @@ fn test_slash_name_no_session_shows_warning() {
     );
 }
 
-#[test]
-fn test_slash_name_sets_session_name() {
+#[tokio::test]
+async fn test_slash_name_sets_session_name() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
@@ -1203,7 +1213,7 @@ fn test_slash_name_sets_session_name() {
         .expect("create session");
     let _ = storage;
 
-    app.execute_slash_command("/name My Test Session");
+    app.execute_slash_command("/name My Test Session").await;
 
     assert!(
         app.status.contains("Session name set to 'My Test Session'"),
@@ -1220,8 +1230,8 @@ fn test_slash_name_sets_session_name() {
     assert_eq!(session.title, "My Test Session");
 }
 
-#[test]
-fn test_slash_name_clears_with_empty_argument() {
+#[tokio::test]
+async fn test_slash_name_clears_with_empty_argument() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
@@ -1237,7 +1247,7 @@ fn test_slash_name_clears_with_empty_argument() {
     let _ = storage;
 
     // Then clear it with empty argument
-    app.execute_slash_command("/name ");
+    app.execute_slash_command("/name ").await;
 
     assert!(
         app.status.contains("Session name cleared"),
@@ -1254,8 +1264,8 @@ fn test_slash_name_clears_with_empty_argument() {
     assert_eq!(session.title, "");
 }
 
-#[test]
-fn test_slash_name_trims_whitespace() {
+#[tokio::test]
+async fn test_slash_name_trims_whitespace() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
@@ -1265,7 +1275,7 @@ fn test_slash_name_trims_whitespace() {
         .expect("create session");
     let _ = storage;
 
-    app.execute_slash_command("/name   Trimmed Name   ");
+    app.execute_slash_command("/name   Trimmed Name   ").await;
 
     assert!(
         app.status.contains("Session name set to 'Trimmed Name'"),
@@ -1281,12 +1291,12 @@ fn test_slash_name_trims_whitespace() {
     assert_eq!(session.title, "Trimmed Name");
 }
 
-#[test]
-fn test_help_shows_name_command() {
+#[tokio::test]
+async fn test_help_shows_name_command() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("/name"),
@@ -1294,12 +1304,12 @@ fn test_help_shows_name_command() {
     );
 }
 
-#[test]
-fn test_help_lists_compact_not_compress() {
+#[tokio::test]
+async fn test_help_lists_compact_not_compress() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/help");
+    app.execute_slash_command("/help").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("/compact"),
@@ -1317,7 +1327,7 @@ fn test_help_lists_compact_not_compress() {
 async fn test_slash_model_opens_provider_picker() {
     let mut app = make_app();
     // No provider configured by default (no env vars in test)
-    app.execute_slash_command("/model");
+    app.execute_slash_command("/model").await;
     // With no provider configured, /model opens the provider picker.
     // (If a provider was auto-detected from the environment, it would jump
     // straight to the model list instead.)
@@ -1332,12 +1342,12 @@ async fn test_slash_model_opens_provider_picker() {
     );
 }
 
-#[test]
-fn test_slash_model_show_without_selected_model_uses_agent_model() {
+#[tokio::test]
+async fn test_slash_model_show_without_selected_model_uses_agent_model() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/model show");
+    app.execute_slash_command("/model show").await;
 
     assert_eq!(app.status, "active model metadata");
     let text = app
@@ -1349,8 +1359,8 @@ fn test_slash_model_show_without_selected_model_uses_agent_model() {
     assert!(text.contains("Model Ref"));
 }
 
-#[test]
-fn test_slash_model_show_displays_metadata_for_active_model() {
+#[tokio::test]
+async fn test_slash_model_show_displays_metadata_for_active_model() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     app.configured_provider = Some(ConfiguredProvider {
@@ -1392,7 +1402,7 @@ fn test_slash_model_show_displays_metadata_for_active_model() {
         .set_discovered_models("openai", &discovered_json)
         .expect("persist openai discovered models");
 
-    app.execute_slash_command("/model show");
+    app.execute_slash_command("/model show").await;
 
     assert_eq!(app.status, "active model metadata");
     let text = app
@@ -1407,11 +1417,11 @@ fn test_slash_model_show_displays_metadata_for_active_model() {
     assert!(text.contains("Tool use"));
 }
 
-#[test]
-fn test_slash_model_show_invalid_subcommand_shows_usage() {
+#[tokio::test]
+async fn test_slash_model_show_invalid_subcommand_shows_usage() {
     let mut app = make_app();
 
-    app.execute_slash_command("/model nope");
+    app.execute_slash_command("/model nope").await;
 
     assert_eq!(app.status, "Usage: /model [show]");
 }
@@ -1425,7 +1435,7 @@ async fn test_slash_model_empty_model_list_shows_warning_instead_of_opening_pick
         source: ProviderSource::Database,
     });
 
-    app.execute_slash_command("/model");
+    app.execute_slash_command("/model").await;
 
     // With a configured provider that is not registered, /model jumps to
     // LoadingModels (which will fail and fall back to the model picker or
@@ -1463,7 +1473,7 @@ async fn test_slash_model_ollama_cloud_falls_back_to_selected_model_when_discove
     app.selected_model = Some("ollama_cloud/deepseek-v4-flash".to_string());
     app.selected_model_ctx_window = Some(262_144);
 
-    app.execute_slash_command("/model");
+    app.execute_slash_command("/model").await;
 
     // The new /model flow shows a configured-provider picker, or auto-selects
     // a single provider and attempts model restore. Because discovery is not
@@ -1506,10 +1516,10 @@ async fn test_slash_model_ollama_cloud_falls_back_to_selected_model_when_discove
 
 // ── /provider ───────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_provider_opens_setup() {
+#[tokio::test]
+async fn test_slash_provider_opens_setup() {
     let mut app = make_app();
-    app.execute_slash_command("/provider");
+    app.execute_slash_command("/provider").await;
 
     assert!(
         app.provider_setup.is_some(),
@@ -1531,7 +1541,7 @@ async fn test_slash_provider_always_prompts_for_key_when_already_configured() {
     });
 
     // Open the provider picker via /provider (force_key_entry == true).
-    app.execute_slash_command("/provider");
+    app.execute_slash_command("/provider").await;
     assert!(
         matches!(
             app.provider_setup,
@@ -1553,7 +1563,8 @@ async fn test_slash_provider_always_prompts_for_key_when_already_configured() {
         selected: anthropic_idx,
         force_key_entry: true,
     });
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     // Even though anthropic is already configured, /provider should show
     // the EnterKey dialog so the user can edit the key.
@@ -1576,8 +1587,8 @@ async fn test_slash_provider_always_prompts_for_key_when_already_configured() {
         );
     }
 }
-#[test]
-fn test_slash_provider_selection_updates_displayed_provider() {
+#[tokio::test]
+async fn test_slash_provider_selection_updates_displayed_provider() {
     let mut app = make_app();
 
     // Start with a different provider so we can verify the display updates.
@@ -1614,7 +1625,8 @@ fn test_slash_provider_selection_updates_displayed_provider() {
     // Press Enter to confirm the model selection. Because this is an Ollama-family
     // provider, the selector now forces the thinking-level step even when model
     // detection reports no levels.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(
         matches!(
             app.provider_setup,
@@ -1624,7 +1636,8 @@ fn test_slash_provider_selection_updates_displayed_provider() {
     );
 
     // Press Enter again to confirm the default thinking level.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert_eq!(
         app.configured_provider.as_ref().map(|p| p.id.as_str()),
@@ -1653,8 +1666,8 @@ fn test_provider_list_includes_generic_openai() {
         "provider list should include Ollama Cloud"
     );
 }
-#[test]
-fn test_model_selector_navigation_wraps_top_and_bottom() {
+#[tokio::test]
+async fn test_model_selector_navigation_wraps_top_and_bottom() {
     let mut app = make_app();
     app.provider_setup = Some(ProviderSetupStep::SelectModel {
         provider_id: "copilot".to_string(),
@@ -1712,13 +1725,13 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
         selected: 0,
     });
 
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)).await;
     match app.provider_setup.as_ref().expect("provider setup present") {
         ProviderSetupStep::SelectModel { selected, .. } => assert_eq!(*selected, 2),
         _ => panic!("expected SelectModel state"),
     }
 
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)).await;
     match app.provider_setup.as_ref().expect("provider setup present") {
         ProviderSetupStep::SelectModel { selected, .. } => assert_eq!(*selected, 0),
         _ => panic!("expected SelectModel state"),
@@ -1727,10 +1740,10 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
 
 // ── /provider_reset ─────────────────────────────────────────────────
 
-#[test]
-fn test_slash_provider_reset_opens_dialog() {
+#[tokio::test]
+async fn test_slash_provider_reset_opens_dialog() {
     let mut app = make_app();
-    app.execute_slash_command("/provider_reset");
+    app.execute_slash_command("/provider_reset").await;
 
     assert!(
         app.provider_setup.is_some(),
@@ -1738,8 +1751,8 @@ fn test_slash_provider_reset_opens_dialog() {
     );
 }
 
-#[test]
-fn test_generic_openai_enter_key_supports_endpoint_field_and_tab_toggle() {
+#[tokio::test]
+async fn test_generic_openai_enter_key_supports_endpoint_field_and_tab_toggle() {
     let mut app = make_app();
     app.provider_setup = Some(ProviderSetupStep::EnterKey {
         provider_id: "generic_openai".to_string(),
@@ -1751,15 +1764,17 @@ fn test_generic_openai_enter_key_supports_endpoint_field_and_tab_toggle() {
     });
 
     // Toggle to endpoint field and type URL.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)).await;
     ragent_tui::input::handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE),
-    );
+    )
+    .await;
     ragent_tui::input::handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE),
-    );
+    )
+    .await;
 
     match app.provider_setup.as_ref().expect("provider setup present") {
         ProviderSetupStep::EnterKey {
@@ -1786,7 +1801,8 @@ async fn test_generic_openai_enter_key_persists_endpoint_setting() {
         error: None,
     });
 
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert_eq!(
         app.storage
@@ -1907,10 +1923,10 @@ fn test_paste_text_replaces_mouse_selection() {
 
 // ── unknown command ─────────────────────────────────────────────────
 
-#[test]
-fn test_slash_unknown_command_shows_error() {
+#[tokio::test]
+async fn test_slash_unknown_command_shows_error() {
     let mut app = make_app();
-    app.execute_slash_command("/foobar");
+    app.execute_slash_command("/foobar").await;
 
     assert!(
         app.status.contains("Unknown command"),
@@ -1931,14 +1947,14 @@ fn test_slash_unknown_command_shows_error() {
     );
 }
 
-#[test]
-fn test_slash_unknown_command_visible_in_message_window() {
+#[tokio::test]
+async fn test_slash_unknown_command_visible_in_message_window() {
     // The status line auto-expires back to "ready", so a typo'd slash command
     // must ALSO render a visible rejection in the message window (a silently
     // swallowed prompt once looked like a broken agent loop).
     let mut app = make_app();
     let before = app.messages.len();
-    app.execute_slash_command("/simpify all");
+    app.execute_slash_command("/simpify all").await;
 
     assert_eq!(
         app.messages.len(),
@@ -1993,11 +2009,11 @@ fn write_temp_blueprint(dir: &std::path::Path, name: &str, readme: &str, teammat
     .expect("write task-seed");
 }
 
-#[test]
-fn test_blueprints_list_empty() {
+#[tokio::test]
+async fn test_blueprints_list_empty() {
     let _guard = enter_with_cwd();
     let mut app = make_app();
-    app.execute_slash_command("/blueprints");
+    app.execute_slash_command("/blueprints").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("From: /blueprints"),
@@ -2010,13 +2026,13 @@ fn test_blueprints_list_empty() {
     assert_eq!(app.status, "blueprints: list");
 }
 
-#[test]
-fn test_blueprints_list_installed() {
+#[tokio::test]
+async fn test_blueprints_list_installed() {
     let guard = enter_with_cwd();
     write_temp_blueprint(&guard.path(), "demo", "# Demo\nA demo blueprint", 2);
 
     let mut app = make_app();
-    app.execute_slash_command("/blueprints list");
+    app.execute_slash_command("/blueprints list").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("## Installed Team Blueprints"),
@@ -2033,21 +2049,21 @@ fn test_blueprints_list_installed() {
     assert_eq!(app.status, "blueprints: list");
 }
 
-#[test]
-fn test_blueprints_help() {
+#[tokio::test]
+async fn test_blueprints_help() {
     let _guard = enter_with_cwd();
     let mut app = make_app();
-    app.execute_slash_command("/blueprints help");
+    app.execute_slash_command("/blueprints help").await;
     assert_eq!(app.status, "blueprints: help");
 }
 
-#[test]
-fn test_blueprints_detail() {
+#[tokio::test]
+async fn test_blueprints_detail() {
     let guard = enter_with_cwd();
     write_temp_blueprint(&guard.path(), "demo", "# Demo\nA demo blueprint", 1);
 
     let mut app = make_app();
-    app.execute_slash_command("/blueprints demo");
+    app.execute_slash_command("/blueprints demo").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("From: /blueprints demo"),
@@ -2065,22 +2081,22 @@ fn test_blueprints_detail() {
     assert_eq!(app.status, "blueprints: demo");
 }
 
-#[test]
-fn test_blueprints_unknown_name() {
+#[tokio::test]
+async fn test_blueprints_unknown_name() {
     let _guard = enter_with_cwd();
     let mut app = make_app();
-    app.execute_slash_command("/blueprints missing");
+    app.execute_slash_command("/blueprints missing").await;
     assert_eq!(app.status, "Blueprint 'missing' not found");
     assert!(app.log_entries.iter().any(|e| e.level == LogLevel::Warn));
 }
 
-#[test]
-fn test_team_blueprint_still_works_after_refactor() {
+#[tokio::test]
+async fn test_team_blueprint_still_works_after_refactor() {
     let guard = enter_with_cwd();
     write_temp_blueprint(&guard.path(), "demo", "# Demo\nA demo blueprint", 1);
 
     let mut app = make_app();
-    app.execute_slash_command("/team blueprint demo");
+    app.execute_slash_command("/team blueprint demo").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("From: /team blueprint demo"),
@@ -2095,12 +2111,12 @@ fn test_team_blueprint_still_works_after_refactor() {
 
 // ── input clearing ──────────────────────────────────────────────────
 
-#[test]
-fn test_slash_command_clears_input() {
+#[tokio::test]
+async fn test_slash_command_clears_input() {
     let mut app = make_app();
     app.input = "/help".to_string();
 
-    app.execute_slash_command(&app.input.clone());
+    app.execute_slash_command(&app.input.clone()).await;
     assert!(
         app.input.is_empty(),
         "input should be cleared after command"
@@ -2108,63 +2124,73 @@ fn test_slash_command_clears_input() {
     assert!(app.slash_menu.is_none(), "slash menu should be closed");
 }
 
-#[test]
-fn test_input_cursor_left_right_and_editing() {
+#[tokio::test]
+async fn test_input_cursor_left_right_and_editing() {
     let mut app = make_app();
     app.input = "abc".to_string();
     app.input_cursor = app.input.chars().count();
 
     // Move cursor left twice (from end to between 'b' and 'c')
-    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+        .await;
 
     assert_eq!(app.input_cursor, 1);
 
     // Insert a character at the cursor position
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input, "aXbc");
     assert_eq!(app.input_cursor, 2);
 
     // Move to end and delete the inserted character
-    app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input_cursor, 4);
 
     // Backspace at end removes the last character.
-    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input, "aXb");
     assert_eq!(app.input_cursor, 3);
 
     // Move left one position and delete the inserted character.
-    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input_cursor, 2);
-    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input, "ab");
     assert_eq!(app.input_cursor, 1);
 }
 
-#[test]
-fn test_input_editing_handles_unicode_backspace_and_delete() {
+#[tokio::test]
+async fn test_input_editing_handles_unicode_backspace_and_delete() {
     let mut app = make_app();
     app.input = "a💡b".to_string();
     app.input_cursor = app.input.chars().count();
 
     // Move to between 💡 and b, then backspace removes 💡.
-    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input_cursor, 2);
-    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input, "ab");
     assert_eq!(app.input_cursor, 1);
 
     // Delete at cursor should remove the next character.
     app.input = "a💡b".to_string();
     app.input_cursor = 1; // before 💡
-    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input, "ab");
     assert_eq!(app.input_cursor, 1);
 }
 
-#[test]
-fn test_file_menu_mode_editing_respects_midline_cursor() {
+#[tokio::test]
+async fn test_file_menu_mode_editing_respects_midline_cursor() {
     let mut app = make_app();
     app.input = "ab@cd".to_string();
     app.input_cursor = 2; // between 'b' and '@'
@@ -2180,17 +2206,19 @@ fn test_file_menu_mode_editing_respects_midline_cursor() {
         current_dir: None,
     });
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input, "abX@cd");
     assert_eq!(app.input_cursor, 3);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input, "ab@cd");
     assert_eq!(app.input_cursor, 2);
 }
 
-#[test]
-fn test_history_picker_enter_sets_char_cursor_for_unicode() {
+#[tokio::test]
+async fn test_history_picker_enter_sets_char_cursor_for_unicode() {
     let mut app = make_app();
     app.history_picker = Some(HistoryPickerState {
         entries: vec!["éé".to_string()],
@@ -2198,15 +2226,16 @@ fn test_history_picker_enter_sets_char_cursor_for_unicode() {
         scroll_offset: 0,
     });
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert!(app.history_picker.is_none());
     assert_eq!(app.input, "éé");
     assert_eq!(app.input_cursor, 2);
 }
 
-#[test]
-fn test_chat_keystrokes_produce_expected_edit_result() {
+#[tokio::test]
+async fn test_chat_keystrokes_produce_expected_edit_result() {
     // Test that input handling works correctly in chat mode
     let mut chat = make_app();
     // App now starts in Chat mode - home screen has been removed
@@ -2221,7 +2250,7 @@ fn test_chat_keystrokes_produce_expected_edit_result() {
         KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
     ];
     for key in sequence {
-        chat.handle_key_event(key);
+        chat.handle_key_event(key).await;
     }
 
     // Verify the final state
@@ -2229,53 +2258,62 @@ fn test_chat_keystrokes_produce_expected_edit_result() {
     assert_eq!(chat.input_cursor, 2);
 }
 
-#[test]
-fn test_ctrl_word_navigation_and_deletes() {
+#[tokio::test]
+async fn test_ctrl_word_navigation_and_deletes() {
     let mut app = make_app();
     app.input = "hello world again".to_string();
     app.input_cursor = app.input.chars().count();
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.input_cursor, "hello world ".chars().count());
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.input, "hello again");
     assert_eq!(app.input_cursor, "hello ".chars().count());
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.input, "hello ");
     assert_eq!(app.input_cursor, "hello ".chars().count());
 }
 
-#[test]
-fn test_ctrl_terminal_cursor_movement_bindings() {
+#[tokio::test]
+async fn test_ctrl_terminal_cursor_movement_bindings() {
     let mut app = make_app();
     app.input = "abcdef".to_string();
     app.input_cursor = 3;
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.input_cursor, 2);
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.input_cursor, 3);
 
     // Ctrl+A now selects all: anchor → 0, cursor → end.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.kb_select_anchor, Some(0));
     assert_eq!(app.input_cursor, 6);
     // Ctrl+E moves to end (cursor is already there; clears selection).
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.input_cursor, 6);
 }
 
-#[test]
-fn test_ctrl_home_end_bindings() {
+#[tokio::test]
+async fn test_ctrl_home_end_bindings() {
     let mut app = make_app();
     app.input = "abcdef".to_string();
     app.input_cursor = 3;
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.input_cursor, 0);
-    app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.input_cursor, 6);
 }
 
@@ -2344,8 +2382,8 @@ fn test_file_menu_closes_when_cursor_not_inside_mention() {
     assert!(app.file_menu.is_none());
 }
 
-#[test]
-fn test_file_menu_mode_supports_cursor_movement_and_delete() {
+#[tokio::test]
+async fn test_file_menu_mode_supports_cursor_movement_and_delete() {
     let mut app = make_app();
     app.input = "ab@cd".to_string();
     app.input_cursor = 3; // between '@' and 'c'
@@ -2361,16 +2399,18 @@ fn test_file_menu_mode_supports_cursor_movement_and_delete() {
         current_dir: None,
     });
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input_cursor, 2);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.input, "abcd");
     assert_eq!(app.input_cursor, 2);
 }
 
-#[test]
-fn test_file_menu_mode_supports_ctrl_word_actions() {
+#[tokio::test]
+async fn test_file_menu_mode_supports_ctrl_word_actions() {
     let mut app = make_app();
     app.input = "@hello world".to_string();
     app.input_cursor = app.input.chars().count();
@@ -2386,16 +2426,18 @@ fn test_file_menu_mode_supports_ctrl_word_actions() {
         current_dir: None,
     });
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.input_cursor, "@hello ".chars().count());
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.input, "@hello ");
     assert_eq!(app.input_cursor, "@hello ".chars().count());
 }
 
-#[test]
-fn test_file_menu_enter_accepts_without_sending() {
+#[tokio::test]
+async fn test_file_menu_enter_accepts_without_sending() {
     let mut app = make_app();
     app.input = "@first".to_string();
     app.input_cursor = app.input.chars().count();
@@ -2412,7 +2454,8 @@ fn test_file_menu_enter_accepts_without_sending() {
     });
 
     let action =
-        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await;
     assert!(action.is_none(), "enter should accept mention but not send");
     assert_eq!(app.input, "@src/first.rs");
     assert!(
@@ -2435,15 +2478,15 @@ fn test_file_menu_no_matches_stays_open_for_feedback() {
     assert_eq!(menu.query, "nomatch");
 }
 
-#[test]
-fn test_slash_browse_refresh_updates_cache_metadata() {
+#[tokio::test]
+async fn test_slash_browse_refresh_updates_cache_metadata() {
     let mut app = make_app();
     app.project_files_cache = None;
     app.project_files_cache_cwd = None;
     app.project_files_cache_refreshed_at = None;
     app.project_files_cache_count = 0;
 
-    app.execute_slash_command("/browse_refresh");
+    app.execute_slash_command("/browse_refresh").await;
 
     assert!(
         app.status.starts_with("browse index refreshed"),
@@ -2516,8 +2559,9 @@ fn test_directory_menu_has_back_to_fuzzy_entry() {
     );
 }
 
-#[test]
-fn test_file_menu_ctrl_backslash_toggles_hidden_filter() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_file_menu_ctrl_backslash_toggles_hidden_filter() {
     let _lock = cwd_lock();
     let mut app = make_app();
     app.input = "@src".to_string();
@@ -2538,13 +2582,15 @@ fn test_file_menu_ctrl_backslash_toggles_hidden_filter() {
     let _ = ragent_tui::input::handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL),
-    );
+    )
+    .await;
     assert!(app.file_menu_show_hidden);
     assert!(app.file_menu.is_some());
 }
 
-#[test]
-fn test_file_menu_down_scrolls_selection_window() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_file_menu_down_scrolls_selection_window() {
     let _lock = cwd_lock();
     let mut app = make_app();
     let mut entries = Vec::new();
@@ -2567,21 +2613,22 @@ fn test_file_menu_down_scrolls_selection_window() {
         let _ = ragent_tui::input::handle_key(
             &mut app,
             KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-        );
+        )
+        .await;
     }
     let menu = app.file_menu.as_ref().expect("menu");
     assert_eq!(menu.selected, 9);
     assert!(menu.scroll_offset > 0);
 }
 
-#[test]
-fn test_slash_inputdiag_reports_input_state() {
+#[tokio::test]
+async fn test_slash_inputdiag_reports_input_state() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     app.input = "abc".to_string();
     app.input_cursor = 2;
 
-    app.execute_slash_command("/inputdiag");
+    app.execute_slash_command("/inputdiag").await;
 
     assert_eq!(app.status, "inputdiag");
     assert!(!app.messages.is_empty());
@@ -2595,45 +2642,50 @@ fn test_slash_inputdiag_reports_input_state() {
 
 // ── with leading slash and without ──────────────────────────────────
 
-#[test]
-fn test_slash_command_works_without_leading_slash() {
+#[tokio::test]
+async fn test_slash_command_works_without_leading_slash() {
     let mut app = make_app();
-    app.execute_slash_command("quit");
+    app.execute_slash_command("quit").await;
     assert!(!app.is_running, "/quit should work without leading slash");
 }
 
-#[test]
-fn test_keyboard_quit_requires_ctrl_c_then_ctrl_d() {
+#[tokio::test]
+async fn test_keyboard_quit_requires_ctrl_c_then_ctrl_d() {
     let mut app = make_app();
     assert!(app.is_running);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+        .await;
     assert!(app.is_running, "Ctrl+D alone should not quit");
     assert!(app.status.contains("Ctrl+C first"));
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
+        .await;
     assert!(app.is_running, "Ctrl+C should arm, not quit");
     assert!(app.status.contains("Ctrl+D"));
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+        .await;
     assert!(!app.is_running, "Ctrl+C then Ctrl+D should quit");
 }
 
-#[test]
-fn test_keyboard_quit_ctrl_c_then_ctrl_c_does_not_exit() {
+#[tokio::test]
+async fn test_keyboard_quit_ctrl_c_then_ctrl_c_does_not_exit() {
     let mut app = make_app();
     assert!(app.is_running);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
+        .await;
     assert!(app.is_running);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
+        .await;
     assert!(app.is_running, "second Ctrl+C should not exit");
     assert!(app.status.contains("Ctrl+D"));
 }
 
-#[test]
-fn test_output_view_paging_shortcuts() {
+#[tokio::test]
+async fn test_output_view_paging_shortcuts() {
     let mut app = make_app();
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::Session {
@@ -2651,21 +2703,25 @@ fn test_output_view_paging_shortcuts() {
         },
     });
 
-    app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 15);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+        .await;
     assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 10);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 50);
 
-    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL));
+    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL))
+        .await;
     assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 0);
 }
 
-#[test]
-fn test_output_view_escape_closes_overlay() {
+#[tokio::test]
+async fn test_output_view_escape_closes_overlay() {
     let mut app = make_app();
     app.selected_agent_session_id = Some("s1".to_string());
     app.selected_agent_index = Some(1);
@@ -2685,14 +2741,15 @@ fn test_output_view_escape_closes_overlay() {
         },
     });
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await;
     assert!(app.output_view.is_none());
     assert!(app.selected_agent_session_id.is_none());
     assert!(app.selected_agent_index.is_none());
 }
 
-#[test]
-fn test_output_view_team_member_without_session_uses_log_filter() {
+#[tokio::test]
+async fn test_output_view_team_member_without_session_uses_log_filter() {
     let mut app = make_app();
     app.log_entries.push(LogEntry {
         timestamp: chrono::Utc::now(),
@@ -2720,16 +2777,18 @@ fn test_output_view_team_member_without_session_uses_log_filter() {
         },
     });
 
-    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+        .await;
     assert!(app.output_view.is_some());
 }
 
 // ── /system preserves whitespace ────────────────────────────────────
 
-#[test]
-fn test_slash_system_preserves_argument_whitespace() {
+#[tokio::test]
+async fn test_slash_system_preserves_argument_whitespace() {
     let mut app = make_app();
-    app.execute_slash_command("/system   You are   a   helpful   bot  ");
+    app.execute_slash_command("/system   You are   a   helpful   bot  ")
+        .await;
 
     assert_eq!(
         app.agent_info.prompt.as_deref(),
@@ -2740,13 +2799,13 @@ fn test_slash_system_preserves_argument_whitespace() {
 
 // ── /tools ──────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_tools_lists_visibility_switches() {
+#[tokio::test]
+async fn test_slash_tools_lists_visibility_switches() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
     app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    app.execute_slash_command("/tools");
+    app.execute_slash_command("/tools").await;
 
     assert_eq!(app.status, "tools");
     assert!(!app.messages.is_empty());
@@ -2763,25 +2822,25 @@ fn test_slash_tools_lists_visibility_switches() {
     assert!(text.contains("codeindex"), "should list codeindex switch");
 }
 
-#[test]
-fn test_slash_tools_shows_single_switch_state() {
+#[tokio::test]
+async fn test_slash_tools_shows_single_switch_state() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
     app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    app.execute_slash_command("/tools office");
+    app.execute_slash_command("/tools office").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("`office` is currently **off**"));
 }
 
-#[test]
-fn test_slash_tools_help_shows_usage() {
+#[tokio::test]
+async fn test_slash_tools_help_shows_usage() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
     app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    app.execute_slash_command("/tools help");
+    app.execute_slash_command("/tools help").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("`/tools show`"));
@@ -2789,13 +2848,13 @@ fn test_slash_tools_help_shows_usage() {
     assert!(text.contains("`/tools <switch> on|off`"));
     assert!(text.contains("`office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`"));
 }
-#[test]
-fn test_slash_tools_show_alias_lists_visibility_switches() {
+#[tokio::test]
+async fn test_slash_tools_show_alias_lists_visibility_switches() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
     app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    app.execute_slash_command("/tools show");
+    app.execute_slash_command("/tools show").await;
 
     assert_eq!(app.status, "tools");
     let text = app.messages.last().unwrap().text_content();
@@ -2810,8 +2869,9 @@ fn test_slash_tools_show_alias_lists_visibility_switches() {
     assert!(text.contains("read"), "should include the read tool");
 }
 
-#[test]
-fn test_slash_tools_office_on_shows_office_tools() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_slash_tools_office_on_shows_office_tools() {
     let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
@@ -2839,7 +2899,7 @@ fn test_slash_tools_office_on_shows_office_tools() {
             .any(|d| d.name == "office_read")
     );
 
-    app.execute_slash_command("/tools office on");
+    app.execute_slash_command("/tools office on").await;
 
     assert!(app.tool_visibility.office);
     assert_eq!(app.status, "tools: office on");
@@ -2854,8 +2914,9 @@ fn test_slash_tools_office_on_shows_office_tools() {
     assert!(text.contains("`office` visibility is now **on**"));
 }
 
-#[test]
-fn test_slash_tools_teams_on_shows_team_tools() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_slash_tools_teams_on_shows_team_tools() {
     let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
@@ -2884,7 +2945,7 @@ fn test_slash_tools_teams_on_shows_team_tools() {
             .any(|d| d.name == "team_create")
     );
 
-    app.execute_slash_command("/tools teams on");
+    app.execute_slash_command("/tools teams on").await;
 
     assert!(app.tool_visibility.teams);
     assert_eq!(app.status, "tools: teams on");
@@ -2899,8 +2960,9 @@ fn test_slash_tools_teams_on_shows_team_tools() {
     assert!(text.contains("`teams` visibility is now **on**"));
 }
 
-#[test]
-fn test_slash_tools_agents_on_shows_agent_tools() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_slash_tools_agents_on_shows_agent_tools() {
     let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
@@ -2929,7 +2991,7 @@ fn test_slash_tools_agents_on_shows_agent_tools() {
             .any(|d| d.name == "new_agent")
     );
 
-    app.execute_slash_command("/tools agents on");
+    app.execute_slash_command("/tools agents on").await;
 
     assert!(app.tool_visibility.agents);
     assert_eq!(app.status, "tools: agents on");
@@ -2944,8 +3006,9 @@ fn test_slash_tools_agents_on_shows_agent_tools() {
     assert!(text.contains("`agents` visibility is now **on**"));
 }
 
-#[test]
-fn test_slash_tools_plan_on_shows_plan_tools() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_slash_tools_plan_on_shows_plan_tools() {
     let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
@@ -2974,7 +3037,7 @@ fn test_slash_tools_plan_on_shows_plan_tools() {
             .any(|d| d.name == "plan_enter")
     );
 
-    app.execute_slash_command("/tools plan on");
+    app.execute_slash_command("/tools plan on").await;
 
     assert!(app.tool_visibility.plan);
     assert_eq!(app.status, "tools: plan on");
@@ -2989,24 +3052,24 @@ fn test_slash_tools_plan_on_shows_plan_tools() {
     assert!(text.contains("`plan` visibility is now **on**"));
 }
 
-#[test]
-fn test_slash_tools_creates_session_if_none() {
+#[tokio::test]
+async fn test_slash_tools_creates_session_if_none() {
     let mut app = make_app();
     assert!(app.session_id.is_none());
 
-    app.execute_slash_command("/tools");
+    app.execute_slash_command("/tools").await;
 
     assert!(app.session_id.is_some(), "should create session");
     assert_eq!(app.status, "tools");
     assert!(!app.messages.is_empty());
 }
 
-#[test]
-fn test_slash_webapi_help_shows_endpoints() {
+#[tokio::test]
+async fn test_slash_webapi_help_shows_endpoints() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/webapi help");
+    app.execute_slash_command("/webapi help").await;
 
     assert!(!app.messages.is_empty(), "help should produce a message");
     let last = app.messages.last().unwrap();
@@ -3017,12 +3080,12 @@ fn test_slash_webapi_help_shows_endpoints() {
     );
 }
 
-#[test]
-fn test_slash_webapi_disable_when_not_running() {
+#[tokio::test]
+async fn test_slash_webapi_disable_when_not_running() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/webapi disable");
+    app.execute_slash_command("/webapi disable").await;
 
     let last = app.messages.last().unwrap();
     let text = format!("{last:?}");
@@ -3042,7 +3105,7 @@ async fn test_slash_webapi_enable_sets_token() {
         "token should be None before enabling"
     );
 
-    app.execute_slash_command("/webapi enable");
+    app.execute_slash_command("/webapi enable").await;
 
     assert!(
         app.webapi_token.is_some(),
@@ -3058,12 +3121,12 @@ async fn test_slash_webapi_enable_sets_token() {
 
 // ── /spec ───────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_spec_no_args_shows_help() {
+#[tokio::test]
+async fn test_slash_spec_no_args_shows_help() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/spec");
+    app.execute_slash_command("/spec").await;
 
     assert!(!app.messages.is_empty(), "spec should create a message");
     let text = app.messages.last().unwrap().text_content();
@@ -3077,12 +3140,12 @@ fn test_slash_spec_no_args_shows_help() {
 }
 
 /// `/spec update` without a spec-id should show a usage error (FR-012).
-#[test]
-fn test_slash_spec_update_missing_spec_id_shows_usage_error() {
+#[tokio::test]
+async fn test_slash_spec_update_missing_spec_id_shows_usage_error() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/spec update");
+    app.execute_slash_command("/spec update").await;
 
     assert!(
         app.status.contains("Usage: /spec update"),
@@ -3093,8 +3156,8 @@ fn test_slash_spec_update_missing_spec_id_shows_usage_error() {
 
 /// `/spec reverse` with a missing or invalid flag must report the specific
 /// cause in the message window, not only a status line (NFR-005).
-#[test]
-fn test_slash_spec_reverse_usage_errors_report_cause() {
+#[tokio::test]
+async fn test_slash_spec_reverse_usage_errors_report_cause() {
     let cases = [
         ("/spec reverse", "missing required argument"),
         (
@@ -3131,7 +3194,7 @@ fn test_slash_spec_reverse_usage_errors_report_cause() {
         let mut app = make_app();
         app.session_id = Some("s1".to_string());
 
-        app.execute_slash_command(command);
+        app.execute_slash_command(command).await;
 
         let text: String = app
             .messages
@@ -3172,7 +3235,8 @@ async fn test_slash_spec_reverse_folder_scaffolds_project() {
         "/spec reverse octocat/Hello-World --language rust --type cmdline \
          --folder {}",
         dir.display()
-    ));
+    ))
+    .await;
 
     // The folder now holds the `/new` scaffold, including the specs root the
     // chained `/spec create` writes into.
@@ -3211,7 +3275,8 @@ async fn test_slash_spec_reverse_valid_scaffold_reaches_reverse_handler() {
     app.execute_slash_command(
         "/spec reverse octocat/Hello-World --create my-spec --depth 2 \
          --language rust --type cmdline --stack axum",
-    );
+    )
+    .await;
 
     // The handler reports a `reverse:` status (auth/invalid-repo/wait) or
     // starts fetching; what matters is that it was reached rather than the
@@ -3255,7 +3320,7 @@ async fn test_slash_spec_reverse_valid_scaffold_reaches_reverse_handler() {
 async fn test_slash_spec_task_lists_tasks() {
     let mut app = make_app();
 
-    app.execute_slash_command("/spec task testspec");
+    app.execute_slash_command("/spec task testspec").await;
 
     assert!(!app.messages.is_empty(), "task should create a message");
     let text = app.messages.last().unwrap().text_content();
@@ -3270,7 +3335,7 @@ async fn test_slash_spec_validate_all() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/spec validate");
+    app.execute_slash_command("/spec validate").await;
 
     assert!(!app.messages.is_empty(), "validate should create a message");
     let text = app.messages.last().unwrap().text_content();
@@ -3290,7 +3355,8 @@ async fn test_slash_spec_create_starts_generation() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/spec create websocket Add real-time collaborative editing");
+    app.execute_slash_command("/spec create websocket Add real-time collaborative editing")
+        .await;
 
     assert_eq!(
         app.status,
@@ -3325,12 +3391,12 @@ async fn test_slash_spec_create_starts_generation() {
 
 // ── /config ─────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_config_show_displays_paths() {
+#[tokio::test]
+async fn test_slash_config_show_displays_paths() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/config show");
+    app.execute_slash_command("/config show").await;
 
     assert_eq!(app.status, "config: show");
     assert!(
@@ -3368,12 +3434,12 @@ fn test_slash_config_show_displays_paths() {
     );
 }
 
-#[test]
-fn test_slash_config_no_args_shows_usage() {
+#[tokio::test]
+async fn test_slash_config_no_args_shows_usage() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/config");
+    app.execute_slash_command("/config").await;
 
     // `/config` with no args now shows the help table (same content family as
     // `/config help`); the status reflects help rather than the usage hint.
@@ -3393,8 +3459,8 @@ fn test_slash_config_no_args_shows_usage() {
     );
 }
 
-#[test]
-fn test_slash_config_save_errors_when_no_global_config() {
+#[tokio::test]
+async fn test_slash_config_save_errors_when_no_global_config() {
     // FR-003: /config save must surface a clear error when there is no global
     // ragent.json to back up. We point the process at an empty temp config dir
     // via the RAGENT_CONFIG env var indirectly — but backup_global_config(None)
@@ -3404,7 +3470,7 @@ fn test_slash_config_save_errors_when_no_global_config() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/config save");
+    app.execute_slash_command("/config save").await;
 
     // Either a real backup succeeds (if a global config exists in CI) or the
     // error arm fires. We accept both but require a non-empty message + a
@@ -3420,8 +3486,8 @@ fn test_slash_config_save_errors_when_no_global_config() {
     );
 }
 
-#[test]
-fn test_slash_config_list_no_saves_shows_message() {
+#[tokio::test]
+async fn test_slash_config_list_no_saves_shows_message() {
     // FR-004 / FR-006: /config list must always produce a user-facing message.
     // When saves exist it opens the picker AND emits a summary line; when none
     // exist it shows a "no saved configurations" message instead of an empty
@@ -3430,7 +3496,7 @@ fn test_slash_config_list_no_saves_shows_message() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/config list");
+    app.execute_slash_command("/config list").await;
 
     assert!(
         app.status.starts_with("config:"),
@@ -3602,8 +3668,9 @@ fn test_config_save_picker_state_struct_construction() {
 }
 
 // NOTE: render_terminal_to_string helper removed; re-add when needed.
-#[test]
-fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
@@ -3621,7 +3688,8 @@ fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     assert!(!ragent_config::yolo::is_enabled());
 
     // Press Alt+Y through the app handler so the new persist path runs.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::ALT))
+        .await;
 
     // Handler should have toggled and persisted YOLO on.
     assert!(ragent_config::yolo::is_enabled());
@@ -3641,7 +3709,8 @@ fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     );
 
     // Toggle back off and verify.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::ALT));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::ALT))
+        .await;
     assert!(!ragent_config::yolo::is_enabled());
     assert!(app.status.contains("YOLO mode disabled"));
 
@@ -3659,8 +3728,9 @@ fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     );
 }
 
-#[test]
-fn test_slash_yolo_toggles_and_persists() {
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_slash_yolo_toggles_and_persists() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
@@ -3676,7 +3746,8 @@ fn test_slash_yolo_toggles_and_persists() {
     app.input = "/yolo".to_string();
     app.input_cursor = app.input.chars().count();
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
 
     assert!(ragent_config::yolo::is_enabled());
     assert!(app.status.contains("ENABLED"));
@@ -3684,7 +3755,8 @@ fn test_slash_yolo_toggles_and_persists() {
     // Running again disables it.
     app.input = "/yolo".to_string();
     app.input_cursor = app.input.chars().count();
-    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(!ragent_config::yolo::is_enabled());
     assert!(app.status.contains("disabled"));
 }
@@ -3826,8 +3898,8 @@ fn test_config_restore_invalidates_config_cache() {
     );
 }
 
-#[test]
-fn test_config_save_picker_intercepts_keys_in_handle_key_event() {
+#[tokio::test]
+async fn test_config_save_picker_intercepts_keys_in_handle_key_event() {
     // Regression: config_save_picker must own focus so keys like 'a' do not go
     // into the input box while the picker is open.
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -3846,20 +3918,21 @@ fn test_config_save_picker_intercepts_keys_in_handle_key_event() {
         config_dir: dir.to_path_buf(),
     });
 
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty()));
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty()))
+        .await;
     assert!(
         app.input.is_empty(),
         "keys must be intercepted while config save picker is open"
     );
 }
 
-#[test]
-fn test_slash_memory_no_args_shows_usage() {
+#[tokio::test]
+async fn test_slash_memory_no_args_shows_usage() {
     // /memory with an unknown subcommand should list the supported subcommands.
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/memory foobar");
+    app.execute_slash_command("/memory foobar").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
@@ -3876,12 +3949,12 @@ fn test_slash_memory_no_args_shows_usage() {
     );
 }
 
-#[test]
-fn test_slash_actionloop_help_shows_subcommands() {
+#[tokio::test]
+async fn test_slash_actionloop_help_shows_subcommands() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/actionloop help");
+    app.execute_slash_command("/actionloop help").await;
 
     assert_eq!(app.status, "actionloop: help");
     let text = app.messages.last().unwrap().text_content();
@@ -3895,15 +3968,15 @@ fn test_slash_actionloop_help_shows_subcommands() {
     );
 }
 
-#[test]
-fn test_slash_actionloop_no_samples_reports_hint() {
+#[tokio::test]
+async fn test_slash_actionloop_no_samples_reports_hint() {
     // With no profiling samples, the plain form reports the "no samples" hint.
     // The profiler is shared process-wide, so reset it first for determinism.
     agent_loop_profiler().reset();
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/actionloop");
+    app.execute_slash_command("/actionloop").await;
 
     let text = app.messages.last().unwrap().text_content();
     if app.status == "actionloop: no samples" {
@@ -3922,8 +3995,8 @@ fn test_slash_actionloop_no_samples_reports_hint() {
     }
 }
 
-#[test]
-fn test_slash_actionloop_clip_no_samples_reports_hint() {
+#[tokio::test]
+async fn test_slash_actionloop_clip_no_samples_reports_hint() {
     // The clip variant degrades gracefully when there is nothing to copy.
     // The profiler is shared process-wide and other tests may have recorded
     // samples concurrently, so reset before running to make the "no samples"
@@ -3932,7 +4005,7 @@ fn test_slash_actionloop_clip_no_samples_reports_hint() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/actionloop clip");
+    app.execute_slash_command("/actionloop clip").await;
 
     // When another test polluted the shared profiler, the clip path reports
     // success instead; either outcome is acceptable, so assert on the message.
@@ -3944,8 +4017,8 @@ fn test_slash_actionloop_clip_no_samples_reports_hint() {
     );
 }
 
-#[test]
-fn test_slash_actionloop_with_samples_shows_timings() {
+#[tokio::test]
+async fn test_slash_actionloop_with_samples_shows_timings() {
     // Record a sample through the shared profiler so the report path is exercised.
     let profiler = agent_loop_profiler();
     profiler.reset();
@@ -3959,7 +4032,7 @@ fn test_slash_actionloop_with_samples_shows_timings() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
 
-    app.execute_slash_command("/actionloop");
+    app.execute_slash_command("/actionloop").await;
 
     assert_eq!(app.status, "actionloop: timings shown");
     let text = app.messages.last().unwrap().text_content();
@@ -3976,10 +4049,10 @@ fn test_slash_actionloop_with_samples_shows_timings() {
 }
 // ── /triggers slash command tests ─────────────────────────────────────
 
-#[test]
-fn test_triggers_list_empty() {
+#[tokio::test]
+async fn test_triggers_list_empty() {
     let mut app = make_app();
-    app.execute_slash_command("/triggers list");
+    app.execute_slash_command("/triggers list").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("No trigger rules registered"),
@@ -3988,8 +4061,8 @@ fn test_triggers_list_empty() {
     assert_eq!(app.status, "triggers: list empty");
 }
 
-#[test]
-fn test_triggers_list_with_rules() {
+#[tokio::test]
+async fn test_triggers_list_with_rules() {
     let mut app = make_app();
     let runtime = ragent_agent::trigger::TriggerRuntime::default();
     let rule =
@@ -3998,7 +4071,7 @@ fn test_triggers_list_with_rules() {
     runtime.add_rule(rule);
     app.trigger_runtime = Some(runtime);
 
-    app.execute_slash_command("/triggers list");
+    app.execute_slash_command("/triggers list").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains(&rule_id[..8]),
@@ -4015,10 +4088,10 @@ fn test_triggers_list_with_rules() {
     assert_eq!(app.status, "triggers: list");
 }
 
-#[test]
-fn test_triggers_no_subcommand_defaults_to_list() {
+#[tokio::test]
+async fn test_triggers_no_subcommand_defaults_to_list() {
     let mut app = make_app();
-    app.execute_slash_command("/triggers");
+    app.execute_slash_command("/triggers").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("No trigger rules registered"),
@@ -4026,8 +4099,8 @@ fn test_triggers_no_subcommand_defaults_to_list() {
     );
 }
 
-#[test]
-fn test_triggers_enable_existing_rule() {
+#[tokio::test]
+async fn test_triggers_enable_existing_rule() {
     let mut app = make_app();
     let runtime = ragent_agent::trigger::TriggerRuntime::default();
     let rule = ragent_types::trigger::TriggerRule::new("cond-a", "act-a");
@@ -4036,16 +4109,18 @@ fn test_triggers_enable_existing_rule() {
     runtime.disable_rule(&rule_id);
     app.trigger_runtime = Some(runtime);
 
-    app.execute_slash_command(&format!("/triggers enable {rule_id}"));
+    app.execute_slash_command(&format!("/triggers enable {rule_id}"))
+        .await;
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("enabled"), "enable should confirm: {text}");
     assert_eq!(app.status, "triggers: enabled");
 }
 
-#[test]
-fn test_triggers_enable_not_found() {
+#[tokio::test]
+async fn test_triggers_enable_not_found() {
     let mut app = make_app();
-    app.execute_slash_command("/triggers enable nonexistent-id");
+    app.execute_slash_command("/triggers enable nonexistent-id")
+        .await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found"),
@@ -4054,10 +4129,10 @@ fn test_triggers_enable_not_found() {
     assert_eq!(app.status, "triggers: not found");
 }
 
-#[test]
-fn test_triggers_enable_no_id() {
+#[tokio::test]
+async fn test_triggers_enable_no_id() {
     let mut app = make_app();
-    app.execute_slash_command("/triggers enable");
+    app.execute_slash_command("/triggers enable").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Usage"),
@@ -4066,8 +4141,8 @@ fn test_triggers_enable_no_id() {
     assert_eq!(app.status, "triggers: enable usage");
 }
 
-#[test]
-fn test_triggers_disable_existing_rule() {
+#[tokio::test]
+async fn test_triggers_disable_existing_rule() {
     let mut app = make_app();
     let runtime = ragent_agent::trigger::TriggerRuntime::default();
     let rule = ragent_types::trigger::TriggerRule::new("cond-b", "act-b");
@@ -4075,16 +4150,18 @@ fn test_triggers_disable_existing_rule() {
     runtime.add_rule(rule);
     app.trigger_runtime = Some(runtime);
 
-    app.execute_slash_command(&format!("/triggers disable {rule_id}"));
+    app.execute_slash_command(&format!("/triggers disable {rule_id}"))
+        .await;
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("disabled"), "disable should confirm: {text}");
     assert_eq!(app.status, "triggers: disabled");
 }
 
-#[test]
-fn test_triggers_disable_not_found() {
+#[tokio::test]
+async fn test_triggers_disable_not_found() {
     let mut app = make_app();
-    app.execute_slash_command("/triggers disable nonexistent-id");
+    app.execute_slash_command("/triggers disable nonexistent-id")
+        .await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found"),
@@ -4093,8 +4170,8 @@ fn test_triggers_disable_not_found() {
     assert_eq!(app.status, "triggers: not found");
 }
 
-#[test]
-fn test_triggers_remove_existing_rule() {
+#[tokio::test]
+async fn test_triggers_remove_existing_rule() {
     let mut app = make_app();
     app.trigger_runtime = Some(ragent_agent::trigger::TriggerRuntime::default());
     let runtime = ragent_agent::trigger::TriggerRuntime::default();
@@ -4103,17 +4180,19 @@ fn test_triggers_remove_existing_rule() {
     runtime.add_rule(rule);
     app.trigger_runtime = Some(runtime);
 
-    app.execute_slash_command(&format!("/triggers remove {rule_id}"));
+    app.execute_slash_command(&format!("/triggers remove {rule_id}"))
+        .await;
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("removed"), "remove should confirm: {text}");
     assert_eq!(app.status, "triggers: removed");
     assert_eq!(app.trigger_runtime.as_ref().unwrap().rule_count(), 0);
 }
 
-#[test]
-fn test_triggers_remove_not_found() {
+#[tokio::test]
+async fn test_triggers_remove_not_found() {
     let mut app = make_app();
-    app.execute_slash_command("/triggers remove nonexistent-id");
+    app.execute_slash_command("/triggers remove nonexistent-id")
+        .await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found"),
@@ -4122,10 +4201,10 @@ fn test_triggers_remove_not_found() {
     assert_eq!(app.status, "triggers: not found");
 }
 
-#[test]
-fn test_triggers_remove_no_id() {
+#[tokio::test]
+async fn test_triggers_remove_no_id() {
     let mut app = make_app();
-    app.execute_slash_command("/triggers remove");
+    app.execute_slash_command("/triggers remove").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Usage"),
@@ -4134,10 +4213,10 @@ fn test_triggers_remove_no_id() {
     assert_eq!(app.status, "triggers: remove usage");
 }
 
-#[test]
-fn test_triggers_status_empty() {
+#[tokio::test]
+async fn test_triggers_status_empty() {
     let mut app = make_app();
-    app.execute_slash_command("/triggers status");
+    app.execute_slash_command("/triggers status").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Trigger Runtime Status"),
@@ -4150,15 +4229,15 @@ fn test_triggers_status_empty() {
     assert_eq!(app.status, "triggers: status");
 }
 
-#[test]
-fn test_triggers_status_with_rules() {
+#[tokio::test]
+async fn test_triggers_status_with_rules() {
     let mut app = make_app();
     let runtime = ragent_agent::trigger::TriggerRuntime::default();
     runtime.add_rule(ragent_types::trigger::TriggerRule::new("cond-1", "act-1"));
     runtime.add_rule(ragent_types::trigger::TriggerRule::new("cond-2", "act-2"));
     app.trigger_runtime = Some(runtime);
 
-    app.execute_slash_command("/triggers status");
+    app.execute_slash_command("/triggers status").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Total rules") && text.contains('2'),
@@ -4171,10 +4250,10 @@ fn test_triggers_status_with_rules() {
     assert_eq!(app.status, "triggers: status");
 }
 
-#[test]
-fn test_triggers_help() {
+#[tokio::test]
+async fn test_triggers_help() {
     let mut app = make_app();
-    app.execute_slash_command("/triggers help");
+    app.execute_slash_command("/triggers help").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("/triggers"),
@@ -4191,10 +4270,10 @@ fn test_triggers_help() {
     assert_eq!(app.status, "triggers: help");
 }
 
-#[test]
-fn test_triggers_unknown_subcommand() {
+#[tokio::test]
+async fn test_triggers_unknown_subcommand() {
     let mut app = make_app();
-    app.execute_slash_command("/triggers frobnicate");
+    app.execute_slash_command("/triggers frobnicate").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Unknown sub-command"),
@@ -4204,12 +4283,12 @@ fn test_triggers_unknown_subcommand() {
 }
 // ── /inbox slash command tests ────────────────────────────────────────
 
-#[test]
-fn test_inbox_list_empty() {
+#[tokio::test]
+async fn test_inbox_list_empty() {
     let _guard = enter_with_cwd();
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox list");
+    app.execute_slash_command("/inbox list").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Inbox is empty"),
@@ -4218,12 +4297,12 @@ fn test_inbox_list_empty() {
     assert_eq!(app.status, "inbox: list empty");
 }
 
-#[test]
-fn test_inbox_no_subcommand_defaults_to_list() {
+#[tokio::test]
+async fn test_inbox_no_subcommand_defaults_to_list() {
     let _guard = enter_with_cwd();
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox");
+    app.execute_slash_command("/inbox").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Inbox is empty"),
@@ -4231,8 +4310,8 @@ fn test_inbox_no_subcommand_defaults_to_list() {
     );
 }
 
-#[test]
-fn test_inbox_list_with_entries() {
+#[tokio::test]
+async fn test_inbox_list_with_entries() {
     let guard = enter_with_cwd();
 
     // Write some inbox entries directly to the JSONL file
@@ -4243,7 +4322,7 @@ fn test_inbox_list_with_entries() {
     ragent_agent::loop_state::write_inbox_entries(&guard.path(), &entries).expect("write entries");
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox list");
+    app.execute_slash_command("/inbox list").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Triage Inbox"),
@@ -4264,8 +4343,8 @@ fn test_inbox_list_with_entries() {
     assert_eq!(app.status, "inbox: list");
 }
 
-#[test]
-fn test_inbox_claim_existing() {
+#[tokio::test]
+async fn test_inbox_claim_existing() {
     let guard = enter_with_cwd();
 
     let entry = ragent_agent::loop_state::InboxEntry::new("event-1", "test finding");
@@ -4273,7 +4352,8 @@ fn test_inbox_claim_existing() {
     ragent_agent::loop_state::write_inbox_entries(&guard.path(), &[entry]).expect("write entry");
 
     let mut app = make_app();
-    app.execute_slash_command(&format!("/inbox claim {entry_id}"));
+    app.execute_slash_command(&format!("/inbox claim {entry_id}"))
+        .await;
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("claimed"), "claim should confirm: {text}");
     assert_eq!(app.status, "inbox: claimed");
@@ -4283,12 +4363,13 @@ fn test_inbox_claim_existing() {
     assert_eq!(read[0].status, "claimed");
 }
 
-#[test]
-fn test_inbox_claim_not_found() {
+#[tokio::test]
+async fn test_inbox_claim_not_found() {
     let _guard = enter_with_cwd();
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox claim nonexistent-id");
+    app.execute_slash_command("/inbox claim nonexistent-id")
+        .await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found"),
@@ -4297,12 +4378,12 @@ fn test_inbox_claim_not_found() {
     assert_eq!(app.status, "inbox: not found");
 }
 
-#[test]
-fn test_inbox_claim_no_id() {
+#[tokio::test]
+async fn test_inbox_claim_no_id() {
     let _guard = enter_with_cwd();
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox claim");
+    app.execute_slash_command("/inbox claim").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Usage"),
@@ -4311,8 +4392,8 @@ fn test_inbox_claim_no_id() {
     assert_eq!(app.status, "inbox: claimed usage");
 }
 
-#[test]
-fn test_inbox_dismiss_existing() {
+#[tokio::test]
+async fn test_inbox_dismiss_existing() {
     let guard = enter_with_cwd();
 
     let entry = ragent_agent::loop_state::InboxEntry::new("event-1", "to dismiss");
@@ -4320,7 +4401,8 @@ fn test_inbox_dismiss_existing() {
     ragent_agent::loop_state::write_inbox_entries(&guard.path(), &[entry]).expect("write entry");
 
     let mut app = make_app();
-    app.execute_slash_command(&format!("/inbox dismiss {entry_id}"));
+    app.execute_slash_command(&format!("/inbox dismiss {entry_id}"))
+        .await;
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("dismissed"), "dismiss should confirm: {text}");
     assert_eq!(app.status, "inbox: dismissed");
@@ -4330,12 +4412,13 @@ fn test_inbox_dismiss_existing() {
     assert_eq!(read[0].status, "dismissed");
 }
 
-#[test]
-fn test_inbox_dismiss_not_found() {
+#[tokio::test]
+async fn test_inbox_dismiss_not_found() {
     let _guard = enter_with_cwd();
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox dismiss nonexistent-id");
+    app.execute_slash_command("/inbox dismiss nonexistent-id")
+        .await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found"),
@@ -4344,12 +4427,12 @@ fn test_inbox_dismiss_not_found() {
     assert_eq!(app.status, "inbox: not found");
 }
 
-#[test]
-fn test_inbox_dismiss_no_id() {
+#[tokio::test]
+async fn test_inbox_dismiss_no_id() {
     let _guard = enter_with_cwd();
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox dismiss");
+    app.execute_slash_command("/inbox dismiss").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Usage"),
@@ -4358,8 +4441,8 @@ fn test_inbox_dismiss_no_id() {
     assert_eq!(app.status, "inbox: dismissed usage");
 }
 
-#[test]
-fn test_inbox_clear_with_entries() {
+#[tokio::test]
+async fn test_inbox_clear_with_entries() {
     let guard = enter_with_cwd();
 
     let entries = vec![
@@ -4369,7 +4452,7 @@ fn test_inbox_clear_with_entries() {
     ragent_agent::loop_state::write_inbox_entries(&guard.path(), &entries).expect("write entries");
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox clear");
+    app.execute_slash_command("/inbox clear").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Cleared 2 finding(s)"),
@@ -4388,12 +4471,12 @@ fn test_inbox_clear_with_entries() {
     );
 }
 
-#[test]
-fn test_inbox_clear_empty() {
+#[tokio::test]
+async fn test_inbox_clear_empty() {
     let _guard = enter_with_cwd();
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox clear");
+    app.execute_slash_command("/inbox clear").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Cleared 0 finding(s)"),
@@ -4402,12 +4485,12 @@ fn test_inbox_clear_empty() {
     assert_eq!(app.status, "inbox: cleared");
 }
 
-#[test]
-fn test_inbox_help() {
+#[tokio::test]
+async fn test_inbox_help() {
     let _guard = enter_with_cwd();
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox help");
+    app.execute_slash_command("/inbox help").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("/inbox"),
@@ -4421,12 +4504,12 @@ fn test_inbox_help() {
     assert_eq!(app.status, "inbox: help");
 }
 
-#[test]
-fn test_inbox_unknown_subcommand() {
+#[tokio::test]
+async fn test_inbox_unknown_subcommand() {
     let _guard = enter_with_cwd();
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox frobnicate");
+    app.execute_slash_command("/inbox frobnicate").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Unknown sub-command"),
@@ -4435,8 +4518,8 @@ fn test_inbox_unknown_subcommand() {
     assert_eq!(app.status, "inbox: unknown");
 }
 
-#[test]
-fn test_inbox_list_shows_status() {
+#[tokio::test]
+async fn test_inbox_list_shows_status() {
     let guard = enter_with_cwd();
 
     let entry = ragent_agent::loop_state::InboxEntry::new("event-1", "test finding");
@@ -4448,7 +4531,7 @@ fn test_inbox_list_shows_status() {
         .expect("update status");
 
     let mut app = make_app();
-    app.execute_slash_command("/inbox list");
+    app.execute_slash_command("/inbox list").await;
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("claimed"),
@@ -4458,22 +4541,22 @@ fn test_inbox_list_shows_status() {
 
 // ── /task (todo2tasks T-016, FR-019) ─────────────────────────────────
 
-#[test]
-fn test_slash_task_toggles_panel() {
+#[tokio::test]
+async fn test_slash_task_toggles_panel() {
     let mut app = make_app();
     assert!(
         !app.show_tasks_panel,
         "tasks panel should be hidden initially"
     );
 
-    app.execute_slash_command("/task");
+    app.execute_slash_command("/task").await;
     assert!(
         app.show_tasks_panel,
         "tasks panel should be visible after /task"
     );
     assert_eq!(app.status, "tasks panel visible");
 
-    app.execute_slash_command("/task");
+    app.execute_slash_command("/task").await;
     assert!(
         !app.show_tasks_panel,
         "tasks panel should be hidden after second /task"
@@ -4481,13 +4564,13 @@ fn test_slash_task_toggles_panel() {
     assert_eq!(app.status, "tasks panel hidden");
 }
 
-#[test]
-fn test_slash_task_mutually_excludes_log() {
+#[tokio::test]
+async fn test_slash_task_mutually_excludes_log() {
     let mut app = make_app();
     app.show_log = true;
     app.show_tasks_panel = false;
 
-    app.execute_slash_command("/task");
+    app.execute_slash_command("/task").await;
     assert!(app.show_tasks_panel, "tasks panel should be visible");
     assert!(
         !app.show_log,
@@ -4495,8 +4578,8 @@ fn test_slash_task_mutually_excludes_log() {
     );
 }
 
-#[test]
-fn test_slash_task_list_shows_items() {
+#[tokio::test]
+async fn test_slash_task_list_shows_items() {
     let mut app = make_app();
     let session_id = "task-list-session".to_string();
     app.session_id = Some(session_id.clone());
@@ -4530,7 +4613,7 @@ fn test_slash_task_list_shows_items() {
         )
         .expect("create task");
 
-    app.execute_slash_command("/task list");
+    app.execute_slash_command("/task list").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
@@ -4548,8 +4631,8 @@ fn test_slash_task_list_shows_items() {
     assert_eq!(app.status, "2 task(s)");
 }
 
-#[test]
-fn test_slash_task_list_empty() {
+#[tokio::test]
+async fn test_slash_task_list_empty() {
     let mut app = make_app();
     let session_id = "task-empty-session".to_string();
     app.session_id = Some(session_id.clone());
@@ -4557,7 +4640,7 @@ fn test_slash_task_list_empty() {
         .create_session(&session_id, ".")
         .expect("create session");
 
-    app.execute_slash_command("/task list");
+    app.execute_slash_command("/task list").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
@@ -4566,12 +4649,12 @@ fn test_slash_task_list_empty() {
     );
 }
 
-#[test]
-fn test_slash_task_help() {
+#[tokio::test]
+async fn test_slash_task_help() {
     let mut app = make_app();
     app.session_id = Some("help-session".to_string());
 
-    app.execute_slash_command("/task help");
+    app.execute_slash_command("/task help").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
@@ -4593,12 +4676,12 @@ fn test_slash_task_help() {
     assert_eq!(app.status, "task help");
 }
 
-#[test]
-fn test_slash_task_add_delegates_hint() {
+#[tokio::test]
+async fn test_slash_task_add_delegates_hint() {
     let mut app = make_app();
     app.session_id = Some("add-hint-session".to_string());
 
-    app.execute_slash_command("/task add");
+    app.execute_slash_command("/task add").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
@@ -4608,12 +4691,12 @@ fn test_slash_task_add_delegates_hint() {
     assert_eq!(app.status, "Use agent tool: task_create");
 }
 
-#[test]
-fn test_slash_task_update_delegates_hint() {
+#[tokio::test]
+async fn test_slash_task_update_delegates_hint() {
     let mut app = make_app();
     app.session_id = Some("update-hint-session".to_string());
 
-    app.execute_slash_command("/task update");
+    app.execute_slash_command("/task update").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
@@ -4623,12 +4706,12 @@ fn test_slash_task_update_delegates_hint() {
     assert_eq!(app.status, "Use agent tool: task_update");
 }
 
-#[test]
-fn test_slash_task_get_delegates_hint() {
+#[tokio::test]
+async fn test_slash_task_get_delegates_hint() {
     let mut app = make_app();
     app.session_id = Some("get-hint-session".to_string());
 
-    app.execute_slash_command("/task get");
+    app.execute_slash_command("/task get").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
@@ -4638,12 +4721,12 @@ fn test_slash_task_get_delegates_hint() {
     assert_eq!(app.status, "Use agent tool: task_get");
 }
 
-#[test]
-fn test_slash_task_create_alias_for_add() {
+#[tokio::test]
+async fn test_slash_task_create_alias_for_add() {
     let mut app = make_app();
     app.session_id = Some("create-alias-session".to_string());
 
-    app.execute_slash_command("/task create");
+    app.execute_slash_command("/task create").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
@@ -4652,12 +4735,12 @@ fn test_slash_task_create_alias_for_add() {
     );
 }
 
-#[test]
-fn test_slash_task_unknown_subcommand_shows_help() {
+#[tokio::test]
+async fn test_slash_task_unknown_subcommand_shows_help() {
     let mut app = make_app();
     app.session_id = Some("unknown-sub-session".to_string());
 
-    app.execute_slash_command("/task frobnicate");
+    app.execute_slash_command("/task frobnicate").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
@@ -4666,19 +4749,19 @@ fn test_slash_task_unknown_subcommand_shows_help() {
     );
 }
 
-#[test]
-fn test_slash_task_toggles_panel_with_tasks_status() {
+#[tokio::test]
+async fn test_slash_task_toggles_panel_with_tasks_status() {
     // FR-019: /task toggles the Tasks side panel.
     let mut app = make_app();
 
-    app.execute_slash_command("/task");
+    app.execute_slash_command("/task").await;
     assert!(
         app.show_tasks_panel,
         "tasks panel should be visible after /task"
     );
     assert_eq!(app.status, "tasks panel visible");
 
-    app.execute_slash_command("/task");
+    app.execute_slash_command("/task").await;
     assert!(
         !app.show_tasks_panel,
         "tasks panel should be hidden after second /task"
@@ -4686,8 +4769,8 @@ fn test_slash_task_toggles_panel_with_tasks_status() {
     assert_eq!(app.status, "tasks panel hidden");
 }
 
-#[test]
-fn test_model_selector_preserves_openrouter_vendor_slug() {
+#[tokio::test]
+async fn test_model_selector_preserves_openrouter_vendor_slug() {
     let mut app = make_app();
     app.provider_setup = Some(ProviderSetupStep::SelectModel {
         provider_id: "openrouter".to_string(),
@@ -4713,7 +4796,8 @@ fn test_model_selector_preserves_openrouter_vendor_slug() {
 
     // Confirm the model selection. OpenRouter models may report reasoning levels
     // from discovery, so the flow opens the thinking-level selector.
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
     assert!(
         matches!(
             app.provider_setup,
@@ -4724,7 +4808,8 @@ fn test_model_selector_preserves_openrouter_vendor_slug() {
     );
 
     if let Some(ProviderSetupStep::SelectThinkingLevel { .. }) = app.provider_setup {
-        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await;
     }
 
     assert_eq!(
@@ -4741,31 +4826,32 @@ fn test_model_selector_preserves_openrouter_vendor_slug() {
 
 // ── /spawn ────────────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_spawn_help() {
+#[tokio::test]
+async fn test_slash_spawn_help() {
     let mut app = make_app();
-    app.execute_slash_command("/spawn help");
+    app.execute_slash_command("/spawn help").await;
     assert_eq!(app.status, "spawn: help");
 }
 
-#[test]
-fn test_slash_spawn_bare_shows_help() {
+#[tokio::test]
+async fn test_slash_spawn_bare_shows_help() {
     let mut app = make_app();
-    app.execute_slash_command("/spawn");
+    app.execute_slash_command("/spawn").await;
     assert_eq!(app.status, "spawn: help");
 }
 
-#[test]
-fn test_slash_spawn_no_prompt_is_usage_error() {
+#[tokio::test]
+async fn test_slash_spawn_no_prompt_is_usage_error() {
     let mut app = make_app();
-    app.execute_slash_command("/spawn general");
+    app.execute_slash_command("/spawn general").await;
     assert_eq!(app.status, "spawn: usage");
 }
 
-#[test]
-fn test_slash_spawn_unknown_agent_rejected() {
+#[tokio::test]
+async fn test_slash_spawn_unknown_agent_rejected() {
     let mut app = make_app();
-    app.execute_slash_command("/spawn no-such-agent-xyz do something");
+    app.execute_slash_command("/spawn no-such-agent-xyz do something")
+        .await;
     assert_eq!(app.status, "spawn: unknown agent 'no-such-agent-xyz'");
     // Nothing pending: the result slot must be free for the next /spawn.
     let guard = app.spawn_result.lock().unwrap_or_else(|e| e.into_inner());
@@ -4775,8 +4861,8 @@ fn test_slash_spawn_unknown_agent_rejected() {
     );
 }
 
-#[test]
-fn test_slash_spawn_builtin_agent_launches_detached() {
+#[tokio::test]
+async fn test_slash_spawn_builtin_agent_launches_detached() {
     let mut app = make_app();
     // Wire an AgentManager into the test processor exactly like the
     // production session does.
@@ -4788,7 +4874,7 @@ fn test_slash_spawn_builtin_agent_launches_detached() {
     ));
     let _ = app.session_processor.agent_manager.set(manager);
 
-    app.execute_slash_command("/spawn general say hello");
+    app.execute_slash_command("/spawn general say hello").await;
 
     // The slash handler only queues the launch; the detached-task
     // registration completes on the async side and is surfaced by the
@@ -4808,4 +4894,290 @@ fn test_slash_spawn_builtin_agent_launches_detached() {
             "slot must hold the in-flight marker or a real outcome"
         );
     }
+}
+
+/// The `/mcp` listing must include servers contributed by enabled plugins, not
+/// just the `ragent.json` `mcp` section. Regression: a project whose only MCP
+/// servers come from a plugin (e.g. the Claude `mongodb` plugin's `mcp.json`)
+/// connected them at startup but `/mcp list` reported "no MCP servers
+/// configured", because the display list was rebuilt from `cfg.mcp` alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_slash_mcp_list_includes_plugin_contributed_servers() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+
+    // Minimal enabled plugin with an external `mcp.json` (the Claude shape).
+    // A plugin is inert until the store ledger records it enabled.
+    let store = root.join(".ragent").join("plugins");
+    let plugin = store.join("mongodb");
+    std::fs::create_dir_all(plugin.join(".claude-plugin")).expect("manifest dir");
+    std::fs::write(
+        plugin.join(".claude-plugin").join("plugin.json"),
+        br#"{"name":"mongodb","version":"1.0.0","mcpServers":"./mcp.json"}"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        plugin.join("mcp.json"),
+        br#"{"mcpServers":{"mongodb":{"command":"npx","args":["-y","mongodb-mcp-server@<3"]}}}"#,
+    )
+    .expect("write mcp.json");
+    std::fs::write(
+        store.join("_state.json"),
+        br#"{"plugins":{"mongodb":{"enabled":true}}}"#,
+    )
+    .expect("write state ledger");
+
+    let _guard = with_cwd(root);
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command("/mcp list").await;
+
+    assert!(
+        app.mcp_servers.iter().any(|s| s.id == "mongodb.mongodb"),
+        "the plugin-contributed server must be listed: {:?}",
+        app.mcp_servers.iter().map(|s| &s.id).collect::<Vec<_>>()
+    );
+
+    let joined: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        joined.contains("mongodb.mongodb"),
+        "the /mcp output must name the plugin server: {joined}"
+    );
+    assert!(
+        !joined.contains("(no MCP servers configured)"),
+        "the empty-state message must not appear: {joined}"
+    );
+}
+
+/// The merged display list must keep the configured `ragent.json` servers and
+/// preserve their tracked status/tools across a rebuild.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mcp_display_servers_merges_and_preserves_status() {
+    use ragent_agent::mcp::{McpServer, McpStatus};
+    use std::collections::HashMap;
+
+    let previous = vec![McpServer {
+        id: "configured".to_string(),
+        config: ragent_agent::McpServerConfig::default(),
+        status: McpStatus::Connected,
+        tools: Vec::new(),
+    }];
+    let mut configured = HashMap::new();
+    configured.insert(
+        "configured".to_string(),
+        ragent_agent::McpServerConfig::default(),
+    );
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let merged = ragent_tui::app::mcp_display_servers_for_tests(
+        &previous,
+        &configured,
+        dir.path(),
+        &HashMap::new(),
+    );
+
+    let kept = merged
+        .iter()
+        .find(|s| s.id == "configured")
+        .expect("configured server retained");
+    assert_eq!(kept.status, McpStatus::Connected);
+}
+
+/// The live status map (fed by `Event::McpStatusChanged`) must supply the status
+/// of a server the display list has not seen before, so a server connected by
+/// the background startup loop is not shown as `disabled` (BUG-001).
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mcp_display_servers_applies_live_status_to_new_server() {
+    use ragent_agent::mcp::McpStatus;
+    use std::collections::HashMap;
+
+    let mut configured = HashMap::new();
+    configured.insert("live".to_string(), ragent_agent::McpServerConfig::default());
+    let mut live = HashMap::new();
+    live.insert("live".to_string(), McpStatus::Connected);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let merged =
+        ragent_tui::app::mcp_display_servers_for_tests(&[], &configured, dir.path(), &live);
+
+    let server = merged
+        .iter()
+        .find(|s| s.id == "live")
+        .expect("server listed");
+    assert_eq!(
+        server.status,
+        McpStatus::Connected,
+        "the live status map must override the default Disabled state"
+    );
+}
+
+/// The startup MCP connect loop publishes `McpStatusChanged` from a task
+/// spawned *before* the TUI subscribes to the event bus, so those events can be
+/// dropped by the broadcast channel (no replay buffer). The shared `McpClient`
+/// held by the `SessionProcessor` is the authoritative record; adopting it must
+/// make `/mcp` report the real status instead of the seeded `disabled`.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mcp_list_reports_status_from_shared_client_not_events() {
+    use ragent_agent::mcp::{McpClient, McpServer, McpStatus};
+
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    // Seed the display list exactly as `App::new` does for a plugin-bridged
+    // server: present, but with no live status yet.
+    app.mcp_servers = vec![McpServer {
+        id: "mongodb.mongodb".to_string(),
+        config: ragent_agent::McpServerConfig::default(),
+        status: McpStatus::Disabled,
+        tools: Vec::new(),
+    }];
+    app.mcp_client_adopted = false;
+
+    // Stand in for the completed startup connect loop: a client whose record
+    // says the server is connected and advertises one tool.
+    let mut client = McpClient::new();
+    client.register_connected_for_tests(
+        "mongodb.mongodb",
+        vec![ragent_agent::mcp::McpToolDef {
+            name: "find".to_string(),
+            description: "Find documents".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        }],
+    );
+    app.session_processor
+        .mcp_client
+        .set(Arc::new(tokio::sync::RwLock::new(client)))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+
+    let processor = Arc::clone(&app.session_processor);
+    app.adopt_mcp_client_state(&processor).await;
+
+    let tracked = app
+        .mcp_servers
+        .iter()
+        .find(|s| s.id == "mongodb.mongodb")
+        .expect("server retained");
+    assert_eq!(
+        tracked.status,
+        McpStatus::Connected,
+        "the shared client's status must replace the seeded Disabled state"
+    );
+    assert_eq!(tracked.tools.len(), 1, "tools are adopted too");
+    assert!(
+        app.mcp_client_adopted,
+        "the adoption latch stops repeated client reads"
+    );
+}
+
+/// `/mcp list` must print the status adopted from the shared client, even
+/// though no `McpStatusChanged` event was ever delivered to the TUI.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_slash_mcp_list_prints_client_derived_status() {
+    use ragent_agent::mcp::{McpClient, McpServer, McpStatus};
+
+    // The tempdir cwd has no `.ragent/plugins`, so the `/mcp list` refresh
+    // cannot reintroduce a plugin server; the seeded entry is enough to prove
+    // the refresh preserves client-derived status.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+    let mut app = make_app();
+    // `cwd_path` is captured when the App is built, so re-point it at the
+    // tempdir: the `/mcp list` refresh reads the plugin store from here.
+    app.cwd_path = dir.path().to_path_buf();
+    app.session_id = Some("s1".to_string());
+    app.mcp_servers = vec![McpServer {
+        id: "configured".to_string(),
+        config: ragent_agent::McpServerConfig::default(),
+        status: McpStatus::Disabled,
+        tools: Vec::new(),
+    }];
+
+    let mut client = McpClient::new();
+    client.register_connected_for_tests("configured", Vec::new());
+    app.session_processor
+        .mcp_client
+        .set(Arc::new(tokio::sync::RwLock::new(client)))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+    let processor = Arc::clone(&app.session_processor);
+    app.adopt_mcp_client_state(&processor).await;
+
+    app.execute_slash_command("/mcp list").await;
+
+    let joined: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        joined.contains("connected"),
+        "the list must show the client-derived connected status: {joined}"
+    );
+    assert!(
+        !joined.contains("disabled"),
+        "the list must not still show the seeded disabled status: {joined}"
+    );
+}
+
+/// `/mcp list` reports each server's tool COUNT and nothing more: the full
+/// tool-name inventory is the model-facing surface (`/tools`), while the
+/// per-server names stay available via `/plugins list --mcp`.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_slash_mcp_list_shows_tool_counts_not_tool_names() {
+    use ragent_agent::mcp::{McpClient, McpToolDef};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+    let mut app = make_app();
+    app.cwd_path = dir.path().to_path_buf();
+    app.session_id = Some("s1".to_string());
+
+    let mut client = McpClient::new();
+    client.register_connected_for_tests(
+        "configured",
+        vec![
+            McpToolDef {
+                name: "find".to_string(),
+                description: "Find documents".to_string(),
+                parameters: serde_json::json!({"type": "object"}),
+            },
+            McpToolDef {
+                name: "count".to_string(),
+                description: "Count documents".to_string(),
+                parameters: serde_json::json!({"type": "object"}),
+            },
+        ],
+    );
+    app.session_processor
+        .mcp_client
+        .set(Arc::new(tokio::sync::RwLock::new(client)))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+    let processor = Arc::clone(&app.session_processor);
+    app.adopt_mcp_client_state(&processor).await;
+
+    app.execute_slash_command("/mcp list").await;
+
+    let joined: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let flat = joined.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        flat.contains("tools: 2"),
+        "the list must report the tool count: {joined}"
+    );
+    assert!(
+        !joined.contains("find") && !joined.contains("mcp_configured_find"),
+        "the list must not enumerate individual tool names: {joined}"
+    );
 }

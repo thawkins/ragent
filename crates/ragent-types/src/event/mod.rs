@@ -420,6 +420,19 @@ pub enum Event {
         /// New status string (e.g. `"connected"`, `"disconnected"`).
         status: String,
     },
+    /// An MCP server was enabled or disabled and the change was persisted.
+    ///
+    /// Emitted after the enabled state is written, so every surface (TUI
+    /// `/mcp`, `/plugins`) reflects the change without re-reading the
+    /// connection. `enabled = false` means the server is configured but
+    /// inert; `enabled = true` means it is (or will be, after a restart)
+    /// connected.
+    McpServerEnabledChanged {
+        /// Identifier of the MCP server.
+        server_id: String,
+        /// Whether the server is now enabled.
+        enabled: bool,
+    },
     /// Token usage report for a single LLM request.
     TokenUsage {
         /// Session the usage belongs to.
@@ -995,6 +1008,7 @@ impl Event {
             Self::AgentError { .. } => "AgentError",
             Self::ServiceStartError { .. } => "ServiceStartError",
             Self::McpStatusChanged { .. } => "McpStatusChanged",
+            Self::McpServerEnabledChanged { .. } => "McpServerEnabledChanged",
             Self::TokenUsage { .. } => "TokenUsage",
             Self::RunCostSummary { .. } => "RunCostSummary",
             Self::LoopTerminated { .. } => "LoopTerminated",
@@ -1112,6 +1126,7 @@ impl Event {
             | Self::TeamCleanedUp { session_id, .. }
             | Self::TeammateP2PMessage { session_id, .. } => Some(session_id.as_str()),
             Self::McpStatusChanged { .. }
+            | Self::McpServerEnabledChanged { .. }
             | Self::CopilotDeviceFlowComplete { .. }
             | Self::GithubDeviceFlowComplete { .. }
             | Self::GitLabSetupComplete { .. }

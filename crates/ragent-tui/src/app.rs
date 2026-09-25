@@ -36,6 +36,23 @@ mod reverse;
 mod session_ops;
 pub mod skillgen;
 mod slash;
+
+/// Test hook: expose the `/mcp` display-list builder to the integration test
+/// suite (`tests/test_slash_commands.rs`) without widening the production
+/// surface. `crate::app::slash::*` is not visible outside the `app` module.
+#[doc(hidden)]
+pub fn mcp_display_servers_for_tests<S, H>(
+    previous: &[ragent_agent::mcp::McpServer],
+    configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
+    working_dir: &std::path::Path,
+    live: &std::collections::HashMap<String, ragent_agent::mcp::McpStatus, H>,
+) -> Vec<ragent_agent::mcp::McpServer>
+where
+    S: std::hash::BuildHasher,
+    H: std::hash::BuildHasher,
+{
+    slash::mcp_display_servers(previous, configured, working_dir, live)
+}
 mod spawn;
 mod swarm;
 pub mod toolchain;

@@ -29,22 +29,22 @@ fn app_with_session() -> App {
 }
 
 /// Simulate the user typing `text` and pressing Enter.
-fn type_and_submit(app: &mut App, text: &str) {
+async fn type_and_submit(app: &mut App, text: &str) {
     app.input = text.to_string();
     app.input_cursor = app.input_len_chars();
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 }
 
 // ---------------------------------------------------------------------------
 // FR-017 amendment — a slash command is enqueued while busy
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_slash_command_is_enqueued_while_processing() {
+#[tokio::test]
+async fn test_slash_command_is_enqueued_while_processing() {
     let mut app = app_with_session();
     app.is_processing = true;
 
-    type_and_submit(&mut app, "/status");
+    type_and_submit(&mut app, "/status").await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -58,12 +58,12 @@ fn test_slash_command_is_enqueued_while_processing() {
     );
 }
 
-#[test]
-fn test_slash_command_is_not_refused_while_processing() {
+#[tokio::test]
+async fn test_slash_command_is_not_refused_while_processing() {
     let mut app = app_with_session();
     app.is_processing = true;
 
-    type_and_submit(&mut app, "/status");
+    type_and_submit(&mut app, "/status").await;
 
     assert_ne!(
         app.status, "busy - wait for the current turn to finish",
@@ -71,11 +71,11 @@ fn test_slash_command_is_not_refused_while_processing() {
     );
 }
 
-#[test]
-fn test_slash_command_dispatches_immediately_when_idle() {
+#[tokio::test]
+async fn test_slash_command_dispatches_immediately_when_idle() {
     let mut app = app_with_session();
 
-    type_and_submit(&mut app, "/status");
+    type_and_submit(&mut app, "/status").await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -84,12 +84,12 @@ fn test_slash_command_dispatches_immediately_when_idle() {
     );
 }
 
-#[test]
-fn test_bang_command_still_refused_while_processing() {
+#[tokio::test]
+async fn test_bang_command_still_refused_while_processing() {
     let mut app = app_with_session();
     app.is_processing = true;
 
-    type_and_submit(&mut app, "! ls");
+    type_and_submit(&mut app, "! ls").await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -99,16 +99,16 @@ fn test_bang_command_still_refused_while_processing() {
     assert_eq!(app.status, "busy - wait for the current turn to finish");
 }
 
-#[test]
-fn test_slash_command_enqueue_respects_capacity() {
+#[tokio::test]
+async fn test_slash_command_enqueue_respects_capacity() {
     let mut app = app_with_session();
     app.is_processing = true;
     app.input_queue_capacity = 1;
 
-    type_and_submit(&mut app, "/status");
+    type_and_submit(&mut app, "/status").await;
     assert_eq!(app.input_queue_len(), 1);
 
-    type_and_submit(&mut app, "/about");
+    type_and_submit(&mut app, "/about").await;
 
     assert_eq!(app.input_queue_len(), 1, "FR-004: the cap is enforced");
     assert_eq!(
@@ -122,8 +122,8 @@ fn test_slash_command_enqueue_respects_capacity() {
     );
 }
 
-#[test]
-fn test_slash_command_enqueue_clears_slash_menu() {
+#[tokio::test]
+async fn test_slash_command_enqueue_clears_slash_menu() {
     let mut app = app_with_session();
     app.is_processing = true;
     // A visible completion menu must not linger over a cleared field.
@@ -133,7 +133,7 @@ fn test_slash_command_enqueue_clears_slash_menu() {
     app.input = "/status".to_string();
     app.input_cursor = app.input_len_chars();
 
-    app.handle_key_event(key(KeyCode::Enter));
+    app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert_eq!(app.input_queue_len(), 1);
     assert!(
@@ -157,7 +157,7 @@ async fn test_queued_slash_command_drains_at_the_boundary() {
 
     // The turn ends: the queued slash command runs and leaves the queue empty.
     app.is_processing = false;
-    app.advance_input_queue();
+    app.advance_input_queue().await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -182,7 +182,7 @@ async fn test_consecutive_queued_slash_commands_all_drain() {
 
     // Synchronous slash commands leave the boundary free, so a single drain
     // must run the whole batch rather than strand the tail behind the first.
-    app.advance_input_queue();
+    app.advance_input_queue().await;
 
     assert_eq!(
         app.input_queue_len(),
@@ -200,7 +200,7 @@ async fn test_queued_slash_command_defers_while_processing() {
         image_paths: Vec::new(),
     });
 
-    app.advance_input_queue();
+    app.advance_input_queue().await;
 
     assert_eq!(
         app.input_queue_len(),
