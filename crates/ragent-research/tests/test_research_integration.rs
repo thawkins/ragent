@@ -735,7 +735,7 @@ async fn session_persists_synthesize_result_to_run_log() {
 
     let tmp = TempDir::new().unwrap();
     let research_root = tmp.path().join("research");
-    let log_dir = tmp.path().join("logs").join("research");
+    let log_dir = tmp.path().join("log").join("research");
     tokio::fs::create_dir_all(&research_root).await.unwrap();
 
     let manager = ResearchManager::new(&research_root);

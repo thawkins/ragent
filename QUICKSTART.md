@@ -1815,6 +1815,35 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.119
+
+- **Sessionful Streamable-HTTP MCP servers report their tools** — the HTTP MCP
+  client now performs the `initialize` handshake, replays the returned
+  `mcp-session-id` on every later request, advertises `text/event-stream` in
+  `Accept`, and unwraps `event: message` SSE frames, so servers such as the
+  MongoDB MCP server (2025-era sessionful path) no longer reject `tools/list`
+  with HTTP 400. Adopting an already-running server uses the same client.
+- **MCP HTTP client is runtime-safe** — it is built lazily on first request, so
+  constructing it from a synchronous context (e.g. `App::init`, slash-command
+  handling) no longer panics with "there is no reactor running".
+- **Startup MCP report is reliable and deterministic** — the TUI waits up to
+  three seconds for background MCP connects and awaits the shared client lock,
+  so the per-server status lines (`[mcp] Starting/Connected/Skipping ...`)
+  reflect the real outcome instead of being silently dropped.
+- **`/plugins list --mcp` is deterministic** — server ids are sorted
+  alphabetically in the contributions block, so the rendered table is stable
+  between runs and independent of manifest or map iteration order.
+- **`/plugins list` resolves live MCP tool counts** — connected plugin MCP
+  servers show their real tool count instead of `?`.
+- **`/mcp` list output tightened** — it prints `tools: N` per server instead of
+  the full tool-name inventory; the inventory stays on `/plugins list --mcp`.
+- **`/simplify all` fixes** — `/swarm status` progress bar can no longer
+  overflow and renders empty at 0 tasks; `/spawn` no longer overwrites a landed
+  launch outcome with the pending error sentinel; `/plugins <non-list> --mcp`
+  executes the requested operation; the swarm unblock path persists task state
+  and logs save failures; `/alog` delete propagates storage errors; temporary
+  `[image-debug]` logging is removed.
+
 ## Version 1.0.118
 
 - **Durable, global MCP server enable/disable state** — whether an MCP server is

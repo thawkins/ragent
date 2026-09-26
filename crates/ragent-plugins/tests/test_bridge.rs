@@ -185,6 +185,8 @@ fn plugin_mcp_servers_reads_external_file() {
         mapped[0].1.args,
         vec!["-y".to_string(), "mongodb-mcp-server".to_string()]
     );
+    assert_eq!(mapped[0].1.type_, McpTransport::Stdio);
+    assert_eq!(mapped[0].1.url, None);
 }
 
 // ── Store-level bridge (enabled filter) ─────────────────────────────────────

@@ -5069,15 +5069,31 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                                         &format!("🔴 failed: {}", error)
                                     }
                                 };
+                                let endpoint = match s.config.type_ {
+                                    ragent_agent::McpTransport::Stdio => {
+                                        s.config.command.clone().unwrap_or_default()
+                                    }
+                                    ragent_agent::McpTransport::Sse
+                                    | ragent_agent::McpTransport::Http => {
+                                        s.config.url.clone().unwrap_or_default()
+                                    }
+                                };
+                                let endpoint_suffix = if endpoint.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" {endpoint}")
+                                };
                                 out.push_str(&format!(
-                                    "  {:<18} enabled {:<3} {}\n",
+                                    "  {:<18} enabled {:<3} {} [{}]{}\n",
                                     s.id,
                                     if server_is_enabled(s, &self.mcp_enabled_map) {
                                         "yes"
                                     } else {
                                         "no"
                                     },
-                                    status_icon
+                                    status_icon,
+                                    s.config.type_,
+                                    endpoint_suffix
                                 ));
                                 out.push_str(&format!("    tools: {}\n", s.tools.len()));
                             }

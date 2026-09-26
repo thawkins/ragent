@@ -300,11 +300,15 @@ pub fn render_list_with_mcp_tools(
                 parts.push(format!("hooks [{}]", row.hooks.join(", ")));
             }
             if !row.mcp_servers.is_empty() {
-                let servers: Vec<String> = row
-                    .mcp_servers
+                // Sorted for a stable, diffable contributions block: manifest
+                // order (or map order after bridge resolution) is not a
+                // contract and would flip the rendered line between runs.
+                let mut server_ids: Vec<&String> = row.mcp_servers.iter().collect();
+                server_ids.sort();
+                let servers: Vec<String> = server_ids
                     .iter()
                     .map(|id| {
-                        let count = row.mcp_tool_counts.get(id).map_or_else(
+                        let count = row.mcp_tool_counts.get(*id).map_or_else(
                             || {
                                 declared_server_name(id)
                                     .and_then(|name| row.mcp_tool_counts.get(name))

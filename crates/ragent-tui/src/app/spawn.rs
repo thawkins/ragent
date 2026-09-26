@@ -62,9 +62,11 @@ impl App {
         }
 
         // Validate the agent name against built-ins + loaded custom agents.
-        let builtins: Vec<_> = ragent_agent::agent::builtin_agents().to_vec();
-        let customs = self.custom_agent_defs.clone();
-        match resolve_agent(agent_name, &builtins, &customs) {
+        // `builtin_agents()` returns a static slice and `custom_agent_defs`
+        // is only borrowed — validation needs no clones at all.
+        let builtins = ragent_agent::agent::builtin_agents();
+        let customs = self.custom_agent_defs.as_slice();
+        match resolve_agent(agent_name, builtins, customs) {
             AgentResolution::Found(_) => {}
             AgentResolution::Miss { available, .. } => {
                 let list = if available.is_empty() {
@@ -204,12 +206,17 @@ impl App {
             Err(msg) if msg.is_empty() => {
                 // Marker entry — the real outcome has not landed yet; leave
                 // the slot occupied so concurrent /spawn invocations stay
-                // serialised.
+                // serialised. Restore the marker ONLY if the slot is still
+                // empty: if the async launch task landed its outcome between
+                // our `take()` above and this lock acquisition, the real
+                // result must win or the user never sees the success path.
                 let mut guard = crate::app::session_ops::recover_poisoned(
                     self.spawn_result.lock(),
                     "spawn_result",
                 );
-                *guard = Some(Err(String::new()));
+                if guard.is_none() {
+                    *guard = Some(Err(String::new()));
+                }
             }
             Err(msg) => {
                 self.status = format!("[warn] spawn failed: {msg}");

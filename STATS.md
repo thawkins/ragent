@@ -1,20 +1,20 @@
 # Project Statistics
 
-**Version:** 1.0.118
+**Version:** 1.0.119
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
-> Metrics below are measured against the v1.0.118 tree.
+> Metrics below are measured against the v1.0.119 tree.
 
 
 ## Project-wide Metrics
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 508,364 (504,596 in `crates/` + 3,768 in root `src/`/`examples/`) |
-| Total Rust files | 1,255 (workspace crates) + 6 (root `src/`/`examples/`) |
-| Tests defined | ~9,689 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
-| Test files | 630 external + ~200 inline-bearing |
+| Total Rust lines | 509,754 (505,975 in `crates/` + 3,779 in root `src/`/`examples/`) |
+| Total Rust files | 1,256 (workspace crates) + 6 (root `src/`/`examples/`) |
+| Tests defined | ~9,697 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
+| Test files | 631 external + ~200 inline-bearing |
 | Test binaries | ~664 (630 integration test files + 33 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 169 |
@@ -23,7 +23,7 @@
 | Specs on disk | 54 directories in `specs/` |
 | Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 20 category how-tos, 78 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.118 |
+| Version | 1.0.119 |
 
 ---
 
@@ -35,12 +35,12 @@ shows the file count, line count, and test-file count for each crate (including
 
 | Crate | Rust files | Rust lines | Test files |
 |---|---|---|---|
-| `ragent-agent` | 234 | 82,238 | 94 |
+| `ragent-agent` | 235 | 83,093 | 95 |
 | `ragent-bench` | 24 | 8,436 | 3 |
 | `ragent-codeindex` | 69 | 23,548 | 40 |
-| `ragent-config` | 47 | 11,639 | 30 |
-| `ragent-llm` | 52 | 23,540 | 23 |
-| `ragent-plugins` | 52 | 19,249 | 28 |
+| `ragent-config` | 47 | 11,651 | 30 |
+| `ragent-llm` | 52 | 23,563 | 23 |
+| `ragent-plugins` | 52 | 19,251 | 28 |
 | `ragent-research` | 114 | 60,102 | 48 |
 | `ragent-server` | 11 | 5,871 | 5 |
 | `ragent-specs` | 31 | 20,000 | 18 |
@@ -50,7 +50,7 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-tools-core` | 56 | 17,747 | 20 |
 | `ragent-tools-extended` | 203 | 74,682 | 85 |
 | `ragent-tools-vcs` | 56 | 14,819 | 20 |
-| `ragent-tui` | 193 | 106,282 | 136 |
+| `ragent-tui` | 193 | 106,769 | 136 |
 | `ragent-types` | 36 | 8,691 | 18 |
 
 ---
@@ -105,7 +105,7 @@ ragent-team            # 2,770 lines ( 0.5%)
 Inline `#[cfg(test)]` modules in library sources contribute a further
 ~1,600 test attributes (largest contributors: `ragent-research`, `ragent-agent`,
 `ragent-tools-extended`, `ragent-tui`, `ragent-specs`), bringing the estimated
-total to ~9,689.
+total to ~9,697.
 
 ---
 
@@ -167,7 +167,7 @@ Notes:
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 52 lines (9,689 tests / 508,364 lines)
+- Test-to-code ratio: ~1 test per 52 lines (9,697 tests / 509,754 lines)
 - Largest crate: `ragent-tui` (106,282 lines, 21.1%)
 - Smallest crate: `ragent-team` (2,770 lines, 0.5%)
 - Median crate size: 17,747 lines (`ragent-tools-core`)
@@ -176,10 +176,11 @@ Notes:
 
 ---
 
-_Generated 2026-09-25 (v1.0.118 tree: the uncommitted MCP-enablement work folded
-in at release — `/mcp` lists plugin-contributed servers and reports their live
-status, `/mcp connect <id>` / `/mcp disconnect <id>` enable/disable a server live
-with the choice persisted in a global `mcp_state.json` ledger, `/plugins list`
-shows each plugin's MCP server and tool counts, `/tools` lists visibility-disabled
-tools, and plugin `mcpServers` entries are bridged by default. Metrics
-re-measured across the workspace and docs re-rendered in the same pass.)_
+_Generated 2026-09-26 (v1.0.119 tree: MCP transports/sessions/startup-reporting
+fixes — sessionful Streamable-HTTP servers (the MongoDB MCP server) report their
+tools through `HttpMcpClient::initialize` + `mcp-session-id` replay, the HTTP
+client no longer panics outside a Tokio runtime, the startup report awaits the
+shared client lock with a 3s grace, `/plugins list --mcp` sorts server ids for a
+stable contributions block; `/simplify all` pass over the v1.0.116–v1.0.118
+change set and a full rust-hygiene sweep both green. Metrics unchanged by the
+release aside from the version bump.)_

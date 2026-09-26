@@ -759,8 +759,7 @@ mod app_tests {
             app.log_entries
                 .iter()
                 .any(|e| e.message.contains("Background task completed")
-                    && (e.message.contains("bg-1")
-                        || e.message.contains(&"bg-1"[..8.min("bg-1".len())])))
+                    && e.message.contains("bg-1"))
         );
     }
 

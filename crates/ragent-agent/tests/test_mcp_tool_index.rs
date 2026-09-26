@@ -83,6 +83,283 @@ async fn register_disabled_lists_the_server_with_no_tools() {
     assert!(client.servers()[0].tools.is_empty());
 }
 
+// ── Streamable-HTTP session adoption ────────────────────────────────────────
+
+/// A sessionful Streamable-HTTP server refuses `tools/list` unless the request
+/// carries the `mcp-session-id` it issued during `initialize`, so a replaying
+/// client must resend it. This drives a minimal in-process sessionful server
+/// and asserts the id reaches every later request.
+#[tokio::test]
+async fn http_client_replays_the_session_id_from_initialize() {
+    use std::collections::HashMap;
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use axum::Router;
+    use axum::extract::State;
+    use axum::http::HeaderMap;
+    use axum::response::IntoResponse;
+    use axum::routing::post;
+    use ragent_agent::mcp::McpClientBackend;
+
+    const SESSION: &str = "test-session-123";
+
+    #[derive(Clone, Default)]
+    struct Seen {
+        /// Request paths that carried the session header.
+        with_session: Arc<AtomicUsize>,
+        /// Request paths seen at all.
+        total: Arc<AtomicUsize>,
+    }
+
+    async fn handler(
+        State(seen): State<Seen>,
+        headers: HeaderMap,
+        body: String,
+    ) -> impl IntoResponse {
+        seen.total.fetch_add(1, Ordering::SeqCst);
+        if headers.contains_key("mcp-session-id") {
+            seen.with_session.fetch_add(1, Ordering::SeqCst);
+        }
+        let request: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+        let id = request.get("id").cloned().unwrap_or(json!(1));
+        match request.get("method").and_then(|m| m.as_str()).unwrap_or("") {
+            "initialize" => {
+                let frame = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": { "protocolVersion": "2024-11-05" }
+                });
+                let mut response = (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    format!("event: message\ndata: {frame}\n\n"),
+                )
+                    .into_response();
+                response.headers_mut().insert(
+                    "mcp-session-id",
+                    axum::http::HeaderValue::from_static(SESSION),
+                );
+                response
+            }
+            "tools/list" => {
+                // Sessionful server: reject a request that did not join the
+                // session opened by `initialize`.
+                if !headers.contains_key("mcp-session-id") {
+                    return (
+                        axum::http::StatusCode::BAD_REQUEST,
+                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                        json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "error": { "code": -32004, "message": "invalid request" }
+                        })
+                        .to_string(),
+                    )
+                        .into_response();
+                }
+                let frame = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": { "tools": [ { "name": "find" }, { "name": "count" } ] }
+                });
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    format!("event: message\ndata: {frame}\n\n"),
+                )
+                    .into_response()
+            }
+            other => panic!("unexpected MCP method {other}"),
+        }
+    }
+
+    let seen = Seen::default();
+    let router = Router::new()
+        .route("/mcp", post(handler))
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .expect("bind test server");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+
+    let url = format!("http://{addr}/mcp");
+    let mut client = ragent_agent::mcp::http::HttpMcpClient::new(url, HashMap::new());
+    client.initialize().await.expect("initialize handshake");
+    assert_eq!(client.session_id(), Some(SESSION));
+    assert!(!client.is_disconnected());
+
+    let tools = client.list_tools().await;
+    assert_eq!(
+        tools.len(),
+        2,
+        "a sessionful server answers tools/list only for a joined session"
+    );
+    assert_eq!(
+        seen.with_session.load(Ordering::SeqCst),
+        1,
+        "the tools/list request must carry the id initialize negotiated"
+    );
+    assert_eq!(seen.total.load(Ordering::SeqCst), 2);
+}
+
+// ── Generic adopt of an already-running MCP server ──────────────────────────
+
+/// `connect` must adopt a server that is already running at the address its
+/// config declares, instead of spawning a duplicate.
+///
+/// The live server is a sessionful Streamable-HTTP mock, so a successful adopt
+/// proves both the probe and the session hand-off. Generic by construction: the
+/// config is a plain `http` entry like any hand-written or plugin-bridged one,
+/// with no per-product special casing anywhere on the adopt path.
+#[tokio::test]
+async fn connect_adopts_an_already_running_http_server() {
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use axum::Router;
+    use axum::extract::State;
+    use axum::http::HeaderMap;
+    use axum::response::IntoResponse;
+    use axum::routing::post;
+
+    const SESSION: &str = "adopt-session-1";
+
+    #[derive(Clone, Default)]
+    struct Seen {
+        initializes: Arc<AtomicUsize>,
+    }
+
+    async fn handler(
+        State(seen): State<Seen>,
+        headers: HeaderMap,
+        body: String,
+    ) -> impl IntoResponse {
+        let request: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+        let id = request.get("id").cloned().unwrap_or(json!(1));
+        match request.get("method").and_then(|m| m.as_str()).unwrap_or("") {
+            "initialize" => {
+                seen.initializes.fetch_add(1, Ordering::SeqCst);
+                let frame = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": { "protocolVersion": "2024-11-05" }
+                });
+                let mut response = (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    format!("event: message\ndata: {frame}\n\n"),
+                )
+                    .into_response();
+                response.headers_mut().insert(
+                    "mcp-session-id",
+                    axum::http::HeaderValue::from_static(SESSION),
+                );
+                response
+            }
+            "tools/list" => {
+                assert!(
+                    headers.contains_key("mcp-session-id"),
+                    "the adopting client must replay the session the probe negotiated"
+                );
+                let frame = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": { "tools": [ { "name": "find" } ] }
+                });
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    format!("event: message\ndata: {frame}\n\n"),
+                )
+                    .into_response()
+            }
+            other => panic!("unexpected MCP method {other}"),
+        }
+    }
+
+    let seen = Seen::default();
+    let router = Router::new()
+        .route("/mcp", post(handler))
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .expect("bind test server");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+
+    let url = format!("http://{addr}/mcp");
+    assert!(
+        ragent_agent::mcp::http::probe(&url).await.is_some(),
+        "a live Streamable-HTTP endpoint must be probeable"
+    );
+
+    let config = McpServerConfig {
+        type_: ragent_config::McpTransport::Http,
+        url: Some(url),
+        ..McpServerConfig::default()
+    };
+
+    let mut client = McpClient::new();
+    client
+        .connect("shared", config)
+        .await
+        .expect("adopt the running server");
+
+    let server = client
+        .servers()
+        .iter()
+        .find(|s| s.id == "shared")
+        .expect("server registered");
+    assert_eq!(server.status, ragent_agent::mcp::McpStatus::Connected);
+    assert_eq!(
+        server.tools.len(),
+        1,
+        "the adopted server's tools are listed"
+    );
+
+    // Exactly one `initialize` ran in-process (the probe); the adopt reused the
+    // session it negotiated rather than reconnecting. The test's own
+    // `probe(...)` assertion below is the same handshake the adopt path runs,
+    // hence two in total.
+    assert_eq!(seen.initializes.load(Ordering::SeqCst), 2);
+
+    // Shutting down an adopted connection must not panic or hang.
+    client.shutdown().await;
+}
+
+/// A server with no reachable existing instance must fall through to a normal
+/// spawn attempt rather than adopt a phantom endpoint. Port 1 is reserved and
+/// never listening, so the probe is guaranteed to miss.
+#[tokio::test]
+async fn connect_does_not_adopt_a_dead_endpoint() {
+    let config = McpServerConfig {
+        type_: ragent_config::McpTransport::Http,
+        // Reserved port; nothing listens here, so `initialize` cannot answer.
+        url: Some("http://127.0.0.1:1/mcp".to_string()),
+        ..McpServerConfig::default()
+    };
+
+    let mut client = McpClient::new();
+    // The probe must miss and the connect must fall through to the configured
+    // HTTP transport, which then fails against the dead endpoint. Asserting on
+    // the resulting `Failed` status (not on the error's Display, which is empty
+    // for the transport's own error chain) is what proves nothing was adopted.
+    let _ = client.connect("dead", config).await;
+    let server = client
+        .servers()
+        .iter()
+        .find(|s| s.id == "dead")
+        .expect("failed server is still registered for reporting");
+    assert!(matches!(
+        server.status,
+        ragent_agent::mcp::McpStatus::Failed { .. }
+    ));
+}
+
 // ── Global enable ledger ────────────────────────────────────────────────────
 
 /// A server id absent from the ledger is enabled, so a newly added MCP server

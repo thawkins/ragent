@@ -547,19 +547,17 @@ impl LegacyMultiEditAlias {
             return input;
         };
         for edit in edits {
-            if edit.get("file_path").is_none() {
-                if let Some(path) = edit.get("path").cloned() {
-                    edit["file_path"] = path;
-                }
-            }
-            if edit.get("old_string").is_none() {
-                if let Some(old) = edit.get("old_str").cloned() {
-                    edit["old_string"] = old;
-                }
-            }
-            if edit.get("new_string").is_none() {
-                if let Some(new) = edit.get("new_str").cloned() {
-                    edit["new_string"] = new;
+            // Canonical slot wins; copy the legacy spelling in only when the
+            // canonical one is absent.
+            for (legacy, canonical) in [
+                ("path", "file_path"),
+                ("old_str", "old_string"),
+                ("new_str", "new_string"),
+            ] {
+                if edit.get(canonical).is_none()
+                    && let Some(value) = edit.get(legacy).cloned()
+                {
+                    edit[canonical] = value;
                 }
             }
         }

@@ -93,7 +93,7 @@ impl Drop for CronSchedulerHandle {
 /// # Arguments
 ///
 /// - `storage` — shared SQLite storage handle for querying due cron events.
-/// - `session_processor` �� shared session processor for spawning agent runs
+/// - `session_processor` — shared session processor for spawning agent runs
 ///   via the `new_agent` / `spawn_background` path (FR-004, FR-005).
 /// - `working_dir` — project working directory used for execution logging
 ///   (`<working_dir>/log/cron-<timestamp>.jsonl`).

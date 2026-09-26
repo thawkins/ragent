@@ -249,8 +249,11 @@ impl SkillInfo {
         let body = loader::extract_body(&content)
             .map_err(|e| anyhow::anyhow!("Failed to extract body for '{}': {e}", self.name))?;
 
-        *cache = Some(body.to_string());
-        Ok(body.to_string())
+        // One allocation: cache the owned body, then hand back a clone of
+        // that single String rather than building the string twice.
+        let owned = body.to_string();
+        *cache = Some(owned.clone());
+        Ok(owned)
     }
 
     /// Returns `true` if the user can invoke this skill via `/name`.

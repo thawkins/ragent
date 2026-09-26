@@ -34,9 +34,6 @@ impl Tool for NewAgentTool {
         "new_agent"
     }
 
-    /// # Errors
-    ///
-    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
         "Spawn a sub-agent to perform a focused task. Supports synchronous (blocking) \
          and background (non-blocking) modes. Use agent names like 'explore', 'build', \

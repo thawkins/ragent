@@ -10,6 +10,24 @@ use crate::app::state::{App, LogLevel};
 // Re-export status types from theme
 
 impl App {
+    /// The working directory the swarm was launched from. All team/task
+    /// stores are anchored to the App's cwd, so use that rather than
+    /// re-querying the process cwd (which could differ if it ever changes).
+    fn swarm_working_dir(&self) -> std::path::PathBuf {
+        self.cwd_path.clone()
+    }
+
+    /// Load the swarm team's task list from disk, or `None` when the team or
+    /// its task store cannot be read. Shared by the status, unblock,
+    /// completion, and finalize paths so the load-by-name + open + read chain
+    /// lives in one place.
+    fn load_swarm_tasks(&self, team_name: &str) -> Option<ragent_team::team::task::TaskList> {
+        let working_dir = self.swarm_working_dir();
+        let store = team::TeamStore::load_by_name(team_name, &working_dir).ok()?;
+        let ts = team::TaskStore::open(&store.dir).ok()?;
+        ts.read().ok()
+    }
+
     pub(crate) fn execute_swarm_decomposition(&mut self, decomposition: team::SwarmDecomposition) {
         use ragent_team::team::{SwarmState, TaskStore, TeamStore, task::Task};
 
@@ -25,7 +43,7 @@ impl App {
         // Create ephemeral team name
         let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
         let team_name = format!("swarm-{ts}");
-        let working_dir = std::env::current_dir().unwrap_or_default();
+        let working_dir = self.swarm_working_dir();
         let lead_sid = self
             .session_id
             .clone()
@@ -112,7 +130,7 @@ impl App {
         decomposition: &team::SwarmDecomposition,
         team_dir: &std::path::Path,
     ) {
-        let working_dir = std::env::current_dir().unwrap_or_default();
+        let working_dir = self.swarm_working_dir();
 
         for subtask in &decomposition.tasks {
             let teammate_name = format!("swarm-{}", subtask.id);
@@ -240,17 +258,7 @@ impl App {
         let mut output = format!("From: /swarm status\n## 🐝 Swarm: {}\n\n", swarm.team_name);
 
         // Load tasks from disk for current status
-        let working_dir = std::env::current_dir().unwrap_or_default();
-        let tasks = if let Ok(store) = team::TeamStore::load_by_name(&swarm.team_name, &working_dir)
-        {
-            if let Ok(ts) = team::TaskStore::open(&store.dir) {
-                ts.read().ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let tasks = self.load_swarm_tasks(&swarm.team_name);
 
         let total = swarm.decomposition.tasks.len();
         let (completed, in_progress, pending) = if let Some(ref tl) = tasks {
@@ -274,12 +282,10 @@ impl App {
             (0, 0, total)
         };
 
-        // Progress bar
+        // Progress bar: completed/total fraction of the bar. Guard the
+        // zero-total case so the bar renders empty instead of dividing by 0.
         let bar_width = 30;
-        let filled = total
-            .saturating_mul(bar_width)
-            .checked_div(total)
-            .unwrap_or(0);
+        let filled = (completed * bar_width).checked_div(total).unwrap_or(0);
         let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
         output.push_str(&format!(
             "**Progress:** [{bar}] {completed}/{total} ({} in progress, {} pending)\n\n",
@@ -405,25 +411,17 @@ impl App {
             .collect();
 
         // Also check TaskStore for explicitly completed tasks
-        let working_dir = std::env::current_dir().unwrap_or_default();
-        let task_completed_ids: std::collections::HashSet<String> =
-            if let Ok(store) = team::TeamStore::load_by_name(&team_name, &working_dir) {
-                if let Ok(ts) = team::TaskStore::open(&store.dir) {
-                    if let Ok(tl) = ts.read() {
-                        tl.tasks
-                            .iter()
-                            .filter(|t| t.status == team::TaskStatus::Completed)
-                            .map(|t| t.id.clone())
-                            .collect()
-                    } else {
-                        std::collections::HashSet::new()
-                    }
-                } else {
-                    std::collections::HashSet::new()
-                }
-            } else {
-                std::collections::HashSet::new()
-            };
+        let working_dir = self.swarm_working_dir();
+        let task_completed_ids: std::collections::HashSet<String> = self
+            .load_swarm_tasks(&team_name)
+            .map(|tl| {
+                tl.tasks
+                    .iter()
+                    .filter(|t| t.status == team::TaskStatus::Completed)
+                    .map(|t| t.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let all_completed: std::collections::HashSet<String> = completed_task_ids
             .union(&task_completed_ids)
@@ -453,10 +451,11 @@ impl App {
                     completed_ids = ?all_completed,
                     "Checking swarm dependency resolution"
                 );
-                if missing.is_empty() && !deps.is_empty() {
-                    unblocked.push((member_name.clone(), agent_id.clone(), task_id.to_string()));
-                } else if deps.is_empty() {
-                    // No deps — should have been Spawning, but unblock anyway
+                // `deps.is_empty()` implies `missing.is_empty()`, so a
+                // member with no deps unblocks on the same condition (it
+                // should have started Spawning instead of Blocked, but
+                // unblock anyway rather than stranding it).
+                if missing.is_empty() {
                     unblocked.push((member_name.clone(), agent_id.clone(), task_id.to_string()));
                 }
             }
@@ -481,7 +480,12 @@ impl App {
                 if let Some(m) = store.config.member_by_id_mut(agent_id) {
                     m.status = MemberStatus::Spawning;
                 }
-                let _ = store.save();
+                // A failed save leaves the persisted member stuck at Blocked
+                // while the in-memory copy moved on — surface it so the swarm
+                // is not left silently inconsistent.
+                if let Err(e) = store.save() {
+                    tracing::warn!(error = %e, agent_id, "failed to persist unblocked swarm member");
+                }
             }
             // Log with actual deps for debugging
             let dep_info = decomp_tasks
@@ -529,7 +533,7 @@ impl App {
         }
         let team_name = swarm.team_name.clone();
 
-        let working_dir = std::env::current_dir().unwrap_or_default();
+        let working_dir = self.swarm_working_dir();
 
         // Check member status — if all non-lead members are terminal (idle/failed/stopped),
         // the swarm is effectively done regardless of task store state.
@@ -568,15 +572,7 @@ impl App {
         }
 
         // Now check task store for final tally
-        let tasks = if let Ok(store) = team::TeamStore::load_by_name(&team_name, &working_dir) {
-            if let Ok(ts) = team::TaskStore::open(&store.dir) {
-                ts.read().ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let tasks = self.load_swarm_tasks(&team_name);
 
         let Some(ref tl) = tasks else {
             // No task store — fall back to member-only check
@@ -629,8 +625,6 @@ impl App {
         completed: usize,
         cancelled: usize,
     ) {
-        let working_dir = std::env::current_dir().unwrap_or_default();
-
         let mut output = format!(
             "From: /swarm\n## 🎉 Swarm Complete: {team_name}\n\n\
             All **{total}** subtasks have finished ({completed} completed, {cancelled} failed/cancelled).\n\n"
@@ -638,24 +632,17 @@ impl App {
 
         // Include task table if we have tasks
         if total > 0 {
-            if let Ok(store) = team::TeamStore::load_by_name(team_name, &working_dir) {
-                if let Ok(ts) = team::TaskStore::open(&store.dir) {
-                    if let Ok(tl) = ts.read() {
-                        output.push_str("| ID | Title | Status |\n|----|-------|--------|\n");
-                        for task in &tl.tasks {
-                            let icon = match task.status {
-                                team::TaskStatus::Completed => "[ok]",
-                                team::TaskStatus::Cancelled => "[err]",
-                                _ => "[warn]",
-                            };
-                            output.push_str(&format!(
-                                "| {} | {} | {} |\n",
-                                task.id, task.title, icon
-                            ));
-                        }
-                        output.push('\n');
-                    }
+            if let Some(tl) = self.load_swarm_tasks(team_name) {
+                output.push_str("| ID | Title | Status |\n|----|-------|--------|\n");
+                for task in &tl.tasks {
+                    let icon = match task.status {
+                        team::TaskStatus::Completed => "[ok]",
+                        team::TaskStatus::Cancelled => "[err]",
+                        _ => "[warn]",
+                    };
+                    output.push_str(&format!("| {} | {} | {} |\n", task.id, task.title, icon));
                 }
+                output.push('\n');
             }
         }
 

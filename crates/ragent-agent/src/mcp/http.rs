@@ -17,6 +17,7 @@
 //! `disconnected` flag is cleared and the request is attempted again.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -34,6 +35,67 @@ const RETRY_BACKOFFS: &[Duration] = &[
     Duration::from_secs(2),
     Duration::from_secs(4),
 ];
+
+/// How long [`probe`] waits for an endpoint's `initialize` before giving up.
+///
+/// Deliberately short: the probe runs on the startup path and a miss is the
+/// common case (nothing is listening), so it must not inherit the retry/backoff
+/// envelope used for servers ragent owns.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(800);
+
+/// The process-wide MCP HTTP client.
+///
+/// `reqwest::Client::new()` must be called from inside a Tokio runtime context:
+/// it builds the connection pool's `PollEvented` TCP sockets eagerly, so calling
+/// it outside a runtime panics with "there is no reactor running". A client
+/// constructed lazily on first use is therefore built from the async request
+/// path (which always runs on the runtime), never from `app::init`/`Config`
+/// construction. Sharing one client also lets the connection pool be reused
+/// across every MCP HTTP server instead of one pool per server.
+fn shared_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
+
+/// Parse a JSON-RPC reply body into its `result`, unwrapping a Streamable-HTTP
+/// Server-Sent-Events frame first when the server answered with one.
+///
+/// A Streamable-HTTP endpoint may reply either with a bare JSON-RPC object or
+/// with an `event: message` / `data: {...}` SSE frame (the MongoDB MCP server on
+/// its 2025-era sessionful path does the latter). Both carry the same
+/// [`JsonRpcResponse`]; this normalises them so the plain-JSON-RPC client needs
+/// no SSE parser.
+fn parse_jsonrpc_result(method: &str, text: &str) -> Result<Value> {
+    let payload = unwrap_sse_frame(text);
+    let parsed: JsonRpcResponse<Value> = serde_json::from_str(payload)
+        .with_context(|| format!("invalid JSON-RPC response for '{}': {}", method, text))?;
+
+    if let Some(error) = parsed.error {
+        anyhow::bail!(
+            "JSON-RPC error for '{}': code {} - {}",
+            method,
+            error.code,
+            error.message
+        );
+    }
+
+    parsed
+        .result
+        .context(format!("JSON-RPC response for '{}' missing result", method))
+}
+
+/// Return the JSON payload of `text`: the `data:` line of an SSE frame, or the
+/// input unchanged when it is already a bare JSON document.
+fn unwrap_sse_frame(text: &str) -> &str {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with("event:") && !trimmed.starts_with("data:") {
+        return text.trim();
+    }
+    trimmed
+        .lines()
+        .find_map(|line| line.strip_prefix("data:"))
+        .map_or(text.trim(), str::trim)
+}
 
 /// JSON-RPC 2.0 request envelope.
 #[derive(Debug, Serialize)]
@@ -60,6 +122,55 @@ struct JsonRpcResponse<T> {
     error: Option<JsonRpcError>,
 }
 
+/// One live MCP Streamable-HTTP endpoint discovered by [`probe`].
+///
+/// Carries the exact endpoint that answered and the `mcp-session-id` that
+/// endpoint issued for the probe's `initialize`, so a caller can adopt the
+/// running server (build a client with [`HttpMcpClient::new`] +
+/// [`HttpMcpClient::with_session_id`]) without repeating the handshake.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveEndpoint {
+    /// The MCP endpoint URL that answered (e.g. `http://127.0.0.1:3000/mcp`).
+    pub url: String,
+    /// The `mcp-session-id` the endpoint issued, when it is sessionful.
+    pub session_id: Option<String>,
+}
+
+/// Probe whether an already-running MCP server is reachable at `url`.
+///
+/// Performs the MCP `initialize` handshake the Streamable-HTTP transport
+/// requires and returns the endpoint plus its session id when a live server
+/// answered. Returns `None` for a URL this is not HTTP/HTTPS, or when nothing
+/// answered / the endpoint is not an MCP server (so the caller falls through to
+/// starting its own instance).
+///
+/// A bare TCP-listening socket is *not* enough: `initialize` must round-trip, so
+/// an unrelated process squatting the port is rejected.
+pub async fn probe(url: &str) -> Option<LiveEndpoint> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return None;
+    }
+    let mut client = HttpMcpClient::new(url, HashMap::new());
+    // A single attempt on a short timeout: a probe asks "is something already
+    // listening here?" and a miss must fall through to a spawn quickly. The
+    // client's own retry/backoff envelope (1s + 2s + 4s) is right for a server
+    // ragent owns and wrong for a speculative probe.
+    match tokio::time::timeout(PROBE_TIMEOUT, client.initialize()).await {
+        Ok(Ok(_)) => Some(LiveEndpoint {
+            url: url.to_string(),
+            session_id: client.session_id().map(str::to_string),
+        }),
+        Ok(Err(error)) => {
+            tracing::debug!(url = %crate::sanitize::redact_secrets(url), error = %error, "MCP endpoint probe failed");
+            None
+        }
+        Err(_) => {
+            tracing::debug!(url = %crate::sanitize::redact_secrets(url), "MCP endpoint probe timed out");
+            None
+        }
+    }
+}
+
 /// MCP client that sends JSON-RPC requests over HTTP.
 ///
 /// Each instance targets a single MCP server URL. The client is stateless apart
@@ -72,8 +183,13 @@ pub struct HttpMcpClient {
     url: String,
     /// Optional custom headers attached to every request.
     headers: HashMap<String, String>,
-    /// Underlying reqwest client.
-    client: reqwest::Client,
+    /// Underlying reqwest client. `None` means "resolve [`shared_client`] on
+    /// first use", so constructing the client is safe outside a Tokio runtime.
+    client: Option<reqwest::Client>,
+    /// The `mcp-session-id` a sessionful Streamable-HTTP server issued during
+    /// `initialize`, replayed on every later request. `None` for a stateless
+    /// server, or before [`HttpMcpClient::initialize`] has run.
+    session_id: Option<String>,
     /// Next JSON-RPC request id.
     next_id: AtomicU64,
     /// `true` when the server has been marked disconnected after exhausting
@@ -103,10 +219,17 @@ impl HttpMcpClient {
         Self {
             url: url.into(),
             headers,
-            client: reqwest::Client::new(),
+            client: None,
+            session_id: None,
             next_id: AtomicU64::new(1),
             disconnected: AtomicBool::new(false),
         }
+    }
+
+    /// The reqwest client for this instance: the injected one, or the shared
+    /// process-wide client resolved on first use.
+    fn client(&self) -> &reqwest::Client {
+        self.client.as_ref().unwrap_or_else(|| shared_client())
     }
 
     /// Replace the underlying `reqwest::Client`.
@@ -114,7 +237,16 @@ impl HttpMcpClient {
     /// Useful in tests or when the caller needs custom timeouts / middleware.
     #[must_use]
     pub fn with_client(mut self, client: reqwest::Client) -> Self {
-        self.client = client;
+        self.client = Some(client);
+        self
+    }
+
+    /// Attach an already-negotiated `mcp-session-id`, so this client joins a
+    /// session opened elsewhere (see [`Self::initialize`] and
+    /// [`McpClient::adopt_connected`](super::McpClient::adopt_connected)).
+    #[must_use]
+    pub fn with_session_id(mut self, session_id: Option<String>) -> Self {
+        self.session_id = session_id;
         self
     }
 
@@ -123,6 +255,47 @@ impl HttpMcpClient {
     #[must_use]
     pub fn is_disconnected(&self) -> bool {
         self.disconnected.load(Ordering::SeqCst)
+    }
+
+    /// The `mcp-session-id` sent with every request, when the server is a
+    /// sessionful Streamable-HTTP server.
+    ///
+    /// A server that issues a session refuses every request other than
+    /// `initialize` unless it carries the id, so a client that only speaks the
+    /// plain JSON-RPC subset ([`Self::post_once`]) must replay the session the
+    /// [`initialize`](Self::initialize) call negotiated.
+    #[must_use]
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref()
+    }
+
+    /// Perform the MCP `initialize` handshake, capturing any `mcp-session-id`
+    /// the server returns for use by later requests.
+    ///
+    /// This is the subset handshake a sessionful Streamable-HTTP server requires
+    /// before it will answer `tools/list`: a bare [`list_tools`] on a fresh
+    /// client is rejected. Returns the server's negotiated `protocolVersion`
+    /// when it answered with a JSON-RPC result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the request fails, the status is not 2xx, or the
+    /// response is not a parseable JSON-RPC reply.
+    ///
+    /// [`list_tools`]: McpClientBackend::list_tools
+    pub async fn initialize(&mut self) -> Result<Value> {
+        let params = serde_json::json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": { "name": "ragent", "version": env!("CARGO_PKG_VERSION") }
+        });
+        let (result, session_id) = self
+            .post_once_capture_session("initialize", &params)
+            .await?;
+        if session_id.is_some() {
+            self.session_id = session_id;
+        }
+        Ok(result)
     }
 
     /// Build and send a single JSON-RPC POST request (no retries).
@@ -134,6 +307,18 @@ impl HttpMcpClient {
         method: &str,
         params: &T,
     ) -> Result<Value> {
+        self.post_once_capture_session(method, params)
+            .await
+            .map(|(result, _)| result)
+    }
+
+    /// As [`Self::post_once`], but also returns the `mcp-session-id` response
+    /// header when the server issued one (only `initialize` does).
+    async fn post_once_capture_session<T: Serialize + Send + Sync>(
+        &self,
+        method: &str,
+        params: &T,
+    ) -> Result<(Value, Option<String>)> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -145,10 +330,18 @@ impl HttpMcpClient {
             serde_json::to_string(&request).context("failed to serialize JSON-RPC request")?;
 
         let mut builder = self
-            .client
+            .client()
             .post(&self.url)
             .header("Content-Type", "application/json")
-            .header("Accept", "application/json");
+            // A sessionful Streamable-HTTP server (the MongoDB MCP server among
+            // them) only answers a negotiated session; advertising the SSE
+            // media type lets such a server reply with an `event: message`
+            // frame, which is unwrapped below.
+            .header("Accept", "application/json, text/event-stream");
+
+        if let Some(session_id) = &self.session_id {
+            builder = builder.header("mcp-session-id", session_id);
+        }
 
         for (key, value) in &self.headers {
             builder = builder.header(key, value);
@@ -161,6 +354,11 @@ impl HttpMcpClient {
             .context("failed to send HTTP MCP request")?;
 
         let status = response.status();
+        let session_id = response
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
         let text = response
             .text()
             .await
@@ -175,21 +373,8 @@ impl HttpMcpClient {
             );
         }
 
-        let parsed: JsonRpcResponse<Value> = serde_json::from_str(&text)
-            .with_context(|| format!("invalid JSON-RPC response for '{}': {}", method, text))?;
-
-        if let Some(error) = parsed.error {
-            anyhow::bail!(
-                "JSON-RPC error for '{}': code {} - {}",
-                method,
-                error.code,
-                error.message
-            );
-        }
-
-        parsed
-            .result
-            .context(format!("JSON-RPC response for '{}' missing result", method))
+        let parsed = parse_jsonrpc_result(method, &text)?;
+        Ok((parsed, session_id))
     }
 
     /// Build and send a JSON-RPC POST request with auto-reconnect (FR-014).

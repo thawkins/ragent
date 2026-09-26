@@ -2971,6 +2971,136 @@ impl App {
         self.needs_redraw = true;
     }
 
+    /// Append the per-server MCP connection report to the message window.
+    ///
+    /// Called once at startup, after the enable-state ledger has been consulted
+    /// but before the `[ok] **Ready**` line, so the user sees one line per
+    /// server that ragent attempted to start and, for the ones that came up,
+    /// a second line confirming the handshake. A server switched off in the
+    /// ledger is reported as skipped rather than started.
+    ///
+    /// A no-op when no MCP server is configured or when the shared client has
+    /// not been published yet (the connect loop runs concurrently with startup,
+    /// and a report is better omitted than shown as a wrong "0 servers").
+    ///
+    /// Waits for the client lock rather than skipping when it is momentarily
+    /// held: the connect loop publishes the client and can still hold its guard
+    /// while this one-shot call runs, and a skipped report is never retried.
+    pub async fn report_mcp_startup(&mut self) {
+        let Some(client) = self.session_processor.mcp_client.get() else {
+            return;
+        };
+        let guard = client.read().await;
+        let mut lines = String::new();
+        for server in guard.servers() {
+            // The transport label rides on every line so the report names the
+            // wire protocol (stdio / sse / http) for each server.
+            let transport = &server.config.type_;
+            match &server.status {
+                ragent_agent::mcp::McpStatus::Connected => {
+                    lines.push_str(&format!(
+                        "\n[mcp] Starting mcp server {} ({transport})",
+                        server.id
+                    ));
+                    lines.push_str(&format!(
+                        "\n[mcp] Connected to mcp server {} via {transport}",
+                        server.id
+                    ));
+                }
+                ragent_agent::mcp::McpStatus::Disabled => {
+                    lines.push_str(&format!(
+                        "\n[mcp] Skipping mcp server {} ({transport}, disabled)",
+                        server.id
+                    ));
+                }
+                ragent_agent::mcp::McpStatus::Failed { error } => {
+                    lines.push_str(&format!(
+                        "\n[mcp] Starting mcp server {} ({transport})",
+                        server.id
+                    ));
+                    lines.push_str(&format!(
+                        "\n[mcp] Failed to connect to mcp server {} via {transport}: {error}",
+                        server.id
+                    ));
+                }
+                ragent_agent::mcp::McpStatus::NeedsAuth => {
+                    lines.push_str(&format!(
+                        "\n[mcp] Starting mcp server {} ({transport})",
+                        server.id
+                    ));
+                    lines.push_str(&format!(
+                        "\n[mcp] mcp server {} ({transport}) needs authentication",
+                        server.id
+                    ));
+                }
+            }
+        }
+        // Drop the read guard before mutating `self` (the guard borrows the
+        // shared client, which the append below would otherwise conflict with).
+        drop(guard);
+        if !lines.is_empty() {
+            self.append_assistant_text(&lines);
+        }
+    }
+
+    /// Wait for the background MCP connect loop to register tools.
+    ///
+    /// The loop runs concurrently with startup: a server that is registered but
+    /// not yet connected (status `Disabled`) or whose tools are not yet in the
+    /// tool registry is still being set up, so this polls until every configured
+    /// server is terminal — connected with its tools registered, or
+    /// failed/needs-auth/disabled — or `timeout` expires.
+    ///
+    /// # Returns
+    ///
+    /// `true` when every server settled, `false` when the timeout expired with
+    /// work still in flight.
+    pub async fn wait_for_mcp_connect(
+        &self,
+        session_processor: &ragent_agent::session::processor::SessionProcessor,
+        timeout: std::time::Duration,
+    ) -> bool {
+        let Some(client) = session_processor.mcp_client.get() else {
+            return true;
+        };
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let settled = {
+                let guard = client.read().await;
+                guard.servers().iter().all(|server| match server.status {
+                    ragent_agent::mcp::McpStatus::Connected => {
+                        // Connected, but the tool registry is populated by the
+                        // startup tool-registration step; a server whose tools
+                        // are not there yet is still in flight.
+                        server.tools.is_empty()
+                            || server.tools.iter().all(|tool| {
+                                session_processor
+                                    .tool_registry
+                                    .get(
+                                        &ragent_agent::tool::McpToolWrapper::new(
+                                            &server.id,
+                                            &tool.name,
+                                            &tool.description,
+                                            tool.parameters.clone(),
+                                            std::sync::Arc::clone(&client),
+                                        )
+                                        .ragent_name,
+                                    )
+                                    .is_some()
+                            })
+                    }
+                    ragent_agent::mcp::McpStatus::Failed { .. }
+                    | ragent_agent::mcp::McpStatus::NeedsAuth => true,
+                    ragent_agent::mcp::McpStatus::Disabled => false,
+                })
+            };
+            if settled || std::time::Instant::now() >= deadline {
+                return settled;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
     /// Reload the persisted global MCP enable state into
     /// [`Self::mcp_enabled_map`].
     ///

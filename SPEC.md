@@ -1,7 +1,7 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.118</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.119</p>
         <p style="font-size: 1.1em;">
           <strong>Date:</strong> 2026-09-20
       </p>
@@ -2764,8 +2764,8 @@ generated JSON schemas. The wrapper handles:
 
 ### 19.4 Status
 
-MCP support is functional for stdio servers. Auto-discovery and configuration
-editing are supported via `/mcp` slash commands.
+MCP support is functional for stdio and HTTP servers. Auto-discovery and
+configuration editing are supported via `/mcp` slash commands.
 
 #### 19.4.1 Server enable/disable state
 
@@ -2788,6 +2788,33 @@ connect path, the permission gate, and the `/mcp` and `/plugins` surfaces:
 - `McpToolWrapper::execute` refuses to call a disabled server's tools even when
   the tool is still registered from an earlier connection, naming the command
   that re-enables it.
+
+#### 19.4.2 Transports, sessions, and startup reporting
+
+A server is reached over the transport its config declares. Only the bundled
+MongoDB server gets a default: ragent does **not** start a second copy of a
+server it expects to be long-lived, so the shipped `mongodb` plugin, whose
+`mcp.json` declares no transport, is bridged to `McpTransport::Http` at
+`http://127.0.0.1:3000/mcp`. If a server is already listening there it is
+adopted; otherwise the HTTP endpoint (not a stdio child) is what the server is
+started as. Every other plugin entry and every `ragent.json` entry keeps the
+transport it declares (default `stdio`).
+
+The HTTP client performs the MCP `initialize` handshake before `tools/list` and
+replays an issued `mcp-session-id` on every later request, because a sessionful
+Streamable-HTTP server (the MongoDB server on its 2025-era path) rejects
+requests on a session it did not open. Replies may be bare JSON-RPC or an
+`event: message` SSE frame; both are accepted.
+
+The startup connect loop publishes the shared `McpClient` **before** connecting
+the first server, so every reader (the tool registry, `/mcp`, the startup
+report) sees the live handle from the beginning; a one-shot run no longer races
+the loop. The TUI then waits up to three seconds for in-flight connects and
+prints one `[mcp]` line per server — `Starting <id> (<transport>)` plus
+`Connected ... via <transport>`, or `Skipping ... (<transport>, disabled)`, or
+the failure reason, where `<transport>` is the config's declared wire protocol
+(`stdio` / `sse` / `http`, via `Display for McpTransport`) — before
+`[ok] **Ready**`.
 
 ---
 
@@ -2981,6 +3008,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.119 | 2026-09-26 | User headline "mcp fixes": a sessionful Streamable-HTTP MCP server (the MongoDB MCP server) now reports its tools — `HttpMcpClient::initialize` negotiates the session, replays the returned `mcp-session-id`, advertises `text/event-stream`, and unwraps SSE frames, and `McpClient::adopt_connected` adopts an already-running server through that client; the HTTP client is built lazily so it no longer panics outside a Tokio runtime. The TUI startup MCP report awaits the shared client lock with a `MCP_STARTUP_GRACE = 3s` connect wait, `/plugins list` resolves live MCP tool counts via `run_control_command`, and `/plugins list --mcp` sorts server ids for a deterministic contributions block. A `/simplify all` pass over v1.0.116–v1.0.118 fixed the `/swarm status` progress-bar overflow, the `/spawn` pending-marker race, `/plugins <non-list> --mcp` handling, swarm unblock persistence, and `/alog` error propagation. Rust-hygiene sweep green: `cargo check --workspace --all-targets`, `cargo check --tests --workspace`, `cargo test --workspace`, dead-code lint and reason checks, `cargo clippy --workspace --all-targets`, `cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`. |
 | v1.0.118 | 2026-09-25 | Durable, global MCP server enable/disable state: whether an MCP server is started is now a persisted choice (`<global state dir>/mcp_state.json`, a shared `McpEnableLedger`) rather than an implicit effect of being listed in `ragent.json`. A server id absent from the ledger is enabled; `mcp.<id>.disabled: true` always wins; a disabled server is registered with `McpStatus::Disabled` and no child process is spawned. `/mcp connect <id>` enables and connects live (registering tools immediately) and `/mcp disconnect <id>` disables and disconnects live, both persisting globally; `McpToolWrapper::execute` refuses a disabled server's tools. `/mcp` lists plugin-contributed servers (built from the merged `plugin_mcp_servers` set) with `enabled yes/no` and `tools: N`; `/plugins list` gains `MCP` / `MCP Tools` columns and an `mcp [...]` contributions line (`?` when a count is unknown, never `0`), and `/plugins list --mcp` keeps the full per-server tool inventory with registry names. Plugin `mcpServers` entries (inline or the Claude `"mcpServers": "./mcp.json"` file reference) are bridged as `<plugin-id>.<server>` and connected by default. `/tools` now lists visibility-disabled tools (`Visible Tools (N total, M disabled)` + a `Disabled by visibility` section) via the new `ToolRegistry::hidden_definitions()` / `hidden()`, and the slash-output extractor keeps every fenced block. A `/simplify` code-quality pass follows (dead `plugin_contributed_mcp_servers` and `McpEnableLedger::enabled_servers` removed, `McpEnableLedger::to_map` added, single config load in `set_mcp_server_enabled`, `impl Display for McpStatus`). |
 | v1.0.117 | 2026-09-25 | `/spec reverse --folder` now scaffolds and hosts the target project: the parsed scaffold request and `--folder` are handed straight to the reverse handler (not re-rendered through the `/reverse` text grammar that does not carry them), the shared `archdoc::run_govcreate_scaffold` engine runs before the async fetch, and a chained `--create <name>` writes the spec into `<folder>/specs/<name>/` via the new `/spec create --folder` flag. A `/spec reverse` invocation whose first argument is a flag, or whose flag tail is invalid (missing `--type`, unregistered `--language`, duplicate/empty value, `--github` with `--gitlab`), now reports the specific cause instead of the bare usage line; `next_value` rejects empty or `--`-prefixed values. The scaffolder gains `webapp` as a first-class registered `--type` value for `/new`, `/spec reverse`, and `/spec govcreate` (tiny dependency-free HTTP-server starter for `rust`/`python`/`go`/`typescript`/`javascript`, manifest-only elsewhere). The vendored `lopdf` crate carries crate-level allowances (matching `vendor/pdf-extract`) so the dead-code lint and `cargo-machete` are green. All verification checks pass: `cargo check --workspace`, `cargo-machete`, `cargo check --tests --workspace`, `cargo test --workspace`, the dead-code lint and reason checks, `cargo clippy --workspace -- -D warnings`, `cargo fmt --all -- --check`, `cargo audit`, and `cargo deny check`. |
 | v1.0.116 | 2026-09-23 | Maintenance release over the v1.0.115 tree: agent and plugin updates plus a code-quality pass. The four content-sized TUI modal renderers (queue menu, queue show panel, plugin-store panel, queue clear confirmation) now share one `centered_rect_fixed(width, height, area)` helper in `ragent-tui/src/utils.rs` (byte-for-byte identical geometry); `persist_task_output` in `ragent-agent/src/task/mod.rs` streams the header plus the reply body straight into a `BufWriter<File>` then renames, halving peak memory while the full untruncated sub-agent report is written, with identical on-disk bytes. `cargo check --workspace`, the dead-code lint and reason checks, `cargo clippy --workspace -- -D warnings`, `cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`, and the full `cargo test --workspace` suite all pass. |

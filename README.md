@@ -487,13 +487,25 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.118** — The core architecture, tool system (169 tools across 25 categories), TUI,
+**v1.0.119** — The core architecture, tool system (169 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
 
+- **MCP transport/session fixes + simplify sweep (v1.0.119)** — a sessionful
+  Streamable-HTTP MCP server now reports its tools: `HttpMcpClient` performs an
+  `initialize` handshake, replays the returned `mcp-session-id`, advertises
+  `text/event-stream`, and unwraps SSE frames, and `McpClient::adopt_connected`
+  adopts an already-running server through that client. The HTTP client is built
+  lazily so it no longer panics outside a Tokio runtime. The TUI prints a
+  per-server MCP startup report (with the declared transport on every line and a
+  3-second connect grace), `/plugins list` resolves live MCP tool counts, and
+  `/plugins list --mcp` sorts server ids for a deterministic contributions block.
+  A `/simplify all` pass over the recent MCP/swarm/plugins work fixed a progress-bar
+  overflow in `/swarm status`, a pending-marker race in `/spawn`, and `--mcp`
+  flag handling on non-`list` `/plugins` subcommands.
 - **Durable MCP server enable/disable + plugin-bridged servers (v1.0.118)** —
   whether an MCP server is started is now a persisted choice
   (`<global state dir>/mcp_state.json`) rather than an implicit effect of being

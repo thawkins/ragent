@@ -2,6 +2,207 @@
 
 ## [Unreleased]
 
+## [1.0.119] - 2026-09-26
+
+Release over the v1.0.118 tree with the user headline "mcp fixes". This version
+folds in the working-tree MCP transports/sessions/startup-reporting, plugin
+MCP bridging, and tool-visibility fixes, followed by a `/simplify all`
+code-quality pass and a full rust-hygiene sweep (check, machete, tests,
+dead-code lint, clippy, fmt, audit, deny) — all green.
+
+### Fixed (this release)
+
+- **Sessionful Streamable-HTTP MCP servers report their tools.** The plain
+  HTTP client never performed an `initialize` handshake, so a server that
+  issues an `mcp-session-id` (e.g. the MongoDB MCP server on its 2025-era
+  sessionful path) rejected every `tools/list` with HTTP 400 — a connected
+  server showed zero tools and ragent retried the dead endpoint for 7 seconds.
+  `HttpMcpClient::initialize` now negotiates the session, replays the returned
+  `mcp-session-id`, advertises `text/event-stream`, and unwraps SSE frames;
+  `McpClient::adopt_connected` adopts an already-running server through this
+  client instead of a second rmcp handshake.
+- **Constructing the MCP HTTP client no longer panics outside a Tokio
+  runtime.** `HttpMcpClient::new` called `reqwest::Client::new()`, which builds
+  pool sockets eagerly and panics with "there is no reactor running" from sync
+  contexts such as `App::init` and slash-command construction; the client is
+  now built lazily on first request.
+- **The TUI startup MCP report cannot be silently dropped.** The report was
+  skipped whenever the shared `McpClient` lock was momentarily held by the
+  connect loop; `App::report_mcp_startup` is now async and awaits the lock, and
+  a `MCP_STARTUP_GRACE = 3s` wait (`App::wait_for_mcp_connect`) lets a slow
+  server reach a terminal connected/failed state before the report prints.
+- **`/plugins list` MCP Tools column resolves live counts.** The TUI never
+  passed live counts to the renderer, so a connected plugin MCP server showed
+  `?`; live counts are now threaded from `App.mcp_servers` through
+  `run_plugin_subcommand`/`run_control_command` into
+  `render_list_with_mcp_tools`, and the earlier rendered-text substitution hack
+  is deleted.
+- **The `/mcp` list no longer prints the full per-tool inventory.** It now
+  prints only `tools: N`; the detailed inventory with registry names stays on
+  `/plugins list --mcp`.
+- **Deterministic plugin MCP contributions block.** `/plugins list --mcp`
+  sorts each plugin's MCP server ids alphabetically so the rendered table and
+  contributions line are stable, diffable, and independent of manifest or map
+  iteration order; this also fixed the order-dependent test
+  `list_table_totals_counts_across_a_plugins_servers`.
+- **`/swarm status` progress bar math.** The `completed * bar_width / total`
+  arithmetic could overflow before dividing; it now uses
+  `checked_div(total).unwrap_or(0)` and renders empty at 0 tasks.
+- **`/spawn` no longer clobbers a landed launch outcome.** The pending-marker
+  restore in `poll_spawn_result` writes the marker only when the slot is still
+  empty, so a success/error arriving between the two lock acquisitions is
+  surfaced rather than overwritten.
+- **`/plugins <subcommand> --mcp` executes the requested operation.** A
+  literal `--mcp` on a non-`list` subcommand previously printed the MCP
+  inventory instead of running the operation; the flag is honoured on
+  `/plugins list` only.
+- **A swarm member unblocked by dependency resolution is persisted.** The
+  unblock path no longer silently drops `store.save()` errors; save failures
+  are logged.
+- **`/alog` delete confirmation surfaces storage errors.** The command no
+  longer converts a storage error into a misleading "0 events" count.
+- **Removed the temporary `[image-debug]` info-level logging** from the
+  per-turn history conversion path (`session/history.rs`).
+- **Removed duplication and small allocations** across the TUI app layer:
+  `clear_active_bench()` shared by the bench watchdog and completion paths,
+  `load_swarm_tasks()` used by status/unblock/completion/finalize, the
+  `multiedit` parameter normalisation table, single-pass `truncate_str`,
+  borrowed `files_preview`, and one-shot skill-body cold load.
+- **Fixed mojibake (two U+FFFD replacement characters)** in the
+  `start_cron_scheduler` doc comment.
+
+### Added (this release)
+
+- **`McpEnableLedger` is the single source of truth for MCP server
+  enablement.** Whether a server is started is now a persisted choice
+  (`<global state dir>/mcp_state.json`) rather than an implicit effect of being
+  listed in `ragent.json`; a server absent from the ledger is enabled, and
+  `mcp.<id>.disabled: true` always wins.
+- **Per-server MCP startup report with transport labels.** Immediately after
+  `[ok] Input history loaded` and before `[ok] **Ready**`, the TUI prints two
+  lines per attempted server (`[mcp] Starting ...` / `[mcp] Connected ...`),
+  plus explicit `disabled` / `failed` / `needs auth` lines; the transport label
+  is rendered from a new `Display` impl on `McpTransport` so config names and
+  display names cannot drift.
+- **`/plugins list` gains MCP columns and a contributions block.** The table
+  gains `MCP` (server count) and `MCP Tools` (total tool count), and the
+  contributions block renders `mcp [<id> (<n> tools)] (S server(s), T
+  tool(s))`; `/plugins list --mcp` keeps the full per-server tool inventory.
+- **Plugin-declared MCP servers are bridged and connected by default.**
+  `mcpServers` entries (inline or the Claude `"mcpServers": "./mcp.json"` file
+  reference) are bridged as `<plugin-id>.<server>`.
+- **`/tools` lists visibility-disabled tools.** `ToolRegistry::hidden_definitions()`
+  and `hidden()` expose them, and the slash-output extractor keeps every fenced
+  block.
+- **Deterministic transport mapping for plugin-bridged MCP servers.** The
+  bundled MongoDB special case was removed; a plugin's declared `type`/`url`
+  always wins, so the bridge is a declared-transport mapping and a stdio
+  server is still started as stdio.
+- **`McpEnableLedger::to_map`** centralises the ledger-to-map conversion used
+  by the TUI; **`impl Display for McpStatus`** gives `/mcp` and `/plugins`
+  one place to render status text.
+
+### Fixed
+
+- **Code-quality sweep over the last three releases (simplify `all`).** A
+  parallel review of every Rust source file changed since v1.0.116 applied
+  the following fixes:
+  - `/swarm status` progress bar always rendered 100% full (`total *
+    bar_width / total` collapses to `bar_width`); it now shows the real
+    `completed/total` fraction and renders empty at 0 tasks.
+    - `/spawn` no longer clobbers a landed launch outcome: the
+      pending-marker restore in `poll_spawn_result` now writes the marker
+      only when the slot is still empty, so a success/error that arrives
+      between the two lock acquisitions is surfaced instead of being
+      overwritten with the empty error sentinel.
+    - `/plugins remove foo --mcp` (and other non-`list` subcommands carrying
+      a literal `--mcp`) now execute the requested operation instead of
+      printing the MCP inventory; the flag is honoured on `/plugins list`
+      only.
+    - A swarm member unblocked by dependency resolution is now persisted with
+      a logged failure instead of silently dropping `store.save()` errors
+      (`swarm.rs` unblock path).
+  - Removed the temporary `[image-debug]` info-level logging from the
+    per-turn history conversion path (`session/history.rs`).
+  - Duplication extracted: the bench watchdog and completion paths share one
+    `clear_active_bench()` helper; the legacy `multiedit` parameter
+    normalisation loop now drives the three renames from a single table;
+    swarm task-list loading (`TeamStore` + `TaskStore` + read) is one
+    `load_swarm_tasks()` helper used by the status, unblock, completion, and
+    finalize paths; all six swarm `std::env::current_dir()` calls now use the
+    App's recorded cwd.
+  - Error handling: `/alog` delete confirmation no longer converts a storage
+    error into a misleading "0 events" count — the error is propagated to
+    the user.
+  - Test fix: removed the tautological truncated-id fallback assertion in
+    `test_background_task_removed_on_completion` (the `||` arm compared the
+    same string).
+  - Small allocations removed: bench summary/show rendering no longer clones
+    the run message/paths twice, `files_preview` borrows instead of cloning,
+    `truncate_str` is single-pass, and the skill-body cold load allocates
+    once instead of twice.
+  - Fixed mojibake (two U+FFFD replacement characters) in the
+    `start_cron_scheduler` doc comment.
+
+- **A sessionful Streamable-HTTP MCP server now reports its tools.** The
+  plain-JSON-RPC HTTP client sent `Accept: application/json` only and never
+  performed an `initialize` handshake, so a server that issues an
+  `mcp-session-id` (the MongoDB MCP server on its 2025-era sessionful path)
+  rejected every `tools/list` with HTTP 400 — a connected server showed zero
+  tools, and ragent then retried the dead endpoint for 7 seconds with backoff.
+  The client now negotiates the session (`HttpMcpClient::initialize`), replays
+  the returned `mcp-session-id` on every later request, advertises
+  `text/event-stream` in `Accept`, and unwraps the `event: message` SSE frame the
+  server replies with. `McpClient::adopt_connected` adopts an already-running
+  server through this client instead of a second rmcp handshake, which is what
+  actually surfaced the failure; `find_running_streamable_http` replaces the old
+  boolean probe so the discovered endpoint and its session id reach the adoption.
+- **Constructing the MCP HTTP client no longer panics outside a Tokio runtime.**
+  `HttpMcpClient::new` called `reqwest::Client::new()`, which builds the pool's
+  `PollEvented` sockets eagerly and panics with "there is no reactor running"
+  when called from a synchronous context such as `App::init`/slash-command
+  construction. The client is now built lazily on first request (which always
+  runs on the runtime) and shared process-wide.
+
+### Added
+
+- **The TUI prints per-server MCP status at startup, with the transport
+  protocol on every line.** Immediately after `[ok] Input history loaded` and
+  before `[ok] **Ready**`, ragent now reports every MCP server it attempted to
+  start. A server that came up produces two lines, `[mcp] Starting mcp server
+  <id> (<transport>)` then `[mcp] Connected to mcp server <id> via
+  <transport>`; a server switched off in the enable-state ledger prints `[mcp]
+  Skipping mcp server <id> (<transport>, disabled)`, a failed connection
+  prints the reason on its own line, and a server awaiting auth is labelled
+  the same way. The `<transport>` label is the config's declared wire protocol
+  (`stdio`, `sse`, or `http`), rendered by a new `Display` impl on
+  `McpTransport` so config names and display names cannot drift. The report
+  reads the shared `McpClient` (adopted first, so it reflects the real
+  per-server outcome rather than assuming `disabled`) and is skipped entirely
+  when no server is configured or the connect loop has not published the
+  client yet.
+  The report waits up to three seconds for the background connect loop so a
+  slow server is reported as connected rather than `disabled`.
+- **Fixed: the startup MCP report could be silently dropped.** The report was
+  skipped whenever the shared `McpClient` lock was momentarily held (the connect
+  loop can still hold its guard after publishing the client), and a one-shot
+  call that is skipped is never retried, so a slow-starting server showed nothing
+  at all between `[ok] Input history loaded` and `[ok] **Ready**`.
+  `App::report_mcp_startup` is now async and awaits the read lock instead of
+  failing a `try_read`.
+
+- **An already-running MCP server is adopted instead of started a second time.**
+  For an MCP server that can also serve Streamable-HTTP on a well-known localhost
+  port (currently the bundled MongoDB server, port 3000), ragent probes the port
+  with a JSON-RPC `initialize` frame on `/mcp` and `/`: if a server answers,
+  ragent connects to the running instance (`McpClient::adopt_connected`, over the
+  session the probe negotiated) and spawns nothing. If nothing is listening the
+  configured transport is used, so a stdio server is still started as before. An
+  adopted server is never shut down on exit — the child is owned by another
+  process — while a server ragent itself spawned is still killed on exit. The
+  rule is applied identically at startup (`src/main.rs`) and on a live
+  `/mcp connect <id>`.
+
 ## [1.0.118] - 2026-09-25
 
 Release over the v1.0.117 tree. This version folds in the uncommitted MCP

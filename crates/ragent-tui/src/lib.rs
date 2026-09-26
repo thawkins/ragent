@@ -159,6 +159,14 @@ const MODEL_DOWNLOAD_STALE_SECS: u64 = 45 * 60;
 /// Self-healing staleness cap for a wedged benchmark run.
 const BENCH_STALE_SECS: u64 = 30 * 60;
 
+/// How long the startup waits for the background MCP connect loop before
+/// printing the MCP status report.
+///
+/// A server whose tools are already registered is reported immediately; this
+/// bound only applies while a server is still connecting, so a slow handshake
+/// cannot hold startup indefinitely.
+const MCP_STARTUP_GRACE: Duration = Duration::from_secs(3);
+
 /// Run the TUI application.
 ///
 /// Enters the alternate screen, creates an [`App`], and runs the main event
@@ -475,9 +483,24 @@ pub async fn run_tui(
     if let Err(e) = app.load_history() {
         tracing::warn!("Failed to load input history: {}", e);
     }
-    app.append_assistant_text("\n[ok] Input history loaded");
-    terminal.draw(|frame| layout::render(frame, &mut app))?;
     startup.record("Input history load", t0.elapsed());
+    app.append_assistant_text("\n[ok] Input history loaded");
+
+    // -- MCP server status --
+    // The startup connect loop in `src/main.rs` runs concurrently and publishes
+    // its shared client before connecting anything. Adopt the published state
+    // and give a still-connecting loop a short grace period so the report shows
+    // the real per-server outcome rather than a server stuck at `disabled`; on
+    // timeout the report prints what is known and the later housekeeping pass
+    // picks up the rest.
+    let t0 = Instant::now();
+    app.adopt_mcp_client_state(&session_processor).await;
+    let _ = app
+        .wait_for_mcp_connect(&session_processor, MCP_STARTUP_GRACE)
+        .await;
+    app.report_mcp_startup().await;
+    terminal.draw(|frame| layout::render(frame, &mut app))?;
+    startup.record("MCP server status", t0.elapsed());
 
     // -- Code index startup (non-blocking) --
     // The code index open + watcher setup can take several seconds on large
@@ -1006,6 +1029,14 @@ pub async fn run_tui(
     // -- Graceful shutdown of background resources --
     // Stop the cron scheduler (FR-017: non-blocking background task).
     cron_scheduler.stop();
+
+    // Kill every MCP stdio server child ragent spawned. Without this the child
+    // outlives ragent as an orphan (reparented to init), keeps the stdio pipe
+    // open, and prints its own teardown errors after ragent exits - and the next
+    // start finds a stale server still holding whatever endpoint it bound. The
+    // 3 s force-exit safety net above bounds this, and `McpClient::drop` repeats
+    // the kill if this teardown is cut short.
+    session_processor.shutdown_mcp().await;
 
     // Cancel any in-flight code-index reindex (initial watcher reindex or
     // fallback one-shot) BEFORE stopping the watcher/worker, so a detached

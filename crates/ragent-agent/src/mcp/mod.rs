@@ -240,7 +240,11 @@ pub trait McpClientBackend: Send + Sync {
 #[derive(Clone)]
 enum McpConnection {
     /// rmcp-based connection (stdio child process or SSE).
-    Rmcp(Arc<RunningService<RoleClient, ()>>),
+    ///
+    /// The optional pid is that of the spawned stdio child, kept so teardown
+    /// can kill the process synchronously even when `KillOnDrop` cannot run
+    /// (e.g. the process is force-exited before the async teardown completes).
+    Rmcp(Arc<RunningService<RoleClient, ()>>, Option<u32>),
     /// Custom HTTP JSON-RPC connection (FR-013).
     Http(Arc<http::HttpMcpClient>),
 }
@@ -270,12 +274,16 @@ pub(crate) fn normalize_mcp_arguments(input: Value) -> serde_json::Map<String, V
 pub struct McpClient {
     servers: Vec<McpServer>,
     connections: Arc<RwLock<HashMap<String, McpConnection>>>,
-    /// Shared HTTP client reused by every HTTP/SSE MCP transport connection.
+    /// Shared HTTP client reused by every HTTP/SSE MCP transport connection,
+    /// resolved on first use by the `HttpMcpClient` (`None` means "use the
+    /// process-wide shared client").
     ///
     /// `reqwest::Client` is backed by an inner `Arc`, so cloning it is cheap
     /// and all `HttpMcpClient` instances share the same connection pool and
-    /// TLS session cache (FR-007).
-    http_client: reqwest::Client,
+    /// TLS session cache (FR-007). It is built on the async request path rather
+    /// than in [`Self::new`] because constructing it eagerly requires a Tokio
+    /// runtime to be running.
+    http_client: Option<reqwest::Client>,
     /// PERF-076: `tool_name -> server_id` lookup index derived from `servers`,
     /// rebuilt whenever the server list or a server's tool manifest changes.
     /// Turns `call_tool_by_name`'s nested `servers x tools` scan into an O(1)
@@ -285,26 +293,34 @@ pub struct McpClient {
 }
 
 impl Drop for McpClient {
-    /// R-15: On drop, attempt to kill any MCP stdio child processes. Since
-    /// `Drop` is synchronous and `disconnect()` is async, we use
-    /// `Arc::try_unwrap` / `Weak` to extract connections and cancel them
-    /// best-effort. If the `Arc` is still shared (strong count > 1) we
-    /// cannot cancel synchronously — the caller should have called
-    /// `disconnect_all().await` before dropping.
+    /// R-15: On drop, kill any MCP stdio child processes.
+    ///
+    /// `Drop` is synchronous but graceful cancellation is async, so this is the
+    /// last-resort path: it hard-kills every recorded stdio child pid (see
+    /// [`Self::shutdown`] for the deterministic path) and then drops the
+    /// connections map, whose `KillOnDrop` transports would kill the children
+    /// anyway when the map is uniquely owned. Both steps are needed because a
+    /// child whose pid was recorded but whose transport is shared elsewhere
+    /// cannot be reached through `Arc::get_mut`, and a leaked child keeps the
+    /// stdio pipe open and prints its own teardown errors after ragent exits.
     fn drop(&mut self) {
-        // Best-effort: try to get exclusive access to the connections map.
-        // If we can, cancel each Rmcp service's underlying child process.
-        if let Some(conns) = Arc::get_mut(&mut self.connections) {
-            // We have exclusive access — no async needed, just drop the map.
-            // The `RunningService` inside each `McpConnection::Rmcp` will be
-            // dropped, which (in recent rmcp versions) sends a shutdown to
-            // the child process.
-            conns.get_mut().clear();
+        let Some(conns) = Arc::get_mut(&mut self.connections) else {
+            // The connections map is shared with an `McpToolWrapper` that
+            // outlived the client. There is nothing safe to reach here, so the
+            // pids cannot be recovered; callers must run [`Self::shutdown`]
+            // before dropping the last handle.
+            tracing::debug!(
+                "MCP client dropped with connections still shared; stdio children rely on the process supervisor"
+            );
+            return;
+        };
+        let guard = conns.get_mut();
+        for connection in guard.values() {
+            if let McpConnection::Rmcp(_, Some(pid)) = connection {
+                kill_stdio_child(*pid);
+            }
         }
-        // If we don't have exclusive access, the connections are still
-        // shared elsewhere and will be cleaned up when the last Arc is
-        // dropped. Callers should use `disconnect_all().await` for
-        // deterministic cleanup.
+        guard.clear();
     }
 }
 
@@ -327,7 +343,13 @@ impl McpClient {
         Self {
             servers: Vec::new(),
             connections: Arc::new(RwLock::new(HashMap::new())),
-            http_client: reqwest::Client::new(),
+            // `reqwest::Client` is built lazily by `HttpMcpClient` itself:
+            // `reqwest::Client::new()` creates the connection pool's sockets
+            // eagerly, so calling it here panics with "there is no reactor
+            // running" when an `McpClient` is constructed outside a Tokio
+            // runtime. The `HttpMcpClient` resolves a process-wide shared client
+            // on the first request instead.
+            http_client: None,
             tool_index: HashMap::new(),
         }
     }
@@ -407,6 +429,48 @@ impl McpClient {
         // Validate config before attempting connection.
         validate_mcp_config(id, &config)?;
 
+        // Adopt an already-running instance of this server before spawning our
+        // own. A plugin (or a hand-configured entry) declares how the server is
+        // *normally* reached; a user who already runs that server separately - a
+        // shared MongoDB MCP server on a fixed port, a company-wide HTTP MCP
+        // gateway - must not be shadowed by a second copy ragent starts. The
+        // probe is transport-aware (see `adopt_candidate`): a declared HTTP/SSE
+        // URL is contacted directly, and a stdio entry is contacted only when its
+        // command line names a port to try. A stdio child can never be adopted -
+        // its stdio pipes are private to its parent - so a plain stdio server
+        // with no endpoint always falls through to a normal spawn.
+        if let Some(endpoint) = self.adopt_running(id, &config).await {
+            tracing::info!(
+                server_id = id,
+                url = %crate::sanitize::redact_secrets(&endpoint.url),
+                "Adopted an already-running MCP server"
+            );
+            let mut client = http::HttpMcpClient::new(&endpoint.url, config.headers.clone());
+            if let Some(http_client) = self.http_client.clone() {
+                client = client.with_client(http_client);
+            }
+            client = client.with_session_id(endpoint.session_id);
+            let tool_defs = client.list_tools().await;
+            let tool_count = tool_defs.len();
+            self.servers.push(McpServer {
+                id: id.to_string(),
+                config,
+                status: McpStatus::Connected,
+                tools: tool_defs,
+            });
+            self.rebuild_tool_index();
+            self.connections
+                .write()
+                .await
+                .insert(id.to_string(), McpConnection::Http(Arc::new(client)));
+            tracing::info!(
+                server_id = id,
+                tool_count,
+                "Already-running MCP server adopted and tools discovered"
+            );
+            return Ok(());
+        }
+
         // Acquire a spawn permit to limit concurrent MCP connections.
         let _permit = MCP_SPAWN_SEMAPHORE
             .acquire()
@@ -456,6 +520,40 @@ impl McpClient {
         }
     }
 
+    /// Look for an already-running MCP server that `config` would otherwise
+    /// duplicate, returning the endpoint to adopt it through.
+    ///
+    /// The candidate URLs come from the config's own declared transport, so this
+    /// is generic across servers and never hard-coded to one product:
+    ///
+    /// - `http` / `sse` — the configured [`McpServerConfig::url`] is the server's
+    ///   endpoint, so it is the only candidate.
+    /// - `stdio` — a child's stdio pipes are private to its parent, so a stdio
+    ///   child cannot be adopted. The command line is still inspected for an
+    ///   `--httpPort <n>` / `--port <n>` style flag; a server that also listens on
+    ///   HTTP is adopted through that port, and a server that does not leaves this
+    ///   returning `None` (a normal spawn).
+    ///
+    /// The first URL whose `initialize` handshake round-trips wins. Probing is
+    /// best-effort: a connection refusal just means "nothing is listening there
+    /// yet", so the caller falls through to starting its own instance.
+    async fn adopt_running(
+        &self,
+        id: &str,
+        config: &McpServerConfig,
+    ) -> Option<http::LiveEndpoint> {
+        for url in adopt_candidate_urls(config) {
+            if let Some(endpoint) = http::probe(&url).await {
+                return Some(endpoint);
+            }
+        }
+        tracing::debug!(
+            server_id = id,
+            "No already-running MCP server answered; starting a new instance"
+        );
+        None
+    }
+
     /// Internal connection logic, separated for clean error handling.
     ///
     /// # Arguments
@@ -481,7 +579,14 @@ impl McpClient {
                 let args = config.args.clone();
                 let env = config.env.clone();
 
-                let transport = rmcp::transport::TokioChildProcess::new(
+                // `KillOnDrop` makes the child die with its transport. Without
+                // it, the process is abandoned to the OS when the client goes
+                // away: it can outlive ragent holding the stdio pipe open, and
+                // its teardown writes then land on a dead pipe, printing an
+                // unhandled `write EPIPE` Node stack dump after ragent exits.
+                // A hard kill is deliberate - a graceful one makes the server
+                // log to a client that is already gone, which is the dump.
+                let mut wrap = process_wrap::tokio::CommandWrap::from(
                     Command::new(command_str).configure(|cmd| {
                         for arg in &args {
                             cmd.arg(arg);
@@ -490,7 +595,10 @@ impl McpClient {
                             cmd.env(k, v);
                         }
                     }),
-                )?;
+                );
+                wrap.wrap(process_wrap::tokio::KillOnDrop);
+                let transport = rmcp::transport::TokioChildProcess::new(wrap)?;
+                let child_pid = transport.id();
 
                 tracing::info!(
                     server_id = id,
@@ -500,7 +608,7 @@ impl McpClient {
                 let service = Arc::new(().serve(transport).await?);
                 let tools = service.peer().list_all_tools().await?;
                 let tool_defs = rmcp_tools_to_defs(&tools);
-                Ok((McpConnection::Rmcp(service), tool_defs))
+                Ok((McpConnection::Rmcp(service, child_pid), tool_defs))
             }
             McpTransport::Sse => {
                 let url = config
@@ -518,7 +626,7 @@ impl McpClient {
                 let service = Arc::new(().serve(transport).await?);
                 let tools = service.peer().list_all_tools().await?;
                 let tool_defs = rmcp_tools_to_defs(&tools);
-                Ok((McpConnection::Rmcp(service), tool_defs))
+                Ok((McpConnection::Rmcp(service, None), tool_defs))
             }
             McpTransport::Http => {
                 let url = config
@@ -531,8 +639,21 @@ impl McpClient {
                     url = %crate::sanitize::redact_secrets(url),
                     "Connecting to HTTP MCP server via HttpMcpClient"
                 );
-                let client = http::HttpMcpClient::new(url, config.headers.clone())
-                    .with_client(self.http_client.clone());
+                let mut client = http::HttpMcpClient::new(url, config.headers.clone());
+                if let Some(http_client) = self.http_client.clone() {
+                    client = client.with_client(http_client);
+                }
+                // The `initialize` handshake is mandatory, not best-effort. A
+                // sessionful Streamable-HTTP server (the MongoDB MCP server on
+                // its 2025-era path) rejects `tools/list` unless the request
+                // carries the `mcp-session-id` this handshake yields, and a
+                // server that cannot complete the handshake is not an MCP server
+                // ragent can talk to at all. Treating it as optional previously
+                // let `list_tools` swallow the failure, so a dead endpoint
+                // registered a tool-less server as `Connected`.
+                client.initialize().await.map_err(|error| {
+                    anyhow::anyhow!("HTTP MCP server at '{url}' failed to initialize: {error}")
+                })?;
                 let tool_defs = client.list_tools().await;
 
                 tracing::info!(
@@ -630,10 +751,12 @@ impl McpClient {
 
             if let Some(conn) = conns.get(&server.id) {
                 let tools_result = match conn {
-                    McpConnection::Rmcp(service) => match service.peer().list_all_tools().await {
-                        Ok(tools) => Ok(rmcp_tools_to_defs(&tools)),
-                        Err(e) => Err(e),
-                    },
+                    McpConnection::Rmcp(service, _) => {
+                        match service.peer().list_all_tools().await {
+                            Ok(tools) => Ok(rmcp_tools_to_defs(&tools)),
+                            Err(e) => Err(e),
+                        }
+                    }
                     McpConnection::Http(client) => {
                         // list_tools never errors; it returns an empty vec on failure.
                         Ok(client.list_tools().await)
@@ -704,7 +827,7 @@ impl McpClient {
         };
 
         let tool_defs = match &conn {
-            McpConnection::Rmcp(service) => {
+            McpConnection::Rmcp(service, _) => {
                 let tools = service.peer().list_all_tools().await?;
                 rmcp_tools_to_defs(&tools)
             }
@@ -766,7 +889,7 @@ impl McpClient {
             .ok_or_else(|| anyhow::anyhow!("MCP server '{server_id}' is not connected"))?;
 
         match conn {
-            McpConnection::Rmcp(service) => {
+            McpConnection::Rmcp(service, _) => {
                 let arguments = normalize_mcp_arguments(input);
 
                 let params =
@@ -891,6 +1014,18 @@ impl McpClient {
         self.rebuild_tool_index();
     }
 
+    /// Append a fully-formed server entry, leaving the tool index untouched.
+    ///
+    /// Test seam for callers that need a specific status/transport pairing
+    /// (e.g. asserting the startup report labels `sse`/`http` servers); unlike
+    /// [`Self::register_connected_for_tests`] the config is caller-supplied.
+    /// Tool registration is irrelevant on those paths because no tools are
+    /// seeded.
+    #[doc(hidden)]
+    pub fn push_server_for_tests(&mut self, server: McpServer) {
+        self.servers.push(server);
+    }
+
     /// Disconnect a specific server by ID.
     ///
     /// Cancels the running service and removes the connection.
@@ -921,16 +1056,26 @@ impl McpClient {
 
         if let Some(conn) = conn {
             match conn {
-                McpConnection::Rmcp(service) => {
+                McpConnection::Rmcp(service, child_pid) => {
                     // cancel() takes ownership; unwrap the Arc.
                     // If there are other holders, the Arc strong count > 1
                     // and we skip cancellation (the service will be
-                    // dropped when the last Arc is released).
+                    // dropped when the last Arc is released), which also
+                    // drops the transport and kills its child (`KillOnDrop`).
                     if let Some(service) = Arc::into_inner(service) {
                         let _ = service
                             .cancel()
                             .await
                             .map_err(|e| anyhow::anyhow!("Failed to cancel MCP service: {e}"));
+                    }
+                    // `cancel()` stops the rmcp client but does not reliably
+                    // SIGKILL the child on every platform, so reap the pid we
+                    // recorded at spawn. Hard-killing here is deliberate and
+                    // matches the `KillOnDrop` transport: a graceful signal
+                    // makes a server log its teardown to a client that is
+                    // already gone, which is the unhandled `write EPIPE` dump.
+                    if let Some(pid) = child_pid {
+                        kill_stdio_child(pid);
                     }
                 }
                 McpConnection::Http(_) => {
@@ -979,6 +1124,48 @@ impl McpClient {
         Ok(())
     }
 
+    /// Terminate every MCP connection at process teardown.
+    ///
+    /// Called on the shutdown path (TUI exit, headless run end, SIGTERM) so the
+    /// stdio server children ragent spawned are reaped *before* the process
+    /// exits. Without it a stdio child outlives ragent as an orphan (`init`
+    /// becomes its parent), keeps the stdio pipe open, and prints its own
+    /// teardown errors into a dead pipe - and the next ragent start finds a
+    /// stale server still bound to whatever endpoint it held.
+    ///
+    /// Unlike [`Self::disconnect_all`], this is lossy by design: a failed
+    /// graceful cancel on one server must not abort the teardown of the rest,
+    /// and every recorded stdio pid is hard-killed afterwards so the child is
+    /// gone even when its transport is still shared. The call is safe to repeat.
+    ///
+    /// This is idempotent and best-effort; it never returns an error.
+    pub async fn shutdown(&mut self) {
+        let server_ids: Vec<String> = {
+            let conns = self.connections.read().await;
+            conns.keys().cloned().collect()
+        };
+        for id in server_ids {
+            if let Err(error) = self.disconnect(&id).await {
+                tracing::warn!(server_id = %id, error = %error, "MCP server failed to disconnect during shutdown");
+            }
+        }
+        // Belt-and-braces: `disconnect` only cancels services it exclusively
+        // owns, and `KillOnDrop` may not have run yet, so hit every recorded pid.
+        let pids: Vec<u32> = {
+            let conns = self.connections.read().await;
+            conns
+                .values()
+                .filter_map(|connection| match connection {
+                    McpConnection::Rmcp(_, Some(pid)) => Some(*pid),
+                    McpConnection::Rmcp(_, None) | McpConnection::Http(_) => None,
+                })
+                .collect()
+        };
+        for pid in pids {
+            kill_stdio_child(pid);
+        }
+    }
+
     /// Scan the system for available MCP servers and return them.
     ///
     /// Does not modify internal state — the caller decides what to do with results.
@@ -1005,6 +1192,104 @@ impl Default for McpClient {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Hard-kill an MCP stdio child by pid.
+///
+/// The child is created with `KillOnDrop`, so the transport's own teardown
+/// normally reaps it; this is the belt-and-braces path for the cases the
+/// transport cannot cover - a force-exit that never runs the async teardown, or
+/// a child whose transport is still shared when the client is dropped.
+///
+/// `SIGKILL` is deliberate: a graceful signal makes the server log to a client
+/// that is already gone, which is the unhandled `write EPIPE` Node stack dump.
+/// The error is ignored: an already-dead child (`ESRCH`) is the expected
+/// outcome when `KillOnDrop` won the race.
+#[cfg(unix)]
+fn kill_stdio_child(pid: u32) {
+    // SAFETY: `libc::kill` is a plain syscall on a pid we spawned; it takes no
+    // pointers and the pid is not reused within this process's lifetime for a
+    // child it still tracks. The return value is intentionally ignored.
+    #[allow(unsafe_code)]
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGKILL);
+    }
+}
+
+/// Hard-kill an MCP stdio child by pid (Windows: no pid-based hard kill).
+///
+/// There is no safe, direct `TerminateProcess` equivalent in std, and the
+/// `KillOnDrop` transport already terminates the child on Windows, so this is a
+/// no-op there.
+#[cfg(not(unix))]
+fn kill_stdio_child(_pid: u32) {}
+
+/// The HTTP endpoint URLs to probe for an already-running instance of a server.
+///
+/// See [`McpClient::adopt_running`] for the transport-aware rationale. Returns
+/// an empty vector for a stdio entry whose command line names no port, which is
+/// the common case and the correct one: nothing about that entry advertises an
+/// address a separately-running copy would be reachable at.
+pub fn adopt_candidate_urls(config: &McpServerConfig) -> Vec<String> {
+    match config.type_ {
+        McpTransport::Http | McpTransport::Sse => config
+            .url
+            .as_deref()
+            .map(str::to_string)
+            .into_iter()
+            .collect(),
+        McpTransport::Stdio => {
+            // Only a command line that explicitly binds an HTTP port is a
+            // candidate; the port flag name is read from the arguments, not the
+            // command, so a server id or package name cannot be mistaken for one.
+            let Some(port) = declared_port(&config.args) else {
+                return Vec::new();
+            };
+            vec![
+                format!("http://127.0.0.1:{port}/mcp"),
+                format!("http://127.0.0.1:{port}"),
+            ]
+        }
+    }
+}
+
+/// Extract the TCP port a stdio server's arguments declare it will listen on.
+///
+/// Recognises the flag spellings the common MCP servers use (`--httpPort 3000`,
+/// `--http-port=3000`, `--port 3000`). Only a bare decimal port in the range
+/// `1..=65535` is accepted, so a `--port` that names a device path or a
+/// non-numeric value is ignored rather than producing a nonsense probe.
+pub fn declared_port(args: &[String]) -> Option<u16> {
+    /// Flag names that declare an HTTP listen port, lower-cased for comparison.
+    const PORT_FLAGS: &[&str] = &["--httpport", "--http-port", "--port", "-p"];
+
+    let mut iter = args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        let lower = arg.to_ascii_lowercase();
+        // `--flag=3000` form.
+        if let Some((flag, value)) = lower.split_once('=') {
+            if PORT_FLAGS.contains(&flag) {
+                if let Some(port) = parse_port(value) {
+                    return Some(port);
+                }
+            }
+            continue;
+        }
+        // `--flag 3000` form.
+        if PORT_FLAGS.contains(&lower.as_str()) {
+            if let Some(value) = iter.peek() {
+                if let Some(port) = parse_port(value) {
+                    return Some(port);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Parse a decimal TCP port, rejecting out-of-range or non-numeric values.
+pub fn parse_port(value: &str) -> Option<u16> {
+    value.trim().parse::<u16>().ok().filter(|port| *port != 0)
 }
 
 /// Convert rmcp tool descriptors to ragent's [`McpToolDef`] format.

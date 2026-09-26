@@ -1247,8 +1247,27 @@ impl SessionProcessor {
             tracing::debug!("No connected MCP tools to register");
         }
 
-        let _ = self.mcp_client.set(client);
         self.invalidate_tool_cache();
+        if self.mcp_client.set(client).is_err() {
+            // `set` only fails when the handle was already published (a second
+            // startup step, or a test that seeded the processor), so the tools
+            // were just registered against the live client and the earlier
+            // handle's tools are registered on their own connect path.
+            tracing::debug!("MCP client already published; retained the existing handle");
+        }
+    }
+
+    /// Terminate every MCP server connection this session owns.
+    ///
+    /// The shutdown path (TUI exit, headless run end, signal handler) calls this
+    /// so the stdio server children ragent spawned are killed before the process
+    /// exits. A no-op when no MCP client was ever published. Idempotent and
+    /// best-effort: teardown must never fail on a wedged server.
+    pub async fn shutdown_mcp(&self) {
+        let Some(client) = self.mcp_client.get() else {
+            return;
+        };
+        client.write().await.shutdown().await;
     }
 
     /// Invalidate the cached tool definitions so they are rebuilt on the next loop step.

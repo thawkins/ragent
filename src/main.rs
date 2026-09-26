@@ -728,8 +728,13 @@ async fn async_main() -> Result<()> {
 
         let sp = Arc::clone(&session_processor);
         let bus = event_bus.clone();
+        // Publish the client *before* connecting any server: `/mcp`, the startup
+        // report and the tool registry all read it, and the first server's
+        // connect can block for seconds. The client is shared, so connecting
+        // through a second handle still publishes every server the caller sees.
+        let shared_client = Arc::new(tokio::sync::RwLock::new(ragent_agent::mcp::McpClient::new()));
+        sp.set_mcp_client(Arc::clone(&shared_client)).await;
         tokio::spawn(async move {
-            let mut mcp_client = ragent_agent::mcp::McpClient::new();
             let ledger = ragent_agent::mcp::McpEnableLedger::load();
             let mut mcp_connected = 0u32;
             for (id, cfg) in mcp_configs {
@@ -737,13 +742,14 @@ async fn async_main() -> Result<()> {
                 // registered as disabled so `/mcp` can still list it and offer
                 // to re-enable it, but no child process is spawned.
                 if !ragent_agent::mcp::is_server_enabled(&cfg, &ledger, &id) {
-                    mcp_client.register_disabled(&id, cfg);
+                    shared_client.write().await.register_disabled(&id, cfg);
                     bus.publish(ragent_agent::event::Event::McpServerEnabledChanged {
                         server_id: id,
                         enabled: false,
                     });
                     continue;
                 }
+                let mut mcp_client = shared_client.write().await;
                 let status = match mcp_client.connect(&id, cfg).await {
                     Ok(()) => {
                         mcp_connected += 1;
@@ -754,6 +760,7 @@ async fn async_main() -> Result<()> {
                         "failed"
                     }
                 };
+                drop(mcp_client);
                 // Publish per-server status so the TUI (`/mcp`) reflects the
                 // real connection state instead of assuming `disabled`.
                 bus.publish(ragent_agent::event::Event::McpStatusChanged {
@@ -761,8 +768,6 @@ async fn async_main() -> Result<()> {
                     status: status.to_string(),
                 });
             }
-            let shared_client = Arc::new(tokio::sync::RwLock::new(mcp_client));
-            sp.set_mcp_client(shared_client).await;
             tracing::info!(
                 connected = mcp_connected,
                 total = mcp_server_count,
@@ -950,9 +955,15 @@ async fn async_main() -> Result<()> {
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "Run failed");
+                    // Kill any stdio MCP server children before exiting: a
+                    // leaked child outlives this one-shot run as an orphan.
+                    session_processor.shutdown_mcp().await;
                     std::process::exit(1);
                 }
             }
+            // Tear down MCP connections so the stdio server children ragent
+            // spawned are killed before this short-lived process exits.
+            session_processor.shutdown_mcp().await;
         }
         Some(Commands::Serve { addr }) => {
             tracing::info!(address = %addr, "Starting HTTP server");

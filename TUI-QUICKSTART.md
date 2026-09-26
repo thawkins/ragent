@@ -4,6 +4,29 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.119)
+
+- **Sessionful Streamable-HTTP MCP servers report their tools** — the HTTP MCP
+  client now performs the `initialize` handshake, replays the returned
+  `mcp-session-id` on every later request, advertises `text/event-stream` in
+  `Accept`, and unwraps `event: message` SSE frames, so servers such as the
+  MongoDB MCP server (2025-era sessionful path) no longer reject `tools/list`
+  with HTTP 400. The client is built lazily, so it no longer panics outside a
+  Tokio runtime.
+- **Startup MCP report is reliable** — the TUI waits up to three seconds for
+  background MCP connects and awaits the shared client lock, so the per-server
+  `[mcp] Starting/Connected/Skipping ...` lines reflect the real outcome.
+- **`/plugins list --mcp` is deterministic** — server ids are sorted
+  alphabetically in the contributions block, so the rendered table is stable
+  between runs. `/plugins list` resolves live MCP tool counts from connected
+  servers.
+- **`/mcp` list output tightened** — it prints `tools: N` per server instead of
+  the full tool-name inventory; the inventory lives on `/plugins list --mcp`.
+- **`/simplify all` fixes** — `/swarm status` progress bar no longer overflows;
+  `/spawn` no longer overwrites a landed launch outcome; `/plugins <non-list>
+  --mcp` executes the requested operation; the swarm unblock path persists task
+  state; `/alog` delete propagates storage errors.
+
 ## Highlights (v1.0.118)
 
 - **Durable, global MCP server enable/disable state** — whether an MCP server is

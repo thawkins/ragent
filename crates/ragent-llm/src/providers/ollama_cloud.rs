@@ -365,6 +365,18 @@ impl OllamaCloudClient {
         // Ollama Cloud to reject the request with "this model does not support
         // image input". Compute the index once and only attach images there.
         let last_user_idx = request.messages.iter().rposition(|m| m.role == "user");
+        let parts_msgs = request
+            .messages
+            .iter()
+            .filter(|m| matches!(m.content, ChatContent::Parts(_)))
+            .count();
+        tracing::info!(
+            model = %request.model,
+            n_messages = request.messages.len(),
+            parts_msgs,
+            last_user_idx = ?last_user_idx,
+            "[image-debug] build_request_body entry"
+        );
 
         for (idx, msg) in request.messages.iter().enumerate() {
             // Ollama Cloud requires content to always be a plain string.
@@ -503,6 +515,17 @@ impl OllamaCloudClient {
         // native `/api/chat` endpoint, just like local Ollama.
         if let Some(think) = think_flag_from_request(request) {
             body["think"] = json!(think);
+        }
+
+        {
+            let n_images_msgs = body["messages"]
+                .as_array()
+                .map(|ms| ms.iter().filter(|m| m.get("images").is_some()).count())
+                .unwrap_or(0);
+            tracing::info!(
+                n_images_msgs,
+                "[image-debug] build_request_body: messages carrying images array"
+            );
         }
 
         body

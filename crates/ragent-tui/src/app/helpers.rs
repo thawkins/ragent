@@ -181,7 +181,12 @@ pub(crate) fn open_verified_alog(
         ));
     }
 
-    let count = log.count(run_id).unwrap_or(0);
+    // Propagate storage errors: a corrupt log must not be presented to the
+    // user as an empty run — the confirmation dialog this feeds guards the
+    // destructive `/alog delete` path.
+    let count = log
+        .count(run_id)
+        .map_err(|e| format!("From: /alog {subcmd}\n\n⚠ Failed to count events: {e}"))?;
     Ok((log, count))
 }
 
@@ -226,7 +231,7 @@ pub(crate) fn files_preview(files: &[String], take: usize) -> String {
     let preview = files
         .iter()
         .take(take)
-        .cloned()
+        .map(String::as_str)
         .collect::<Vec<_>>()
         .join(", ");
     let more = files.len().saturating_sub(take);

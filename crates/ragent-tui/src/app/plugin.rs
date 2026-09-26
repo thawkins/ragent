@@ -91,8 +91,10 @@ pub(super) fn handle_plugins_command(app: &mut crate::app::App, args: &str) -> O
     let workdir = current_working_dir();
     // A plugin's `mcpServers` entry is a separate process, so the number of tools
     // it exposes is only known after it connects — never derivable from the
-    // manifest. `/plugins list --mcp` prints that live inventory directly.
-    if parses_mcp_flag(rest) {
+    // manifest. `--mcp` is meaningful on `list` only: gate on the subcommand
+    // so `/plugins remove foo --mcp` still executes the removal rather than
+    // silently printing the MCP inventory.
+    if sub == "list" && parses_mcp_flag(rest) {
         return Some(render_mcp_tool_report(app));
     }
     // Seed the collision surface (FR-024) from the live session: built-in tool

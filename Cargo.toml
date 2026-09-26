@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.118"
+version = "1.0.119"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -157,6 +157,9 @@ tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }   # sync → BroadcastStream
+# process-wrap: `KillOnDrop` so a spawned MCP stdio child dies with its
+# transport instead of being orphaned when the client goes away.
+process-wrap = { version = "9", features = ["tokio1", "kill-on-drop"] }
 async-stream = "0.3"
 
 # ── Serialization ────────────────────────────────────────────────────────

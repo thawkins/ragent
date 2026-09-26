@@ -1391,6 +1391,18 @@ pub enum McpTransport {
     Http,
 }
 
+impl std::fmt::Display for McpTransport {
+    /// Render the wire-protocol label surfaces print (`stdio`, `sse`, `http`),
+    /// matching serde's lowercase names so config and display cannot drift.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stdio => f.write_str("stdio"),
+            Self::Sse => f.write_str("sse"),
+            Self::Http => f.write_str("http"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// Flags for experimental features that are not yet stable.
 pub struct ExperimentalFlags {

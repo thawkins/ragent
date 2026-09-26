@@ -5126,6 +5126,252 @@ async fn test_slash_mcp_list_prints_client_derived_status() {
     );
 }
 
+/// The startup report must print one `[mcp] Starting mcp server <id> (<transport>)`
+/// line per attempted server and, for a server that came up, a following
+/// `[mcp] Connected to mcp server <id> via <transport>` line — each on its own
+/// line. `register_connected_for_tests` seeds the default (stdio) config, so
+/// the label must read `stdio` here.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_report_mcp_startup_lists_start_and_connect_lines() {
+    use ragent_agent::mcp::McpClient;
+
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    let mut client = McpClient::new();
+    client.register_connected_for_tests(
+        "alpha",
+        vec![ragent_agent::mcp::McpToolDef {
+            name: "find".to_string(),
+            description: "Find documents".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        }],
+    );
+    client.register_connected_for_tests("beta", Vec::new());
+    app.session_processor
+        .mcp_client
+        .set(Arc::new(tokio::sync::RwLock::new(client)))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+
+    app.report_mcp_startup().await;
+
+    let joined: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        joined.contains(
+            "\n[mcp] Starting mcp server alpha (stdio)\n[mcp] Connected to mcp server alpha via stdio"
+        ),
+        "alpha must report start then connect, each with its transport: {joined}"
+    );
+    assert!(
+        joined.contains(
+            "\n[mcp] Starting mcp server beta (stdio)\n[mcp] Connected to mcp server beta via stdio"
+        ),
+        "beta must report start then connect, each with its transport: {joined}"
+    );
+}
+
+/// The startup report must still print the per-server lines when the shared
+/// client exists but its lock is momentarily held by the connect loop. The
+/// connect loop sets the client and then logs, so a `try_read` failure at the
+/// one-shot `report_mcp_startup` call would otherwise drop the whole report.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_report_mcp_startup_waits_for_client_lock() {
+    use ragent_agent::mcp::McpClient;
+
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    let mut client = McpClient::new();
+    client.register_connected_for_tests("alpha", Vec::new());
+    let shared = Arc::new(tokio::sync::RwLock::new(client));
+    app.session_processor
+        .mcp_client
+        .set(Arc::clone(&shared))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+
+    // Hold the write lock, as the connect loop can between publishing the
+    // client and releasing its guard.
+    let guard = shared.write().await;
+    let probe = app.session_processor.mcp_client.get().cloned();
+    let handle = tokio::spawn(async move {
+        let mut app = app;
+        app.report_mcp_startup().await;
+        app
+    });
+    tokio::task::yield_now().await;
+    drop(guard);
+    let app = handle.await.expect("report task joins");
+    drop(probe);
+
+    let joined: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        joined.contains(
+            "\n[mcp] Starting mcp server alpha (stdio)\n[mcp] Connected to mcp server alpha via stdio"
+        ),
+        "a held lock must not drop the startup report: {joined}"
+    );
+}
+
+/// Each endpoint transport must be named in the startup report: an `sse` and
+/// an `http` configured server produce lines carrying those exact labels.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_report_mcp_startup_labels_sse_and_http_transports() {
+    use ragent_agent::mcp::{McpClient, McpServer, McpStatus};
+    use ragent_config::config::{McpServerConfig, McpTransport};
+
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    let mut client = McpClient::new();
+    for (id, transport) in [
+        ("sse-server", McpTransport::Sse),
+        ("http-server", McpTransport::Http),
+    ] {
+        client.push_server_for_tests(McpServer {
+            id: id.to_string(),
+            config: McpServerConfig {
+                type_: transport,
+                url: Some(format!("http://127.0.0.1:9/{id}")),
+                ..McpServerConfig::default()
+            },
+            status: McpStatus::Connected,
+            tools: Vec::new(),
+        });
+    }
+    app.session_processor
+        .mcp_client
+        .set(Arc::new(tokio::sync::RwLock::new(client)))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+
+    app.report_mcp_startup().await;
+
+    let joined: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        joined.contains(
+            "\n[mcp] Starting mcp server sse-server (sse)\n[mcp] Connected to mcp server sse-server via sse"
+        ),
+        "the sse server must be labelled sse on both lines: {joined}"
+    );
+    assert!(
+        joined.contains(
+            "\n[mcp] Starting mcp server http-server (http)\n[mcp] Connected to mcp server http-server via http"
+        ),
+        "the http server must be labelled http on both lines: {joined}"
+    );
+}
+
+/// The startup report is a no-op when the connect loop has not published the
+/// shared client yet, so a slow start never prints a misleading empty report.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_report_mcp_startup_noop_without_client() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    let before: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    app.report_mcp_startup().await;
+
+    let after: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        before, after,
+        "no client means no report lines are appended"
+    );
+}
+
+/// The startup wait returns as soon as every server is terminal: a client with
+/// no in-flight work (connected, failed, or empty) settles immediately, while a
+/// registered-but-not-yet-connected server keeps it waiting for the loop.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_wait_for_mcp_connect_settles_on_terminal_servers() {
+    use ragent_agent::mcp::{McpClient, McpStatus, McpToolDef};
+    use std::time::Duration;
+
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    let mut client = McpClient::new();
+    client.register_connected_for_tests(
+        "alpha",
+        vec![McpToolDef {
+            name: "find".to_string(),
+            description: "Find documents".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        }],
+    );
+    // Register the connected server's tools the way the startup path does, so
+    // the wait sees a settled server rather than one still in flight.
+    for tool in &client.servers()[0].tools {
+        app.session_processor.tool_registry.register(Arc::new(
+            ragent_agent::tool::McpToolWrapper::new(
+                "alpha",
+                &tool.name,
+                &tool.description,
+                tool.parameters.clone(),
+                Arc::new(tokio::sync::RwLock::new(McpClient::new())),
+            ),
+        ));
+    }
+    app.session_processor
+        .mcp_client
+        .set(Arc::new(tokio::sync::RwLock::new(client)))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+
+    // A connected server whose tools are already in the registry is terminal.
+    assert!(
+        app.wait_for_mcp_connect(&app.session_processor, Duration::from_secs(5))
+            .await,
+        "a connected server with registered tools settles immediately"
+    );
+
+    // A server still carrying its placeholder registration is not.
+    let mut waiting = McpClient::new();
+    waiting.register_disabled("beta", ragent_config::McpServerConfig::default());
+    assert_eq!(
+        waiting.servers()[0].status,
+        McpStatus::Disabled,
+        "a server registered before its connect attempt starts as disabled"
+    );
+    let shared = app
+        .session_processor
+        .mcp_client
+        .get()
+        .expect("client published above")
+        .clone();
+    *shared.write().await = waiting;
+    assert!(
+        !app.wait_for_mcp_connect(&app.session_processor, Duration::from_millis(150))
+            .await,
+        "a server still connecting must not report settled"
+    );
+}
+
 /// `/mcp list` reports each server's tool COUNT and nothing more: the full
 /// tool-name inventory is the model-facing surface (`/tools`), while the
 /// per-server names stay available via `/plugins list --mcp`.
@@ -5179,5 +5425,66 @@ async fn test_slash_mcp_list_shows_tool_counts_not_tool_names() {
     assert!(
         !joined.contains("find") && !joined.contains("mcp_configured_find"),
         "the list must not enumerate individual tool names: {joined}"
+    );
+}
+
+/// Each `/mcp` list row must name the server's transport protocol and its
+/// endpoint (command for stdio, URL for http/sse) so a user can see *how* a
+/// server connects without opening `ragent.json`.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_slash_mcp_list_shows_transport_and_endpoint() {
+    use ragent_agent::mcp::{McpServer, McpStatus};
+    use ragent_agent::{McpServerConfig, McpTransport};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+    let mut app = make_app();
+    app.cwd_path = dir.path().to_path_buf();
+    app.session_id = Some("s1".to_string());
+    // Seed the display list: one stdio server with a known command, one http
+    // server with a known URL. No MCP client is wired up, so the refresh keeps
+    // these entries as-is (status Disabled).
+    let stdio_cfg = McpServerConfig {
+        type_: McpTransport::Stdio,
+        command: Some("uvx".to_string()),
+        args: vec!["fetch-server".to_string()],
+        ..McpServerConfig::default()
+    };
+    let http_cfg = McpServerConfig {
+        type_: McpTransport::Http,
+        url: Some("http://127.0.0.1:3000/mcp".to_string()),
+        ..McpServerConfig::default()
+    };
+    app.mcp_servers = vec![
+        McpServer {
+            id: "fetcher".to_string(),
+            config: stdio_cfg,
+            status: McpStatus::Disabled,
+            tools: Vec::new(),
+        },
+        McpServer {
+            id: "remote".to_string(),
+            config: http_cfg,
+            status: McpStatus::Disabled,
+            tools: Vec::new(),
+        },
+    ];
+    // No client: nothing to adopt; the refresh preserves the seeded rows.
+
+    app.execute_slash_command("/mcp list").await;
+
+    let joined: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        joined.contains("[stdio]") && joined.contains("uvx"),
+        "stdio row must show the transport and command: {joined}"
+    );
+    assert!(
+        joined.contains("[http]") && joined.contains("http://127.0.0.1:3000/mcp"),
+        "http row must show the transport and URL: {joined}"
     );
 }

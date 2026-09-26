@@ -13,6 +13,25 @@ use crate::app::state::{App, LogLevel};
 use crate::app::session_ops::recover_poisoned;
 
 impl App {
+    /// Remove the active bench run's task entry and reset all per-run state.
+    /// Shared by the watchdog-detach and run-completion paths, which must not
+    /// drift apart (a field cleared in one branch but not the other leaves
+    /// stale bench state pinned to the status line).
+    fn clear_active_bench(&mut self) {
+        if let Some(task_id) = self.active_bench_task_id.take()
+            && let Some(idx) = self.active_tasks.iter().position(|task| task.id == task_id)
+        {
+            self.active_tasks.remove(idx);
+        }
+        self.active_bench_summary = None;
+        self.active_bench_started_at = None;
+        self.active_bench_cancel = None;
+        if let Some(progress) = &self.active_bench_progress {
+            progress.clear();
+        }
+        self.active_bench_progress = None;
+    }
+
     /// Whether the active benchmark run has outlived the staleness cap.
     ///
     /// A wedged bench runner (hung HTTP call, blocked tool) would otherwise
@@ -43,18 +62,7 @@ impl App {
                 .active_bench_started_at
                 .map(|started| (chrono::Utc::now() - started).num_seconds().max(0))
                 .unwrap_or(0);
-            if let Some(task_id) = self.active_bench_task_id.take()
-                && let Some(idx) = self.active_tasks.iter().position(|task| task.id == task_id)
-            {
-                self.active_tasks.remove(idx);
-            }
-            self.active_bench_summary = None;
-            self.active_bench_started_at = None;
-            self.active_bench_cancel = None;
-            if let Some(progress) = &self.active_bench_progress {
-                progress.clear();
-            }
-            self.active_bench_progress = None;
+            self.clear_active_bench();
             self.status = "bench: timed out".to_string();
             self.needs_redraw = true;
             self.push_log_no_agent(
@@ -90,34 +98,24 @@ impl App {
         };
         let Some(outcome) = outcome else { return };
         self.drain_bench_progress_events();
-
-        if let Some(task_id) = self.active_bench_task_id.take()
-            && let Some(idx) = self.active_tasks.iter().position(|task| task.id == task_id)
-        {
-            self.active_tasks.remove(idx);
-        }
-        self.active_bench_summary = None;
-        self.active_bench_started_at = None;
-        self.active_bench_cancel = None;
-        if let Some(progress) = &self.active_bench_progress {
-            progress.clear();
-        }
-        self.active_bench_progress = None;
+        self.clear_active_bench();
 
         match outcome {
             Ok(run) => {
-                self.bench_last_summary = Some(run.message.clone());
-                self.bench_last_workbooks = run.workbook_paths.clone();
+                let ragent_bench::BenchRunOutcome {
+                    message,
+                    workbook_paths,
+                    ..
+                } = run;
+                self.bench_last_summary = Some(message.clone());
+                self.bench_last_workbooks = workbook_paths.clone();
                 self.bench_last_finished_at = Some(chrono::Utc::now());
                 self.force_new_message = true;
-                self.append_assistant_text(&run.message);
+                self.append_assistant_text(&message);
                 self.status = "bench: done".to_string();
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!(
-                        "Finished /bench run — {} workbook(s)",
-                        run.workbook_paths.len()
-                    ),
+                    format!("Finished /bench run — {} workbook(s)", workbook_paths.len()),
                 );
                 // Arm the status auto-expiry timer so "bench: done" transitions
                 // to "ready" after the grace period.
@@ -269,10 +267,7 @@ impl App {
     }
 
     pub(crate) fn render_bench_show(&self) -> String {
-        let selected_model = self
-            .selected_model
-            .clone()
-            .unwrap_or_else(|| "(not selected)".to_string());
+        let selected_model = self.selected_model.as_deref().unwrap_or("(not selected)");
         let last = if self.bench_last_workbooks.is_empty() {
             "(none)".to_string()
         } else {

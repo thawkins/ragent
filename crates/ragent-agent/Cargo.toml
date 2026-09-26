@@ -15,6 +15,9 @@ num_cpus = { workspace = true }
 sha2 = { workspace = true }
 fs2 = { workspace = true }
 tokio = { workspace = true }
+# Unix kill support for MCP stdio child teardown (`kill_stdio_child`).
+libc = { workspace = true }
+process-wrap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
@@ -83,6 +86,7 @@ chrono = { workspace = true }
 anyhow = { workspace = true }
 tempfile = "3.5"
 criterion = { version = "0.5", features = ["async_tokio"] }
+axum = { workspace = true }
 [[bench]]
 name = "agent_loop"
 harness = false

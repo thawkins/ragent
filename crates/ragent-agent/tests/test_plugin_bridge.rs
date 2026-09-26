@@ -143,7 +143,10 @@ fn plugin_mcp_servers_contributes_when_not_configured() {
         entry.1.args,
         vec!["-y".to_string(), "mongodb-mcp-server".to_string()]
     );
+    // The declared transport is kept verbatim; an entry with no `type` stays on
+    // the default stdio transport.
     assert_eq!(entry.1.type_, McpTransport::Stdio);
+    assert_eq!(entry.1.url, None);
 }
 
 #[test]
