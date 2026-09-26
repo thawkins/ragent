@@ -2651,6 +2651,7 @@ impl SessionProcessor {
                     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
                     read_timestamps: self.read_timestamps.clone(),
                     canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+                    tool_registry: self.tool_registry.clone(),
                 };
                 type ToolExecutionResult = Result<
                     (

@@ -1,6 +1,96 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.120] - 2026-09-26
+
+Release of the working tree carrying the introspection tools, MCP orphan-sweep
+and shutdown fixes, and MCP tool-registry reconciliation. The full
+rust-hygiene sweep (cargo check, cargo machete, cargo check --tests, cargo
+test, dead-code lint, dead-code reason check, clippy, rustfmt, cargo audit,
+cargo deny) is green on this tree.
+
+### Added
+
+- **`tool_info` and `commands_info` introspection tools** — two new
+  read-only tools (permission category `none`, hardwired
+  auto-approve). `tool_info` returns a JSON-encoded dump of every
+  registered tool (name, description, parameters JSON schema,
+  permission category, source family — `internal` / `mcp:<server>`
+  / `plugin:<id>` / `visibility:<family>` — hidden state, and MCP
+  server/tool provenance for bridged tools). `commands_info`
+  returns a JSON-encoded catalog of every slash command — the
+  built-in TUI commands (trigger, description, subcommands, flags)
+  from a static mirror of `SLASH_COMMANDS`, plus the commands
+  contributed by enabled plugins resolved live at call time. The
+  static catalog is kept in sync with the TUI table by a drift
+  test in `crates/ragent-tui/tests/test_command_catalog.rs`.
+
+- **MCP duplicate-process cleanup at startup.** `McpClient::connect` no longer
+  blindly spawns a second copy of an MCP server that is already running. Before
+  spawning it first resolves the server by its config: a declared `http`/`sse`
+  URL (or a stdio command line that names a port via `--httpPort <n>` /
+  `--port <n>`) is probed with a short-timeout MCP `initialize` handshake, and
+  a live MCP endpoint answering on the loopback candidates
+  (`http://127.0.0.1:<port>/mcp`, then the bare origin) is **adopted** —
+  session id, tools, and all — instead of starting a competing instance; a
+  plain TCP listener that fails the handshake is not adopted. For a plain
+  stdio command (no HTTP port), adoption is impossible because the pipes are
+  private to the spawning parent, so `connect` sweeps `/proc/<pid>/cmdline`
+  (Unix only) for orphaned earlier copies of the same `command` + `args` and
+  SIGKILLs them before spawning a fresh child, freeing their file locks,
+  ports, handles, and rate-limit slots. A process counts as an orphan only
+  after being re-parented to init (`/proc/<pid>/stat` field 4, `Ppid == 1`);
+  a same-command process whose parent is still alive belongs to a *running*
+  ragent instance and is left alone, so two concurrent sessions can share the
+  same MCP stdio server command without the later one severing the earlier
+  one's pipes (`Transport closed` errors). Matching keys on the executable
+  basename (`/usr/bin/npx` == `npx`) plus the package token extracted from the
+  arguments (`@<version>` stripped), which recognises both the `npx` launcher
+  and the `node` child it spawns without touching a different package through
+  the same launcher; the current process is always excluded, and a launcher
+  with no positional package argument matches nothing rather than sweeping
+  every `npx` on the machine.
+
+### Fixed
+
+- **MCP stdio servers are shut down with ragent instead of being orphaned on
+  exit.** Two failure modes leaked the child past every existing safeguard:
+  first, `shutdown` re-drained the connections map through `disconnect`, whose
+  graceful `cancel()` silently no-ops whenever the rmcp service `Arc` is still
+  shared by a registered `McpToolWrapper` (the normal state at exit) - so the
+  transport's `kill_on_drop` was never triggered and the "belt-and-braces"
+  second pass could never see the pid because the map was already drained.
+  Second, even a successful kill only reached the recorded *launcher* pid:
+  `npx` (and friends) fork the real `node` server and exit within a second,
+  leaving that grandchild - the process actually holding the stdio pipes -
+  orphaned. The stdio child now leads its own process group
+  (`process_group(0)`, the same pattern as the bash-timeout harness), shutdown
+  tears each drained connection down inline (graceful cancel when the `Arc` is
+  uniquely owned, a SIGKILL on the whole process group always afterwards), and
+  a failed shutdown no longer resurrects an entry on a stale connection.
+  `shutdown` also clears any `Connected` server state that outlives its
+  connection. A `/simplify` follow-up dropped the `config.disabled` skip from
+  the teardown loop (a re-enabled server whose config still said `disabled`
+  would have leaked its child), removed the signal-0 liveness probe that gated
+  only a log line, and made `disconnect` warn-log a cancel failure instead of
+  discarding it. MCP Streamable-HTTP SSE replies that split a JSON payload
+  across multiple `data:` lines are now joined per the SSE grammar instead of
+  being truncated to the first line. Verified live: consecutive `ragent run`
+  invocations leave zero
+  `mongodb-mcp-server` processes on the system, and a second concurrent
+  instance no longer kills the first's server (that sibling-kill was the
+  `Transport closed` regression).
+
+- **MCP tools reach the tool registry after startup, and a disconnect drops
+  them again.** Publishing the shared `McpClient` before the background
+  connect loop meant `set_mcp_client` ran while no server was Connected, so
+  the registry never saw the servers' tools and `/tools` (and the model's
+  tool surface) stayed empty. The TUI now reconciles the registry on
+  `McpStatusChanged` / `McpServerEnabledChanged` and after a live
+  enable/disable: connected servers' tools are registered (idempotently, the
+  registry is name-keyed) and every `mcp_<server>_*` tool whose server is no
+  longer Connected is first removed via the new
+  `ToolRegistry::remove_all`, so disabling a server leaves no dead wrappers
+  for the model to call.
 
 ## [1.0.119] - 2026-09-26
 

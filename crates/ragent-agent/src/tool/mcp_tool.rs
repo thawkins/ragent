@@ -38,6 +38,20 @@ pub struct McpToolWrapper {
 }
 
 impl McpToolWrapper {
+    /// The registry name (`mcp_<server>_<tool>`) an MCP tool is registered
+    /// under, with `-`, `.` and `/` replaced by `_` in both segments.
+    ///
+    /// This is the single source of truth for the mangling: the TUI's `/mcp`
+    /// surfaces and the registry reconcile pass must derive the same name
+    /// without constructing a wrapper (which clones the schema and the client
+    /// handle just to reach [`Self::ragent_name`]).
+    #[must_use]
+    pub fn ragent_name_for(server_id: &str, tool_name: &str) -> String {
+        let safe_server = server_id.replace(['-', '.', '/'], "_");
+        let safe_tool = tool_name.replace(['-', '.', '/'], "_");
+        format!("mcp_{safe_server}_{safe_tool}")
+    }
+
     /// Create a new wrapper for a specific MCP tool.
     pub fn new(
         server_id: &str,
@@ -46,12 +60,10 @@ impl McpToolWrapper {
         input_schema: Value,
         client: Arc<RwLock<McpClient>>,
     ) -> Self {
-        let safe_server = server_id.replace(['-', '.', '/'], "_");
-        let safe_tool = tool_name.replace(['-', '.', '/'], "_");
         Self {
             server_id: server_id.to_string(),
             tool_name: tool_name.to_string(),
-            ragent_name: format!("mcp_{safe_server}_{safe_tool}"),
+            ragent_name: Self::ragent_name_for(server_id, tool_name),
             description: description.to_string(),
             input_schema,
             client,
@@ -83,6 +95,10 @@ impl Tool for McpToolWrapper {
 
     fn permission_category(&self) -> &'static str {
         "mcp"
+    }
+
+    fn mcp_wrapper_info(&self) -> Option<(&str, &str)> {
+        Some((&self.server_id, &self.tool_name))
     }
 
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {

@@ -2987,6 +2987,7 @@ impl App {
     /// held: the connect loop publishes the client and can still hold its guard
     /// while this one-shot call runs, and a skipped report is never retried.
     pub async fn report_mcp_startup(&mut self) {
+        use std::fmt::Write as _;
         let Some(client) = self.session_processor.mcp_client.get() else {
             return;
         };
@@ -2996,42 +2997,34 @@ impl App {
             // The transport label rides on every line so the report names the
             // wire protocol (stdio / sse / http) for each server.
             let transport = &server.config.type_;
+            let id = &server.id;
             match &server.status {
                 ragent_agent::mcp::McpStatus::Connected => {
-                    lines.push_str(&format!(
-                        "\n[mcp] Starting mcp server {} ({transport})",
-                        server.id
-                    ));
-                    lines.push_str(&format!(
-                        "\n[mcp] Connected to mcp server {} via {transport}",
-                        server.id
-                    ));
+                    let _ = write!(lines, "\n[mcp] Starting mcp server {id} ({transport})");
+                    let _ = write!(
+                        lines,
+                        "\n[mcp] Connected to mcp server {id} via {transport}"
+                    );
                 }
                 ragent_agent::mcp::McpStatus::Disabled => {
-                    lines.push_str(&format!(
-                        "\n[mcp] Skipping mcp server {} ({transport}, disabled)",
-                        server.id
-                    ));
+                    let _ = write!(
+                        lines,
+                        "\n[mcp] Skipping mcp server {id} ({transport}, disabled)"
+                    );
                 }
                 ragent_agent::mcp::McpStatus::Failed { error } => {
-                    lines.push_str(&format!(
-                        "\n[mcp] Starting mcp server {} ({transport})",
-                        server.id
-                    ));
-                    lines.push_str(&format!(
-                        "\n[mcp] Failed to connect to mcp server {} via {transport}: {error}",
-                        server.id
-                    ));
+                    let _ = write!(lines, "\n[mcp] Starting mcp server {id} ({transport})");
+                    let _ = write!(
+                        lines,
+                        "\n[mcp] Failed to connect to mcp server {id} via {transport}: {error}"
+                    );
                 }
                 ragent_agent::mcp::McpStatus::NeedsAuth => {
-                    lines.push_str(&format!(
-                        "\n[mcp] Starting mcp server {} ({transport})",
-                        server.id
-                    ));
-                    lines.push_str(&format!(
-                        "\n[mcp] mcp server {} ({transport}) needs authentication",
-                        server.id
-                    ));
+                    let _ = write!(lines, "\n[mcp] Starting mcp server {id} ({transport})");
+                    let _ = write!(
+                        lines,
+                        "\n[mcp] mcp server {id} ({transport}) needs authentication"
+                    );
                 }
             }
         }
@@ -3071,21 +3064,17 @@ impl App {
                     ragent_agent::mcp::McpStatus::Connected => {
                         // Connected, but the tool registry is populated by the
                         // startup tool-registration step; a server whose tools
-                        // are not there yet is still in flight.
+                        // are not there yet is still in flight. Deriving the
+                        // registration name directly (instead of constructing a
+                        // throwaway wrapper per tool per poll) keeps each pass
+                        // to a hash lookup.
                         server.tools.is_empty()
                             || server.tools.iter().all(|tool| {
                                 session_processor
                                     .tool_registry
-                                    .get(
-                                        &ragent_agent::tool::McpToolWrapper::new(
-                                            &server.id,
-                                            &tool.name,
-                                            &tool.description,
-                                            tool.parameters.clone(),
-                                            std::sync::Arc::clone(&client),
-                                        )
-                                        .ragent_name,
-                                    )
+                                    .get(&ragent_agent::tool::McpToolWrapper::ragent_name_for(
+                                        &server.id, &tool.name,
+                                    ))
                                     .is_some()
                             })
                     }
@@ -3174,8 +3163,7 @@ impl App {
             };
             match outcome {
                 Ok(()) => {
-                    self.register_mcp_tools_and_refresh(std::sync::Arc::clone(&client))
-                        .await;
+                    self.register_mcp_tools().await;
                     format!("From: /mcp\n\n[ok] `{server_id}` is connected.")
                 }
                 Err(e) => format!("From: /mcp\n\n[err] `{server_id}` could not connect: {e}"),
@@ -3185,8 +3173,7 @@ impl App {
                 let mut guard = client.write().await;
                 guard.disconnect(server_id).await
             };
-            self.register_mcp_tools_and_refresh(std::sync::Arc::clone(&client))
-                .await;
+            self.register_mcp_tools().await;
             match outcome {
                 Ok(()) => format!(
                     "From: /mcp\n\n[ok] `{server_id}` is disabled and disconnected. \
@@ -3200,31 +3187,55 @@ impl App {
         }
     }
 
-    /// Re-register the live MCP tools into the session tool registry and adopt
-    /// the client's state into the display list.
+    /// Reconcile the session tool registry with the live MCP client state.
     ///
-    /// `set_mcp_client` only runs once at startup, so a server connected later
-    /// would otherwise have its tools missing from the registry. The client is
-    /// re-read and its connected servers' tools registered by name (the
-    /// registry is keyed by name, so a repeat registration is idempotent).
-    async fn register_mcp_tools_and_refresh(
-        &mut self,
-        client: std::sync::Arc<tokio::sync::RwLock<ragent_agent::mcp::McpClient>>,
-    ) {
-        let pairs = {
-            let guard = client.read().await;
-            guard
-                .servers()
-                .iter()
-                .filter(|s| s.status == ragent_agent::mcp::McpStatus::Connected)
-                .flat_map(|s| {
-                    s.tools
-                        .iter()
-                        .map(move |t| (s.id.clone(), t.clone()))
-                        .collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>()
+    /// Called from `set_mcp_server_enabled` (after a live enable/disable) and
+    /// from the `McpStatusChanged` event handler (after a startup connect
+    /// settles). Startup `set_mcp_client` runs before any server is Connected,
+    /// so without this the registry would stay empty of MCP tools and `/tools`
+    /// (and the model's own tool surface) would never list them.
+    ///
+    /// Disconnect works by removal, not just re-registration: dropping the
+    /// connection without dropping the tools would leave dead
+    /// `mcp_<server>_*` wrappers in the registry that can only fail when the
+    /// model calls them, so every registered MCP tool whose server is no
+    /// longer Connected is removed first. The registry is keyed by name, so
+    /// re-registering a live server's tools is idempotent.
+    pub(crate) async fn register_mcp_tools(&self) {
+        let Some(client) = self.session_processor.mcp_client.get() else {
+            return;
         };
+        let (live_ids, pairs) = {
+            let guard = client.read().await;
+            // `live_ids` holds the registered-name prefix of each Connected
+            // server (`mcp_<sanitized-server>_`), so the stale scan below can
+            // prefix-match without re-deriving the sanitization.
+            let mut live_ids = std::collections::HashSet::new();
+            let mut pairs = Vec::new();
+            for server in guard.servers() {
+                if server.status == ragent_agent::mcp::McpStatus::Connected {
+                    live_ids.insert(ragent_agent::tool::McpToolWrapper::ragent_name_for(
+                        &server.id, "",
+                    ));
+                    for tool in &server.tools {
+                        pairs.push((server.id.clone(), tool.clone()));
+                    }
+                }
+            }
+            (live_ids, pairs)
+        };
+        let registry = &self.session_processor.tool_registry;
+        // A registered MCP tool is stale when its `mcp_<sanitized-server>_`
+        // prefix no longer belongs to any Connected server. Comparing prefixes
+        // (not the first `_`-segment) is what keeps multi-segment ids like
+        // `mongodb.mongodb` (`mcp_mongodb_mongodb_*`) alive.
+        let stale: Vec<String> = registry
+            .list()
+            .into_iter()
+            .filter(|name| name.starts_with("mcp_"))
+            .filter(|name| !live_ids.iter().any(|prefix| name.starts_with(prefix)))
+            .collect();
+        registry.remove_all(&stale);
         for (server_id, tool) in pairs {
             self.session_processor
                 .tool_registry
@@ -3234,14 +3245,11 @@ impl App {
                         &tool.name,
                         &tool.description,
                         tool.parameters,
-                        client.clone(),
+                        std::sync::Arc::clone(&client),
                     ),
                 ));
         }
         self.session_processor.invalidate_tool_cache();
-        let processor = std::sync::Arc::clone(&self.session_processor);
-        self.mcp_client_adopted = false;
-        self.adopt_mcp_client_state(&processor).await;
     }
 
     /// PERF-045: the instant the next housekeeping pass is due.

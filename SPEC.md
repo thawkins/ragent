@@ -768,6 +768,8 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `get_env` | Read non-sensitive environment variables |
 | `calculator` | Evaluate mathematical expressions |
 | `ragent_info` | Report the running ragent version, build time, git commit, and compiler |
+| `tool_info` | Return a JSON-encoded dump of the tool registry (name, description, parameters schema, permission category, source, hidden state) |
+| `commands_info` | Return a JSON-encoded catalog of every slash command (trigger, description, subcommands, flags) including plugin-contributed commands |
 
 ### 3.2.1 Tool System Categories Summary
 
@@ -791,7 +793,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Initiatives / skills | `initiative`, `skill_manage` | 2 |
 | Interactive | `ask_user`, `think` | 2 |
 | Task management | `task_create`, `task_update`, `task_get`, `task_list` | 4 |
-| Utility | `get_env`, `calculator`, `ragent_info` | 3 |
+| Utility | `get_env`, `calculator`, `ragent_info`, `tool_info`, `commands_info` | 5 |
 
 #### Team Tools (19)
 
@@ -2804,7 +2806,43 @@ The HTTP client performs the MCP `initialize` handshake before `tools/list` and
 replays an issued `mcp-session-id` on every later request, because a sessionful
 Streamable-HTTP server (the MongoDB server on its 2025-era path) rejects
 requests on a session it did not open. Replies may be bare JSON-RPC or an
-`event: message` SSE frame; both are accepted.
+`event: message` SSE frame; both are accepted, and a frame whose JSON payload
+is split across multiple `data:` lines is re-joined with `\n` per the SSE
+grammar rather than truncated to the first line.
+
+A stdio child is never adoptable - its pipes are private to the parent that
+spawned it - so a config declaring `stdio` always results in a fresh child.
+A stdio child leads its **own process group** (`process_group(0)` at spawn, the
+same pattern as the bash-timeout harness), because launcher commands (`npx`,
+`npm`, `bunx`) fork the real server (`node`) and exit immediately - killing
+only the recorded launcher pid would orphan the process actually holding the
+stdio pipes. Process teardown (`shutdown`) therefore SIGKILLs the *group*
+(`killpg`) after attempting the graceful rmcp `cancel()` — the kill is
+unconditional and ESRCH-safe, so a connection that `/mcp disable` already
+tore down needs no special-casing — and drains the connections map atomically
+so a second ragent instance starting at the same
+time never reaps a child another instance is still using. Before spawning,
+`connect` sweeps `/proc` (Unix only) for **orphaned** earlier
+copies of the same `command` + `args` and SIGKILLs them, because an orphaned
+stdio server can no longer serve anyone yet keeps holding file locks, ports it
+also binds, API rate-limit slots, and memory. A process counts as orphaned only
+after being re-parented to init (`/proc/<pid>/stat` field 4, `Ppid == 1`); a
+same-command process whose own parent is still alive belongs to a *running*
+ragent instance and is never killed, so concurrent sessions sharing one MCP
+stdio command do not sever each other's pipes (`Transport closed`). The
+current process is always
+excluded, matching keys on the executable basename (`/usr/bin/npx` == `npx`)
+plus, for launcher commands (`npx`, `npm`, `bunx`, `pnpx`), the package token
+with any `@<version>` specifier stripped - so `npx -y mongodb-mcp-server@<3`
+and the node child it spawns (whose argv only mentions the package inside the
+`node_modules` path) are both swept, while an unrelated `npx -y other-server`
+and any same-named process outside the package tree survive. A launcher
+invocation with no positional package argument matches nothing (killing every
+`npx` on the machine would be a bug, not cleanup). When the stdio command line
+declares an HTTP port (`--httpPort <n>` / `--port <n>`), that port is probed
+with a short-timeout `initialize` first and a live MCP server there is adopted
+instead of spawning a child; a bare TCP listener that fails the handshake is
+rejected as not-MCP.
 
 The startup connect loop publishes the shared `McpClient` **before** connecting
 the first server, so every reader (the tool registry, `/mcp`, the startup
@@ -2815,6 +2853,16 @@ prints one `[mcp]` line per server — `Starting <id> (<transport>)` plus
 the failure reason, where `<transport>` is the config's declared wire protocol
 (`stdio` / `sse` / `http`, via `Display for McpTransport`) — before
 `[ok] **Ready**`.
+
+The TUI reconciles the session tool registry against the live client whenever a
+connect settles or a server is enabled/disabled: a registered MCP tool whose
+`mcp_<sanitized-server>_` name prefix no longer matches any Connected server is
+removed (`ToolRegistry::remove_all`), so a multi-segment id like
+`mongodb.mongodb` (`mcp_mongodb_mongodb_*`) is recognised by prefix match
+rather than by its first `_`-segment, and disabling a server leaves no dead
+wrappers for the model to call. The registered name itself comes from one
+place, `McpToolWrapper::ragent_name_for`, which the wrapper constructor and the
+TUI both use.
 
 ---
 

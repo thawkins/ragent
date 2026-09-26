@@ -1003,6 +1003,7 @@ async fn test_memory_store_tool_content_appears_in_memory_panel() {
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
         allowed_roots: vec![dir.path().to_path_buf()],
+        tool_registry: ToolContext::default_tool_registry(),
     };
     tool.execute(
         json!({

@@ -162,6 +162,8 @@ pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
         || tool_name == "ask_user"
         || tool_name == "model_info"
         || tool_name == "ragent_info"
+        || tool_name == "tool_info"
+        || tool_name == "commands_info"
 }
 
 /// Return `true` for the read-only codeindex tools that are always allowed
@@ -446,6 +448,8 @@ pub(crate) const SKILL_ALWAYS_ALLOWED_TOOLS: &[&str] = &[
     "agent_complete",
     "model_info",
     "ragent_info",
+    "tool_info",
+    "commands_info",
 ];
 
 /// Check permission for a tool execution, prompting the user if necessary.

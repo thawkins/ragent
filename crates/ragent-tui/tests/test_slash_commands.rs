@@ -5488,3 +5488,78 @@ async fn test_slash_mcp_list_shows_transport_and_endpoint() {
         "http row must show the transport and URL: {joined}"
     );
 }
+
+/// Disconnecting an MCP server must drop its tools from the session registry:
+/// re-registering the survivors is not enough, because the stale
+/// `mcp_<server>_<tool>` wrappers would stay callable against a dead
+/// connection and the model would keep trying them.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_disconnect_drops_mcp_tools_from_registry() {
+    use ragent_agent::event::Event;
+    use ragent_agent::mcp::{McpClient, McpToolDef};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+    let mut app = make_app();
+    app.cwd_path = dir.path().to_path_buf();
+    app.session_id = Some("s1".to_string());
+
+    // Two connected servers; `dying` is the one that will go away.
+    let mut client = McpClient::new();
+    let tool = |name: &str| McpToolDef {
+        name: name.to_string(),
+        description: format!("{name} tool"),
+        parameters: serde_json::json!({"type": "object"}),
+    };
+    client.register_connected_for_tests("dying", vec![tool("find"), tool("count")]);
+    client.register_connected_for_tests("keeper", vec![tool("search")]);
+    let shared = Arc::new(tokio::sync::RwLock::new(client));
+    app.session_processor
+        .mcp_client
+        .set(Arc::clone(&shared))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+
+    // Connect event registers every connected server's tools.
+    app.handle_event(Event::McpStatusChanged {
+        server_id: "dying".to_string(),
+        status: "connected".to_string(),
+    })
+    .await;
+    let names = app.session_processor.tool_registry.list();
+    assert!(
+        names.contains(&"mcp_dying_find".to_string())
+            && names.contains(&"mcp_dying_count".to_string())
+            && names.contains(&"mcp_keeper_search".to_string()),
+        "connect must register both servers' tools: {names:?}"
+    );
+
+    // Disable path: mirror the client's post-disconnect state for the server
+    // (`register_connected_for_tests` records no live connection, so calling
+    // `client.disconnect` here would be a no-op): status flips off Connected
+    // and the tool list is cleared, exactly what `McpClient::disconnect` does.
+    {
+        let mut guard = shared.write().await;
+        let server = guard
+            .servers_mut_for_tests()
+            .iter_mut()
+            .find(|s| s.id == "dying")
+            .expect("dying server");
+        server.status = ragent_agent::mcp::McpStatus::Disabled;
+        server.tools.clear();
+    }
+    app.handle_event(Event::McpServerEnabledChanged {
+        server_id: "dying".to_string(),
+        enabled: false,
+    })
+    .await;
+    let names = app.session_processor.tool_registry.list();
+    assert!(
+        !names.iter().any(|n| n.starts_with("mcp_dying_")),
+        "disconnect must drop the dead server's tools: {names:?}"
+    );
+    assert!(
+        names.contains(&"mcp_keeper_search".to_string()),
+        "the surviving server's tools must stay registered: {names:?}"
+    );
+}

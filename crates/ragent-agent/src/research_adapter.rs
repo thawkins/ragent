@@ -244,6 +244,7 @@ fn build_tool_context(
     storage: Option<Arc<Storage>>,
     config: Option<Arc<Config>>,
     active_model: Option<ModelRef>,
+    tool_registry: Arc<ToolRegistry>,
 ) -> AgentToolContext {
     // Extract allowed_roots from config if available
     let allowed_roots = config
@@ -267,6 +268,7 @@ fn build_tool_context(
         active_spec_id: None,
         config,
         allowed_roots,
+        tool_registry,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
@@ -304,6 +306,7 @@ fn build_web_gatherer(
         storage.clone(),
         config.clone(),
         active_model.clone(),
+        registry.clone(),
     );
 
     let decomposer: Arc<dyn QueryDecomposer> = match (provider_registry, active_model) {
@@ -361,7 +364,15 @@ fn build_local_gatherer(
     let grep = registry.get("grep")?;
     let read = registry.get("read")?;
     let list = registry.get("list")?;
-    let ctx = build_tool_context(session_id, working_dir, event_bus, storage, config, None);
+    let ctx = build_tool_context(
+        session_id,
+        working_dir,
+        event_bus,
+        storage,
+        config,
+        None,
+        registry.clone(),
+    );
     Some(LocalGatherer::new(Arc::new(AgentLocalTool {
         glob,
         grep,
@@ -1598,6 +1609,7 @@ mod tests {
                     active_spec_id: None,
                     config: None,
                     allowed_roots: Vec::new(),
+                    tool_registry: Arc::new(crate::tool::create_default_registry()),
                     read_timestamps: Arc::new(std::sync::RwLock::new(
                         std::collections::HashMap::new(),
                     )),
@@ -1823,6 +1835,7 @@ mod tests {
             active_spec_id: None,
             config: None,
             allowed_roots: Vec::new(),
+            tool_registry: Arc::new(crate::tool::create_default_registry()),
             read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
             canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),

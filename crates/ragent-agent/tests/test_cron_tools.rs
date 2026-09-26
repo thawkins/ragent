@@ -31,6 +31,7 @@ fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
         config: None,
         allowed_roots: Vec::new(),
         cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+        tool_registry: ToolContext::default_tool_registry(),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     }

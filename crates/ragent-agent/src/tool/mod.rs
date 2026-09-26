@@ -71,6 +71,13 @@ pub mod model_info;
 /// when the binary was built.
 pub mod ragent_info;
 
+/// Registry introspection — `tool_info` / `commands_info` JSON dumps.
+pub mod tool_info;
+
+/// Static catalog of the built-in slash commands (mirrors the TUI's
+/// `SLASH_COMMANDS` table; consumed by `commands_info`).
+pub mod command_catalog;
+
 /// Spec management tools.
 pub mod spec_coverage;
 pub mod spec_list;
@@ -214,6 +221,7 @@ impl Default for ToolOutput {
 ///     config: None,
 ///     read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
 ///     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+///     tool_registry: Arc::new(create_default_registry()),
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
 /// ```
@@ -266,6 +274,11 @@ pub struct ToolContext {
     /// Allowed root directories for path escape checking. Populated from
     /// `config.dirs.allowed_roots` at session initialization.
     pub allowed_roots: Vec<std::path::PathBuf>,
+    /// Registry of tools available to the session. Introspection tools
+    /// (`tool_info`) snapshot it; ordinary tools ignore it. Callers that do
+    /// not supply a registry get a shared handle over an empty registry via
+    /// [`ToolContext::default_tool_registry`].
+    pub tool_registry: Arc<ToolRegistry>,
     /// PERF-019: cache for the most recently resolved team directory.
     ///
     /// Team tools call [`find_team_dir`] on every `execute()`, and that
@@ -275,6 +288,19 @@ pub struct ToolContext {
     /// reused by [`find_team_dir_cached`]. The cache is keyed by team name
     /// so switching teams (rare) simply overwrites the entry.
     pub cached_team_dir: Arc<std::sync::Mutex<Option<(String, PathBuf)>>>,
+}
+
+impl ToolContext {
+    /// Shared handle over an empty [`ToolRegistry`] for callers that build a
+    /// `ToolContext` without a real registry (primarily tests and doc
+    /// examples). The empty registry is created once per process and reused.
+    #[must_use]
+    pub fn default_tool_registry() -> Arc<ToolRegistry> {
+        static EMPTY_REGISTRY: std::sync::OnceLock<Arc<ToolRegistry>> = std::sync::OnceLock::new();
+        EMPTY_REGISTRY
+            .get_or_init(|| Arc::new(ToolRegistry::new()))
+            .clone()
+    }
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -297,6 +323,15 @@ pub trait Tool: Send + Sync {
     ///
     /// Returns an error if required parameters are missing or the operation fails.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput>;
+
+    /// Returns the MCP wrapper metadata (`server_id` and original MCP tool
+    /// name) when this tool is an [`McpToolWrapper`], else `None`.
+    ///
+    /// Overridden only by [`McpToolWrapper`]; kept as a trait method (rather
+    /// than an `Any` downcast) so the trait stays object-safe.
+    fn mcp_wrapper_info(&self) -> Option<(&str, &str)> {
+        None
+    }
 }
 
 /// PERF-030: extracted-tool adapter that owns a per-adapter event bus so
@@ -1360,6 +1395,28 @@ impl ToolRegistry {
         self.invalidate_definitions_cache();
     }
 
+    /// Removes the named tools from the registry.
+    ///
+    /// Used when an MCP server disconnects: its [`McpToolWrapper`]s would
+    /// otherwise stay registered against a dead connection, so `/tools` and
+    /// the model's tool surface would keep advertising tools that can only
+    /// fail. Names that are not registered are ignored, so callers can pass
+    /// the full prefix set without checking membership first.
+    pub fn remove_all(&self, names: &[String]) {
+        if names.is_empty() {
+            return;
+        }
+        let mut tools = self
+            .tools
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for name in names {
+            tools.remove(name);
+        }
+        drop(tools);
+        self.invalidate_definitions_cache();
+    }
+
     /// Looks up a tool by name, returning a shared reference if found.
     ///
     /// # Examples
@@ -1460,6 +1517,22 @@ impl ToolRegistry {
             *guard = Some(defs.clone());
         }
         defs
+    }
+
+    /// Returns every registered tool sorted by name, including hidden ones.
+    ///
+    /// Used by the `tool_info` introspection tool, which must snapshot the
+    /// full registry — visible tools plus tools hidden by a visibility
+    /// switch — regardless of the hidden set.
+    #[must_use]
+    pub fn all_tools(&self) -> Vec<Arc<dyn Tool>> {
+        let tools = self
+            .tools
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut all: Vec<Arc<dyn Tool>> = tools.values().cloned().collect();
+        all.sort_by(|a, b| a.name().cmp(b.name()));
+        all
     }
 
     /// Returns [`ToolDefinition`] descriptors for the registered tools that are
@@ -1584,6 +1657,9 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(model_info::ModelInfoTool));
     // Build/version introspection
     registry.register(Arc::new(ragent_info::RagentInfoTool));
+    // Registry introspection (tool_info/commands_info)
+    registry.register(Arc::new(tool_info::ToolInfoTool));
+    registry.register(Arc::new(tool_info::CommandsInfoTool));
     // Phase 1 — alias layer (commonly hallucinated tool names)
     registry.register(Arc::new(aliases::UpdateFileTool));
     registry.register(Arc::new(aliases::AskUserTool));

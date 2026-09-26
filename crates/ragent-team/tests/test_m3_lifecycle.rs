@@ -57,6 +57,7 @@ fn make_ctx(
         config: None,
         bg_service: None,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        tool_registry: ragent_agent::tool::ToolContext::default_tool_registry(),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
@@ -236,6 +237,7 @@ async fn test_team_idle_publishes_teammate_idle_event() {
         )),
         canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
         allowed_roots: Vec::new(),
+        tool_registry: ragent_agent::tool::ToolContext::default_tool_registry(),
     };
 
     let tool = ragent_team::tools::team_idle::TeamIdleTool;

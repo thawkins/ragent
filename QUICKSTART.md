@@ -735,11 +735,13 @@ The AI agent can use these tools during a session:
 | `list`     | List directory contents (2 levels deep)         | `file:read`     |
 | `ask_user` | Ask the user a clarifying question              | `ask_user`      |
 | `ragent_info`| Report ragent version and build time          | `none`          |
+| `tool_info`| JSON dump of the tool registry                | `none`          |
+| `commands_info`| JSON dump of the slash-command catalog      | `none`          |
 | `plot_line`| Render an XY line plot on the message window   | `system`        |
 | `plot_bar` | Render a bar chart (stacked/horizontal)        | `system`        |
 | `plot_pie` | Render a pie/donut chart                       | `system`        |
 
-169 tools are registered in total across 25 categories — run `/tools` in the
+171 tools are registered in total across 25 categories — run `/tools` in the
 TUI to list them all. The `plot_*` family (`plot_line`, `plot_scatter`,
 `plot_bar`, `plot_histogram`, `plot_pie`, `plot_heatmap`) renders ASCII-art
 graphs, coloured via ANSI, inline in the message window.

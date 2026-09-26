@@ -527,10 +527,14 @@ impl App {
                         if !prompt.is_empty() {
                             // FR-027: a `--folder` run already scaffolded the
                             // project, so its `specs/` root must receive the
-                            // generated spec rather than the invoking directory.
+                            // generated spec rather than the invoking
+                            // directory. The folder is quoted so a path with
+                            // whitespace re-parses as one argument.
                             let cmd = match scaffold_folder {
                                 Some(folder) => {
-                                    format!("/spec create {spec_name} --folder {folder} {prompt}")
+                                    format!(
+                                        "/spec create {spec_name} --folder \"{folder}\" {prompt}"
+                                    )
                                 }
                                 None => format!("/spec create {spec_name} {prompt}"),
                             };
@@ -1996,6 +2000,29 @@ impl App {
                 if let Some(server) = self.mcp_servers.iter_mut().find(|s| s.id == *server_id) {
                     server.status = mapped;
                 }
+                // Re-register the live MCP tools into the registry: startup
+                // `set_mcp_client` runs before any server is Connected, so the
+                // registry would otherwise never see this server's tools and
+                // `/tools` (and the model's own tool surface) would stay empty.
+                // The registry is keyed by name, so a repeat registration is
+                // idempotent.
+                if status == "connected" {
+                    self.register_mcp_tools().await;
+                }
+            }
+            Event::McpServerEnabledChanged {
+                ref server_id,
+                enabled,
+            } => {
+                self.mcp_enabled_map.insert(server_id.clone(), enabled);
+                if let Some(server) = self.mcp_servers.iter_mut().find(|s| s.id == *server_id) {
+                    server.status = if enabled {
+                        super::slash::mcp_status_from_event("connected")
+                    } else {
+                        ragent_agent::mcp::McpStatus::Disabled
+                    };
+                }
+                self.register_mcp_tools().await;
             }
             _ => {}
         }

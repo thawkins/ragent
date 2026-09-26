@@ -67,7 +67,7 @@ fn shared_client() -> &'static reqwest::Client {
 /// no SSE parser.
 fn parse_jsonrpc_result(method: &str, text: &str) -> Result<Value> {
     let payload = unwrap_sse_frame(text);
-    let parsed: JsonRpcResponse<Value> = serde_json::from_str(payload)
+    let parsed: JsonRpcResponse<Value> = serde_json::from_str(&payload)
         .with_context(|| format!("invalid JSON-RPC response for '{}': {}", method, text))?;
 
     if let Some(error) = parsed.error {
@@ -84,17 +84,27 @@ fn parse_jsonrpc_result(method: &str, text: &str) -> Result<Value> {
         .context(format!("JSON-RPC response for '{}' missing result", method))
 }
 
-/// Return the JSON payload of `text`: the `data:` line of an SSE frame, or the
-/// input unchanged when it is already a bare JSON document.
-fn unwrap_sse_frame(text: &str) -> &str {
+/// Return the JSON payload of `text`: the joined `data:` lines of an SSE
+/// frame, or the input unchanged when it is already a bare JSON document.
+///
+/// The SSE grammar concatenates every `data:` line of an event with `\n`
+/// between them, so a server that splits a large JSON-RPC payload across
+/// several `data:` lines must not be reduced to its first line.
+fn unwrap_sse_frame(text: &str) -> std::borrow::Cow<'_, str> {
     let trimmed = text.trim_start();
     if !trimmed.starts_with("event:") && !trimmed.starts_with("data:") {
-        return text.trim();
+        return std::borrow::Cow::Borrowed(text.trim());
     }
-    trimmed
+    let data_lines: Vec<&str> = trimmed
         .lines()
-        .find_map(|line| line.strip_prefix("data:"))
-        .map_or(text.trim(), str::trim)
+        .filter_map(|line| line.strip_prefix("data:"))
+        .map(str::trim)
+        .collect();
+    match data_lines.len() {
+        0 => std::borrow::Cow::Borrowed(text.trim()),
+        1 => std::borrow::Cow::Borrowed(data_lines[0]),
+        _ => std::borrow::Cow::Owned(data_lines.join("\n")),
+    }
 }
 
 /// JSON-RPC 2.0 request envelope.
@@ -535,5 +545,24 @@ mod tests {
     fn new_client_starts_connected() {
         let client = HttpMcpClient::new("http://localhost:9999", HashMap::new());
         assert!(!client.is_disconnected());
+    }
+
+    #[test]
+    fn unwrap_sse_frame_joins_multiline_data_fields() {
+        // The SSE grammar concatenates the `data:` lines of one event with
+        // `\n`; a server that splits a payload across lines must round-trip.
+        let frame = "event: message\ndata: {\"jsonrpc\":\ndata: \"2.0\",\"result\":1}\n\n";
+        assert_eq!(
+            unwrap_sse_frame(frame),
+            "{\"jsonrpc\":\n\"2.0\",\"result\":1}"
+        );
+    }
+
+    #[test]
+    fn unwrap_sse_frame_keeps_bare_json_and_single_data_line() {
+        let bare = "{\"result\": 1}";
+        assert_eq!(unwrap_sse_frame(bare), bare);
+        let framed = "event: message\ndata: {\"result\": 1}\n\n";
+        assert_eq!(unwrap_sse_frame(framed), "{\"result\": 1}");
     }
 }

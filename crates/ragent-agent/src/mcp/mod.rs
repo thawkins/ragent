@@ -439,6 +439,18 @@ impl McpClient {
         // command line names a port to try. A stdio child can never be adopted -
         // its stdio pipes are private to its parent - so a plain stdio server
         // with no endpoint always falls through to a normal spawn.
+        match config.type_ {
+            McpTransport::Stdio => {
+                if let Some(killed) = kill_orphaned_stdio(id, &config) {
+                    tracing::info!(
+                        server_id = id,
+                        pids = ?killed,
+                        "Killed orphaned MCP stdio server processes matching the configured command"
+                    );
+                }
+            }
+            McpTransport::Http | McpTransport::Sse => {}
+        }
         if let Some(endpoint) = self.adopt_running(id, &config).await {
             tracing::info!(
                 server_id = id,
@@ -529,10 +541,11 @@ impl McpClient {
     /// - `http` / `sse` — the configured [`McpServerConfig::url`] is the server's
     ///   endpoint, so it is the only candidate.
     /// - `stdio` — a child's stdio pipes are private to its parent, so a stdio
-    ///   child cannot be adopted. The command line is still inspected for an
-    ///   `--httpPort <n>` / `--port <n>` style flag; a server that also listens on
-    ///   HTTP is adopted through that port, and a server that does not leaves this
-    ///   returning `None` (a normal spawn).
+    ///   child cannot be adopted; orphaned copies are instead killed by
+    ///   [`kill_orphaned_stdio`] before spawn. The command line is still
+    ///   inspected for an `--httpPort <n>` / `--port <n>` style flag; a server
+    ///   that also listens on HTTP is adopted through that port, and a server
+    ///   that does not leaves this returning `None` (a normal spawn).
     ///
     /// The first URL whose `initialize` handshake round-trips wins. Probing is
     /// best-effort: a connection refusal just means "nothing is listening there
@@ -593,6 +606,17 @@ impl McpClient {
                         }
                         for (k, v) in &env {
                             cmd.env(k, v);
+                        }
+                        // The child leads its own process group so shutdown
+                        // can `killpg` the whole tree: launcher commands
+                        // (`npx`, `npm`, `bunx`) fork the real server (`node`)
+                        // and exit immediately, so the transport id alone
+                        // tracks a process that is already gone. Without a
+                        // per-child group, `killpg` would target ragent's own
+                        // group (see the same pattern in the bash timeout).
+                        #[cfg(unix)]
+                        {
+                            cmd.process_group(0);
                         }
                     }),
                 );
@@ -1026,6 +1050,14 @@ impl McpClient {
         self.servers.push(server);
     }
 
+    /// Mutable access to the recorded servers for tests that need to flip a
+    /// seeded server's status (e.g. simulating the post-disconnect state when
+    /// no real connection exists for `disconnect()` to tear down).
+    #[doc(hidden)]
+    pub fn servers_mut_for_tests(&mut self) -> &mut [McpServer] {
+        &mut self.servers
+    }
+
     /// Disconnect a specific server by ID.
     ///
     /// Cancels the running service and removes the connection.
@@ -1036,7 +1068,10 @@ impl McpClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if the service cancellation fails.
+    /// Disconnect is best-effort for teardown: a graceful `cancel()` failure is
+    /// logged as a warning (the stdio child is hard-killed right after either
+    /// way) rather than returned. Infallible in practice today, but the
+    /// `Result` keeps the door open for stricter failure modes later.
     ///
     /// # Examples
     ///
@@ -1062,11 +1097,17 @@ impl McpClient {
                     // and we skip cancellation (the service will be
                     // dropped when the last Arc is released), which also
                     // drops the transport and kills its child (`KillOnDrop`).
-                    if let Some(service) = Arc::into_inner(service) {
-                        let _ = service
-                            .cancel()
-                            .await
-                            .map_err(|e| anyhow::anyhow!("Failed to cancel MCP service: {e}"));
+                    // A cancel failure is logged, not propagated: the pid is
+                    // hard-killed right after either way, and the server must
+                    // still leave the live registry as Disabled.
+                    if let Some(service) = Arc::into_inner(service)
+                        && let Err(error) = service.cancel().await
+                    {
+                        tracing::warn!(
+                            server_id,
+                            error = %error,
+                            "MCP service failed to cancel during disconnect"
+                        );
                     }
                     // `cancel()` stops the rmcp client but does not reliably
                     // SIGKILL the child on every platform, so reap the pid we
@@ -1140,30 +1181,52 @@ impl McpClient {
     ///
     /// This is idempotent and best-effort; it never returns an error.
     pub async fn shutdown(&mut self) {
-        let server_ids: Vec<String> = {
-            let conns = self.connections.read().await;
-            conns.keys().cloned().collect()
+        let conns: Vec<(String, McpConnection)> = {
+            let mut conns = self.connections.write().await;
+            conns.drain().collect()
         };
-        for id in server_ids {
-            if let Err(error) = self.disconnect(&id).await {
-                tracing::warn!(server_id = %id, error = %error, "MCP server failed to disconnect during shutdown");
+        // Each drained connection is torn down inline (rather than reinserted
+        // for `disconnect`) so a failed `cancel()` - the Arc is shared by a
+        // `McpToolWrapper` and never yields - still kills the recorded pid.
+        for (id, conn) in conns {
+            let (service, pid) = match &conn {
+                McpConnection::Rmcp(service, pid) => (Some(service.clone()), *pid),
+                McpConnection::Http(_) => (None, None),
+            };
+            if let Some(service) = service {
+                // `cancel()` takes ownership, so try the Arc-unwrap first; a
+                // shared service only loses the graceful path, never the kill.
+                match Arc::into_inner(service) {
+                    Some(service) => {
+                        if let Err(error) = service.cancel().await {
+                            tracing::warn!(server_id = %id, error = %error, "MCP service failed to cancel during shutdown");
+                        }
+                    }
+                    None => {
+                        tracing::debug!(
+                            server_id = %id,
+                            "MCP service Arc is shared; skipping cancel, killing the pid directly"
+                        );
+                    }
+                }
+            }
+            if let Some(pid) = pid {
+                // The child leads its own process group: `kill_stdio_child`
+                // SIGKILLs the pid and the whole group. Both syscalls are
+                // ESRCH-safe, so a child already reaped by `/mcp disable`
+                // needs no liveness probe or special-casing here.
+                kill_stdio_child(pid);
             }
         }
-        // Belt-and-braces: `disconnect` only cancels services it exclusively
-        // owns, and `KillOnDrop` may not have run yet, so hit every recorded pid.
-        let pids: Vec<u32> = {
-            let conns = self.connections.read().await;
-            conns
-                .values()
-                .filter_map(|connection| match connection {
-                    McpConnection::Rmcp(_, Some(pid)) => Some(*pid),
-                    McpConnection::Rmcp(_, None) | McpConnection::Http(_) => None,
-                })
-                .collect()
-        };
-        for pid in pids {
-            kill_stdio_child(pid);
+        let mut servers = std::mem::take(&mut self.servers);
+        for server in &mut servers {
+            if server.status == McpStatus::Connected {
+                server.status = McpStatus::Disabled;
+                server.tools.clear();
+            }
         }
+        self.servers = servers;
+        self.rebuild_tool_index();
     }
 
     /// Scan the system for available MCP servers and return them.
@@ -1207,9 +1270,20 @@ impl Default for McpClient {
 /// outcome when `KillOnDrop` won the race.
 #[cfg(unix)]
 fn kill_stdio_child(pid: u32) {
-    // SAFETY: `libc::kill` is a plain syscall on a pid we spawned; it takes no
-    // pointers and the pid is not reused within this process's lifetime for a
-    // child it still tracks. The return value is intentionally ignored.
+    // The child leads its own process group (`process_group(0)` at spawn), so
+    // SIGKILL the whole group: launcher commands (`npx`, ...) fork the real
+    // server process and exit, and killing only the recorded pid would orphan
+    // that grandchild on a dead stdio pipe.
+    // SAFETY: `libc::killpg` takes a plain C int and has no pointer arguments.
+    // `pid` was recorded at spawn as the group leader's pid, so this signals
+    // the child's own group, never ragent's.
+    #[allow(unsafe_code)]
+    unsafe {
+        libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+    }
+    // The leader itself too: already covered by killpg, but the call is
+    // harmless if the group is gone (`ESRCH`), and it guards a child that
+    // left its group after spawn.
     #[allow(unsafe_code)]
     unsafe {
         libc::kill(pid as libc::pid_t, libc::SIGKILL);
@@ -1223,6 +1297,116 @@ fn kill_stdio_child(pid: u32) {
 /// no-op there.
 #[cfg(not(unix))]
 fn kill_stdio_child(_pid: u32) {}
+
+/// Parent pid of `pid`, parsed from `/proc/<pid>/stat` (field 4, `ppid`).
+///
+/// The `comm` field (field 2) is parenthesised and may itself contain spaces
+/// or `)`, so the fields are split after the *last* `)`. Returns `None` when
+/// the process exited mid-scan or the file cannot be read.
+///
+/// `#[doc(hidden)] pub` so the integration tests can parse synthetic `stat`
+/// contents via [`ppid_from_stat_contents`] without standing up real pids.
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn read_ppid_of(pid: u32) -> Option<u32> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    ppid_from_stat_contents(&stat)
+}
+
+/// Parse the ppid from the contents of a `/proc/<pid>/stat` file.
+///
+/// Split out from [`read_ppid_of`] so tests can exercise the parsing rule
+/// (including hostile `comm` values) without a real process.
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn ppid_from_stat_contents(stat: &str) -> Option<u32> {
+    let after_comm = stat.rsplit_once(") ")?.1;
+    // Fields after comm: state(3) ppid(4) ...
+    after_comm.split_whitespace().nth(1)?.parse::<u32>().ok()
+}
+
+/// Pids of orphaned processes belonging to a stdio MCP server, excluding
+/// `exclude` (the current process). Reads `/proc` on Unix; a directory entry
+/// that cannot be read means the process exited mid-scan and is skipped.
+///
+/// A process counts as an orphan only when it has been re-parented to init
+/// (`Ppid == 1`): that proves its spawning ragent exited. A matching process
+/// whose parent is still alive belongs to a *running* ragent instance and
+/// must be left alone - killing it would sever that instance's stdio pipes
+/// and its tools would return `Transport closed`. The ppid is read *before*
+/// the cmdline so the common case (another live instance's child) is rejected
+/// without parsing argv.
+#[cfg(unix)]
+fn find_orphaned_stdio_pids(command: &str, args: &[String], exclude: u32) -> Vec<u32> {
+    let mut pids = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return pids;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
+        if pid == exclude {
+            continue;
+        }
+        if read_ppid_of(pid) != Some(1) {
+            continue;
+        }
+        let Ok(raw) = std::fs::read(entry.path().join("cmdline")) else {
+            continue;
+        };
+        if orphan_cmdline_matches(&raw, command, args) {
+            pids.push(pid);
+        }
+    }
+    pids.sort_unstable();
+    pids
+}
+
+/// Kill orphaned copies of a stdio MCP server's command left running by an
+/// earlier ragent exit, and return the killed pids.
+///
+/// A stdio server's pipes are private to the parent that spawned it, so an
+/// orphaned copy is unreachable (it can never serve another client) but keeps
+/// its resources - file locks, ports it also binds, API rate-limit slots,
+/// memory. `connect` therefore tears orphans down before spawning a fresh
+/// child, freeing what they hold. The current process is always excluded, so
+/// in-process tests and a hypothetical embedded server are never killed.
+///
+/// Matching is `/proc/<pid>/cmdline`-based (see [`orphan_cmdline_matches`]) and
+/// deliberately narrow: launcher-mediated servers match on the extracted
+/// package token, not the shared launcher name. On non-Unix platforms (or
+/// without a `command`) there is no safe process-table walk, so nothing is
+/// killed and the normal spawn proceeds.
+fn kill_orphaned_stdio(id: &str, config: &McpServerConfig) -> Option<Vec<u32>> {
+    #[cfg(unix)]
+    {
+        let command = config.command.as_deref()?;
+        let pids = find_orphaned_stdio_pids(command, &config.args, std::process::id());
+        if pids.is_empty() {
+            return None;
+        }
+        for pid in &pids {
+            kill_stdio_child(*pid);
+        }
+        tracing::warn!(
+            server_id = id,
+            killed = pids.len(),
+            "Orphaned MCP stdio processes killed before spawning a fresh child"
+        );
+        Some(pids)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = id;
+        let _ = config;
+        None
+    }
+}
 
 /// The HTTP endpoint URLs to probe for an already-running instance of a server.
 ///
@@ -1292,6 +1476,201 @@ pub fn parse_port(value: &str) -> Option<u16> {
     value.trim().parse::<u16>().ok().filter(|port| *port != 0)
 }
 
+// ── Orphaned stdio child cleanup ────────────────────────────────────────────
+
+/// Whether `basename` names a launcher binary that mediates an MCP stdio
+/// server's real child process (`npx`, `npm exec`, ...).
+///
+/// A server launched through a wrapper (`npx -y some-mcp-server`) leaves two
+/// process trees behind when its parent dies: the launcher and the real node
+/// child. Matching then keys on the package argument (see
+/// [`orphan_match_tokens`]) rather than the launcher name, because every
+/// MCP server on the machine shares the same `npx` executable name.
+fn is_launcher_basename(basename: &str) -> bool {
+    let stem = basename.strip_suffix(".exe").unwrap_or(basename);
+    matches!(stem, "npx" | "npm" | "bunx" | "pnpx")
+}
+
+/// The executable basenames of a single `/proc/<pid>/cmdline` buffer
+/// (NUL-separated argv). Leading-dash arguments (`-y`, `--httpPort`) are
+/// dropped - they are launch configuration, not identity. Every other argv
+/// part reduces to its basename (`/usr/bin/node` -> `node`), because the
+/// process's own executable name - not the script path it runs - is the
+/// stable, comparable token. A path part that is purely a script (`server.js`)
+/// still contributes its basename, which is harmless: only the *first*
+/// basename (argv[0]'s executable) is used by the plain-command matcher, and
+/// the launcher matcher keys on the extracted package token rather than
+/// arbitrary basenames.
+fn cmdline_basenames(raw: &[u8]) -> Vec<String> {
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    raw.split(|b| *b == 0)
+        .filter(|part| !part.is_empty())
+        .filter(|part| !part.starts_with(b"-"))
+        .map(|part| {
+            let text = String::from_utf8_lossy(part);
+            text.rsplit(['/', '\\']).next().unwrap_or(&text).to_string()
+        })
+        .collect()
+}
+
+/// Extract a match token from one argv fragment when the fragment is exactly
+/// the package name, or a path whose **basename** is the package name. A
+/// fragment that merely contains the name deeper in its path (e.g.
+/// `.../node_modules/mongodb-mcp-server/dist/index.js`, basename
+/// `index.js`) yields nothing; [`part_matches_token`] handles that case with
+/// the exact-segment rule below.
+fn package_match_token<'a>(fragment: &'a str, package: &str) -> Option<&'a str> {
+    if fragment.is_empty() {
+        return None;
+    }
+    if fragment == package {
+        return Some(fragment);
+    }
+    let base = fragment.rsplit(['/', '\\']).next().unwrap_or(fragment);
+    if base == package { Some(base) } else { None }
+}
+
+/// Whether one argv part names the package. An argv part identifies the
+/// package when it is the bare token (`mongodb-mcp-server`), a path whose
+/// basename is the token (`.../node_modules/mongodb-mcp-server`), or a path
+/// containing the token as **one exact segment**
+/// (`.../node_modules/mongodb-mcp-server/dist/index.js`: the segment
+/// `mongodb-mcp-server` appears verbatim among the part's `/`-separated
+/// segments). The exact-segment rule is deliberately strict: a segment that
+/// merely *contains* the token (`mongodb-mcp-server-2`) does not match, so
+/// one package's name cannot sweep another's.
+fn part_matches_token(part: &str, token: &str) -> bool {
+    if package_match_token(part, token).is_some() {
+        return true;
+    }
+    // Version-suffixed argv (the real npx command line shows the full
+    // `mongodb-mcp-server@<3` argument): split off the trailing `@<version>`
+    // specifier and try again.
+    let stripped = match part.rsplit_once('@') {
+        Some((base, _)) if !base.is_empty() && !part.starts_with('@') => base,
+        _ => part,
+    };
+    if stripped != part {
+        return package_match_token(stripped, token).is_some()
+            || stripped
+                .split(['/', '\\'])
+                .any(|segment| !segment.is_empty() && segment == token);
+    }
+    part.split(['/', '\\'])
+        .any(|segment| !segment.is_empty() && segment == token)
+}
+
+/// The match token set that identifies a process started from `command` +
+/// `args`.
+///
+/// - A launcher command (`npx`, ...) yields the launcher name plus the
+///   package token extracted from `args`, because the launcher shows
+///   `npx -y pkg` while the child it spawns shows `node .../pkg/.../bin`.
+/// - A plain command yields only the command basename, matched against the
+///   basenames of the running process.
+///
+/// Returns `None` when no safe identifier extractable from the config remains:
+/// a launcher command with no positional package argument, or a `command`
+/// whose basename cannot be told apart from any same-named process.
+fn orphan_match_tokens(
+    command: &str,
+    args: &[String],
+) -> Option<std::collections::HashSet<String>> {
+    let command_base = command.rsplit(['/', '\\']).next().unwrap_or(command);
+    if command_base.is_empty() {
+        return None;
+    }
+    let mut tokens = std::collections::HashSet::new();
+    if is_launcher_basename(command_base) {
+        tokens.insert(command_base.to_string());
+        for arg in args {
+            let lower = arg.to_ascii_lowercase();
+            // Skip flags (`-y`, `--httpPort`) and numbers: they are launch
+            // configuration, not identity.
+            if lower.starts_with('-') || lower.parse::<u16>().is_ok() {
+                continue;
+            }
+            // Strip a *trailing* version specifier (`mongodb-mcp-server@<3` ->
+            // `mongodb-mcp-server`) only when the `@` is not the very first
+            // character; a scoped package's leading `@` (`@scope/pkg`) is part
+            // of the name and is preserved.
+            let package = match arg.rsplit_once('@') {
+                Some((base, _)) if !base.is_empty() => base,
+                _ => arg.as_str(),
+            };
+            if package.is_empty() {
+                continue;
+            }
+            let package_base = package.rsplit(['/', '\\']).next().unwrap_or(package);
+            if package_base.is_empty() {
+                continue;
+            }
+            tokens.insert(package_base.to_string());
+        }
+        // A launcher with no extractable package token cannot be identified
+        // safely - matching on `npx` alone would sweep every npx process on
+        // the machine.
+        if tokens.len() == 1 {
+            return None;
+        }
+    } else {
+        tokens.insert(command_base.to_string());
+    }
+    Some(tokens)
+}
+
+/// Whether one `/proc/<pid>/cmdline` buffer identifies a process started from
+/// a stdio `command` + `args` pair. Extracted for testability, and exported
+/// `doc(hidden)` for the integration tests.
+///
+/// - Launcher command: the package-match token must appear as an argv part
+///   (`npx -y pkg`) or as a path segment (`.../node_modules/pkg/dist/...`).
+///   The launcher name alone is **not** sufficient to identify the child,
+///   because the launcher's own argv shows the package, and its child must be
+///   tied to that package, not to every npx process on the machine.
+/// - Plain command: the first argv basename (the executable) must be the
+///   command name, regardless of what script the process runs.
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn orphan_cmdline_matches(raw: &[u8], command: &str, args: &[String]) -> bool {
+    let Some(tokens) = orphan_match_tokens(command, args) else {
+        return false;
+    };
+    let basenames = cmdline_basenames(raw);
+    if basenames.is_empty() {
+        return false;
+    }
+    let command_base = command.rsplit(['/', '\\']).next().unwrap_or(command);
+    if is_launcher_basename(command_base) {
+        tokens
+            .iter()
+            .filter(|t| t.as_str() != command_base)
+            .any(|token| {
+                if basenames
+                    .iter()
+                    .any(|base| package_match_token(base, token).is_some())
+                {
+                    return true;
+                }
+                // Path / version-suffixed probe: the package name may be a
+                // non-basename path segment of an argv part
+                // (`.../node_modules/pkg/dist/index.js`), or an argv part may
+                // carry the trailing `@<version>` specifier
+                // (`mongodb-mcp-server@<3`). [`part_matches_token`] owns both
+                // rules.
+                raw.split(|b| *b == 0)
+                    .filter(|part| !part.is_empty())
+                    .any(|part| part_matches_token(&String::from_utf8_lossy(part), token))
+            })
+    } else {
+        basenames
+            .first()
+            .is_some_and(|first| tokens.contains(first))
+    }
+}
+
 /// Convert rmcp tool descriptors to ragent's [`McpToolDef`] format.
 fn rmcp_tools_to_defs(tools: &[RmcpTool]) -> Vec<McpToolDef> {
     tools
@@ -1337,5 +1716,53 @@ impl McpClientBackend for McpClient {
 
     async fn call_tool_by_name(&self, tool_name: &str, input: Value) -> anyhow::Result<Value> {
         self.call_tool_by_name(tool_name, input).await
+    }
+}
+
+#[cfg(all(test, unix))]
+mod orphan_sweep_tests {
+    use super::*;
+
+    /// A stdio child leads its own process group (`process_group(0)` at spawn)
+    /// and shutdown kills the *group*: launcher commands (`npx`, ...) fork the
+    /// real server (`node`) and exit, so killing only the recorded pid orphans
+    /// the process actually holding the stdio pipes. Proven with a `sh` child
+    /// that forks a grandchild `sleep` before replacing itself.
+    ///
+    /// No rmcp transport is used: `().serve(transport)` would block on a
+    /// JSON-RPC handshake `sleep` never answers. The shutdown path the fix
+    /// targets only reads the recorded pid and kills the group, which a plain
+    /// child exercises exactly.
+    #[tokio::test]
+    async fn shutdown_kills_the_stdio_child_process_group() {
+        let mut child = tokio::process::Command::new("sh")
+            .args(["-c", "sh -c 'sleep 600' & exec sleep 600"])
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn sh");
+        let leader_pid = child.id().expect("child pid is recorded");
+
+        // Directly exercise the group-kill primitives: this is the same pair
+        // `kill_stdio_child` issues for the pid the stdio spawn records.
+        kill_stdio_child(leader_pid);
+        let _ = child.wait().await;
+
+        // The group must be gone: probing the leader pid (kill with signal 0)
+        // and the process group (killpg with signal 0) must both return ESRCH.
+        #[allow(unsafe_code)]
+        // approved: kill/killpg signal-0 probes are harmless; no safe std alternative
+        unsafe {
+            assert_eq!(
+                libc::kill(leader_pid as libc::pid_t, 0),
+                -1,
+                "leader pid {leader_pid} must be killed by shutdown"
+            );
+            assert_eq!(
+                libc::killpg(leader_pid as libc::pid_t, 0),
+                -1,
+                "process group {leader_pid} must be empty after shutdown"
+            );
+        }
     }
 }

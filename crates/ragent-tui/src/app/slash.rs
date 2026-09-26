@@ -654,7 +654,7 @@ fn is_help_args(args: &str) -> bool {
 /// `live` (the `Event::McpStatusChanged` map) when present, so the background
 /// startup connect loop's status is not lost; otherwise it starts `Disabled`
 /// until the connect path reports otherwise.
-pub fn mcp_display_servers<S, H>(
+pub(crate) fn mcp_display_servers<S, H>(
     previous: &[ragent_agent::mcp::McpServer],
     configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
     working_dir: &std::path::Path,
@@ -697,35 +697,29 @@ where
 /// `enabled` (the persisted global enable-state map) is the authoritative
 /// answer when it carries an entry for the server; an absent entry means
 /// enabled, matching [`ragent_agent::mcp::is_server_enabled`]. A server with no
-/// map entry but a `disabled: true` in its own config is reported disabled.
+/// The registry name an MCP tool is registered under (`mcp_<server>_<tool>`
+/// with `-`, `.` and `/` replaced by `_`).
+///
+/// Thin re-export of [`ragent_agent::tool::McpToolWrapper::ragent_name_for`]
+/// so the existing TUI call sites keep their short path.
 #[must_use]
-pub fn server_is_enabled(
+pub(crate) fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
+    ragent_agent::tool::McpToolWrapper::ragent_name_for(server_id, tool_name)
+}
+
+/// Whether a server is enabled under the TUI's cached copy of the persisted
+/// global enable state: an id absent from the map is enabled, and a
+/// `disabled: true` in the server's own config wins over the map.
+///
+/// This is exactly what [`ragent_agent::mcp::is_server_enabled`] reduces to;
+/// synthesizing a ledger per call just to invoke that predicate wastefully
+/// rebuilds a `BTreeMap` for every `/mcp` row.
+#[must_use]
+pub(crate) fn server_is_enabled(
     server: &ragent_agent::mcp::McpServer,
     enabled: &std::collections::HashMap<String, bool>,
 ) -> bool {
-    ragent_agent::mcp::is_server_enabled(&server.config, &ledger_from_map(enabled), &server.id)
-}
-
-/// The registry name an MCP tool is registered under, mirroring
-/// [`ragent_agent::tool::McpToolWrapper::ragent_name`] (`mcp_<server>_<tool>`
-/// with `-`, `.` and `/` replaced by `_`).
-#[must_use]
-pub fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
-    let safe_server = server_id.replace(['-', '.', '/'], "_");
-    let safe_tool = tool_name.replace(['-', '.', '/'], "_");
-    format!("mcp_{safe_server}_{safe_tool}")
-}
-
-/// Build a ledger view over a plain `server_id -> enabled` map (the TUI's
-/// cached copy of the persisted global enable state).
-fn ledger_from_map(
-    enabled: &std::collections::HashMap<String, bool>,
-) -> ragent_agent::mcp::McpEnableLedger {
-    let mut ledger = ragent_agent::mcp::McpEnableLedger::default();
-    for (id, on) in enabled {
-        ledger.set_enabled(id, *on);
-    }
-    ledger
+    !server.config.disabled && enabled.get(&server.id).copied().unwrap_or(true)
 }
 
 /// Map an `Event::McpStatusChanged` status string onto an [`McpStatus`].
@@ -733,7 +727,7 @@ fn ledger_from_map(
 /// Unknown strings map to `Disabled` so a malformed event cannot wedge the
 /// display list in a bogus state.
 #[must_use]
-pub fn mcp_status_from_event(status: &str) -> ragent_agent::mcp::McpStatus {
+pub(crate) fn mcp_status_from_event(status: &str) -> ragent_agent::mcp::McpStatus {
     match status {
         "connected" => ragent_agent::mcp::McpStatus::Connected,
         "needs_auth" => ragent_agent::mcp::McpStatus::NeedsAuth,
@@ -888,20 +882,8 @@ impl App {
             "blueprints" => {
                 vec!["help".to_string(), "list".to_string()]
             }
-            "reverse" => {
-                vec![
-                    "help".to_string(),
-                    "--help".to_string(),
-                    "--language".to_string(),
-                    "--type".to_string(),
-                    "--stack".to_string(),
-                    "--create".to_string(),
-                    "--depth".to_string(),
-                    "--folder".to_string(),
-                    "--github".to_string(),
-                    "--gitlab".to_string(),
-                ]
-            }
+            // `/reverse` no longer exists as a top-level command (it moved
+            // under `/spec reverse`), so it must not surface in autocomplete.
             "new" => {
                 vec![
                     "help".to_string(),
@@ -5292,6 +5274,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                             config: Some(Arc::new(ragent_agent::Config::load().unwrap_or_default())),
                                                             allowed_roots: vec![working_dir_clone.clone()],
                                                             cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                                                            tool_registry: ragent_agent::tool::ToolContext::default_tool_registry(),
                                                             read_timestamps: session_processor.read_timestamps.clone(),
                                                             canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
                                                         };
