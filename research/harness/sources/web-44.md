@@ -1,0 +1,19 @@
+# Web source
+
+- URL: https://hermes-agent.ai/integrations/webhooks
+- Title: Hermes Agent + Webhooks — Trigger Runs from Events
+- Author(s): —
+- Language: English
+- Published (UTC): —
+- Captured (UTC): 2026-09-05T10:27:22.289016835+00:00
+- Relevance: High — title + snippet match query
+
+
+```text
+Integration
+Use Hermes webhooks to receive GitHub, GitLab, Jira, Stripe, or custom POST events, validate signatures, transform payloads, and route agent responses.
+Quick answerHermes webhooks let external systems trigger agent runs over HTTP. Configure a route, protect it with an HMAC secret, send events to /webhooks/<route-name>, and let Hermes turn the payload into an agent task or notification.Managed cloud · API costs included · No gateway maintenance
+Best forOperators who want a practical agent workflow, not only a chat demo.Teams that need a clear setup path, smoke test, and permission boundary.Workflows that should connect Hermes to other tools such as GitHub, Linear, Notion, Telegram, Slack, or email.Self-hosted users who need to understand what runs locally and what credentials are required.Features✓v0.20 signed outbound lifecycle events for session, turn, and tool activity✓HMAC verification, replay rejection, and idempotent receiver guidance✓HTTP webhook server for external POST events✓Named webhook routes with per-route prompts and event filters✓HMAC signature validation with a global or route-specific secret✓Health check at /health for deployment verification✓Works with GitHub, GitLab, Jira, Stripe, internal apps, and custom scripts✓Responses can be routed back to chat platforms, comments, logs, or follow-up toolsSetup path1Enable the webhook platform with hermes gateway setup or environment variables such as WEBHOOK_ENABLED=true.2Set a strong WEBHOOK_SECRET and avoid unauthenticated routes outside local testing.3Create a named route in config or with hermes webhook subscribe <name>.4Verify the server with curl http://localhost:8644/health.5Point the external service at https://your-host/webhooks/<route-name>.6Send a test payload and confirm Hermes transforms it into the expected prompt and delivery path.When webhooks are better than cronCron is for scheduled checks. Webhooks are for “something happened, act now.” Use webhooks when a pull request opens, a payment fails, a support ticket changes, or an internal tool emits an event that should produce a focused agent run.
+•GitHub PR opened → summarize risk and assign review steps.•Stripe dispute created → notify the team and draft the checklist.•Internal form submitted → create a Linear issue and send a Telegram summary.Route designDo not send every event to one giant prompt. Create small, named routes with specific event filters and specific instructions. That keeps the agent grounded and makes failures easier to debug.
+•Use separate routes for GitHub PRs, billing events, customer forms, and alerts.•Keep secrets per route when different systems have different trust levels.•Log payload shape during testing, then remove noisy debugging once the route is stable.Common setup issuesThe integration appears enabled but nothing happens — restart the Hermes gateway or start a fresh Hermes session after config changes.Credentials work in one shell but not in the gateway — check the active Hermes profile and where the gateway process reads its environment.The workflow is too broad — split it into smaller routes, skills, or prompts with one expected outcome each.Keep building the workflowFAQWhat port does the webhook adapter use?The default documented port is 8644, but use your configured gateway value if you changed it.Can I test a webhook locally?Yes. Start the gateway, hit /health, then send a small signed test payload to your route.Should I ever use INSECURE_NO_AUTH?Only for temporary local testing. Public webhook routes should validate signatures.Related setup guidesOther Integrations
+```
