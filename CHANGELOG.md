@@ -1,5 +1,102 @@
 # Changelog
 
+## [1.0.121] - 2026-09-27
+
+Release of the staged working tree: documentation refresh for v1.0.120, a
+`/simplify all` pass over the 50-file changed set (including the FUNC-015 test
+hardening below), and the regression cover for the rollback race fixed in
+v1.0.120's working tree.
+
+### Fixed (this release)
+
+- The FUNC-015 guard test (`test_block_in_place_guard`) broke when the last
+  `Handle::current().block_on` site in `src/app/slash.rs` was reformatted by
+  rustfmt onto two lines: the guard only matched `Handle::current().block_on`
+  on a single line and then (after the legitimate `/mcp` awaits were exempted)
+  found zero sites to check. The guard now also matches a
+  `Handle::current()` receiver whose `.block_on(..)` continues on the next
+  line, and a new `AWAITED_EXEMPTIONS` table pins the `/mcp
+  discover|connect|disconnect` sites that were legitimately converted to plain
+  `.await`s (the slash dispatcher is itself async, so awaiting is the correct
+  fix, not `block_in_place`).
+
+### Code quality (`/simplify all`)
+
+- Reviewed the 50-file changed set with four parallel reviewers and applied the
+  worthwhile findings (no behaviour change):
+  - `ragent-agent/src/tool/mod.rs` `remove_all` now releases the registry write
+    lock with a scoped block before draining tools, instead of a manual
+    `drop(tools)`.
+  - `ragent-plugins/src/store_provider.rs` no longer double-SHA-256s the
+    marketplace document: the provider records it and receives the key from
+    `record_document`. The per-entry JSON round-trip was removed via a new
+    `inline_manifest_in(&Value, …)` helper.
+  - `ragent-plugins/src/manifest.rs` extracts a duplicated skills-directory
+    merge into `merge_scanned_skills`.
+  - `ragent-plugins/src/marketplace.rs` drops the redundant `root.clone()`
+    candidate in `materialize_at` and logs the materialise error at `debug!`.
+  - `ragent-tui/src/app/models.rs` and `ragent-agent/src/tool/tool_info.rs`
+    `tool_source` now read the registry's `mcp_wrapper_info()` (with the exact
+    `ragent_name_for` prefix fallback) instead of duplicating the naming
+    logic, keeping the TUI `/tools` report and the tool dump consistent.
+  - `tool_info.rs` additionally gains a `VISIBILITY_SWITCHES` const and a
+    single `mcp_wrapper_info` query for the registry snapshot.
+  - `ragent-tui/src/app/slash.rs` removes the nested
+    `block_in_place`/`block_on` from `/mcp connect|disconnect|discover` (the
+    arms are now awaited directly and collapsed).
+  - `ragent-tui/src/app/state.rs` `set_mcp_server_enabled` now validates
+    before touching the on-disk ledger.
+
+### Fixed
+
+- Accepting the TUI's post-loop rollback offer (`Enter` on the change-summary)
+  could report success while the workspace file still held the loop's mutated
+  contents: the spawned `SessionProcessor::rollback_loop` task removed the
+  capture from `active_loop_captures` *before* the blocking snapshot-write
+  completed, so a caller polling on the capture map becoming empty observed
+  "capture dropped, file restored" a beat early (the intermittent CI failure
+  of `test_rollback_accept_restores_snapshot`). The capture is now removed
+  only after the restore has fully completed, and a failed restore leaves the
+  capture pending for retry. Regression cover lives in
+  `crates/ragent-agent/tests/test_rollback_capture.rs`.
+
+- OpenSkills discovered under `~/.agents/skills/` (and project-local
+  `.agents/skills/`) are now loaded and registered. The skill discovery scan
+  previously only covered the `.agent` and `.claude` directory variants, so
+  skills installed by the `skills` CLI into its default `.agents` location were
+  invisible to ragent. Both the global and project scans now cover
+  `.agent`, `.agents`, and `.claude`, under the existing
+  `openskills-global` / `openskills-project` scopes.
+- The Claude store's `*-lsp` stubs (`rust-analyzer-lsp`, `gopls-lsp`,
+  `pyright-lsp`, ...) now install instead of failing with `no plugin manifest
+  found`.
+  Those marketplace entries are self-describing stubs: the entry
+  itself carries the plugin's manifest content inline (`lspServers`), while
+  the repo subdirectory its `source` points at holds only a README and a
+  LICENSE. The store provider now records the parsed marketplace document
+  in-process (keyed by `sha256(origin-url + document bytes)`) and suffixes
+  such an entry's git-subdir source with that key; when `/plugins add` clones
+  a keyed source and finds no manifest in the checked-out tree, it
+  materialises the recorded inline manifest into `.claude-plugin/plugin.json`
+  (listing-only marketplace fields stripped) so the plugin installs as an
+  ordinary Claude-dialect non-JS bundle. The bridged-in `lspServers` /
+  `monitors` sections are reported under the new FR-025 `claude lsp servers`
+  unsupported capability; a checked-out tree that already carries a manifest
+  is never overwritten, and a source without a registered key installs
+  exactly as before.
+
+- **Claude-marketplace plugins that ship a conventional `skills/` directory but
+  declare no `skills` manifest section now contribute their skills.** The
+  plugins spec FR-029 bridge previously only honoured an explicit `skills`
+  declaration (a string or list of directories), so plugins like
+  `mcp-server-dev` (from the Claude marketplace) — which rely on the
+  convention that a `skills/` directory at the plugin root holds `SKILL.md`
+  packs — installed and listed cleanly but exposed none of their skills to
+  `skill_manage` / `/plugins list`. Both manifest parsers now probe the plugin
+  root for the conventional `skills/` directory when the manifest declares no
+  `skills` section, and merge the result (declared entries first, de-duplicated)
+  the same way the `agents/` directory scan works.
+
 ## [1.0.120] - 2026-09-26
 
 Release of the working tree carrying the introspection tools, MCP orphan-sweep

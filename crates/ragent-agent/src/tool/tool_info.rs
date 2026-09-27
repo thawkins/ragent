@@ -96,8 +96,8 @@ pub struct CommandsInfoTool;
 /// - `plugin:<id>` for plugin-registered tools (`plugin_<id>_<tool>`);
 /// - the visibility-switch family name for family-gated built-ins;
 /// - `internal` otherwise.
-fn tool_source(tool: &Arc<dyn Tool>) -> String {
-    if let Some((server_id, _tool_name)) = tool.mcp_wrapper_info() {
+fn tool_source(tool: &Arc<dyn Tool>, mcp_info: Option<(&str, &str)>) -> String {
+    if let Some((server_id, _tool_name)) = mcp_info {
         return format!("mcp:{server_id}");
     }
     let name = tool.name();
@@ -107,18 +107,7 @@ fn tool_source(tool: &Arc<dyn Tool>) -> String {
         }
         return "plugin".to_string();
     }
-    for switch in [
-        "office",
-        "github",
-        "gitlab",
-        "teams",
-        "agents",
-        "plan",
-        "codeindex",
-        "masterfetch",
-        "browser",
-        "finance",
-    ] {
+    for switch in VISIBILITY_SWITCHES {
         if let Some(names) = ragent_config::tool_family_names(switch)
             && names.contains(&name)
         {
@@ -128,6 +117,23 @@ fn tool_source(tool: &Arc<dyn Tool>) -> String {
     "internal".to_string()
 }
 
+/// The visibility-switch family names scanned by [`tool_source`]. Mirrors
+/// `tool_visibility_switches` in ragent-config's `ToolVisibilityConfig`; kept
+/// in one place so adding a family means editing one list here and the
+/// config struct.
+const VISIBILITY_SWITCHES: &[&str] = &[
+    "office",
+    "github",
+    "gitlab",
+    "teams",
+    "agents",
+    "plan",
+    "codeindex",
+    "masterfetch",
+    "browser",
+    "finance",
+];
+
 /// Build the sorted snapshot of every registered tool (visible + hidden).
 fn registry_snapshot(registry: &ToolRegistry) -> Vec<ToolInfoEntry> {
     let hidden = registry.hidden();
@@ -136,19 +142,17 @@ fn registry_snapshot(registry: &ToolRegistry) -> Vec<ToolInfoEntry> {
         .into_iter()
         .map(|tool| {
             let name = tool.name().to_string();
-            let mcp = tool
-                .mcp_wrapper_info()
-                .map(|(server_id, tool_name)| McpToolRef {
-                    server_id: server_id.to_string(),
-                    tool_name: tool_name.to_string(),
-                });
+            let mcp_info = tool.mcp_wrapper_info();
             ToolInfoEntry {
                 hidden: hidden.contains(&name),
-                source: tool_source(&tool),
+                source: tool_source(&tool, mcp_info),
                 description: tool.description().to_string(),
                 parameters: tool.parameters_schema(),
                 permission_category: tool.permission_category().to_string(),
-                mcp,
+                mcp: mcp_info.map(|(server_id, tool_name)| McpToolRef {
+                    server_id: server_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                }),
                 name,
             }
         })

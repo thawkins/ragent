@@ -1817,6 +1817,38 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.121
+
+- **`tool_info` and `commands_info` introspection tools** — two new read-only
+  tools (permission category `none`, hardwired auto-approve). `tool_info`
+  returns a JSON dump of every registered tool (name, description, parameters
+  schema, permission category, source family, hidden state, MCP provenance) and
+  `commands_info` returns a JSON catalog of every slash command — the built-in
+  TUI set plus commands contributed by enabled plugins (169 -> 171 tools).
+- **MCP duplicate-process cleanup and shutdown** — `McpClient::connect` sweeps
+  orphaned earlier copies of a stdio server before spawning (a process counts
+  as an orphan only once re-parented to init, so a live sibling ragent's server
+  is never killed); on exit the whole spawned process group is torn down, so no
+  `npx`/`node` MCP children are left behind.
+- **Rollback race fix** — accepting the TUI's post-loop rollback offer removes
+  the capture from `active_loop_captures` only after the restore fully
+  completes (a failed restore leaves it pending for retry), fixing the
+  intermittent `test_rollback_accept_restores_snapshot` CI failure.
+- **OpenSkills `.agents` discovery** — `~/.agents/skills/` (global) and
+  `.agents/skills/` (project) join the `.agent`/`.claude` variants, so skills
+  installed by the `skills` CLI into its default location now load.
+- **Claude store `*-lsp` stubs install** — marketplace entries whose repo
+  subdirectory holds no manifest (e.g. `rust-analyzer-lsp`) install via a
+  manifest materialised from the marketplace document's inline `lspServers`
+  content into `.claude-plugin/plugin.json`; plugins shipping a conventional
+  `skills/` directory without a `skills` manifest section now bridge those
+  skills too.
+- **`/simplify all` pass** over the 50-file changed set (registry lock scoping
+  in `remove_all`, no double SHA-256 or JSON round-trip in the store provider,
+  shared `merge_scanned_skills`, single `mcp_wrapper_info` source classifiers,
+  awaited `/mcp connect|disconnect|discover` arms, validation-before-ledger in
+  `set_mcp_server_enabled`); no behaviour change.
+
 ## Version 1.0.119
 
 - **Sessionful Streamable-HTTP MCP servers report their tools** — the HTTP MCP

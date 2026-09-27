@@ -43,11 +43,17 @@ impl App {
         if trimmed.is_empty() {
             return false;
         }
-        trimmed.contains('│')
-            || (trimmed.contains('─')
-                && trimmed
-                    .chars()
-                    .all(|c| matches!(c, '─' | '┬' | '┼' | '┴' | ' ')))
+        // A run of `─` (optionally broken by top/bottom junctions) is a
+        // horizontal border emitted by html2text; the left-`┬`, join-`┼`, and
+        // right-`┴` variants all qualify as borders.  A row containing any
+        // vertical bar (`│`) is treated as a data row.
+        if trimmed.contains('│') {
+            return true;
+        }
+        trimmed.contains('─')
+            && trimmed
+                .chars()
+                .all(|c| matches!(c, '─' | '┬' | '┼' | '┴' | ' '))
     }
 
     pub(crate) fn table_row_cells(line: &str) -> Vec<String> {
@@ -66,6 +72,10 @@ impl App {
     /// Normalize ASCII table rendering: collapse repeated border rows, ensure
     /// each table has a top border, and emit clean aligned rows for display.
     pub fn normalize_ascii_tables(&self, rendered: &str) -> String {
+        Self::normalize_ascii_tables_impl(rendered)
+    }
+
+    fn normalize_ascii_tables_impl(rendered: &str) -> String {
         let lines: Vec<&str> = rendered.lines().collect();
         let mut out: Vec<String> = Vec::new();
         let mut i = 0usize;
@@ -103,8 +113,30 @@ impl App {
                 continue;
             }
 
+            // Drop every trailing separator the block ends with: the bottom
+            // border below the last data row is emitted once, by the
+            // `write_bottom` pass after the loop.
+            let mut keep = rows.len();
+            while keep > 0 && separators[keep - 1] {
+                keep -= 1;
+            }
+            let rows = &rows[..keep];
+            let separators = &separators[..keep];
+
+            // html2text strips rows in which no `<td>` carries content, but a
+            // row can still be present when every cell was a whitespace-only
+            // text node (the pipeline emits one at the top of a table whose
+            // first body row the parser dropped).  Treat such a row as a
+            // separator so it does not emit an all-blank line like
+            // `| | | ... |`, but still mark the bottom border as required so the
+            // table is not left unterminated.
+            let write_bottom = separators.iter().any(|is_sep| *is_sep)
+                || rows
+                    .iter()
+                    .any(|cells| cells.iter().all(|cell| cell.is_empty()));
+
             let mut widths = vec![0usize; col_count];
-            for row in &rows {
+            for row in rows {
                 for (idx, cell) in row.iter().enumerate() {
                     widths[idx] = widths[idx].max(cell.chars().count());
                 }
@@ -113,7 +145,7 @@ impl App {
             let border = Self::table_border(&widths);
             let mut wrote_top = false;
             for (idx, row) in rows.iter().enumerate() {
-                if separators[idx] {
+                if separators[idx] || row.iter().all(|cell| cell.is_empty()) {
                     if !wrote_top {
                         out.push(border.clone());
                         wrote_top = true;
@@ -138,7 +170,7 @@ impl App {
                 }
                 out.push(line);
             }
-            if wrote_top {
+            if write_bottom {
                 out.push(border);
             }
         }
@@ -2205,7 +2237,11 @@ impl App {
                 // Name (56) + spacer + source (24) + spacer = 82 columns of the
                 // message window's 118 inner columns; the description is
                 // hard-truncated to 30 so no row can reach the right border.
-                output.push_str(&self.tool_row(&def.name, &def.description));
+                output.push_str(&self.tool_row(
+                    &self.session_processor.tool_registry,
+                    &def.name,
+                    &def.description,
+                ));
             }
             if !disabled.is_empty() {
                 output.push_str(&format!(
@@ -2213,7 +2249,11 @@ impl App {
                     disabled.len()
                 ));
                 for def in &disabled {
-                    output.push_str(&self.tool_row(&def.name, &def.description));
+                    output.push_str(&self.tool_row(
+                        &self.session_processor.tool_registry,
+                        &def.name,
+                        &def.description,
+                    ));
                 }
             }
             output.push_str("```\n");
@@ -2225,9 +2265,14 @@ impl App {
     /// Render one `/tools` table row: name (56), source (24), description (30).
     ///
     /// Shared by the visible and hidden tool listings so both stay aligned.
-    fn tool_row(&self, name: &str, description: &str) -> String {
+    fn tool_row(
+        &self,
+        registry: &ragent_agent::tool::ToolRegistry,
+        name: &str,
+        description: &str,
+    ) -> String {
         let desc = ragent_types::truncate_bytes_no_ellipsis(description, 30);
-        let source = self.tool_source(name);
+        let source = self.tool_source(registry, name);
         format!("{name:<56} {source:<24} {desc}\n")
     }
 
@@ -2236,22 +2281,43 @@ impl App {
     ///
     /// Returns, in order of precedence:
     ///
-    /// - `mcp:<server-id>` when the tool is a bridged MCP server tool
-    ///   (`McpToolWrapper` name `mcp_<server>_<tool>`);
+    /// - `mcp:<server-id>` when the tool is a bridged MCP server tool,
+    ///   resolved against the live registry via `Tool::mcp_wrapper_info` (the
+    ///   same authoritative source the `tool_info` tool uses); the name-based
+    ///   `McpToolWrapper::ragent_name_for` prefix match is only the fallback
+    ///   because a server id containing `_` cannot be recovered from the
+    ///   mangled name alone;
     /// - `plugin:<id>` when the tool was registered by a plugin
     ///   (name `plugin_<id>_<tool>`);
     /// - `visibility:<switch>` when the tool belongs to a tool-family
     ///   visibility switch (`office`, `github`, `gitlab`, `teams`, `agents`,
     ///   `plan`, `codeindex`, `masterfetch`, `browser`, `finance`);
     /// - `internal` otherwise (a core or built-in tool).
-    fn tool_source(&self, name: &str) -> String {
-        if let Some(suffix) = name.strip_prefix("mcp_")
-            && let Some((server, _tool)) = suffix.split_once('_')
-        {
-            return format!("mcp:{server}");
+    fn tool_source(&self, registry: &ragent_agent::tool::ToolRegistry, name: &str) -> String {
+        if let Some(tool) = registry.get(name) {
+            if let Some((server_id, _tool_name)) = tool.mcp_wrapper_info() {
+                return format!("mcp:{server_id}");
+            }
+        } else if let Some(suffix) = name.strip_prefix("mcp_") {
+            // Fallback for a name not live in the registry: match the exact
+            // `ragent_name_for` prefix of a live server first so a server id
+            // containing `_` is not truncated at its first segment.
+            if let Some(client) = self.session_processor.mcp_client.get()
+                && let Ok(guard) = client.try_read()
+            {
+                for server in guard.servers() {
+                    let prefix =
+                        ragent_agent::tool::McpToolWrapper::ragent_name_for(&server.id, "");
+                    if name.starts_with(&prefix) {
+                        return format!("mcp:{}", server.id);
+                    }
+                }
+            }
+            if let Some((server, _tool)) = suffix.split_once('_') {
+                return format!("mcp:{server}");
+            }
         }
-        if name.starts_with("plugin_") {
-            let rest = name.trim_start_matches("plugin_");
+        if let Some(rest) = name.strip_prefix("plugin_") {
             if let Some((id, _tool)) = rest.split_once('_') {
                 return format!("plugin:{id}");
             }

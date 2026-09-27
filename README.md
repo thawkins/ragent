@@ -20,7 +20,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — 169 registered tools across 25 categories:
+- **Comprehensive tool system** — 171 registered tools across 25 categories:
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -167,7 +167,9 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   tools (`plugin_<id>_<tool>`) and slash commands; skill-only/MCP-only plugins
   (no JavaScript entry) install and load inertly, and their `skills` directories
   and `mcpServers` entries are bridged into the session (plugin skills join the
-  skill-discovery roots; plugin MCP servers connect as `<plugin-id>.<server>`);
+  skill-discovery roots — a plugin with no `skills` section but a conventional
+  `skills/` directory, the Claude marketplace's default layout, contributes it
+  too; plugin MCP servers connect as `<plugin-id>.<server>`);
   a plugin's slash commands are bridged too, including the Claude `commands/*.md`
   prompt commands (each injected as a user turn with `$ARGUMENTS` substituted),
   registered under their bare name or the namespaced `plugin:<id>:<name>` trigger
@@ -487,12 +489,23 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.119** — The core architecture, tool system (169 tools across 25 categories), TUI,
+**v1.0.120** — The core architecture, tool system (171 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
+
+- **Introspection + marketplace fixes (v1.0.120)** — two new read-only tools,
+  `tool_info` and `commands_info`, expose a JSON dump of the tool registry and
+  of every slash command (including plugin-contributed ones); MCP server
+  processes no longer duplicate at startup (orphan sweep with a PPID gate) and
+  are torn down through their whole process group on exit; the TUI post-loop
+  rollback now removes its capture only after the restore fully completes,
+  fixing the intermittent `test_rollback_accept_restores_snapshot` CI flake;
+  OpenSkills installed under `~/.agents/skills/` are discovered; and the Claude
+  store's `*-lsp` marketplace stubs install via a manifest materialised from the
+  marketplace document.
 
 - **MCP transport/session fixes + simplify sweep (v1.0.119)** — a sessionful
   Streamable-HTTP MCP server now reports its tools: `HttpMcpClient` performs an

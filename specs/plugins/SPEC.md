@@ -147,6 +147,23 @@ contribution surface. Any other both-dialect match (mixed top-level
 `codex-plugin.json`/`claude-plugin.json`, or a Codex-marked `plugin.json` beside a Claude
 manifest) remains ambiguous and is refused.
 
+When a vendor **marketplace entry is the manifest** — the Claude store's `*-lsp`
+entries (`rust-analyzer-lsp`, `gopls-lsp`, ...) carry an inline `lspServers`
+hosting-config section while the repo subdirectory their `source` points at
+holds no manifest at all — the store provider shall record the raw marketplace
+document in-process (keyed by `sha256(origin-url + document bytes)`) and suffix
+that entry's install source with the key (`@<sha256>`). When the install
+pipeline clones such a source and finds no recognisable manifest in the
+checked-out tree, it shall materialise the recorded inline manifest into
+`.claude-plugin/plugin.json` (listing-only fields such as `source`, `category`,
+and `strict` stripped) so the plugin installs as an ordinary Claude-dialect
+non-JS bundle; its `lspServers`/`monitors` sections are recorded as the FR-025
+`claude lsp servers` unsupported capability. A checked-out tree that already
+carries a manifest is never overwritten: the on-disk manifest wins. A source
+without the suffix, or a suffix never registered in this process, installs
+exactly as before (reporting `no plugin manifest found` for a truly
+manifest-less tree).
+
 **FR-003** — The system shall execute enabled plugins' JavaScript entry points on an
 embedded JavaScript engine integrated as a Rust crate within the ragent binary, and
 shall not require an external Node.js, Deno, or Bun installation.
@@ -292,6 +309,11 @@ to the plugin root) of every **enabled** plugin in the project and user-global p
 stores shall be appended to the skill-discovery roots, so a plugin's `SKILL.md` packs are
 loaded by `SkillRegistry::load` exactly as a user skill directory is. A disabled plugin
 contributes nothing (FR-016); a declared path that escapes the plugin root is dropped.
+A plugin whose manifest declares **no `skills` section** but whose root holds the
+conventional `skills/` directory (the Claude marketplace's default layout, e.g.
+`anthropics/mcp-server-dev`) shall contribute that directory as if it had been declared;
+the implicit entry is merged with any declared entries (declared first, de-duplicated),
+mirroring the `agents/` directory scan of FR-032.
 
 **FR-030** — The system shall bridge a plugin's `mcpServers`/`mcp_servers` section into the
 session's MCP server set. Each server entry (an inline `{command, args, env, url, headers,

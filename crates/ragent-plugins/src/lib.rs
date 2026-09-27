@@ -41,6 +41,7 @@ pub mod help;
 pub mod host_api;
 pub mod lifecycle;
 pub mod manifest;
+pub mod marketplace;
 pub mod remove;
 pub mod report;
 pub mod runtime;
@@ -95,11 +96,12 @@ pub use lifecycle::{
 pub use manifest::{
     AGENTS_DIR, COMMANDS_DIR, CommandSource, HOOKS_DIR, HOOKS_FILE, HOST_API_VERSION,
     ParsedManifest, PermissionRequest, PluginCommandDecl, PluginCommandDef, PluginHook,
-    PluginMcpServer, PluginToolDecl, UNSUP_AGENTS, UNSUP_DESKTOP_MOUNTS, UNSUP_DESKTOP_WINDOW,
-    UNSUP_EXEC, UNSUP_FS, UNSUP_HOOKS, UNSUP_MCP, UNSUP_SKILLS, V1_CAPABILITIES, VersionMismatch,
-    check_api_version, derive_id, extract_agent_decls, extract_command_decls, extract_hooks,
-    extract_mcp_servers, extract_skill_dirs, parse_claude_manifest, parse_codex_manifest,
-    parse_manifest, parse_plugin_dir, read_plugin_hooks_file, scan_agent_dir, scan_command_dir,
+    PluginMcpServer, PluginToolDecl, SKILLS_DIR, UNSUP_AGENTS, UNSUP_DESKTOP_MOUNTS,
+    UNSUP_DESKTOP_WINDOW, UNSUP_EXEC, UNSUP_FS, UNSUP_HOOKS, UNSUP_LSP, UNSUP_MCP, UNSUP_SKILLS,
+    V1_CAPABILITIES, VersionMismatch, check_api_version, derive_id, extract_agent_decls,
+    extract_command_decls, extract_hooks, extract_mcp_servers, extract_skill_dirs,
+    parse_claude_manifest, parse_codex_manifest, parse_manifest, parse_plugin_dir,
+    read_plugin_hooks_file, scan_agent_dir, scan_command_dir, scan_skills_dir,
 };
 pub use remove::{RemoveError, RemoveOutcome, remove};
 pub use report::{add_error_report, add_report, remove_error_report, remove_report};

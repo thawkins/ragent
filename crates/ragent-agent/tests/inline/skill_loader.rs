@@ -569,3 +569,65 @@ fn test_discover_skills_extra_dirs_nonexistent() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn test_discover_skills_agents_project_dir() {
+    let tmp = std::env::temp_dir().join("ragent_test_discover_agents_project");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    let skill_dir = tmp.join(".agents").join("skills").join("mcp-builder");
+    std::fs::create_dir_all(&skill_dir).expect("create .agents skill dir");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\ndescription: Build MCP servers\n---\nBuild an MCP server\n",
+    )
+    .expect("write SKILL.md");
+
+    let skills = discover_skills(&tmp, &[]);
+    let openskills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::OpenSkillsProject)
+        .collect();
+    assert_eq!(openskills.len(), 1);
+    assert_eq!(openskills[0].name, "mcp-builder");
+    assert_eq!(
+        openskills[0].description.as_deref(),
+        Some("Build MCP servers")
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_discover_skills_all_openskills_project_variants() {
+    // .agent/, .agents/, and .claude/ skills dirs are all scanned.
+    let tmp = std::env::temp_dir().join("ragent_test_discover_openskills_variants");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    for (dir_name, skill_name) in [
+        (".agent", "skill-a"),
+        (".agents", "skill-b"),
+        (".claude", "skill-c"),
+    ] {
+        let skill_dir = tmp.join(dir_name).join("skills").join(skill_name);
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\ndescription: {skill_name}\n---\nBody\n"),
+        )
+        .expect("write SKILL.md");
+    }
+
+    let skills = discover_skills(&tmp, &[]);
+    let openskills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::OpenSkillsProject)
+        .collect();
+    assert_eq!(openskills.len(), 3);
+    let names: Vec<&str> = openskills.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.contains(&"skill-a"));
+    assert!(names.contains(&"skill-b"));
+    assert!(names.contains(&"skill-c"));
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

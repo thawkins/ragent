@@ -66,6 +66,13 @@ pub const UNSUP_AGENTS: &str = "plugin agents";
 /// bridged equivalent (FR-025).
 pub const UNSUP_HOOKS: &str = "plugin hooks";
 
+/// Unsupported-capability label for an `lspServers` (or `lsp_servers`)
+/// language-server section, and a `monitors` section: Claude Code host
+/// integrations ragent does not consume (FR-025). These sections surface in
+/// the manifests materialised for the Claude marketplace's manifest-less
+/// `*-lsp` stubs (see [`crate::marketplace`]).
+pub const UNSUP_LSP: &str = "claude lsp servers";
+
 /// The host-API version this ragent build presents to plugin code (FR-019).
 pub const HOST_API_VERSION: u32 = 1;
 
@@ -206,6 +213,12 @@ pub const COMMANDS_DIR: &str = "commands";
 /// Plugin `agents/` directory name (Claude / Codex subagent profiles).
 pub const AGENTS_DIR: &str = "agents";
 
+/// Plugin `skills/` directory name (Claude / Codex skill packs). A plugin root
+/// holding this directory contributes its `SKILL.md` subdirectories to skill
+/// discovery even when the manifest declares no `skills` section (the Claude
+/// marketplace's default convention, FR-029).
+pub const SKILLS_DIR: &str = "skills";
+
 /// Plugin `hooks/` directory name (Claude-dialect hook scripts).
 pub const HOOKS_DIR: &str = "hooks";
 
@@ -306,6 +319,12 @@ struct ClaudeManifest {
     mounts: Option<serde_json::Value>,
     /// Claude Desktop window section (unsupported).
     window: Option<serde_json::Value>,
+    /// Claude Code language-server section (unsupported; surfaced by the
+    /// manifests materialised for the marketplace's `*-lsp` stubs).
+    #[serde(rename = "lspServers", alias = "lsp_servers")]
+    lsp_servers: Option<serde_json::Value>,
+    /// Claude Code `monitors` section (unsupported).
+    monitors: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -696,6 +715,34 @@ pub fn scan_agent_dir(root: &Path) -> Vec<String> {
     scan_profile_dir(root, AGENTS_DIR)
 }
 
+/// Probe a plugin root for the conventional `skills/` directory (FR-029).
+///
+/// Returns `["skills"]` when the directory exists, else an empty vector. The
+/// bridge treats the returned relative path like a manifest-declared `skills`
+/// entry, so a plugin using the Claude marketplace's default layout (a
+/// `skills/` root with `SKILL.md` subdirectories) contributes its skills even
+/// when the manifest declares no `skills` section. Existence of per-skill
+/// `SKILL.md` files is not checked here — that is the bridge's job.
+#[must_use]
+pub fn scan_skills_dir(root: &Path) -> Vec<String> {
+    if root.join(SKILLS_DIR).is_dir() {
+        vec![SKILLS_DIR.to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// Merge scan results into `skills`, keeping any manifest-declared entry
+/// first and appending a conventionally-discovered `skills/` directory that
+/// is not already declared (FR-029). Shared by both dialect parsers.
+fn merge_scanned_skills(skills: &mut Vec<String>, root: &Path) {
+    for rel in scan_skills_dir(root) {
+        if !skills.contains(&rel) {
+            skills.push(rel);
+        }
+    }
+}
+
 /// Map a plugin's `hooks` declarations into [`PluginHook`]s (FR-033 hooks
 /// bridge).
 ///
@@ -1064,8 +1111,11 @@ pub fn parse_codex_manifest(
         }
     }
     // FR-029/FR-030 bridges: extract `skills` and `mcpServers`. An entry with no
-    // bridged equivalent keeps the FR-025 unsupported label.
-    let skills = extract_skill_dirs(raw.skills.as_ref());
+    // bridged equivalent keeps the FR-025 unsupported label. A plugin with no
+    // `skills` section but a conventional `skills/` directory (the Claude
+    // marketplace's default layout) contributes it (FR-029).
+    let mut skills = extract_skill_dirs(raw.skills.as_ref());
+    merge_scanned_skills(&mut skills, root);
     let (mcp_servers, unbridged_mcp) = extract_mcp_servers(raw.mcp_servers.as_ref());
     if unbridged_mcp > 0 {
         unsupported.push(UNSUP_MCP.to_string());
@@ -1168,6 +1218,9 @@ pub fn parse_claude_manifest(
     if raw.window.is_some() {
         unsupported.push(UNSUP_DESKTOP_WINDOW.to_string());
     }
+    if raw.lsp_servers.is_some() || raw.monitors.is_some() {
+        unsupported.push(UNSUP_LSP.to_string());
+    }
     if let Some(capabilities) = raw.capabilities {
         unsupported.extend(
             capabilities
@@ -1177,8 +1230,11 @@ pub fn parse_claude_manifest(
     }
 
     // FR-029/FR-030 bridges: extract `skills` and `mcpServers`. A section whose shape
-    // has no bridged equivalent keeps the FR-025 unsupported label.
-    let skills = extract_skill_dirs(raw.skills.as_ref());
+    // has no bridged equivalent keeps the FR-025 unsupported label. A plugin with no
+    // `skills` section but a conventional `skills/` directory (the Claude
+    // marketplace's default layout) contributes it (FR-029).
+    let mut skills = extract_skill_dirs(raw.skills.as_ref());
+    merge_scanned_skills(&mut skills, root);
     if raw.skills.is_some() && skills.is_empty() {
         unsupported.push(UNSUP_SKILLS.to_string());
     }

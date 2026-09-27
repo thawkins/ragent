@@ -4883,53 +4883,16 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     output.push_str("    Personal:  ~/.ragent/skills/<name>/SKILL.md\n");
                     output.push_str("    Project:   .ragent/skills/<name>/SKILL.md\n");
                 } else {
-                    // Wrap the table body in a fenced code block so the markdown
-                    // pipeline preserves the per-line layout and column alignment
-                    // instead of collapsing every row into a single paragraph.
+                    // Render each skill as its own compact block instead of one wide
+                    // dense table row, so long descriptions wrap cleanly under the
+                    // command name instead of stretching an ever-wider column.
                     output.push_str("```\n");
-                    // Compute column widths from data
-                    let col_cmd = skills
-                        .iter()
-                        .map(|s| {
-                            let hint_len = s.argument_hint.as_ref().map_or(0, |h| h.len() + 1);
-                            s.name.len() + 1 + hint_len // +1 for leading '/'
-                        })
-                        .max()
-                        .unwrap_or(7)
-                        .max(7); // "Command"
-                    let col_scope = 10; // "Scope" header is 5, but values up to 10
-                    let col_access = 10; // "Access" header is 6, values up to 10
-
-                    // Header
-                    output.push_str(&format!(
-                        "  {:<col_cmd$}  {:<col_scope$}  {:<col_access$}  Description\n",
-                        "Command",
-                        "Scope",
-                        "Access",
-                        col_cmd = col_cmd,
-                        col_scope = col_scope,
-                        col_access = col_access,
-                    ));
-                    // Separator
-                    output.push_str(&format!(
-                        "  {:-<col_cmd$}  {:-<col_scope$}  {:-<col_access$}  {:-<11}\n",
-                        "",
-                        "",
-                        "",
-                        "",
-                        col_cmd = col_cmd,
-                        col_scope = col_scope,
-                        col_access = col_access,
-                    ));
-
                     for skill in &skills {
                         let hint = skill
                             .argument_hint
                             .as_deref()
                             .map(|h| format!(" {h}"))
                             .unwrap_or_default();
-                        let cmd_col = format!("/{}{}", skill.name, hint);
-                        let scope = format!("{}", skill.scope);
                         let access = match (skill.user_invocable, !skill.disable_model_invocation) {
                             (true, true) => "both",
                             (true, false) => "user-only",
@@ -4937,18 +4900,26 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                             (false, false) => "disabled",
                         };
                         let desc = skill.description.as_deref().unwrap_or("(no description)");
-                        output.push_str(&format!(
-                            "  {:<col_cmd$}  {:<col_scope$}  {:<col_access$}  {}\n",
-                            cmd_col,
-                            scope,
-                            access,
-                            desc,
-                            col_cmd = col_cmd,
-                            col_scope = col_scope,
-                            col_access = col_access,
-                        ));
+                        output.push_str(&format!("/{}{}\n", skill.name, hint));
+                        output.push_str(&format!("  scope: {}  access: {}\n", skill.scope, access));
+                        // Wrap the description at ~76 cols with a hanging indent so
+                        // multi-line descriptions stay visually attached to the skill.
+                        let mut line = String::from("  ");
+                        for word in desc.split_whitespace() {
+                            if line.len() + word.len() + 1 > 78 {
+                                output.push_str(&line);
+                                output.push('\n');
+                                line = String::from("  ");
+                            }
+                            if line.len() > 2 {
+                                line.push(' ');
+                            }
+                            line.push_str(word);
+                        }
+                        output.push_str(&line);
+                        output.push_str("\n\n");
                     }
-                    output.push_str(&format!("\n  {} skill(s) registered\n", skills.len()));
+                    output.push_str(&format!("{} skill(s) registered\n", skills.len()));
                     output.push_str("```\n");
                 }
 
@@ -4971,10 +4942,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                         return;
                     }
                     "discover" => {
-                        // Run discovery synchronously using block_in_place.
-                        let found = tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current().block_on(McpClient::discover())
-                        });
+                        let found = McpClient::discover().await;
                         // Show interactive discover dialog.
                         self.mcp_discover = Some(McpDiscoverState {
                             servers: found,
@@ -4985,28 +4953,12 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
 
                         return;
                     }
-                    "connect" => {
+                    "connect" | "disconnect" => {
                         if let Some(&id) = mcp_args.get(1) {
-                            let report = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current()
-                                    .block_on(self.set_mcp_server_enabled(id, true))
-                            });
+                            let report = self.set_mcp_server_enabled(id, sub == "connect").await;
                             self.append_assistant_text(&report);
                         } else {
-                            self.status = "Usage: /mcp connect <id>".to_string();
-                        }
-
-                        return;
-                    }
-                    "disconnect" => {
-                        if let Some(&id) = mcp_args.get(1) {
-                            let report = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current()
-                                    .block_on(self.set_mcp_server_enabled(id, false))
-                            });
-                            self.append_assistant_text(&report);
-                        } else {
-                            self.status = "Usage: /mcp disconnect <id>".to_string();
+                            self.status = format!("Usage: /mcp {sub} <id>");
                         }
 
                         return;

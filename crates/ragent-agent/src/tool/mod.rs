@@ -1406,14 +1406,15 @@ impl ToolRegistry {
         if names.is_empty() {
             return;
         }
-        let mut tools = self
-            .tools
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for name in names {
-            tools.remove(name);
+        {
+            let mut tools = self
+                .tools
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for name in names {
+                tools.remove(name);
+            }
         }
-        drop(tools);
         self.invalidate_definitions_cache();
     }
 

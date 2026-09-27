@@ -848,15 +848,38 @@ impl SessionProcessor {
     /// Returns `true` when a capture existed and was restored; `false` when
     /// no capture is pending (nothing was written, or rollback already ran).
     ///
+    /// The capture is removed only *after* the restore has fully completed:
+    /// the TUI's spawned rollback task deposits its outcome into the
+    /// `rollback_result` mailbox when this call returns, and the UI then reads
+    /// the workspace files — a caller that observes the capture map becoming
+    /// empty must already see the pre-loop contents on disk (CI regression:
+    /// `test_rollback_accept_restores_snapshot`; cover:
+    /// `test_rollback_loop_file_is_restored_when_the_call_returns`). On a
+    /// failed restore the entry was never removed, so the caller can retry.
+    ///
     /// # Errors
     ///
     /// Returns an error when the snapshot restore fails; the capture is
     /// kept so the caller can retry.
     pub async fn rollback_loop(&self, session_id: &str) -> Result<bool, anyhow::Error> {
-        let Some(capture) = self.active_loop_captures.write().await.remove(session_id) else {
+        let Some(capture) = self
+            .active_loop_captures
+            .read()
+            .await
+            .get(session_id)
+            .cloned()
+        else {
             return Ok(false);
         };
-        crate::session::loop_capture::rollback_to_capture(capture).await?;
+        if let Err(e) = crate::session::loop_capture::rollback_to_capture(capture).await {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %e,
+                "loop rollback failed; the capture is kept for retry (FR-020)"
+            );
+            return Err(e);
+        }
+        self.active_loop_captures.write().await.remove(session_id);
         tracing::info!(
             session_id = %session_id,
             "workspace rolled back to the pre-loop snapshot (FR-020)"

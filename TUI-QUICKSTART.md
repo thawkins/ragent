@@ -4,6 +4,25 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.121)
+
+- **Introspection tools** — `tool_info` / `commands_info` (read-only, auto-
+  approved) return a JSON dump of the tool registry and the slash-command
+  catalog respectively (169 -> 171 tools).
+- **MCP process hygiene** — startup sweeps orphaned stdio servers before
+  spawning (never touching a live sibling ragent's server), and shutdown kills
+  the whole spawned process group so no MCP children survive exit.
+- **Rollback race fixed** — the post-loop rollback offer now removes its
+  capture only after the restore completes, so the restored file is never
+  observed half-written.
+- **Plugin marketplace fixes** — Claude store `*-lsp` stubs (e.g.
+  `rust-analyzer-lsp`) install via a manifest materialised from the marketplace
+  document, and plugins shipping a conventional `skills/` directory now
+  contribute their skills.
+- **`/simplify all` pass** — `/mcp connect|disconnect|discover` no longer nest
+  `block_in_place`/`block_on`, tool-source classification is shared between the
+  `/tools` report and `tool_info`, and six further cleanups.
+
 ## Highlights (v1.0.119)
 
 - **Sessionful Streamable-HTTP MCP servers report their tools** — the HTTP MCP

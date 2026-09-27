@@ -83,7 +83,8 @@ pub enum AddError {
     Exists(String),
 
     /// The source (or the extracted archive) contains no recognisable plugin
-    /// manifest.
+    /// manifest, and the install source carried no marketplace-inline manifest
+    /// to materialise (see [`crate::marketplace`]).
     #[error("plugin add: no plugin manifest found in {0}")]
     NotAPlugin(String),
 
@@ -167,6 +168,15 @@ pub fn add(
         Staging::Extracted(path) => descend_single_wrapper(path),
     };
 
+    // Marketplace-inline manifest materialisation: when a store-browser git
+    // source carried the `@<key>` suffix of a recorded marketplace document
+    // and the checked-out tree holds no manifest (a manifest-less stub such
+    // as the Claude marketplace's `*-lsp` entries), write the inline manifest
+    // into `.claude-plugin/plugin.json` before validation. A tree that
+    // already has a manifest is untouched (an upstream fix wins
+    // automatically); a source without the suffix installs exactly as before.
+    let staged_root = materialize_marketplace_manifest(staged_root, source);
+
     // Validate before touching the store: recognise + parse the manifest.
     let parsed = match detect_dialect(&staged_root) {
         Ok(Some(_)) => match parse_plugin_dir(&staged_root) {
@@ -237,7 +247,13 @@ pub fn add(
 
 /// Resolve and materialise `source` into a staging area, without touching the
 /// store.
+///
+/// The source is stripped of a trailing marketplace-inline manifest key (the
+/// `@<sha256>` suffix a store browser attaches to a manifest-less stub's
+/// source; see [`crate::marketplace`]) before it is classified: the suffix is
+/// an install-time annotation, not part of the git/URL/directory form.
 fn add_inner(source: &str, workdir: &Path, staging: &Path) -> Result<Staging, AddError> {
+    let (source, _key) = crate::marketplace::split_manifest_key(source);
     // A git source (`git+<https-url>#<ref>[:<subpath>]`) is cloned into staging.
     // Handled before the plain-URL branch because it shares the `https` prefix.
     if source.starts_with("git+") {
@@ -341,6 +357,32 @@ fn git_subpath(raw: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+/// Materialise a marketplace-inline manifest for a manifest-less stub.
+///
+/// When `source` carried the `@<key>` suffix a store browser attaches to a
+/// manifest-less stub (see [`crate::marketplace`]), the plugin name is derived
+/// from the source's git subpath (its final path segment), and the recorded
+/// inline manifest is written into `.claude-plugin/plugin.json` under
+/// `staged_root` (or, for a sparse checkout layout, `<staged_root>/<name>`).
+/// Any other source — no suffix, an unrecorded key, a tree that already has
+/// a recognisable manifest — returns `staged_root` unchanged.
+fn materialize_marketplace_manifest(staged_root: PathBuf, source: &str) -> PathBuf {
+    // Strip the key first so the name parse below never sees the suffix.
+    let (stripped, Some(key)) = crate::marketplace::split_manifest_key(source) else {
+        return staged_root;
+    };
+    // The plugin name is the subpath's final segment
+    // (`git+...#main:plugins/rust-analyzer-lsp` -> `rust-analyzer-lsp`).
+    let name = stripped
+        .rsplit(['#', ':', '/'])
+        .map(str::trim)
+        .find(|piece| !piece.is_empty());
+    let Some(name) = name else {
+        return staged_root;
+    };
+    crate::marketplace::materialize_at(staged_root, name, Some(key))
 }
 
 /// Clone a `git+<https-url>#<ref>[:<subpath>]` source into `staging`.

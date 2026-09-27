@@ -372,16 +372,16 @@ mod app_tests {
 
     #[test]
     pub(crate) fn test_try_extract_research_code_block_handles_skills_output() {
-        let text = "From: /skills\nRegistered Skills:\n\n```\n  Command   Scope  Access  Description\n  -------   -----  ------  -----------\n  /simplify         both    Reviews recently changed files\n  /debug            both    Troubleshoots current session\n```\n";
+        let text = "From: /skills\nRegistered Skills:\n\n```\n/simplify\n  scope: project  access: both\n  Reviews recently changed files\n\n/debug\n  scope: personal  access: both\n  Troubleshoots current session\n\n2 skill(s) registered\n```\n";
         let extracted = try_extract_research_code_block(text).expect("skills code block");
         assert!(extracted.contains("From: /skills"));
         assert!(extracted.contains("Registered Skills:"));
         assert!(extracted.contains("/simplify"));
         assert!(extracted.contains("/debug"));
-        // Each skill must stay on its own line — the bug was the markdown
+        // Each skill must stay in its own block — the bug was the markdown
         // pipeline collapsing all rows into a single reflowed paragraph.
-        assert!(extracted.contains("\n  /simplify"));
-        assert!(extracted.contains("\n  /debug"));
+        assert!(extracted.contains("/simplify"));
+        assert!(extracted.contains("\n/debug"));
         assert!(!extracted.contains("```"));
     }
 
@@ -418,14 +418,14 @@ mod app_tests {
     #[test]
     pub(crate) fn test_render_markdown_to_ascii_preserves_skills_table_lines() {
         let mut app = test_app();
-        let text = "From: /skills\nRegistered Skills:\n\n```\n  Command   Scope  Description\n  -------   -----  -----------\n  /simplify         Reviews recently changed files\n  /debug            Troubleshoots current session\n```\n";
+        let text = "From: /skills\nRegistered Skills:\n\n```\n/simplify\n  scope: project  access: both\n  Reviews recently changed files\n\n/debug\n  scope: personal  access: both\n  Troubleshoots current session\n\n2 skill(s) registered\n```\n";
         let rendered = app.render_markdown_to_ascii(text);
         // Each skill line must survive the markdown pipeline intact.
-        assert!(rendered.contains("\n  /simplify"));
-        assert!(rendered.contains("\n  /debug"));
-        // The two skill lines must NOT have been merged into a single sentence.
+        assert!(rendered.contains("\n/simplify"));
+        assert!(rendered.contains("\n/debug"));
+        // The two skill blocks must NOT have been merged into a single sentence.
         assert!(
-            !rendered.contains("/simplify         Reviews recently changed files /debug"),
+            !rendered.contains("Reviews recently changed files /debug"),
             "skills output should not collapse into a single paragraph; got:\n{rendered}",
         );
     }

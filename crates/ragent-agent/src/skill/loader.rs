@@ -304,10 +304,10 @@ fn yaml_to_json(yaml: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
 ///
 /// Scans in order (lowest → highest priority):
 ///
-/// 1. `OpenSkills` global: `~/.agent/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`
+/// 1. `OpenSkills` global: `~/.agent/skills/*/SKILL.md`, `~/.agents/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`
 /// 2. Personal: `~/.ragent/skills/*/SKILL.md`
 /// 3. Extra directories from config `skill_dirs` (treated as Personal scope)
-/// 4. `OpenSkills` project: `{working_dir}/.agent/skills/*/SKILL.md`, `{working_dir}/.claude/skills/*/SKILL.md`
+/// 4. `OpenSkills` project: `{working_dir}/.agent/skills/*/SKILL.md`, `{working_dir}/.agents/skills/*/SKILL.md`, `{working_dir}/.claude/skills/*/SKILL.md`
 /// 5. Project: `{working_dir}/.ragent/skills/*/SKILL.md`
 /// 6. Monorepo: nested `.ragent/skills/` in subdirectories of `working_dir`
 ///
@@ -325,9 +325,9 @@ fn yaml_to_json(yaml: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
 pub fn discover_skills(working_dir: &Path, extra_dirs: &[String]) -> Vec<SkillInfo> {
     let mut skills = Vec::new();
 
-    // OpenSkills global: ~/.agent/skills/ and ~/.claude/skills/
+    // OpenSkills global: ~/.agent/skills/, ~/.agents/skills/, and ~/.claude/skills/
     if let Some(home) = dirs::home_dir() {
-        for dir_name in &[".agent", ".claude"] {
+        for dir_name in &[".agent", ".agents", ".claude"] {
             let openskills_dir = home.join(dir_name).join("skills");
             if openskills_dir.is_dir() {
                 load_skills_from_dir(&openskills_dir, SkillScope::OpenSkillsGlobal, &mut skills);
@@ -353,8 +353,8 @@ pub fn discover_skills(working_dir: &Path, extra_dirs: &[String]) -> Vec<SkillIn
         }
     }
 
-    // OpenSkills project: .agent/skills/ and .claude/skills/
-    for dir_name in &[".agent", ".claude"] {
+    // OpenSkills project: .agent/skills/, .agents/skills/, and .claude/skills/
+    for dir_name in &[".agent", ".agents", ".claude"] {
         let openskills_dir = working_dir.join(dir_name).join("skills");
         if openskills_dir.is_dir() {
             load_skills_from_dir(&openskills_dir, SkillScope::OpenSkillsProject, &mut skills);

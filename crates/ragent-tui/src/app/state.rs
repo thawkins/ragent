@@ -3121,6 +3121,16 @@ impl App {
                 .map(|(_, cfg)| cfg)
         });
 
+        // Validate before touching the persisted ledger: enabling an unknown
+        // server must not silently erase a previously persisted disable entry
+        // and then only afterwards report the id as invalid.
+        if enabled && config.is_none() {
+            return format!(
+                "From: /mcp\n\n[err] `{server_id}` is not a known MCP server \
+                 (not in ragent.json and not contributed by a plugin)."
+            );
+        }
+
         // Persist to the global ledger first: a failure must leave the running
         // state untouched rather than diverging from what will happen at the
         // next startup.
@@ -3152,10 +3162,7 @@ impl App {
 
         if enabled {
             let Some(config) = config else {
-                return format!(
-                    "From: /mcp\n\n[err] `{server_id}` is not a known MCP server \
-                     (not in ragent.json and not contributed by a plugin)."
-                );
+                unreachable!("validated above: enable requires a known config");
             };
             let outcome = {
                 let mut guard = client.write().await;

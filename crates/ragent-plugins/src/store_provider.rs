@@ -46,6 +46,7 @@
 use reqwest::Url;
 use serde_json::{Map, Value};
 
+use crate::marketplace;
 use crate::store_fetch::{StoreError, StoreIndex};
 use crate::store_index::{StoreEntry, StoreEntryError, StoreKind};
 
@@ -131,10 +132,17 @@ fn parse_index_with(
     let items = plugins_array(&root)?;
 
     // A native ragent store index carries explicit `id` fields; parse it exactly
-    // as before so its strict validation is unchanged.
+    // as before so its strict validation is unchanged (and no inline-manifest
+    // materialisation is wired up for it).
     if items.iter().any(entry_has_id) {
         return StoreIndex::from_value(&root);
     }
+
+    // Record the document so the install pipeline can materialise an inline
+    // manifest for a manifest-less stub it later clones (e.g. the Claude
+    // marketplace's `*-lsp` entries). The returned key binds the source to
+    // this exact document and origin (and avoids hashing the body twice).
+    let manifest_key = marketplace::record_document(origin.as_str(), bytes);
 
     let store = root
         .get("store")
@@ -145,7 +153,7 @@ fn parse_index_with(
     let mut skipped = 0usize;
     for item in items {
         match transform_vendor_entry(item, origin, kind, resolver) {
-            Ok(entry) => entries.push(entry),
+            Ok(entry) => entries.push(tag_inline_manifest(entry, &root, &manifest_key)),
             Err(e) => {
                 skipped += 1;
                 tracing::debug!(error = %e, "store entry skipped");
@@ -157,6 +165,33 @@ fn parse_index_with(
         entries,
         skipped,
     })
+}
+
+/// Append the `#<key>` inline-manifest marker to `entry.source` when the
+/// marketplace entry named `entry.name` carries a materialisable manifest
+/// inline (FR-002 stub bridge).
+///
+/// Only a git-subdir source gains the marker: a plain `https` archive URL has
+/// no git clone for the pipeline to amend, and an entry without inline
+/// content installs exactly as before. The marker is stripped by the install
+/// pipeline before the source is parsed, so existing git validation is
+/// untouched.
+fn tag_inline_manifest(entry: StoreEntry, root: &Value, manifest_key: &str) -> StoreEntry {
+    if !entry.source.starts_with("git+") {
+        return entry;
+    }
+    // `entry.name` mirrors the marketplace entry's `name` field only while
+    // `transform_vendor_entry` keeps the two in sync; an entry whose id was
+    // overridden by an `id` field never reaches this vendor path (native
+    // documents returned early), so name-based lookup is safe here. The parsed
+    // `root` is queried directly — no serialise/re-parse round trip.
+    match marketplace::inline_manifest_in(root, &entry.name) {
+        Some(_) => StoreEntry {
+            source: format!("{}@{manifest_key}", entry.source),
+            ..entry
+        },
+        None => entry,
+    }
 }
 
 /// The `plugins` array from a marketplace document.

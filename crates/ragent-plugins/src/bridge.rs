@@ -53,7 +53,10 @@ fn enabled_manifests(dirs: &StoreDirs) -> Vec<ParsedManifest> {
 /// stores described by `dirs` (FR-029 skills bridge).
 ///
 /// Returns absolute paths, de-duplicated and sorted. A plugin whose manifest
-/// cannot be parsed contributes nothing (it is reported by discovery).
+/// cannot be parsed contributes nothing (it is reported by discovery). A plugin
+/// with no `skills` section but a conventional `skills/` directory (the Claude
+/// marketplace's default layout) contributes that directory via the parser's
+/// implicit-skills probe.
 #[must_use]
 pub fn scanned_plugin_skill_dirs(dirs: &StoreDirs) -> Vec<PathBuf> {
     let mut out: BTreeSet<PathBuf> = BTreeSet::new();

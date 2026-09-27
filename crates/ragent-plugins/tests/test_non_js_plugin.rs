@@ -110,7 +110,11 @@ fn add_installs_a_skill_only_claude_plugin() {
         "the bridged sections are not unsupported: {:?}",
         outcome.parsed.descriptor.unsupported_capabilities
     );
-    assert_eq!(outcome.parsed.skills, vec!["./skills/".to_string()]);
+    assert_eq!(
+        outcome.parsed.skills,
+        vec!["./skills/".to_string(), "skills".to_string()],
+        "the declared section is kept and the conventional skills/ directory is appended (FR-029)"
+    );
     assert!(outcome.installed_dir.join("skills").is_dir());
 
     // It scans as a discovered, enabled plugin (FR-007): add records the flag.

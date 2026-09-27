@@ -896,7 +896,7 @@ consume this surface?".
 | **App / UI surfaces** | `apps`, `.app.json`, `interface` | - | **No** - Codex app/UI metadata is host-specific and ignored |
 | **Desktop integration** | - | `mounts`, `window` | **No** - recorded as `claude desktop mounts` / `claude desktop window` |
 | **Subprocess / filesystem grants** | `permissions.fs`, `permissions.exec` | - | **No** - recorded as `codex permissions.fs` / `codex permissions.exec` |
-| **LSP servers / monitors** | - | LSP servers, monitors | **No** |
+| **LSP servers / monitors** | - | LSP servers, monitors | **No** - recorded as `claude lsp servers`; a marketplace `*-lsp` stub whose repo holds no manifest (the inline-`lspServers` shape, e.g. `rust-analyzer-lsp`) installs via a manifest **materialised** from the marketplace document into `.claude-plugin/plugin.json`, so the "no plugin manifest found" refusal now applies only to trees no recognised manifest could be produced for |
 | **Non-JS bundle** | common | common | **Yes** - installs and loads inertly, contributing only its bridged skills/MCP (FR-028) |
 
 Two practical consequences:

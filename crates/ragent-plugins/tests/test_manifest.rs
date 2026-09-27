@@ -886,3 +886,101 @@ fn claude_manifest_bridges_hooks_declaration() {
         "bridged hooks are not reported unsupported"
     );
 }
+
+// ── FR-029: implicit conventional `skills/` directory ────────────────────────
+
+#[test]
+fn claude_manifest_with_no_skills_section_but_skills_dir_contributes_skills() {
+    let dir = TempDir::new("skills-dir");
+    std::fs::create_dir_all(dir.0.join("skills/build-mcp-app")).expect("skills dir");
+    std::fs::write(
+        dir.0.join("skills/build-mcp-app/SKILL.md"),
+        "---\nname: build-mcp-app\ndescription: Build an MCP app\n---\n\nBody.\n",
+    )
+    .expect("skill");
+    std::fs::create_dir_all(dir.0.join(".claude-plugin")).expect("manifest dir");
+    std::fs::write(
+        dir.0.join(".claude-plugin/plugin.json"),
+        // The mcp-server-dev shape: no `skills` section, a `skills/` root.
+        r#"{ "name": "mcp-server-dev", "description": "MCP server skills" }"#,
+    )
+    .expect("manifest");
+
+    let parsed = parse_plugin_dir(&dir.0)
+        .expect("parses")
+        .expect("recognised");
+    assert_eq!(
+        parsed.skills,
+        vec!["skills".to_string()],
+        "the conventional skills/ directory is bridged without a manifest section"
+    );
+    assert!(
+        !parsed
+            .descriptor
+            .unsupported_capabilities
+            .contains(&UNSUP_SKILLS.to_string())
+    );
+}
+
+#[test]
+fn codex_manifest_with_no_skills_section_but_skills_dir_contributes_skills() {
+    let dir = TempDir::new("codex-skills-dir");
+    std::fs::create_dir_all(dir.0.join("skills/pack")).expect("skills dir");
+    std::fs::write(
+        dir.0.join("skills/pack/SKILL.md"),
+        "---\nname: pack\ndescription: A pack\n---\n\nBody.\n",
+    )
+    .expect("skill");
+    std::fs::write(
+        dir.0.join("codex-plugin.json"),
+        r#"{ "name": "pack", "version": "1.0.0", "entry": "index.js" }"#,
+    )
+    .expect("manifest");
+
+    let parsed = parse_plugin_dir(&dir.0)
+        .expect("parses")
+        .expect("recognised");
+    assert_eq!(parsed.skills, vec!["skills".to_string()]);
+}
+
+#[test]
+fn manifest_skills_section_merges_with_conventional_skills_dir() {
+    let dir = TempDir::new("skills-merge");
+    std::fs::create_dir_all(dir.0.join("skills/a")).expect("skills dir");
+    std::fs::write(
+        dir.0.join("skills/a/SKILL.md"),
+        "---\nname: a\n---\n\nBody.\n",
+    )
+    .expect("skill");
+    std::fs::create_dir_all(dir.0.join(".claude-plugin")).expect("manifest dir");
+    std::fs::write(
+        dir.0.join(".claude-plugin/plugin.json"),
+        r#"{ "name": "pack", "skills": "./skills/" }"#,
+    )
+    .expect("manifest");
+
+    let parsed = parse_plugin_dir(&dir.0)
+        .expect("parses")
+        .expect("recognised");
+    assert_eq!(
+        parsed.skills,
+        vec!["./skills/".to_string(), "skills".to_string()],
+        "declared entry first, de-duplicated directory probe second"
+    );
+}
+
+#[test]
+fn manifest_without_any_skills_contributes_none() {
+    let dir = TempDir::new("no-skills");
+    std::fs::create_dir_all(dir.0.join(".claude-plugin")).expect("manifest dir");
+    std::fs::write(
+        dir.0.join(".claude-plugin/plugin.json"),
+        r#"{ "name": "bare" }"#,
+    )
+    .expect("manifest");
+
+    let parsed = parse_plugin_dir(&dir.0)
+        .expect("parses")
+        .expect("recognised");
+    assert!(parsed.skills.is_empty());
+}
