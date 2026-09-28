@@ -1358,8 +1358,40 @@ fn resolve_entry(
             manifest: manifest.to_path_buf(),
             detail: format!("manifest {field} is empty"),
         }),
-        Some(entry) => Ok(Some(root.join(entry))),
+        Some(entry) => {
+            // SEC-ragent-plugins-006 (SECTASKS T-062): only emptiness was
+            // validated, so `entry`/`main`/`server.entry` could be absolute or
+            // contain `..`; the resolved file is read and evaluated as
+            // JavaScript, so an escape here reads any host file. Accept only a
+            // relative path that stays inside the plugin root.
+            if !is_contained_relative_path(entry) {
+                return Err(PluginError::ManifestParse {
+                    manifest: manifest.to_path_buf(),
+                    detail: format!("manifest {field} escapes the plugin root: {entry}"),
+                });
+            }
+            Ok(Some(root.join(entry)))
+        }
     }
+}
+
+/// Whether `declared` is a non-empty relative path whose components stay
+/// beneath the plugin root.
+///
+/// Rejects absolute paths, any `..`/root/prefix component, and a blank
+/// declaration. Used for manifest-declared entry points
+/// (SEC-ragent-plugins-006).
+fn is_contained_relative_path(declared: &str) -> bool {
+    let path = std::path::Path::new(declared);
+    if declared.trim().is_empty() || path.is_absolute() {
+        return false;
+    }
+    path.components().all(|component| {
+        matches!(
+            component,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    })
 }
 
 /// Parse the manifest named by a [`DialectMatch`], dispatching on dialect

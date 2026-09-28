@@ -436,6 +436,9 @@ async fn async_main() -> Result<()> {
                 .lines()
                 .nth(line.saturating_sub(1))
                 .unwrap_or("<line not found>");
+            // SEC-ragent-config-007 (SECTASKS T-061): the echoed source line can
+            // contain a credential; redact it before it reaches the terminal/log.
+            let problematic_line = ragent_types::sanitize::redact_secrets(problematic_line);
 
             anyhow::anyhow!(
                 "Failed to parse config file '{}':\n\

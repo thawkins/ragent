@@ -52,7 +52,7 @@ consolidated here and grouped into milestones and tasks.
 | MS-01 | Stop the bleeding (Critical)           | All 5 critical findings fixed; regression tests added; no new criticals   | T-001 .. T-006            |
 | MS-02 | Host & sandbox escape (High)           | All 25 high findings fixed or formally risk-accepted with rationale       | T-007 .. T-022            |
 | MS-03 | Network & secret hardening (Medium)    | All 54 medium findings fixed or triaged                                   | T-023 .. T-046            |
-| MS-04 | Defence in depth (Low)                 | All 33 low findings fixed or triaged                                      | T-047 .. T-062            |
+| MS-04 | Defence in depth (Low)                 | All 33 low findings fixed or triaged                                      | T-059 .. T-066            |
 | MS-05 | Prevent recurrence                     | Shared guards in place; CI gates enforce them                             | T-063 .. T-067            |
 
 ---
@@ -383,6 +383,50 @@ consecutive full runs.
 | T-064 | SEC-ragent-server-007, SEC-ragent-server-008 | Bind a permission reply to a pending request for that session; return generic error strings to clients and keep paths/stack traces in the log. |
 | T-065 | SEC-ragent-specs-003, SEC-ragent-specs-004, SEC-ragent-specs-005 | Validate the spec name in `/spec create` and `/spec specify`; route `SpecId` deserialization through the constructor validation; validate `write_govcreate_spec`. |
 | T-066 | SEC-ragent-storage-006, SEC-ragent-team-007, SEC-ragent-telemetry-005, SEC-ragent-tools-vcs-008, SEC-ragent-tui-003, SEC-ragent-tui-004, SEC-ragent-tui-005, SEC-ragent-types-006, SEC-tools-extended-007, SEC-tools-extended-008, SEC-tools-extended-009, SEC-tools-extended-010 | Fix non-ASCII diff-line panic; validate the agent name in `resolve_memory_dir`; apply redaction in the cardinality resolver and fail closed on lock poisoning; bound the tree walk; validate run ids in `/alog export`; team-name validation (see T-004); create the log spool 0600; remove `Debug` derive from credential-bearing events and redact them on the SSE stream; stop echoing `refresh_token`; SSRF-validate config base URLs; classify `browser eval` under its own permission category; SSRF-validate `crawl_urls`. |
+
+### MS-04 status (complete)
+
+Milestone MS-04 ("Defence in depth") is implemented in full. Tasks T-059 .. T-066
+were delivered as the same guard shapes used by the earlier milestones — explicit
+caps/budgets, containment checks, char-safe splits, and owner-only file modes —
+and are recorded in `SPEC.md` §4.6d. Notable guards:
+
+- **Resource caps** — the benchmark `--samples` flag is clamped to 100 before
+  both the `Vec` pre-allocation and the generation loop; dataset downloads are
+  streamed under a 64 MiB cap and the HumanEvalPack pagination loop carries a
+  page/row budget; session-archive import keeps its entry-count and
+  total-decompressed-size caps.
+- **Containment** — the benchmark manifest `case_file`/`relative_path` joins are
+  confined to the canonicalised data root; plugin manifest `entry`/`main`/
+  `server.entry` must be a contained relative path; the marketplace
+  wrapper-directory name must be a single normal component; a multi-component or
+  `..` agent name is refused by `resolve_memory_dir`.
+- **Char-safe and panic-free** — `apply_unified_diff` splits on the first char,
+  so a multibyte diff line returns a `Result` instead of panicking.
+- **Redaction and disclosure** — the config parse diagnostic redacts the echoed
+  source line; research fenced bodies cannot close their fence or spoof a
+  `#### Source [#N]` header; gather-log URLs drop userinfo and query strings;
+  internal server errors are logged in full and returned generically;
+  credential-bearing events expose presence-only fields on the SSE stream plus a
+  `redacted_event_debug` helper.
+- **Validation** — a permission reply is bound to the awaiting session;
+  `SpecId` deserialises through its validating constructor and
+  `write_govcreate_spec` re-validates; `/spec create`/`/spec specify` validate
+  the name; `/alog export` accepts only `[A-Za-z0-9_-]+` run ids.
+- **File modes and egress** — the log-window spool is created 0600 and
+  re-asserted on every open; the bash scratch directory falls back to a
+  process-private 0700 directory; config-supplied outbound base URLs (Telegram,
+  Gmail, finance providers) are SSRF-checked; the `CrawlFetcher` SSRF obligation
+  is stated on the trait.
+- **Remaining Low items** — `SEC-ragent-bench-004/005` (manifest path
+  containment) and `SEC-ragent-plugins-005` (http redirect on package download)
+  were also closed here, and `SEC-ragent-tools-core-004` (scratch-dir
+  confinement) was completed.
+
+Verification at the time of writing: `cargo fmt --all -- --check` clean,
+`cargo check --workspace --all-targets` clean, `cargo clippy --workspace
+--all-targets` clean (0 warnings), and `cargo test --workspace` green
+(10 128 passed, 0 failed).
 
 ---
 

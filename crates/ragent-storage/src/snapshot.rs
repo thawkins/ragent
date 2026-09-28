@@ -298,7 +298,17 @@ fn apply_unified_diff(base: &str, diff: &str) -> Result<String> {
         if diff_line.is_empty() {
             continue;
         }
-        let (tag, content) = diff_line.split_at(1);
+        // SEC-ragent-storage-006 (SECTASKS T-066): `split_at(1)` panics when
+        // byte 1 is not a UTF-8 char boundary, so a diff line beginning with a
+        // multibyte character aborted the process instead of returning the
+        // `Result` this function declares. Split on the first *char*.
+        let Some((tag, content)) = diff_line
+            .char_indices()
+            .next()
+            .map(|(_, c)| (&diff_line[..c.len_utf8()], &diff_line[c.len_utf8()..]))
+        else {
+            continue;
+        };
         match tag {
             " "
                 // Context line — output base line and advance

@@ -142,6 +142,21 @@ pub(crate) fn parse_alog_run_id_yes(
         return None;
     }
 
+    // SEC-ragent-tui-003 (SECTASKS T-066): the run id is interpolated into the
+    // export file name (`export-<run-id>.jsonl`), so a value containing `/` or
+    // `..` wrote attacker-chosen paths outside `log/exports/`. Accept only the
+    // characters a generated run id can contain.
+    if !run_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        append(&format!(
+            "From: /alog {subcmd}\n\n\
+             \u{26a0} Invalid run id `{run_id}`: only ASCII letters, digits, `-`, and `_` are allowed."
+        ));
+        return None;
+    }
+
     Some(run_id.to_string())
 }
 

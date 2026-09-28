@@ -21,6 +21,7 @@ tracing = "0.1"
 [dev-dependencies]
 tokio = { version = "1.42", features = ["full"] }
 tempfile = "3"
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

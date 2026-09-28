@@ -1662,6 +1662,11 @@ impl Config {
             .lines()
             .nth(line.saturating_sub(1))
             .unwrap_or("<line not found>");
+        // SEC-ragent-config-007 (SECTASKS T-061): a credential is very often on
+        // the offending line (a stray comma beside `"tavily_api_key": "..."`),
+        // and this diagnostic is printed to the terminal and logged. Redact the
+        // echoed source line before embedding it.
+        let problematic_line = ragent_types::sanitize::redact_secrets(problematic_line);
         anyhow::anyhow!(
             "Failed to parse {label}:\n\
              Error at line {}, column {}:\n\

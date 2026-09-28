@@ -61,6 +61,53 @@ struct TelegramResolved {
     base_url: String,
 }
 
+/// Refuse a config-supplied outbound target unless it is usable as a public
+/// endpoint.
+///
+/// SEC-tools-extended-008 (SECTASKS T-066). `validate_url` blocks loopback and
+/// private ranges outright, which is correct for agent-supplied URLs but would
+/// also break the documented local-mock/test shape for these outbound sinks, so
+/// a loopback literal is allowed here (the operator configured it) while every
+/// other private, link-local, metadata, and rebinding host is refused.
+fn refuse_non_public_target(label: &str, url: &str) -> Result<()> {
+    if target_is_allowed(url) {
+        return Ok(());
+    }
+    match crate::masterfetch::security::validate_url(url) {
+        Ok(()) => Ok(()),
+        Err(e) => bail!("{label} rejected: {e}"),
+    }
+}
+
+/// Whether a config-supplied outbound target may be used.
+///
+/// `validate_url` blocks loopback and private ranges outright, which is correct
+/// for agent-supplied URLs but would also break the documented local-mock/test
+/// shape for these outbound sinks. A loopback literal is therefore allowed (the
+/// operator configured it); every other private, link-local, metadata, and
+/// rebinding host is refused (SEC-tools-extended-008, SECTASKS T-066).
+#[must_use]
+pub fn target_is_allowed(url: &str) -> bool {
+    use crate::masterfetch::security::SecurityError;
+    if matches!(
+        crate::masterfetch::security::validate_url(url),
+        Ok(()) | Err(SecurityError::Localhost(_))
+    ) {
+        return true;
+    }
+    // `validate_url` reports a loopback *literal* as a private range (only a
+    // hostname like `localhost` produces `Localhost`), so an explicitly
+    // configured loopback IP must be recognised separately.
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    match parsed.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        _ => false,
+    }
+}
+
 /// Resolve a config credential value. Values prefixed with `env:` are read
 /// from the named environment variable at send time.
 pub fn resolve_secret(config_value: Option<&str>) -> Option<String> {
@@ -144,6 +191,13 @@ impl SendChannelMessageTool {
     }
 
     async fn send_telegram(resolved: &TelegramResolved, message: &str) -> Result<String> {
+        // SEC-tools-extended-008 (SECTASKS T-066): `channels.telegram.base_url`
+        // is config-supplied and was interpolated into a POST target with no
+        // SSRF check, so a config could point the tool at an internal service.
+        // A loopback target is the documented local-mock/test shape, so it is
+        // permitted when the user has explicitly pointed the config there;
+        // every other private/metadata host is refused.
+        refuse_non_public_target("telegram base_url", &resolved.base_url)?;
         let url = format!(
             "{}/bot{}/sendMessage",
             resolved.base_url, resolved.bot_token

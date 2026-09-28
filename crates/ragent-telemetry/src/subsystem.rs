@@ -782,7 +782,13 @@ fn build_resource(config: &OtelConfig) -> Resource {
 
     let mut kvs = vec![
         KeyValue::new("service.name", sanitize_attr_value(&config.service_name)),
-        KeyValue::new("service.version", env!("CARGO_PKG_VERSION").to_string()),
+        // SEC-ragent-telemetry-005 (SECTASKS T-066): every other resource
+        // attribute is routed through the guard; route the version too so the
+        // contract holds uniformly.
+        KeyValue::new(
+            "service.version",
+            sanitize_attr_value(env!("CARGO_PKG_VERSION")),
+        ),
     ];
 
     // Add host.name from the system hostname when available (FR-004).

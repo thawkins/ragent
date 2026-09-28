@@ -212,6 +212,16 @@ impl Tool for MfCrawlTool {
                 });
             }
         }
+        // SEC-tools-extended-010 / SEC-tools-extended-009 (SECTASKS T-066): the
+        // SSRF obligation now also lives in the tool entry point and is stated
+        // on the `CrawlFetcher` trait, so a fetcher that does not re-validate
+        // cannot silently reopen the hole.
+        debug_assert!(
+            crawl_urls
+                .iter()
+                .all(|candidate| validate_url(candidate).is_ok()),
+            "crawl_urls entries must pass SSRF validation at the tool boundary"
+        );
 
         let config = CrawlConfig {
             max_pages,

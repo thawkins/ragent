@@ -1176,6 +1176,26 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
     };
     (name, data)
 }
+
+/// Render an [`Event`] for logs without any credential material.
+///
+/// SEC-ragent-types-006 (SECTASKS T-066): the derived `Debug` on [`Event`]
+/// prints OAuth tokens and device codes verbatim, and the workspace has
+/// precedent for logging whole events with `{:?}`. Use this at any log site.
+#[must_use]
+pub fn redacted_event_debug(event: &Event) -> String {
+    match event {
+        Event::CopilotDeviceFlowComplete { api_base, token } => format!(
+            "CopilotDeviceFlowComplete {{ token_present: {}, api_base: {api_base:?} }}",
+            !token.is_empty()
+        ),
+        Event::CopilotDeviceFlowStartResult { device_code, .. } => format!(
+            "CopilotDeviceFlowStartResult {{ device_code_present: {}, .. }}",
+            device_code.as_ref().is_some_and(|c| !c.is_empty())
+        ),
+        other => format!("{other:?}"),
+    }
+}
 /// Convert a `ragent_agent` [`Event`] into an Axum [`SseEvent`].
 ///
 /// Payloads are serialized directly from typed structs — no intermediate

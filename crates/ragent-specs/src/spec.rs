@@ -13,8 +13,26 @@ pub(crate) fn now_epoch_secs() -> u64 {
 /// Unique, URL-safe identifier for a spec.
 ///
 /// Used as the directory name under `specs/`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct SpecId(String);
+
+/// Deserialises through [`SpecId::new`] so the validated constructor is the
+/// only way in.
+///
+/// SEC-ragent-specs-004 (SECTASKS T-065): the derived `Deserialize` on a
+/// transparent `String` bypassed the allowlist entirely, and `dir_name()` is
+/// joined onto `specs_root` at every path site in the crate, so a
+/// deserialised `../../x` reached `specs_root.join(id.dir_name())`.
+impl<'de> Deserialize<'de> for SpecId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Self::new(raw).ok_or_else(|| {
+            serde::de::Error::custom(
+                "invalid spec id: only ASCII alphanumeric, hyphen, and underscore are allowed",
+            )
+        })
+    }
+}
 
 impl SpecId {
     /// Create a new `SpecId` from a string.

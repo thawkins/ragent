@@ -297,6 +297,18 @@ impl GmailTool {
                 .ok()
                 .filter(|v| !v.is_empty());
         }
+        // SEC-tools-extended-008 (SECTASKS T-066): both endpoints are
+        // config-derived and were used for authenticated requests without an
+        // SSRF check. Fall back to the public defaults when an override is
+        // rejected, so a bad config cannot redirect credential-bearing calls.
+        if !super::channels::target_is_allowed(&resolved.api_base) {
+            tracing::warn!(base = %resolved.api_base, "gmail api_base rejected; using default");
+            resolved.api_base = DEFAULT_API_BASE.to_string();
+        }
+        if !super::channels::target_is_allowed(&resolved.token_url) {
+            tracing::warn!(url = %resolved.token_url, "gmail token_url rejected; using default");
+            resolved.token_url = DEFAULT_TOKEN_URL.to_string();
+        }
         resolved
     }
 

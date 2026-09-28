@@ -20,6 +20,11 @@ const BENCH_TRANSIENT_MAX_RETRIES: u32 = 7;
 const BENCH_TRANSIENT_MAX_BACKOFF_SECS: u64 = 30;
 const BENCH_TRANSIENT_MAX_ELAPSED_SECS: u64 = 150;
 
+/// Upper bound on `--samples`, so a mistyped or hostile value cannot drive an
+/// unbounded generation loop or a huge `Vec` pre-allocation
+/// (SEC-ragent-bench-006, SECTASKS T-059).
+const MAX_BENCH_SAMPLES: usize = 100;
+
 /// Resolved provider/model selection for a benchmark run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedModelSelection {
@@ -191,6 +196,12 @@ impl BenchModelRunner for LiveBenchModelRunner {
         let api_key = self.api_key.clone();
         let prompt = prompt.to_string();
         let options = options.clone();
+        // SEC-ragent-bench-006 (SECTASKS T-059): `options.samples` is a plain
+        // `usize` from the CLI with no upper bound, used both as a
+        // `Vec::with_capacity` argument and as the loop bound — each sample is
+        // a full streaming LLM request. Clamp it once, before the runtime is
+        // built, so the cap applies to both the pre-allocation and the loop.
+        let sample_count = options.samples.clamp(1, MAX_BENCH_SAMPLES);
 
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -206,8 +217,8 @@ impl BenchModelRunner for LiveBenchModelRunner {
                         )
                     })?;
 
-                let mut samples = Vec::with_capacity(options.samples.max(1));
-                for _ in 0..options.samples.max(1) {
+                let mut samples = Vec::with_capacity(sample_count);
+                for _ in 0..sample_count {
                     if cancel.load(Ordering::Relaxed) {
                         bail!("benchmark run cancelled");
                     }

@@ -583,6 +583,12 @@ impl SpecCommand {
                 if specname.is_empty() || feature.is_empty() {
                     // Caller should treat this as a usage error.
                     Self::Unknown("create".to_string())
+                } else if crate::spec::SpecId::new(specname.as_str()).is_none() {
+                    // SEC-ragent-specs-003 (SECTASKS T-065): the name is
+                    // interpolated into the generation prompt and every
+                    // `specs/{specname}/...` site, so validate it exactly like
+                    // `parse_govcreate` does.
+                    Self::Unknown("create".to_string())
                 } else {
                     Self::Create {
                         specname,
@@ -763,6 +769,10 @@ impl SpecCommand {
                 // `/spec create` acts on it; `specify` ignores it.
                 let (specname, feature, from_research, _folder) = parse_feature_with_research(rest);
                 if specname.is_empty() || feature.is_empty() {
+                    Self::Unknown("specify".to_string())
+                } else if crate::spec::SpecId::new(specname.as_str()).is_none() {
+                    // SEC-ragent-specs-003 (SECTASKS T-065): same validation as
+                    // the `create` arm.
                     Self::Unknown("specify".to_string())
                 } else {
                     Self::Specify {
@@ -2139,6 +2149,14 @@ Use the `write` tool to create all three files. Ensure the spec is clear, testab
         force: bool,
     ) -> Result<std::path::PathBuf, crate::error::SpecError> {
         use crate::error::SpecError;
+
+        // SEC-ragent-specs-005 (SECTASKS T-065): this is a public write API, so
+        // re-validate the id here rather than relying on caller discipline - the
+        // raw `&str` was joined into the output path, so a caller that forwarded
+        // a user/LLM value would get a path-traversal-capable create/write.
+        let validated = crate::spec::SpecId::new(spec_id)
+            .ok_or_else(|| SpecError::InvalidSpecId(spec_id.to_string()))?;
+        let spec_id = validated.dir_name();
 
         let spec_dir = target_folder.join("specs").join(spec_id);
         let spec_dir_exists = spec_dir.is_dir();

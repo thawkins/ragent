@@ -181,6 +181,18 @@ pub fn load_from_config() {
             denylist.extend(cfg.dirs.denylist);
             allowed_roots.extend(cfg.dirs.allowed_roots);
 
+            // SEC-ragent-config-006 (SECTASKS T-061): `BUILTIN_DENYLIST` was
+            // only ever handed to the TUI for *display*; the enforced compiled
+            // denylist was seeded purely from `cfg.dirs.denylist`, so the
+            // advertised system-directory protection was inert. Merge the
+            // built-ins into the enforced list (de-duplicated, built-ins first).
+            for pattern in BUILTIN_DENYLIST {
+                let pattern = (*pattern).to_string();
+                if !denylist.contains(&pattern) {
+                    denylist.push(pattern);
+                }
+            }
+
             DirLists {
                 allowlist,
                 denylist,

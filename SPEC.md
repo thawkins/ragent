@@ -1195,6 +1195,45 @@ attachment**.
 | `split_bash_command` substitution depth | `ragent-agent::session::permissions` | a `;`/`&&` inside `$( ... )` does not split the command into a separately-judged sub-command |
 | `same_origin_as` | `ragent-tools-vcs::github` | the Bearer token is attached only when the resolved URL matches the configured API origin |
 
+### 4.6d Defence in Depth (SECTASKS MS-04)
+
+The Low-severity findings, delivered as the same guard shapes at the remaining
+call sites: an explicit **cap/budget**, a **containment check**, a **char-safe
+split**, or an **owner-only file mode**.
+
+| Guard | Where it lives | What it enforces |
+|-------|----------------|------------------|
+| `unpack_archive_checked` (`ARCHIVE_MAX_ENTRIES`, `ARCHIVE_MAX_TOTAL_BYTES`) | `ragent-agent::session::archive` | session-archive import refuses an entry-count or total-decompressed-size overrun and rejects an entry path that escapes the extraction directory |
+| `MAX_BENCH_SAMPLES` | `ragent-bench::model` | `--samples` is clamped to 100 before both the `Vec` pre-allocation and the generation loop |
+| `MAX_DOWNLOAD_BYTES` / `MAX_HUMANEVALPACK_PAGES` / `MAX_HUMANEVALPACK_ROWS` | `ragent-bench::data` | a dataset download is streamed under a 64 MiB cap and the pagination loop carries a page and row budget |
+| `base_url_override` run note | `ragent-bench::runner` | the resolved provider base URL is no longer written into the shareable workbook or run-state sidecar |
+| `contained_join` | `ragent-bench::data` | manifest `case_file` and `relative_path` are joined inside the canonicalised data root |
+| read-then-check size | `ragent-codeindex::scanner` | the stored byte size is derived from the bytes actually read, closing the stat/read TOCTOU past `max_file_size` |
+| `build_exclude_matcher` | `ragent-codeindex::scanner` | `ScanConfig::extra_exclude_patterns` is compiled into a glob matcher and applied during the walk |
+| `clear_index_dir` symlink refusal | `ragent-codeindex::search` | `FtsIndex::open_or_create` refuses a symlinked index directory before the recovery wipe and surfaces deletion failures |
+| `BUILTIN_DENYLIST` merge | `ragent-config::dir_lists` | the built-in system-directory patterns are merged into the enforced denylist, not merely advertised |
+| parse-diagnostic redaction | `ragent-config::config`, `src/main.rs` | the echoed problematic source line is passed through `redact_secrets` before it is printed or logged |
+| `is_contained_relative_path` | `ragent-plugins::manifest` | `entry` / `main` / `server.entry` must be a contained relative path inside the plugin root |
+| `https_only_redirects` (shared) | `ragent-plugins::store_fetch` → `add` | the package download stops any non-`https` redirect |
+| `is_single_normal_component` | `ragent-plugins::marketplace` | the wrapper-directory name derived from the install source must be a single normal component |
+| `neutralise_fenced_body` | `ragent-research::document` | backtick runs are broken and `#### Source [#N]` / `**Sources:**` lines escaped before a fetched body enters a fenced synthesis prompt |
+| `mask_url_credentials` | `ragent-research::document` → `gather_log` | recorded gather-log URLs drop userinfo and query strings |
+| session-bound permission reply | `ragent-agent::session::permissions` | an `Event::PermissionReplied` is honoured only when its `session_id` matches the session awaiting the request |
+| `internal_error_response` | `ragent-server::routes` | internal error detail is logged; the client receives `internal server error` |
+| `SpecId` validating `Deserialize` | `ragent-specs::spec` | every deserialisation routes through `SpecId::new`, so a traversal id cannot be constructed |
+| `write_govcreate_spec` re-validation | `ragent-specs::commands` | the public write API validates the id before joining it into the output path |
+| `/spec create` / `/spec specify` name validation | `ragent-specs::commands` | an invalid spec name is a usage error |
+| char-boundary diff split | `ragent-storage::snapshot` | `apply_unified_diff` splits on the first char; a multibyte diff line no longer panics |
+| `is_safe_memory_component` | `ragent-agent::team::config` | `resolve_memory_dir` rejects a multi-component or `..` agent name |
+| `CardinalityCache::resolve` sanitisation | `ragent-telemetry::cardinality` | values are passed through `sanitize_attr_value` inside `resolve` and a poisoned lock fails closed to the unknown bucket |
+| `parse_alog_run_id_yes` validation | `ragent-tui::app::helpers` | `/alog export` accepts only `[A-Za-z0-9_-]+` run ids |
+| log-window spool mode | `ragent-tui::app::session_ops` | the spool is created 0600 and the mode is re-asserted on every open |
+| `bash_scratch_dir` private fallback | `ragent-tools-core::bash` | a failed private-dir creation falls back to a process-private 0700 directory, never to shared temp |
+| tree-walk budget | `ragent-tools-vcs::github` | the GitHub recursive tree walk carries a `MAX_TREE_REQUESTS`/`MAX_TREE_ENTRIES` budget, matching the GitLab equivalent |
+| `redacted_event_debug` / SSE device-code masking | `ragent-server::sse` | credential-bearing events expose presence-only fields on the SSE stream and a redacted rendering for log sites |
+| `target_is_allowed` | `ragent-tools-extended::channels` | config-supplied outbound base URLs (Telegram, Gmail, finance providers) are SSRF-checked; an explicitly configured loopback target is permitted, everything else private is refused |
+| `CrawlFetcher` SSRF contract | `ragent-tools-extended::masterfetch::crawl` | the SSRF obligation is stated on the trait and validated at the `mf_crawl` tool boundary |
+
 ### 4.7 YOLO Mode
 
 YOLO mode bypasses Layers 2, 3, and 6 of bash security and auto-approves all

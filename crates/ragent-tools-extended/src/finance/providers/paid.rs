@@ -95,6 +95,16 @@ impl PaidProvider {
                 "paid provider API key is empty".to_string(),
             ));
         }
+        // SEC-tools-extended-008 (SECTASKS T-066): `base_url` is config-supplied
+        // and was used verbatim as the API endpoint, so a config could point the
+        // key-bearing request at an internal service. Reject a non-public host.
+        if let Some(base) = base_url.as_deref()
+            && let Err(e) = crate::masterfetch::security::validate_url(base)
+        {
+            return Err(FinanceError::ConfigError(format!(
+                "paid provider base_url rejected: {e}"
+            )));
+        }
         Ok(Self {
             name: provider.to_string(),
             api_key: api_key.to_string(),

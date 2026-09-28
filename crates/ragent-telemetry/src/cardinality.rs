@@ -31,6 +31,11 @@ use std::sync::RwLock;
 #[cfg(feature = "telemetry")]
 use opentelemetry::KeyValue;
 
+/// Sentinel value for the metric `name` argument when redacting a value that is
+/// not a plain string (SEC-ragent-telemetry-005).
+#[cfg(feature = "telemetry")]
+const NON_STRING_ATTR: &str = "<non-string>";
+
 /// The sentinel value used for attribute values when the cardinality limit
 /// is exceeded (FR-035).
 pub const UNKNOWN_BUCKET: &str = "unknown";
@@ -79,6 +84,27 @@ impl CardinalityCache {
     /// metric has no cardinality to cap.
     #[must_use]
     pub fn resolve(&self, metric_name: &str, attrs: &[KeyValue]) -> Vec<KeyValue> {
+        // SEC-ragent-telemetry-005 (SECTASKS T-066): the documented contract in
+        // `sensitive.rs` promised the guard was applied where the cache resolves
+        // attribute sets, but `resolve` returned the caller's values untouched,
+        // so safety depended on every call site using the `attr_*` helpers.
+        // Sanitise here so the guarantee holds regardless of call site.
+        let sanitised: Vec<KeyValue> = attrs
+            .iter()
+            .map(|kv| {
+                KeyValue::new(
+                    kv.key.clone(),
+                    match &kv.value {
+                        opentelemetry::Value::String(s) => {
+                            crate::sensitive::sanitize_attr_value(s.as_str())
+                        }
+                        _ => NON_STRING_ATTR.to_string(),
+                    },
+                )
+            })
+            .collect();
+        let attrs = sanitised.as_slice();
+
         // Fast path: no attributes → no cardinality to cap.
         if attrs.is_empty() {
             return Vec::new();
@@ -117,8 +143,13 @@ impl CardinalityCache {
                     .collect()
             }
         } else {
-            // Lock poisoned — return attrs as-is (fail open, never block).
-            attrs.to_vec()
+            // SEC-ragent-telemetry-005 (SECTASKS T-066): a poisoned lock used to
+            // fail open (returning attributes untouched, bypassing both the cap
+            // and the redaction above). Fail closed to the unknown bucket.
+            attrs
+                .iter()
+                .map(|kv| KeyValue::new(kv.key.clone(), UNKNOWN_BUCKET.to_string()))
+                .collect()
         }
     }
 

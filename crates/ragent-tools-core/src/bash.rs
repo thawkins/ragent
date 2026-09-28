@@ -193,6 +193,15 @@ fn bash_scratch_dir() -> PathBuf {
         .unwrap_or_else(|_| std::env::temp_dir());
     let dir = base.join("ragent-shell").join(safe_session_id("scratch"));
     if create_private_dir(&dir).is_err() {
+        // SEC-ragent-tools-core-004 (SECTASKS T-066): the fallback used to be
+        // the shared system temp directory itself, so a failed private-dir
+        // creation silently put exportable-env state and the command script in
+        // a world-readable location. Fall back to a process-private directory
+        // with a 0700 mode, and only then to a plain directory.
+        let private = std::env::temp_dir().join(format!("ragent-shell-{}", std::process::id()));
+        if create_private_dir(&private).is_ok() {
+            return private;
+        }
         return std::env::temp_dir();
     }
     dir

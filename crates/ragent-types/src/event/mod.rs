@@ -582,6 +582,11 @@ pub enum Event {
         /// URL the user must visit to authorise.
         verification_uri: Option<String>,
         /// Opaque device code used when polling for the access token.
+        ///
+        /// SEC-ragent-types-006 (SECTASKS T-066): this is an OAuth credential,
+        /// so it is redacted wherever the event is rendered - the SSE payload
+        /// carries only `device_code_present`, and
+        /// `ragent_server::sse::redacted_event_debug` masks it for logs.
         device_code: Option<String>,
         /// Minimum polling interval in seconds.
         interval: Option<u64>,

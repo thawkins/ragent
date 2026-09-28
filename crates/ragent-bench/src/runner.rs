@@ -547,8 +547,12 @@ fn build_run_notes(
     if let Some(model_display_name) = &selection.model_display_name {
         notes.push(format!("model_display_name={model_display_name}"));
     }
-    if let Some(base_url) = &selection.base_url {
-        notes.push(format!("base_url={base_url}"));
+    // SEC-ragent-bench-007 (SECTASKS T-059): the resolved base URL names the
+    // actual endpoint (frequently an internal gateway), and these notes are
+    // written verbatim into the shareable `.xlsx` workbook and the
+    // `.run.json` sidecar. Record only that an override was in effect.
+    if selection.base_url.is_some() {
+        notes.push("base_url_override=true".to_string());
     }
     if let Some(context_window) = selection.context_window {
         notes.push(format!("context_window={context_window}"));

@@ -305,6 +305,14 @@ pub trait CrawlFetcher: Send + Sync {
     /// Returns `None` if the fetch fails entirely (network error, DNS
     /// failure, etc.). Partial failures (HTTP 404, bot block) return
     /// `Some(FetchedPage)` with `content_ok = false`.
+    ///
+    /// # SSRF contract
+    ///
+    /// An implementation MUST reject any URL that fails
+    /// [`crate::masterfetch::security::validate_url`]. Selective crawl mode
+    /// (`crawl_urls`) also validates every entry at the tool boundary, but the
+    /// fetcher is the last line of defence and must not rely on that
+    /// (SEC-tools-extended-010, SECTASKS T-066).
     async fn fetch_page(&self, url: &str) -> Option<FetchedPage>;
 }
 

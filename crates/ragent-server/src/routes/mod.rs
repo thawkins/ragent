@@ -319,8 +319,8 @@ async fn list_sessions(State(state): State<AppState>) -> (StatusCode, Json<serde
             let resp: Vec<SessionResponse> = sessions.into_iter().map(Into::into).collect();
             serialize_response(resp, "list_sessions")
         }
-        Ok(Err(e)) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
+        Ok(Err(e)) => internal_error_response("list_sessions", e),
+        Err(e) => internal_error_response("list_sessions", e),
     }
 }
 
@@ -338,9 +338,13 @@ async fn create_session(
     let canonical = match tokio::fs::canonicalize(path).await {
         Ok(p) => p,
         Err(e) => {
+            // SEC-ragent-server-008 (SECTASKS T-064): `canonicalize`'s error
+            // embeds the resolved path component, so log it and answer
+            // generically.
+            tracing::warn!(error = %e, "session directory rejected");
             return (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": format!("Invalid directory: {e}") })),
+                Json(serde_json::json!({ "error": "invalid directory" })),
             )
                 .into_response();
         }
@@ -397,8 +401,8 @@ async fn get_session(
             serialize_response(resp, "get_session")
         }
         Ok(Ok(None)) => error_response(StatusCode::NOT_FOUND, "session not found"),
-        Ok(Err(e)) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
+        Ok(Err(e)) => internal_error_response("get_session", e),
+        Err(e) => internal_error_response("get_session", e),
     }
 }
 
@@ -409,8 +413,8 @@ async fn archive_session(
     let storage = Arc::clone(&state.storage);
     match tokio::task::spawn_blocking(move || storage.archive_session(&id)).await {
         Ok(Ok(())) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
-        Ok(Err(e)) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
+        Ok(Err(e)) => internal_error_response("archive_session", e),
+        Err(e) => internal_error_response("archive_session", e),
     }
 }
 
@@ -421,8 +425,8 @@ async fn get_messages(
     let storage = Arc::clone(&state.storage);
     match tokio::task::spawn_blocking(move || storage.get_messages(&id)).await {
         Ok(Ok(messages)) => serialize_response(messages, "get_messages"),
-        Ok(Err(e)) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
+        Ok(Err(e)) => internal_error_response("get_messages", e),
+        Err(e) => internal_error_response("get_messages", e),
     }
 }
 
@@ -881,6 +885,20 @@ pub(crate) fn error_response(
     message: impl Into<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     (status, Json(serde_json::json!({ "error": message.into() })))
+}
+
+/// Return a generic internal error to the client and keep the detail in the log.
+///
+/// SEC-ragent-server-008 (SECTASKS T-064): handlers formatted storage and
+/// filesystem errors straight into the JSON body, disclosing database paths,
+/// SQLite error texts, and other implementation detail. `context` names the
+/// failing operation for the log; the client is told only that it failed.
+pub fn internal_error_response(
+    context: &str,
+    error: impl std::fmt::Display,
+) -> (StatusCode, Json<serde_json::Value>) {
+    tracing::error!(context, error = %error, "request failed");
+    error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
 }
 
 /// Helper to serialize a value to JSON and return a response, or an internal server error.

@@ -2248,14 +2248,78 @@ fn trim_url_trailing(raw: &str) -> (&str, &str) {
 /// Truncate a source body to [`MAX_SOURCE_BODY_BYTES`] if necessary,
 /// returning a markdown-safe fenced version safe to embed in a supporting
 /// file (NFR-006).
+///
+/// The body is additionally neutralised for use inside a ```` ```text ````
+/// fence: any backtick run is broken up so an embedded fence delimiter cannot
+/// close the block, and any line that would render as a `#### Source [#N]`
+/// header is escaped (SEC-ragent-research-006, SECTASKS T-063).
 #[must_use]
 pub fn fence_source_body(body: &str) -> String {
     let trimmed = body.trim();
     let bytes = trimmed.as_bytes();
     if bytes.len() <= MAX_SOURCE_BODY_BYTES {
-        return trimmed.to_string();
+        return neutralise_fenced_body(trimmed);
     }
-    truncate_body_to_bytes(trimmed, MAX_SOURCE_BODY_BYTES)
+    neutralise_fenced_body(&truncate_body_to_bytes(trimmed, MAX_SOURCE_BODY_BYTES))
+}
+
+/// Make a fetched body safe to embed inside a ```` ```text ```` fence.
+///
+/// Two escapes are neutralised: a backtick run (which could close the fence and
+/// inject prompt text) is split with a zero-width space, and a line that
+/// would render as a `#### Source [#...]` header or a `**Sources:**` heading is
+/// escaped so it cannot spoof a citation block. The body is otherwise returned
+/// verbatim.
+#[must_use]
+pub fn neutralise_fenced_body(body: &str) -> String {
+    let mut out = String::with_capacity(body.len() + 64);
+    for (idx, line) in body.split('\n').enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        let trimmed_start = line.trim_start();
+        // Spoofed source headers (`#### Source [#999] (web) ...`) are the
+        // citation-forgery vector; escape the leading `#` run so markdown no
+        // longer sees a heading while the text stays readable.
+        if trimmed_start.starts_with("#### Source [#") || trimmed_start.starts_with("**Sources:**")
+        {
+            out.push_str("\\");
+        }
+        // Break every backtick run so no ```` ``` ```` delimiter survives.
+        for ch in line.chars() {
+            if ch == '`' {
+                out.push('`');
+                out.push('\u{200B}');
+            } else {
+                out.push(ch);
+            }
+        }
+    }
+    out
+}
+
+/// Strip userinfo and the query string from a URL for safe logging.
+///
+/// SEC-ragent-research-007 (SECTASKS T-063): search-hit and OA-recovered URLs
+/// regularly carry credentials or presigned tokens in the query string
+/// (`?access_token=...`). The gather log keeps the scheme/host/path so it stays
+/// diagnostically useful while the secret-bearing components are dropped.
+/// Non-URL input is returned unchanged.
+#[must_use]
+pub fn mask_url_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let (authority, tail) = match rest.find(['/', '?', '#']) {
+        Some(pos) => (&rest[..pos], &rest[pos..]),
+        None => (rest, ""),
+    };
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    let path = match tail.find(['?', '#']) {
+        Some(pos) => &tail[..pos],
+        None => tail,
+    };
+    format!("{scheme}://{host}{path}")
 }
 
 /// Truncate `body` to at most `max_bytes` UTF-8 bytes, cutting at the nearest

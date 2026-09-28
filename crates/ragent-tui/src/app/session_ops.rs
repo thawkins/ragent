@@ -3711,11 +3711,25 @@ impl App {
         };
         let ts = chrono::Utc::now().to_rfc3339();
         let line = format!("{ts} {level_str} {message}\n");
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
+        // SEC-ragent-tui-005 (SECTASKS T-066): every log line (raw tool output,
+        // command output, stderr) was appended to a file created at the process
+        // umask default, so on a multi-user host the session transcript was
+        // world-readable. Create it owner-only, and tighten a pre-existing file.
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
         {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        if let Ok(mut file) = options.open(path) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                // `mode(0o600)` only applies at creation; an existing file keeps
+                // its old mode, so re-assert it (best-effort).
+                let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+            }
             if let Err(e) = file.write_all(line.as_bytes()) {
                 tracing::warn!(error = %e, "failed to append log entry to spool");
             }
@@ -3812,13 +3826,23 @@ impl App {
         let Some(ref path) = self.log_window_path else {
             return;
         };
-        let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-        else {
+        // SEC-ragent-tui-005 (SECTASKS T-066): same owner-only creation as
+        // `append_log_entry_to_spool`.
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let Ok(mut file) = options.open(path) else {
             return;
         };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
         for entry in &self.log_entries {
             let level_str = match entry.level {
                 LogLevel::Info => "INF",

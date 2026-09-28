@@ -418,11 +418,27 @@ async fn prompt_for_permission(
 
         match tokio::time::timeout(recv_timeout, rx.recv()).await {
             Ok(Ok(Event::PermissionReplied {
+                session_id: reply_session,
                 request_id: rid,
                 allowed,
                 decision,
                 ..
             })) if rid == request_id => {
+                // SEC-ragent-server-007 (SECTASKS T-064): bind the reply to the
+                // session that owns this pending request. Request ids are
+                // broadcast on `/events` and the session SSE stream, so without
+                // this check any caller that observed one could forge an
+                // approval for another session. A mismatched session is ignored
+                // (we keep waiting rather than treating it as a decision).
+                if reply_session != session_id {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        claimed = %reply_session,
+                        awaiting = %session_id,
+                        "ignoring permission reply for a different session"
+                    );
+                    continue;
+                }
                 // If user chose 'Always', record the grant.
                 if allowed && decision == crate::permission::PermissionDecision::Always {
                     let mut c = checker.write();

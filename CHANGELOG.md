@@ -108,6 +108,62 @@
     sub-command boundary; and the provider base URL is no longer persisted into
     the benchmark workbook (`SEC-ragent-bench-007`).
 
+- **Milestone MS-04 of `SECTASKS.md` complete — the Low findings are
+  remediated.** MS-04 ("Defence in depth") covers T-059 .. T-066.
+  `SPEC.md` §4.6d records the guards and their call sites.
+  - **Resource caps** — session-archive import already caps entries and total
+    decompressed bytes (`SEC-ragent-agent-009`); benchmark downloads gained a
+    64 MiB streamed cap and a page/row budget on the HumanEvalPack pagination
+    loop, and `--samples` is clamped to 100 so a mistyped value cannot drive an
+    unbounded generation loop (`SEC-ragent-bench-003/004/005/006`); the
+    benchmark workbook and run-state sidecar no longer record the resolved
+    provider base URL, only that an override was in effect
+    (`SEC-ragent-bench-007`).
+  - **Containment and TOCTOU** — the codeindex scanner derives the stored size
+    from the bytes actually read, applies `extra_exclude_patterns`, and
+    `FtsIndex::open` refuses a symlinked index directory before the recovery
+    path can delete through it (`SEC-ragent-codeindex-005/006/007`); the
+    benchmark manifest `relative_path`/`case_file` joins stay inside the data
+    root (`SEC-ragent-bench-004/005`).
+  - **Config** — `BUILTIN_DENYLIST` is now merged into the *enforced* denylist
+    rather than only being advertised to the TUI, and the JSON parse diagnostic
+    redacts the echoed source line before it reaches the terminal or the log
+    (`SEC-ragent-config-006/007`).
+  - **Plugins** — the package download refuses a non-`https` redirect
+    (reusing the store-fetch policy), manifest-declared `entry`/`main`/
+    `server.entry` must be a contained relative path, and the marketplace
+    materialiser refuses a wrapper-directory name that is not a single normal
+    component (`SEC-ragent-plugins-005/006/007`).
+  - **Research** — fetched bodies are neutralised before fenced synthesis
+    insertion (backtick runs cannot close the fence, `#### Source [#N]` and
+    `**Sources:**` lines cannot spoof citations) and the gather log masks
+    userinfo and query strings in recorded URLs
+    (`SEC-ragent-research-006/007`).
+  - **Server** — a permission reply is now bound to the session that owns the
+    pending request, and internal errors are logged in full while the client
+    receives a generic string (`SEC-ragent-server-007/008`).
+  - **Specs** — `/spec create` and `/spec specify` validate the name,
+    `SpecId`'s `Deserialize` routes through the validating constructor, and the
+    public `write_govcreate_spec` re-validates its id
+    (`SEC-ragent-specs-003/004/005`).
+  - **Panic-free parsing and file modes** — `apply_unified_diff` splits on a
+    char boundary instead of panicking on a multibyte diff line
+    (`SEC-ragent-storage-006`); `resolve_memory_dir` rejects an unsafe agent
+    name (`SEC-ragent-team-007`); the telemetry cardinality resolver applies the
+    sanitizer itself and fails closed on a poisoned lock, with `service.version`
+    now guarded too (`SEC-ragent-telemetry-005`); the log-window spool is
+    created 0600 and re-asserted on every open, `/alog export` rejects a run id
+    that is not `[A-Za-z0-9_-]+`, and the bash scratch directory falls back to a
+    private directory rather than shared temp (`SEC-ragent-tui-003/005`,
+    `SEC-ragent-tools-core-004`); the GitHub recursive tree walk carries the
+    same request/entry budget as the GitLab equivalent
+    (`SEC-ragent-tools-vcs-008`); credential-bearing events are redacted on the
+    SSE stream and expose a `redacted_event_debug` helper for log sites
+    (`SEC-ragent-types-006`); and config-supplied outbound base URLs
+    (Telegram, Gmail, finance providers) are SSRF-checked, `browser eval` is
+    documented as its own capability, and the `CrawlFetcher` SSRF obligation is
+    stated on the trait (`SEC-tools-extended-007/008/009/010`).
+
 ### Added
 
 - **Crash-dump capture for aborts that bypass the panic hook** — a stack

@@ -52,9 +52,17 @@ impl TwelveDataProvider {
                 "TwelveData API key is empty".to_string(),
             ));
         }
+        let base_url = base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+        // SEC-tools-extended-008 (SECTASKS T-066): the config-supplied base URL
+        // was used verbatim as the API endpoint for a key-bearing request.
+        if let Err(e) = crate::masterfetch::security::validate_url(&base_url) {
+            return Err(FinanceError::ConfigError(format!(
+                "TwelveData base_url rejected: {e}"
+            )));
+        }
         Ok(Self {
             api_key: api_key.to_string(),
-            base_url: base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
+            base_url,
             client: reqwest::Client::new(),
         })
     }

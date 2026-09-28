@@ -656,7 +656,7 @@ fn is_help_args(args: &str) -> bool {
 /// `live` (the `Event::McpStatusChanged` map) when present, so the background
 /// startup connect loop's status is not lost; otherwise it starts `Disabled`
 /// until the connect path reports otherwise.
-pub(crate) fn mcp_display_servers<S, H>(
+pub fn mcp_display_servers<S, H>(
     previous: &[ragent_agent::mcp::McpServer],
     configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
     working_dir: &std::path::Path,
@@ -705,7 +705,7 @@ where
 /// Thin re-export of [`ragent_agent::tool::McpToolWrapper::ragent_name_for`]
 /// so the existing TUI call sites keep their short path.
 #[must_use]
-pub(crate) fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
+pub fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
     ragent_agent::tool::McpToolWrapper::ragent_name_for(server_id, tool_name)
 }
 
@@ -717,7 +717,7 @@ pub(crate) fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
 /// synthesizing a ledger per call just to invoke that predicate wastefully
 /// rebuilds a `BTreeMap` for every `/mcp` row.
 #[must_use]
-pub(crate) fn server_is_enabled(
+pub fn server_is_enabled(
     server: &ragent_agent::mcp::McpServer,
     enabled: &std::collections::HashMap<String, bool>,
 ) -> bool {
@@ -729,7 +729,7 @@ pub(crate) fn server_is_enabled(
 /// Unknown strings map to `Disabled` so a malformed event cannot wedge the
 /// display list in a bogus state.
 #[must_use]
-pub(crate) fn mcp_status_from_event(status: &str) -> ragent_agent::mcp::McpStatus {
+pub fn mcp_status_from_event(status: &str) -> ragent_agent::mcp::McpStatus {
     match status {
         "connected" => ragent_agent::mcp::McpStatus::Connected,
         "needs_auth" => ragent_agent::mcp::McpStatus::NeedsAuth,

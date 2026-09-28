@@ -208,6 +208,14 @@ pub fn materialize_at(
     let Some(key) = key else {
         return root;
     };
+    // SEC-ragent-plugins-007 (SECTASKS T-062): `name` is the final `#`/`:`/`/`
+    // separated segment of the install source and was joined without a `..`
+    // guard, so a source ending in `:..` pointed `root.join(name)` at the
+    // staging parent. Only a single normal component may be used to probe the
+    // wrapper directory; otherwise return the root unchanged.
+    if !is_single_normal_component(name) {
+        return root;
+    }
     let sub = root.join(name);
     // Probe `root` first, then a one-level `<root>/<name>` wrapper directory.
     // A shared outer `PathBuf` handle for the early return sidesteps
@@ -253,4 +261,18 @@ pub fn materialize_at(
         }
     }
     root
+}
+
+/// Whether `name` is a single non-empty `Path::Component::Normal` segment.
+///
+/// Guards the marketplace materialisation wrapper-directory join against a
+/// source-derived name of `..` or a multi-segment/absolute value
+/// (SEC-ragent-plugins-007, SECTASKS T-062).
+fn is_single_normal_component(name: &str) -> bool {
+    if name.trim().is_empty() {
+        return false;
+    }
+    let mut components = std::path::Path::new(name).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
 }

@@ -262,7 +262,10 @@ pub fn read_capped(mut reader: impl std::io::Read, max_bytes: u64) -> Result<Vec
 /// A plaintext downgrade (or any non-`https` location) is stopped, so the
 /// endpoint cannot be bypassed by a redirect chain. The stopped response is a
 /// 3xx, surfaced as [`StoreError::Redirect`].
-fn https_only_redirects() -> reqwest::redirect::Policy {
+///
+/// Shared with the package-download path in [`crate::add`] so an archive fetch
+/// cannot be redirected to a plaintext mirror either (SEC-ragent-plugins-005).
+pub(crate) fn https_only_redirects() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(|attempt| {
         if attempt.url().scheme() != "https" {
             attempt.stop()

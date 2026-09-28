@@ -153,7 +153,7 @@ impl GatherLog {
     ) -> anyhow::Result<()> {
         let record = UrlRecord {
             timestamp: Rfc3339Now,
-            url,
+            url: MaskUrlCredentials(url),
             query,
             status,
             title,
@@ -240,7 +240,7 @@ impl GatherLog {
 #[derive(Serialize)]
 struct UrlRecord<'a> {
     timestamp: Rfc3339Now,
-    url: &'a str,
+    url: MaskUrlCredentials<'a>,
     query: &'a str,
     status: &'a str,
     title: &'a str,
@@ -249,6 +249,21 @@ struct UrlRecord<'a> {
     reason: Option<&'a str>,
     #[serde(flatten)]
     detail: FlattenDetail<'a>,
+}
+
+/// Serialises a URL with any userinfo and query string removed.
+///
+/// SEC-ragent-research-007 (SECTASKS T-063): candidate URLs written to the
+/// per-run gather log frequently carry credentials, presigned tokens, or
+/// session identifiers in their query string (`?access_token=...`) and land in
+/// that JSONL even when the fetch is later rejected. The scheme/host/path stay
+/// so the log remains diagnostically useful.
+struct MaskUrlCredentials<'a>(&'a str);
+
+impl Serialize for MaskUrlCredentials<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&crate::document::mask_url_credentials(self.0))
+    }
 }
 
 /// Serialises `detail` entries as top-level record fields.

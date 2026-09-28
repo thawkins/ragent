@@ -21,6 +21,16 @@ const FULL_MBPP_URL: &str =
 const HUMANEVALPACK_ROWS_URL: &str = "https://datasets-server.huggingface.co/rows";
 const FULL_INIT_SUPPORTED_SUITES: &[&str] = &["humaneval", "mbpp"];
 
+/// Byte ceiling for a single benchmark dataset download (SEC-ragent-bench-003,
+/// SECTASKS T-027).
+const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Page/row budget for the HumanEvalPack dataset-server pagination loop
+/// (SEC-ragent-bench-004, SECTASKS T-027).
+const MAX_HUMANEVALPACK_PAGES: usize = 200;
+/// Row ceiling for the HumanEvalPack dataset-server pagination loop.
+const MAX_HUMANEVALPACK_ROWS: usize = 50_000;
+
 /// One initialized benchmark case fixture.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BenchCaseFixture {
@@ -911,10 +921,30 @@ fn download_url_bytes(url: &str) -> Result<Vec<u8>> {
             .with_context(|| format!("download benchmark data from {url}"))?
             .error_for_status()
             .with_context(|| format!("benchmark data request failed for {url}"))?;
-        let bytes = response
-            .bytes()
-            .with_context(|| format!("read benchmark data response body from {url}"))?;
-        Ok(bytes.to_vec())
+        // SEC-ragent-bench-003 (SECTASKS T-027): a dataset-server response was
+        // buffered whole with no ceiling. Reject an over-large
+        // `Content-Length` up front and stream with a byte counter so a
+        // chunked/lying header still trips the cap.
+        if let Some(len) = response.content_length()
+            && len > MAX_DOWNLOAD_BYTES
+        {
+            bail!("benchmark download from {url} declares {len} bytes, over the {MAX_DOWNLOAD_BYTES}-byte cap");
+        }
+        let mut bytes = Vec::new();
+        let mut chunk = vec![0_u8; 65536];
+        let mut reader = response;
+        loop {
+            let read = std::io::Read::read(&mut reader, &mut chunk)
+                .with_context(|| format!("read benchmark data response body from {url}"))?;
+            if read == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&chunk[..read]);
+            if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
+                bail!("benchmark download from {url} exceeded the {MAX_DOWNLOAD_BYTES}-byte cap");
+            }
+        }
+        Ok(bytes)
     })
     .join()
     .map_err(|_| anyhow!("benchmark download worker thread panicked"))?
@@ -1132,7 +1162,15 @@ fn fetch_humanevalpack_records(
     let mut records = Vec::new();
     let mut offset = 0usize;
     let page_size = 100usize;
+    let mut pages = 0usize;
     loop {
+        // SEC-ragent-bench-004 (SECTASKS T-027): the pagination loop followed
+        // the server's page count with no budget, so a hostile or broken
+        // dataset server could drive unbounded requests and unbounded memory.
+        pages += 1;
+        if pages > MAX_HUMANEVALPACK_PAGES {
+            bail!("HumanEvalPack pagination exceeded {MAX_HUMANEVALPACK_PAGES} pages; aborting");
+        }
         let url = format!(
             "{HUMANEVALPACK_ROWS_URL}?dataset=bigcode%2Fhumanevalpack&config={config}&split=test&offset={offset}&length={page_size}"
         );
@@ -1142,6 +1180,9 @@ fn fetch_humanevalpack_records(
             .with_context(|| format!("parse HumanEvalPack rows response for config '{config}'"))?;
         let fetched = response.rows.len();
         records.extend(response.rows.into_iter().map(|row| row.row));
+        if records.len() > MAX_HUMANEVALPACK_ROWS {
+            bail!("HumanEvalPack returned more than {MAX_HUMANEVALPACK_ROWS} rows; aborting");
+        }
         if fetched < page_size {
             break;
         }

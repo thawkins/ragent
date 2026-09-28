@@ -526,7 +526,10 @@ fn download_and_extract(url: &str, staging: &Path) -> Result<PathBuf, AddError> 
     let archive_path = staging.join("download.archive");
 
     let client = reqwest::blocking::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(5))
+        // SEC-ragent-plugins-005 (SECTASKS T-062): `Policy::limited` follows an
+        // https -> http downgrade. Reuse the store-fetch policy that stops any
+        // non-https redirect, so a plaintext mirror cannot substitute the archive.
+        .redirect(crate::store_fetch::https_only_redirects())
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| AddError::Io(format!("http client: {e}")))?;

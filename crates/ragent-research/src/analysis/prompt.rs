@@ -400,7 +400,11 @@ pub fn render_sources_block(sources: &[SourceBody], include_published: bool) -> 
             } else {
                 src.relevance.clone()
             },
-            body = truncate_body(&src.body, 4000),
+            // SEC-ragent-research-006 (SECTASKS T-063): the source body is
+            // fetched content embedded in a fenced block, so it is neutralised
+            // before it can close the fence or spoof a `#### Source [#N]`
+            // citation header.
+            body = crate::document::neutralise_fenced_body(&truncate_body(&src.body, 4000)),
         ));
     }
     out
