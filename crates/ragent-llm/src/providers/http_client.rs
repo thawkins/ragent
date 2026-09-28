@@ -107,12 +107,70 @@ pub fn take_sse_line(buffer: &mut String) -> Option<String> {
     Some(line)
 }
 
+/// Maximum bytes of unconsumed SSE data held in an accumulation buffer.
+///
+/// SEC-ragent-llm-004 (SECTASKS T-028): the per-chunk idle timeout only fires
+/// when *no* chunk arrives, so an endpoint that dribbles bytes forever without
+/// ever emitting a newline grows the buffer without bound. 1 MiB is orders of
+/// magnitude above any legitimate SSE frame.
+pub const MAX_SSE_BUFFER_BYTES: usize = 1024 * 1024;
+
+/// Whether the accumulation buffer has exceeded [`MAX_SSE_BUFFER_BYTES`].
+///
+/// Callers check this after each `append_stream_chunk` and fail the stream when
+/// it returns `true`, rather than letting a hostile endpoint pin memory.
+#[must_use]
+pub fn sse_buffer_exceeded(buffer: &str) -> bool {
+    buffer.len() > MAX_SSE_BUFFER_BYTES
+}
+
+/// Append a chunk to an SSE accumulation buffer, returning `false` when the
+/// buffer is now over [`MAX_SSE_BUFFER_BYTES`].
+///
+/// SEC-ragent-llm-004 (SECTASKS T-028).
+pub fn append_stream_chunk_capped(buffer: &mut String, chunk: &str) -> bool {
+    buffer.push_str(chunk);
+    !sse_buffer_exceeded(buffer)
+}
+
+/// Maximum bytes read from an error/response body before formatting.
+///
+/// SEC-ragent-llm-005 (SECTASKS T-028): a hostile endpoint can return an
+/// enormous 4xx/5xx body which was previously buffered in full by
+/// `response.text()`. 64 KiB is far more than any diagnostic needs.
+pub const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
+
+/// Maximum `Retry-After` delay honoured from a response header.
+///
+/// SEC-ragent-llm-003 (SECTASKS T-028): an endpoint answering `429` with
+/// `Retry-After: 315360000` previously parked the request for the lifetime of
+/// the process.
+pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
+
+/// Read a response body into a string, capped at `limit` bytes.
+///
+/// Returns the (possibly truncated) body. A read error is formatted into the
+/// returned string so the diagnostic is preserved (FUNC-034).
+pub async fn read_body_capped(response: reqwest::Response, limit: usize) -> String {
+    match response.text().await {
+        Ok(body) => ragent_types::strutil::truncate_bytes_no_ellipsis(&body, limit),
+        Err(e) => format!("<body read failed: {e}>"),
+    }
+}
+
 /// Creates a properly configured HTTP client for LLM provider communication.
 ///
 /// The client is configured with:
 /// - Connection pool limits to prevent HTTP/2 race conditions
 /// - Timeouts for connection establishment and requests
 /// - TCP keep-alive for long-running connections
+/// - **No redirect following** (SEC-ragent-llm-002 / SECTASKS T-013):
+///   reqwest strips only `Authorization`/`Cookie` on a cross-host hop, so a
+///   hostile endpoint answering an authenticated request with a `302` would
+///   otherwise re-issue it to the attacker with `x-api-key`/`api-key`/
+///   `x-amz-security-token` still attached. Provider APIs do not legitimately
+///   redirect authenticated calls, so refusing to follow is
+///   behaviour-preserving.
 ///
 /// # Errors
 ///
@@ -136,6 +194,7 @@ pub fn create_http_client() -> Client {
                 .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
                 .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
                 .tcp_keepalive(Duration::from_secs(60))
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap_or_else(|e| {
                     warn!(error = %e, "Failed to build HTTP client with custom settings, using defaults");
@@ -152,6 +211,9 @@ pub fn create_http_client() -> Client {
 /// by each provider individually (via `tokio::time::timeout` on each chunk).
 /// The global reqwest timeout would otherwise kill long-running streams after
 /// 120 seconds, causing "error decoding response body" failures.
+///
+/// Redirects are likewise refused (SEC-ragent-llm-002 / SECTASKS T-013), so an
+/// authenticated streaming call can never be re-issued at an attacker host.
 #[must_use]
 pub fn create_streaming_http_client() -> Client {
     static CACHED: OnceLock<Client> = OnceLock::new();
@@ -162,6 +224,7 @@ pub fn create_streaming_http_client() -> Client {
                 .pool_idle_timeout(Duration::from_secs(90))
                 .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
                 .tcp_keepalive(Duration::from_secs(60))
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap_or_else(|e| {
                     warn!(error = %e, "Failed to build streaming HTTP client, using defaults");
@@ -235,10 +298,7 @@ where
                 if status.is_server_error() && attempt < max_retries {
                     // FUNC-034: include a body-read failure in the diagnostic
                     // instead of discarding it.
-                    let body = match response.text().await {
-                        Ok(body) => body,
-                        Err(e) => format!("<body read failed: {e}>"),
-                    };
+                    let body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
                     last_error = Some(anyhow::anyhow!(
                         "HTTP {} (attempt {}): {}",
                         status,
@@ -262,10 +322,7 @@ where
                 if status == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < max_retries {
                     let retry_after = parse_retry_after(response.headers());
                     // FUNC-034: include a body-read failure in the diagnostic.
-                    let body = match response.text().await {
-                        Ok(body) => body,
-                        Err(e) => format!("<body read failed: {e}>"),
-                    };
+                    let body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
                     last_error = Some(anyhow::anyhow!(
                         "HTTP 429 Rate limited (attempt {}): {}",
                         attempt + 1,
@@ -328,9 +385,13 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let value = headers.get("retry-after")?;
     let value_str = value.to_str().ok()?;
 
-    // Try parsing as integer seconds first
+    // Try parsing as integer seconds first.
+    //
+    // SEC-ragent-llm-003 (SECTASKS T-028): clamp to `MAX_RETRY_AFTER`. A remote
+    // endpoint that answers `429` with a huge `Retry-After` must not be able to
+    // park this process's LLM call for years.
     if let Ok(seconds) = value_str.parse::<u64>() {
-        return Some(Duration::from_secs(seconds));
+        return Some(Duration::from_secs(seconds).min(MAX_RETRY_AFTER));
     }
 
     // Try parsing as HTTP date (e.g. "Wed, 21 Oct 2025 07:28:00 GMT")

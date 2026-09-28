@@ -93,14 +93,49 @@ pub fn run_cli(args: &[String]) -> Result<()> {
     }
 
     let workdir = std::env::current_dir()?;
-    // Seed the collision surface (FR-024) from the built-in tool registry and the
-    // `SLASH_COMMANDS` triggers so it matches the live TUI surface, then run the
-    // shared dispatch ladder (store / test / control). No MCP client is connected
-    // for a one-shot CLI invocation, so a plugin's MCP tool counts stay `?`
-    // (unknown, not zero): the count is only known from a live connection.
+
+    // `/plugins stores --check` performs the store-index fetch on the calling
+    // thread. `fetch_index` builds a `reqwest::blocking::Client`, which spins up
+    // and *drops* its own internal tokio runtime; dropping a runtime from inside
+    // an async context panics ("Cannot drop a runtime in a context where blocking
+    // is not allowed"), which is exactly what happened when this ran inside
+    // `async_main`. Hand the whole subcommand off to a dedicated OS thread so the
+    // blocking client lives and dies outside any async runtime. The other
+    // subcommands are cheap local operations and run inline.
+    let report = if sub == "stores" && ragent_plugins::stores_check_requested(rest) {
+        let workdir = workdir.clone();
+        let sub_owned = sub.to_string();
+        let rest_owned = rest.to_string();
+        let sub_for_fallback = sub_owned.clone();
+        std::thread::spawn(move || run_plugin_subcommand_offline(&workdir, &sub_owned, &rest_owned))
+            .join()
+            .map_err(|_| anyhow::anyhow!("plugin store probe thread panicked"))?
+            .unwrap_or_else(|| render_help(&sub_for_fallback))
+    } else {
+        run_plugin_subcommand_offline(&workdir, sub, rest).unwrap_or_else(|| render_help(sub))
+    };
+    print!("{}", cli_body(&report));
+    Ok(())
+}
+
+/// Run the shared plugin dispatch ladder for the CLI surface.
+///
+/// Seeds the collision surface (FR-024) from the built-in tool registry and the
+/// `SLASH_COMMANDS` triggers so it matches the live TUI surface. No MCP client is
+/// connected for a one-shot CLI invocation, so a plugin's MCP tool counts stay
+/// `?` (unknown, not zero): the count is only known from a live connection.
+///
+/// Returns `None` for subcommands the shared ladder does not own, so the caller
+/// can render the CLI usage block.
+#[must_use]
+fn run_plugin_subcommand_offline(
+    workdir: &std::path::Path,
+    sub: &str,
+    rest: &str,
+) -> Option<String> {
     let registry = ragent_agent::tool::create_default_registry();
-    let report = run_plugin_subcommand(
-        &workdir,
+    run_plugin_subcommand(
+        workdir,
         sub,
         rest,
         registry.list().into_iter().collect(),
@@ -110,9 +145,6 @@ pub fn run_cli(args: &[String]) -> Result<()> {
             .collect(),
         &std::collections::BTreeMap::new(),
     )
-    .unwrap_or_else(|| render_help(sub));
-    print!("{}", cli_body(&report));
-    Ok(())
 }
 
 /// Rewrite a shared `/plugins` report for the CLI surface (FR-021): the TUI

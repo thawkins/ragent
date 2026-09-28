@@ -254,12 +254,11 @@ async fn stores_check_without_a_reactor_deposits_the_plain_config_report() {
     let mut app = app_with_seam(FixtureStoreFetcher::new().with_default_endpoints());
 
     app.execute_slash_command("/plugins stores --check").await;
-    assert!(
-        app.plugin_store_probe_result.lock().unwrap().is_some(),
-        "without a reactor the plain report is deposited synchronously"
-    );
+    // The probe runs on a dedicated OS thread so the event loop never stalls on
+    // the network, so the report arrives asynchronously on every surface - the
+    // fixture seam answers immediately, but the deposit is still off-thread.
+    drive_probe(&mut app).await;
 
-    app.poll_plugin_store_probe_result();
     let text = flat_text(&app);
     assert!(text.contains("From: /plugins stores"), "{text}");
     for kind in StoreKind::ALL {
@@ -269,8 +268,11 @@ async fn stores_check_without_a_reactor_deposits_the_plain_config_report() {
             kind.token()
         );
     }
+    // The seam answers both compiled defaults, so the probe reports them as
+    // available; what this test pins is that the report is rendered and
+    // delivered without blocking or panicking on the calling thread.
     assert!(
-        !text.contains("available") && !text.contains("unavailable"),
-        "the degraded report is the plain config view: {text}"
+        text.contains("available"),
+        "the injected seam's probe result is delivered: {text}"
     );
 }

@@ -21,6 +21,8 @@ fn ctx() -> ToolContext {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -38,6 +40,8 @@ fn ctx_with_langsearch_key(key: &str) -> ToolContext {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -55,6 +59,8 @@ fn ctx_with_tavily_key(key: &str) -> ToolContext {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -72,6 +78,8 @@ fn ctx_with_perplexity_key(key: &str) -> ToolContext {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -89,6 +97,8 @@ fn ctx_with_exa_key(key: &str) -> ToolContext {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -229,6 +239,8 @@ fn test_orchestrator_with_both_keys_adds_all_optional_engines() {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     };
     let orchestrator = MfSearchTool::build_orchestrator(&ctx);
     assert_eq!(orchestrator.engine_count(), 4);
@@ -255,6 +267,8 @@ fn test_orchestrator_with_all_three_keys_adds_all_optional_engines() {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     };
     let orchestrator = MfSearchTool::build_orchestrator(&ctx);
     assert_eq!(orchestrator.engine_count(), 5);
@@ -296,6 +310,8 @@ fn ctx_with_serper_key(key: &str) -> ToolContext {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -349,6 +365,8 @@ fn test_orchestrator_with_all_four_keys_adds_all_optional_engines() {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     };
     let orchestrator = MfSearchTool::build_orchestrator(&ctx);
     assert_eq!(orchestrator.engine_count(), 6);
@@ -669,6 +687,8 @@ fn test_engine_status_with_both_keys_enables_all_optional_engines() {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     };
     let status = MfSearchTool::engine_status(&ctx);
     let by_name: std::collections::HashMap<&str, &EngineStatus> =
@@ -702,6 +722,8 @@ fn test_engine_status_with_empty_keys_treats_keys_as_missing() {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     };
     let status = MfSearchTool::engine_status(&ctx);
     let by_name: std::collections::HashMap<&str, &EngineStatus> =

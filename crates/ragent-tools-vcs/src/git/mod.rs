@@ -60,6 +60,52 @@ pub struct GitOutput {
     pub success: bool,
 }
 
+/// SEC-ragent-tools-vcs-001/002 (SECTASKS T-022): require `value` to be an
+/// option-free git operand.
+///
+/// # Errors
+///
+/// Returns an error naming `label` when `value` is empty or begins with `-`.
+pub fn reject_option_like(value: &str, label: &str) -> Result<()> {
+    if value.is_empty() {
+        bail!("`{label}` must not be empty");
+    }
+    if value.starts_with('-') {
+        bail!(
+            "`{label}` value '{value}' is rejected: it would be parsed by git as \
+             an option rather than an operand"
+        );
+    }
+    Ok(())
+}
+
+/// SEC-ragent-tools-vcs-003 (SECTASKS T-022): confine a `git clone`
+/// destination directory to the working directory.
+///
+/// `directory` is passed to `git clone` as the destination and is
+/// LLM-controlled, so `../../../../ESCAPED` would write a whole repository
+/// tree outside the declared workspace (the bash tool's directory-escape
+/// guard does not apply - this spawns `git` directly).
+///
+/// # Errors
+///
+/// Returns an error when the value is option-like, absolute, or contains a
+/// parent-directory component.
+pub fn validate_clone_directory(directory: &str) -> Result<()> {
+    reject_option_like(directory, "directory")?;
+    let path = std::path::Path::new(directory);
+    if path.is_absolute() {
+        bail!("`directory` '{directory}' must be a relative path inside the working directory");
+    }
+    if path
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
+        bail!("`directory` '{directory}' must not contain '..' components");
+    }
+    Ok(())
+}
+
 /// Spawn `git` once and capture its full output (stdout, stderr, exit status).
 ///
 /// This is the single spawn point for every local git tool: deriving stdout,

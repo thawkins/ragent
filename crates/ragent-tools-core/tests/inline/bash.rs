@@ -8,15 +8,15 @@ use super::*;
 #[test]
 fn test_safe_command_exact_match() {
     assert!(is_safe_command("ls"));
-    assert!(is_safe_command("git"));
-    assert!(is_safe_command("cargo"));
+    assert!(is_safe_command("pwd"));
+    assert!(is_safe_command("cat"));
 }
 
 #[test]
 fn test_safe_command_with_args() {
     assert!(is_safe_command("ls -la"));
-    assert!(is_safe_command("git status"));
-    assert!(is_safe_command("cargo build"));
+    assert!(is_safe_command("cat README.md"));
+    assert!(is_safe_command("grep -n foo src/lib.rs"));
 }
 
 #[test]
@@ -24,6 +24,41 @@ fn test_unsafe_command() {
     assert!(!is_safe_command("rm"));
     assert!(!is_safe_command("curl"));
     assert!(!is_safe_command("nmap"));
+}
+
+/// SEC-ragent-tools-core-002 (SECTASKS T-021): interpreters, build tools, and
+/// argument-taking executors must never be auto-approved on the strength of a
+/// whitelist prefix - they go through the normal permission gate.
+#[test]
+fn test_interpreters_are_not_safe_commands() {
+    assert!(!is_safe_command("python3"));
+    assert!(!is_safe_command("python3 -c \"print(1)\""));
+    assert!(!is_safe_command("python -c \"import os\""));
+    assert!(!is_safe_command("node -e \"1\""));
+    assert!(!is_safe_command("sh -c \"echo hi\""));
+    assert!(!is_safe_command("bash -c \"echo hi\""));
+    assert!(!is_safe_command("perl -e \"1\""));
+    assert!(!is_safe_command("awk 'BEGIN{system(\"id\")}'"));
+    assert!(!is_safe_command("sed -n '1p;w /tmp/x' f"));
+    assert!(!is_safe_command("xargs -I{} sh -c {}"));
+    assert!(!is_safe_command("find . -exec sh -c 'id' ;"));
+    assert!(!is_safe_command("git"));
+    assert!(!is_safe_command("git status"));
+    assert!(!is_safe_command("cargo build"));
+    assert!(!is_safe_command("patch < x.diff"));
+}
+
+/// A shell separator or redirection means the invocation is a compound
+/// statement whose tail was never inspected by the whitelist.
+#[test]
+fn test_compound_commands_are_not_safe() {
+    assert!(!is_safe_command("ls; rm -rf /"));
+    assert!(!is_safe_command("ls | sh"));
+    assert!(!is_safe_command("ls && curl http://x"));
+    assert!(!is_safe_command("cat `id`"));
+    assert!(!is_safe_command("cat $(id)"));
+    assert!(!is_safe_command("ls > /tmp/out"));
+    assert!(!is_safe_command("cat < /etc/shadow"));
 }
 
 // ── Banned command tests ─────────────────────────────────────────────
@@ -193,11 +228,34 @@ fn test_state_file_path_format() {
             "Windows state path should contain the session filename: {path}"
         );
     } else {
-        // On Unix, should use /tmp
+        // SEC-ragent-tools-core-004 (SECTASKS T-054): the state file moved out
+        // of the shared, world-writable /tmp into the project's 0700 scratch
+        // directory, because it holds `export -p` output (API keys).
         assert!(
-            path.starts_with("/tmp/ragent_shell_"),
-            "Unix state path should start with /tmp: {path}"
+            path.ends_with("ragent_shell_test-session-123.state"),
+            "Unix state path should name the session file: {path}"
         );
+        assert!(
+            path.contains("target/temp/ragent-shell")
+                || path.starts_with("/tmp/")
+                || path.starts_with(std::env::temp_dir().to_string_lossy().as_ref()),
+            "Unix state path should live in the scratch directory: {path}"
+        );
+    }
+}
+
+#[test]
+fn test_state_file_is_not_world_readable() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let path = state_file_path("perm-check-session");
+        // Create the file the way the tool does, then restrict it.
+        std::fs::write(&path, "export TOKEN=abc\n").expect("write state file");
+        assert!(restrict_to_owner(std::path::Path::new(&path)));
+        let mode = std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "state file must be owner-only, got {mode:o}");
+        let _ = std::fs::remove_file(&path);
     }
 }
 

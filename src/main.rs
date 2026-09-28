@@ -28,8 +28,10 @@ use ragent_agent::{
 use ragent_config::{activity_log, edit_log, gcf, yolo};
 
 mod cli;
+mod crash_dump;
 mod panic_hook;
 mod plugins;
+mod stderr_spool;
 
 /// Top-level CLI arguments parsed by clap.
 #[derive(Parser)]
@@ -289,6 +291,26 @@ async fn async_main() -> Result<()> {
     // Install the panic hook first so panics during startup are also captured.
     panic_hook::install();
 
+    // Stamp the crash marker before anything else can die: an abort (stack
+    // overflow) or SIGKILL leaves the marker as "running", which the next
+    // start reports. A clean return overwrites it with "clean exit".
+    let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if let Err(e) = crash_dump::write_record(&working_dir, "running") {
+        eprintln!("warning: failed to write crash marker: {e}");
+    }
+    match crash_dump::previous_unclean_exit(&working_dir) {
+        Ok(Some(prev)) => {
+            eprintln!(
+                "warning: previous ragent session (pid {}, started {}) exited without unwinding \
+                 — check log/panics/last-crash.json and other panic reports",
+                prev.pid, prev.updated_at
+            );
+            eprintln!("         {}", prev.core_dump_hint);
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!("warning: could not read previous crash marker: {e}"),
+    }
+
     let mut startup = StartupTimings::new();
 
     let t0 = Instant::now();
@@ -344,6 +366,16 @@ async fn async_main() -> Result<()> {
     };
     startup.record("Tracing init", t0.elapsed());
     tracing::info!(log_level = %cli.log_level, tui_mode = tui_will_run, "Tracing initialized");
+
+    // In TUI mode the alternate screen paints over raw stderr, so the default
+    // panic hook, `eprintln!`, and any C-library diagnostic would be lost.
+    // Redirect fd 2 into a truncating spool (`log/logwindow/stderr-*.log`) and
+    // mirror it into the log panel; non-TUI modes keep writing to the terminal.
+    let stderr_spool = if tui_will_run {
+        stderr_spool::install(&working_dir.join("log").join("logwindow"))
+    } else {
+        None
+    };
 
     /// Run the dry-run readiness check and exit the process.
     ///
@@ -482,11 +514,30 @@ async fn async_main() -> Result<()> {
     }
 
     // Also seed from well-known environment variables.
+    //
+    // SEC-ragent-types-004 (SECTASKS T-046): the GitLab / GitHub / Tavily /
+    // Gmail credentials the tools accept from the environment were never
+    // registered, so a token echoed by a failing command could reach the log or
+    // the SSE stream in cleartext - the pattern layer does not know
+    // `glpat-...` shapes in every position.
     for var in [
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "GENERIC_OPENAI_API_KEY",
         "OLLAMA_API_KEY",
+        "GITLAB_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "TAVILY_API_KEY",
+        "LANGSEARCH_API_KEY",
+        "PERPLEXITY_API_KEY",
+        "EXA_API_KEY",
+        "SERPER_API_KEY",
+        "GMAIL_ACCESS_TOKEN",
+        "GMAIL_REFRESH_TOKEN",
+        "GMAIL_CLIENT_SECRET",
+        "TELEGRAM_BOT_TOKEN",
+        "DISCORD_WEBHOOK_URL",
     ] {
         if let Ok(val) = std::env::var(var) {
             ragent_agent::sanitize::register_secret(&val);
@@ -595,6 +646,12 @@ async fn async_main() -> Result<()> {
     // Initialise telemetry subsystem from configuration.
     // A ShutdownGuard keeps the provider alive for the process lifetime and
     // flushes pending metrics on normal or panic exit paths.
+    //
+    // SEC-ragent-telemetry-002 (SECTASKS T-020): enablement and endpoint come
+    // from user-owned configuration only. The repository-local
+    // `.ragent/ragent.json` is merged through `Config::merge_project`, which
+    // drops its `telemetry` block entirely, so a cloned project cannot turn
+    // telemetry on or point the OTLP endpoint at an attacker host.
     let t0 = Instant::now();
     let telemetry_config = config.read().await.telemetry.otel.clone();
     let telemetry = match TelemetrySubsystem::new(telemetry_config) {
@@ -892,6 +949,7 @@ async fn async_main() -> Result<()> {
                     db_path.clone(),
                     config.read().await.config_paths.clone(),
                     startup,
+                    stderr_spool.clone(),
                 )
                 .await?;
             }
@@ -1024,6 +1082,7 @@ async fn async_main() -> Result<()> {
                     db_path.clone(),
                     config.read().await.config_paths.clone(),
                     startup,
+                    stderr_spool.clone(),
                 )
                 .await?;
             }
@@ -1258,6 +1317,10 @@ async fn async_main() -> Result<()> {
                     }
                 }
             }
+            // Flush stdout before the runtime is shut down so a closed pipe
+            // (e.g. `ragent models | head`) cannot race the print and turn into
+            // a `Broken pipe` panic (see the note on `main`'s bounded shutdown).
+            std::io::stdout().flush()?;
         }
         Some(Commands::Config { command }) => match command {
             Some(ConfigCommands::Check { json }) => {
@@ -1360,9 +1423,14 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
 /// the process alive burning CPU after the TUI had already exited. Arming a
 /// `shutdown_timeout` bounds that wait so the prompt returns promptly.
 fn main() -> Result<()> {
+    let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|e| anyhow::anyhow!("failed to create tokio runtime: {e}"))?;
     let result = runtime.block_on(async_main());
+    // A normal return (including an error propagated out of `async_main`)
+    // clears the crash marker so the next start does not report a phantom
+    // abort. Process-wide state only; failure to mark is not worth failing on.
+    let _ = crate::crash_dump::write_record(&working_dir, "clean exit");
     // Give leftover blocking tasks 2 seconds, then abandon (not abort) them
     // and return: outstanding blocking tasks finish in the background while
     // the process exits normally.

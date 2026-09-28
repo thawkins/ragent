@@ -705,6 +705,9 @@ pub enum ContradictionKind {
     /// Two requirements use mutually exclusive verbs for the same subject
     /// (e.g. "shall accept" vs "shall reject").
     OppositeAction,
+    /// The spec has more requirements than the bounded consistency analysis
+    /// will compare (SEC-ragent-specs-002 / SECTASKS T-040).
+    TooManyRequirements,
 }
 
 impl fmt::Display for ContradictionKind {
@@ -712,6 +715,7 @@ impl fmt::Display for ContradictionKind {
         match self {
             Self::NegationConflict => write!(f, "negation conflict"),
             Self::OppositeAction => write!(f, "opposite action"),
+            Self::TooManyRequirements => write!(f, "too many requirements"),
         }
     }
 }
@@ -856,6 +860,28 @@ fn extract_action(ears_text: &str) -> Option<ParsedAction> {
 pub fn detect_contradictions(content: &str) -> Vec<ContradictionIssue> {
     let reqs = parse_requirements(content);
     let mut issues = Vec::new();
+
+    // SEC-ragent-specs-002 (SECTASKS T-040): the pair comparison below is
+    // O(n^2) in the requirement count, and a several-MB SPEC.md easily holds
+    // 100k headings. Bound the input before the pair loop - a spec that large
+    // is not a consistency problem worth hanging the agent over.
+    const MAX_CONTRADICTION_REQUIREMENTS: usize = 2_000;
+    if reqs.len() > MAX_CONTRADICTION_REQUIREMENTS {
+        issues.push(ContradictionIssue {
+            kind: ContradictionKind::TooManyRequirements,
+            req_a: String::new(),
+            req_b: String::new(),
+            line_a: 0,
+            line_b: 0,
+            term: String::new(),
+            description: format!(
+                "spec has {} requirements; consistency analysis is capped at \
+                 {MAX_CONTRADICTION_REQUIREMENTS}",
+                reqs.len()
+            ),
+        });
+        return issues;
+    }
 
     // Extract actions for all requirements up front
     let actions: Vec<(&ParsedRequirement, Option<ParsedAction>)> = reqs
@@ -1460,9 +1486,29 @@ fn check_numbering_gaps(numbers: &[u32], prefix: &str, report: &mut Report) {
     if numbers.len() < 2 {
         return;
     }
+    // SEC-ragent-specs-001 (SECTASKS T-040): the numbers come from
+    // requirement headings (`FR-4294967295` parses to a u32 near `u32::MAX`),
+    // and the loop below allocated one `Issue` per missing number - billions of
+    // iterations for a crafted SPEC.md. Summarise wide gaps instead of
+    // expanding them.
+    const MAX_GAP_EXPANSION: u32 = 1_000;
     for window in numbers.windows(2) {
         let gap = window[1] - window[0];
         if gap > 1 {
+            if gap - 1 > MAX_GAP_EXPANSION {
+                report.add(Issue::new(
+                    Severity::Warning,
+                    Category::Numbering,
+                    format!(
+                        "Numbering gap of {} between {prefix}-{} and {prefix}-{} is too large to \
+                         expand",
+                        gap - 1,
+                        window[0],
+                        window[1]
+                    ),
+                ));
+                continue;
+            }
             for missing in (window[0] + 1)..window[1] {
                 report.add(Issue::new(
                     Severity::Warning,

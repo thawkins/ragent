@@ -21,6 +21,11 @@ const CONTEXT_RADIUS: usize = 10;
 /// Keywords (lower-cased) that mark an interesting log line.
 const ERROR_KEYWORDS: &[&str] = &["error", "failed"];
 
+/// Maximum bytes of CI log excerpt injected into the model context.
+///
+/// SEC-ragent-tools-vcs-006 (SECTASKS T-043).
+const MAX_LOG_EXCERPT_BYTES: usize = 64 * 1024;
+
 /// Returns the authenticated `GitHubClient` or a human-readable error.
 fn make_client() -> Result<GitHubClient> {
     GitHubClient::new().context("GitHub not authenticated. Run /github login to authenticate.")
@@ -129,6 +134,14 @@ async fn fetch_run_logs(
 
     let mut output = String::new();
     for i in 0..archive.len() {
+        // SEC-ragent-tools-vcs-006 (SECTASKS T-043): a workflow log is
+        // attacker-influenced content from a repository the agent was asked to
+        // operate on, and it is injected verbatim into the model context. Cap
+        // the extracted volume so a huge archive cannot flood the context.
+        if output.len() >= MAX_LOG_EXCERPT_BYTES {
+            output.push_str("\n[log excerpt truncated: size cap reached]\n");
+            break;
+        }
         let mut entry = archive
             .by_index(i)
             .with_context(|| format!("Failed to read zip entry {i}"))?;
@@ -147,6 +160,12 @@ async fn fetch_run_logs(
         }
         let snippet = filter_log_text(&text);
         if !snippet.is_empty() {
+            // SEC-ragent-tools-vcs-006 (SECTASKS T-043): redact credentials
+            // before the excerpt reaches the model or the session store. CI
+            // logs are the classic place a secret gets echoed (a failed
+            // `curl -H "Authorization: ..."`, a `set -x` trace, an un-masked
+            // variable).
+            let snippet = ragent_types::sanitize::redact_secrets(&snippet);
             output.push_str(&format!("## {name}\n{snippet}"));
         }
     }

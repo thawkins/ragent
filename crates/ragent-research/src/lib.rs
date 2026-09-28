@@ -137,7 +137,7 @@ pub use entities::{
     extract_entities_for_competitive_analysis, infer_competitive_set,
 };
 pub use evaluation::{EvaluationScorecard, evaluate_report, render_scorecard};
-pub use io::{IndexEntry, ResearchIo, ResearchIoError};
+pub use io::{IndexEntry, ResearchIo, ResearchIoError, is_valid_template_name};
 pub use item::{
     DERIVED_TITLE_MAX_CHARS, ResearchItem, ResearchItemError, derive_title, derive_title_files,
     derive_title_full,

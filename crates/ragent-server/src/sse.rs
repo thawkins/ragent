@@ -1165,7 +1165,11 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
         } => to_data(&serde_json::json!({
             "user_code": user_code,
             "verification_uri": verification_uri,
-            "device_code": device_code,
+            // SEC-ragent-types-006 (SECTASKS T-066): the device code is an
+            // OAuth credential - a consumer that receives it can complete the
+            // device-flow poll. Report presence only, matching the
+            // `token_present` treatment of the completion event.
+            "device_code_present": device_code.as_ref().is_some_and(|c| !c.is_empty()),
             "interval": interval,
             "error": error,
         })),

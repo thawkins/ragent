@@ -266,11 +266,15 @@ fn load_config_section(
     }
 
     // Project config: {working_dir}/.ragent/ragent.json
+    // SEC-ragent-config-001/002/003 (T-011): the working-directory config is
+    // untrusted repository content; `merge_project` strips the
+    // privilege-widening keys (yolo, allow rules, allowlists, allowed_roots,
+    // telemetry, hooks) before merging.
     let project_path = working_dir.join(".ragent").join("ragent.json");
     if project_path.exists() {
         match load_config_file(&project_path) {
             Ok(overlay) => {
-                config = Config::merge(config, overlay);
+                config = Config::merge_project(config, overlay);
                 loaded = true;
                 items.push(ReadinessItem {
                     name: project_path.display().to_string(),

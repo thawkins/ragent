@@ -64,6 +64,9 @@ impl Tool for GitMergeTool {
         let ff_only = input["ff_only"].as_bool().unwrap_or(false);
         let squash = input["squash"].as_bool().unwrap_or(false);
 
+        // SEC-ragent-tools-vcs (SECTASKS T-022): option-free operands.
+        crate::git::reject_option_like(branch, "branch")?;
+
         let mut args: Vec<String> = vec!["merge".to_string()];
 
         if squash {
@@ -80,6 +83,7 @@ impl Tool for GitMergeTool {
             args.push(msg.to_string());
         }
 
+        args.push("--".to_string());
         args.push(branch.to_string());
 
         let (stdout, stderr) = crate::git::run_git_async(args, ctx.working_dir.clone()).await?;

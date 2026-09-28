@@ -31,6 +31,8 @@ fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 

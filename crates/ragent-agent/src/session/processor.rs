@@ -272,6 +272,10 @@ async fn dispatch_tool_with_permissions(
     auto_approve: Option<bool>,
     checkpoint_forced: bool,
     checkpoint_timeout_secs: u64,
+    // SEC-ragent-agent-001 (SECTASKS T-007): `true` when a `pre_tool_use` hook
+    // explicitly approved this call. Checked against the policy verdict below
+    // so a hook can satisfy an `Ask` but never override an explicit `Deny`.
+    hook_approved: bool,
 ) -> anyhow::Result<crate::tool::ToolOutput> {
     let perm_category = tool.permission_category();
     if perm_category.is_empty() || perm_category == "none" {
@@ -316,13 +320,25 @@ async fn dispatch_tool_with_permissions(
                 }
             }
         }
-        return if all_approved {
-            tool.execute(tool_input, tool_ctx).await
-        } else {
-            Err(anyhow::anyhow!(
-                "Permission denied for one or more sub-commands"
-            ))
-        };
+        if all_approved {
+            return tool.execute(tool_input, tool_ctx).await;
+        }
+        // SEC-ragent-agent-001 (SECTASKS T-007): a hook approval may satisfy
+        // the sub-command prompts - but only when no explicit rule denies any
+        // of them (the policy verdict is re-checked here rather than assumed).
+        if hook_approved
+            && !checkpoint_forced
+            && !policy_has_explicit_verdict(permission_checker, &sub_commands, perm_category)
+        {
+            tracing::info!(
+                tool = %tc.name,
+                "PreToolUse hook approval satisfied the bash permission prompt"
+            );
+            return tool.execute(tool_input, tool_ctx).await;
+        }
+        return Err(anyhow::anyhow!(
+            "Permission denied for one or more sub-commands"
+        ));
     }
     let permission_action = check_permission_with_prompt(
         permission_checker,
@@ -337,6 +353,23 @@ async fn dispatch_tool_with_permissions(
         checkpoint_timeout_secs,
     )
     .await;
+    // SEC-ragent-agent-001 (SECTASKS T-007): a hook approval may satisfy the
+    // prompt when the policy has no explicit verdict for this call. It never
+    // rescues a `Deny` (an explicit rule) and never bypasses a forced
+    // destructive-action checkpoint.
+    if hook_approved
+        && !checkpoint_forced
+        && matches!(
+            permission_action,
+            Ok(crate::permission::PermissionAction::Ask)
+        )
+    {
+        tracing::info!(
+            tool = %tc.name,
+            "PreToolUse hook approval satisfied the permission prompt"
+        );
+        return tool.execute(tool_input, tool_ctx).await;
+    }
     match permission_action {
         Ok(crate::permission::PermissionAction::Allow) => tool.execute(tool_input, tool_ctx).await,
         Ok(crate::permission::PermissionAction::Deny) => {
@@ -357,6 +390,28 @@ async fn dispatch_tool_with_permissions(
         )),
         Err(e) => Err(e),
     }
+}
+
+/// Whether an explicit policy rule (allow/deny) exists for any bash
+/// sub-command of `tool_input`, i.e. the verdict is not a bare `Ask`.
+///
+/// SEC-ragent-agent-001 (SECTASKS T-007): used to decide whether a
+/// `pre_tool_use` hook approval may stand in for the bash sub-command prompts.
+/// A hook approval is only valid when the policy itself has nothing explicit
+/// to say; an explicit rule (in particular a `Deny`) always wins.
+fn policy_has_explicit_verdict(
+    checker: &Arc<parking_lot::RwLock<crate::permission::PermissionChecker>>,
+    sub_commands: &[String],
+    category: &str,
+) -> bool {
+    sub_commands.iter().any(|cmd| {
+        let name = extract_command_name(cmd);
+        let c = checker.read();
+        !matches!(
+            c.check(category, &name),
+            crate::permission::PermissionAction::Ask
+        )
+    })
 }
 
 /// Drives the agentic conversation loop for a single session.
@@ -1916,10 +1971,13 @@ impl SessionProcessor {
         // Set to true after injecting the sub-agent summary nudge so we only
         // nudge once per run. See [`SUBAGENT_SUMMARY_NUDGE`].
         let mut subagent_summary_nudged = false;
-        // M-008: count of non-tool-call assistant parts at the last interim
-        // save, so a step that only appended tool-call parts skips the interim
-        // rewrite (the sole save gate — see the interim-save block below).
-        let mut last_interim_significant_count: Option<usize> = None;
+        // M-008 (amended): count of assistant parts at the last interim save.
+        // Parts are only ever pushed or popped (stream deltas, per-call
+        // tool-call appends, the sub-agent narration nudge) — never mutated in
+        // place — so the count alone is a sufficient save gate. Tool-call
+        // parts are included so the child session's SQLite row stays in step
+        // with the run and the TUI output-view overlay can render steps live.
+        let mut last_interim_parts_count: Option<usize> = None;
         let total_start = Instant::now();
         let mut cumulative_model_wait_ms: u64 = 0;
         let mut compaction_attempted_this_turn = false;
@@ -2672,6 +2730,9 @@ impl SessionProcessor {
                     config: Some(std::sync::Arc::clone(&turn.session_config)),
                     allowed_roots,
                     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                    // SEC-ragent-team-001: blueprint seed files must run through
+                    // the same permission decision as ordinary tool calls.
+                    permission_checker: Some(self.permission_checker.clone()),
                     read_timestamps: self.read_timestamps.clone(),
                     canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
                     tool_registry: self.tool_registry.clone(),
@@ -3079,8 +3140,17 @@ impl SessionProcessor {
                                 Some(&event_bus),
                             )
                         };
+                        // SEC-ragent-agent-001 (SECTASKS T-007): `hook_approved`
+                        // distinguishes "a hook explicitly approved this call"
+                        // from "no hook decided". It is threaded into
+                        // `dispatch_tool_with_permissions`, where it can satisfy
+                        // an `Ask` but never an explicit `Deny`.
+                        let mut hook_approved = false;
                         let tool_input: Value = match pre_hook_result {
-                            crate::hooks::PreToolUseResult::Allow => {
+                            crate::hooks::PreToolUseResult::Allow {
+                                hook_approved: approved,
+                            } => {
+                                hook_approved = approved;
                                 // Unparseable args never reach here: the B1
                                 // gate short-circuits before the task runs.
                                 parsed_input.unwrap_or(Value::Null)
@@ -3201,6 +3271,7 @@ impl SessionProcessor {
                                         auto_approve,
                                         checkpoint_forced,
                                         checkpoint_timeout_secs,
+                                        hook_approved,
                                     )
                                     .await
                                 }
@@ -3851,25 +3922,24 @@ impl SessionProcessor {
             // Interim save
             {
                 let _scope = profiler.scope("storage.assistant_interim.update");
-                // M-008: avoid rewriting the full SQLite row when the only
-                // change is that tool-call parts were appended. Tool-call
-                // parts are carried in the transcript (`chat_messages`) and
-                // finalised on the final save, so an interim rewrite that
-                // only adds them is wasted work.
+                // M-008: avoid rewriting the full SQLite row when nothing was
+                // appended since the last save. Tool-call parts are carried in
+                // the transcript (`chat_messages`) as well, and the row is
+                // finalised on the final save, so an interim rewrite that only
+                // re-serialises unchanged content is wasted work.
                 //
                 // Invariant: non-tool-call parts are only pushed (stream
                 // deltas) or popped (sub-agent narration nudge) — never
-                // mutated in place — so an unchanged non-tool-call count
-                // implies unchanged persisted content. That makes the count
-                // alone a sufficient save gate; hashing the serialised parts
-                // (the previous P-12 gate) re-serialised every tool-call
-                // input/output on every step, which is exactly the cost this
-                // interim save exists to avoid.
-                let significant_count = assistant_parts
-                    .iter()
-                    .filter(|p| !matches!(p, MessagePart::ToolCall { .. }))
-                    .count();
-                if last_interim_significant_count != Some(significant_count) {
+                // mutated in place — and tool-call parts are appended once per
+                // completed call, so the total count alone is a sufficient
+                // save gate; hashing the serialised parts (the previous P-12
+                // gate) re-serialised every tool-call input/output on every
+                // step, which is exactly the cost this interim save exists to
+                // avoid. Persisting tool-call appends keeps the row in step
+                // with the run so the TUI output-view overlay renders live
+                // steps instead of a frozen snapshot.
+                let interim_parts_count = (*assistant_parts).len();
+                if last_interim_parts_count != Some(interim_parts_count) {
                     let mut interim =
                         Message::new(session_id, Role::Assistant, (*assistant_parts).clone());
                     interim.id = assistant_msg_id.clone();
@@ -3883,7 +3953,7 @@ impl SessionProcessor {
                     let _ = self
                         .storage_op(move |s| s.update_message_parts_skip_fts(&interim))
                         .await;
-                    last_interim_significant_count = Some(significant_count);
+                    last_interim_parts_count = Some(interim_parts_count);
                 }
             }
         }

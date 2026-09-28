@@ -781,3 +781,67 @@ async fn test_multiedit_collapse_whitespace_failure_is_atomic() {
         "alpha\n"
     );
 }
+
+// ── SEC-ragent-tools-core-001: multi_edit path containment (SECTASKS MS-01 T-005) ─
+
+/// `multi_edit` used to resolve each `file_path` and read/write it with no
+/// containment check at all, unlike every sibling file tool: a `..` or absolute
+/// path escaped the workspace and overwrote any file the agent uid could write.
+/// Both forms must now be refused before any read or write.
+#[tokio::test]
+async fn test_multiedit_rejects_paths_outside_the_workspace() {
+    let tmp = TempDir::new().unwrap();
+    let outside = tmp.path().parent().unwrap().join("ragsectask-outside.txt");
+    std::fs::write(&outside, "do not touch\n").unwrap();
+
+    let outside_str = outside.to_string_lossy().into_owned();
+    for bad_path in ["../ragsectask-outside.txt", outside_str.as_str()] {
+        let input = json!({
+            "edits": [
+                { "file_path": bad_path, "old_string": "do not touch", "new_string": "pwned" }
+            ]
+        });
+        let err = MultiEditTool
+            .execute(input, &ctx(tmp.path()))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("outside")
+                || err.to_string().contains("allowed")
+                || err.to_string().contains("escape"),
+            "unexpected refusal for {bad_path:?}: {err}"
+        );
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(&outside).unwrap(),
+        "do not touch\n",
+        "an out-of-workspace edit target must not be written"
+    );
+    let _ = std::fs::remove_file(&outside);
+}
+
+/// A batch that mixes one in-workspace edit with one out-of-workspace edit is
+/// rejected atomically: the legal file is left untouched.
+#[tokio::test]
+async fn test_multiedit_out_of_workspace_edit_aborts_the_batch() {
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "alpha\n");
+
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "alpha", "new_string": "ALPHA" },
+            { "file_path": "../../etc/hostname", "old_string": "x", "new_string": "y" }
+        ]
+    });
+    let _ = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("the batch must be refused");
+
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("a.rs")).unwrap(),
+        "alpha\n",
+        "no edit in a rejected batch may be applied"
+    );
+}

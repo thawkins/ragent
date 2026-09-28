@@ -12,6 +12,50 @@ use ragent_tools_vcs::vcs_provider::{VcsProvider, parse_reverse_repo};
 // FR-012: Every supported format parses into the correct VcsProvider
 // ===========================================================================
 
+// --- SEC-ragent-tools-vcs-004 (SECTASKS T-022) -----------------------------
+//
+// A `gitlab:<host>/...` short form is only accepted for a host that matches
+// the configured instance (or the fixed SaaS allowlist), because the GitLab
+// PAT is attached to every API request to that host. These tests pin the
+// configured instance while parsing.
+
+/// Serialises the `GITLAB_URL` mutation across the tests that use it.
+///
+/// `cargo test` runs the tests in this binary on multiple threads, and each of
+/// these tests sets the *same* process environment variable, so without a lock
+/// one test's configured instance can be visible to another test's parse and
+/// turn a trusted host into a rejected one (a flaky failure, not a defect).
+static GITLAB_URL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Run `f` with `GITLAB_URL` set to `configured`, restoring the previous value
+/// afterwards.
+fn with_gitlab_url<T>(configured: &str, f: impl FnOnce() -> T) -> T {
+    let _lock = GITLAB_URL_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    struct Restore(Option<String>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            // SAFETY: test-only, single-threaded discipline for this variable.
+            #[allow(unsafe_code)]
+            unsafe {
+                match self.0.take() {
+                    Some(v) => std::env::set_var("GITLAB_URL", v),
+                    None => std::env::remove_var("GITLAB_URL"),
+                }
+            }
+        }
+    }
+    let previous = std::env::var("GITLAB_URL").ok();
+    // SAFETY: see `Restore`.
+    #[allow(unsafe_code)]
+    unsafe {
+        std::env::set_var("GITLAB_URL", configured);
+    }
+    let _restore = Restore(previous);
+    f()
+}
+
 // --- GitHub: bare owner/repo ----------------------------------------------
 
 #[test]
@@ -240,7 +284,9 @@ fn fr012_gitlab_prefix_filters_empty_segments() {
 
 #[test]
 fn fr012_gitlab_prefix_self_hosted() {
-    let p = parse_reverse_repo("gitlab:gitlab.example.com/group/project").unwrap();
+    let p = with_gitlab_url("https://gitlab.example.com", || {
+        parse_reverse_repo("gitlab:gitlab.example.com/group/project").unwrap()
+    });
     assert_eq!(
         p,
         VcsProvider::GitLab {
@@ -252,7 +298,9 @@ fn fr012_gitlab_prefix_self_hosted() {
 
 #[test]
 fn fr012_gitlab_prefix_self_hosted_with_port() {
-    let p = parse_reverse_repo("gitlab:gitlab.example.com:8443/group/project").unwrap();
+    let p = with_gitlab_url("https://gitlab.example.com:8443", || {
+        parse_reverse_repo("gitlab:gitlab.example.com:8443/group/project").unwrap()
+    });
     assert_eq!(
         p,
         VcsProvider::GitLab {
@@ -264,7 +312,9 @@ fn fr012_gitlab_prefix_self_hosted_with_port() {
 
 #[test]
 fn fr012_gitlab_prefix_self_hosted_ip() {
-    let p = parse_reverse_repo("gitlab:10.0.0.1/group/project").unwrap();
+    let p = with_gitlab_url("https://10.0.0.1", || {
+        parse_reverse_repo("gitlab:10.0.0.1/group/project").unwrap()
+    });
     assert_eq!(
         p,
         VcsProvider::GitLab {
@@ -276,7 +326,9 @@ fn fr012_gitlab_prefix_self_hosted_ip() {
 
 #[test]
 fn fr012_gitlab_prefix_self_hosted_nested() {
-    let p = parse_reverse_repo("gitlab:gitlab.corp.com/a/b/c/project").unwrap();
+    let p = with_gitlab_url("https://gitlab.corp.com", || {
+        parse_reverse_repo("gitlab:gitlab.corp.com/a/b/c/project").unwrap()
+    });
     assert_eq!(
         p,
         VcsProvider::GitLab {

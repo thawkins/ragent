@@ -25,7 +25,10 @@ pub mod permission;
 pub mod resource;
 /// Secret-redaction helpers for scrubbing sensitive patterns from text.
 pub mod sanitize;
+/// SEC-ragent-types-001 (SECTASKS T-023): terminal-escape neutralisation.
+pub mod sanitize_terminal;
 pub mod startup;
+pub mod stderr_spool;
 pub mod strutil;
 pub mod thinking;
 pub mod trigger;

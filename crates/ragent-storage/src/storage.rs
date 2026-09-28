@@ -104,18 +104,116 @@ fn extract_message_text(parts: &[MessagePart]) -> String {
 /// Fixed key used for legacy XOR-based obfuscation (v1 format).
 const OBFUSCATION_KEY: &[u8] = b"ragent-obfuscation-key-v1";
 
-/// Version prefix for the new encryption format.
+/// Version prefix for the legacy unauthenticated keystream format.
 const ENCRYPT_V2_PREFIX: &str = "v2:";
 
-/// Nonce length in bytes for v2 encryption.
+/// Version prefix for the authenticated AEAD format (SEC-ragent-storage-001).
+const ENCRYPT_V3_PREFIX: &str = "v3:";
+
+/// Nonce length in bytes for the legacy v2 keystream format.
 const NONCE_LEN: usize = 16;
 
-/// Machine-local encryption key derived from system identity.
+/// File name of the per-install credential key, under the state directory.
+const CREDENTIAL_KEY_FILE: &str = "credential.key";
+
+/// Per-installation 32-byte AEAD key.
 ///
-/// Uses blake3 key derivation with username + home directory as input material.
-/// This ties the encrypted data to the current machine/user, preventing
-/// credential theft by simply copying the database file.
-static MACHINE_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
+/// SEC-ragent-storage-001 (SECTASKS T-017): the previous scheme keyed an
+/// unauthenticated XOR keystream with `blake3::derive_key(.., "$USER:$HOME")` -
+/// two non-secret values - and fell back to *hardcoded* literals when the
+/// environment was stripped, so every container/CI instance shared a
+/// publicly-known key. The key is now 32 random bytes generated on first use
+/// and stored in a `0600` file under the ragent state directory. Losing the
+/// key makes existing credentials unreadable, which is the intended trade-off
+/// for a credential store that can no longer be decrypted from the database
+/// file alone.
+static CREDENTIAL_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
+    if let Some(key) = load_or_create_credential_key() {
+        return key;
+    }
+    // Degraded fallback: the state directory is not writable, so a key file
+    // cannot be persisted. Derive a process-lifetime key instead of using a
+    // hardcoded constant, and warn loudly - credentials written under this key
+    // are not recoverable after exit, but they are never decryptable from the
+    // database file by a third party either.
+    tracing::warn!(
+        "credential key file could not be persisted; using a per-process key. \
+         Stored credentials will not survive a restart."
+    );
+    let mut key = [0u8; 32];
+    rand::Rng::fill(&mut rand::thread_rng(), &mut key);
+    key
+});
+
+/// Load the per-install credential key, generating it on first use.
+///
+/// Returns `None` when the key file cannot be read or created.
+fn load_or_create_credential_key() -> Option<[u8; 32]> {
+    let dir = credential_key_dir()?;
+    if std::fs::create_dir_all(&dir).is_err() {
+        return None;
+    }
+    let path = dir.join(CREDENTIAL_KEY_FILE);
+    if let Ok(existing) = std::fs::read(&path)
+        && existing.len() == 32
+    {
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&existing);
+        return Some(key);
+    }
+
+    let mut key = [0u8; 32];
+    rand::Rng::fill(&mut rand::thread_rng(), &mut key);
+
+    // Write 0600 from creation on unix; ignore the mode elsewhere.
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let opened = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path);
+        match opened {
+            Ok(mut file) => {
+                if file.write_all(&key).is_err() {
+                    tracing::warn!(path = %path.display(), "failed to write credential key");
+                    return None;
+                }
+            }
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "failed to create credential key");
+                return None;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        if std::fs::write(&path, key).is_err() {
+            tracing::warn!(path = %path.display(), "failed to write credential key");
+            return None;
+        }
+    }
+
+    Some(key)
+}
+
+/// Directory holding the per-install credential key.
+fn credential_key_dir() -> Option<std::path::PathBuf> {
+    dirs::data_dir()
+        .map(|d| d.join("ragent"))
+        .or_else(|| dirs::config_dir().map(|d| d.join("ragent")))
+}
+
+/// Legacy machine-derived key, retained only to decrypt `v2:` rows.
+///
+/// SEC-ragent-storage-001/002 (SECTASKS T-017): never used to write. A
+/// database written by an older build holds `v2:` values under this key; the
+/// migration path reads them once and immediately re-encrypts with the AEAD
+/// key. New writes always use [`ENCRYPT_V3_PREFIX`].
+static LEGACY_MACHINE_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
     let username = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "ragent-default-user".to_string());
@@ -129,11 +227,80 @@ static MACHINE_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
     blake3::derive_key("ragent credential encryption v2", input.as_bytes())
 });
 
-/// Encrypts an API key using blake3-derived keystream with a random nonce.
+/// Restrict a file to `0600` (owner read/write) on unix.
 ///
-/// Returns a `v2:` prefixed base64 string containing `nonce || ciphertext`.
-/// The encryption key is derived from the current machine identity, so the
-/// ciphertext can only be decrypted on the same machine by the same user.
+/// SEC-ragent-storage-003 (SECTASKS T-017): the SQLite database, its WAL
+/// sidecars, and the activity log are created with the process umask (commonly
+/// 0644), so another local user can read the encrypted credentials and the
+/// whole session history. The permission is applied after creation and also to
+/// the `-wal` / `-shm` siblings, which SQLite creates lazily.
+pub(crate) fn restrict_file_permissions(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for candidate in [
+            path.to_path_buf(),
+            sibling(path, "-wal"),
+            sibling(path, "-shm"),
+        ] {
+            if let Ok(metadata) = std::fs::metadata(&candidate) {
+                let mut perms = metadata.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    if let Err(e) = std::fs::set_permissions(&candidate, perms) {
+                        tracing::warn!(
+                            path = %candidate.display(),
+                            error = %e,
+                            "failed to restrict database file permissions"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
+/// Restrict a directory to `0700` (owner-only) on unix.
+pub(crate) fn restrict_dir_permissions(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            let mut perms = metadata.permissions();
+            if perms.mode() & 0o777 != 0o700 {
+                perms.set_mode(0o700);
+                if let Err(e) = std::fs::set_permissions(path, perms) {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "failed to restrict state directory permissions"
+                    );
+                }
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
+/// Append `suffix` to a path's file name (`/a/b.db` + `-wal` -> `/a/b.db-wal`).
+fn sibling(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut os = path.as_os_str().to_os_string();
+    os.push(suffix);
+    std::path::PathBuf::from(os)
+}
+
+///
+/// Returns a `v3:` prefixed base64 string containing `nonce || ciphertext ||
+/// tag` (SEC-ragent-storage-001 / SECTASKS T-017). The AEAD authenticates the
+/// payload, so tampering with a stored credential fails decryption loudly
+/// instead of yielding attacker-chosen garbage.
 ///
 /// # Examples
 ///
@@ -141,37 +308,56 @@ static MACHINE_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
 /// use ragent_storage::storage::{encrypt_key, decrypt_key};
 ///
 /// let encrypted = encrypt_key("sk-secret-key");
-/// assert!(encrypted.starts_with("v2:"));
+/// assert!(encrypted.starts_with("v3:"));
 /// assert_ne!(encrypted, "sk-secret-key");
 /// let recovered = decrypt_key(&encrypted);
 /// assert_eq!(recovered, "sk-secret-key");
 /// ```
 #[must_use]
 pub fn encrypt_key(key: &str) -> String {
+    encrypt_key_with_context(key, b"provider_auth")
+}
+
+/// Encrypt `plaintext` with `context` as AEAD associated data.
+///
+/// `context` binds a ciphertext to the field it belongs to, so a value moved
+/// between columns fails authentication.
+#[must_use]
+pub fn encrypt_key_with_context(plaintext: &str, context: &[u8]) -> String {
+    use chacha20poly1305::aead::{Aead, KeyInit, Payload};
     use rand::Rng;
-    let mut nonce = [0u8; NONCE_LEN];
-    let mut rng = rand::thread_rng();
-    rng.fill(&mut nonce);
 
-    let keystream = generate_keystream(&nonce, key.len());
-    let ciphertext: Vec<u8> = key
-        .as_bytes()
-        .iter()
-        .zip(keystream.iter())
-        .map(|(p, k)| p ^ k)
-        .collect();
+    let cipher = chacha20poly1305::ChaCha20Poly1305::new((&*CREDENTIAL_KEY).into());
+    let mut nonce = [0u8; 12];
+    rand::thread_rng().fill(&mut nonce);
 
-    let mut payload = Vec::with_capacity(NONCE_LEN + ciphertext.len());
-    payload.extend_from_slice(&nonce);
-    payload.extend_from_slice(&ciphertext);
-
-    format!("{ENCRYPT_V2_PREFIX}{}", STANDARD.encode(&payload))
+    let payload = Payload {
+        msg: plaintext.as_bytes(),
+        aad: context,
+    };
+    // `encrypt` only fails if the message length overflows the AEAD limits,
+    // which cannot happen for a credential-sized string.
+    match cipher.encrypt((&nonce).into(), payload) {
+        Ok(ciphertext) => {
+            let mut blob = Vec::with_capacity(12 + ciphertext.len());
+            blob.extend_from_slice(&nonce);
+            blob.extend_from_slice(&ciphertext);
+            format!("{ENCRYPT_V3_PREFIX}{}", STANDARD.encode(&blob))
+        }
+        Err(_) => {
+            // Fail closed: never fall back to a weaker encoding.
+            tracing::error!("encrypt_key_with_context: AEAD encryption failed");
+            String::new()
+        }
+    }
 }
 
 /// Decrypts an API key encrypted with [`encrypt_key`].
 ///
-/// Also handles legacy v1 (XOR-obfuscated) format for backward compatibility.
-/// Returns the original key, or an empty string if decoding fails.
+/// Handles the authenticated `v3:` format, plus the legacy `v2:` (machine-key
+/// XOR keystream) and v1 (repeating-key XOR) formats for backward
+/// compatibility. Returns the original key, or an empty string when decoding
+/// fails.
 ///
 /// # Examples
 ///
@@ -184,46 +370,11 @@ pub fn encrypt_key(key: &str) -> String {
 /// ```
 #[must_use]
 pub fn decrypt_key(encoded: &str) -> String {
-    if let Some(v2_data) = encoded.strip_prefix(ENCRYPT_V2_PREFIX) {
-        // v2 format: blake3-derived keystream
-        let Ok(payload) = STANDARD.decode(v2_data) else {
-            tracing::warn!("decrypt_key: base64 decode failed for v2-encrypted key");
-            return String::new();
-        };
-        if payload.len() < NONCE_LEN {
-            tracing::warn!(
-                "decrypt_key: v2 payload too short ({} < {})",
-                payload.len(),
-                NONCE_LEN
-            );
-            return String::new();
-        }
-        let (nonce, ciphertext) = payload.split_at(NONCE_LEN);
-        let keystream = generate_keystream(
-            nonce.try_into().unwrap_or(&[0u8; NONCE_LEN]),
-            ciphertext.len(),
-        );
-        let plaintext: Vec<u8> = ciphertext
-            .iter()
-            .zip(keystream.iter())
-            .map(|(c, k)| c ^ k)
-            .collect();
-        match String::from_utf8(plaintext) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!("decrypt_key: decrypted bytes are not valid UTF-8: {e}");
-                String::new()
-            }
-        }
-    } else {
-        // Legacy v1 format: repeating-key XOR. A corrupt key is logged rather
-        // than silently returning "" (FUNC-013).
-        match deobfuscate_key_v1(encoded) {
-            Ok(s) => s,
-            Err(reason) => {
-                tracing::warn!(reason, "decrypt_key: legacy v1 key is corrupt");
-                String::new()
-            }
+    match decrypt_key_checked(encoded) {
+        Ok(s) => s,
+        Err(reason) => {
+            tracing::warn!(reason, "decrypt_key: stored credential is corrupt");
+            String::new()
         }
     }
 }
@@ -235,32 +386,74 @@ pub fn decrypt_key(encoded: &str) -> String {
 /// key look absent. Callers that must not silently drop a secret it cannot
 /// decode (e.g. the redaction-registry seed) use this instead (FUNC-013).
 fn decrypt_key_checked(encoded: &str) -> std::result::Result<String, &'static str> {
-    if let Some(v2_data) = encoded.strip_prefix(ENCRYPT_V2_PREFIX) {
-        let payload = STANDARD
-            .decode(v2_data)
-            .map_err(|_| "base64 decode failed for v2-encrypted key")?;
-        if payload.len() < NONCE_LEN {
-            return Err("v2 payload too short");
-        }
-        let (nonce, ciphertext) = payload.split_at(NONCE_LEN);
-        let keystream = generate_keystream(
-            nonce.try_into().unwrap_or(&[0u8; NONCE_LEN]),
-            ciphertext.len(),
-        );
-        let plaintext: Vec<u8> = ciphertext
-            .iter()
-            .zip(keystream.iter())
-            .map(|(c, k)| c ^ k)
-            .collect();
-        String::from_utf8(plaintext).map_err(|_| "decrypted bytes are not valid UTF-8")
+    if let Some(v3_data) = encoded.strip_prefix(ENCRYPT_V3_PREFIX) {
+        decrypt_v3(v3_data, b"provider_auth")
+    } else if let Some(v2_data) = encoded.strip_prefix(ENCRYPT_V2_PREFIX) {
+        // Legacy format: unauthenticated machine-key keystream. Read-only -
+        // the caller migrates the value to v3 immediately after a successful
+        // decode (SEC-ragent-storage-001/002).
+        decrypt_v2_legacy(v2_data)
     } else {
+        // Legacy v1: repeating-key XOR over a hardcoded constant. Already
+        // compromised by definition; decrypt once so the migration can
+        // re-wrap it, and require the operator to rotate.
         deobfuscate_key_v1(encoded)
     }
 }
 
-/// Generates a keystream of the given length using blake3 in XOF mode.
-fn generate_keystream(nonce: &[u8; NONCE_LEN], len: usize) -> Vec<u8> {
-    let mut hasher = blake3::Hasher::new_keyed(&MACHINE_KEY);
+/// Authenticated decryption of a `v3:` payload.
+fn decrypt_v3(data: &str, context: &[u8]) -> std::result::Result<String, &'static str> {
+    use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+
+    let blob = STANDARD
+        .decode(data)
+        .map_err(|_| "base64 decode failed for v3 credential")?;
+    if blob.len() < 12 + 16 {
+        return Err("v3 payload too short");
+    }
+    let (nonce, ciphertext) = blob.split_at(12);
+    // The 12-byte slice is validated by `blob.len() < 12 + 16` above.
+    let nonce: &[u8; 12] = nonce.try_into().map_err(|_| "v3 nonce length invalid")?;
+    let cipher = chacha20poly1305::ChaCha20Poly1305::new((&*CREDENTIAL_KEY).into());
+    let plaintext = cipher
+        .decrypt(
+            nonce.into(),
+            Payload {
+                msg: ciphertext,
+                aad: context,
+            },
+        )
+        .map_err(|_| "v3 authentication failed (wrong key or tampered ciphertext)")?;
+    String::from_utf8(plaintext).map_err(|_| "decrypted bytes are not valid UTF-8")
+}
+
+/// Legacy `v2:` decryption under the machine-derived key (read-only).
+fn decrypt_v2_legacy(data: &str) -> std::result::Result<String, &'static str> {
+    let payload = STANDARD
+        .decode(data)
+        .map_err(|_| "base64 decode failed for v2-encrypted key")?;
+    if payload.len() < NONCE_LEN {
+        return Err("v2 payload too short");
+    }
+    let (nonce, ciphertext) = payload.split_at(NONCE_LEN);
+    let keystream = generate_legacy_keystream(
+        nonce.try_into().unwrap_or(&[0u8; NONCE_LEN]),
+        ciphertext.len(),
+    );
+    let plaintext: Vec<u8> = ciphertext
+        .iter()
+        .zip(keystream.iter())
+        .map(|(c, k)| c ^ k)
+        .collect();
+    String::from_utf8(plaintext).map_err(|_| "decrypted bytes are not valid UTF-8")
+}
+
+/// Generates a legacy v2 keystream using blake3 in XOF mode.
+///
+/// SEC-ragent-storage-001 (SECTASKS T-017): retained only so `v2:` rows from
+/// an older build can be read once and re-encrypted; never used to write.
+fn generate_legacy_keystream(nonce: &[u8; NONCE_LEN], len: usize) -> Vec<u8> {
+    let mut hasher = blake3::Hasher::new_keyed(&LEGACY_MACHINE_KEY);
     hasher.update(nonce);
     let mut output = vec![0u8; len];
     let mut reader = hasher.finalize_xof();
@@ -442,9 +635,15 @@ impl Storage {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
+            // SEC-ragent-storage-003 (SECTASKS T-017): the directory holds the
+            // credential table and the full transcript history; keep it 0700.
+            restrict_dir_permissions(parent);
         }
         let conn = Connection::open(path)
             .with_context(|| format!("Failed to open database at {}", path.display()))?;
+        // The database file (created above with the process umask) and its WAL
+        // sidecars must be 0600: the row contents are the credentials.
+        restrict_file_permissions(path);
         // PERF: Use WAL so background writers (e.g. the FTS warm-up) do not
         // block concurrent readers on the main thread, and set a busy_timeout
         // so a transient lock never surfaces as an immediate `DatabaseBusy`
@@ -472,6 +671,11 @@ impl Storage {
             has_format_version: std::sync::atomic::AtomicBool::new(false),
         };
         storage.migrate()?;
+        // SEC-ragent-storage-003 (SECTASKS T-041): the WAL sidecars are created
+        // lazily by SQLite on the first write (the migration above), under the
+        // process umask. Re-apply the 0600 restriction now that they exist, so
+        // the sidecar files are not left world-readable.
+        restrict_file_permissions(path);
         // PERF-069: open the dedicated read-only connection after migration so
         // the schema is complete. On any failure the reader is left `None` and
         // reads fall back to sharing the writer connection — a graceful
@@ -1546,7 +1750,7 @@ impl Storage {
     /// ```
     pub fn get_provider_auth(&self, provider_id: &str) -> Result<Option<String>> {
         // NOTE: must use the writer connection (not `lock_conn_read!`) because
-        // the legacy-credential branch below may auto-migrate the row.
+        // the legacy-credential branch below auto-migrates the row.
         let conn = lock_conn!(self)?;
         let mut stmt =
             conn.prepare_cached("SELECT api_key FROM provider_auth WHERE provider_id = ?1")?;
@@ -1554,37 +1758,69 @@ impl Storage {
             .query_row(params![provider_id], |row| row.get::<_, String>(0))
             .optional()?;
 
-        match encoded {
-            Some(ref enc) if !enc.starts_with(ENCRYPT_V2_PREFIX) => {
-                // Auto-migrate legacy v1 to v2 encryption.
-                match deobfuscate_key_v1(enc) {
-                    Ok(plaintext) => {
-                        if !plaintext.is_empty() {
-                            let v2 = encrypt_key(&plaintext);
-                            let now = Utc::now().to_rfc3339();
-                            let _ = conn.execute(
-                                "UPDATE provider_auth SET api_key = ?1, updated_at = ?2 \
-                                 WHERE provider_id = ?3",
-                                params![v2, now, provider_id],
-                            );
-                        }
-                        Ok(Some(plaintext))
-                    }
-                    Err(reason) => {
-                        // A corrupt stored key must not masquerade as "no key".
+        let Some(ref enc) = encoded else {
+            return Ok(None);
+        };
+
+        // Already in the authenticated format: a corrupt value is surfaced as
+        // an error rather than downgraded to an empty string
+        // (SEC-ragent-storage-004 / SECTASKS T-017).
+        if enc.starts_with(ENCRYPT_V3_PREFIX) {
+            return match decrypt_key_checked(enc) {
+                Ok(plaintext) => Ok(Some(plaintext)),
+                Err(reason) => {
+                    tracing::warn!(
+                        provider_id,
+                        reason,
+                        "get_provider_auth: stored credential is corrupt"
+                    );
+                    anyhow::bail!(
+                        "stored credential for provider '{provider_id}' is corrupt: {reason}"
+                    );
+                }
+            };
+        }
+
+        // Legacy value (v2 keystream or v1 XOR): decrypt once, then re-wrap it
+        // with the AEAD key so the exposure window closes on first read
+        // (SEC-ragent-storage-002).
+        match decrypt_key_checked(enc) {
+            Ok(plaintext) => {
+                if !plaintext.is_empty() {
+                    let migrated = encrypt_key(&plaintext);
+                    let now = Utc::now().to_rfc3339();
+                    if let Err(e) = conn.execute(
+                        "UPDATE provider_auth SET api_key = ?1, updated_at = ?2 \
+                         WHERE provider_id = ?3",
+                        params![migrated, now, provider_id],
+                    ) {
                         tracing::warn!(
                             provider_id,
-                            reason,
-                            "get_provider_auth: stored credential is corrupt"
+                            error = %e,
+                            "get_provider_auth: failed to migrate a legacy credential"
                         );
-                        anyhow::bail!(
-                            "stored credential for provider '{provider_id}' is corrupt: {reason}"
+                    } else {
+                        tracing::warn!(
+                            provider_id,
+                            "get_provider_auth: migrated a legacy credential to the \
+                             authenticated format; rotate this key because the \
+                             previous format did not protect it"
                         );
                     }
                 }
+                Ok(Some(plaintext))
             }
-            Some(enc) => Ok(Some(decrypt_key(&enc))),
-            None => Ok(None),
+            Err(reason) => {
+                // A corrupt stored key must not masquerade as "no key".
+                tracing::warn!(
+                    provider_id,
+                    reason,
+                    "get_provider_auth: stored credential is corrupt"
+                );
+                anyhow::bail!(
+                    "stored credential for provider '{provider_id}' is corrupt: {reason}"
+                );
+            }
         }
     }
 

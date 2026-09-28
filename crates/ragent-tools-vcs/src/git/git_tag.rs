@@ -72,6 +72,10 @@ impl Tool for GitTagTool {
             "show" => {
                 let tag_name =
                     name.ok_or_else(|| anyhow::anyhow!("Tag name is required for 'show'"))?;
+                // SEC-ragent-tools-vcs (SECTASKS T-022): operand, not option.
+                crate::git::reject_option_like(tag_name, "name")?;
+                // No `--` here: for `git show`, a trailing `--` starts a
+                // pathspec list, which would filter the tag name as a path.
                 let (out, err) = crate::git::run_git_async(
                     vec!["show".to_string(), tag_name.to_string()],
                     ctx.working_dir.clone(),
@@ -82,6 +86,10 @@ impl Tool for GitTagTool {
             "create" => {
                 let tag_name =
                     name.ok_or_else(|| anyhow::anyhow!("Tag name is required for 'create'"))?;
+                // SEC-ragent-tools-vcs (SECTASKS T-022): both the tag name and
+                // the target ref are operands.
+                crate::git::reject_option_like(tag_name, "name")?;
+                crate::git::reject_option_like(git_ref, "ref")?;
                 let mut args = vec!["tag"];
                 if let Some(msg) = message {
                     args.push("-a");
@@ -91,6 +99,8 @@ impl Tool for GitTagTool {
                 } else {
                     args.push(tag_name);
                 }
+                // No `--` before the target ref: for `git tag <name>`, a `--`
+                // separator would make the following token a pathspec.
                 args.push(git_ref);
                 let (out, err) = crate::git::run_git_async(
                     args.into_iter().map(ToString::to_string).collect(),
@@ -102,6 +112,10 @@ impl Tool for GitTagTool {
             "delete" => {
                 let tag_name =
                     name.ok_or_else(|| anyhow::anyhow!("Tag name is required for 'delete'"))?;
+                // SEC-ragent-tools-vcs (SECTASKS T-022): operand, not option.
+                crate::git::reject_option_like(tag_name, "name")?;
+                // `git tag -d -- <name>` does not resolve the tag, so the
+                // validated name is passed directly (no `--` separator).
                 let (out, err) = crate::git::run_git_async(
                     vec!["tag".to_string(), "-d".to_string(), tag_name.to_string()],
                     ctx.working_dir.clone(),

@@ -319,10 +319,14 @@ fn gemini_discovered_model_to_info(
 /// Returns an error if the HTTP request fails or the response cannot be parsed.
 pub async fn list_gemini_models(api_key: &str, base_url: Option<&str>) -> Result<Vec<ModelInfo>> {
     let base_url = base_url.unwrap_or(GEMINI_API_BASE).trim_end_matches('/');
-    let url = format!("{base_url}/v1beta/models?key={api_key}");
+    // SEC-ragent-llm-001 (SECTASKS T-012): send the key in the
+    // `x-goog-api-key` header rather than the query string, so it cannot be
+    // captured by a proxy/access log or echoed back in an error URL.
+    let url = format!("{base_url}/v1beta/models");
     let http = crate::provider::http_client::create_http_client();
     let resp = http
         .get(&url)
+        .header("x-goog-api-key", api_key)
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
@@ -356,14 +360,32 @@ pub async fn list_gemini_models(api_key: &str, base_url: Option<&str>) -> Result
 }
 
 /// HTTP client for the Google Gemini API with streaming SSE support.
+///
+/// The `api_key` is credential material: `Debug` is implemented by hand
+/// (SEC-ragent-llm-001 / SECTASKS T-012) so a `{:?}` of this struct can never
+/// print it.
 pub(crate) struct GeminiClient {
     api_key: String,
     base_url: String,
     http: reqwest::Client,
 }
 
+impl std::fmt::Debug for GeminiClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeminiClient")
+            .field("api_key", &"<redacted>")
+            .field("base_url", &self.base_url)
+            .finish_non_exhaustive()
+    }
+}
+
 impl GeminiClient {
     pub(crate) fn new(api_key: &str, base_url: &str) -> Self {
+        // SEC-ragent-llm-001 (SECTASKS T-012): register the key with the
+        // shared redaction registry so any path that runs text through
+        // `ragent_types::sanitize::redact_secrets` (logs, SSE, error
+        // rendering) masks it even if it appears verbatim.
+        ragent_types::sanitize::register_secret(api_key);
         Self {
             api_key: api_key.to_string(),
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -512,14 +534,18 @@ impl LlmClient for GeminiClient {
         let body_bytes = serde_json::to_vec(&body).context("serialise Gemini request body")?;
 
         // Use streaming endpoint
+        // SEC-ragent-llm-001 (SECTASKS T-012): the key travels in the
+        // `x-goog-api-key` header, never in the URL, so log lines and error
+        // strings that carry `url` are free of credential material.
         let url = format!(
-            "{}/v1beta/models/{}:streamGenerateContent?key={}",
-            self.base_url, request.model, self.api_key
+            "{}/v1beta/models/{}:streamGenerateContent",
+            self.base_url, request.model
         );
 
         let response = self
             .http
             .post(&url)
+            .header("x-goog-api-key", &self.api_key)
             .header("content-type", "application/json")
             .body(body_bytes)
             .send()
@@ -601,6 +627,23 @@ impl LlmClient for GeminiClient {
 
                 // Gemini streams JSON objects, not SSE
                 super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
+
+                // SEC-ragent-llm-004 (SECTASKS T-028): bound the accumulation
+                // buffer for the non-SSE path too; a peer that never emits a
+                // line terminator must not grow it without limit.
+                if super::http_client::sse_buffer_exceeded(&buffer) {
+                    tracing::warn!(
+                        limit = super::http_client::MAX_SSE_BUFFER_BYTES,
+                        "Gemini stream buffer exceeded the cap; aborting the stream"
+                    );
+                    yield StreamEvent::Error {
+                        message: format!(
+                            "stream buffer exceeded {} bytes without a complete frame",
+                            super::http_client::MAX_SSE_BUFFER_BYTES
+                        ),
+                    };
+                    return;
+                }
 
                 // Try to parse complete JSON objects from buffer
                 // Gemini returns a stream of JSON objects, each on its own line or as NDJSON

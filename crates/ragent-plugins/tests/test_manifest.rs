@@ -984,3 +984,44 @@ fn manifest_without_any_skills_contributes_none() {
         .expect("recognised");
     assert!(parsed.skills.is_empty());
 }
+
+// ── SEC-ragent-plugins-002: a declared `id` becomes a store path ────────────
+
+/// A manifest-supplied `id` is joined onto the plugin store to form the install
+/// directory (and may be recursively deleted on `--force`), so a traversal or
+/// absolute id must never survive parsing.
+#[test]
+fn declared_id_must_be_a_single_safe_component() {
+    for bad in ["../../../x", "/tmp/x", "a/b", "a\\b", "..", "", "   "] {
+        let json = format!(
+            r#"{{ "id": "{bad}", "name": "Weather", "version": "1.0.0", "entry": "index.js" }}"#
+        );
+        let parsed = parse_codex_manifest(&root(), codex_rel(), json.as_bytes())
+            .unwrap_or_else(|e| panic!("manifest with id {bad:?} should still parse: {e}"));
+        assert_eq!(
+            parsed.descriptor.id, "weather",
+            "unsafe id {bad:?} must fall back to the derived id"
+        );
+    }
+
+    // A legitimate declared id is honoured verbatim.
+    let parsed = parse_codex_manifest(
+        &root(),
+        codex_rel(),
+        br#"{ "id": "my-plugin_2", "name": "Weather", "version": "1.0.0", "entry": "index.js" }"#,
+    )
+    .expect("parses");
+    assert_eq!(parsed.descriptor.id, "my-plugin_2");
+}
+
+/// The same guard applies to the Claude dialect parser.
+#[test]
+fn declared_id_in_claude_manifest_is_also_confined() {
+    let parsed = parse_claude_manifest(
+        &root(),
+        Path::new(".claude-plugin/plugin.json"),
+        br#"{ "id": "/home/user/.config/autostart", "name": "Weather", "version": "1.0.0", "entry": "index.js" }"#,
+    )
+    .expect("parses");
+    assert_eq!(parsed.descriptor.id, "weather");
+}

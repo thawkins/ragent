@@ -424,9 +424,12 @@ pub async fn import_session_archive(
     let mut archive = Archive::new(tar);
 
     let temp_dir = tempdir().context("Failed to create temp directory")?;
-    archive
-        .unpack(temp_dir.path())
-        .context("Failed to extract archive")?;
+    // SEC-ragent-agent-002 / SEC-ragent-agent-009 (SECTASKS T-008): `unpack`
+    // contains entry *paths* inside the temp dir, but performs no bound on
+    // entry count or total decompressed size, so a crafted archive is a
+    // zip-bomb / inode-exhaustion vector. Unpack entry-by-entry, refusing an
+    // entry whose (lexically normalised) path escapes the temp dir.
+    unpack_archive_checked(&mut archive, temp_dir.path())?;
 
     // Read and validate manifest
     let manifest_path = temp_dir.path().join("manifest.json");
@@ -448,10 +451,28 @@ pub async fn import_session_archive(
         serde_json::from_str(&transcript_content).context("Failed to parse transcript.json")?;
 
     // Create new session in the manifest's directory (or current dir if unavailable)
+    //
+    // SEC-ragent-agent-002 (SECTASKS T-008): `manifest.session_directory` is
+    // attacker-controlled content inside the archive, so it may not name an
+    // arbitrary absolute path (`/home/victim/.ssh`, `/etc/systemd/system`).
+    // Accept it only when it resolves inside the current working directory;
+    // otherwise fall back to the working directory and record the archived
+    // value as metadata only.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let session_dir = if manifest.session_directory.is_empty() {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        cwd.clone()
     } else {
-        PathBuf::from(&manifest.session_directory)
+        let candidate = PathBuf::from(&manifest.session_directory);
+        if path_within_root(&candidate, &cwd) {
+            candidate
+        } else {
+            tracing::warn!(
+                archived = %manifest.session_directory,
+                "archive manifest session_directory escapes the working \
+                 directory; importing into the working directory instead"
+            );
+            cwd.clone()
+        }
     };
 
     // Ensure directory exists
@@ -566,6 +587,87 @@ pub async fn import_session_archive(
         loop_state_files_restored: loop_state_restored,
         checksums_verified: config.verify_checksums,
     })
+}
+
+/// Maximum number of files an imported archive may contain.
+const ARCHIVE_MAX_ENTRIES: u64 = 10_000;
+
+/// Maximum total decompressed bytes an imported archive may contain (512 MiB).
+const ARCHIVE_MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Extract every archive entry into `dest`, refusing escapes and bombs.
+///
+/// SEC-ragent-agent-002 / SEC-ragent-agent-009 (SECTASKS T-008). `tar::Archive`
+/// refuses entry paths that escape `dest`, but performs no bound on entry count
+/// or total decompressed size, so a crafted `.tar.gz` is a zip-bomb vector.
+/// Each entry is unpacked only after its lexically normalised path is confirmed
+/// to stay inside `dest`, and the running counts are checked against
+/// [`ARCHIVE_MAX_ENTRIES`] / [`ARCHIVE_MAX_TOTAL_BYTES`].
+fn unpack_archive_checked<R: std::io::Read>(
+    archive: &mut tar::Archive<R>,
+    dest: &Path,
+) -> Result<()> {
+    let mut entries = 0u64;
+    let mut total = 0u64;
+    for entry in archive
+        .entries()
+        .context("Failed to read archive entries")?
+    {
+        let mut entry = entry.context("Failed to read an archive entry")?;
+        entries += 1;
+        if entries > ARCHIVE_MAX_ENTRIES {
+            return Err(anyhow!(
+                "archive contains more than {ARCHIVE_MAX_ENTRIES} entries; refusing to extract"
+            ));
+        }
+        let declared = entry.size();
+        total = total.saturating_add(declared);
+        if total > ARCHIVE_MAX_TOTAL_BYTES {
+            return Err(anyhow!(
+                "archive decompresses to more than {ARCHIVE_MAX_TOTAL_BYTES} bytes; \
+                 refusing to extract"
+            ));
+        }
+        let path = entry
+            .path()
+            .context("Failed to read an archive entry path")?
+            .into_owned();
+        if !path_within_root(&path, dest) {
+            return Err(anyhow!(
+                "archive entry '{}' escapes the extraction directory",
+                path.display()
+            ));
+        }
+        entry
+            .unpack_in(dest)
+            .with_context(|| format!("Failed to extract archive entry '{}'", path.display()))?;
+    }
+    Ok(())
+}
+
+/// Whether `candidate` (relative or absolute) is lexically inside `root`.
+///
+/// Used on archive-supplied paths that must not name an absolute location or
+/// climb out with `..`. The root itself is canonicalised when possible so a
+/// symlinked working directory still compares correctly.
+fn path_within_root(candidate: &Path, root: &Path) -> bool {
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let resolved = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        canonical_root.join(candidate)
+    };
+    // Reject any parent-directory component outright, then require the
+    // lexically normalised form to stay under the root.
+    let mut normalised = PathBuf::new();
+    for component in resolved.components() {
+        match component {
+            std::path::Component::ParentDir => return false,
+            std::path::Component::CurDir => {}
+            other => normalised.push(other.as_os_str()),
+        }
+    }
+    normalised.starts_with(&canonical_root)
 }
 
 /// Verify SHA-256 checksums of all files in an extracted archive.

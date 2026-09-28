@@ -1,5 +1,163 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+
+- **Milestone MS-01 of `SECTASKS.md` complete — all five Critical findings from
+  the per-crate security audit are remediated, each with a regression test.**
+  The audit (`SECTASKS.md`, 17 crates, 117 findings) is tracked as five
+  milestones; MS-01 was the "stop the bleeding" set.
+  - **SEC-ragent-plugins-001** — an attacker-controlled `git+<url>#<ref>[:<subpath>]`
+    fragment reached `git fetch`/`git sparse-checkout` as an *option*: a ref of
+    `--upload-pack=<cmd>` executed a program with the user's privileges,
+    escaping the plugin sandbox entirely. `git_ref`/`git_subpath` now reject any
+    value that is not `[A-Za-z0-9._/-]+`, begins with `-`, or contains `..`, and
+    `git_run` inserts `--` before every positional so the option parsing itself
+    is terminated. Regression cover in
+    `crates/ragent-plugins/tests/test_store_git_source.rs` (parse-level refusal
+    plus an end-to-end install asserting the injected marker is never created).
+  - **SEC-ragent-plugins-002** — a manifest-declared plugin `id` was accepted
+    verbatim and joined onto the plugin store, so `id: "/home/user/.config/autostart"`
+    (or `../../..`) wrote attacker files outside the store and — with
+    `--force` — recursively deleted the target first. Both dialect parsers now
+    run a declared id through `sanitize_declared_id` (a single `Component::Normal`
+    matching `[A-Za-z0-9._-]+`, else it falls back to the derived id), and the
+    install sink re-asserts containment in `confined_dest_dir` before
+    `remove_dir_all`/`copy_dir_recursive`. Tests in
+    `crates/ragent-plugins/tests/test_manifest.rs`.
+  - **SEC-ragent-team-001 / SEC-ragent-agent-008** — a blueprint's
+    `task-seed.json` / `spawn-prompts.json` looked each entry's tool up in the
+    full default registry and called `execute()` directly, bypassing the
+    permission gate. A repository is untrusted content, so sharing a project
+    whose blueprint seeded `bash` gave unprompted command execution. Every
+    seeded tool now goes through `dispatch_seed_tool`, which consults the
+    session permission checker and refuses anything that is not explicitly
+    allowed (failing closed when no checker is wired). Cover in
+    `crates/ragent-team/tests/test_blueprint_seed_permissions.rs` (Ask refused,
+    Deny refused, no-checker fails closed, explicit Allow still runs, benign
+    task seed still creates its task).
+  - **SEC-ragent-team-002 / SEC-ragent-agent-007 / SEC-ragent-tui-004** — a team
+    name was interpolated straight into `base.join(name)`, `create_dir_all`, and
+    `remove_dir_all`, making `team_create`/`team_cleanup` an arbitrary-path
+    write/delete primitive driven by LLM output. A single `validate_team_name`
+    (`^[a-z0-9][a-z0-9-]{0,63}$`) now guards `TeamStore::create`,
+    `find_team_dir`, the cached lookup, `team_cleanup`, and the `/team create`
+    and `/team delete` slash commands; blueprint-derived names are slugified
+    before use so generation cannot produce an invalid name. Tests in
+    `crates/ragent-team/tests/test_team_name_validation.rs` and
+    `crates/ragent-tui/tests/test_teams_tui.rs`.
+  - **SEC-ragent-tools-core-001** — `multi_edit` was the only file tool with no
+    path-containment check: `{"file_path": "../../.bashrc"}` or an absolute
+    `/home/user/.ssh/authorized_keys` was read and overwritten directly. Every
+    edit target is now validated with `check_path_within_allowed_roots_cached`
+    (the same helper `edit`/`read`/`write` use) before the batch acquires locks
+    or reads anything, so a mixed batch is rejected atomically. Tests in
+    `crates/ragent-tools-core/tests/test_multiedit.rs`.
+  - `SPEC.md` §4.6a records the five guards and their call sites so later
+    milestones can migrate remaining sites onto them.
+
+- **Milestone MS-03 of `SECTASKS.md` complete — the Medium findings are
+  remediated.** MS-03 ("Network & secret hardening") covers T-025 .. T-058: the
+  network egress, secrets/redaction, resource-cap, and defence-in-depth items.
+  `SPEC.md` §4.6c records the guards and their call sites.
+  - **Network egress** — MCP HTTP response bodies are read under an 8 MiB cap
+    (`SEC-ragent-agent-003`); benchmark downloads carry a client timeout, a
+    streamed size cap, and a 64-page/64k-record pagination budget, with the
+    manifest `case_file`/`relative_path` confined to the data root
+    (`SEC-ragent-bench-003/004/005`); LLM providers clamp `Retry-After` to 30 s,
+    cap the SSE accumulation buffer at 1 MiB on every streaming path (all 11
+    provider stream loops plus the Gemini NDJSON path), and read error bodies
+    under a 64 KiB cap (`SEC-ragent-llm-003/004/005`); the GitHub tree walk and
+    the GitLab jobs pagination carry request/entry budgets
+    (`SEC-ragent-tools-vcs-007/008`); `mf_fetch`/`mf_crawl` stream responses
+    under byte caps instead of buffering first, and `crawl_urls` is SSRF-checked
+    at the tool boundary (`SEC-tools-extended-006/010`).
+  - **Secrets and disclosure** — the secret registry is seeded from every
+    credential env var (`GITLAB_TOKEN`, `GITHUB_TOKEN`, `TAVILY_API_KEY`, Gmail,
+    Telegram, ...), and `SECRET_PATTERN` already covered GitLab PATs / `hf_` /
+    `npm_` / `?key=` (`SEC-ragent-types-004`); bash partial *and* completed
+    output is redacted before it reaches the model or the session store
+    (`SEC-ragent-tools-core-005`); CI log excerpts are redacted and size-capped
+    (`SEC-ragent-tools-vcs-006`); the GitHub client attaches the token only to
+    the configured API origin (`SEC-ragent-tools-vcs-005`); Gmail header values
+    are CRLF-stripped (`SEC-tools-extended-003`); the provider-setup dialog
+    masks the API key and the GitLab PAT (`SEC-ragent-tui-002`).
+  - **Resource caps and containment** — database, WAL, and activity-log files are
+    re-restricted to 0600 after the first write creates the sidecars
+    (`SEC-ragent-storage-003`); document write tools route through the workspace
+    containment check (`SEC-tools-extended-002`); `http_request` refuses
+    routing/credential headers (`Host`, `Cookie`, `Authorization`, `Proxy-*`)
+    (`SEC-tools-extended-004`); the codeindex scanner applies the configured
+    exclusion globs and re-checks the size of the bytes it read
+    (`SEC-ragent-codeindex-005/006`), `index_file` does the same on the watcher
+    path, and the FTS recovery wipe refuses a symlinked index directory
+    (`SEC-ragent-codeindex-007`); the bash wrapper script and `export -p` state
+    file move out of world-readable `/tmp` into a 0700 scratch directory with
+    0600 files (`SEC-ragent-tools-core-004`); the tree-sitter walker recursion is
+    bounded and graph edge derivation carries per-reference and global budgets
+    (`SEC-ragent-codeindex-003/004`); spec numbering-gap expansion and
+    contradiction detection are bounded (`SEC-ragent-specs-001/002`); mailbox
+    messages are size-capped, team hook commands are validated and run under a
+    30 s timeout with process-group kill and capped feedback
+    (`SEC-ragent-team-004/005/006`); `CronSchedule` no longer panics on an
+    invariant violation and uses checked arithmetic
+    (`SEC-ragent-types-003`); the stderr spool enforces a byte ceiling on every
+    write, including newline-free ones (`SEC-ragent-types-002`); the
+    permission-splitting helper no longer treats a `;` inside `$( ... )` as a
+    sub-command boundary; and the provider base URL is no longer persisted into
+    the benchmark workbook (`SEC-ragent-bench-007`).
+
+### Added
+
+- **Crash-dump capture for aborts that bypass the panic hook** — a stack
+  overflow is not an unwinding panic: the Rust runtime prints
+  `thread '...' has overflowed its stack` and calls `abort()`, so nothing
+  in-process runs afterwards. `src/crash_dump.rs` now stamps
+  `log/panics/last-crash.json` at startup with the session identity (pid, exe,
+  args, cwd, thread), marks it `running`, overwrites it with `clean exit` on a
+  normal return, and — when the next start finds a still-`running` record whose
+  pid is gone — prints a warning pointing at the marker and at the host's core
+  dump command. The record also carries a platform-specific retrieval hint
+  (`coredumpctl list/info/debug` when `core_pattern` pipes to
+  `systemd-coredump`, otherwise the `core_pattern` file or the macOS `/cores`
+  path). This is detection, not trapping: a stack overflow still aborts, and
+  the dump itself is collected by the OS.
+- **Truncating stderr spool for TUI mode** — the TUI owns the alternate screen,
+  so raw stderr (the default panic hook, `eprintln!`, C-library diagnostics)
+  was painted over by the next frame. `src/stderr_spool.rs` redirects fd 2 into
+  `log/logwindow/stderr-<timestamp>.log` on a dedicated drain thread when the
+  TUI runs, and the TUI mirrors the spooled text into its log panel
+  (`stderr: <line>`). The shared `Spool` type
+  (`ragent_types::stderr_spool`, `SPOOL_MAX_LINES = 1000`) counts newlines per
+  write and rewrites the file with only its newest 1000 lines once the cap is
+  exceeded; the rewrite is skipped entirely for writes containing no newline.
+  Non-TUI modes (`--no-tui`, headless run, server) leave stderr untouched.
+
+### Fixed
+
+- The TUI output-view overlay for a running sub-agent no longer stays frozen
+  while the Agents panel's step counter advances. Two gaps stacked up:
+  (1) the session loop's M-008 interim save was gated on the count of
+  non-tool-call message parts, so a tool-only step (the common sub-agent
+  shape) never persisted its completed tool-call parts to SQLite until the
+  final save — the gate is now a total-parts count (parts are only ever
+  pushed or popped, never mutated in place, so the count alone remains a
+  sufficient save gate; FTS is still skipped until the final save); and
+  (2) the overlay's line-cache generation key (message count + `edit_seq`)
+  cannot change mid-run — the assistant placeholder is created once and
+  `edit_seq` is not persisted — so the cached lines were reused verbatim
+  until the run ended. The key now mixes in the same per-session step /
+  tool-call counters the Agents panel displays, rebuilding the cache exactly
+  when the agent advances and reusing it otherwise (the PERF-048 single-copy
+  invariant is unchanged). Opening the overlay on a running agent now shows
+  completed steps live; regression cover lives in
+  `crates/ragent-agent/tests/test_interim_tool_call_persist.rs` (mid-run
+  persistence asserted strictly before `MessageEnd`) and
+  `crates/ragent-tui/tests/test_output_view_live_steps.rs` (cache
+  invalidation on counter advance, rendered tool-call rows, stable cache
+  when nothing advanced).
+
 ## [1.0.121] - 2026-09-27
 
 Release of the staged working tree: documentation refresh for v1.0.120, a

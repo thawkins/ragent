@@ -116,12 +116,17 @@ impl Tool for TeamAssignTaskTool {
                      assigned to you. Use `team_task_complete` when done.",
                     task.id, task.title
                 );
-                match mailbox.push(MailboxMessage::new(
-                    "lead".to_string(),
-                    agent_id.clone(),
-                    MessageType::Message,
-                    content,
-                )) {
+                // SEC-ragent-team-003 (SECTASKS T-018): authenticated lead
+                // session id on every lead-authored assignment.
+                match mailbox.push(
+                    MailboxMessage::new(
+                        "lead".to_string(),
+                        agent_id.clone(),
+                        MessageType::Message,
+                        content,
+                    )
+                    .with_sender_session(&ctx.session_id),
+                ) {
                     Ok(()) => "delivered".to_string(),
                     Err(e) => format!("failed: {e}"),
                 }

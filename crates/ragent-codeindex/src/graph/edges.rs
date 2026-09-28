@@ -12,6 +12,23 @@ use std::collections::HashMap;
 use std::sync::atomic::Ordering as AtomicOrdering;
 use tracing::debug;
 
+/// Maximum candidate symbols a single reference/import may fan out to.
+///
+/// SEC-ragent-codeindex-004 (SECTASKS T-049): edge derivation is a cross
+/// product over whole-repository candidate lists, so a common name (`new`,
+/// `get`, `clone`) defined in thousands of places produces `refs x candidates`
+/// edges materialised in memory before they are written to SQLite. Bounding the
+/// per-reference fan-out keeps derivation linear in the repository size.
+const MAX_CANDIDATES_PER_REF: usize = 32;
+
+/// Maximum graph edges materialised in one derivation pass.
+///
+/// SEC-ragent-codeindex-004 (SECTASKS T-049): a global budget is the second
+/// half of the guard - even with a per-reference cap, a large repository can
+/// multiply out. When the budget trips the pass stops and logs, rather than
+/// exhausting memory.
+const MAX_EDGES_PER_PASS: usize = 500_000;
+
 /// Extract a trait name from an `impl` signature such as
 /// `impl Trait for Type` or `impl Trait<Type> for Type`.
 ///
@@ -140,7 +157,9 @@ fn derive_ref_edges(
             _ => continue,
         };
 
-        for &(target_sym_id, target_file_id) in target_candidates {
+        for &(target_sym_id, target_file_id) in
+            target_candidates.iter().take(MAX_CANDIDATES_PER_REF)
+        {
             if target_sym_id == source_sym_id {
                 continue;
             }
@@ -151,6 +170,13 @@ fn derive_ref_edges(
                 Confidence::Inferred
             };
 
+            if edges.len() >= MAX_EDGES_PER_PASS {
+                debug!(
+                    budget = MAX_EDGES_PER_PASS,
+                    "edge budget reached during ref derivation; truncating pass"
+                );
+                return edges;
+            }
             edges.push(GraphEdge {
                 source_sym: source_sym_id,
                 target_sym: target_sym_id,
@@ -179,7 +205,7 @@ fn derive_import_edges(
             continue;
         };
         for sym in file_symbols {
-            for &(target_id, target_file_id) in candidates {
+            for &(target_id, target_file_id) in candidates.iter().take(MAX_CANDIDATES_PER_REF) {
                 if target_id == sym.id {
                     continue;
                 }
@@ -188,6 +214,13 @@ fn derive_import_edges(
                 } else {
                     Confidence::Inferred
                 };
+                if edges.len() >= MAX_EDGES_PER_PASS {
+                    debug!(
+                        budget = MAX_EDGES_PER_PASS,
+                        "edge budget reached during import derivation; truncating pass"
+                    );
+                    return edges;
+                }
                 edges.push(GraphEdge {
                     source_sym: sym.id,
                     target_sym: target_id,

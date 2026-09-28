@@ -142,7 +142,6 @@ async fn test_rollback_loop_failure_keeps_the_capture() -> Result<()> {
             "the capture is kept for retry when the restore fails"
         );
         // Restore permissions so the tempdir can be cleaned up.
-        perms.set_readonly(false);
         use std::os::unix::fs::PermissionsExt;
         let mut writable = std::fs::metadata(dir.path())?.permissions();
         writable.set_mode(0o700);
@@ -150,7 +149,7 @@ async fn test_rollback_loop_failure_keeps_the_capture() -> Result<()> {
     }
     #[cfg(not(unix))]
     {
-        let _ = (result, perms);
+        let _ = result;
     }
     Ok(())
 }

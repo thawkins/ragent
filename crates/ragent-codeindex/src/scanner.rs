@@ -42,6 +42,14 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
         .canonicalize()
         .with_context(|| format!("cannot canonicalize root: {}", root.display()))?;
 
+    // Compile the configured exclusion globs once.
+    //
+    // SEC-ragent-codeindex-006 (SECTASKS T-060): `ScanConfig.extra_exclude_patterns`
+    // was declared and persisted by the config subsystem but never consulted, so a
+    // user who added `*.snap` or `secrets/**` still had those files indexed and
+    // searchable. Build a matcher here and apply it to every candidate path.
+    let exclude_matcher = build_exclude_matcher(&config.extra_exclude_patterns);
+
     // Collect paths first (WalkBuilder is not Send-safe for parallel iteration).
     let mut paths: Vec<std::path::PathBuf> = Vec::new();
 
@@ -50,6 +58,7 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
         .git_ignore(true) // respect .gitignore
         .git_global(true)
         .git_exclude(true)
+        .follow_links(false) // SEC-ragent-codeindex-001: never traverse symlinks
         .build();
 
     for entry in walker {
@@ -68,6 +77,13 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
 
         let path = entry.path();
 
+        // Skip symlinks: a link inside the tree may point anywhere, and
+        // following it indexes content outside the project root.
+        if entry.file_type().is_some_and(|ft| ft.is_symlink()) {
+            trace!("skipping symlink: {}", path.display());
+            continue;
+        }
+
         // Skip excluded directories.
         if path.ancestors().any(|ancestor| {
             ancestor
@@ -79,6 +95,14 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
                 })
         }) {
             trace!("skipping excluded path: {}", path.display());
+            continue;
+        }
+
+        // Apply the configured exclusion globs (SEC-ragent-codeindex-006).
+        if let Some(matcher) = &exclude_matcher
+            && matcher.is_match(path)
+        {
+            trace!("skipping glob-excluded path: {}", path.display());
             continue;
         }
 
@@ -135,6 +159,25 @@ fn process_file(path: &Path, root: &Path, config: &ScanConfig) -> Option<Scanned
         }
     };
 
+    // Re-check the size against the bytes actually read.
+    //
+    // SEC-ragent-codeindex-005 (SECTASKS T-060): `fs::metadata` above is only
+    // advisory - a file that grows between the stat and the read (or a device
+    // that reports a small size) is read in full by `fs::read`, bypassing the
+    // cap. Derive the stored size from the content and drop the file when the
+    // real size exceeds the limit.
+    let size = content.len() as u64;
+    if size == 0 {
+        return None;
+    }
+    if size > config.max_file_size {
+        trace!(
+            "skipping file that grew past the cap ({size} bytes): {}",
+            path.display()
+        );
+        return None;
+    }
+
     // Binary check: look for NUL bytes in the first chunk.
     if is_binary(&content) {
         trace!("skipping binary file: {}", path.display());
@@ -161,6 +204,38 @@ fn process_file(path: &Path, root: &Path, config: &ScanConfig) -> Option<Scanned
 #[must_use]
 pub fn hash_content(content: &[u8]) -> String {
     blake3::hash(content).to_hex().to_string()
+}
+
+/// Build a glob matcher for the configured exclusion patterns.
+///
+/// SEC-ragent-codeindex-006 (SECTASKS T-060). Returns `None` when no pattern is
+/// configured, or when every pattern failed to compile (the failure is logged so
+/// a typo in `codeindex.extra_exclude_patterns` is visible rather than silent).
+fn build_exclude_matcher(patterns: &[String]) -> Option<globset::GlobSet> {
+    if patterns.is_empty() {
+        return None;
+    }
+    let mut builder = globset::GlobSetBuilder::new();
+    let mut added = 0usize;
+    for pattern in patterns {
+        match globset::Glob::new(pattern) {
+            Ok(glob) => {
+                builder.add(glob);
+                added += 1;
+            }
+            Err(e) => warn!("ignoring invalid codeindex exclusion glob '{pattern}': {e}"),
+        }
+    }
+    if added == 0 {
+        return None;
+    }
+    match builder.build() {
+        Ok(set) => Some(set),
+        Err(e) => {
+            warn!("cannot build codeindex exclusion glob set: {e}");
+            None
+        }
+    }
 }
 
 /// Compute the blake3 hash of a file on disk.

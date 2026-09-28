@@ -23,6 +23,8 @@ fn ctx() -> ToolContext {
         code_index: None,
         config: None,
         read_timestamps: Arc::new(std::sync::RwLock::new(HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 

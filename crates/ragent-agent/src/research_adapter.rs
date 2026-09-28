@@ -270,6 +270,7 @@ fn build_tool_context(
         allowed_roots,
         tool_registry,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        permission_checker: None,
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
@@ -1614,6 +1615,7 @@ mod tests {
                         std::collections::HashMap::new(),
                     )),
                     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                    permission_checker: None,
                     canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
                 },
                 legacy_verifier: None,
@@ -1838,6 +1840,7 @@ mod tests {
             tool_registry: Arc::new(crate::tool::create_default_registry()),
             read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+            permission_checker: None,
             canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
         }
     }

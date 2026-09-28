@@ -39,6 +39,15 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
+/// Maximum size of a mailbox message body in bytes.
+///
+/// SEC-ragent-team-006 (SECTASKS T-047): `Mailbox::push` appends one JSONL line
+/// per message and `read_all`/`drain_unread` load the whole file, so an
+/// unbounded `content` (a flooding teammate, or a blueprint-supplied body)
+/// grows the file and every subsequent read without limit. 256 KiB is far
+/// above any legitimate coordination message.
+pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
+
 // ── Message type ─────────────────────────────────────────────────────────────
 
 /// The semantic category of a mailbox message.
@@ -93,6 +102,15 @@ pub struct MailboxMessage {
     /// Optional correlation id linking a request to its reply (M5-T4).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
+    /// Session id of the sender that actually pushed this message.
+    ///
+    /// SEC-ragent-team-003 (SECTASKS T-018): the `from` field is derived from
+    /// the sending session's context and cannot be proven by the recipient, so
+    /// the runtime records the authenticated session id here as well. A
+    /// consumer that sees a `from` it cannot corroborate treats the message as
+    /// unverified rather than as an instruction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_session_id: Option<String>,
 }
 
 impl MailboxMessage {
@@ -112,7 +130,15 @@ impl MailboxMessage {
             sent_at: Utc::now(),
             read: false,
             correlation_id: None,
+            sender_session_id: None,
         }
+    }
+
+    /// Attach the authenticated sender session id (SEC-ragent-team-003).
+    #[must_use]
+    pub fn with_sender_session(mut self, session_id: &str) -> Self {
+        self.sender_session_id = Some(session_id.to_string());
+        self
     }
 
     /// Create a new unread message with a correlation id (M5-T4).
@@ -147,6 +173,16 @@ impl MailboxMessage {
         }
         if self.to.is_empty() {
             return Err(anyhow!("message {} has empty to", self.message_id));
+        }
+        // SEC-ragent-team-003 (SECTASKS T-018): a message that claims to come
+        // from the lead must carry the authenticated sender session id, so a
+        // teammate cannot forge a lead directive by setting the derived field.
+        if self.from == "lead" && self.sender_session_id.is_none() {
+            return Err(anyhow!(
+                "message {} claims to be from 'lead' but carries no authenticated \
+                 sender session id",
+                self.message_id
+            ));
         }
         Ok(())
     }
@@ -354,6 +390,23 @@ impl Mailbox {
     /// After writing, signals the in-process [`Notify`] handle (if
     /// registered) so the recipient's poll loop wakes immediately.
     pub fn push(&self, message: MailboxMessage) -> Result<()> {
+        // SEC-ragent-team-003 (SECTASKS T-018): enforce the sender-identity
+        // invariant at the write boundary, so a spoofed `from: "lead"` can
+        // never reach a recipient's mailbox.
+        message.validate()?;
+        // SEC-ragent-team-006 (SECTASKS T-047): a mailbox message is
+        // attacker-influenced content (a teammate, a blueprint seed, or the
+        // lead) and `read_all` loads the whole file into memory, so an
+        // unbounded `content` grows the file without limit. Refuse oversized
+        // messages at the write boundary.
+        if message.content.len() > MAX_MESSAGE_BYTES {
+            anyhow::bail!(
+                "mailbox message {} is {} bytes, over the {} byte limit",
+                message.message_id,
+                message.content.len(),
+                MAX_MESSAGE_BYTES
+            );
+        }
         let lock = acquire_lock(&self.path, true)?;
 
         // Detect legacy format by inspecting the first non-whitespace byte.

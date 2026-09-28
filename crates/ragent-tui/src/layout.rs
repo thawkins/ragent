@@ -14,6 +14,7 @@ use crate::app::{image_dimensions_or_placeholder, sanitize_for_display};
 
 use crate::widgets::message_widget::make_relative_path;
 use ragent_types::ThinkingLevel;
+use ragent_types::sanitize_terminal::sanitize_terminal;
 use ragent_types::strutil::{truncate_bytes, truncate_bytes_no_ellipsis};
 use ratatui::{
     Frame,
@@ -1222,8 +1223,10 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 Line::from(""),
             ];
 
-            // Show the key unmasked so the user can verify the full value.
-            let key_text = key_field.text();
+            // SEC-ragent-tui-002 (SECTASKS T-045): mask the key. The field was
+            // rendered verbatim, so a live provider credential was readable
+            // during a screen share, a terminal recording, or a shoulder-surf.
+            let key_text = mask_secret(key_field.text());
             let key_cursor_display = if *active_field == 0 {
                 key_field.cursor()
             } else {
@@ -1235,7 +1238,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                     Style::default().fg(Color::Cyan),
                 ),
                 Span::styled(
-                    with_cursor_marker(key_text, key_cursor_display),
+                    with_cursor_marker(&key_text, key_cursor_display),
                     Style::default().fg(Color::White),
                 ),
             ]));
@@ -1905,11 +1908,12 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             lines.push(Line::from(""));
             lines.push(Line::from("Personal Access Token:"));
 
-            // Token field (unmasked so the user can verify the full value)
+            // SEC-ragent-tui-002 (SECTASKS T-045): mask the GitLab PAT.
+            let token_masked = mask_secret(token_input);
             let tok_cursor_display = if *active_field == 1 {
                 *token_cursor
             } else {
-                token_input.chars().count()
+                token_masked.chars().count()
             };
             lines.push(Line::from(vec![
                 Span::styled(
@@ -1917,7 +1921,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                     Style::default().fg(Color::Cyan),
                 ),
                 Span::styled(
-                    with_cursor_marker(token_input, tok_cursor_display),
+                    with_cursor_marker(&token_masked, tok_cursor_display),
                     Style::default().fg(Color::White),
                 ),
             ]));
@@ -2832,6 +2836,27 @@ fn input_cursor_display_pos(
 
     // Fallback: cursor at or past end of input
     (display_row, 0)
+}
+
+/// Render a credential field masked, keeping the first and last few characters.
+///
+/// SEC-ragent-tui-002 (SECTASKS T-045): API keys and PATs are shown in the
+/// provider-setup dialog, which is visible during screen sharing or a terminal
+/// recording. A short value is masked entirely; a longer one keeps its first 4
+/// and last 4 characters so the operator can still confirm which key is
+/// entered.
+#[must_use]
+pub fn mask_secret(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return String::new();
+    }
+    if chars.len() <= 12 {
+        return "*".repeat(chars.len());
+    }
+    let head: String = chars[..4].iter().collect();
+    let tail: String = chars[chars.len() - 4..].iter().collect();
+    format!("{head}{}{tail}", "*".repeat(chars.len() - 8))
 }
 
 fn with_cursor_marker(text: &str, cursor: usize) -> String {
@@ -4803,8 +4828,14 @@ fn log_entry_to_lines(
         ));
     }
 
-    // Parse and color the [sid:step] prefix in the message if present
-    let msg = &entry.message;
+    // Parse and color the [sid:step] prefix in the message if present.
+    //
+    // SEC-ragent-types-001 (SECTASKS T-023): the log message body carries text
+    // from tool results, web pages, repository files, and MCP responses. It is
+    // neutralised at this render boundary so a CSI/OSC sequence can never be
+    // interpreted by the terminal (spoofed output, clipboard write, retitle).
+    let sanitised = sanitize_terminal(&entry.message);
+    let msg: &str = &sanitised;
     if msg.starts_with('[') {
         // Try to find the "]" that ends the [sid:step] prefix
         if let Some(close_bracket) = msg.find(']') {
@@ -4831,14 +4862,15 @@ fn log_entry_to_lines(
                 ));
                 spans.push(Span::raw(rest.to_string()));
             } else {
-                spans.push(Span::raw(msg.clone()));
+                spans.push(Span::raw(msg.to_string()));
             }
         } else {
-            spans.push(Span::raw(msg.clone()));
+            spans.push(Span::raw(msg.to_string()));
         }
     } else {
-        spans.push(Span::raw(msg.clone()));
+        spans.push(Span::raw(msg.to_string()));
     }
+    drop(sanitised);
     vec![Line::from(spans)]
 }
 
@@ -5421,6 +5453,20 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
             generation =
                 generation.wrapping_add(msg_count.wrapping_mul(31).wrapping_add(last_edit_seq));
         }
+
+        // Live-progress hint: for another session's target (a running
+        // sub-agent or teammate) the generation key above is frozen mid-run —
+        // the assistant placeholder is created once (constant message count)
+        // and `edit_seq` is not persisted to SQLite. Mix in the same
+        // per-session step / tool-call counters the Agents panel shows so the
+        // cache rebuilds as the agent advances and completed steps appear live.
+        let live_progress = target_session.as_deref().map_or(0, |sid| {
+            let steps = app.event_bus.current_step(sid);
+            steps
+                .wrapping_mul(1_003)
+                .wrapping_add(app.event_bus.current_tool_calls(sid))
+        });
+        generation = generation.wrapping_add(live_progress.wrapping_mul(7_919));
 
         (generation, session_messages)
     };

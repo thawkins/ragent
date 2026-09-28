@@ -27,6 +27,80 @@ pub fn global_teams_dir() -> Option<PathBuf> {
     ragent_config::user_dirs::global_teams_dir()
 }
 
+/// Validate a team name before it is used as a filesystem path component.
+///
+/// A team name reaches `base.join(name)`, `create_dir_all`, `is_dir`, and — via
+/// `team_cleanup` — `remove_dir_all`. Taken straight from tool input or a slash
+/// command it is therefore an arbitrary-path write/delete primitive: a name of
+/// `../../../../tmp/pwned` escapes `.ragent/teams/`, `..` resolves to the
+/// project root, and `/etc` replaces the base entirely because `Path::join`
+/// discards the base for an absolute argument (SEC-ragent-team-002,
+/// SEC-ragent-agent-007, SEC-ragent-tui-004).
+///
+/// The accepted shape is a single ordinary path component: lowercase
+/// alphanumerics and `-`, starting with an alphanumeric, at most 64 characters
+/// — `^[a-z0-9][a-z0-9-]{0,63}$`. `TeamConfig::new` slugifies the name it is
+/// given (uppercase and `_`/`.` become `-`), so every previously usable name
+/// still validates. Callers that also accept an id derived from another name
+/// (a blueprint) must slugify before calling.
+///
+/// # Errors
+///
+/// Returns an error naming the offending value and the accepted shape.
+pub fn validate_team_name(name: &str) -> Result<()> {
+    let mut chars = name.chars();
+    let starts_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    let rest_ok = name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if starts_ok && rest_ok && name.len() <= 64 {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "invalid team name {name:?}: a team name must match ^[a-z0-9][a-z0-9-]{{0,63}}$ \
+         (lowercase alphanumerics and hyphens only, starting with an alphanumeric, \
+         at most 64 characters)"
+    ))
+}
+
+/// Turn an arbitrary string into a valid team name.
+///
+/// Used where the name is derived rather than user-supplied (a team named after
+/// a blueprint), so generation can never produce a value that
+/// [`validate_team_name`] would reject.
+#[must_use]
+pub fn slugify_team_name(raw: &str) -> String {
+    let mut slug: String = raw
+        .trim()
+        .chars()
+        .map(|c| {
+            let lower = c.to_ascii_lowercase();
+            if lower.is_ascii_lowercase() || lower.is_ascii_digit() {
+                lower
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    slug.truncate(64);
+    match slug.chars().next() {
+        // A leading hyphen (or an empty slug) is not a valid start.
+        Some(c) if c.is_ascii_alphanumeric() => slug,
+        Some(_) => {
+            slug.remove(0);
+            let trimmed = slug.trim_start_matches('-').to_string();
+            if trimmed.is_empty() {
+                "team".to_string()
+            } else {
+                trimmed
+            }
+        }
+        None => "team".to_string(),
+    }
+}
+
 /// Walk up from `working_dir` to find the nearest project `.ragent/` directory,
 /// returning `[PROJECT]/.ragent/teams/`.
 #[must_use]
@@ -53,6 +127,10 @@ pub fn find_project_teams_dir(working_dir: &Path) -> Option<PathBuf> {
 /// `process_user_message` turn.
 #[must_use]
 pub fn find_team_dir_cached(ctx: &crate::tool::ToolContext, name: &str) -> Option<PathBuf> {
+    // SEC-ragent-team-002: never serve a cached entry for an invalid name.
+    if validate_team_name(name).is_err() {
+        return None;
+    }
     {
         let guard = ctx.cached_team_dir.lock().ok()?;
         if let Some((ref cached_name, ref dir)) = *guard {
@@ -78,6 +156,12 @@ pub fn find_team_dir_cached(ctx: &crate::tool::ToolContext, name: &str) -> Optio
 /// [`ToolContext`](crate::tool::ToolContext) (PERF-019).
 #[must_use]
 pub fn find_team_dir(working_dir: &Path, name: &str) -> Option<PathBuf> {
+    // SEC-ragent-team-002: a name that is not a single safe path component can
+    // never name a team, and must not reach `join` (which would resolve `..`
+    // or replace the base for an absolute name).
+    if validate_team_name(name).is_err() {
+        return None;
+    }
     // Project-local wins.
     if let Some(proj_teams) = find_project_teams_dir(working_dir) {
         let candidate = proj_teams.join(name);
@@ -118,6 +202,8 @@ impl TeamStore {
         working_dir: &Path,
         project_local: bool,
     ) -> Result<Self> {
+        // SEC-ragent-team-002: validate before any join/create_dir_all.
+        validate_team_name(name)?;
         let base = if project_local {
             find_project_teams_dir(working_dir).ok_or_else(|| {
                 anyhow!(

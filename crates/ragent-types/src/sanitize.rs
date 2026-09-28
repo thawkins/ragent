@@ -9,8 +9,14 @@ use regex::Regex;
 /// - `key-` prefixed keys
 /// - `Bearer` tokens (including JWTs with dots)
 /// - `ghp_` / `gho_` / `ghs_` / `ghu_` / `ghr_` GitHub tokens
+/// - `glpat-` GitLab personal access tokens, plus `gldt-` / `glrt-` /
+///   `glsoat-` / `glcbt-` / `glptt-` deploy/runner/agent/CI job/trigger tokens
+///   (SEC-ragent-types-004 / SECTASKS T-046)
 /// - `xoxb-` / `xoxp-` Slack tokens
 /// - `AKIA` AWS access key IDs
+/// - `hf_` Hugging Face and `npm_` npm tokens
+/// - `[?&]key=` query-string API keys (a bare `key=` is what Google's
+///   `?key=AIza…` form used, which the assignment group below did not match)
 /// - Generic long base64-like tokens following a `token` / `apikey` / `api_key` /
 ///   `secret` / `password` key. This group is case-insensitive and accepts an
 ///   optional quote and either `=` or `:`, so `API_KEY=…`, `"token": "…"` and
@@ -30,11 +36,24 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         // GitHub personal / OAuth / server / user / refresh tokens
         r"gh[pousr]_[a-zA-Z0-9]{20,}",
         r"|",
+        // GitLab personal access tokens and the other documented token types
+        // (SEC-ragent-types-004): glpat-, gldt-, glrt-, glsoat-, glcbt-, glptt-.
+        r"gl(?:pat|dt|rt|soat|cbt|ptt)-[a-zA-Z0-9_\-]{20,}",
+        r"|",
         // Slack tokens
         r"xox[bp]-[a-zA-Z0-9\-]{20,}",
         r"|",
         // AWS access key IDs (start with AKIA)
         r"AKIA[A-Z0-9]{16,}",
+        r"|",
+        // Hugging Face and npm tokens (SEC-ragent-types-004)
+        r"hf_[a-zA-Z0-9]{20,}",
+        r"|",
+        r"npm_[a-zA-Z0-9]{20,}",
+        r"|",
+        // Query-string API keys: `?key=AIza…` / `&key=…` (the assignment group
+        // below requires a longer key name and missed a bare `key=`).
+        r"(?i:[?&]key=)[a-zA-Z0-9_\-\.]{16,}",
         r"|",
         // Generic token/apikey/secret/password assignments in URLs and configs.
         // Capture group 1 holds the key + separator so the replacement keeps the
@@ -230,4 +249,38 @@ fn redact_secrets_owned(msg: &str, registry_empty: bool) -> String {
     SECRET_PATTERN
         .replace_all(&result, "${1}[REDACTED]")
         .into_owned()
+}
+
+#[cfg(test)]
+mod sectasks_t046_secret_pattern_tests {
+    use super::*;
+
+    /// SEC-ragent-types-004 (SECTASKS T-046): the pattern layer must cover the
+    /// credential shapes that were previously unregistered.
+    #[test]
+    fn redacts_gitlab_pat_and_env_sourced_credentials() {
+        let gitlab = "glpat-abcdefghijklmnopqrst";
+        let out = redact_secrets(&format!("token is {gitlab} here"));
+        assert!(!out.contains(gitlab), "GitLab PAT leaked: {out}");
+
+        let hf = "hf_abcdefghijklmnopqrstuvwx";
+        let out = redact_secrets(&format!("use {hf} for the model"));
+        assert!(!out.contains(hf), "Hugging Face token leaked: {out}");
+
+        let npm = "npm_abcdefghijklmnopqrstuvwx";
+        let out = redact_secrets(&format!("auth {npm}"));
+        assert!(!out.contains(npm), "npm token leaked: {out}");
+    }
+
+    /// A bare `?key=` query parameter (the Google Gemini form) must redact.
+    #[test]
+    fn redacts_query_string_key_parameter() {
+        let url =
+            "https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyABCDEFGHIJKLMNOP";
+        let out = redact_secrets(url);
+        assert!(
+            !out.contains("AIzaSyABCDEFGHIJKLMNOP"),
+            "query key leaked: {out}"
+        );
+    }
 }

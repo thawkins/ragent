@@ -236,6 +236,8 @@ fn make_ctx(idx: Option<CodeIndex>) -> ragent_tools_extended::ToolContext {
         code_index: idx.map(std::sync::Arc::new),
         config: None,
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 

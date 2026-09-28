@@ -963,6 +963,39 @@ graph LR
 
 `agent_complete` takes **only** `summary`. `team_task_complete` takes `team_name` + `task_id`.
 
+### 3.9 Failure Capture: Panic Reports, Crash Dumps, and the stderr Spool
+
+Three complementary mechanisms cover the three ways a ragent process can die.
+
+| Failure | Captured by | Where the evidence lands |
+|---------|-------------|--------------------------|
+| Unwinding panic (in-process) | `panic_hook::install` — writes the payload, location, environment, and a forced backtrace, then chains to the default hook | `log/panics/panic-<timestamp>.log` |
+| Abort — stack overflow, `SIGKILL`, `std::process::abort` | OS core dump (no in-process hook can run) | `coredumpctl` entry / `core_pattern` file; detection marker at `log/panics/last-crash.json` |
+| Raw stderr while the TUI owns the alternate screen | `stderr_spool::install` — fd-2 redirection drained into a truncating spool | `log/logwindow/stderr-<timestamp>.log` plus the log panel |
+
+**Stack overflows cannot be trapped in-process.** The Rust runtime prints
+`thread '...' has overflowed its stack` and calls `abort()`; nothing after that
+point runs. ragent therefore does not try. Instead, `src/crash_dump.rs` stamps
+`log/panics/last-crash.json` at startup (pid, exe, args, cwd, thread,
+`status: running`, and a platform-specific core-dump retrieval hint), overwrites
+it with `clean exit` on a normal return, and — when the next start finds a
+still-`running` record whose pid is gone — prints a warning naming the marker,
+the dead pid, and the host's core-dump command. The hint is `coredumpctl
+list/info/debug <pid>` when `/proc/sys/kernel/core_pattern` pipes into a helper
+(typical `systemd-coredump` hosts), otherwise the `core_pattern` file path or
+the macOS `/cores` convention. A clean exit never reports.
+
+**The stderr spool** exists because the TUI paints the alternate screen: the
+default panic hook, `eprintln!`, and C-library diagnostics would be overwritten
+by the next frame. In TUI mode the binary replaces fd 2 with the write end of a
+pipe and drains it on a dedicated thread into
+`ragent_types::stderr_spool::Spool` (`SPOOL_MAX_LINES = 1000`); the TUI mirrors
+each chunk into the log panel as `stderr: <line>`. The spool counts newlines per
+write and, once the 1000-line cap is exceeded, rewrites the file with only its
+newest 1000 lines — the rewrite is skipped entirely for a write containing no
+newline, so the common case costs one append. Non-TUI modes (`--no-tui`,
+headless `run`, `serve`) leave stderr attached to the terminal.
+
 ---
 
 ## 4. Security & Permissions
@@ -1084,6 +1117,83 @@ Built-in default rules include:
 
 Environment variables matching `*KEY*`, `*SECRET*`, `*TOKEN*`, `*PASSWORD*`
 are redacted from tool outputs and logs.
+
+### 4.6a Critical-Hardening Guards (SECTASKS MS-01)
+
+Five path/argument-injection guards close the Critical findings in
+`SECTASKS.md`. Each is a named helper (not an inline check) so later
+Milestone MS-05 work can migrate stragglers onto it.
+
+| Guard | Where it lives | What it rejects |
+|-------|----------------|-----------------|
+| `validate_team_name` | `ragent-agent::team::store` | anything outside `^[a-z0-9][a-z0-9-]{0,63}$`; called by `TeamStore::create`, `find_team_dir`, `find_team_dir_cached`, `team_cleanup`, and the `/team create`/`/team delete` slash commands |
+| Team-name slugify (`slugify_team_name`) | `ragent-agent::team::store` | blueprint/timestamp-derived names are slugified before use so generation can never produce an invalid name |
+| `is_safe_git_argument` | `ragent-plugins::add` | a `git+` ref or subpath that is not `[A-Za-z0-9._/-]+`, begins with `-`, or contains `..`; `git_run` also passes `--` before every positional |
+| `sanitize_declared_id` / `confined_dest_dir` | `ragent-plugins::manifest` / `add` | a manifest `id` that is not a single `Component::Normal` matching `[A-Za-z0-9._-]+` (no separators, no `..`, not absolute) |
+| `check_path_within_allowed_roots_cached` | `ragent-tools-core` | a `multi_edit` target outside the workspace — the same containment check `edit`/`read`/`write` already applied |
+
+Two further Critical classes are handled in place rather than by a helper:
+
+- **Blueprint seed execution** — every tool named by `.ragent/blueprints/teams/<bp>/task-seed.json`
+  or `spawn-prompts.json` is dispatched through `dispatch_seed_tool`, which consults
+  the session permission checker: a category that is not explicitly `Allow` (or
+  `Ask`-with-no-checker) refuses the seed and reports why, so a repository-supplied
+  blueprint can no longer reach `bash`/`write`/`rm` unpermissioned.
+- **`multi_edit` containment** — see the table row above; the check runs for every
+  edit in the batch before any file is read or written, so a mixed batch is atomic
+  and writes nothing.
+
+### 4.6b Host & Sandbox Hardening (SECTASKS MS-02)
+
+The High-severity findings. Each is a named helper or an explicit bound so the
+later milestones can migrate remaining call sites onto the same shapes.
+
+| Guard | Where it lives | What it enforces |
+|-------|----------------|------------------|
+| `hook_approved` on `PreToolUseResult::Allow` | `ragent-agent::hooks` / `session::processor` | a `pre_tool_use` hook approval is distinguishable from "no hook"; it may satisfy an `Ask` but never an explicit `Deny`. Plugin-contributed `pre_tool_use` hooks are dropped by `merge_hook_configs` |
+| `unpack_archive_checked` | `ragent-agent::session::archive` | session-archive import rejects escaping entry paths and caps entries (10 000) and total decompressed bytes (512 MiB); `manifest.session_directory` is accepted only inside the working directory |
+| `exec_guard` (`is_allowed_fixture_program`) | `ragent-bench` | a benchmark fixture may only spawn an allowlisted toolchain program (bare name, no path, no shell) |
+| `index_file` containment | `ragent-codeindex` | the watcher-driven path canonicalises and refuses anything outside the project root, refuses symlinks, and enforces `max_file_size` |
+| Project-config privilege stripping | `ragent-config` | the cwd `.ragent/ragent.json` may not enable YOLO, remove a global deny rule, or widen `allowed_roots`/bash allow-lists |
+| `x-goog-api-key` header | `ragent-llm::providers::gemini` | the Gemini key is sent as a header, registered with the secret registry, and never interpolated into a logged URL |
+| `redirect::Policy::none()` | `ragent-llm::providers` | authenticated LLM requests do not follow redirects, so a non-standard auth header cannot be replayed cross-host |
+| `ResearchIo::template_path` -> `Option` | `ragent-research::io` | the `--template` name must be a single `[A-Za-z0-9_-]` component; an invalid name yields no template plus a warning |
+| `ConfigResponse` credential masking | `ragent-server::routes` | `GET /config` redacts every credential field before serialising |
+| `check_path_within_root` on `from_files` | `ragent-research` / `ragent-server` | research file seeds are canonicalised and rejected outside the project root |
+| ChaCha20-Poly1305 `v3:` credential store | `ragent-storage` | a per-install 0600 key file, an authenticated construction with a fresh nonce, and a hard error on a corrupt row (no empty-string downgrade) |
+| `sender_session_id` on `MailboxMessage` | `ragent-agent::team::mailbox` | the authenticated sender session id is recorded; a message claiming `from: "lead"` without one is rejected at the write boundary |
+| `tls-roots` OTLP transport | `ragent-telemetry` | the gRPC exporter is compiled with TLS, and a non-loopback `https://` endpoint is refused when TLS is unavailable |
+| Telemetry privilege stripping | `ragent-config` | telemetry enablement and endpoint overrides come from the user-global config only |
+| Safe-command allowlist + in-crate calculator | `ragent-tools-core` | the allowlist is read-only commands only, interpreters always go through the permission gate, banned tools are consulted first, and `calculator` evaluates arithmetic in-process (no `python3 -c`) |
+| VCS argument hardening | `ragent-tools-vcs` | `reject_option_like` on every ref/branch/tag/remote/path, `--` before positionals, `validate_clone_directory` confines the clone target, and a `gitlab:<host>` host is accepted only when it matches the configured instance |
+
+### 4.6c Network & Secret Hardening (SECTASKS MS-03)
+
+The Medium-severity findings. The recurring shapes are a **byte cap**, a
+**page/entry budget**, a **clamped delay**, and **origin-scoped credential
+attachment**.
+
+| Guard | Where it lives | What it enforces |
+|-------|----------------|------------------|
+| `read_body_capped` / MCP body cap | `ragent-agent::mcp::http` | MCP HTTP responses are read under a fixed byte cap |
+| Benchmark download caps | `ragent-bench::data` | client timeout, streamed byte cap, pagination page/record budget, and `contained_join` for manifest `case_file`/`relative_path` |
+| `MAX_RETRY_AFTER` / `MAX_SSE_BUFFER_BYTES` / `MAX_ERROR_BODY_BYTES` | `ragent-llm::providers::http_client` | `Retry-After` is clamped to 30 s, the SSE accumulation buffer aborts the stream past 1 MiB, and error bodies are read under 64 KiB |
+| `MAX_TREE_REQUESTS` / `MAX_TREE_ENTRIES` / `MAX_JOB_PAGES` | `ragent-tools-vcs` | the GitHub tree walk and the GitLab jobs pagination are bounded |
+| `read_response_capped` / `MAX_FETCH_BODY_BYTES` / `MAX_CRAWL_PAGE_BYTES` | `ragent-tools-extended::masterfetch` | responses are streamed under a byte budget; `crawl_urls` is SSRF-validated at the tool boundary |
+| Credential env seeding | binary startup | every credential env var is registered with the secret registry before any log can be written |
+| `redact_secrets` on tool output | `ragent-tools-core::bash`, `ragent-tools-vcs::github_actions` | bash partial/completed output and CI log excerpts are redacted before they reach the model or the session store |
+| `is_denied_request_header` | `ragent-tools-extended::http_request` | routing/credential headers (`Host`, `Cookie`, `Authorization`, `Proxy-*`, ...) are rejected |
+| `mask_secret` | `ragent-tui::layout` | the provider-setup dialog masks the API key and the GitLab PAT |
+| `check_path_within_workspace` | `ragent-tools-extended::ToolContext` | `office_write`/`libreoffice_write`/`pdf_write` confine their output path |
+| `build_exclude_matcher` / `clear_index_dir` | `ragent-codeindex` | the configured exclusion globs are applied and the FTS recovery wipe refuses a symlinked directory |
+| Scratch-dir confinement (`bash_scratch_dir`, `restrict_to_owner`) | `ragent-tools-core::bash` | the wrapper script and `export -p` state file live in a 0700 directory as 0600 files |
+| `MAX_CANDIDATES_PER_REF` / `MAX_EDGES_PER_PASS` | `ragent-codeindex::graph::edges` | edge derivation carries a per-reference fan-out cap and a global edge budget |
+| `MAX_GAP_EXPANSION` / `MAX_CONTRADICTION_REQUIREMENTS` | `ragent-specs::validate` | numbering-gap expansion and contradiction detection are bounded |
+| `MAX_MESSAGE_BYTES` / `validate_hook_command` / `HOOK_TIMEOUT` | `ragent-agent::team` | mailbox messages are size-capped, team hook commands are validated, hooks time out at 30 s with a process-group kill, and feedback is capped |
+| `positive_duration_secs` / checked arithmetic | `ragent-types::cron` | `CronSchedule` returns `None` instead of panicking on an invariant violation and uses `checked_mul` / `saturating_mul` |
+| `SPOOL_MAX_BYTES` | `ragent-types::stderr_spool` | the spool enforces a byte ceiling on every write, including newline-free ones |
+| `split_bash_command` substitution depth | `ragent-agent::session::permissions` | a `;`/`&&` inside `$( ... )` does not split the command into a separately-judged sub-command |
+| `same_origin_as` | `ragent-tools-vcs::github` | the Bearer token is attached only when the resolved URL matches the configured API origin |
 
 ### 4.7 YOLO Mode
 
@@ -2494,6 +2604,27 @@ a detached task is excluded from `list_agents` and `running_background_count`,
 cannot be awaited with `wait_agents`, and its completion is reaped without a
 chat injection while remaining visible in the Agents panel and
 `tasks_snapshot`.
+
+### 16.4.2 Live sub-agent output overlay
+
+The TUI output-view overlay (click a row in the Agents panel, or `Alt+A` /
+the Agents popup) renders the target session's persisted transcript from
+SQLite, so a running sub-agent's steps are visible mid-run, not only after
+completion. Two mechanisms keep the overlay in step with the run:
+
+- the session loop's interim assistant save persists completed tool-call
+  parts into the child session's message row as each step finishes (the
+  M-008 save gate is a total-parts count, so a tool-only step still saves;
+  FTS stays untouched until the final save), and
+- the overlay's line-cache generation key mixes in the same per-session
+  step / tool-call counters the Agents panel shows, so the cache rebuilds
+  whenever the agent advances and otherwise reuses the rendered rows
+  (PERF-048 invariant).
+
+Before the counter mix, the generation key (message count + `edit_seq`,
+neither of which changes mid-run) kept the overlay frozen at whatever it
+rendered when opened; before the total-parts gate, a tool-only step skipped
+the interim save entirely, so nothing new was visible until the final save.
 
 ### 16.5 Status Display
 

@@ -642,6 +642,23 @@ impl LlmClient for OllamaCloudClient {
 
                 super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
 
+                // SEC-ragent-llm-004 (SECTASKS T-028): fail the stream when a
+                // peer dribbles bytes without ever emitting a newline instead
+                // of letting the accumulation buffer grow without bound.
+                if super::http_client::sse_buffer_exceeded(&buffer) {
+                    tracing::warn!(
+                        limit = super::http_client::MAX_SSE_BUFFER_BYTES,
+                        "SSE accumulation buffer exceeded the cap; aborting the stream"
+                    );
+                    yield StreamEvent::Error {
+                        message: format!(
+                            "SSE buffer exceeded {} bytes without a complete frame",
+                            super::http_client::MAX_SSE_BUFFER_BYTES
+                        ),
+                    };
+                    return;
+                }
+
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
                     if line.is_empty() {
@@ -756,11 +773,17 @@ impl LlmClient for OllamaCloudClient {
                         // when INFO logging is actually enabled.
                         if tracing::enabled!(tracing::Level::INFO) {
                             let done_preview = serde_json::to_string(&parsed).unwrap_or_default();
-                            let preview_len = done_preview.len().min(500);
+                            // SEC-ragent-llm-006 (SECTASKS T-050): slicing at a
+                            // raw byte offset panics when it lands inside a
+                            // multibyte UTF-8 character in a server-controlled
+                            // string field (the same fix already applied in
+                            // openrouter.rs / FUNC-001).
+                            let done_preview =
+                                ragent_types::strutil::truncate_bytes_no_ellipsis(&done_preview, 500);
                             tracing::info!(
                                 model = %model_name,
                                 open_tool_calls = open_tool_calls.len(),
-                                done_frame = %&done_preview[..preview_len],
+                                done_frame = %done_preview,
                                 "Ollama Cloud: done frame received"
                             );
                         }

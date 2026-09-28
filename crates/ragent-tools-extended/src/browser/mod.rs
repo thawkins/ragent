@@ -306,6 +306,14 @@ impl BrowserTool {
                     .get("url")
                     .and_then(Value::as_str)
                     .context("Missing required 'url' parameter for action=open")?;
+                // SEC-tools-extended-001 (SECTASKS T-024): every other network
+                // tool routes caller URLs through `masterfetch::security`, but
+                // the browser navigates the raw value. `Page.navigate` accepts
+                // `file://`, `chrome://`, `data:`, and internal addresses, so a
+                // prompt-injected turn could read local files (`file:///etc/passwd`
+                // + snapshot) or reach an internal service. Reject any scheme
+                // other than http(s) and apply the shared SSRF host check first.
+                ensure_safe_navigation_url(url)?;
                 let wait = input.get("wait").and_then(Value::as_bool).unwrap_or(true);
                 actions::action_open(&conn, url, wait).await
             }
@@ -413,6 +421,28 @@ impl BrowserTool {
 }
 
 /// Format a browser action result as human-readable text.
+/// Reject a browser navigation target that is not a plain `http(s)` URL.
+///
+/// SEC-tools-extended-001 (SECTASKS T-024): the `open` action forwards the
+/// raw `url` argument into a CDP `Page.navigate`, which accepts `file://`,
+/// `chrome://`, `data:`, and internal `http://` targets. Only `http`/`https`
+/// are allowed, and the shared SSRF host check (`masterfetch::security`) must
+/// pass before the navigation is dispatched.
+fn ensure_safe_navigation_url(url: &str) -> Result<()> {
+    let lowered = url.trim().to_ascii_lowercase();
+    if !(lowered.starts_with("http://") || lowered.starts_with("https://")) {
+        bail!(
+            "browser navigation to '{url}' is refused: only http:// and https:// \
+             URLs are allowed (file://, chrome://, data:, and similar schemes \
+             can read local resources)"
+        );
+    }
+    if let Err(reason) = crate::masterfetch::security::validate_url(url) {
+        bail!("browser navigation to '{url}' is refused by the SSRF guard: {reason}");
+    }
+    Ok(())
+}
+
 fn format_browser_result(action: &str, value: &Value) -> String {
     match action {
         "open" => {

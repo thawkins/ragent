@@ -34,6 +34,8 @@ fn ctx_no_config() -> ToolContext {
         code_index: None,
         config: None,
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -50,6 +52,8 @@ fn ctx_with_config(endpoint: &str) -> ToolContext {
         code_index: None,
         config: Some(Arc::new(config)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 

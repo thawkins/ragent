@@ -12,7 +12,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Resolved AWS credentials for SigV4 request signing.
-#[derive(Debug, Clone)]
+///
+/// `Debug` is implemented by hand: the derived form would print `secret_key`
+/// and `session_token` verbatim into any `tracing::debug!(creds = ?..)` field
+/// (SEC-ragent-llm-007 / SECTASKS T-062).
+#[derive(Clone)]
 pub struct AwsCredentials {
     /// AWS access key ID (e.g. `AKIAIOSFODNN7EXAMPLE`).
     pub access_key: String,
@@ -22,6 +26,20 @@ pub struct AwsCredentials {
     pub session_token: Option<String>,
     /// AWS region for the Bedrock endpoint.
     pub region: String,
+}
+
+impl std::fmt::Debug for AwsCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AwsCredentials")
+            .field("access_key", &self.access_key)
+            .field("secret_key", &"[REDACTED]")
+            .field(
+                "session_token",
+                &self.session_token.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("region", &self.region)
+            .finish()
+    }
 }
 
 /// Resolves AWS credentials using the standard provider chain.

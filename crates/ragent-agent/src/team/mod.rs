@@ -42,12 +42,17 @@ pub use config::{
     HookEntry, HookEvent, MemberStatus, MemoryScope, PlanStatus, TeamConfig, TeamMember,
     TeamSettings, TeamStatus, resolve_memory_dir,
 };
-pub use mailbox::{Mailbox, MailboxMessage, MessageType, deregister_notifier, register_notifier};
-pub use manager::{
-    HookOutcome, TeamManager, build_team_prompt_addition, run_hook, run_team_hook,
-    teammate_retry_backoff,
+pub use mailbox::{
+    MAX_MESSAGE_BYTES, Mailbox, MailboxMessage, MessageType, deregister_notifier, register_notifier,
 };
-pub use store::{TeamStore, find_project_teams_dir, find_team_dir, global_teams_dir};
+pub use manager::{
+    HookOutcome, MAX_HOOK_FEEDBACK_BYTES, TeamManager, build_team_prompt_addition, run_hook,
+    run_team_hook, teammate_retry_backoff, validate_hook_command,
+};
+pub use store::{
+    TeamStore, find_project_teams_dir, find_team_dir, global_teams_dir, slugify_team_name,
+    validate_team_name,
+};
 pub use swarm::{
     DECOMPOSITION_SYSTEM_PROMPT, SwarmDecomposition, SwarmState, SwarmSubtask,
     build_decomposition_user_prompt, parse_decomposition, parse_decomposition_with_default,

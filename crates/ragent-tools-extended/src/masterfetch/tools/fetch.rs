@@ -281,29 +281,42 @@ async fn fetch_one_url(
         .unwrap_or("text/html")
         .to_string();
 
+    // SEC-tools-extended-006 (SECTASKS T-033): bound the body *while* reading.
+    // `response.text()`/`bytes()` buffered the whole (transparently
+    // decompressed) body before any size budget applied, so a gzip
+    // decompression bomb could OOM the process.
+    let declared = response.content_length().unwrap_or(0) as usize;
+    if declared > MAX_FETCH_BODY_BYTES {
+        return fetch_error_output(
+            url,
+            status,
+            &format!(
+                "response declares {declared} bytes, over the {MAX_FETCH_BODY_BYTES} byte cap"
+            ),
+        );
+    }
+
     let is_pdf = content_type
         .to_ascii_lowercase()
         .contains("application/pdf")
         || url.to_ascii_lowercase().ends_with(".pdf");
 
-    if is_pdf {
-        let bytes = match response.bytes().await {
-            Ok(b) => b,
-            Err(e) => {
-                return fetch_error_output(url, status, &e.to_string());
-            }
-        };
-        return pdf_tool_output(url, status, &content_type, &bytes, params).await;
-    }
-
     let is_youtube = is_youtube_url(url);
 
-    let body = match response.text().await {
-        Ok(t) => t,
+    let body_bytes = match read_response_capped(response, MAX_FETCH_BODY_BYTES).await {
+        Ok(b) => b,
         Err(e) => {
-            return fetch_error_output(url, status, &e.to_string());
+            return fetch_error_output(url, status, &e);
         }
     };
+    let _ = is_youtube;
+
+    if is_pdf {
+        return pdf_tool_output(url, status, &content_type, &body_bytes, params).await;
+    }
+
+    let body = String::from_utf8_lossy(&body_bytes).into_owned();
+    let is_youtube = is_youtube_url(url);
 
     if is_youtube {
         return youtube_tool_output(url, status, &content_type, &body).await;
@@ -541,6 +554,40 @@ async fn pdf_tool_output(
 }
 
 /// Build a `ToolOutput` when PDF text extraction fails.
+/// Maximum bytes buffered from one `mf_fetch` response.
+///
+/// SEC-tools-extended-006 (SECTASKS T-033): 16 MiB of decompressed content is
+/// far above any legitimate page or PDF and bounds the per-request footprint.
+const MAX_FETCH_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+/// Stream a response into memory, stopping at `limit` bytes.
+///
+/// SEC-tools-extended-006 (SECTASKS T-033): the size budget is applied per
+/// chunk, so a decompression bomb cannot be buffered in full first.
+async fn read_response_capped(
+    response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
+    let mut stream = response;
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        match stream.chunk().await {
+            Ok(Some(chunk)) => {
+                if buf.len() + chunk.len() > limit {
+                    let room = limit.saturating_sub(buf.len());
+                    buf.extend_from_slice(&chunk[..room]);
+                    buf.extend_from_slice(b"\n[truncated at the fetch size cap]\n");
+                    break;
+                }
+                buf.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(buf)
+}
+
 fn pdf_error_output(url: &str, status: u16, error: &str) -> ToolOutput {
     ToolOutput {
         content: format!(

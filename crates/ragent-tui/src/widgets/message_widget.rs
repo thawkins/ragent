@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
+use ragent_types::sanitize_terminal::sanitize_terminal;
 
 /// Sentinel prefix used to identify agent-notice chat bubbles.
 const AGENT_NOTICE_PREFIX: &str = "📋 Agent Notice";
@@ -3368,7 +3369,12 @@ impl<'a> MessageWidget<'a> {
                             2,
                         ),
                     };
-                    for (i, line) in text.lines().enumerate() {
+                    // SEC-ragent-types-001 (SECTASKS T-023): assistant text is
+                    // model output that can embed an escape sequence from a
+                    // tool result or fetched page. Neutralise it at this render
+                    // boundary before it reaches the terminal.
+                    let sanitised_text = sanitize_terminal(text);
+                    for (i, line) in sanitised_text.as_ref().lines().enumerate() {
                         // A `[red]…[/red]` span marker (e.g. a tool disabled by
                         // a visibility switch in `/tools`) renders red and
                         // takes precedence over the plain-raw path below.

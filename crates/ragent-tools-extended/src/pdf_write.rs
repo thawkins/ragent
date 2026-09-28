@@ -141,6 +141,12 @@ impl Tool for PdfWriteTool {
             .as_str()
             .context("Missing required 'path' parameter")?;
         let path = resolve_path(&ctx.working_dir, path_str);
+        // SEC-tools-extended-002 (SECTASKS T-055): `resolve_path` returns an
+        // absolute input unchanged, so a caller could write anywhere on disk
+        // (`/etc/...`, `~/.config/ragent/config.json`). Every `ragent-tools-core`
+        // write tool applies this containment check; the document writers were
+        // the ones that did not.
+        ctx.check_path_within_workspace(&path)?;
         let content = input
             .get("content")
             .context("Missing 'content' parameter")?

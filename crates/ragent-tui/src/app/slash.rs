@@ -466,6 +466,8 @@ fn websearch_diag_ctx() -> ragent_tools_extended::ToolContext {
         code_index: None,
         config: Some(Arc::new(config)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -5138,14 +5140,23 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
 
                         // If no name provided, generate one from blueprint + timestamp
                         if name.is_none() {
+                            // SEC-ragent-tui-004: slugify the blueprint segment so
+                            // the generated name is always a valid team name.
                             let generated_name = format!(
                                 "{}-{}",
-                                blueprint,
+                                ragent_team::team::slugify_team_name(&blueprint),
                                 chrono::Utc::now().format("%Y%m%d-%H-%M-%S")
                             );
                             name = Some(generated_name);
                         }
                         let name = name.expect("name guaranteed Some above");
+
+                        // SEC-ragent-tui-004: reject a name that is not a single
+                        // safe path component before it reaches the store.
+                        if let Err(e) = ragent_team::team::validate_team_name(&name) {
+                            self.status = format!("{e}");
+                            return;
+                        }
 
                         let working_dir = crate::app::helpers::current_working_dir();
                         let sid = self.session_id.clone().unwrap_or_default();
@@ -5226,6 +5237,12 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                             config: Some(Arc::new(ragent_agent::Config::load().unwrap_or_default())),
                                                             allowed_roots: vec![working_dir_clone.clone()],
                                                             cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                                                            // SEC-ragent-team-001: hand the nested team_create
+                                                            // call the session's checker so a blueprint seed
+                                                            // cannot execute tools without approval.
+                                                            permission_checker: Some(
+                                                                session_processor.permission_checker.clone(),
+                                                            ),
                                                             tool_registry: ragent_agent::tool::ToolContext::default_tool_registry(),
                                                             read_timestamps: session_processor.read_timestamps.clone(),
                                                             canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
@@ -5371,6 +5388,12 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     "delete" => {
                         if rest.is_empty() {
                             self.status = "Usage: /team delete <name>".to_string();
+                            return;
+                        }
+                        // SEC-ragent-tui-004: the name reaches `remove_dir_all` via
+                        // the resolved store directory, so it is validated first.
+                        if let Err(e) = ragent_team::team::validate_team_name(rest) {
+                            self.status = format!("{e}");
                             return;
                         }
                         let deleting_active = self

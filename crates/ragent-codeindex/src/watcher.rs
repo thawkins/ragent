@@ -136,6 +136,25 @@ fn relativize(root: &Path, abs_path: PathBuf, ctor: fn(PathBuf) -> WatchEvent) -
 
 /// Check if a path falls inside an ignored directory.
 pub fn should_ignore(root: &Path, path: &Path) -> bool {
+    // SEC-ragent-codeindex-001 (SECTASKS T-010): `notify`'s inotify backend
+    // registers recursive watches with `follow_links(true)`, so an event for a
+    // symlinked directory arrives with a `root/<link>/...` path that passes
+    // `strip_prefix` and is then read through the link. Refuse any path whose
+    // own metadata says it is a symlink, and any path that resolves outside
+    // the watched root.
+    if std::fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let root_canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if let Ok(real) = path.canonicalize()
+        && !real.starts_with(&root_canonical)
+    {
+        return true;
+    }
+
     // Make it relative first so we check component names.
     let rel = path.strip_prefix(root).unwrap_or(path);
     for component in rel.components() {

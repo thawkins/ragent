@@ -16,11 +16,13 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
+memchr = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 serial_test = "3.2"
+tempfile = "3.14"
 
 [lints]
 workspace = true

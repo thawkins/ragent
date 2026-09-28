@@ -10,6 +10,68 @@ use crate::team::manager::HookOutcome;
 use crate::team::{HookEvent, TaskStore, run_team_hook};
 use crate::tool::metadata::MetadataBuilder;
 
+/// Dispatch a tool invoked from a blueprint seed file through the session's
+/// permission gate.
+///
+/// A blueprint directory is untrusted project content (it is contributed by a
+/// repository, a plugin pack, or a marketplace bundle), so a seed entry naming
+/// `bash`/`write`/`rm`/`team_spawn` must not execute directly: that bypassed
+/// `dispatch_tool_with_permissions` entirely — no permission-category check, no
+/// prompt, no repeat guard (SEC-ragent-team-001, SEC-ragent-agent-008).
+///
+/// The gate applied here is the subset of the agent-loop decision that is
+/// meaningful outside the loop:
+///
+/// - a tool with no permission category (or `none`) is inert and runs;
+/// - a tool the session policy explicitly denies never runs;
+/// - a tool with an explicit `Allow` rule runs without a prompt — the user
+///   already granted that category, exactly as for an ordinary call;
+/// - anything else (`Ask`, or no permission checker at all) fails closed with
+///   an error naming the tool, so the lead sees why the seed did not run
+///   instead of the call silently executing.
+///
+/// # Errors
+///
+/// Returns an error when the permission decision is not an explicit allow, or
+/// when the tool itself fails.
+async fn dispatch_seed_tool(
+    tool: &std::sync::Arc<dyn Tool>,
+    input: Value,
+    ctx: &ToolContext,
+    tool_name: &str,
+) -> Result<ToolOutput> {
+    let category = tool.permission_category();
+    if category.is_empty() || category == "none" {
+        return tool.execute(input, ctx).await;
+    }
+
+    let resource = crate::session::permissions::extract_resource_from_input(&input, tool_name);
+    let action = match &ctx.permission_checker {
+        Some(checker) => checker.read().check(category, &resource),
+        // No checker wired in: the call cannot be authorised, so it is refused
+        // rather than allowed (fail closed).
+        None => {
+            return Err(anyhow::anyhow!(
+                "blueprint seed refused: '{tool_name}' requires permission '{category}' \
+                 but this session has no permission checker"
+            ));
+        }
+    };
+
+    match action {
+        crate::permission::PermissionAction::Allow => tool.execute(input, ctx).await,
+        crate::permission::PermissionAction::Deny => Err(anyhow::anyhow!(
+            "blueprint seed refused: permission '{category}' is denied for '{resource}'"
+        )),
+        crate::permission::PermissionAction::Ask => Err(anyhow::anyhow!(
+            "blueprint seed refused: '{tool_name}' requires permission '{category}' for \
+             '{resource}', which is not pre-approved. Blueprint seeds may only invoke \
+             tools the session already allows, or team task tools (team_task_create, \
+             team_spawn) that carry a team permission category"
+        )),
+    }
+}
+
 /// Creates a new team directory and initial config.
 pub struct TeamCreateTool;
 
@@ -80,7 +142,16 @@ impl Tool for TeamCreateTool {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map_or_else(
-                || format!("{}-{}", bp, Utc::now().format("%Y%m%d-%H-%M-%S")),
+                || {
+                    // SEC-ragent-team-002: the blueprint name is path-adjacent
+                    // too, so the generated team name is slugified rather than
+                    // interpolated raw.
+                    format!(
+                        "{}-{}",
+                        crate::team::slugify_team_name(&bp),
+                        Utc::now().format("%Y%m%d-%H-%M-%S")
+                    )
+                },
                 ToString::to_string,
             );
 
@@ -216,7 +287,12 @@ impl Tool for TeamCreateTool {
                                 if let Some(tool) = registry.get(tool_name) {
                                     let args_debug = format!("{args_obj:?}");
                                     tracing::info!(tool = %tool_name, team = %name, session = %ctx.session_id, team_manager_present = %ctx.team_manager.is_some(), "Invoking seed tool");
-                                    match tool.execute(args_obj, ctx).await {
+                                    // SEC-ragent-team-001: a blueprint is untrusted
+                                    // project content, so a seeded tool is dispatched
+                                    // through the session's permission gate rather than
+                                    // executed directly.
+                                    match dispatch_seed_tool(&tool, args_obj, ctx, tool_name).await
+                                    {
                                         Ok(_out) => {
                                             tracing::info!(tool = %tool_name, "Seed tool executed successfully");
                                         }
@@ -363,7 +439,12 @@ impl Tool for TeamCreateTool {
 
                                 if let Some(tool) = registry.get(tool_name) {
                                     tracing::info!(tool = %tool_name, team = %name, session = %ctx.session_id, team_manager_present = %ctx.team_manager.is_some(), "Invoking spawn tool from blueprint (spawn-prompts.json)");
-                                    match tool.execute(args.clone(), ctx).await {
+                                    // SEC-ragent-team-001: a seeded spawn is
+                                    // dispatched through the session's permission
+                                    // gate, like the task-seed path above.
+                                    match dispatch_seed_tool(&tool, args.clone(), ctx, tool_name)
+                                        .await
+                                    {
                                         Ok(out) => {
                                             tracing::info!(tool = %tool_name, "Spawn tool executed");
                                             if let Some(meta) = out.metadata

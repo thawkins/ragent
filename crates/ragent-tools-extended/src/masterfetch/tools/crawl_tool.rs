@@ -177,6 +177,12 @@ impl Tool for MfCrawlTool {
         };
 
         // Parse crawl_urls.
+        //
+        // SEC-tools-extended-010 (SECTASKS T-033): selective mode fetches each
+        // entry directly. The fetcher re-validates per URL today, but the
+        // obligation lived only in `HttpCrawlFetcher`, so a future fetcher (or
+        // a refactor) would reopen the SSRF hole. Validate every entry here, at
+        // the tool boundary.
         let crawl_urls: Vec<String> = input["crawl_urls"]
             .as_array()
             .map(|arr| {
@@ -185,6 +191,27 @@ impl Tool for MfCrawlTool {
                     .collect()
             })
             .unwrap_or_default();
+        for candidate in &crawl_urls {
+            if let Err(e) = validate_url(candidate) {
+                return Ok(ToolOutput {
+                    content: format!(
+                        "mf_crawl: crawl_urls entry rejected by SSRF security check: {e}\n\n\
+                         next_action: drop the offending entry and retry."
+                    ),
+                    metadata: Some(json!({
+                        "url": url,
+                        "pages": [],
+                        "total_pages": 0,
+                        "truncated": false,
+                        "truncated_by": null,
+                        "discovered_urls": [],
+                        "error": format!("SSRF validation failed for crawl_urls entry: {e}"),
+                        "next_action": "drop the offending entry and retry",
+                        "version": MASTERFETCH_VERSION,
+                    })),
+                });
+            }
+        }
 
         let config = CrawlConfig {
             max_pages,
@@ -245,6 +272,38 @@ impl HttpCrawlFetcher {
     }
 }
 
+/// Maximum bytes buffered from a single crawl page.
+///
+/// SEC-tools-extended-006 (SECTASKS T-033): 4 MiB of *decompressed* content is
+/// far above any legitimate page and bounds the per-page memory footprint.
+const MAX_CRAWL_PAGE_BYTES: usize = 4 * 1024 * 1024;
+
+/// Read a response body, stopping at `limit` bytes.
+///
+/// SEC-tools-extended-006 (SECTASKS T-033): streams the response so the size
+/// budget is applied while reading rather than after the whole body is in
+/// memory.
+async fn read_body_capped(response: reqwest::Response, limit: usize) -> Result<String, String> {
+    let mut stream = response;
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        match stream.chunk().await {
+            Ok(Some(chunk)) => {
+                if buf.len() + chunk.len() > limit {
+                    let room = limit.saturating_sub(buf.len());
+                    buf.extend_from_slice(&chunk[..room]);
+                    buf.extend_from_slice(b"\n[truncated at the crawl size cap]\n");
+                    break;
+                }
+                buf.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
 #[async_trait::async_trait]
 impl CrawlFetcher for HttpCrawlFetcher {
     async fn fetch_page(&self, url: &str) -> Option<FetchedPage> {
@@ -298,8 +357,24 @@ impl CrawlFetcher for HttpCrawlFetcher {
             .unwrap_or("text/html")
             .to_string();
 
-        // Read the body.
-        let body = match response.text().await {
+        // Read the body under a byte cap.
+        //
+        // SEC-tools-extended-006 (SECTASKS T-033): the whole body used to be
+        // buffered before any size budget applied, and the shared client
+        // transparently decompresses, so a small gzip response could expand to
+        // an arbitrarily large body and OOM the process. Check `Content-Length`
+        // first and stop reading once the accumulated bytes exceed the cap.
+        let content_length = response.content_length().unwrap_or(0) as usize;
+        if content_length > MAX_CRAWL_PAGE_BYTES {
+            tracing::warn!(
+                url = url,
+                content_length,
+                cap = MAX_CRAWL_PAGE_BYTES,
+                "crawl: skipping page whose declared size exceeds the cap"
+            );
+            return None;
+        }
+        let body = match read_body_capped(response, MAX_CRAWL_PAGE_BYTES).await {
             Ok(t) => t,
             Err(e) => {
                 tracing::warn!(url = url, error = %e, "crawl: failed to read body");

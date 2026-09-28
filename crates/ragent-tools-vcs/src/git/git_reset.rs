@@ -69,6 +69,9 @@ impl Tool for GitResetTool {
             let mode = input["mode"].as_str().unwrap_or("mixed");
             let target = input["target"].as_str().unwrap_or("HEAD");
 
+            // SEC-ragent-tools-vcs (SECTASKS T-022): `target` is an operand.
+            crate::git::reject_option_like(target, "target")?;
+
             args = vec!["reset".to_string()];
             match mode {
                 "soft" => args.push("--soft".to_string()),
@@ -81,6 +84,9 @@ impl Tool for GitResetTool {
                     ));
                 }
             }
+            // No `--` before `target`: `git reset --hard -- <rev>` is
+            // rejected by git ("cannot do hard reset with paths"). The value
+            // is validated by `reject_option_like` above.
             args.push(target.to_string());
         }
 

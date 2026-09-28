@@ -30,6 +30,21 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::fs;
 
+/// Whether `name` is safe to interpolate into a template file path.
+///
+/// SEC-ragent-research-001 (SECTASKS T-014): a template name must be a single
+/// plain component drawn from `[A-Za-z0-9_-]`. Empty names, separators,
+/// `..`, drive prefixes, and absolute components are all rejected. This is
+/// the same shape as `source_vault::validate_run_tag`, applied to a value
+/// that is never used as a *path* but is always *joined into* one.
+#[must_use]
+pub fn is_valid_template_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// Errors emitted by the research I/O layer.
 #[derive(Debug, Error)]
 pub enum ResearchIoError {
@@ -106,11 +121,28 @@ impl ResearchIo {
     }
 
     /// Compute the path of the `research/_templates/<name>.md` template file.
+    ///
+    /// Returns `None` when `template_name` is not a single plain
+    /// `[A-Za-z0-9_-]` path component (SEC-ragent-research-001 / SECTASKS
+    /// T-014). The template name is caller/LLM-controlled (CLI `--template`,
+    /// TUI flag, `POST /research`), and `Path::join` discards the base for an
+    /// absolute component, so an unvalidated name would read any `.md` file
+    /// the process can reach (`../../../../home/u/.config/notes`).
     #[must_use]
-    pub fn template_path(research_root: &Path, template_name: &str) -> PathBuf {
-        research_root
-            .join("_templates")
-            .join(format!("{template_name}.md"))
+    pub fn template_path(research_root: &Path, template_name: &str) -> Option<PathBuf> {
+        if !is_valid_template_name(template_name) {
+            tracing::warn!(
+                template = %template_name,
+                "research: rejecting template name that is not a single \
+                 [A-Za-z0-9_-] component"
+            );
+            return None;
+        }
+        Some(
+            research_root
+                .join("_templates")
+                .join(format!("{template_name}.md")),
+        )
     }
 
     /// Compute the path of the per-item serialized state file (`state.json`).
@@ -563,8 +595,30 @@ mod tests {
     fn template_path_sits_under_templates_dir() {
         assert_eq!(
             ResearchIo::template_path(Path::new("/data"), "deepdive"),
-            PathBuf::from("/data/_templates/deepdive.md"),
+            Some(PathBuf::from("/data/_templates/deepdive.md")),
         );
+    }
+
+    /// SEC-ragent-research-001 (SECTASKS T-014): a traversal, absolute, or
+    /// separator-bearing template name is rejected (returns `None`) instead of
+    /// being joined into a path.
+    #[test]
+    fn template_path_rejects_traversal_and_absolute_names() {
+        for bad in [
+            "../secrets",
+            "../../etc/passwd",
+            "/home/u/notes",
+            "a/b",
+            ".",
+            "..",
+            "",
+        ] {
+            assert_eq!(
+                ResearchIo::template_path(Path::new("/data"), bad),
+                None,
+                "template name {bad:?} must be rejected"
+            );
+        }
     }
 
     #[test]

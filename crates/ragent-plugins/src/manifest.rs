@@ -470,6 +470,36 @@ pub fn derive_id(name: &str) -> String {
     }
 }
 
+/// Validate the `id` a manifest declares explicitly, returning `None` when it
+/// is not usable as a store directory name.
+///
+/// A plugin id is joined onto the store root to form the install directory
+/// (`add.rs`: `dest_store.join(&id)`), and that directory may be recursively
+/// deleted on a `--force` reinstall, so a manifest-supplied id is a
+/// path-shaped value carrying the user's privileges (SEC-ragent-plugins-002).
+/// Only a single ordinary path component is accepted: `[A-Za-z0-9._-]+`, no
+/// `/` or `\`, no `..`, not absolute. Anything else (including an empty or
+/// whitespace-only id) returns `None` so the caller falls back to the
+/// sanitised [`derive_id`] shape.
+#[must_use]
+fn sanitize_declared_id(id: &str) -> Option<String> {
+    let trimmed = id.trim();
+    let path = Path::new(trimmed);
+    let mut components = path.components();
+    let is_single_normal = matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none();
+    if !is_single_normal || trimmed.contains('\\') {
+        return None;
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
 /// Extract declared commands from the manifest `commands` field (FR-004,
 /// FR-031).
 ///
@@ -1136,11 +1166,15 @@ pub fn parse_codex_manifest(
     }
     // FR-033: hooks are normalised to (trigger, command); an unrecognised
     // section shape leaves no hooks and keeps the unsupported label.
+    // SEC-ragent-plugins-002: a manifest id becomes a directory name in the
+    // store (`<store>/<id>`), so anything that is not a single safe path
+    // component is refused rather than honoured. A rejected id falls back to
+    // the sanitised `derive_id` — the same shape a manifest with no id gets.
     let id = raw
         .id
         .as_deref()
-        .filter(|id| !id.trim().is_empty())
-        .map_or_else(|| derive_id(&raw.name), str::to_string);
+        .and_then(sanitize_declared_id)
+        .unwrap_or_else(|| derive_id(&raw.name));
     let mut hooks = extract_hooks(&id, root, raw.hooks.as_ref());
     for (trigger, entries) in read_plugin_hooks_file(root) {
         collect_hook_entries(&id, root, &trigger, &entries, &mut hooks);
@@ -1265,11 +1299,15 @@ pub fn parse_claude_manifest(
     }
     // FR-033: hooks normalised to (trigger, command); a section whose shape
     // yields no hooks keeps the unsupported label.
+    // SEC-ragent-plugins-002: a manifest id becomes a directory name in the
+    // store (`<store>/<id>`), so anything that is not a single safe path
+    // component is refused rather than honoured. A rejected id falls back to
+    // the sanitised `derive_id` — the same shape a manifest with no id gets.
     let id = raw
         .id
         .as_deref()
-        .filter(|id| !id.trim().is_empty())
-        .map_or_else(|| derive_id(&raw.name), str::to_string);
+        .and_then(sanitize_declared_id)
+        .unwrap_or_else(|| derive_id(&raw.name));
     let mut hooks = extract_hooks(&id, root, raw.hooks.as_ref());
     for (trigger, entries) in read_plugin_hooks_file(root) {
         collect_hook_entries(&id, root, &trigger, &entries, &mut hooks);

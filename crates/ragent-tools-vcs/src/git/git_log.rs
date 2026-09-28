@@ -72,6 +72,17 @@ impl Tool for GitLogTool {
         // Build command as owned strings to avoid lifetime issues.
         // Use --format=... (with equals) to prevent git from misinterpreting
         // the format string as a path/revision.
+        // SEC-ragent-tools-vcs-002 (SECTASKS T-022): `git log --output=<path>`
+        // is accepted by git and creates/truncates the named file, so a caller
+        // holding only the read-only `git:read` grant can still write anywhere.
+        crate::git::reject_option_like(branch, "branch")?;
+        if let Some(a) = author {
+            crate::git::reject_option_like(a, "author")?;
+        }
+        if let Some(s) = since {
+            crate::git::reject_option_like(s, "since")?;
+        }
+
         let mut args: Vec<String> = vec!["log".to_string(), format!("--format={}", format)];
 
         if oneline {
@@ -91,6 +102,11 @@ impl Tool for GitLogTool {
             args.push(since.to_string());
         }
 
+        // SEC-ragent-tools-vcs-002 (SECTASKS T-022): the revision is an
+        // operand and is validated (option-like values rejected). No `--`
+        // separator is inserted here: for `git log`, everything after `--` is
+        // a pathspec, which would turn the revision into a file filter and
+        // return an empty result.
         args.push(branch.to_string());
 
         let (stdout, stderr) = crate::git::run_git_async(args, ctx.working_dir.clone()).await?;

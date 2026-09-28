@@ -203,7 +203,12 @@ fn test_pre_tool_use_exit_code_0_allow_still_parses_stdout() {
     );
 
     assert!(
-        matches!(result, PreToolUseResult::Allow),
+        matches!(
+            result,
+            PreToolUseResult::Allow {
+                hook_approved: true
+            }
+        ),
         "expected Allow, got {:?}",
         result
     );
@@ -666,7 +671,12 @@ fn test_fixture_pre_tool_use_exit_0_allow() {
     );
 
     assert!(
-        matches!(result, PreToolUseResult::Allow),
+        matches!(
+            result,
+            PreToolUseResult::Allow {
+                hook_approved: true
+            }
+        ),
         "expected Allow, got {:?}",
         result
     );

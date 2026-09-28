@@ -221,6 +221,7 @@ impl Default for ToolOutput {
 ///     config: None,
 ///     read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
 ///     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+///     permission_checker: None,
 ///     tool_registry: Arc::new(create_default_registry()),
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
@@ -288,6 +289,18 @@ pub struct ToolContext {
     /// reused by [`find_team_dir_cached`]. The cache is keyed by team name
     /// so switching teams (rare) simply overwrites the entry.
     pub cached_team_dir: Arc<std::sync::Mutex<Option<(String, PathBuf)>>>,
+    /// Permission checker of the owning session.
+    ///
+    /// Tools that execute *other* tools on the session's behalf — currently
+    /// only `team_create` running a blueprint seed file — must route those
+    /// calls through the same permission decision the agent loop applies, so a
+    /// blueprint (untrusted project content) cannot execute `bash`/`write`
+    /// without approval (SEC-ragent-team-001, FR-024).
+    ///
+    /// `None` when the caller has no permission checker (tests, adapters that
+    /// never execute nested tools); a nested call then fails closed on an
+    /// `Ask` verdict instead of silently running.
+    pub permission_checker: Option<Arc<parking_lot::RwLock<crate::permission::PermissionChecker>>>,
 }
 
 impl ToolContext {
@@ -1066,6 +1079,10 @@ impl Tool for ExtractedExtendedToolAdapter {
             code_index: ctx.code_index.clone(),
             config: ctx.config.clone(),
             read_timestamps: ctx.read_timestamps.clone(),
+            // SEC-tools-extended-002 (SECTASKS T-055): the document write tools
+            // need the same containment check the core write tools use.
+            canonical_cache: Some(ctx.canonical_cache.clone()),
+            allowed_roots: ctx.allowed_roots.clone(),
         };
         let result = self
             .inner

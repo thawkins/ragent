@@ -56,6 +56,14 @@ impl Tool for GitFetchTool {
         let prune = input["prune"].as_bool().unwrap_or(false);
         let all = input["all"].as_bool().unwrap_or(false);
 
+        // SEC-ragent-tools-vcs-001 (SECTASKS T-022): `remote` and `branch`
+        // are LLM-controlled operands; `--upload-pack=sh -c ...` would be
+        // consumed as a git option.
+        crate::git::reject_option_like(remote, "remote")?;
+        if let Some(b) = branch {
+            crate::git::reject_option_like(b, "branch")?;
+        }
+
         let mut args: Vec<String> = vec!["fetch".to_string()];
 
         if all {
@@ -67,8 +75,10 @@ impl Tool for GitFetchTool {
         }
 
         if !all {
+            args.push("--".to_string());
             args.push(remote.to_string());
             if let Some(b) = branch {
+                args.push("--".to_string());
                 args.push(b.to_string());
             }
         }

@@ -46,6 +46,7 @@ use super::replace::{
     find_flexible_replacement_range, find_replacement_cascade, format_match_failure, length_note,
 };
 use super::{Tool, ToolContext, ToolOutput};
+use crate::check_path_within_allowed_roots_cached;
 
 /// An edit match failed with `outcome`; log the failure (with the match lane
 /// and a length note) and return it as the tool error.
@@ -279,8 +280,24 @@ impl Tool for MultiEditTool {
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
 
+            let path = resolve_path(&ctx.working_dir, path_str);
+
+            // SEC-ragent-tools-core-001: every edit target must stay inside the
+            // allowed roots. This is the same containment check `edit.rs` and
+            // the other file tools apply; without it `multi_edit` was the sole
+            // file tool that could be pointed at an absolute path or a `..`
+            // path outside the workspace and overwrite any file the agent's
+            // uid can write.
+            check_path_within_allowed_roots_cached(
+                &path,
+                &ctx.working_dir,
+                &ctx.allowed_roots,
+                &ctx.canonical_cache,
+            )
+            .with_context(|| format!("Edit {i}: file path {}", path.display()))?;
+
             ops.push(EditOp {
-                path: resolve_path(&ctx.working_dir, path_str),
+                path,
                 old_str: old_str.to_string(),
                 new_str: new_str.to_string(),
                 collapse_ws,

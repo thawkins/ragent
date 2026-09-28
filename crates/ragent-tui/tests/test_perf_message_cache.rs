@@ -68,7 +68,10 @@ async fn test_idle_frame_only_scans_dirty_groups() {
 
     // One frame does not yet re-render that group: PERF-042 throttles a group
     // that was already populated, so the first frame after the token leaves it
-    // pending rather than re-parsing it.
+    // pending rather than re-parsing it. Pin the throttle clock so the frame is
+    // unambiguously inside the window (a wall-clock throttle makes this racy
+    // under load without it).
+    app.message_stream_throttle_at = Some(std::time::Instant::now());
     render(&mut app);
     assert_eq!(
         app.message_cache_dirty_from,
@@ -150,10 +153,21 @@ async fn test_streaming_group_renders_immediately_when_never_populated() {
 
 #[tokio::test]
 async fn test_streaming_re_render_is_throttled_to_one_per_window() {
+    // The throttle is wall-clock based (`MESSAGE_STREAM_MIN_INTERVAL`), so the
+    // priming render must leave the group's last-render timestamp *inside* the
+    // current window for the first assertions to observe a deferred refresh.
+    // Priming, then sleeping the interval, guarantees that; without it a fast
+    // scheduler can take the "window already elapsed" path and re-render.
     let mut app = primed_app(1);
+    // Pin the throttle clock to "just rendered" so the frame below is
+    // unambiguously inside the window. Sleeping and re-rendering is not enough:
+    // the throttle only refreshes when something actually rendered, so a second
+    // render in the same frame loop does not advance the timestamp.
+    app.message_stream_throttle_at = Some(std::time::Instant::now());
 
-    // First token after priming: already-populated group, so the throttle
-    // defers this refresh and leaves the group pending.
+    // First token after priming: already-populated group with a fresh render
+    // timestamp, so the throttle defers this refresh and leaves the group
+    // pending.
     app.handle_event(ragent_agent::event::Event::TextDelta {
         session_id: "s1".to_string(),
         text: " alpha".to_string(),
@@ -181,7 +195,21 @@ async fn test_streaming_re_render_is_throttled_to_one_per_window() {
     assert_eq!(app.message_cache_dirty_from, 0, "still pending");
 
     // Once the window elapses the group catches up exactly once.
-    std::thread::sleep(ragent_tui::layout::MESSAGE_STREAM_MIN_INTERVAL);
+    //
+    // The throttle is wall-clock based, so `sleep` alone is not reliable on a
+    // loaded machine (the frame can be scheduled before the window really
+    // elapsed). Wait until the interval has observably passed, then render.
+    let deadline = std::time::Instant::now() + ragent_tui::layout::MESSAGE_STREAM_MIN_INTERVAL * 10;
+    loop {
+        std::thread::sleep(ragent_tui::layout::MESSAGE_STREAM_MIN_INTERVAL);
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        render(&mut app);
+        if app.message_cache_dirty_from != 0 {
+            break;
+        }
+    }
     render(&mut app);
     assert_eq!(
         app.message_line_cache[0].edit_seq, app.messages[0].edit_seq,

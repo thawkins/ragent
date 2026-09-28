@@ -628,7 +628,10 @@ fn load_cases_from_manifest(
     data_root: &Path,
     manifest: &BenchDataManifest,
 ) -> Result<Vec<BenchCaseFixture>> {
-    let cases_path = data_root.join(&manifest.case_file);
+    // SEC-ragent-bench-004 (SECTASKS T-009): `case_file` is manifest content,
+    // so it must stay inside the data root - an absolute path or a `..`
+    // escape would make the loader read an arbitrary file.
+    let cases_path = contained_join(data_root, &manifest.case_file)?;
     let file = std::fs::File::open(&cases_path)
         .with_context(|| format!("open case file {}", cases_path.display()))?;
     let reader = BufReader::new(file);
@@ -759,8 +762,51 @@ fn prepare_full_suite_dataset(
     }
 }
 
+/// Join a manifest-supplied relative path onto `data_root`, refusing escapes.
+///
+/// SEC-ragent-bench-004 (SECTASKS T-009): `case_file` and `relative_path` are
+/// manifest content. `Path::join` discards `data_root` entirely for an
+/// absolute component, and a `..` component climbs out of it, so either would
+/// let a crafted manifest name an arbitrary file for the loader to read/hash.
+///
+/// # Errors
+///
+/// Returns an error when the value is empty, absolute, or contains a parent
+/// component that leaves `data_root`.
+fn contained_join(data_root: &Path, relative: &str) -> Result<PathBuf> {
+    let candidate = Path::new(relative);
+    if candidate.is_absolute() {
+        bail!(
+            "benchmark manifest path '{relative}' is absolute; it must be              relative to the data root"
+        );
+    }
+    let mut normalised = data_root.to_path_buf();
+    for component in candidate.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                bail!(
+                    "benchmark manifest path '{relative}' escapes the data root                      with a '..' component"
+                );
+            }
+            std::path::Component::CurDir => {}
+            other => normalised.push(other.as_os_str()),
+        }
+    }
+    let root = data_root
+        .canonicalize()
+        .unwrap_or_else(|_| data_root.to_path_buf());
+    if let Ok(real) = normalised.canonicalize()
+        && !real.starts_with(&root)
+    {
+        bail!("benchmark manifest path '{relative}' resolves outside the data root");
+    }
+    Ok(normalised)
+}
+
 fn verify_manifest_file(data_root: &Path, file: &BenchDataFile) -> Result<()> {
-    let path = data_root.join(&file.relative_path);
+    // SEC-ragent-bench-004 (SECTASKS T-009): same containment as the case-file
+    // join - `relative_path` comes from the manifest.
+    let path = contained_join(data_root, &file.relative_path)?;
     let metadata = std::fs::metadata(&path)
         .with_context(|| format!("stat tracked benchmark file {}", path.display()))?;
     if metadata.len() != file.bytes {

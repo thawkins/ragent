@@ -40,6 +40,11 @@ opentelemetry-otlp = { version = "0.28", optional = true, default-features = fal
     "http-proto",
     "reqwest-client",
     "grpc-tonic",
+    # SEC-ragent-telemetry-001 (SECTASKS T-019): without `tonic/tls` an
+    # `https://host:4317` gRPC endpoint is dialled in cleartext, so the OTLP
+    # payload leaves the machine unencrypted while the configuration looks
+    # secure.
+    "tls-roots",
 ] }
 
 [dev-dependencies]

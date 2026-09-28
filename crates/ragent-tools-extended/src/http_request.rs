@@ -19,6 +19,35 @@ const MAX_BODY_BYTES: usize = 1024 * 1024; // 1 MiB response cap
 /// Perform an HTTP request with configurable method, headers, and body.
 pub struct HttpRequestTool;
 
+/// Headers a caller may not set on an `http_request`.
+///
+/// SEC-tools-extended-004 (SECTASKS T-056): routing and credential headers.
+const DENIED_REQUEST_HEADERS: &[&str] = &[
+    "host",
+    "cookie",
+    "cookie2",
+    "authorization",
+    "proxy-authorization",
+    "proxy-authenticate",
+    "proxy-connection",
+    "connection",
+    "transfer-encoding",
+    "upgrade",
+    "te",
+    "trailer",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-real-ip",
+];
+
+/// Whether `name` is a routing/credential header the caller may not set.
+#[must_use]
+fn is_denied_request_header(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    DENIED_REQUEST_HEADERS.contains(&lower.as_str()) || lower.starts_with("proxy-")
+}
+
 #[async_trait::async_trait]
 impl Tool for HttpRequestTool {
     fn name(&self) -> &'static str {
@@ -95,11 +124,24 @@ impl Tool for HttpRequestTool {
             .request(method, url)
             .timeout(Duration::from_secs(timeout_secs));
 
-        // Apply custom headers
+        // Apply custom headers.
+        //
+        // SEC-tools-extended-004 (SECTASKS T-056): reject caller-supplied
+        // routing/credential headers. `Host` re-targets the request to a
+        // virtual host behind the validated IP, `Cookie`/`Authorization`
+        // forward credentials to an attacker-chosen origin, and the
+        // `Proxy-*`/hop-by-hop headers rewrite the request path. The tool's
+        // SSRF check validates the URL, not these.
         if let Some(headers_obj) = input["headers"].as_object() {
             let mut header_map = HeaderMap::new();
             for (k, v) in headers_obj {
                 if let Some(val_str) = v.as_str() {
+                    if is_denied_request_header(k) {
+                        anyhow::bail!(
+                            "header '{k}' is not permitted: it controls request routing or \
+                             carries credentials"
+                        );
+                    }
                     let name = HeaderName::from_str(k)
                         .with_context(|| format!("Invalid header name: {k}"))?;
                     let value = HeaderValue::from_str(val_str)

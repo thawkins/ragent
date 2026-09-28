@@ -267,12 +267,10 @@ async fn test_mailbox_valid_messages_still_work_after_recovery() {
 
     // Now write a valid message — it should work.
     mailbox
-        .push(MailboxMessage::new(
-            "lead",
-            "tm-001",
-            MessageType::Message,
-            "hello",
-        ))
+        .push(
+            MailboxMessage::new("lead", "tm-001", MessageType::Message, "hello")
+                .with_sender_session("lead-session"),
+        )
         .expect("push");
     let msgs = mailbox.read_all().expect("read_all");
     assert_eq!(msgs.len(), 1);

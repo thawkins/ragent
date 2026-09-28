@@ -1524,37 +1524,46 @@ impl App {
     /// Start the off-loop `/plugins stores --check` availability probe (spec
     /// `pluginstores` FR-031 `--check`).
     ///
-    /// Resolves the store block and spawns a blocking task that contacts each
+    /// Resolves the store block and spawns a plain OS thread that contacts each
     /// store endpoint through the same injectable [`StoreIndexFetcher`] seam the
     /// browser uses, then deposits the fully rendered report into
     /// [`App::plugin_store_probe_result`] for
     /// [`App::poll_plugin_store_probe_result`] to append. The event loop never
-    /// stalls on the network probe. Without an async reactor (headless/unit-test
-    /// contexts) the probe is skipped and the plain report is deposited, exactly
-    /// as the browser fetch is skipped, so no path panics.
+    /// stalls on the network probe.
+    ///
+    /// A bare `std::thread` (not `tokio::task::spawn_blocking`) is required: the
+    /// probe builds a `reqwest::blocking::Client`, whose internal tokio runtime
+    /// panics on drop inside a blocking-pool worker. No path panics.
     pub fn begin_plugin_store_probe(&mut self) {
         let (_dirs, plugins) = store_and_config(&self.cwd_path);
         let stores = plugins.stores_or_default();
         let slot = Arc::clone(&self.plugin_store_probe_result);
         let fetcher = Arc::clone(&self.plugin_store_fetcher);
-        if let Ok(handle) = tokio::runtime::Handle::try_current()
-            && handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
-        {
-            // Only a multi-thread reactor can run the blocking probe alongside
-            // the caller; on a current-thread reactor `spawn_blocking` would
-            // queue the probe without ever letting it make progress (the test
-            // reactor is dropped before the task runs), so the plain report is
-            // deposited instead — matching the no-reactor branch.
-            handle.spawn_blocking(move || {
+        // Run the probe on a plain OS thread, never `spawn_blocking`.
+        // `fetch_index` builds a `reqwest::blocking::Client`, which spins up and
+        // drops its own internal tokio runtime; dropping a runtime inside a
+        // blocking-pool worker (which runs inside the reactor's blocking region)
+        // panics with "Cannot drop a runtime in a context where blocking is not
+        // allowed". A bare `std::thread` has no runtime context, so the client's
+        // runtime is created and torn down cleanly.
+        std::thread::spawn(move || {
+            // SEC-ragent-tui-001 follow-up (SECTASKS T-057): the probe thread
+            // must never take the process down. A panic here (a fetcher bug, an
+            // unexpected error path) would abort a background thread silently
+            // and leave the probe slot empty forever, so the report is built
+            // under `catch_unwind` and a failure is surfaced in the slot.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let probes = probe_stores(&stores, fetcher.as_ref());
-                let report = render_stores_report_with_probes(&stores, Some(&probes));
-                *recover_poisoned(slot.lock(), "plugin_store_probe_result") = Some(report);
-            });
-        } else {
-            // No usable reactor: report the plain config view rather than block.
-            let report = render_stores_report_with_probes(&stores, None);
+                render_stores_report_with_probes(&stores, Some(&probes))
+            }));
+            let report = match result {
+                Ok(report) => report,
+                Err(_) => {
+                    "From: /plugins stores\n\n[err] store probe failed unexpectedly".to_string()
+                }
+            };
             *recover_poisoned(slot.lock(), "plugin_store_probe_result") = Some(report);
-        }
+        });
     }
 
     /// Drain a completed off-loop `/plugins stores --check` probe and append its

@@ -96,20 +96,28 @@ impl Tool for TeamBroadcastTool {
         // field that differs is `to`) and move each into its own async task.
         let succeeded: Vec<String> = Vec::with_capacity(active.len());
         let failed: Vec<Value> = Vec::with_capacity(active.len());
+        let sender_session = ctx.session_id.clone();
         let push_futs = active.iter().map(|(agent_id, name)| {
             let team_dir = team_dir.clone();
             let from = from.clone();
             let agent_id = agent_id.clone();
             let name = name.clone();
             let content = content.to_string();
+            let sender_session = sender_session.clone();
             async move {
                 let outcome = Mailbox::open(&team_dir, &agent_id).and_then(|mailbox| {
-                    mailbox.push(MailboxMessage::new(
-                        from,
-                        agent_id.clone(),
-                        MessageType::Broadcast,
-                        content,
-                    ))
+                    // SEC-ragent-team-003 (SECTASKS T-018): authenticated
+                    // sender session id, so a spoofed `from: "lead"` is
+                    // detectable and rejected at push time.
+                    mailbox.push(
+                        MailboxMessage::new(
+                            from,
+                            agent_id.clone(),
+                            MessageType::Broadcast,
+                            content,
+                        )
+                        .with_sender_session(&sender_session),
+                    )
                 });
                 (agent_id, name, outcome)
             }

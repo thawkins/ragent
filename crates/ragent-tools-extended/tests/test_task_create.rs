@@ -27,6 +27,8 @@ fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
         code_index: None,
         config: None,
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -190,6 +192,8 @@ async fn test_task_create_no_storage() {
         code_index: None,
         config: None,
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     };
     let tool = TaskCreateTool;
 

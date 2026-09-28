@@ -217,6 +217,8 @@ async fn test_godnodes_tool_returns_disabled_when_no_code_index() {
         code_index: None,
         config: None,
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     };
 
     let output = tool.execute(json!({"n": 5}), &ctx).await.unwrap();

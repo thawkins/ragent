@@ -93,6 +93,7 @@ impl Tool for TeamReadMessagesTool {
                 json!({
                     "message_id": m.message_id,
                     "from": m.from,
+                    "sender_verified": m.sender_session_id.is_some(),
                     "to": m.to,
                     "type": serde_json::to_value(&m.message_type).unwrap_or(Value::Null),
                     "read": m.read,
@@ -108,8 +109,17 @@ impl Tool for TeamReadMessagesTool {
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_string))
                 .unwrap_or_else(|| format!("{:?}", m.message_type));
+            // SEC-ragent-team-003 (SECTASKS T-018): `from` is a derived,
+            // unauthenticated claim. Mark it so a recipient agent never treats
+            // a peer's message as a verified lead directive.
+            let provenance = if m.sender_session_id.is_some() {
+                "From"
+            } else {
+                "From (unverified - provenance: none)"
+            };
             lines.push(format!(
-                "From: {} | To: {} | Type: {} | Read: {} | {}\n{}",
+                "{}: {} | To: {} | Type: {} | Read: {} | {}\n{}",
+                provenance,
                 m.from,
                 m.to,
                 type_str,

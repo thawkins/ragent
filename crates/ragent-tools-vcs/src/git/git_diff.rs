@@ -51,6 +51,14 @@ impl Tool for GitDiffTool {
         let path = input["path"].as_str();
         let stat = input["stat"].as_bool().unwrap_or(false);
 
+        // SEC-ragent-tools-vcs-002 (SECTASKS T-022): `git diff --output=<path>`
+        // is accepted by git and creates/truncates the named file under a
+        // read-only grant, so `target` must not look like an option.
+        let target_is_ref = !matches!(target, "staged" | "cached" | "working");
+        if target_is_ref {
+            crate::git::reject_option_like(target, "target")?;
+        }
+
         let mut args: Vec<&str> = vec!["diff"];
 
         if stat {
@@ -65,6 +73,7 @@ impl Tool for GitDiffTool {
 
         // Add -- before path to disambiguate from refs
         if let Some(p) = path {
+            crate::git::reject_option_like(p, "path")?;
             args.push("--");
             args.push(p);
         }

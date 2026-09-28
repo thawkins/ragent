@@ -27,6 +27,7 @@ fn base_ctx(active_model: Option<ModelRef>) -> ToolContext {
         allowed_roots: Vec::new(),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+        permission_checker: None,
         tool_registry: ToolContext::default_tool_registry(),
         canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     }

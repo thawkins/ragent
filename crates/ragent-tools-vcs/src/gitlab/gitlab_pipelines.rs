@@ -7,6 +7,12 @@ use serde_json::{Value, json};
 use super::{Tool, ToolContext, ToolOutput};
 use crate::gitlab::client::GitLabClient;
 
+/// Maximum pages `gitlab_list_jobs` will follow (SEC-ragent-tools-vcs-007).
+const MAX_JOB_PAGES: u32 = 50;
+
+/// Maximum jobs `gitlab_list_jobs` will collect (SEC-ragent-tools-vcs-007).
+const MAX_JOB_ENTRIES: usize = 2_000;
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /// Create an authenticated client and detect the project path.
@@ -279,18 +285,40 @@ impl Tool for GitlabListJobsTool {
 
         let mut jobs: Vec<Value> = Vec::new();
         let mut next_page: Option<u32> = None;
+        let mut pages_fetched = 0u32;
         loop {
+            // SEC-ragent-tools-vcs-007 (SECTASKS T-034): the loop followed
+            // `x-next-page` indefinitely with no page or entry cap, so a server
+            // that always returns a non-empty next page hung the tool call and
+            // grew `jobs` without bound. Mirror the tree-walk budgets.
+            if pages_fetched >= MAX_JOB_PAGES || jobs.len() >= MAX_JOB_ENTRIES {
+                tracing::warn!(
+                    pages = pages_fetched,
+                    jobs = jobs.len(),
+                    "GitLab jobs pagination hit its budget; returning partial results"
+                );
+                break;
+            }
             let path = match next_page {
                 Some(page) => format!("{base}&page={page}"),
                 None => base.clone(),
             };
             let (value, cursor) = client.get_paged(&path).await?;
+            pages_fetched += 1;
             let arr = value
                 .as_array()
                 .context("Expected array from GitLab jobs endpoint")?;
             jobs.extend(arr.iter().cloned());
             match cursor {
-                Some(page) => next_page = Some(page),
+                // Ignore a cursor that does not strictly advance - a server
+                // echoing the same page must not spin the loop.
+                Some(page) => {
+                    if next_page.is_some_and(|current| page <= current) {
+                        tracing::warn!(page, "GitLab jobs pagination cursor did not advance");
+                        break;
+                    }
+                    next_page = Some(page);
+                }
                 None => break,
             }
         }

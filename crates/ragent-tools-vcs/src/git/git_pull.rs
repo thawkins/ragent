@@ -51,15 +51,23 @@ impl Tool for GitPullTool {
         let branch = input["branch"].as_str();
         let rebase = input["rebase"].as_bool().unwrap_or(false);
 
+        // SEC-ragent-tools-vcs-001 (SECTASKS T-022): option-free operands.
+        crate::git::reject_option_like(remote, "remote")?;
+        if let Some(b) = branch {
+            crate::git::reject_option_like(b, "branch")?;
+        }
+
         let mut args: Vec<String> = vec!["pull".to_string()];
 
         if rebase {
             args.push("--rebase".to_string());
         }
 
+        args.push("--".to_string());
         args.push(remote.to_string());
 
         if let Some(b) = branch {
+            args.push("--".to_string());
             args.push(b.to_string());
         }
 

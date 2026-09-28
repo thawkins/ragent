@@ -102,6 +102,9 @@ impl Tool for TeamApprovePlanTool {
         }
 
         let teammate_mailbox = Mailbox::open(&team_dir, &agent_id)?;
+        // SEC-ragent-team-003 (SECTASKS T-018): a lead-authored message
+        // carries the lead session's authenticated id so the recipient can
+        // corroborate the derived `from`.
         let mut msg = MailboxMessage::new(
             "lead".to_string(),
             agent_id.clone(),
@@ -111,7 +114,8 @@ impl Tool for TeamApprovePlanTool {
                 MessageType::PlanRejected
             },
             feedback,
-        );
+        )
+        .with_sender_session(&ctx.session_id);
         // M5-T4: copy the correlation id from the member's plan_request_id so
         // the teammate can tell which plan was approved/rejected.
         {

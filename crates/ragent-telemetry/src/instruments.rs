@@ -259,9 +259,26 @@ impl InstrumentRegistry {
     /// `from_meter` but before any recording occurs. The default limit is
     /// [`DEFAULT_CARDINALITY_LIMIT`](crate::cardinality::DEFAULT_CARDINALITY_LIMIT)
     /// (1000).
+    ///
+    /// NOTE: a per-call fresh cache only observes recordings made through the
+    /// returned registry, so a caller that builds a registry per tool call
+    /// never accumulates the cap. Prefer
+    /// [`with_shared_cardinality`](Self::with_shared_cardinality) when the
+    /// registry is short-lived (SEC-ragent-telemetry-003 / SECTASKS T-032).
     #[must_use]
     pub fn with_cardinality_limit(mut self, limit: usize) -> Self {
         self.cardinality = std::sync::Arc::new(CardinalityCache::new(limit));
+        self
+    }
+
+    /// Use a process-wide shared cardinality cache (SEC-ragent-telemetry-003).
+    ///
+    /// The subsystem owns one [`CardinalityCache`] for the lifetime of the
+    /// provider and clones this `Arc` into every registry it hands out, so the
+    /// distinct-signature cap actually binds across all recorders.
+    #[must_use]
+    pub fn with_shared_cardinality(mut self, cache: std::sync::Arc<CardinalityCache>) -> Self {
+        self.cardinality = cache;
         self
     }
 

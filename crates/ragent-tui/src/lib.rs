@@ -22,6 +22,13 @@ pub mod tracing_layer;
 pub mod utils;
 pub mod widgets;
 
+/// Truncating stderr spool shared with the binary's fd-2 redirection.
+///
+/// The binary owns the `dup2` redirection (it is the only crate that may use
+/// the approved FFI); the TUI only needs the [`Spool`] handle to attach its
+/// log-panel mirror, so it re-exports the binary-side type.
+pub use ragent_types::stderr_spool::Spool as StderrSpool;
+
 pub use app::App;
 #[doc(hidden)]
 pub use app::poll_spawn_result_for_tests;
@@ -206,6 +213,7 @@ const MCP_STARTUP_GRACE: Duration = Duration::from_secs(3);
 ///     std::path::PathBuf::new(),
 ///     vec![],
 ///     StartupTimings::new(),
+///     None, // stderr spool (installed by the binary when the TUI runs)
 /// ).await?;
 /// # Ok(())
 /// # }
@@ -222,6 +230,7 @@ pub async fn run_tui(
     db_path: std::path::PathBuf,
     config_paths: Vec<std::path::PathBuf>,
     mut startup: ragent_agent::StartupTimings,
+    stderr_spool: Option<StderrSpool>,
 ) -> Result<()> {
     use std::time::Instant;
     // Set up panic handler to ensure terminal state is restored on crashes
@@ -277,6 +286,20 @@ pub async fn run_tui(
     // Hand the bridge's lag counter to the app so the reconcile poll can
     // detect dropped broadcast events and repair the Agents panel.
     app.set_tui_event_lag_counter(Arc::clone(&tui_event_lag));
+
+    // Raw stderr is already redirected into the spool file; additionally
+    // mirror it into the log panel so diagnostics that bypass `tracing`
+    // (the default panic hook, `eprintln!`) are visible live. A dedicated
+    // channel is used so stderr bursts cannot starve the tracing channel.
+    let stderr_rx = if let Some(spool) = stderr_spool {
+        let (tx, rx) = std::sync::mpsc::sync_channel(512);
+        spool.set_mirror(Arc::new(move |text: &str| {
+            let _ = tx.try_send(text.to_string());
+        }));
+        Some(rx)
+    } else {
+        None
+    };
 
     // Clean up orphaned clipboard image temp files before the session starts.
     // This is a one-time, best-effort sweep; individual errors are logged.
@@ -809,6 +832,22 @@ pub async fn run_tui(
         }
         if got_log_record {
             app.needs_redraw = true;
+        }
+
+        // Drain mirrored raw-stderr chunks into the log panel (same rate
+        // limit as the tracing channel above).
+        if let Some(ref stderr_rx) = stderr_rx {
+            let mut stderr_records_this_frame = 0u32;
+            while let Ok(chunk) = stderr_rx.try_recv() {
+                for line in chunk.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
+                    app.push_log(app::LogLevel::Warn, format!("stderr: {line}"), None);
+                    app.needs_redraw = true;
+                }
+                stderr_records_this_frame += 1;
+                if stderr_records_this_frame >= LOG_DRAIN_LIMIT {
+                    break;
+                }
+            }
         }
 
         // PERF-045: run the cheap periodic polls/refreshes at most once per

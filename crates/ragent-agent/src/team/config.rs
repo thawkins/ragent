@@ -46,6 +46,17 @@ pub fn resolve_memory_dir(
     agent_name: &str,
     working_dir: &Path,
 ) -> Option<PathBuf> {
+    // SEC-ragent-team-007 (SECTASKS T-066): `agent_name` reaches this function
+    // from team/agent configuration, and `Path::join` would honour an absolute
+    // component or a `..` escape, writing the memory file outside the intended
+    // directory. Accept only a single safe path component.
+    if !is_safe_memory_component(agent_name) {
+        tracing::warn!(
+            agent_name,
+            "refusing to resolve a memory directory for an unsafe agent name"
+        );
+        return Option::None;
+    }
     match scope {
         MemoryScope::None => Option::None,
         MemoryScope::User => Some(
@@ -60,6 +71,17 @@ pub fn resolve_memory_dir(
                 .join(agent_name),
         ),
     }
+}
+
+/// Whether `name` is a single safe path component (`[A-Za-z0-9._-]`, not `.`/`..`).
+fn is_safe_memory_component(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name != "."
+        && name != ".."
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// Overall lifecycle state of a team.

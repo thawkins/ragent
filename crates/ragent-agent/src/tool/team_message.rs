@@ -103,12 +103,18 @@ impl Tool for TeamMessageTool {
         }
 
         let mailbox = Mailbox::open(&team_dir, &recipient_id)?;
-        mailbox.push(MailboxMessage::new(
-            from.clone(),
-            recipient_id.clone(),
-            MessageType::Message,
-            content,
-        ))?;
+        // SEC-ragent-team-003 (SECTASKS T-018): record the authenticated
+        // session id alongside the derived `from`, so the recipient can tell a
+        // genuine lead message from a forged one.
+        mailbox.push(
+            MailboxMessage::new(
+                from.clone(),
+                recipient_id.clone(),
+                MessageType::Message,
+                content,
+            )
+            .with_sender_session(&ctx.session_id),
+        )?;
 
         Ok(ToolOutput {
             content: format!("Message sent to '{to}' in team '{team_name}'."),

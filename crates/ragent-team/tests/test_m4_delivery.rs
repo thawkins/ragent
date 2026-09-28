@@ -47,6 +47,7 @@ fn make_ctx(
         config: None,
         bg_service: None,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        permission_checker: None,
         tool_registry: ragent_agent::tool::ToolContext::default_tool_registry(),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
@@ -77,12 +78,10 @@ async fn test_peek_unread_does_not_mark_read() {
     let team_dir = team_dir_for(&dir, "peek-team");
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new(
-            "lead",
-            "tm-001",
-            MessageType::Message,
-            "hello",
-        ))
+        .push(
+            MailboxMessage::new("lead", "tm-001", MessageType::Message, "hello")
+                .with_sender_session("lead-session"),
+        )
         .expect("push");
 
     let unread = mailbox.peek_unread().expect("peek");
@@ -101,12 +100,10 @@ async fn test_acknowledge_marks_read_and_is_idempotent() {
     let team_dir = team_dir_for(&dir, "ack-team");
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new(
-            "lead",
-            "tm-001",
-            MessageType::Message,
-            "ack me",
-        ))
+        .push(
+            MailboxMessage::new("lead", "tm-001", MessageType::Message, "ack me")
+                .with_sender_session("lead-session"),
+        )
         .expect("push");
 
     let unread = mailbox.peek_unread().expect("peek");
@@ -131,12 +128,10 @@ async fn test_drain_unread_still_marks_read_for_backward_compat() {
     let team_dir = team_dir_for(&dir, "drain-team");
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new(
-            "lead",
-            "tm-001",
-            MessageType::Message,
-            "drain me",
-        ))
+        .push(
+            MailboxMessage::new("lead", "tm-001", MessageType::Message, "drain me")
+                .with_sender_session("lead-session"),
+        )
         .expect("push");
 
     let unread = mailbox.drain_unread().expect("drain");
@@ -375,12 +370,10 @@ async fn test_team_read_messages_emits_snake_case_type_and_to_read_fields() {
     let team_dir = team_dir_for(&dir, "read-team");
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new(
-            "lead",
-            "tm-001",
-            MessageType::PlanRequest,
-            "plan text",
-        ))
+        .push(
+            MailboxMessage::new("lead", "tm-001", MessageType::PlanRequest, "plan text")
+                .with_sender_session("lead-session"),
+        )
         .expect("push");
     drop(mailbox);
 
@@ -448,12 +441,10 @@ async fn test_team_read_messages_redelivers_on_partial_ack_failure_is_safe() {
     let team_dir = team_dir_for(&dir, "redeliver-team");
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new(
-            "lead",
-            "tm-001",
-            MessageType::Message,
-            "redo",
-        ))
+        .push(
+            MailboxMessage::new("lead", "tm-001", MessageType::Message, "redo")
+                .with_sender_session("lead-session"),
+        )
         .expect("push");
     drop(mailbox);
 

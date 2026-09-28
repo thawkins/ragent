@@ -48,3 +48,36 @@ fn test_tool_call_counter_per_session() {
     assert_eq!(bus.current_tool_calls("sess-b"), 2);
     assert_eq!(bus.current_tool_calls("sess-c"), 0);
 }
+
+#[test]
+fn test_publish_with_multibyte_session_id_does_not_panic() {
+    // SEC-ragent-types-005 (SECTASKS T-035): the dropped-event warning used to
+    // slice the session id by byte offset, which panicked for a non-ASCII id.
+    // The id is unvalidated caller-supplied data, so publishing with no
+    // subscribers must never panic.
+    use ragent_types::event::Event;
+
+    let bus = EventBus::new(4);
+    let id = "😀aaaaaaa";
+    bus.set_step(id, 1);
+    // No subscribers: `publish` takes the `warn_no_subscribers` path.
+    bus.publish(Event::AgentNotice {
+        session_id: id.to_string(),
+        message: "dropped".to_string(),
+    });
+    assert_eq!(bus.current_step(id), 1);
+}
+
+#[test]
+fn test_publish_with_short_multibyte_session_id_does_not_panic() {
+    use ragent_types::event::Event;
+
+    let bus = EventBus::new(4);
+    let id = "😀";
+    bus.set_step(id, 2);
+    bus.publish(Event::AgentNotice {
+        session_id: id.to_string(),
+        message: "dropped".to_string(),
+    });
+    assert_eq!(bus.current_step(id), 2);
+}

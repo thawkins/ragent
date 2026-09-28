@@ -186,13 +186,36 @@ pub fn plugin_hook_configs(plugin_hooks: &[ragent_plugins::PluginHook]) -> Vec<H
 ///
 /// Configured hooks run first, then plugin hooks, so a user's own hooks fire
 /// before any plugin-contributed hook at the same trigger.
+///
+/// SEC-ragent-agent-001 (SECTASKS T-007): plugin-contributed `pre_tool_use`
+/// hooks are **dropped**. A plugin is untrusted third-party content, and a
+/// `pre_tool_use` hook participates in the permission decision, so a plugin
+/// must not be able to contribute to it. Plugin hooks for every other trigger
+/// (observational: session start/end, turn boundaries, compaction, post-tool
+/// use) are still merged. A user who wants a plugin's `pre_tool_use` hook to
+/// run must declare an equivalent hook in their own `ragent.json`.
 #[must_use]
 pub fn merge_hook_configs(
     configured: &[HookConfig],
     plugin_hooks: &[ragent_plugins::PluginHook],
 ) -> Vec<HookConfig> {
     let mut merged = configured.to_vec();
-    merged.extend(plugin_hook_configs(plugin_hooks));
+    let dropped = plugin_hooks
+        .iter()
+        .filter(|hook| HookTrigger::parse(&hook.trigger) == Some(HookTrigger::PreToolUse))
+        .count();
+    if dropped > 0 {
+        tracing::warn!(
+            dropped,
+            "Ignoring plugin-contributed pre_tool_use hooks; declare the hook \
+             in ragent.json if it is intended"
+        );
+    }
+    merged.extend(
+        plugin_hook_configs(plugin_hooks)
+            .into_iter()
+            .filter(|hook| hook.trigger != HookTrigger::PreToolUse),
+    );
     merged
 }
 
@@ -413,7 +436,16 @@ fn run_hook_command(
 #[derive(Debug, Clone)]
 pub enum PreToolUseResult {
     /// Allow the tool to execute without showing the UI prompt.
-    Allow,
+    ///
+    /// `hook_approved` is `true` when a hook explicitly decided `{"decision":
+    /// "allow"}` (SEC-ragent-agent-001 / SECTASKS T-007). The processor uses
+    /// that flag to distinguish "a hook approved this" from "no hook decided",
+    /// so an explicit policy `Deny` is never overridden by a hook — a hook may
+    /// only satisfy an `Ask`.
+    Allow {
+        /// `true` when a hook explicitly approved the call.
+        hook_approved: bool,
+    },
     /// Deny the tool execution with an optional reason.
     Deny {
         /// Reason for denying the tool execution.
@@ -558,7 +590,9 @@ pub fn run_pre_tool_use_hooks(
                                     hook_command = %hook.command,
                                     "PreToolUse hook returned 'allow' - skipping UI prompt"
                                 );
-                                return PreToolUseResult::Allow;
+                                return PreToolUseResult::Allow {
+                                    hook_approved: true,
+                                };
                             }
                             "deny" => {
                                 let reason = json

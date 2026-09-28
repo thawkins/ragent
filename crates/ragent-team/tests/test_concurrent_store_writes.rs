@@ -246,12 +246,19 @@ fn test_mailbox_threaded_push_does_not_corrupt() {
         let mb = Arc::clone(&mailbox);
         handles.push(std::thread::spawn(move || {
             for i in 0..50 {
-                mb.push(MailboxMessage::new(
-                    "lead",
-                    "tm-001",
-                    MessageType::Message,
-                    format!("thread-{t}-{i}"),
-                ))
+                // SEC-ragent-team-003 (SECTASKS T-018): a message claiming to
+                // come from the lead must carry the authenticated sender
+                // session id.
+                mb.push(
+                    MailboxMessage::new(
+                        "lead",
+                        "tm-001",
+                        MessageType::Message,
+                        format!("thread-{t}-{i}"),
+                    )
+                    .with_sender_session("lead-session")
+                    .with_sender_session("lead-session"),
+                )
                 .expect("push");
             }
         }));

@@ -243,7 +243,15 @@ fn run_mbpp_python_assertions(sample: &str, test_code: &str) -> Result<(), Strin
     std::fs::write(&script_path, script)
         .map_err(|error| format!("write MBPP script {}: {error}", script_path.display()))?;
 
-    let output = Command::new("python3")
+    // SEC-ragent-bench-002 (SECTASKS T-009/T-048): the in-script
+    // `signal.alarm` is defeated by untrusted fixture code, so the subprocess
+    // gets the same hard `timeout` wrapper as the native harness.
+    let output = Command::new("timeout")
+        .arg(format!(
+            "{}s",
+            crate::exec_guard::FIXTURE_SUBPROCESS_TIMEOUT_SECS
+        ))
+        .arg("python3")
         .arg(&script_path)
         .output()
         .map_err(|error| format!("launch python3: {error}"))?;
@@ -301,6 +309,10 @@ fn run_mbpp_native_harness(
                 .iter()
                 .map(|part| part.replace("__FILENAME__", &source_name))
                 .collect::<Vec<_>>();
+            // SEC-ragent-bench-001 (SECTASKS T-009): the fixture supplies the
+            // program, so it must be an allowlisted toolchain binary - never an
+            // absolute path or a shell interpreter.
+            crate::exec_guard::validate_fixture_command(&rendered_parts)?;
             let Some(program) = rendered_parts.first() else {
                 return Err("native MBPP command list was empty".to_string());
             };

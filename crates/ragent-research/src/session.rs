@@ -3213,6 +3213,17 @@ impl ResearchSession {
     ) -> Result<()> {
         for (idx, file_path) in config.input.from_files.iter().enumerate() {
             let path_str = file_path.display().to_string();
+            // SEC-ragent-research-005 (SECTASKS T-016): a `from_files` entry
+            // must resolve inside the project root. The extracted body is
+            // streamed back to the caller and embedded as a research source,
+            // so an uncontained entry is an arbitrary file read.
+            let project_root = project_root_for(self.manager.root());
+            if let Some(bad) = out_of_root_from_file(file_path, project_root) {
+                return Err(ResearchError::FromFileExtractFailed {
+                    path: path_str.clone(),
+                    message: format!("path resolves outside the project root '{}'", bad.display()),
+                });
+            }
             let extracted = tokio::task::spawn_blocking({
                 let path = file_path.clone();
                 move || ragent_tools_extended::document_extract::extract_file_as_markdown(&path)
@@ -3846,12 +3857,40 @@ fn project_root_for(research_root: &Path) -> &Path {
     research_root.parent().unwrap_or(research_root)
 }
 
+/// Return the resolved path when `candidate` escapes `root`, else `None`.
+///
+/// SEC-ragent-research-005 (SECTASKS T-016): shared by the `from_files` seed
+/// reader. An existing path is canonicalised (so a symlink out of the tree is
+/// caught); a not-yet-existing path falls back to a lexical check that rejects
+/// any parent-directory component and any absolute path outside the root.
+fn out_of_root_from_file(candidate: &Path, root: &Path) -> Option<std::path::PathBuf> {
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let resolved = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        canonical_root.join(candidate)
+    };
+    let contained = match resolved.canonicalize() {
+        Ok(real) => real.starts_with(&canonical_root),
+        Err(_) => {
+            !resolved
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+                && resolved.starts_with(&canonical_root)
+        }
+    };
+    if contained { None } else { Some(resolved) }
+}
+
 /// Load a FR-020 template body from `_templates/<name>.md` if it exists.
 /// Returns `None` when no template was requested, or when the file does
 /// not exist.
 async fn load_template(research_root: &Path, template: Option<&str>) -> Option<String> {
     let name = template?;
-    let path = ResearchIo::template_path(research_root, name);
+    // SEC-ragent-research-001 (SECTASKS T-014): `template_path` returns `None`
+    // for a traversal/absolute/separator name, so a rejected template simply
+    // falls back to the built-in document shape.
+    let path = ResearchIo::template_path(research_root, name)?;
     match tokio::fs::read_to_string(&path).await {
         Ok(body) => Some(body),
         Err(e) => {

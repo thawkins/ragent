@@ -84,12 +84,17 @@ pub(crate) fn strip_timeout_prefix(command: &str) -> &str {
 ///
 /// This handles simple cases but does NOT parse full bash syntax (quotes,
 /// heredocs, etc.). It's a best-effort split for permission UX.
-pub(crate) fn split_bash_command(command: &str) -> Vec<String> {
+#[must_use]
+pub fn split_bash_command(command: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
     let mut chars = command.chars().peekable();
     let mut in_single_quote = false;
     let mut in_double_quote = false;
+    // Tracks `$( ... )` so a `;` inside a command substitution does not split
+    // the outer command into a second, separately-judged sub-command
+    // (SEC-ragent-tools-core-002 follow-up, SECTASKS T-021).
+    let mut substitution_depth = 0usize;
 
     // Flush a completed sub-command into `parts` (trim + strip timeout prefix).
     let mut flush = |current: &mut String| {
@@ -111,7 +116,17 @@ pub(crate) fn split_bash_command(command: &str) -> Vec<String> {
                 in_double_quote = !in_double_quote;
                 current.push(c);
             }
-            '&' | '|' | ';' if !in_single_quote && !in_double_quote => {
+            '$' if !in_single_quote && chars.peek() == Some(&'(') => {
+                chars.next();
+                substitution_depth += 1;
+                current.push('$');
+                current.push('(');
+            }
+            ')' if !in_single_quote && !in_double_quote && substitution_depth > 0 => {
+                substitution_depth -= 1;
+                current.push(c);
+            }
+            '&' | '|' | ';' if !in_single_quote && !in_double_quote && substitution_depth == 0 => {
                 // Check for && or ||
                 if (c == '&' || c == '|') && chars.peek() == Some(&c) {
                     chars.next(); // consume the second character
@@ -139,7 +154,8 @@ pub(crate) fn split_bash_command(command: &str) -> Vec<String> {
 
 /// Extract just the command name (first word) from a bash command string.
 /// This is used for permission checking so that "ls -la" matches against "ls" patterns.
-pub(crate) fn extract_command_name(command: &str) -> String {
+#[must_use]
+pub fn extract_command_name(command: &str) -> String {
     let trimmed = command.trim();
     // Find the first whitespace, if any
     if let Some(space_pos) = trimmed.find(char::is_whitespace) {

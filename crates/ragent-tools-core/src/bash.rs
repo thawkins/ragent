@@ -17,7 +17,7 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use tokio::io::AsyncReadExt;
@@ -176,9 +176,70 @@ fn windows_state_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Per-session scratch directory for the bash wrapper script and state file.
+///
+/// SEC-ragent-tools-core-004 (SECTASKS T-054): these files used to live directly
+/// in the shared, world-writable `/tmp`, written under the process umask
+/// (typically 0644). The state file is `export -p` output, i.e. every exported
+/// environment variable including provider API keys, and the script file is the
+/// session's command line. On a shared host any local user could read them.
+///
+/// The directory is created 0700 under `target/temp` (the project's sanctioned
+/// scratch location) and falls back to a per-uid subdirectory of the system
+/// temp directory when no `target` directory can be created.
+fn bash_scratch_dir() -> PathBuf {
+    let base = std::env::current_dir()
+        .map(|cwd| cwd.join("target").join("temp"))
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let dir = base.join("ragent-shell").join(safe_session_id("scratch"));
+    if create_private_dir(&dir).is_err() {
+        return std::env::temp_dir();
+    }
+    dir
+}
+
+/// Create `dir` (and its parents) with owner-only permissions.
+#[cfg(unix)]
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+}
+
+/// Create `dir` (and its parents).
+#[cfg(not(unix))]
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
+}
+
+/// Restrict `path` to owner-only read/write where the platform supports it.
+#[must_use = "the restriction is the point; use this for its side effect"]
+pub fn restrict_to_owner(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            let mut perms = metadata.permissions();
+            if perms.mode() & 0o777 != 0o600 {
+                perms.set_mode(0o600);
+                return std::fs::set_permissions(path, perms).is_ok();
+            }
+            return true;
+        }
+        false
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        true
+    }
+}
+
 /// Return the path of the persistent state file for the given session.
 ///
-/// On Unix: `/tmp/ragent_shell_<session_id>.state`
+/// On Unix: `<working_dir>/target/temp/ragent-shell/<session>.state` (mode 0600)
 /// On Windows: `%LOCALAPPDATA%\ragent\shell\ragent_shell_<session_id>.state`
 #[must_use]
 pub fn state_file_path(session_id: &str) -> String {
@@ -192,10 +253,22 @@ pub fn state_file_path(session_id: &str) -> String {
                 ))
                 .to_string_lossy()
                 .into_owned(),
-            Err(_) => format!("/tmp/ragent_shell_{}.state", safe_session_id(session_id)),
+            Err(_) => bash_scratch_dir()
+                .join(format!(
+                    "ragent_shell_{}.state",
+                    safe_session_id(session_id)
+                ))
+                .to_string_lossy()
+                .into_owned(),
         }
     } else {
-        format!("/tmp/ragent_shell_{}.state", safe_session_id(session_id))
+        bash_scratch_dir()
+            .join(format!(
+                "ragent_shell_{}.state",
+                safe_session_id(session_id)
+            ))
+            .to_string_lossy()
+            .into_owned()
     }
 }
 
@@ -226,7 +299,9 @@ fn script_file_path(session_id: &str, shell: &ShellType) -> Result<String> {
         let dir = windows_state_dir()?;
         Ok(dir.join(name).to_string_lossy().into_owned())
     } else {
-        Ok(format!("/tmp/{name}"))
+        // SEC-ragent-tools-core-004 (SECTASKS T-054): never write the session's
+        // command line into the shared world-writable temp directory.
+        Ok(bash_scratch_dir().join(name).to_string_lossy().into_owned())
     }
 }
 
@@ -312,63 +387,15 @@ const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
 // with the entry followed by a space (so "ls" matches "ls -la", "git" matches "git status", etc.).
 const SAFE_COMMANDS: &[&str] = &[
     // --- File management ---
-    "ls",
-    "cd",
-    "pwd",
-    "mkdir",
-    "touch",
-    "cp",
-    "mv",
+    "ls", "cd", "pwd", "mkdir", "touch", "cp", "mv",
     // NOTE: "rm" is intentionally excluded — prefix matching cannot distinguish
     // safe "rm file.txt" from destructive "rm -rf /". DENIED_PATTERNS blocks the
     // destructive variants; individual rm calls go through normal permission flow.
     // --- File reading & search ---
-    "cat",
-    "head",
-    "tail",
-    "grep",
-    "egrep",
-    "fgrep",
-    "find",
-    "rg", // ripgrep
-    "wc",
-    // --- Version control ---
-    "git", // covers all git subcommands (clone, add, commit, push, pull, status, diff, log …)
-    "gh",  // GitHub CLI
-    // --- Build / package management ---
-    "cargo",
-    "rustc",
-    "rustfmt",
-    "clippy-driver",
-    "npm",
-    "yarn",
-    "pnpm",
-    "node",
-    "npx",
-    "python3",
-    "python",
-    "pip",
-    "pip3",
-    "make",
-    "docker-compose",
-    // --- Text / data utilities ---
-    "echo",
-    "printf",
-    "chmod",
-    "jq", // JSON query/processing
-    "yq", // YAML query/processing
-    "sed",
-    "awk",
-    "sort",
-    "uniq",
-    "cut",
-    "tr",
-    "xargs",
-    "date",
-    "which",
-    "tree",
-    "diff",
-    "patch",
+    "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", // ripgrep
+    "wc", "which", "tree", "diff", "file",
+    // --- Text formatting (read-only, no argument-driven execution) ---
+    "echo", "printf", "sort", "uniq", "cut", "tr", "date",
 ];
 
 // Banned commands: these are never allowed (unless YOLO mode enabled).
@@ -491,9 +518,31 @@ const DENIED_PATTERNS: &[&str] = &[
 ];
 
 /// Check if command is in the safe whitelist (exact match or with allowed args).
+///
+/// SEC-ragent-tools-core-002 (SECTASKS T-021): the whitelist is limited to
+/// genuinely read-only commands and never auto-approves an interpreter,
+/// build tool, or argument-taking executor. Any command containing a shell
+/// separator (`;`, `|`, `&`, a backtick, `$(`) is never considered safe,
+/// because the whitelist only inspects the first token and the separator
+/// would let a payload follow a whitelisted prefix. Interpreter invocations
+/// (`python3`, `node`, `sh`, `awk`, `sed`, ...) are deliberately absent and
+/// therefore always go through the normal permission gate.
 #[must_use]
 pub fn is_safe_command(cmd: &str) -> bool {
     let trimmed = cmd.trim();
+    // A separator, command substitution, or process substitution means the
+    // command is a compound statement, not a single whitelisted invocation.
+    if trimmed.contains(';')
+        || trimmed.contains('|')
+        || trimmed.contains('&')
+        || trimmed.contains('`')
+        || trimmed.contains("$(")
+        || trimmed.contains('\n')
+        || trimmed.contains('>')
+        || trimmed.contains('<')
+    {
+        return false;
+    }
     SAFE_COMMANDS.iter().any(|safe| {
         trimmed == *safe
             || trimmed
@@ -996,6 +1045,8 @@ pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path
         tracing::info!("Safe bash command auto-approved");
     }
 
+    // SEC-ragent-tools-core-002 (SECTASKS T-021): banned-command check runs
+    // before any whitelist-derived decision (deny-first ordering).
     if contains_banned_command(command) {
         if ragent_config::yolo::is_enabled() {
             tracing::warn!("YOLO mode: allowing banned command tool");
@@ -1462,7 +1513,14 @@ impl Tool for BashTool {
         }
 
         // ── Security checks (all 7 layers, shell-agnostic) ───────────────
-        if is_safe_command(command) {
+        //
+        // SEC-ragent-tools-core-002 (SECTASKS T-021): the banned-command list
+        // is consulted BEFORE the safe-command whitelist. Previously the
+        // whitelist was evaluated first, so a whitelisted prefix could carry a
+        // banned tool past the check (`python3 -c "...curl..."` matched the
+        // "python3" prefix and short-circuited). Ordering is now deny-first.
+        let safe_command = is_safe_command(command);
+        if safe_command {
             tracing::info!("Safe bash command auto-approved");
         }
 
@@ -1543,6 +1601,9 @@ impl Tool for BashTool {
         // Write the user command to the temporary script file.
         std::fs::write(&script_file, command)
             .context("Failed to write command to temporary script file")?;
+        // SEC-ragent-tools-core-004 (SECTASKS T-054): the state file holds
+        // `export -p` output (API keys), so both scratch files are owner-only.
+        let _ = restrict_to_owner(Path::new(&script_file));
 
         // Build the appropriate wrapper script for the detected shell.
         let wrapper = match shell {
@@ -1662,6 +1723,9 @@ impl Tool for BashTool {
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
         // After execution, read the saved cwd and publish ShellCwdChanged.
+        // The state file is `export -p` output (SEC-ragent-tools-core-004 /
+        // SECTASKS T-054), so restrict it before anything can read it.
+        let _ = restrict_to_owner(Path::new(&state_file));
         if let Ok(state_content) = std::fs::read_to_string(&state_file)
             && let Some(cwd) = parse_cwd_from_state(&state_content)
         {
@@ -1695,6 +1759,12 @@ impl Tool for BashTool {
                     partial.push_str(&output.partial_stderr);
                 }
                 let partial = truncate_output(partial);
+                // SEC-ragent-tools-core-005 (SECTASKS T-042): the partial
+                // buffer is raw command output - a command that prints a
+                // credential and then stalls (`gh auth token; sleep 600`) would
+                // otherwise embed it in the tool result, which is persisted to
+                // SQLite and forwarded to the provider. Redact before it leaves.
+                let partial = crate::sanitize::redact_secrets(&partial);
                 let partial_note = if partial.is_empty() {
                     " No output was captured before the timeout.".to_string()
                 } else {
@@ -1728,6 +1798,10 @@ impl Tool for BashTool {
                 }
 
                 let content = truncate_output(content);
+                // SEC-ragent-tools-core-005 (SECTASKS T-042): redact secrets
+                // from the normal completion path too - the content is captured
+                // into the session store and re-sent to the model.
+                let content = crate::sanitize::redact_secrets(&content).to_string();
                 let line_count = content.lines().count();
                 Ok(ToolOutput {
                     content: format!(

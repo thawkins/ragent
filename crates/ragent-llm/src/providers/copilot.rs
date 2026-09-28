@@ -523,6 +523,23 @@ impl LlmClient for CopilotClient {
 
                 super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
 
+                // SEC-ragent-llm-004 (SECTASKS T-028): fail the stream when a
+                // peer dribbles bytes without ever emitting a newline instead
+                // of letting the accumulation buffer grow without bound.
+                if super::http_client::sse_buffer_exceeded(&buffer) {
+                    tracing::warn!(
+                        limit = super::http_client::MAX_SSE_BUFFER_BYTES,
+                        "SSE accumulation buffer exceeded the cap; aborting the stream"
+                    );
+                    yield StreamEvent::Error {
+                        message: format!(
+                            "SSE buffer exceeded {} bytes without a complete frame",
+                            super::http_client::MAX_SSE_BUFFER_BYTES
+                        ),
+                    };
+                    return;
+                }
+
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
                     if line.is_empty() {
@@ -1057,7 +1074,11 @@ async fn discover_api_base_multi_source(primary_token: &str) -> Option<String> {
 }
 
 /// Response from the Copilot token exchange endpoint.
-#[derive(Debug, Deserialize)]
+///
+/// `Debug` is implemented by hand: the derived form would print the
+/// short-lived session JWT verbatim into any `tracing::debug!(.. = ?resp)`
+/// field (SEC-ragent-llm-007 / SECTASKS T-062).
+#[derive(Deserialize)]
 struct CopilotTokenResponse {
     /// Short-lived Copilot session JWT.
     token: String,
@@ -1066,6 +1087,16 @@ struct CopilotTokenResponse {
     /// Plan-specific API endpoints (may include `api` base URL).
     #[serde(default)]
     endpoints: Option<CopilotTokenEndpoints>,
+}
+
+impl std::fmt::Debug for CopilotTokenResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CopilotTokenResponse")
+            .field("token", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .field("endpoints", &self.endpoints)
+            .finish()
+    }
 }
 
 /// Endpoints returned in the Copilot token exchange response.

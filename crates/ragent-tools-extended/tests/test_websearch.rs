@@ -22,6 +22,8 @@ fn ctx() -> ToolContext {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -39,6 +41,8 @@ fn ctx_with_tavily_key(key: &str) -> ToolContext {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 

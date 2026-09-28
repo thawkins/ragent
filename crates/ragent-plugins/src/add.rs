@@ -201,7 +201,12 @@ pub fn add(
     };
 
     let id = parsed.descriptor.id.clone();
-    let dest_dir = dest_store.join(&id);
+    // SEC-ragent-plugins-002 (T-002): the id becomes a directory name and may
+    // be recursively deleted below, so it is confined to the store root before
+    // it is used as a path. The manifest parsers already reject a non-component
+    // id, but the sink re-asserts containment so a future parser change cannot
+    // silently reintroduce an arbitrary write/delete primitive.
+    let dest_dir = confined_dest_dir(&dest_store, &id)?;
     if dest_dir.exists() {
         if !force {
             cleanup_staging(&staging, &staging_root);
@@ -340,23 +345,55 @@ pub fn parse_git_source(source: &str) -> Option<GitSource> {
 }
 
 /// A git ref, treating an empty value or `HEAD` as "the default branch".
+///
+/// The ref is validated against a safe charset before it can reach `git`:
+/// a `git+` source is untrusted content (it is emitted from a marketplace
+/// document fetched over the network or typed by a social-engineered user),
+/// and `git` parses a leading `-` as an *option*, not a positional. Options
+/// such as `--upload-pack=<cmd>` execute a program, which escapes the plugin
+/// sandbox entirely (SEC-ragent-plugins-001). Anything that is not
+/// `[A-Za-z0-9._/-]+` — and anything beginning with `-` — is refused.
 fn git_ref(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("HEAD") {
         None
-    } else {
+    } else if is_safe_git_argument(trimmed) {
         Some(trimmed.to_string())
+    } else {
+        None
     }
 }
 
 /// A repository-relative subpath, normalised without a leading `./`.
+///
+/// Validated with the same charset as [`git_ref`]: the subpath reaches
+/// `git sparse-checkout set <subpath>`, where a leading `-` would again be
+/// parsed as an option (SEC-ragent-plugins-001).
 fn git_subpath(raw: &str) -> Option<String> {
     let trimmed = raw.trim().trim_start_matches("./");
     if trimmed.is_empty() {
         None
-    } else {
+    } else if is_safe_git_argument(trimmed) && !trimmed.contains("..") {
         Some(trimmed.to_string())
+    } else {
+        None
     }
+}
+
+/// Return `true` when `value` is safe to hand to `git` as a positional
+/// argument: a non-empty `[A-Za-z0-9._/-]` string that does not begin with
+/// `-` (which git would parse as an option) and contains no `..` segment.
+///
+/// See SEC-ragent-plugins-001: without this gate, a `git+` ref of
+/// `--upload-pack=/bin/sh -c true` reaches `Command::new("git")` and executes
+/// a program with the user's privileges.
+fn is_safe_git_argument(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('-')
+        && !value.contains("..")
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
 }
 
 /// Materialise a marketplace-inline manifest for a manifest-less stub.
@@ -405,14 +442,17 @@ fn git_clone_stage(source: &str, staging: &Path) -> Result<PathBuf, AddError> {
         None,
     )?;
     if let Some(ref_name) = spec.ref_name.as_deref() {
+        // `--` terminates option parsing: even though `git_ref` already rejects
+        // a leading `-`, the separator keeps that invariant enforced by git
+        // itself if the validator is ever relaxed (SEC-ragent-plugins-001).
         git_run(
-            &["fetch", "--depth", "1", "origin", ref_name],
+            &["fetch", "--depth", "1", "--", "origin", ref_name],
             Some(&repo_dir),
         )?;
-        git_run(&["checkout", "FETCH_HEAD"], Some(&repo_dir))?;
+        git_run(&["checkout", "--", "FETCH_HEAD"], Some(&repo_dir))?;
     }
     if let Some(subpath) = spec.subpath.as_deref() {
-        git_run(&["sparse-checkout", "set", subpath], Some(&repo_dir))?;
+        git_run(&["sparse-checkout", "set", "--", subpath], Some(&repo_dir))?;
     }
 
     let root = match spec.subpath.as_deref() {
@@ -423,6 +463,34 @@ fn git_clone_stage(source: &str, staging: &Path) -> Result<PathBuf, AddError> {
         return Err(AddError::NotAPlugin(root.display().to_string()));
     }
     Ok(root)
+}
+
+/// Join a plugin id onto the store root, refusing anything that is not a
+/// single safe directory component inside that root.
+///
+/// A plugin id is a path-shaped value that arrives from untrusted content (a
+/// manifest fetched from a marketplace or a local directory the user was
+/// talked into installing). `Path::join` honours `..` segments and *replaces*
+/// the base entirely when the argument is absolute, so an id of
+/// `../../../../home/user/.ssh` or `/home/user/.config/autostart` would write
+/// — and, on `--force`, recursively delete — outside the store
+/// (SEC-ragent-plugins-002). Only `[A-Za-z0-9._-]+` is accepted.
+fn confined_dest_dir(store: &Path, id: &str) -> Result<PathBuf, AddError> {
+    let mut components = Path::new(id).components();
+    let single_normal =
+        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
+    if id.is_empty()
+        || !single_normal
+        || id.contains('\\')
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(AddError::Io(format!(
+            "plugin add: refusing plugin id {id:?}; an id must be a single component matching [A-Za-z0-9._-]+"
+        )));
+    }
+    Ok(store.join(id))
 }
 
 /// Run one non-interactive `git` invocation, returning a contained error on a

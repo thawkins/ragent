@@ -198,7 +198,89 @@ async fn health() -> &'static str {
 
 async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
     let config = state.config.read().await;
-    Json(config.clone())
+    // SEC-ragent-server-001 (SECTASKS T-015): never return a credential in a
+    // response body. `Config` derives `Serialize` with no `skip_serializing`
+    // on any secret field, so serialising it directly would hand every stored
+    // API key / PAT / bot token / OAuth client secret to any authenticated
+    // caller. Serialise, then replace each credential value in place.
+    let mut value = match serde_json::to_value(&*config) {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to serialise config for GET /config");
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to serialise configuration".to_string(),
+            )
+            .into_response();
+        }
+    };
+    redact_config_secrets(&mut value);
+    Json(value).into_response()
+}
+
+/// Placeholder written in place of every credential in a config payload.
+const REDACTED: &str = "<redacted>";
+
+/// Replace every credential value in a serialised [`Config`] with
+/// [`REDACTED`].
+///
+/// SEC-ragent-server-001 (SECTASKS T-015). The set of paths mirrors the
+/// credential fields the config schema can hold: the search-engine API keys,
+/// the GitLab PAT, the Telegram bot token, the Discord webhook URL, and the
+/// Gmail OAuth client secret. Anything not on this list is returned as-is.
+fn redact_config_secrets(value: &mut serde_json::Value) {
+    /// Mask `object[key]` when it is a non-empty string.
+    fn mask(object: &mut serde_json::Value, key: &str) {
+        let Some(map) = object.as_object_mut() else {
+            return;
+        };
+        if let Some(entry) = map.get_mut(key) {
+            let is_present = entry
+                .as_str()
+                .is_some_and(|s| !s.trim().is_empty() && s != REDACTED);
+            if is_present {
+                *entry = serde_json::Value::String(REDACTED.to_string());
+            }
+        }
+    }
+
+    const TOP_LEVEL: &[&str] = &[
+        "tavily_api_key",
+        "langsearch_api_key",
+        "perplexity_api_key",
+        "exa_api_key",
+        "serper_api_key",
+    ];
+    for key in TOP_LEVEL {
+        mask(value, key);
+    }
+
+    // Nested credential holders, walked only to depth 2 so a deeply nested
+    // attacker-controlled key cannot make the walk expensive.
+    for section in ["gitlab", "gmail"] {
+        if let Some(node) = value.get_mut(section) {
+            for key in ["token", "client_secret", "client_id", "refresh_token"] {
+                mask(node, key);
+            }
+        }
+    }
+    if let Some(channels) = value.get_mut("channels") {
+        if let Some(telegram) = channels.get_mut("telegram") {
+            mask(telegram, "bot_token");
+        }
+        if let Some(discord) = channels.get_mut("discord") {
+            mask(discord, "webhook_url");
+        }
+    }
+    if let Some(provider) = value.get_mut("provider") {
+        if let Some(map) = provider.as_object_mut() {
+            for (_, entry) in map.iter_mut() {
+                for key in ["api_key", "token"] {
+                    mask(entry, key);
+                }
+            }
+        }
+    }
 }
 
 async fn get_providers(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {

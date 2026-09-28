@@ -845,9 +845,75 @@ impl CodeIndex {
             self.project_root.join(path)
         };
 
+        // SEC-ragent-codeindex-001 (SECTASKS T-010): the incremental path is
+        // driven by filesystem watcher events, which `notify` produces with
+        // `follow_links(true)`. A symlinked directory inside the repository
+        // therefore surfaces paths whose canonical target is outside the
+        // project, and an absolute event path bypasses `strip_prefix` entirely.
+        // Canonicalise and refuse anything that resolves outside the root.
+        let root_canonical = self
+            .project_root
+            .canonicalize()
+            .unwrap_or_else(|_| self.project_root.clone());
+        match abs_path.canonicalize() {
+            Ok(canonical) => {
+                if !canonical.starts_with(&root_canonical) {
+                    debug!(
+                        "index_file: refusing path outside the project root: {}",
+                        abs_path.display()
+                    );
+                    return Ok(());
+                }
+                if std::fs::symlink_metadata(&abs_path)
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false)
+                {
+                    debug!(
+                        "index_file: refusing symlinked path: {}",
+                        abs_path.display()
+                    );
+                    return Ok(());
+                }
+            }
+            Err(e) => {
+                debug!(
+                    "index_file: skipping unreadable path {}: {e}",
+                    abs_path.display()
+                );
+                return Ok(());
+            }
+        }
+
+        // SEC-ragent-codeindex-002 (SECTASKS T-010): the `max_file_size` cap
+        // was enforced only on the full-reindex path (`scanner::process_file`),
+        // so a single watcher event for a large file (a build artefact, a
+        // database dump, `dd if=/dev/zero of=big.bin`) read the whole file into
+        // memory on a background thread. Apply the same policy here.
+        let size = std::fs::metadata(&abs_path).map(|m| m.len()).unwrap_or(0);
+        if size == 0 || size > self.config.scan_config.max_file_size {
+            debug!(
+                "index_file: skipping file of {size} bytes (limit {}): {}",
+                self.config.scan_config.max_file_size,
+                abs_path.display()
+            );
+            return Ok(());
+        }
+
         // ── Read and hash the file ────────────────────────────────────────
         let content = std::fs::read(&abs_path)
             .with_context(|| format!("cannot read file: {}", abs_path.display()))?;
+        // SEC-ragent-codeindex-005 (SECTASKS T-060): re-check the size against
+        // the bytes actually read - the metadata above is advisory, so a file
+        // that grows between the stat and the read would otherwise slip past
+        // the cap.
+        if content.len() as u64 > self.config.scan_config.max_file_size {
+            debug!(
+                "index_file: skipping file that grew past the cap ({} bytes): {}",
+                content.len(),
+                abs_path.display()
+            );
+            return Ok(());
+        }
         let hash = scanner::hash_content(&content);
         #[allow(clippy::naive_bytecount)]
         let line_count = content.iter().filter(|&&b| b == b'\n').count() as u64;

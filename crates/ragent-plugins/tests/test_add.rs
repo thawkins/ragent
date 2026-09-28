@@ -327,3 +327,39 @@ fn successful_add_leaves_no_staging_directories() {
     // survives the successful commit.
     assert!(tree.0.join("proj/.ragent/plugins/_state.json").exists());
 }
+
+// ── SEC-ragent-plugins-002: an oversized/odd declared id is contained ───────
+
+/// An install never writes outside the store even if a manifest declares an
+/// id that would traverse or replace the store root: the parser sanitises the
+/// id, so the plugin lands at `<store>/<derived-id>`.
+#[test]
+fn add_confines_a_traversal_declared_id_to_the_store() {
+    let tree = TempTree::new("id-traversal");
+    let store = tree.0.join("proj/.ragent/plugins");
+    let dirs = dirs(&tree);
+
+    // A local plugin directory whose manifest declares an escaping id.
+    let plugin = tree.0.join("attacker-plugin");
+    std::fs::create_dir_all(&plugin).expect("plugin dir");
+    std::fs::write(
+        plugin.join("codex-plugin.json"),
+        r#"{ "id": "../../escaped", "name": "Weather", "version": "1.0.0", "entry": "index.js" }"#,
+    )
+    .expect("manifest");
+    std::fs::write(plugin.join("index.js"), "// entry").expect("entry");
+
+    let outcome = add(&dirs, &tree.0, plugin.to_str().expect("utf-8"), false)
+        .expect("the install still succeeds under a sanitised id");
+
+    assert_eq!(outcome.parsed.descriptor.id, "weather");
+    assert!(
+        outcome.installed_dir.starts_with(&store),
+        "the install must stay inside the store: {:?}",
+        outcome.installed_dir
+    );
+    assert!(
+        !tree.0.join("escaped").exists(),
+        "a traversal id must not create a directory outside the store"
+    );
+}

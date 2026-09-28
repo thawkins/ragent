@@ -38,12 +38,10 @@ fn test_push_writes_jsonl_format() {
     let team_dir = team_dir_for(&dir, "jsonl-team");
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new(
-            "lead",
-            "tm-001",
-            MessageType::Message,
-            "hello",
-        ))
+        .push(
+            MailboxMessage::new("lead", "tm-001", MessageType::Message, "hello")
+                .with_sender_session("lead-session"),
+        )
         .expect("push");
 
     let path = mailbox_path(&team_dir, "tm-001");
@@ -118,12 +116,10 @@ fn test_legacy_file_migrates_to_jsonl_on_push() {
 
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new(
-            "lead",
-            "tm-001",
-            MessageType::Message,
-            "new body",
-        ))
+        .push(
+            MailboxMessage::new("lead", "tm-001", MessageType::Message, "new body")
+                .with_sender_session("lead-session"),
+        )
         .expect("push after legacy");
 
     let path = mailbox_path(&team_dir, "tm-001");
@@ -154,23 +150,19 @@ fn test_push_is_append_only_after_jsonl() {
     let team_dir = team_dir_for(&dir, "append-team");
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new(
-            "lead",
-            "tm-001",
-            MessageType::Message,
-            "first",
-        ))
+        .push(
+            MailboxMessage::new("lead", "tm-001", MessageType::Message, "first")
+                .with_sender_session("lead-session"),
+        )
         .expect("first push");
 
     let path = mailbox_path(&team_dir, "tm-001");
     let raw_before = std::fs::read_to_string(&path).expect("read");
     mailbox
-        .push(MailboxMessage::new(
-            "lead",
-            "tm-001",
-            MessageType::Message,
-            "second",
-        ))
+        .push(
+            MailboxMessage::new("lead", "tm-001", MessageType::Message, "second")
+                .with_sender_session("lead-session"),
+        )
         .expect("second push");
     let raw_after = std::fs::read_to_string(&path).expect("read again");
 
@@ -190,19 +182,15 @@ fn test_jsonl_reader_skips_blank_lines() {
     let team_dir = team_dir_for(&dir, "blank-team");
 
     // Build a JSONL body with a blank line in the middle.
-    let m1 = serde_json::to_string(&MailboxMessage::new(
-        "lead",
-        "tm-001",
-        MessageType::Message,
-        "one",
-    ))
+    let m1 = serde_json::to_string(
+        &MailboxMessage::new("lead", "tm-001", MessageType::Message, "one")
+            .with_sender_session("lead-session"),
+    )
     .unwrap();
-    let m2 = serde_json::to_string(&MailboxMessage::new(
-        "lead",
-        "tm-001",
-        MessageType::Message,
-        "two",
-    ))
+    let m2 = serde_json::to_string(
+        &MailboxMessage::new("lead", "tm-001", MessageType::Message, "two")
+            .with_sender_session("lead-session"),
+    )
     .unwrap();
     let body = format!("{m1}\n\n{m2}\n");
     write_raw_mailbox(&team_dir, "tm-001", &body);
@@ -227,12 +215,10 @@ fn test_mark_all_read_works_on_jsonl() {
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     for content in ["a", "b", "c"] {
         mailbox
-            .push(MailboxMessage::new(
-                "lead",
-                "tm-001",
-                MessageType::Message,
-                content,
-            ))
+            .push(
+                MailboxMessage::new("lead", "tm-001", MessageType::Message, content)
+                    .with_sender_session("lead-session"),
+            )
             .expect("push");
     }
 

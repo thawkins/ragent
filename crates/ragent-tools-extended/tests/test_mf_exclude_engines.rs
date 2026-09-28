@@ -59,6 +59,8 @@ fn ctx() -> ToolContext {
         code_index: None,
         config: None,
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 
@@ -166,6 +168,8 @@ fn mf_search_orchestrator_with_optional_key_and_exclusion() {
         code_index: None,
         config: Some(Arc::new(config)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     };
     let orchestrator = MfSearchTool::build_orchestrator(&ctx);
     assert_eq!(orchestrator.engine_count(), 3);

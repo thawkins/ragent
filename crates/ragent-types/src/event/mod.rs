@@ -1314,7 +1314,22 @@ impl EventBus {
         let tag = event.session_id().and_then(|sid| {
             let step = self.current_step(sid);
             if step > 0 {
-                let short_id = &sid[sid.len().saturating_sub(8)..];
+                // SEC-ragent-types-005 (SECTASKS T-035): the session id is an
+                // unvalidated `String` supplied by whoever builds the event, so
+                // slicing the last 8 *bytes* panicked whenever `len - 8` landed
+                // inside a multibyte character. Take up to the last 8
+                // characters instead, using the char-boundary-safe helper so a
+                // non-ASCII id can never trip a range index.
+                let short_id: String = {
+                    let start =
+                        crate::strutil::floor_char_boundary(sid, sid.len().saturating_sub(8));
+                    let tail = &sid[start..];
+                    if tail.chars().count() > 8 {
+                        tail.chars().skip(tail.chars().count() - 8).collect()
+                    } else {
+                        tail.to_string()
+                    }
+                };
                 Some(format!("[{short_id}:{step}]"))
             } else {
                 None

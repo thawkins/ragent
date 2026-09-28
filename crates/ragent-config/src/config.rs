@@ -1582,10 +1582,14 @@ impl Config {
         }
 
         // Project config: ./.ragent/ragent.json
+        // SEC-ragent-config-001/002/003 (T-011): repository content is
+        // untrusted - merge it with the project-local guard so it cannot
+        // enable YOLO, widen allow-lists/roots, weaken deny rules, redirect
+        // telemetry, or inject hooks.
         let project_path = PathBuf::from(".ragent").join("ragent.json");
         if project_path.exists() {
             let overlay = Self::load_file(&project_path)?;
-            config = Self::merge(config, overlay);
+            config = Self::merge_project(config, overlay);
             config.config_paths.push(project_path.clone());
             loaded = true;
         }
@@ -2101,7 +2105,18 @@ impl Config {
             .clamp(MIN_INPUT_QUEUE_CAPACITY, MAX_INPUT_QUEUE_CAPACITY)
     }
 
-    /// Deep merge two configs, with overlay taking precedence for set fields.
+    /// Deep merge two untrusted configs, with overlay taking precedence for set
+    /// fields.
+    ///
+    /// SEC-ragent-config-001/002/003 (SECTASKS T-011): a config file that lives
+    /// in the working directory (`.ragent/ragent.json`) is repository content —
+    /// untrusted — and must not be able to widen privileges. Callers merging a
+    /// project-local overlay must use [`Config::merge_project`], which strips
+    /// the privilege-widening keys first. This method applies no such
+    /// restriction and is intended for user-owned/operator sources only
+    /// (the user-global config, `--config`, `RAGENT_CONFIG`, and
+    /// `RAGENT_CONFIG_CONTENT`).
+    ///
     /// # Examples
     ///
     /// ```
@@ -2115,7 +2130,96 @@ impl Config {
     /// assert_eq!(merged.username.as_deref(), Some("alice"));
     /// ```
     #[must_use]
-    pub fn merge(mut base: Self, overlay: Self) -> Self {
+    pub fn merge(base: Self, overlay: Self) -> Self {
+        Self::merge_inner(base, overlay)
+    }
+
+    /// Merge a project-local (untrusted) config overlay into `base`.
+    ///
+    /// SEC-ragent-config-001/002/003 (SECTASKS T-011): the overlay is repository
+    /// content, so the privilege-widening keys it carries are stripped before
+    /// the merge:
+    ///
+    /// - `yolo` may not be enabled by the project (a project file cannot turn
+    ///   off the interactive permission prompts);
+    /// - `permission` rules that grant (`allow`) are dropped, so a project
+    ///   cannot override a user-global `deny` (deny/ask entries are kept — a
+    ///   project may always *tighten*);
+    /// - `bash.allowlist`, `bash.denylist`, `dirs.allowlist`,
+    ///   `dirs.denylist`, and `dirs.allowed_roots` may not be widened, so a
+    ///   project cannot auto-approve commands/paths or extend the tool escape
+    ///   roots beyond the working directory;
+    /// - `telemetry` is dropped entirely, so a project cannot enable telemetry
+    ///   or point the OTLP endpoint at an attacker host (SEC-ragent-telemetry-002);
+    /// - `hooks` contributed by a project are dropped: a project hook runs
+    ///   `sh -c` without ever entering the permission system.
+    ///
+    /// Rejected keys are logged at `warn!` so the behaviour is not silent.
+    #[must_use]
+    pub fn merge_project(base: Self, mut overlay: Self) -> Self {
+        let mut rejected: Vec<&'static str> = Vec::new();
+
+        if overlay.yolo {
+            overlay.yolo = false;
+            rejected.push("yolo");
+        }
+        if !overlay.permission.is_empty() {
+            let before = overlay.permission.len();
+            overlay
+                .permission
+                .retain(|rule| rule.action != crate::permission::PermissionAction::Allow);
+            if overlay.permission.len() != before {
+                rejected.push("permission (allow rules)");
+            }
+        }
+        if !overlay.bash.allowlist.is_empty() {
+            overlay.bash.allowlist.clear();
+            rejected.push("bash.allowlist");
+        }
+        if !overlay.bash.denylist.is_empty() {
+            // A project denylist *tightens*, but a hostile project can also
+            // remove nothing and only add noise; keeping it is safe, yet the
+            // union below would still admit attacker entries. Treat it as
+            // untrusted and drop it so the effective policy is the user's.
+            overlay.bash.denylist.clear();
+            rejected.push("bash.denylist");
+        }
+        if !overlay.dirs.allowlist.is_empty() {
+            overlay.dirs.allowlist.clear();
+            rejected.push("dirs.allowlist");
+        }
+        if !overlay.dirs.allowed_roots.is_empty() {
+            overlay.dirs.allowed_roots.clear();
+            rejected.push("dirs.allowed_roots");
+        }
+        let default_telemetry = crate::telemetry::TelemetryConfig::default();
+        let project_has_telemetry = overlay.telemetry.otel.enabled
+            || overlay.telemetry.otel.endpoint != default_telemetry.otel.endpoint
+            || !overlay.telemetry.otel.resource_attributes.is_empty()
+            || overlay.experimental.open_telemetry;
+        if project_has_telemetry {
+            overlay.telemetry = Default::default();
+            overlay.experimental.open_telemetry = false;
+            rejected.push("telemetry");
+        }
+        if !overlay.hooks.is_empty() {
+            overlay.hooks.clear();
+            rejected.push("hooks");
+        }
+
+        if !rejected.is_empty() {
+            tracing::warn!(
+                keys = %rejected.join(", "),
+                "Ignoring privilege-widening keys from the project-local \
+                 .ragent/ragent.json; move them to the user-global config if \
+                 they are intended"
+            );
+        }
+
+        Self::merge_inner(base, overlay)
+    }
+
+    fn merge_inner(mut base: Self, overlay: Self) -> Self {
         if overlay.username.is_some() {
             base.username = overlay.username;
         }

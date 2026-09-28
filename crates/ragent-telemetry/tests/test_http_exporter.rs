@@ -119,6 +119,26 @@ fn test_grpc_exporter_shutdown_is_clean() {
 /// A custom gRPC endpoint is preserved in the config accessor.
 #[test]
 fn test_grpc_exporter_custom_endpoint_preserved() {
+    // SEC-ragent-telemetry-001 (SECTASKS T-019): a non-loopback cleartext
+    // gRPC endpoint is now refused, so the preserved-endpoint case uses TLS.
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "https://my-grpc-collector:9999".to_string(),
+        protocol: OtelProtocol::Grpc,
+        ..Default::default()
+    };
+
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let sub = rt.block_on(async { TelemetrySubsystem::new(config).expect("should construct") });
+
+    assert_eq!(sub.config().endpoint, "https://my-grpc-collector:9999");
+    assert_eq!(sub.config().protocol, OtelProtocol::Grpc);
+}
+
+/// SEC-ragent-telemetry-001 (SECTASKS T-019): a non-loopback `http://` gRPC
+/// endpoint is rejected instead of being dialled in cleartext.
+#[test]
+fn test_grpc_exporter_rejects_cleartext_remote_endpoint() {
     let config = OtelConfig {
         enabled: true,
         endpoint: "http://my-grpc-collector:9999".to_string(),
@@ -127,10 +147,26 @@ fn test_grpc_exporter_custom_endpoint_preserved() {
     };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-    let sub = rt.block_on(async { TelemetrySubsystem::new(config).expect("should construct") });
+    let result = rt.block_on(async { TelemetrySubsystem::new(config) });
+    assert!(
+        result.is_err(),
+        "cleartext remote gRPC endpoint must be refused"
+    );
+}
 
-    assert_eq!(sub.config().endpoint, "http://my-grpc-collector:9999");
-    assert_eq!(sub.config().protocol, OtelProtocol::Grpc);
+/// A loopback `http://` collector is still allowed (local, no on-path risk).
+#[test]
+fn test_grpc_exporter_allows_loopback_cleartext() {
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://127.0.0.1:4317".to_string(),
+        protocol: OtelProtocol::Grpc,
+        ..Default::default()
+    };
+
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let sub = rt.block_on(async { TelemetrySubsystem::new(config).expect("should construct") });
+    assert_eq!(sub.config().endpoint, "http://127.0.0.1:4317");
 }
 
 /// An HTTPS endpoint is also accepted for OTLP/gRPC (TLS via tonic).

@@ -294,6 +294,8 @@ async fn test_stock_tools_publish_provider_notice() {
         code_index: None,
         config: None,
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     };
 
     // stock_quote resolves from cache when present; with no prior cache the

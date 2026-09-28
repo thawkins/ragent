@@ -335,7 +335,14 @@ fn run_humaneval_hidden_tests(
             format!("write HumanEval script {}: {error}", script_path.display())
         })?;
 
-        let output = Command::new("python3")
+        // SEC-ragent-bench-002 (SECTASKS T-009/T-048): hard subprocess
+        // timeout; the in-script alarm is not a reliable bound.
+        let output = Command::new("timeout")
+            .arg(format!(
+                "{}s",
+                crate::exec_guard::FIXTURE_SUBPROCESS_TIMEOUT_SECS
+            ))
+            .arg("python3")
             .arg(&script_path)
             .output()
             .map_err(|error| format!("launch python3: {error}"))?;
@@ -398,6 +405,9 @@ fn run_humaneval_native_tests(
                     .iter()
                     .map(|part| part.replace("__FILENAME__", &file_name))
                     .collect::<Vec<_>>();
+                // SEC-ragent-bench-001 (SECTASKS T-009): the fixture supplies
+                // the program; it must be an allowlisted toolchain binary.
+                crate::exec_guard::validate_fixture_command(&rendered_parts)?;
                 let Some(program) = rendered_parts.first() else {
                     return Err("HumanEval command list was empty".to_string());
                 };

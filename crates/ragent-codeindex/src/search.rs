@@ -101,6 +101,29 @@ pub struct FtsIndex {
 /// updates, and allocated once per process now rather than per batch.
 const WRITER_HEAP_BYTES: usize = 15_000_000;
 
+/// Remove every regular file directly inside the FTS index directory.
+///
+/// SEC-ragent-codeindex-007 (SECTASKS T-060): used by the recovery branches of
+/// [`FtsIndex::open_or_create`]. Removal failures are surfaced (the previous
+/// `let _ =` discarded them, so a failed wipe silently left a corrupt index in
+/// place), and the caller has already refused a symlinked directory.
+fn clear_index_dir(path: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(path)
+        .with_context(|| format!("cannot read FTS index dir: {}", path.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("cannot read FTS index entry in {}", path.display()))?;
+        let entry_path = entry.path();
+        std::fs::remove_file(&entry_path).with_context(|| {
+            format!(
+                "cannot remove stale FTS index file: {}",
+                entry_path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
 impl FtsIndex {
     /// Open (or create) a tantivy index on disk.
     pub fn open(path: &Path) -> Result<Self> {
@@ -353,6 +376,19 @@ impl FtsIndex {
     }
 
     fn open_or_create(path: &Path, schema: &Schema) -> Result<Index> {
+        // SEC-ragent-codeindex-007 (SECTASKS T-060): the recovery branches below
+        // wipe the directory with `remove_file` on every entry. `read_dir`
+        // follows a symlinked directory, so a repository that plants
+        // `.ragent/codeindex/fts` as a symlink to another directory would have
+        // that target's files deleted. Refuse to operate on a symlink.
+        if let Ok(meta) = std::fs::symlink_metadata(path)
+            && meta.file_type().is_symlink()
+        {
+            anyhow::bail!(
+                "refusing to open a symlinked FTS index directory: {}",
+                path.display()
+            );
+        }
         let dir = tantivy::directory::MmapDirectory::open(path)
             .with_context(|| format!("cannot open tantivy dir: {}", path.display()))?;
         let idx = match Index::open(dir) {
@@ -364,10 +400,9 @@ impl FtsIndex {
                     "existing FTS index at {} unreadable ({e}); recreating",
                     path.display()
                 );
-                // Clear the directory and recreate.
-                for entry in std::fs::read_dir(path)?.flatten() {
-                    let _ = std::fs::remove_file(entry.path());
-                }
+                // Clear the directory and recreate, surfacing failures so a
+                // partially wiped index is visible instead of silently reused.
+                clear_index_dir(path)?;
                 let dir2 = tantivy::directory::MmapDirectory::open(path)
                     .with_context(|| format!("cannot reopen tantivy dir: {}", path.display()))?;
                 return Index::create(dir2, schema.clone(), Default::default())
@@ -388,9 +423,7 @@ impl FtsIndex {
             );
             drop(idx);
             // Clear the directory and recreate.
-            for entry in std::fs::read_dir(path)?.flatten() {
-                let _ = std::fs::remove_file(entry.path());
-            }
+            clear_index_dir(path)?;
             let dir2 = tantivy::directory::MmapDirectory::open(path)
                 .with_context(|| format!("cannot reopen tantivy dir: {}", path.display()))?;
             return Index::create(dir2, schema.clone(), Default::default())

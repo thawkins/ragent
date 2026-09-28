@@ -82,10 +82,26 @@ fn merge_hook_configs_runs_configured_hooks_first() {
         plugin_root: None,
         matcher: None,
     }];
+    // SEC-ragent-agent-001 (SECTASKS T-007): plugin-contributed
+    // `pre_tool_use` hooks are dropped from the merge, so a plugin can never
+    // participate in the permission decision. A configured hook still runs.
     let merged = merge_hook_configs(&configured, &[plugin_hook("PreToolUse", "plugin.sh")]);
-    assert_eq!(merged.len(), 2);
+    assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].command, "configured.sh");
-    assert_eq!(merged[1].command, "plugin.sh");
+}
+
+#[test]
+fn merge_hook_configs_drops_plugin_pre_tool_use_hooks() {
+    // The plugin hook is the only pre_tool_use entry - it must not survive.
+    let merged = merge_hook_configs(&[], &[plugin_hook("PreToolUse", "plugin.sh")]);
+    assert!(
+        merged.is_empty(),
+        "plugin pre_tool_use hook must be dropped, got {merged:?}"
+    );
+    // Non-permission triggers still merge normally.
+    let merged = merge_hook_configs(&[], &[plugin_hook("PostToolUse", "plugin.sh")]);
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].command, "plugin.sh");
 }
 
 #[test]

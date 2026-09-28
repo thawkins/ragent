@@ -211,7 +211,13 @@ pub fn parse_duration(s: &str) -> Result<i64, DurationParseError> {
         return Err(DurationParseError::Negative(num));
     }
 
-    Ok(num * secs)
+    // SEC-ragent-types-003 (SECTASKS T-035): `num` is an arbitrarily large
+    // integer prefix (`from 2020-01-01T00:00:00Z every 999999999999999mo`), and
+    // the workspace release profile does not enable `overflow-checks`, so the
+    // multiplication wrapped silently in release and panicked in debug. Surface
+    // the overflow as a parse error instead.
+    num.checked_mul(secs)
+        .ok_or_else(|| DurationParseError::InvalidNumber(num_str.to_string()))
 }
 
 /// The scheduling form of a [`CronEvent`].
@@ -337,27 +343,43 @@ impl CronSchedule {
     /// invariant violations.
     #[must_use]
     pub fn human_readable(&self) -> String {
+        // SEC-ragent-types-003 (SECTASKS T-035): `CronSchedule` derives
+        // `Deserialize` and is rebuilt from persisted rows and from archive
+        // import, so a `form`/`start_at`/`duration_secs` combination that
+        // violates the structural invariant is reachable input. Render it
+        // instead of panicking the caller that is displaying it.
         match self.form {
-            CronForm::OneShot => {
-                let ts = self.start_at.expect("one-shot schedule must have start_at");
-                format!("at {}", ts.to_rfc3339())
-            }
+            CronForm::OneShot => match self.start_at {
+                Some(ts) => format!("at {}", ts.to_rfc3339()),
+                None => "at <unspecified time> (invalid schedule)".to_string(),
+            },
             CronForm::RepeatFrom => {
-                let ts = self
+                let start = self
                     .start_at
-                    .expect("repeat_from schedule must have start_at");
-                let dur = self
-                    .duration_secs
-                    .expect("repeat_from schedule must have duration_secs");
-                format!("every {} from {}", duration_to_string(dur), ts.to_rfc3339())
+                    .map(|ts| ts.to_rfc3339())
+                    .unwrap_or_else(|| "<unspecified time>".to_string());
+                let dur = match self.positive_duration_secs() {
+                    Some(d) => duration_to_string(d),
+                    None => "<unspecified interval>".to_string(),
+                };
+                format!("every {dur} from {start}")
             }
-            CronForm::RepeatNow => {
-                let dur = self
-                    .duration_secs
-                    .expect("repeat_now schedule must have duration_secs");
-                format!("every {}", duration_to_string(dur))
-            }
+            CronForm::RepeatNow => match self.positive_duration_secs() {
+                Some(d) => format!("every {}", duration_to_string(d)),
+                None => "every <unspecified interval> (invalid schedule)".to_string(),
+            },
         }
+    }
+
+    /// The schedule's duration, but only when it is a positive value.
+    ///
+    /// SEC-ragent-types-003 (SECTASKS T-035): `duration_secs` can be absent
+    /// (invariant violation) or non-positive (which trips the `assert!` in
+    /// [`Self::advance_next_due`]). Both mean "this schedule cannot advance",
+    /// which callers now handle instead of panicking.
+    #[must_use]
+    pub fn positive_duration_secs(&self) -> Option<i64> {
+        self.duration_secs.filter(|d| *d > 0)
     }
 
     /// Compute the next-due timestamp after a fire (FR-004, FR-005).
@@ -396,13 +418,12 @@ impl CronSchedule {
         match self.form {
             CronForm::OneShot => None,
             CronForm::RepeatFrom | CronForm::RepeatNow => {
-                let duration = self
-                    .duration_secs
-                    .expect("repeating schedule must have duration_secs");
-                assert!(
-                    duration > 0,
-                    "repeating schedule must have a positive duration (FR-018)"
-                );
+                // SEC-ragent-types-003 (SECTASKS T-035): no `expect`/`assert!`.
+                // A repeating schedule whose `duration_secs` is absent or
+                // non-positive cannot advance - return `None` so the caller's
+                // existing "disable the event" branch handles it (the TUI
+                // already has that branch), rather than panicking the tick.
+                let duration = self.positive_duration_secs()?;
                 let mut next = current_next_due + chrono::Duration::seconds(duration);
                 // If we're behind (e.g. scheduler was down), skip ahead to the
                 // next future interval so we don't fire a burst of catch-up runs.
@@ -432,21 +453,25 @@ impl CronSchedule {
     /// invariant violations.
     #[must_use]
     pub fn initial_next_due(&self, now: DateTime<Utc>) -> DateTime<Utc> {
+        // SEC-ragent-types-003 (SECTASKS T-035): no `expect`. An invalid
+        // schedule has no meaningful next due time, so fall back to `now`
+        // (the event is immediately due and the caller disables it when it
+        // cannot advance).
         match self.form {
-            CronForm::OneShot => self.start_at.expect("one-shot schedule must have start_at"),
+            CronForm::OneShot => self.start_at.unwrap_or(now),
             CronForm::RepeatFrom => {
-                let start = self
-                    .start_at
-                    .expect("repeat_from schedule must have start_at");
-                let duration = self
-                    .duration_secs
-                    .expect("repeat_from schedule must have duration_secs");
+                let Some(start) = self.start_at else {
+                    return now;
+                };
+                let Some(duration) = self.positive_duration_secs() else {
+                    return now;
+                };
                 advance_to_future(start, duration, now)
             }
             CronForm::RepeatNow => {
-                let duration = self
-                    .duration_secs
-                    .expect("repeat_now schedule must have duration_secs");
+                let Some(duration) = self.positive_duration_secs() else {
+                    return now;
+                };
                 now + chrono::Duration::seconds(duration)
             }
         }
@@ -842,6 +867,13 @@ fn parse_natural_time(s: &str) -> Result<DateTime<Utc>, ()> {
         .with_timezone(&Utc))
 }
 
+/// Upper bound on how far [`advance_to_future`] will skip ahead in one step.
+///
+/// SEC-ragent-types-003 (SECTASKS T-035): roughly 100 years of seconds. Without
+/// a bound, a corrupt `duration_secs` could produce a `chrono::Duration` that
+/// panics when added to a date near the representable range.
+const MAX_ADVANCE_SECONDS: i64 = 3_153_600_000;
+
 /// Advance a past start timestamp to the next future multiple of duration.
 ///
 /// If `start >= now`, returns `start` unchanged. Otherwise, adds duration
@@ -855,10 +887,21 @@ fn advance_to_future(
         return start;
     }
 
+    if duration_secs <= 0 {
+        // SEC-ragent-types-003 (SECTASKS T-035): a non-positive duration cannot
+        // advance anything; surface the unmodified start rather than dividing
+        // by zero / multiplying into a wrap.
+        return start;
+    }
     let diff = (now - start).num_seconds();
     let intervals = diff / duration_secs;
-    // Add one more interval to ensure we're strictly in the future.
-    let advance_secs = (intervals + 1) * duration_secs;
+    // SEC-ragent-types-003 (SECTASKS T-035): `(intervals + 1) * duration_secs`
+    // wrapped silently in release. Saturate instead of overflowing.
+    let advance_secs = intervals
+        .saturating_add(1)
+        .checked_mul(duration_secs)
+        .unwrap_or(i64::MAX)
+        .min(MAX_ADVANCE_SECONDS);
     start + chrono::Duration::seconds(advance_secs)
 }
 
@@ -1526,19 +1569,44 @@ mod tests {
     }
 
     #[test]
-    fn test_advance_next_due_repeating_zero_duration_panics() {
-        // This is a structural invariant — a repeating schedule must have a
-        // nonzero duration. We test that the panic occurs rather than silent
-        // misbehavior.
+    fn test_advance_next_due_repeating_zero_duration_returns_none() {
+        // SEC-ragent-types-003 (SECTASKS T-035): a repeating schedule with a
+        // zero duration used to trip `assert!` inside `advance_next_due`, and
+        // the schedule is deserialisable from persisted/archived input. It now
+        // returns `None` so the caller can disable the event instead of the
+        // process aborting.
         let now = Utc::now();
         let sched = CronSchedule {
             form: CronForm::RepeatNow,
             start_at: None,
             duration_secs: Some(0),
         };
-        let result = std::panic::catch_unwind(|| {
-            let _ = sched.advance_next_due(now, now);
-        });
-        assert!(result.is_err(), "zero duration should panic");
+        assert_eq!(sched.advance_next_due(now, now), None);
+        assert_eq!(sched.positive_duration_secs(), None);
+        assert!(sched.human_readable().contains("invalid schedule"));
+        assert_eq!(sched.initial_next_due(now), now);
+    }
+
+    #[test]
+    fn test_advance_next_due_missing_duration_returns_none() {
+        // SEC-ragent-types-003: `duration_secs: None` on a repeating form was
+        // an `expect` panic reachable from a deserialised row.
+        let now = Utc::now();
+        let sched = CronSchedule {
+            form: CronForm::RepeatFrom,
+            start_at: Some(now - chrono::Duration::hours(1)),
+            duration_secs: None,
+        };
+        assert_eq!(sched.advance_next_due(now, now), None);
+        assert_eq!(sched.initial_next_due(now), now);
+        assert!(sched.human_readable().contains("unspecified interval"));
+    }
+
+    #[test]
+    fn test_parse_duration_rejects_overflow() {
+        // SEC-ragent-types-003: `num * secs` wrapped in release and panicked in
+        // debug; it is now a checked multiplication.
+        assert!(parse_duration("999999999999999mo").is_err());
+        assert!(parse_duration("30m").is_ok());
     }
 }

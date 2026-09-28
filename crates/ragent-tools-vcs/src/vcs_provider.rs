@@ -169,7 +169,8 @@ fn parse_github_prefixed(rest: &str) -> Result<VcsProvider, String> {
 ///   is treated as a host if it contains a `.` (domain) or `:` (port).
 /// - A full GitLab HTTPS/SSH URL — delegate to URL parsing.
 fn parse_gitlab_prefixed(rest: &str) -> Result<VcsProvider, String> {
-    let rest = rest.trim().trim_end_matches(".git"); // If the inner portion is a full URL, delegate to URL parsing.
+    let rest = rest.trim().trim_end_matches(".git");
+    // If the inner portion is a full URL, delegate to URL parsing.
     if rest.starts_with("https://") || rest.starts_with("http://") {
         return parse_gitlab_https_url(rest);
     }
@@ -189,7 +190,20 @@ fn parse_gitlab_prefixed(rest: &str) -> Result<VcsProvider, String> {
             // host + only one more segment is not enough for namespace/project.
             return Err(usage_error());
         }
-        let host = format!("https://{}", segments[0]);
+        // SEC-ragent-tools-vcs-004 (SECTASKS T-022): the host is caller-supplied
+        // and a GitLab PAT is attached to every request to it, so an
+        // attacker-chosen `gitlab:evil.example/ns/proj` would exfiltrate the
+        // token. Accept it only when it matches the configured instance origin.
+        let raw = segments[0];
+        let configured = std::env::var("GITLAB_URL").ok().filter(|u| !u.is_empty());
+        if !is_trusted_gitlab_host(raw, configured.as_deref()) {
+            return Err(format!(
+                "refusing GitLab host '{raw}': it is not the configured instance. \
+                 Set GITLAB_URL (or `gitlab.instance_url`) to that host, or use \
+                 a full https:// URL to confirm the target instance."
+            ));
+        }
+        let host = format!("https://{}", raw);
         let project_path = segments[1..].join("/");
         return Ok(VcsProvider::GitLab {
             host: Some(host),
@@ -275,6 +289,50 @@ fn parse_gitlab_ssh_url(input: &str) -> Result<VcsProvider, String> {
 /// colon)?
 fn looks_like_host(segment: &str) -> bool {
     segment.contains('.') || segment.contains(':')
+}
+
+/// Known GitLab-hosted SaaS endpoints that may be named explicitly.
+///
+/// SEC-ragent-tools-vcs-004 (SECTASKS T-022): only an explicit short host that
+/// is on the fixed allowlist is accepted without a configured instance. Every
+/// other `gitlab:<host>/...` short form must match `GITLAB_URL` (the
+/// `gitlab.instance_url` config value), so an LLM-supplied host cannot have
+/// the user's PAT attached to it.
+const ALLOWED_GITLAB_SAAS_HOSTS: &[&str] = &["gitlab.com"];
+
+/// Whether a `gitlab:<host>/...` short-form host may carry the GitLab token.
+///
+/// `configured` is the `GITLAB_URL` value, if any. A host is trusted when it
+/// is a known SaaS host, or when its host:port matches the configured instance
+/// (case-insensitive, default ports normalised).
+fn is_trusted_gitlab_host(raw_host: &str, configured: Option<&str>) -> bool {
+    let candidate = raw_host.trim().trim_end_matches('/');
+    let candidate_lower = candidate.to_ascii_lowercase();
+    if ALLOWED_GITLAB_SAAS_HOSTS.contains(&candidate_lower.as_str()) {
+        return true;
+    }
+    let Some(configured) = configured else {
+        return false;
+    };
+    let configured_origin = configured
+        .trim()
+        .trim_end_matches('/')
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    // The candidate may carry a port that the configured origin also carries
+    // (`gitlab.example.com:8443`), so compare whole origins first.
+    if configured_origin.eq_ignore_ascii_case(candidate) {
+        return true;
+    }
+    // A candidate that is only the host (no port) still matches a configured
+    // origin whose port is the default for its scheme: the token goes to the
+    // same instance either way.
+    let configured_host = configured_origin
+        .split(['/', ':'])
+        .next()
+        .unwrap_or(configured_origin);
+    let candidate_host = candidate.split(['/', ':']).next().unwrap_or(candidate);
+    configured_host.eq_ignore_ascii_case(candidate_host)
 }
 
 /// Extract the host from an HTTPS/HTTP URL or an SSH `git@host:path` input
@@ -511,9 +569,76 @@ mod tests {
         );
     }
 
+    /// SEC-ragent-tools-vcs-004 (SECTASKS T-022): the self-hosted short form is
+    /// only accepted for a host that matches the configured instance (or the
+    /// fixed SaaS allowlist), so these tests set `GITLAB_URL` for the duration
+    /// of the parse. The environment is process-global, so the helper is used
+    /// under `serial`-style discipline: each test sets and clears it around one
+    /// parse.
+    /// Serialises the `GITLAB_URL` mutation across this binary's tests.
+    ///
+    /// These tests run on multiple threads and all mutate the same process
+    /// environment variable, so without a lock one test's configured instance
+    /// can be observed by another test's parse (turning a trusted host into a
+    /// rejected one). The integration test binary in
+    /// `tests/test_parse_reverse_repo_formats.rs` holds its own lock only for
+    /// its own process, so this lock cannot be shared - the two binaries are
+    /// separate processes and do not contend.
+    static GITLAB_URL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn parse_with_configured_gitlab(configured: &str, spec: &str) -> Result<VcsProvider, String> {
+        let _lock = GITLAB_URL_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = EnvVarGuard::set("GITLAB_URL", configured);
+        parse_reverse_repo(spec)
+    }
+
+    /// Restores (or removes) an environment variable when dropped.
+    ///
+    /// Needed because `std::env::set_var` is `unsafe` under edition 2024 and
+    /// this crate forbids `unsafe`; the guard encapsulates the single
+    /// test-only mutation and restores the previous value on every exit path.
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            // `set_var` is unsafe in edition 2024; this helper is test-only and
+            // the tests using it are single-threaded for this variable.
+            // SAFETY: the caller holds the process-wide environment mutation
+            // for the duration of the guard and restores it on drop.
+            #[allow(unsafe_code)]
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // SAFETY: see `EnvVarGuard::set`.
+            #[allow(unsafe_code)]
+            unsafe {
+                match self.previous.take() {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_parse_gitlab_prefix_self_hosted() {
-        let provider = parse_reverse_repo("gitlab:gitlab.example.com/group/project").unwrap();
+        let provider = parse_with_configured_gitlab(
+            "https://gitlab.example.com",
+            "gitlab:gitlab.example.com/group/project",
+        )
+        .unwrap();
         assert_eq!(
             provider,
             VcsProvider::GitLab {
@@ -525,8 +650,11 @@ mod tests {
 
     #[test]
     fn test_parse_gitlab_prefix_self_hosted_nested() {
-        let provider =
-            parse_reverse_repo("gitlab:gitlab.example.com/group/subgroup/project").unwrap();
+        let provider = parse_with_configured_gitlab(
+            "https://gitlab.example.com",
+            "gitlab:gitlab.example.com/group/subgroup/project",
+        )
+        .unwrap();
         assert_eq!(
             provider,
             VcsProvider::GitLab {
@@ -539,7 +667,11 @@ mod tests {
     #[test]
     fn test_parse_gitlab_prefix_self_hosted_with_port() {
         // FR-003: self-hosted GitLab with a port number in the host.
-        let provider = parse_reverse_repo("gitlab:gitlab.example.com:8443/group/project").unwrap();
+        let provider = parse_with_configured_gitlab(
+            "https://gitlab.example.com:8443",
+            "gitlab:gitlab.example.com:8443/group/project",
+        )
+        .unwrap();
         assert_eq!(
             provider,
             VcsProvider::GitLab {
@@ -552,7 +684,9 @@ mod tests {
     #[test]
     fn test_parse_gitlab_prefix_self_hosted_ip_address() {
         // FR-003: self-hosted GitLab with a bare IP address as the host.
-        let provider = parse_reverse_repo("gitlab:10.0.0.1/group/project").unwrap();
+        let provider =
+            parse_with_configured_gitlab("https://10.0.0.1", "gitlab:10.0.0.1/group/project")
+                .unwrap();
         assert_eq!(
             provider,
             VcsProvider::GitLab {
@@ -566,7 +700,11 @@ mod tests {
     fn test_parse_gitlab_prefix_self_hosted_localhost_with_port() {
         // FR-003: localhost with a port is detected as a host (the ':'
         // triggers looks_like_host).
-        let provider = parse_reverse_repo("gitlab:localhost:8080/group/project").unwrap();
+        let provider = parse_with_configured_gitlab(
+            "https://localhost:8080",
+            "gitlab:localhost:8080/group/project",
+        )
+        .unwrap();
         assert_eq!(
             provider,
             VcsProvider::GitLab {
@@ -579,7 +717,11 @@ mod tests {
     #[test]
     fn test_parse_gitlab_prefix_self_hosted_host_gets_https_prefix() {
         // FR-003: the host is always prefixed with https://.
-        let provider = parse_reverse_repo("gitlab:gitlab.corp.com/team/repo").unwrap();
+        let provider = parse_with_configured_gitlab(
+            "https://gitlab.corp.com",
+            "gitlab:gitlab.corp.com/team/repo",
+        )
+        .unwrap();
         let host = match provider {
             VcsProvider::GitLab { host, .. } => host.unwrap(),
             _ => panic!("expected GitLab provider"),
@@ -591,7 +733,11 @@ mod tests {
     #[test]
     fn test_parse_gitlab_prefix_self_hosted_with_nested_namespace() {
         // FR-003 + FR-022: self-hosted GitLab with a deeply nested namespace.
-        let provider = parse_reverse_repo("gitlab:gitlab.corp.com/a/b/c/project").unwrap();
+        let provider = parse_with_configured_gitlab(
+            "https://gitlab.corp.com",
+            "gitlab:gitlab.corp.com/a/b/c/project",
+        )
+        .unwrap();
         assert_eq!(
             provider,
             VcsProvider::GitLab {
@@ -603,7 +749,11 @@ mod tests {
 
     #[test]
     fn test_parse_gitlab_prefix_self_hosted_strips_git_suffix() {
-        let provider = parse_reverse_repo("gitlab:gitlab.example.com/group/project.git").unwrap();
+        let provider = parse_with_configured_gitlab(
+            "https://gitlab.example.com",
+            "gitlab:gitlab.example.com/group/project.git",
+        )
+        .unwrap();
         assert_eq!(
             provider,
             VcsProvider::GitLab {
@@ -617,7 +767,13 @@ mod tests {
     fn test_parse_gitlab_prefix_self_hosted_host_only_one_segment_rejected() {
         // FR-003: host + only one path segment is not enough for
         // namespace/project.
-        assert!(parse_reverse_repo("gitlab:gitlab.example.com/project").is_err());
+        assert!(
+            parse_with_configured_gitlab(
+                "https://gitlab.example.com",
+                "gitlab:gitlab.example.com/project"
+            )
+            .is_err()
+        );
     }
 
     // --- GitLab URL formats (FR-004) ----------------------------------------

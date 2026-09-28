@@ -4,6 +4,7 @@
 
 pub mod command;
 pub mod data;
+pub mod exec_guard;
 pub mod mock;
 pub mod model;
 pub mod registry;

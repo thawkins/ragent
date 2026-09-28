@@ -66,6 +66,20 @@ impl Tool for GitCloneTool {
         let depth = input["depth"].as_u64();
         let bare = input["bare"].as_bool().unwrap_or(false);
 
+        // SEC-ragent-tools-vcs-001/003 (SECTASKS T-022): every caller value
+        // that becomes a git operand is validated first - `url` and `branch`
+        // must not look like options, and `directory` must stay inside the
+        // working directory. Without this `git clone "--upload-pack=touch X"`
+        // executes a shell command and `directory="../../esc"` writes outside
+        // the workspace.
+        crate::git::reject_option_like(url, "url")?;
+        if let Some(b) = branch {
+            crate::git::reject_option_like(b, "branch")?;
+        }
+        if let Some(dir) = directory {
+            crate::git::validate_clone_directory(dir)?;
+        }
+
         let mut args: Vec<String> = vec!["clone".to_string()];
 
         if bare {
@@ -82,6 +96,9 @@ impl Tool for GitCloneTool {
             args.push(format!("{d}"));
         }
 
+        // `--` ends option parsing: everything after it is an operand even if
+        // it begins with `-` (belt and braces on top of the checks above).
+        args.push("--".to_string());
         args.push(url.to_string());
 
         if let Some(dir) = directory {

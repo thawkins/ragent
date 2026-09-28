@@ -56,6 +56,14 @@ impl Tool for GitPushTool {
         let force = input["force"].as_bool().unwrap_or(false);
         let tags = input["tags"].as_bool().unwrap_or(false);
 
+        // SEC-ragent-tools-vcs-001 (SECTASKS T-022): `--receive-pack=<cmd>`
+        // turns a push into command execution, so `remote`/`branch` must not
+        // look like options.
+        crate::git::reject_option_like(remote, "remote")?;
+        if let Some(b) = branch {
+            crate::git::reject_option_like(b, "branch")?;
+        }
+
         let mut args: Vec<String> = vec!["push".to_string()];
 
         if force {
@@ -66,6 +74,12 @@ impl Tool for GitPushTool {
             args.push("--tags".to_string());
         }
 
+        // SEC-ragent-tools-vcs-001 (SECTASKS T-022): `--` ends option parsing
+        // for the remote and for the refspec that follows it. Both values were
+        // validated by `reject_option_like` above, so no second separator is
+        // needed - and inserting one before the refspec would make git treat
+        // it as a literal ref name (`src refspec -- does not match any`).
+        args.push("--".to_string());
         args.push(remote.to_string());
 
         if let Some(b) = branch {

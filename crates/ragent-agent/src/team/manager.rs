@@ -297,7 +297,18 @@ pub enum HookOutcome {
 /// - Other → log warning, allow
 ///
 /// If `stdin_data` is `Some`, it is piped to the child process on stdin.
+///
+/// SEC-ragent-team-005 (SECTASKS T-047): the command runs under a hard
+/// [`HOOK_TIMEOUT`] and its process group is killed on expiry, so a hook that
+/// never exits (or that spawns a long-lived child) cannot wedge the tool call
+/// or leak processes. Feedback returned to the model is capped at
+/// [`MAX_HOOK_FEEDBACK_BYTES`]. The command itself is validated by
+/// [`validate_hook_command`] before it is spawned.
 pub async fn run_hook(command: &str, args: &[String], stdin_data: Option<&str>) -> HookOutcome {
+    if let Err(reason) = validate_hook_command(command) {
+        warn!(command, %reason, "Refusing to execute untrusted hook command");
+        return HookOutcome::Allow;
+    }
     let mut child_cmd = tokio::process::Command::new(command);
     child_cmd.args(args);
 
@@ -315,6 +326,10 @@ pub async fn run_hook(command: &str, args: &[String], stdin_data: Option<&str>) 
             HookOutcome::Allow
         }
         Ok(mut child_proc) => {
+            // SEC-ragent-team-005 (SECTASKS T-047): record the pid so the
+            // timeout path can terminate the whole process group; the hook
+            // runs unsandboxed, so leaving its children behind is a leak.
+            let pid = child_proc.id();
             // Write stdin data if provided.
             if let Some(data) = stdin_data
                 && let Some(mut stdin) = child_proc.stdin.take()
@@ -324,7 +339,23 @@ pub async fn run_hook(command: &str, args: &[String], stdin_data: Option<&str>) 
                 drop(stdin);
             }
 
-            match child_proc.wait_with_output().await {
+            let waited =
+                match tokio::time::timeout(HOOK_TIMEOUT, child_proc.wait_with_output()).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        warn!(
+                            command,
+                            timeout_secs = HOOK_TIMEOUT.as_secs(),
+                            "Hook timed out; killing it"
+                        );
+                        if let Some(pid) = pid {
+                            kill_hook_process_group(pid);
+                        }
+                        return HookOutcome::Allow;
+                    }
+                };
+
+            match waited {
                 Err(e) => {
                     warn!(command, error = %e, "Hook failed to complete");
                     HookOutcome::Allow
@@ -333,7 +364,7 @@ pub async fn run_hook(command: &str, args: &[String], stdin_data: Option<&str>) 
                     Some(0) => HookOutcome::Allow,
                     Some(2) => {
                         let feedback = String::from_utf8_lossy(&out.stdout).into_owned();
-                        HookOutcome::Feedback(feedback)
+                        HookOutcome::Feedback(cap_hook_feedback(feedback))
                     }
                     Some(code) => {
                         warn!(
@@ -349,6 +380,73 @@ pub async fn run_hook(command: &str, args: &[String], stdin_data: Option<&str>) 
                 },
             }
         }
+    }
+}
+
+/// Hard timeout applied to a team quality-gate hook.
+pub const HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Maximum hook feedback bytes injected back into the model context.
+pub const MAX_HOOK_FEEDBACK_BYTES: usize = 8192;
+
+/// Truncate hook feedback to [`MAX_HOOK_FEEDBACK_BYTES`] on a char boundary.
+fn cap_hook_feedback(mut feedback: String) -> String {
+    if feedback.len() <= MAX_HOOK_FEEDBACK_BYTES {
+        return feedback;
+    }
+    let mut end = MAX_HOOK_FEEDBACK_BYTES;
+    while end > 0 && !feedback.is_char_boundary(end) {
+        end -= 1;
+    }
+    feedback.truncate(end);
+    feedback.push_str("\n[hook feedback truncated]");
+    feedback
+}
+
+/// Validate a hook command before execution.
+///
+/// SEC-ragent-team-005 (SECTASKS T-047): a team `config.json` hook is ordinary
+/// on-disk state that an attacker with write access to the team directory (or a
+/// seeded team dir) can modify, and it is executed as the user with no
+/// validation. Refuse commands carrying shell metacharacters or control bytes,
+/// which are never part of a legitimate quality-gate command.
+pub fn validate_hook_command(command: &str) -> std::result::Result<(), &'static str> {
+    if command.trim().is_empty() {
+        return Err("hook command is empty");
+    }
+    if command.len() > 4096 {
+        return Err("hook command is longer than 4096 bytes");
+    }
+    for ch in command.chars() {
+        if ch == '\n' || ch == '\r' || ch.is_control() {
+            return Err("hook command contains a control character");
+        }
+    }
+    for meta in [";", "|", "&", "`", "$(", ">", "<", "*", "?", "~", "\\"] {
+        if command.contains(meta) {
+            return Err("hook command contains a shell metacharacter");
+        }
+    }
+    Ok(())
+}
+
+/// Kill a hook's process group so its children cannot be orphaned.
+///
+/// Mirrors the MCP shutdown teardown (`mcp::kill_stdio_child`): the command is
+/// spawned without `process_group(0)`, so the group id equals the child pid and
+/// `killpg` reaches whatever the hook spawned. A pid that is not a group leader
+/// returns `ESRCH` and the plain `kill` fallback covers it.
+#[allow(unsafe_code)]
+fn kill_hook_process_group(pid: u32) {
+    let pid = pid as i32;
+    if pid <= 0 {
+        return;
+    }
+    // SAFETY: `killpg`/`kill` are async-signal-safe libc calls that take only
+    // integers; there is no safe std equivalent for signalling a process group.
+    unsafe {
+        let _ = libc::killpg(pid, libc::SIGKILL);
+        let _ = libc::kill(pid, libc::SIGKILL);
     }
 }
 
@@ -769,7 +867,30 @@ impl TeamManager {
         let agent_id = {
             let _guard = self.spawn_lock.lock().await;
             let mut store = TeamStore::load(&self.team_dir)?;
-            let id = if let Some(existing) = store.config.member_by_name(teammate_name) {
+            // SEC-ragent-team-004 (SECTASKS T-052): `max_teammates` was
+            // declared in `TeamSettings` but never consulted, so a blueprint or
+            // an LLM loop could spawn an unbounded number of concurrent
+            // teammate sessions (each an agent loop with its own LLM spend).
+            // Enforce the limit here, before a fresh id is allocated and while
+            // the spawn lock is held.
+            let max_teammates = store.config.settings.max_teammates;
+            let existing = store.config.member_by_name(teammate_name).cloned();
+            if existing.is_none() {
+                let active = store
+                    .config
+                    .members
+                    .iter()
+                    .filter(|m| !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed))
+                    .count();
+                if max_teammates > 0 && active >= max_teammates {
+                    anyhow::bail!(
+                        "team '{}' already has {active} active teammates; the \
+                         configured maximum is {max_teammates}",
+                        self.team_name
+                    );
+                }
+            }
+            let id = if let Some(existing) = existing {
                 tracing::debug!(team = %self.team_name, teammate = %teammate_name, agent_id = %existing.agent_id, "Reusing existing member record for spawn");
                 existing.agent_id.clone()
             } else {

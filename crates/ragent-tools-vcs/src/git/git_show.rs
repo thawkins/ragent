@@ -47,10 +47,17 @@ impl Tool for GitShowTool {
         let git_ref = input["ref"].as_str().unwrap_or("HEAD");
         let stat = input["stat"].as_bool().unwrap_or(true);
 
+        // SEC-ragent-tools-vcs-002 (SECTASKS T-022): `git show --output=<path>`
+        // writes a file under a read-only grant; reject option-like refs.
+        crate::git::reject_option_like(git_ref, "ref")?;
+
         let mut args = vec!["show", "--format=fuller"];
         if stat {
             args.push("--stat");
         }
+        // No `--` before the revision: `git show <ref> --` would make `<ref>`
+        // parse as a pathspec. `reject_option_like` above already guarantees
+        // the value cannot be an option.
         args.push(git_ref);
 
         let args: Vec<String> = args.into_iter().map(ToString::to_string).collect();

@@ -68,6 +68,13 @@ struct RuntimeState {
     /// the (possibly shut-down) provider alive independently.
     #[cfg(feature = "telemetry")]
     provider: Option<std::sync::Arc<opentelemetry_sdk::metrics::SdkMeterProvider>>,
+    /// SEC-ragent-telemetry-003 (SECTASKS T-032): the per-metric cardinality
+    /// cap lives here, created once when the provider is built, and is cloned
+    /// into every [`InstrumentRegistry`]. Previously each `instruments()` call
+    /// allocated a fresh cache, so it only ever observed one recording and the
+    /// cap never accumulated process-wide.
+    #[cfg(feature = "telemetry")]
+    cardinality: std::sync::Arc<crate::cardinality::CardinalityCache>,
     /// The [`SharedManualReader`] used by the optional Prometheus endpoint
     /// (FR-028). `None` when `telemetry.otel.internal_port` is `None` or
     /// telemetry is disabled. Held so the subsystem can extract the
@@ -91,11 +98,15 @@ struct RuntimeState {
 impl RuntimeState {
     /// Construct a disabled runtime state with the given config.
     #[cfg(feature = "telemetry")]
-    const fn disabled(config: OtelConfig) -> Self {
+    fn disabled(config: OtelConfig) -> Self {
+        let cardinality = std::sync::Arc::new(crate::cardinality::CardinalityCache::new(
+            config.cardinality_limit,
+        ));
         Self {
             state: TelemetryState::Disabled,
             config,
             provider: None,
+            cardinality,
             prometheus_reader: None,
             prometheus_handle: None,
         }
@@ -184,11 +195,15 @@ impl TelemetrySubsystem {
                     None
                 };
 
+                let cardinality = std::sync::Arc::new(crate::cardinality::CardinalityCache::new(
+                    config.cardinality_limit,
+                ));
                 Ok(Self {
                     runtime: parking_lot::Mutex::new(RuntimeState {
                         state: TelemetryState::Enabled,
                         config,
                         provider: Some(std::sync::Arc::new(provider)),
+                        cardinality,
                         prometheus_reader,
                         prometheus_handle,
                     }),
@@ -221,11 +236,15 @@ impl TelemetrySubsystem {
     #[cfg(feature = "telemetry")]
     #[must_use]
     pub fn from_provider(config: OtelConfig, provider: SdkMeterProvider) -> Self {
+        let cardinality = std::sync::Arc::new(crate::cardinality::CardinalityCache::new(
+            config.cardinality_limit,
+        ));
         Self {
             runtime: parking_lot::Mutex::new(RuntimeState {
                 state: TelemetryState::Enabled,
                 config,
                 provider: Some(std::sync::Arc::new(provider)),
+                cardinality,
                 prometheus_reader: None,
                 prometheus_handle: None,
             }),
@@ -240,7 +259,7 @@ impl TelemetrySubsystem {
         Self::disabled_with_config(OtelConfig::default())
     }
 
-    const fn disabled_with_config(config: OtelConfig) -> Self {
+    fn disabled_with_config(config: OtelConfig) -> Self {
         Self {
             runtime: parking_lot::Mutex::new(RuntimeState::disabled(config)),
         }
@@ -308,7 +327,7 @@ impl TelemetrySubsystem {
         let provider = guard.provider.as_ref()?;
         Some(
             crate::instruments::InstrumentRegistry::from_provider(provider)
-                .with_cardinality_limit(guard.config.cardinality_limit)
+                .with_shared_cardinality(guard.cardinality.clone())
                 .with_metric_toggles(guard.config.metrics.clone()),
         )
     }
@@ -679,6 +698,12 @@ fn build_metric_exporter(config: &OtelConfig) -> Result<opentelemetry_otlp::Metr
             })
         }
         OtelProtocol::Grpc => {
+            // SEC-ragent-telemetry-001 (SECTASKS T-019): defence in depth.
+            // TLS is now compiled in (`tls-roots`), but a non-loopback
+            // `https://` endpoint whose scheme would be downgraded is refused
+            // outright so a cleartext export can never happen silently.
+            ensure_grpc_endpoint_is_encrypted(&config.endpoint)?;
+
             // OTLP/gRPC via tonic (FR-024).
             let builder = opentelemetry_otlp::MetricExporter::builder()
                 .with_tonic()
@@ -691,6 +716,40 @@ fn build_metric_exporter(config: &OtelConfig) -> Result<opentelemetry_otlp::Metr
             })
         }
     }
+}
+
+/// Refuse an OTLP gRPC endpoint that would be contacted in cleartext.
+///
+/// SEC-ragent-telemetry-001 (SECTASKS T-019): only `https://` (TLS) and
+/// loopback `http://` (a local collector) are accepted. Everything else -
+/// notably a plain `http://` non-loopback host - is rejected so the operator
+/// cannot accidentally ship metadata over an unencrypted link.
+fn ensure_grpc_endpoint_is_encrypted(
+    endpoint: &str,
+) -> std::result::Result<(), crate::TelemetryError> {
+    let lowered = endpoint.trim().to_ascii_lowercase();
+    if lowered.starts_with("https://") {
+        return Ok(());
+    }
+    if lowered.starts_with("http://") {
+        let host = lowered
+            .trim_start_matches("http://")
+            .split(['/', ':'])
+            .next()
+            .unwrap_or("")
+            .to_string();
+        let is_loopback = matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]" | "::1");
+        if is_loopback {
+            return Ok(());
+        }
+        return Err(crate::TelemetryError::ExporterInit(format!(
+            "refusing to export OTLP/gRPC over cleartext to '{endpoint}'; use \
+             an https:// endpoint (TLS is compiled in)"
+        )));
+    }
+    Err(crate::TelemetryError::ExporterInit(format!(
+        "unsupported OTLP/gRPC endpoint '{endpoint}': expected an http(s) URL"
+    )))
 }
 
 /// Build the OTEL [`Resource`] with standard and custom attributes (FR-004).

@@ -1380,3 +1380,86 @@ async fn test_event_teammate_message_increments_receiver_counter() {
         "receiver teammate should increment received counter"
     );
 }
+
+// ── SEC-ragent-tui-004: team-name validation at the TUI boundary (SECTASKS T-004) ─
+
+/// `/team create <bp> <name>` must refuse a name that is not a single safe path
+/// component before it reaches `TeamStore::create` (which joins it onto the
+/// teams root and calls `create_dir_all`).
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_create_slash_rejects_traversal_names() {
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    for name in ["../../evil", "/tmp/evil", "..", "a/b"] {
+        let mut app = support::make_app();
+        app.session_id = Some("s1".to_string());
+
+        app.execute_slash_command(&format!("/team create bp1 {name}"))
+            .await;
+
+        assert!(
+            app.status.contains("invalid team name"),
+            "name {name:?} must be refused at the TUI boundary, got: {}",
+            app.status
+        );
+        assert!(
+            app.active_team.is_none(),
+            "no team may be created for an invalid name"
+        );
+    }
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    // Nothing escaped into a sibling of the project directory.
+    assert!(
+        !tmp.path().parent().expect("parent").join("evil").exists(),
+        "a traversal team name must not create a directory outside the project"
+    );
+}
+
+/// `/team delete <name>` shares the same guard: a traversal name must not reach
+/// `remove_dir_all`.
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_slash_rejects_traversal_names() {
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+    // A directory outside `.ragent/teams/` holding a team-like config: if the
+    // name were honoured, delete would recursively remove it.
+    let victim = tmp.path().join("victim");
+    std::fs::create_dir_all(&victim).expect("victim dir");
+    std::fs::write(victim.join("config.json"), "{}").expect("victim config");
+
+    for name in ["../victim", "/etc", ".."] {
+        let mut app = support::make_app();
+        app.session_id = Some("s1".to_string());
+
+        app.execute_slash_command(&format!("/team delete {name}"))
+            .await;
+
+        assert!(
+            app.status.contains("invalid team name"),
+            "delete of {name:?} must be refused, got: {}",
+            app.status
+        );
+    }
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    assert!(
+        victim.is_dir(),
+        "a traversal name must not let /team delete remove an unrelated directory"
+    );
+}

@@ -204,3 +204,76 @@ fn add_failed_git_subdir_install_leaves_no_staging_directory() {
         "staging must be pruned after a failed git install: {staging_root:?}"
     );
 }
+
+// ── SEC-ragent-plugins-001: a `-`-prefixed ref/subpath is a git option ──────
+
+/// A `git+` fragment is untrusted content, and `git` parses a leading `-` as an
+/// option rather than a positional. `--upload-pack=<cmd>` (and friends) execute
+/// a program, so such a fragment must never survive parsing.
+#[test]
+fn parse_git_source_refuses_option_like_refs_and_subpaths() {
+    const INJECTION: &str = "--upload-pack=/bin/sh -c true";
+
+    let spec = parse_git_source(&format!("git+https://x/y#{INJECTION}"))
+        .expect("the source shape still parses");
+    assert!(
+        spec.ref_name.is_none(),
+        "an option-looking ref must be dropped, not forwarded to git"
+    );
+
+    let spec = parse_git_source(&format!("git+https://x/y#main:{INJECTION}"))
+        .expect("the source shape still parses");
+    assert!(
+        spec.subpath.is_none(),
+        "an option-looking subpath must be dropped, not forwarded to git"
+    );
+
+    let spec = parse_git_source("git+https://x/y#--config=core.sshCommand=x")
+        .expect("the source shape still parses");
+    assert!(spec.ref_name.is_none());
+}
+
+/// A fragment with shell metacharacters or a traversal segment is refused too;
+/// only `[A-Za-z0-9._/-]` without `..` may reach `git`.
+#[test]
+fn parse_git_source_refuses_unsafe_characters() {
+    for raw in [
+        "git+https://x/y#main;rm -rf $HOME",
+        "git+https://x/y#main:`id`",
+        "git+https://x/y#main:../../etc",
+        "git+https://x/y#main\nfetch",
+    ] {
+        let spec = parse_git_source(raw).expect("the source shape still parses");
+        assert!(
+            spec.subpath.is_none(),
+            "{raw} must not yield a subpath for git"
+        );
+    }
+
+    // The legitimate forms keep working.
+    let spec = parse_git_source("git+https://x/y#feature/branch-1.2:plugins/aws").expect("parses");
+    assert_eq!(spec.ref_name.as_deref(), Some("feature/branch-1.2"));
+    assert_eq!(spec.subpath.as_deref(), Some("plugins/aws"));
+}
+
+/// End-to-end: an option-looking ref cannot reach `git` through `add`, and the
+/// command it names never runs.
+#[test]
+fn add_refuses_an_option_like_ref_without_running_it() {
+    let temp = temp_dir("git-injection");
+    let (url, _remote) = remote_with_plugin(&temp, "plugins/weather", "git-weather");
+    let dirs = store_dirs(&temp);
+
+    let marker = temp.join("pwned");
+    let source = format!(
+        "git+{url}#--upload-pack=touch {}:plugins/weather",
+        marker.display()
+    );
+    let outcome = add(&dirs, &temp, &source, false).expect("the install falls back to HEAD");
+
+    assert_eq!(outcome.parsed.descriptor.id, "git-weather");
+    assert!(
+        !marker.exists(),
+        "the injected --upload-pack command must never execute: {marker:?}"
+    );
+}

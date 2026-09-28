@@ -61,6 +61,8 @@ fn ctx(api_base: Option<&str>) -> ToolContext {
         code_index: None,
         config: Some(Arc::new(config)),
         read_timestamps: Arc::new(std::sync::RwLock::new(HashMap::new())),
+        canonical_cache: None,
+        allowed_roots: Vec::new(),
     }
 }
 

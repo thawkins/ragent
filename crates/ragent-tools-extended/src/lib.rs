@@ -56,7 +56,7 @@ use ragent_types::llm::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 /// Compatibility re-export for moved tools that still reference `crate::event`.
@@ -331,6 +331,47 @@ pub struct ToolContext {
     /// have been read by this session. Used by edit tools to detect stale-file
     /// edits (editrenewal FR-003).
     pub read_timestamps: Arc<std::sync::RwLock<std::collections::HashMap<PathBuf, u64>>>,
+    /// Per-step canonical-path cache, forwarded from the core context.
+    ///
+    /// SEC-tools-extended-002 (SECTASKS T-055): the document write tools
+    /// (`office_write`, `pdf_write`, `libreoffice_write`) are now path-confined
+    /// like every core write tool, which needs the same cache the core tools
+    /// use. `None` means the tool builds a fresh cache for the call.
+    pub canonical_cache: Option<Arc<ragent_tools_core::CanonicalPathCache>>,
+    /// Allowed root directories for path escape checking, forwarded from the
+    /// core context (SEC-tools-extended-002 / SECTASKS T-055).
+    pub allowed_roots: Vec<PathBuf>,
+}
+
+impl ToolContext {
+    /// Apply the workspace containment check to a caller-supplied path.
+    ///
+    /// SEC-tools-extended-002 (SECTASKS T-055): every document write tool calls
+    /// this before creating directories or writing, so an absolute path (which
+    /// `resolve_path` returns unchanged) cannot escape the workspace.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `path` resolves outside every allowed root.
+    pub fn check_path_within_workspace(&self, path: &Path) -> anyhow::Result<()> {
+        match &self.canonical_cache {
+            Some(cache) => ragent_tools_core::check_path_within_allowed_roots_cached(
+                path,
+                &self.working_dir,
+                &self.allowed_roots,
+                cache,
+            ),
+            None => {
+                let cache = ragent_tools_core::CanonicalPathCache::new();
+                ragent_tools_core::check_path_within_allowed_roots_cached(
+                    path,
+                    &self.working_dir,
+                    &self.allowed_roots,
+                    &cache,
+                )
+            }
+        }
+    }
 }
 
 /// A tool that an agent can invoke to perform actions.

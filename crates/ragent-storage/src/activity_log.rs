@@ -166,9 +166,13 @@ impl ActivityLog {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
+            crate::storage::restrict_dir_permissions(parent);
         }
         let conn = Connection::open(path)
             .with_context(|| format!("Failed to open activity log at {}", path.display()))?;
+        // SEC-ragent-storage-003 (SECTASKS T-017): the activity log holds
+        // prompts, model messages, and tool-call payloads.
+        crate::storage::restrict_file_permissions(path);
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "busy_timeout", 5000)?;
@@ -177,6 +181,10 @@ impl ActivityLog {
             rebuilding: Mutex::new(HashSet::new()),
         };
         log.migrate()?;
+        // SEC-ragent-storage-003 (SECTASKS T-041): the WAL sidecars are created
+        // by the migration write, after the initial permission restriction, so
+        // restrict them again now that they exist.
+        crate::storage::restrict_file_permissions(path);
         Ok(log)
     }
 

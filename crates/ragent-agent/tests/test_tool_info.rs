@@ -30,6 +30,7 @@ fn registry_ctx() -> ToolContext {
         allowed_roots: Vec::new(),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+        permission_checker: None,
         canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
         tool_registry: Arc::new(create_default_registry()),
     }

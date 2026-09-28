@@ -246,10 +246,23 @@ impl GitHubClient {
     /// endpoints that serve binary blobs such as the Actions logs zip.
     pub async fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
         let url = self.resolve_url(path);
-        let resp = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
+        // SEC-ragent-tools-vcs-005 (SECTASKS T-034): attach the Bearer token
+        // only when the resolved URL is the configured API origin. The URL can
+        // come from response *content* (the README `download_url`), so without
+        // this check a compromised or hostile GitHub Enterprise instance could
+        // direct the user's PAT to an attacker-controlled host.
+        let same_origin = same_origin_as(&url, &self.base_url);
+        let mut request = self.client.get(&url);
+        if same_origin {
+            request = request.header("Authorization", format!("Bearer {}", self.token));
+        } else {
+            tracing::warn!(
+                url = %url,
+                base = %self.base_url,
+                "GitHub: refusing to attach the token to a cross-origin URL"
+            );
+        }
+        let resp = request
             .header("Accept", "application/vnd.github.v3+json")
             .header("User-Agent", "ragent/0.1")
             .send()
@@ -474,10 +487,23 @@ impl GitHubClient {
         depth: u32,
     ) -> Result<Vec<String>> {
         let mut entries = Vec::new();
-        self.fetch_tree_recursive_inner(owner, repo, "", depth, &mut entries)
+        let mut budget = TreeWalkBudget {
+            requests: 0,
+            entries: 0,
+        };
+        self.fetch_tree_recursive_inner(owner, repo, "", depth, &mut entries, &mut budget)
             .await?;
         Ok(entries)
     }
+
+    /// Maximum number of API requests a recursive tree walk may issue.
+    ///
+    /// SEC-ragent-tools-vcs-008 (SECTASKS T-034): the walk fan-out was
+    /// unbounded, unlike the GitLab equivalent, so a hostile repository with a
+    /// wide directory tree drove an unlimited number of authenticated calls.
+    pub const MAX_TREE_REQUESTS: u32 = 500;
+    /// Maximum number of entries a recursive tree walk may collect.
+    pub const MAX_TREE_ENTRIES: usize = 20_000;
 
     /// Internal recursive helper for [`fetch_tree_recursive`].
     ///
@@ -491,7 +517,19 @@ impl GitHubClient {
         prefix: &str,
         remaining: u32,
         entries: &mut Vec<String>,
+        budget: &mut TreeWalkBudget,
     ) -> Result<()> {
+        // SEC-ragent-tools-vcs-008 (SECTASKS T-034): stop before the walk
+        // exceeds its request or entry budget instead of hammering the API.
+        if budget.requests >= Self::MAX_TREE_REQUESTS || budget.entries >= Self::MAX_TREE_ENTRIES {
+            tracing::warn!(
+                requests = budget.requests,
+                entries = budget.entries,
+                "GitHub tree walk hit its budget; returning the entries collected so far"
+            );
+            return Ok(());
+        }
+        budget.requests += 1;
         let path = if prefix.is_empty() {
             format!("/repos/{owner}/{repo}/contents")
         } else {
@@ -506,9 +544,17 @@ impl GitHubClient {
             } else {
                 format!("{prefix}/{}", item.name)
             };
+            if budget.entries >= Self::MAX_TREE_ENTRIES {
+                tracing::warn!(
+                    entries = budget.entries,
+                    "GitHub tree walk hit its entry budget; truncating the listing"
+                );
+                return Ok(());
+            }
             if item.is_dir {
                 // FR-028: directories get a trailing slash.
                 entries.push(format!("{full_path}/"));
+                budget.entries += 1;
                 // FR-027: recurse if there are more depth levels. Box::pin is
                 // required because async fns cannot be directly recursive
                 // (the future size would be infinite).
@@ -520,11 +566,13 @@ impl GitHubClient {
                         &full_path,
                         remaining - 1,
                         entries,
+                        budget,
                     ))
                     .await;
                 }
             } else {
                 entries.push(full_path);
+                budget.entries += 1;
             }
         }
 
@@ -603,6 +651,42 @@ pub fn parse_root_tree(value: &Value) -> Vec<String> {
     arr.iter()
         .filter_map(|entry| entry.get("name").and_then(Value::as_str).map(String::from))
         .collect()
+}
+
+/// Whether `url` has the same scheme/host/port as `base`.
+///
+/// SEC-ragent-tools-vcs-005 (SECTASKS T-034): used before attaching the
+/// Authorization header. A `base_url` that is not parseable compares as
+/// not-same-origin, so the token is withheld rather than leaked.
+fn same_origin_as(url: &str, base: &str) -> bool {
+    fn origin(url: &str) -> Option<(String, String, Option<u16>)> {
+        let rest = url.split_once("://")?;
+        let scheme = rest.0.to_ascii_lowercase();
+        let authority = rest.1.split(['/', '?', '#']).next()?;
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => {
+                (h.to_ascii_lowercase(), p.parse::<u16>().ok())
+            }
+            _ => (authority.to_ascii_lowercase(), None),
+        };
+        if host.is_empty() {
+            return None;
+        }
+        Some((scheme, host, port))
+    }
+    match (origin(url), origin(base)) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Running request/entry counters for one recursive tree walk.
+///
+/// SEC-ragent-tools-vcs-008 (SECTASKS T-034).
+#[derive(Debug, Default)]
+struct TreeWalkBudget {
+    requests: u32,
+    entries: usize,
 }
 
 /// A parsed entry from a GitHub contents API response.

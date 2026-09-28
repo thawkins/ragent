@@ -80,7 +80,9 @@ impl Tool for TeamShutdownAckTool {
             "lead".to_string(),
             MessageType::ShutdownAck,
             format!("Teammate '{agent_id}' acknowledges shutdown and is terminating."),
-        );
+        )
+        // SEC-ragent-team-003 (SECTASKS T-018): authenticated sender session id.
+        .with_sender_session(&ctx.session_id);
         msg.correlation_id = correlation_id;
         lead_mailbox.push(msg)?;
 

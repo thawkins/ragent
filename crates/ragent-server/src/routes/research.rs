@@ -68,6 +68,40 @@ fn research_root() -> PathBuf {
     RESEARCH_ROOT.clone()
 }
 
+/// Return the first `paths` entry that resolves outside `root`, if any.
+///
+/// SEC-ragent-server-002 (SECTASKS T-016): an entry may be absolute, contain
+/// `..`, or be a symlink out of the tree. The path is canonicalised when it
+/// exists; a not-yet-existing path is lexically normalised and rejected when
+/// it still contains a parent-directory component.
+fn first_out_of_root_path(paths: &[String], root: &StdPath) -> Option<String> {
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    for raw in paths {
+        let candidate = std::path::Path::new(raw);
+        let resolved = if candidate.is_absolute() {
+            candidate.to_path_buf()
+        } else {
+            canonical_root.join(candidate)
+        };
+        let contained = match resolved.canonicalize() {
+            Ok(real) => real.starts_with(&canonical_root),
+            Err(_) => {
+                // Does not exist yet: fall back to a lexical check that
+                // rejects any parent-directory component and any absolute
+                // path outside the root.
+                !resolved
+                    .components()
+                    .any(|c| c == std::path::Component::ParentDir)
+                    && resolved.starts_with(&canonical_root)
+            }
+        };
+        if !contained {
+            return Some(raw.clone());
+        }
+    }
+    None
+}
+
 // ── GET /research ────────────────────────────────────────────────────────
 
 async fn list_research(State(_state): State<AppState>) -> impl IntoResponse {
@@ -468,6 +502,42 @@ async fn create_research(
     let run_req = req.to_run_request();
     let cfg = state.config.read().await.clone();
     let config = ragent_research::build_session_config(&run_req, Some(&cfg));
+
+    // SEC-ragent-server-004 / SEC-ragent-research-001 (SECTASKS T-014): reject
+    // an unsafe template name before dispatching. The research layer also
+    // validates, but rejecting here keeps the error at the request boundary.
+    if let Some(template) = req.template.as_deref() {
+        if !ragent_research::is_valid_template_name(template) {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "invalid template name '{template}': expected a single \
+                     [A-Za-z0-9_-] component"
+                ),
+            )
+            .into_response();
+        }
+    }
+
+    // SEC-ragent-server-002 / SEC-ragent-research-005 (SECTASKS T-016): every
+    // `from_files` entry must resolve inside the project root. The research
+    // layer re-checks; this boundary check keeps the 400 next to the request.
+    let project_root = research_root()
+        .parent()
+        .unwrap_or_else(|| StdPath::new("."))
+        .to_path_buf();
+    if let Some(bad) = first_out_of_root_path(&req.from_files, &project_root) {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "from_files entry '{bad}' resolves outside the project root \
+                 '{}'",
+                project_root.display()
+            ),
+        )
+        .into_response();
+    }
+
     let title = req.title.clone().unwrap_or_else(|| {
         ragent_research::derive_title_files(
             &req.topic,
