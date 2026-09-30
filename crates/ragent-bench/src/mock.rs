@@ -1,11 +1,11 @@
 //! Mock LLM client for hermetic agent-loop benchmarks (PERFPLAN Milestone F-1).
 //!
-//! [`MockLlmClient`] implements [`crate::llm::LlmClient`] by replaying a
+//! [`MockLlmClient`] implements [`ragent_llm::llm::LlmClient`] by replaying a
 //! canned sequence of [`StreamEvent`]s on every `chat()` call. This lets the
 //! agent-loop benchmark (Milestone F-2) exercise the full
-//! [`SessionProcessor::process_user_message`] pipeline — including stream
-//! buffering, tool-call assembly, and the per-step allocations targeted by
-//! Milestones A–E — without hitting a real provider.
+//! [`ragent_agent::session::processor::SessionProcessor::process_user_message`]
+//! pipeline - including stream buffering, tool-call assembly, and the per-step
+//! allocations targeted by Milestones A-E - without hitting a real provider.
 //!
 //! The mock is deterministic: the same script produces the same event stream
 //! on every call, so Criterion can measure step latency and tool-call
@@ -57,7 +57,7 @@ impl MockLlmScript {
         ])
     }
 
-    /// Build a script that emits a single tool call (start → delta → end),
+    /// Build a script that emits a single tool call (start -> delta -> end),
     /// followed by `Usage` + `Finish(Stop)`. The tool-call id is `call-1` and
     /// the tool name is `echo`. Useful for measuring per-tool-call throughput.
     #[must_use]

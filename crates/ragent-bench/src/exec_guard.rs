@@ -56,7 +56,7 @@ pub const ALLOWED_ARTEFACT_EXTENSIONS: &[&str] = &[
 ///
 /// Accepts a bare allowlisted toolchain name, or a fixture-relative
 /// `./<artefact>` reference to one of the binaries the harness itself
-/// compiled ([`ALLOWED_ARTEFACT_NAMES`]). Rejects absolute paths, `..`,
+/// compiled (see `is_harness_artefact`). Rejects absolute paths, `..`,
 /// directory traversal, and shell/command interpreters.
 #[must_use]
 pub fn is_allowed_fixture_program(program: &str) -> bool {
@@ -132,3 +132,14 @@ pub fn validate_fixture_command(command_parts: &[String]) -> Result<(), String> 
 /// `signal.alarm(0)`. The subprocess is wrapped in `timeout` with this budget
 /// so the benchmark can never hang indefinitely.
 pub const FIXTURE_SUBPROCESS_TIMEOUT_SECS: u64 = 30;
+
+/// Default per-command timeout (seconds) when a fixture declares none.
+///
+/// This is the in-script Python `signal.alarm` budget used by the HumanEval and
+/// MBPP hidden-test runners, the fallback when a fixture's
+/// `execution_timeouts_secs` list is shorter than its `execution_commands` list,
+/// and the per-command budget seeded for dataset records that carry no explicit
+/// timeout. It is deliberately shorter than
+/// [`FIXTURE_SUBPROCESS_TIMEOUT_SECS`], which only bounds how long the outer
+/// `timeout` wrapper may run before the whole process group is killed.
+pub const FIXTURE_DEFAULT_TIMEOUT_SECS: u64 = 10;

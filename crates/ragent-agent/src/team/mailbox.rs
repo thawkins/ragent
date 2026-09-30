@@ -10,7 +10,7 @@
 //!
 //! # On-disk format (PERF-022)
 //!
-//! Mailbox files use **newline-delimited JSON (JSONL)** — one
+//! Mailbox files use **newline-delimited JSON (JSONL)** - one
 //! `MailboxMessage` serialised as a single JSON object per line. This makes
 //! [`Mailbox::push`] an O(1) append (a single `write_line` under the advisory
 //! lock) instead of the legacy read-modify-write cycle that re-serialised
@@ -19,8 +19,8 @@
 //! **Legacy single-JSON-array format is still supported for reading** so
 //! existing mailbox files continue to load. The first non-whitespace
 //! character of the file distinguishes the two:
-//! - `[` → legacy single JSON array (read with `serde_json::from_str::<Vec<_>>`)
-//! - `{` → JSONL (parse line by line)
+//! - `[` -> legacy single JSON array (read with `serde_json::from_str::<Vec<_>>`)
+//! - `{` -> JSONL (parse line by line)
 //!
 //! Any mutation path (push, mark_read, drain_unread) rewrites the file in
 //! the new JSONL format, so legacy files are transparently migrated on the
@@ -222,7 +222,7 @@ fn acquire_lock(path: &Path, exclusive: bool) -> Result<File> {
     Ok(file)
 }
 
-// ── Mailbox notifier registry ───────────────────��────────────────────────────
+// ── Mailbox notifier registry ───────────────────────────────────────────────
 
 type NotifyKey = (PathBuf, String);
 
@@ -561,7 +561,7 @@ impl Mailbox {
     /// `true` if the message existed and was transitioned from unread to read,
     /// `false` if it was already read or not found. This is semantically
     /// equivalent to [`mark_read`] but is named to make the
-    /// peek → process → acknowledge flow explicit.
+    /// peek -> process -> acknowledge flow explicit.
     pub fn acknowledge(&self, message_id: &str) -> Result<bool> {
         self.mark_read(message_id)
     }
@@ -574,7 +574,7 @@ impl Mailbox {
     }
 
     /// PERF-020: Mark multiple messages as read in a **single**
-    /// lock → read → mark all → write → unlock cycle.
+    /// lock -> read -> mark all -> write -> unlock cycle.
     ///
     /// Previously [`team_read_messages`](crate::tools::team_read_messages)
     /// called [`acknowledge`](Self::acknowledge) (which delegates to
@@ -627,9 +627,9 @@ impl Mailbox {
 /// PERF-022: parse a mailbox file body into a `Vec<MailboxMessage>`,
 /// transparently supporting both on-disk formats:
 ///
-/// - **Legacy single JSON array** — file starts (after leading whitespace)
+/// - **Legacy single JSON array** - file starts (after leading whitespace)
 ///   with `[`. Parsed with `serde_json::from_str::<Vec<MailboxMessage>>`.
-/// - **JSONL** — newline-delimited JSON, one `MailboxMessage` per non-empty
+/// - **JSONL** - newline-delimited JSON, one `MailboxMessage` per non-empty
 ///   line. Parsed line by line; blank lines are skipped.
 ///
 /// Returns the first parse error encountered (the caller is responsible for
@@ -657,7 +657,7 @@ fn parse_messages(raw: &str) -> Result<Vec<MailboxMessage>> {
             }
             Ok(messages)
         }
-        // Empty file or unrecognised leading byte → treat as empty.
+        // Empty file or unrecognised leading byte -> treat as empty.
         // (Empty files are common before the first push.)
         Some(_) if raw.trim().is_empty() => Ok(Vec::new()),
         Some(c) => {

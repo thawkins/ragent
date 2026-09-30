@@ -1,4 +1,4 @@
-//! `git_diff` — Show changes between working tree, index, and commits.
+//! `git_diff` - Show changes between working tree, index, and commits.
 
 use anyhow::Result;
 use serde_json::{Value, json};

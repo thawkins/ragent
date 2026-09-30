@@ -4,6 +4,22 @@
 // Keep `pub(crate)` and suppress the clippy nursery lint.
 #![allow(clippy::redundant_pub_crate)]
 
+/// Leading marker every slash-command reply carries, so the render path can
+/// recognise (and special-case) command output.
+///
+/// The literal `"From: /..."` was hard-coded in ~491 construction sites before
+/// ANTIPAT M6 (LOW-1); this constant and [`from_cmd`] are the shared home for
+/// new code. Existing sites are migrated incrementally.
+pub(crate) const FROM_CMD_PREFIX: &str = "From: /";
+
+/// Build a slash-command reply in the canonical `From: /<cmd>\n\n<body>` shape.
+///
+/// Use for replies whose command marker is a plain leading prefix; call sites
+/// that interpolate the prefix mid-string keep their bespoke `format!`.
+pub(crate) fn from_cmd(cmd: &str, body: &str) -> String {
+    format!("{FROM_CMD_PREFIX}{cmd}\n\n{body}")
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MentionSpan {
     pub(crate) at_start: usize,
@@ -18,7 +34,7 @@ impl MentionSpan {
 }
 
 pub(crate) fn try_extract_research_code_block(text: &str) -> Option<String> {
-    if !text.starts_with("From: /") {
+    if !text.starts_with(FROM_CMD_PREFIX) {
         return None;
     }
     // A message may contain several preformatted tables (e.g. `/tools` shows
@@ -165,7 +181,7 @@ pub(crate) fn parse_alog_run_id_yes(
 ///
 /// On failure an error message prefixed `From: /alog {subcmd}` is returned
 /// so the caller can surface it directly. Used by the `/alog delete` and
-/// `/alog export` handlers, which share this open → verify → count scaffold.
+/// `/alog export` handlers, which share this open -> verify -> count scaffold.
 pub(crate) fn open_verified_alog(
     alog_path: &std::path::Path,
     run_id: &ragent_types::id::RunId,
@@ -197,11 +213,11 @@ pub(crate) fn open_verified_alog(
     }
 
     // Propagate storage errors: a corrupt log must not be presented to the
-    // user as an empty run — the confirmation dialog this feeds guards the
+    // user as an empty run - the confirmation dialog this feeds guards the
     // destructive `/alog delete` path.
     let count = log
         .count(run_id)
-        .map_err(|e| format!("From: /alog {subcmd}\n\n⚠ Failed to count events: {e}"))?;
+        .map_err(|e| format!("From: /alog {subcmd}\n\n[!] Failed to count events: {e}"))?;
     Ok((log, count))
 }
 
@@ -227,11 +243,11 @@ pub(crate) fn plural(n: u64, word: &str) -> String {
 pub(crate) fn loop_termination_banner(status: &str, iterations: u64) -> String {
     let iterations_label = plural(iterations, "iteration");
     match status {
-        "completed" => format!("✓ Goal loop completed — {iterations_label}"),
-        "error" => format!("✗ Goal loop failed — {iterations_label}"),
-        "budget_exhausted" => format!("⏳ Goal loop budget exhausted — {iterations_label}"),
-        "interrupted" => format!("⏹ Goal loop interrupted — {iterations_label}"),
-        other => format!("• Goal loop {other} — {iterations_label}"),
+        "completed" => format!("[ok] Goal loop completed - {iterations_label}"),
+        "error" => format!("[x] Goal loop failed - {iterations_label}"),
+        "budget_exhausted" => format!("[..] Goal loop budget exhausted - {iterations_label}"),
+        "interrupted" => format!("[stop] Goal loop interrupted - {iterations_label}"),
+        other => format!("* Goal loop {other} - {iterations_label}"),
     }
 }
 
@@ -251,9 +267,9 @@ pub(crate) fn files_preview(files: &[String], take: usize) -> String {
         .join(", ");
     let more = files.len().saturating_sub(take);
     if more > 0 {
-        format!(" · files: {preview} (+{more} more)")
+        format!(" * files: {preview} (+{more} more)")
     } else {
-        format!(" · files: {preview}")
+        format!(" * files: {preview}")
     }
 }
 
@@ -286,7 +302,7 @@ pub(crate) fn truncate_to_char_boundary(s: &str, max: usize) -> String {
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}…", &s[..end])
+    format!("{}...", &s[..end])
 }
 
 /// Truncate `s` to at most `max_chars` **characters**, appending a single
@@ -300,7 +316,7 @@ pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> String {
         return s.to_string();
     }
     let out: String = s.chars().take(max_chars).collect();
-    format!("{out}…")
+    format!("{out}...")
 }
 
 /// Remove control characters (except newlines and tabs) and ANSI escape
@@ -430,4 +446,66 @@ fn image_dimensions(path: &std::path::Path) -> Option<(u32, u32)> {
 #[must_use]
 pub(crate) fn current_working_dir() -> std::path::PathBuf {
     std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// Map a log level to its fixed three-letter spool tag.
+///
+/// The tag is written as the second field of every line in the log spool file
+/// (see [`crate::app::session_ops`]). Extracted so the append and full-history
+/// writers cannot drift apart (ANTIPAT M6.9 / MEDIUM-2).
+pub(crate) fn log_level_str(level: crate::app::state::LogLevel) -> &'static str {
+    match level {
+        crate::app::state::LogLevel::Info => "INF",
+        crate::app::state::LogLevel::Tool => "TUL",
+        crate::app::state::LogLevel::Warn => "WRN",
+        crate::app::state::LogLevel::Error => "ERR",
+    }
+}
+
+/// Open `path` for writing with owner-only (`0o600`) permissions asserted.
+///
+/// `mode(0o600)` on `OpenOptions` only applies at creation, so a pre-existing
+/// file keeps its old (possibly world-readable) mode; this re-asserts it
+/// best-effort. Shared by the log spool, session export, and bug-report
+/// writers, which previously carried three copies of the same block (see
+/// `ANTIPAT.md` M3.15).
+///
+/// When `truncate` is true the file is created/truncated; otherwise it is
+/// created and appended to.
+///
+/// # Errors
+///
+/// Propagates any error from opening the file.
+pub(crate) fn open_owner_only(
+    path: &std::path::Path,
+    truncate: bool,
+) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    if truncate {
+        options.write(true).create(true).truncate(true);
+    } else {
+        options.create(true).append(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600)); // INTENTIONAL: best-effort permission tighten (mode set at create)
+    }
+    Ok(file)
+}
+
+/// Open the log spool `path` for owner-only (`0o600`) appending.
+///
+/// Thin `Option`-returning wrapper over [`open_owner_only`] for the two log
+/// spool writers in `session_ops`, which treat an open failure as "skip this
+/// write" rather than an error. Kept in one place so the spool permission
+/// policy cannot diverge (ANTIPAT M6.9 / MEDIUM-2).
+pub(crate) fn open_log_spool(path: &std::path::Path) -> Option<std::fs::File> {
+    open_owner_only(path, false).ok()
 }

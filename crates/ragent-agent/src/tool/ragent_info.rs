@@ -1,4 +1,4 @@
-//! `ragent_info` — Report build and version information about ragent itself.
+//! `ragent_info` - Report build and version information about ragent itself.
 //!
 //! Implements a read-only introspection tool that returns the running ragent
 //! version, when the binary was built, the git commit it was built from (when
@@ -81,7 +81,7 @@ impl Tool for RagentInfoTool {
 
     /// # Errors
     ///
-    /// This tool never returns an error — it always succeeds with build info.
+    /// This tool never returns an error - it always succeeds with build info.
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let format = input["format"].as_str().unwrap_or("text");
         let info = Self::build_info();

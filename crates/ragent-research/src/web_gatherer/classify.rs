@@ -1,4 +1,4 @@
-//! URL/source classification — classify a web URL by content type and host
+//! URL/source classification - classify a web URL by content type and host
 //! (page, PDF, YouTube).
 //!
 //! These helpers were previously inline in `web_gatherer.rs`.

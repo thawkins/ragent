@@ -21,7 +21,7 @@ impl Tool for CopyFileTool {
     fn description(&self) -> &'static str {
         "Copy a single file to a new location, creating any missing parent \
          directories on the destination side. Required parameters: `source` \
-         (string) — the existing file to copy, and `destination` (string) — the \
+         (string) - the existing file to copy, and `destination` (string) - the \
          target path including the new file name. The source file is left \
          unchanged. Both paths must stay within the agent's working-directory \
          root. To move rather than copy, use `move_file`."
@@ -67,7 +67,7 @@ impl Tool for CopyFileTool {
             &ctx.canonical_cache,
         )?;
 
-        // FUNC-061: refuse a self-copy — copying a file onto itself would
+        // FUNC-061: refuse a self-copy - copying a file onto itself would
         // truncate it (the destination is opened for write while the source is
         // read). Compare canonical forms so path aliases are caught too.
         // Canonicalise the source eagerly: a failure here means the source
@@ -87,7 +87,7 @@ impl Tool for CopyFileTool {
             }
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                // New file — no existing destination to collide with.
+                // New file - no existing destination to collide with.
             }
             Err(e) => {
                 return Err(e).with_context(|| {
@@ -108,7 +108,7 @@ impl Tool for CopyFileTool {
 
         Ok(ToolOutput {
             content: format!(
-                "Copied '{}' → '{}' ({bytes} bytes)",
+                "Copied '{}' -> '{}' ({bytes} bytes)",
                 src.display(),
                 dst.display()
             ),

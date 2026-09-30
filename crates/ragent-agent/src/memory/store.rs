@@ -49,7 +49,7 @@ pub struct StructuredMemory {
     /// Source of the memory (e.g., "manual", "auto-extract", tool name).
     #[serde(default)]
     pub source: String,
-    /// Confidence score (0.0–1.0). Higher = more certain.
+    /// Confidence score (0.0-1.0). Higher = more certain.
     pub confidence: f64,
     /// Project this memory belongs to.
     #[serde(default)]

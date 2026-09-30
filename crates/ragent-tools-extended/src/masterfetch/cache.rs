@@ -7,7 +7,7 @@
 //! parameters do not collide. Entries carry a per-insert TTL (default 3600 s);
 //! `cache_ttl = 0` bypasses the cache entirely (the caller skips the
 //! `get_cached` call). Entries inserted with `content_ok = false` are never
-//! stored — bad content is never cached (FR-018).
+//! stored - bad content is never cached (FR-018).
 //!
 //! A configurable size cap (`max_bytes`, default 100 MiB) evicts the oldest
 //! entries after every insert so a long-lived agent's cache cannot grow
@@ -34,7 +34,7 @@
 //! cache.set_cached(
 //!     &key,
 //!     "# Hello",          // content
-//!     true,               // content_ok — bad content is never cached
+//!     true,               // content_ok - bad content is never cached
 //!     200,                // status_code
 //!     "text/markdown",    // content_type
 //!     3600,               // ttl_seconds
@@ -85,7 +85,7 @@ pub const DEFAULT_MAX_BYTES: usize = 100 * 1024 * 1024;
 /// always well-formed.
 const EMPTY_COMPONENT: &str = "";
 
-/// A cache key — the composite of URL + extraction type + CSS selector + pages.
+/// A cache key - the composite of URL + extraction type + CSS selector + pages.
 ///
 /// Construct with [`CacheKey::new`] and the `.with_*` builders. The components
 /// are normalised into owned strings so the key is self-contained and can be
@@ -158,7 +158,7 @@ pub struct CachedEntry {
     /// The extracted content stored at insert time.
     pub content: String,
     /// Whether the content was marked usable (`content_ok`) at insert time.
-    /// Always `true` for stored entries — bad content is never cached.
+    /// Always `true` for stored entries - bad content is never cached.
     pub content_ok: bool,
     /// HTTP status code recorded at insert time.
     pub status_code: u16,
@@ -368,7 +368,7 @@ impl ContentCache {
                     let metadata_json: Option<String> = row.get(4)?;
                     // FUNC-035: a corrupt stored metadata blob must be treated
                     // as a cache miss (so the caller re-fetches), not silently
-                    // degraded to `None` — otherwise a corrupt entry is served
+                    // degraded to `None` - otherwise a corrupt entry is served
                     // as a hit with missing metadata.
                     let metadata = match metadata_json {
                         Some(json) => match serde_json::from_str::<PageMetadata>(&json) {
@@ -441,7 +441,7 @@ impl ContentCache {
     /// until the total is at or below the cap.
     ///
     /// `ttl_seconds` is the per-entry time-to-live. A `ttl_seconds` of `0`
-    /// should bypass the cache entirely — the caller is expected to skip this
+    /// should bypass the cache entirely - the caller is expected to skip this
     /// call when `ttl == 0` (FR-018). If called with `ttl_seconds == 0` the
     /// entry is still stored with an expiry equal to `created_at` (i.e.
     /// immediately expired) so a subsequent `get_cached` will not return it.

@@ -25,8 +25,8 @@ impl Tool for CreateTool {
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
         "Create a new file and write the given content to it, creating parent \
-         directories as needed. Required parameters: `path` (string) — the \
-         file to create, and `content` (string) — the content to write. If the \
+         directories as needed. Required parameters: `path` (string) - the \
+         file to create, and `content` (string) - the content to write. If the \
          file already exists, it is truncated and overwritten. To append to an \
          existing file without overwriting, use `append_to_file`. To update a \
          specific region, use `edit`."

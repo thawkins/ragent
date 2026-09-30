@@ -5,10 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use futures::FutureExt;
 use ragent_agent::agent::AgentMode;
 use ragent_agent::session::loop_state::LoopSpec;
-use ragent_agent::{event::Event, mcp::McpClient, message::Message, tool::TeamManagerInterface};
-use ragent_team::team::{
+use ragent_agent::team::{
     self, Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamStore,
 };
+use ragent_agent::{event::Event, mcp::McpClient, message::Message, tool::TeamManagerInterface};
 use ragent_types::ThinkingLevel;
 use ragent_types::strutil::truncate_bytes;
 
@@ -154,6 +154,7 @@ impl ragent_tools_extended::archdoc::GovCreateStages for TuiGovCreateStages {
     ) -> Result<(), ragent_tools_extended::archdoc::GovCreateRunError> {
         ragent_specs::SpecCommand::write_govcreate_spec(
             &run.target_folder,
+            &run.invoking_root,
             &run.spec_id,
             &authored.spec_md,
             &authored.plan_md,
@@ -202,7 +203,7 @@ impl App {
         else {
             self.append_assistant_text(
                 "From: /spec govcreate\n\n[err] **no model configured** \
-                 — select a provider with /model before running govcreate",
+                 - select a provider with /model before running govcreate",
             );
             self.status = "spec govcreate: no model".to_string();
             return;
@@ -321,7 +322,7 @@ impl App {
     /// (T-013, FR-015).
     pub fn poll_govcreate_result(&mut self) {
         // Stream any fresh worker progress lines into the panel. A poisoned
-        // lock means the worker panicked mid-report — recover with
+        // lock means the worker panicked mid-report - recover with
         // `into_inner` so the panel still drains and the stall is visible.
         let drained: Vec<String> = std::mem::take(
             &mut *self
@@ -400,10 +401,10 @@ impl App {
         };
         if !token.is_cancelled() {
             token.cancel();
-            self.status = "spec govcreate: cancelling…".to_string();
+            self.status = "spec govcreate: cancelling...".to_string();
             self.push_log_no_agent(
                 LogLevel::Warn,
-                "govcreate: user pressed Esc — cancelling at the next stage boundary".to_string(),
+                "govcreate: user pressed Esc - cancelling at the next stage boundary".to_string(),
             );
             self.needs_redraw = true;
         }
@@ -503,7 +504,7 @@ async fn websearch_diag_and_render() -> String {
     if !failed.is_empty() {
         output.push_str("\n\nErrors:");
         for r in failed {
-            output.push_str(&format!("\n• {} — {}", r.name, r.error));
+            output.push_str(&format!("\n* {} - {}", r.name, r.error));
         }
     }
     output
@@ -656,7 +657,7 @@ fn is_help_args(args: &str) -> bool {
 /// `live` (the `Event::McpStatusChanged` map) when present, so the background
 /// startup connect loop's status is not lost; otherwise it starts `Disabled`
 /// until the connect path reports otherwise.
-pub fn mcp_display_servers<S, H>(
+pub(crate) fn mcp_display_servers<S, H>(
     previous: &[ragent_agent::mcp::McpServer],
     configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
     working_dir: &std::path::Path,
@@ -705,7 +706,7 @@ where
 /// Thin re-export of [`ragent_agent::tool::McpToolWrapper::ragent_name_for`]
 /// so the existing TUI call sites keep their short path.
 #[must_use]
-pub fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
+pub(crate) fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
     ragent_agent::tool::McpToolWrapper::ragent_name_for(server_id, tool_name)
 }
 
@@ -717,7 +718,7 @@ pub fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
 /// synthesizing a ledger per call just to invoke that predicate wastefully
 /// rebuilds a `BTreeMap` for every `/mcp` row.
 #[must_use]
-pub fn server_is_enabled(
+pub(super) fn server_is_enabled(
     server: &ragent_agent::mcp::McpServer,
     enabled: &std::collections::HashMap<String, bool>,
 ) -> bool {
@@ -729,7 +730,7 @@ pub fn server_is_enabled(
 /// Unknown strings map to `Disabled` so a malformed event cannot wedge the
 /// display list in a bogus state.
 #[must_use]
-pub fn mcp_status_from_event(status: &str) -> ragent_agent::mcp::McpStatus {
+pub(crate) fn mcp_status_from_event(status: &str) -> ragent_agent::mcp::McpStatus {
     match status {
         "connected" => ragent_agent::mcp::McpStatus::Connected,
         "needs_auth" => ragent_agent::mcp::McpStatus::NeedsAuth,
@@ -1054,7 +1055,7 @@ impl App {
                 let hint = skill
                     .argument_hint
                     .as_deref()
-                    .map(|h| format!(" — {h}"))
+                    .map(|h| format!(" - {h}"))
                     .unwrap_or_default();
 
                 // Skip if a builtin command has the same trigger
@@ -1461,11 +1462,11 @@ impl App {
 
         use std::fmt::Write;
         let write_group = |out: &mut String, title: &str, group: &[(&str, &str, &str, String)]| {
-            let _ = writeln!(out, "### {title}");
+            let _ = writeln!(out, "### {title}"); // INTENTIONAL: write to a String buffer is infallible
             for (name, kind, desc, value) in group {
-                let _ = writeln!(out, "- `{name}` — **{value}** — *{kind}* — {desc}");
+                let _ = writeln!(out, "- `{name}` - **{value}** - *{kind}* - {desc}"); // INTENTIONAL: write to a String buffer is infallible
             }
-            let _ = writeln!(out);
+            let _ = writeln!(out); // INTENTIONAL: write to a String buffer is infallible
         };
 
         write_group(&mut out, "Usage metrics", &usage);
@@ -1478,7 +1479,7 @@ impl App {
 ",
         );
         out.push_str(
-            "No counters configured — log signals are planned.
+            "No counters configured - log signals are planned.
 
 ",
         );
@@ -1487,7 +1488,7 @@ impl App {
 ",
         );
         out.push_str(
-            "No counters configured — trace signals are planned.
+            "No counters configured - trace signals are planned.
 ",
         );
 
@@ -1508,7 +1509,7 @@ impl App {
                 self.append_assistant_text(
                     "From: /telemetry help
 
-## /telemetry — Telemetry management
+## /telemetry - Telemetry management
 
 | Subcommand | Description |
 |---|---|
@@ -1577,7 +1578,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
     /// Handle the `/alog` slash command (activity log UI).
     ///
-    /// Dispatcher skeleton (FR-002) — routes `/alog <subcommand>` to the
+    /// Dispatcher skeleton (FR-002) - routes `/alog <subcommand>` to the
     /// appropriate per-subcommand handler.  Subcommands already implemented
     /// (`config`, `list`, `status`) call their handlers directly; remaining
     /// subcommands (`help`, `delete`, `export`) are routed to dedicated
@@ -1751,7 +1752,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
     fn handle_alog_help(&mut self) {
         let enabled = ragent_config::activity_log::is_enabled();
         let output = "From: /alog help\n\n\
-            ## /alog — Activity Log\n\n\
+            ## /alog - Activity Log\n\n\
             Current state: **logging {}**\n\n\
             | Subcommand | Description |\n\
             |---|---|\n\
@@ -1792,6 +1793,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
         // FR-008/FR-015: perform the storage operation on a blocking thread.
         // Return either a success message (with event count) or an error.
+        // reason: FUNC-015 sync storage/IO kept on a blocking thread (callee is synchronous); see ANTIPAT M6.1
         let result = tokio::task::block_in_place(|| -> Result<(u64, String), String> {
             let (log, count) = open_verified_alog(&alog_path, &run_id_for_block, "delete")?;
 
@@ -1850,6 +1852,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         // FR-023: perform the storage operation on a blocking thread.
         // Return either a success tuple (events count, file path string) or
         // an error message.
+        // reason: FUNC-015 sync storage/IO kept on a blocking thread (callee is synchronous); see ANTIPAT M6.1
         let result = tokio::task::block_in_place(|| -> Result<(u64, String), String> {
             let (log, count) = open_verified_alog(&alog_path, &run_id_for_block, "export")?;
 
@@ -1926,6 +1929,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
         // FR-008: run the storage query (open + journal_mode pragma) on a
         // blocking thread so the async event loop is not held up.
+        // reason: FUNC-015 sync storage/IO kept on a blocking thread (callee is synchronous); see ANTIPAT M6.1
         let journal_mode = tokio::task::block_in_place(|| {
             if !alog_path_for_block.exists() {
                 return "(database not yet created)".to_string();
@@ -1972,7 +1976,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
     /// Handle the `/prompt` slash command (agent system-prompt inspector).
     ///
-    /// Dispatcher (FR-002) — routes `/prompt <subcommand>` by the first
+    /// Dispatcher (FR-002) - routes `/prompt <subcommand>` by the first
     /// whitespace-separated token (lowercased):
     /// - `""`/`help`/`--help`/`-h` -> help page (FR-003)
     /// - `list` -> agent roster (FR-007)
@@ -2137,6 +2141,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         // polling while this work runs.
         let working_dir = crate::app::helpers::current_working_dir();
         let (config, git_status, readme, agents_md, file_tree) =
+            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
             tokio::task::block_in_place(|| {
                 // The P-2 mtime cache keeps this a no-op disk read in the
                 // common case; the wrapped section also covers SkillRegistry's
@@ -2152,9 +2157,11 @@ Usage: `/telemetry help|on|off|setup|counters`",
         let skill_dirs = config.skill_dirs.clone();
         let memory_cfg = config.memory.clone();
         let storage = Arc::clone(self.session_processor.session_manager.storage());
+        // reason: FUNC-015 sync storage/IO kept on a blocking thread (callee is synchronous); see ANTIPAT M6.1
         let skill_registry = tokio::task::block_in_place(|| {
             ragent_agent::skill::SkillRegistry::load(&working_dir, &skill_dirs)
         });
+        // reason: FUNC-015 sync storage/IO kept on a blocking thread (callee is synchronous); see ANTIPAT M6.1
         let memory_section = tokio::task::block_in_place(|| {
             build_memory_prompt_section(&working_dir, Some(&storage), Some(&memory_cfg))
         });
@@ -2163,7 +2170,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         // tool-free agent (max_steps <= 1, e.g. a single-shot summariser)
         // takes the FR-009 `(no tools)` path: zero effective tools, so no
         // `## Available Tools` section is rendered and the header states
-        // `(no tools)` instead of a count — matching the assembler's own gate
+        // `(no tools)` instead of a count - matching the assembler's own gate
         // (`agent/mod.rs:2533-2536`) and the zero-tool wire surface the
         // session processor sends for such agents (`processor.rs:1719`).
         let registry = Arc::clone(&self.session_processor.tool_registry);
@@ -2196,7 +2203,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
             agent_name: agent.name.clone(),
             source,
             mode: assembled_mode,
-            // FR-009: `None` renders `(no tools)` — both for tool-free agents
+            // FR-009: `None` renders `(no tools)` - both for tool-free agents
             // (max_steps <= 1) and for the degenerate empty-filter case.
             tool_count: (!tool_free && tool_count > 0).then_some(tool_count),
             body_chars: body.chars().count(),
@@ -2224,10 +2231,10 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
     /// Handle the `/toolchain` slash command (language toolchain report).
     ///
-    /// Dispatcher (FR-002) — routes `/toolchain <subcommand>` by the
+    /// Dispatcher (FR-002) - routes `/toolchain <subcommand>` by the
     /// first whitespace-separated token (lowercased). `""`, `help`,
     /// `--help`, and `-h` render the help page (FR-003); `list` renders
-    /// the toolchain report (FR-004–FR-009, with the FR-011 language filter
+    /// the toolchain report (FR-004-FR-009, with the FR-011 language filter
     /// and FR-015 `--json` flag parsed from its trailing words); any other
     /// token renders the unknown-subcommand correction message (FR-014).
     fn handle_toolchain_command(&mut self, args: &str) {
@@ -2252,10 +2259,10 @@ Usage: `/telemetry help|on|off|setup|counters`",
     fn handle_toolchain_help(&mut self) {
         self.append_assistant_text(
             "From: /toolchain help\n\n\
-             ## /toolchain — Runtime Toolchain Presence Report\n\n\
+             ## /toolchain - Runtime Toolchain Presence Report\n\n\
              Reports which language toolchains are installed on this machine,\n\
              walking the code-index supported-language list. The report is\n\
-             **read-only** — it never installs, upgrades, or configures any\n\
+             **read-only** - it never installs, upgrades, or configures any\n\
              runtime, and it never touches ragent state.\n\n\
              | Subcommand | Description |\n\
              |---|---|\n\
@@ -2287,6 +2294,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         let json = words.contains(&"--json");
         let filter = words.iter().find(|w| !w.starts_with("--")).copied();
         self.status = "[wait] toolchain".to_string();
+        // reason: FUNC-015 sync storage/IO kept on a blocking thread (callee is synchronous); see ANTIPAT M6.1
         let rows = tokio::task::block_in_place(toolchain::build_report_rows);
         let select = |rows: &[toolchain::ReportRow]| -> Option<Vec<toolchain::ReportRow>> {
             match filter {
@@ -2354,6 +2362,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         // FR-008: perform all storage queries on a blocking thread to avoid
         // blocking the async event loop.  Return either the formatted output
         // or an error message; the caller handles the UI update.
+        // reason: FUNC-015 sync storage/IO kept on a blocking thread (callee is synchronous); see ANTIPAT M6.1
         let result = tokio::task::block_in_place(|| -> Result<String, String> {
             let log = match ActivityLog::open(&alog_path) {
                 Ok(log) => log,
@@ -2379,7 +2388,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
             }
 
             let mut output = String::from(
-                "From: /alog list\n\n## Activity Log — Runs\n\n\
+                "From: /alog list\n\n## Activity Log - Runs\n\n\
                  | Run | Status | Events | Model msgs | Tool calls | Tool results | Permissions | Checkpoints | Terminations | Branch-origin | Mutation-rej | Lifecycle |\n\
                  |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n",
             );
@@ -2451,6 +2460,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         // FR-008: perform all storage queries on a blocking thread to avoid
         // blocking the async event loop.  Return either the formatted output
         // or an error message; the caller handles the UI update.
+        // reason: FUNC-015 sync storage/IO kept on a blocking thread (callee is synchronous); see ANTIPAT M6.1
         let result = tokio::task::block_in_place(|| -> Result<String, String> {
             // Attempt to open the database (FR-006: "whether the database
             // file is openable").  On failure, report a degraded status
@@ -2508,7 +2518,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
             let output = format!(
                 "From: /alog status\n\n\
-                 ## Activity Log — Status\n\n\
+                 ## Activity Log - Status\n\n\
                  | Property | Value |\n\
                  |---|---|\n\
                  | Logging enabled | {} |\n\
@@ -2570,7 +2580,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         match sub.as_str() {
             "help" | "--help" | "-h" | "" => {
                 self.append_assistant_text(
-                    "From: /editlog help\n\n## /editlog — Edit-operation logging\n\n| Subcommand | Description |\n|---|---|\n| `/editlog help` | Show this help |\n| `/editlog status` | Show whether logging is enabled and the log directory |\n| `/editlog on` | Enable logging of `edit` and `multi_edit` operations |\n| `/editlog off` | Disable logging |\n| `/editlog show` | Show counts, outcomes, and success/failure ratio per tool |\n| `/editlog analyse` | Analyse failed edits for `old_str` characteristics that may cause failures |\n| `/editlog clear` | Empty the contents of the editlog files (files are kept) |",
+                    "From: /editlog help\n\n## /editlog - Edit-operation logging\n\n| Subcommand | Description |\n|---|---|\n| `/editlog help` | Show this help |\n| `/editlog status` | Show whether logging is enabled and the log directory |\n| `/editlog on` | Enable logging of `edit` and `multi_edit` operations |\n| `/editlog off` | Disable logging |\n| `/editlog show` | Show counts, outcomes, and success/failure ratio per tool |\n| `/editlog analyse` | Analyse failed edits for `old_str` characteristics that may cause failures |\n| `/editlog clear` | Empty the contents of the editlog files (files are kept) |",
                 );
                 self.status = "editlog: help".to_string();
             }
@@ -2777,7 +2787,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 output.push_str(&format!("*{}*\n\n", risk.label()));
                 for ex in examples.iter().take(3) {
                     output.push_str(&format!(
-                        "- `{}` on `{}` → {}\n  `old_str`: `{}`\n\n",
+                        "- `{}` on `{}` -> {}\n  `old_str`: `{}`\n\n",
                         ex.tool, ex.file_path, ex.outcome, ex.old_str_preview
                     ));
                 }
@@ -2814,7 +2824,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         Box::pin(self.execute_slash_command_inner(raw)).await;
 
         // If the command spawned an async task (status begins with [wait]), defer
-        // the "Finished" log entry — poll_*_result will emit it once the
+        // the "Finished" log entry - poll_*_result will emit it once the
         // background work completes.
         if self.status.starts_with("[wait]") {
             return;
@@ -2828,7 +2838,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         let added = end_lines.saturating_sub(start_lines);
         self.push_log_no_agent(
             LogLevel::Info,
-            format!("Finished /{} {} — {} lines output", cmd, args, added),
+            format!("Finished /{} {} - {} lines output", cmd, args, added),
         );
     }
 
@@ -2871,7 +2881,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
             "telemetry" => self.handle_telemetry_command(args),
             "about" => {
                 let about = format!(
-                    "  ragent — AI Coding Agent\n\
+                    "  ragent - AI Coding Agent\n\
                                  \n\
                                  \x20 An interactive TUI-based AI coding agent\n\
                                  \x20 supporting multiple LLM providers.\n\
@@ -2966,12 +2976,12 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         custom_names.contains(&agent.name) || agent.name.starts_with("custom:");
                     if !is_custom {
                         let active = if agent.name == self.agent_name {
-                            " ●"
+                            " *"
                         } else {
                             ""
                         };
                         output.push_str(&format!(
-                            "- `{}` — {}{}\n",
+                            "- `{}` - {}{}\n",
                             agent.name, agent.description, active
                         ));
                     }
@@ -2979,7 +2989,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
                 if self.custom_agent_defs.is_empty() {
                     output.push_str(
-                                      "\n**Custom Agents**\n\n*(none — place .json or .md files in .ragent/agents/, ~/.config/ragent/agents/, or ~/.ragent/agents/)*\n",
+                                      "\n**Custom Agents**\n\n*(none - place .json or .md files in .ragent/agents/, ~/.config/ragent/agents/, or ~/.ragent/agents/)*\n",
                                   );
                 } else {
                     output.push_str("\n**Custom Agents**\n\n");
@@ -2991,7 +3001,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         };
                         let name = &def.agent_info.name;
                         let desc = &def.agent_info.description;
-                        let active = if *name == self.agent_name { " ●" } else { "" };
+                        let active = if *name == self.agent_name { " *" } else { "" };
                         let fmt =
                             if def.source_path.extension().and_then(|e| e.to_str()) == Some("md") {
                                 "profile"
@@ -2999,7 +3009,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                                 "oasf"
                             };
                         output.push_str(&format!(
-                            "- `{}` — {} [{}/{}]{}\n",
+                            "- `{}` - {} [{}/{}]{}\n",
                             name, desc, scope, fmt, active
                         ));
                     }
@@ -3020,14 +3030,14 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 "refresh" => {
                     ragent_agent::agent::clear_prompt_context_cache();
                     self.append_assistant_text(
-                                                        "From: /context\n[sync] Context cache cleared — next message will recompute file tree, git status, and README."
+                                                        "From: /context\n[sync] Context cache cleared - next message will recompute file tree, git status, and README."
                                                     );
                     self.push_log_no_agent(LogLevel::Info, "context cache cleared".to_string());
                     self.status = "context refreshed".to_string();
                 }
                 "help" | "" => {
                     self.append_assistant_text(
-                                                        "From: /context help\n\n## /context — Prompt context cache\n\n| Subcommand | Description |\n|---|---|\n| `/context refresh` | Clear the cached file tree, git status, and README so the next message recomputes them |\n| `/context help` | Show this help |"
+                                                        "From: /context help\n\n## /context - Prompt context cache\n\n| Subcommand | Description |\n|---|---|\n| `/context refresh` | Clear the cached file tree, git status, and README so the next message recomputes them |\n| `/context help` | Show this help |"
                                                     );
                     self.status = "context: help".to_string();
                 }
@@ -3042,7 +3052,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
             "config" => match args.trim() {
                 "help" | "" => {
                     self.append_assistant_text(
-                        "From: /config help\n\n## /config — Configuration inspection and backup\n\n| Subcommand | Description |\n|---|---|\n| `/config show` | Display application paths and resolved config values (with source: global/project/env) |\n| `/config save` | Back up the global `ragent.json` into the config `saves/` directory |\n| `/config list` | Browse saved backups and restore one (interactive picker) |\n| `/config help` | Show this help |",
+                        "From: /config help\n\n## /config - Configuration inspection and backup\n\n| Subcommand | Description |\n|---|---|\n| `/config show` | Display application paths and resolved config values (with source: global/project/env) |\n| `/config save` | Back up the global `ragent.json` into the config `saves/` directory |\n| `/config list` | Browse saved backups and restore one (interactive picker) |\n| `/config help` | Show this help |",
                     );
                     self.status = "config: help".to_string();
                 }
@@ -3058,7 +3068,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                     let env_config = std::env::var("RAGENT_CONFIG").ok();
 
                     let mut output =
-                        String::from("From: /config show\n\n📂 **Application Paths**\n\n");
+                        String::from("From: /config show\n\n[dir] **Application Paths**\n\n");
 
                     output.push_str(&format!(
                         "| {:<24} | {}\n",
@@ -3076,7 +3086,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         config_dir.display()
                     ));
 
-                    output.push_str("\n📄 **Config Files**\n\n");
+                    output.push_str("\n[file] **Config Files**\n\n");
 
                     let project_exists = project_config.exists();
                     let global_exists = global_config.exists();
@@ -3085,13 +3095,13 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         "| {:<24} | {} {}\n",
                         "Project config",
                         project_config.display(),
-                        if project_exists { "✓" } else { "✗" }
+                        if project_exists { "[ok]" } else { "[x]" }
                     ));
                     output.push_str(&format!(
                         "| {:<24} | {} {}\n",
                         "Global config",
                         global_config.display(),
-                        if global_exists { "✓" } else { "✗" }
+                        if global_exists { "[ok]" } else { "[x]" }
                     ));
                     if let Some(ref env_path) = env_config {
                         let env_exists = std::path::PathBuf::from(env_path).exists();
@@ -3099,7 +3109,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                             "| {:<24} | {} {}\n",
                             "Env (RAGENT_CONFIG)",
                             env_path,
-                            if env_exists { "✓" } else { "✗" }
+                            if env_exists { "[ok]" } else { "[x]" }
                         ));
                     } else {
                         output.push_str(&format!(
@@ -3273,30 +3283,34 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
                     // Storage database
                     output.push_str(&format!(
-                        "\n💾 **Storage**\n\n| {:<24} | {}\n",
+                        "\n[disk] **Storage**\n\n| {:<24} | {}\n",
                         "Database",
                         self.db_path.display()
                     ));
 
                     // Code index
                     let codeindex_dir = cwd.join(".ragent").join("codeindex");
-                    output.push_str("\n🔍 **Code Index**\n\n");
+                    output.push_str("\n[search] **Code Index**\n\n");
                     output.push_str(&format!(
                         "| {:<24} | {} {}\n",
                         "Index directory",
                         codeindex_dir.display(),
-                        if codeindex_dir.exists() { "✓" } else { "✗" }
+                        if codeindex_dir.exists() {
+                            "[ok]"
+                        } else {
+                            "[x]"
+                        }
                     ));
 
                     // Memory
                     let memory_dir = cwd.join(".ragent").join("memory");
                     let global_memory = ragent_config::user_dirs::global_memory_dir();
-                    output.push_str("\n🧠 **Memory**\n\n");
+                    output.push_str("\n[brain] **Memory**\n\n");
                     output.push_str(&format!(
                         "| {:<24} | {} {}\n",
                         "Project memory",
                         memory_dir.display(),
-                        if memory_dir.exists() { "✓" } else { "✗" }
+                        if memory_dir.exists() { "[ok]" } else { "[x]" }
                     ));
                     match &global_memory {
                         Some(dir) => {
@@ -3304,26 +3318,26 @@ Usage: `/telemetry help|on|off|setup|counters`",
                                 "| {:<24} | {} {}\n",
                                 "Global memory",
                                 dir.display(),
-                                if dir.exists() { "✓" } else { "✗" }
+                                if dir.exists() { "[ok]" } else { "[x]" }
                             ));
                         }
                         None => {
-                            output.push_str("| Global memory            | (unavailable) ✗\n");
+                            output.push_str("| Global memory            | (unavailable) [x]\n");
                         }
                     }
 
                     // Agents
                     let project_agents = cwd.join(".ragent").join("agents");
                     let global_agents = ragent_config::user_dirs::global_agents_dir();
-                    output.push_str("\n🤖 **Custom Agents**\n\n");
+                    output.push_str("\n[agent] **Custom Agents**\n\n");
                     output.push_str(&format!(
                         "| {:<24} | {} {}\n",
                         "Project agents",
                         project_agents.display(),
                         if project_agents.exists() {
-                            "✓"
+                            "[ok]"
                         } else {
-                            "✗"
+                            "[x]"
                         }
                     ));
                     match &global_agents {
@@ -3332,11 +3346,11 @@ Usage: `/telemetry help|on|off|setup|counters`",
                                 "| {:<24} | {} {}\n",
                                 "Global agents",
                                 dir.display(),
-                                if dir.exists() { "✓" } else { "✗" }
+                                if dir.exists() { "[ok]" } else { "[x]" }
                             ));
                         }
                         None => {
-                            output.push_str("| Global agents            | (unavailable) ✗\n");
+                            output.push_str("| Global agents            | (unavailable) [x]\n");
                         }
                     }
 
@@ -3416,7 +3430,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                     if entries.is_empty() {
                         // FR-006: no saved configurations available.
                         self.append_assistant_text(&format!(
-                            "From: /config list\nℹ️  **No saved configurations found.**\n\n\
+                            "From: /config list\n[i]  **No saved configurations found.**\n\n\
                              Backups are stored in:\n  `{}`\n\nUse `/config save` to create one.",
                             saves_dir.display()
                         ));
@@ -3445,8 +3459,8 @@ Usage: `/telemetry help|on|off|setup|counters`",
                             config_dir: config_dir.clone(),
                         });
                         self.append_assistant_text(&format!(
-                            "From: /config list\n📋 **{} saved configuration(s) found.**\n\n\
-                             Use ↑/↓ (or k/j) to select a backup, Enter to restore, Esc to \
+                            "From: /config list\n[notice] **{} saved configuration(s) found.**\n\n\
+                             Use ^/v (or k/j) to select a backup, Enter to restore, Esc to \
                              cancel.",
                             count
                         ));
@@ -3471,14 +3485,14 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
             // ── /init ────────────────────────────────────────────────────────
             "init" => match args.trim() {
-                // /init help — show usage without starting the analysis run.
+                // /init help - show usage without starting the analysis run.
                 "help" => {
                     self.append_assistant_text(
-                        "From: /init help\n\n## /init — Project analysis and default config\n\n| Subcommand | Description |\n|---|---|\n| `/init` | Analyse the project and write a summary to `.ragent/memory/PROJECT_ANALYSIS.md` for future sessions |\n| `/init config` | Write a default `ragent.json` to the global config directory (skipped if one exists) |\n| `/init help` | Show this help |",
+                        "From: /init help\n\n## /init - Project analysis and default config\n\n| Subcommand | Description |\n|---|---|\n| `/init` | Analyse the project and write a summary to `.ragent/memory/PROJECT_ANALYSIS.md` for future sessions |\n| `/init config` | Write a default `ragent.json` to the global config directory (skipped if one exists) |\n| `/init help` | Show this help |",
                     );
                     self.status = "init: help".to_string();
                 }
-                // /init config — write a default ragent.json to the global
+                // /init config - write a default ragent.json to the global
                 // config directory (~/.config/ragent/ragent.json on Linux,
                 // ~/Library/Application Support/ragent/ragent.json on macOS,
                 // %APPDATA%\ragent\ragent.json on Windows).
@@ -3588,7 +3602,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 _ => {
                     let sid = self.session_id.clone().unwrap_or_default();
                     self.append_assistant_text(
-                        "From: /init\n🔍 **Analysing project…**\n\n\
+                        "From: /init\n[search] **Analysing project...**\n\n\
                          The analysis agent will examine the project structure, README, build \
                          files, and test layout, then write a summary to \
                          `.ragent/memory/PROJECT_ANALYSIS.md`. Future sessions will \
@@ -3600,7 +3614,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                     );
 
                     // Find the general agent and dispatch the analysis task directly
-                    // (no agent-stack push — init runs as a one-shot subagent that writes
+                    // (no agent-stack push - init runs as a one-shot subagent that writes
                     // memory).
                     let agent = self.select_general_agent();
 
@@ -3629,7 +3643,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     let flag = Arc::new(AtomicBool::new(false));
                     self.cancel_flag = Some(flag.clone());
                     self.is_processing = true;
-                    self.status = "init: analysing project…".to_string();
+                    self.status = "init: analysing project...".to_string();
 
                     let event_bus = self.event_bus.clone();
                     tokio::spawn(async move {
@@ -3876,9 +3890,10 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
                 match sub.as_str() {
                     "help" | "--help" | "-h" => {
-                        self.append_assistant_text(
-                                          "From: /actionloop help\n\n## /actionloop — agent action-loop timing\n\n| Subcommand | Description |\n|---|---|\n| `/actionloop help` | Show this help |\n| `/actionloop` | Show average timing of the agent action-loop buckets |\n| `/actionloop clip` | Copy the timing data to the system clipboard |",
-                                      );
+                        self.append_assistant_text(&crate::app::helpers::from_cmd(
+                            "actionloop help",
+                            "## /actionloop - agent action-loop timing\n\n| Subcommand | Description |\n|---|---|\n| `/actionloop help` | Show this help |\n| `/actionloop` | Show average timing of the agent action-loop buckets |\n| `/actionloop clip` | Copy the timing data to the system clipboard |",
+                        ));
                         self.status = "actionloop: help".to_string();
                         return;
                     }
@@ -3887,7 +3902,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             Some(report) => {
                                 Self::set_clipboard(&report);
                                 self.append_assistant_text(
-                                      "From: /actionloop clip\n\n📋 Action-loop timing data copied to the clipboard.",
+                                      "From: /actionloop clip\n\n[notice] Action-loop timing data copied to the clipboard.",
                                   );
                                 self.status = "actionloop: clipped".to_string();
                             }
@@ -3916,7 +3931,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 }
             }
             "clip" => {
-                // /clip — copy the rendered contents of the message window to
+                // /clip - copy the rendered contents of the message window to
                 // the system clipboard. Uses the plain-text rows the Messages
                 // pane last rendered (the same buffer text-selection copy
                 // reads), so what lands on the clipboard is exactly what the
@@ -3933,7 +3948,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     Self::set_clipboard(&text);
                     let chars = text.len();
                     self.append_assistant_text(&format!(
-                        "From: /clip\n📋 Copied {chars} characters ({n} rendered lines) to the clipboard.",
+                        "From: /clip\n[notice] Copied {chars} characters ({n} rendered lines) to the clipboard.",
                         n = self.message_content_lines.len()
                     ));
                     self.status = format!("clip: copied {chars} chars");
@@ -4075,7 +4090,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         self.append_assistant_text(
                             r"From: /log help
 
-## /log — Log panel and log-file management
+## /log - Log panel and log-file management
 
 | Subcommand | Description |
 |---|---|
@@ -4173,9 +4188,9 @@ Usage: `/log [clear subagents|panics|research|editlog|logwindow|help]`",
                             let help = "\
 From: /task help
 
-## /task — Task management
+## /task - Task management
 
-Manage the session task list (stored in ragent’s task service).
+Manage the session task list (stored in ragent's task service).
 
 | Subcommand | Description |
 |------------|-------------|
@@ -4216,9 +4231,9 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                             let help = "\
 From: /task help
 
-## /task — Task management
+## /task - Task management
 
-Manage the session task list (stored in ragent’s task service).
+Manage the session task list (stored in ragent's task service).
 
 | Subcommand | Description |
 |------------|-------------|
@@ -4238,7 +4253,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 }
             }
             "telemetry_panel" => {
-                // `/telemetry_panel` slash alias — toggles the Telemetry side
+                // `/telemetry_panel` slash alias - toggles the Telemetry side
                 // panel. Mirrors the `/task` alias and the Alt+O
                 // InputAction::ToggleTelemetry handler. This is purely a UI
                 // toggle; the `/telemetry counters` command still prints the
@@ -4337,7 +4352,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             "history" => {
                 if is_help_args(args) {
                     self.append_assistant_text(
-                        "From: /history help\n\n## /history — Input history\n\n| Subcommand | Description |\n|---|---|\n| `/history` | Open the history picker (newest first; ↑/↓ to select, Enter to insert, c to copy to clipboard) |\n| `/history <filter>` | Restrict the picker to entries containing `<filter>` |\n| `/history help` | Show this help |",
+                        "From: /history help\n\n## /history - Input history\n\n| Subcommand | Description |\n|---|---|\n| `/history` | Open the history picker (newest first; ^/v to select, Enter to insert, c to copy to clipboard) |\n| `/history <filter>` | Restrict the picker to entries containing `<filter>` |\n| `/history help` | Show this help |",
                     );
                     self.status = "history: help".to_string();
                     return;
@@ -4445,7 +4460,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 }
                 "help" => {
                     self.append_assistant_text(
-                        "From: /model help\n\n## /model \u{2014} Model selection and metadata\n\n| Subcommand | Description |\n|---|---|\n| `/model` | Open the model picker for the configured provider (or the provider picker when none is configured) |\n| `/model show` | Print the active model’s metadata report into the chat |\n| `/model help` | Show this help |",
+                        "From: /model help\n\n## /model \u{2014} Model selection and metadata\n\n| Subcommand | Description |\n|---|---|\n| `/model` | Open the model picker for the configured provider (or the provider picker when none is configured) |\n| `/model show` | Print the active model's metadata report into the chat |\n| `/model help` | Show this help |",
                     );
                     self.status = "model: help".to_string();
                 }
@@ -4455,7 +4470,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             },
             "thinking" => {
                 if self.selected_model.is_none() {
-                    self.status = "[warn] No model selected — use /model to choose".to_string();
+                    self.status = "[warn] No model selected - use /model to choose".to_string();
                     return;
                 }
 
@@ -4525,7 +4540,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     let providers = Self::get_configured_providers_for_router(&self.storage);
                     if providers.is_empty() {
                         self.status =
-                            "[warn] No concrete providers — configure one first".to_string();
+                            "[warn] No concrete providers - configure one first".to_string();
                         self.push_log_no_agent(
                             LogLevel::Warn,
                             "provider router: no concrete providers configured".to_string(),
@@ -4593,7 +4608,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                         if builtin_names.contains(&info.name) {
                             let new_name = format!("custom:{}", info.name);
                             diags.push(format!(
-                                "custom agent '{}' collides with a built-in — loaded as '{}'",
+                                "custom agent '{}' collides with a built-in - loaded as '{}'",
                                 info.name, new_name
                             ));
                             info.name = new_name;
@@ -4618,7 +4633,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                         self.push_log_no_agent(LogLevel::Warn, format!("[reload agents] {}", d));
                     }
                     report.push_str(&format!(
-                        "✓ Agents reloaded — {} custom agent(s) (was {})\n",
+                        "[ok] Agents reloaded - {} custom agent(s) (was {})\n",
                         self.custom_agent_defs.len(),
                         prev_count,
                     ));
@@ -4649,14 +4664,14 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                                 Self::load_persisted_thinking_level(self.storage.as_ref());
                             self.code_index_enabled = cfg.code_index.enabled;
                             self.sync_tool_visibility_from_config(&cfg);
-                            report.push_str("✓ Config reloaded (ragent.json)\n");
+                            report.push_str("[ok] Config reloaded (ragent.json)\n");
                             self.push_log_no_agent(
                                 LogLevel::Info,
                                 "reload config: ragent.json reloaded".to_string(),
                             );
                         }
                         Err(e) => {
-                            report.push_str(&format!("✗ Config reload failed: {}\n", e));
+                            report.push_str(&format!("[x] Config reload failed: {}\n", e));
                             self.push_log_no_agent(
                                 LogLevel::Warn,
                                 format!("reload config failed: {}", e),
@@ -4682,7 +4697,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                             let prev = self.mcp_servers.len();
                             self.mcp_servers = merged;
                             report.push_str(&format!(
-                                "✓ MCP reloaded — {} server(s) (was {})\n",
+                                "[ok] MCP reloaded - {} server(s) (was {})\n",
                                 self.mcp_servers.len(),
                                 prev,
                             ));
@@ -4692,7 +4707,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                             );
                         }
                         Err(e) => {
-                            report.push_str(&format!("✗ MCP reload failed: {}\n", e));
+                            report.push_str(&format!("[x] MCP reload failed: {}\n", e));
                             self.push_log_no_agent(
                                 LogLevel::Warn,
                                 format!("reload mcp failed: {}", e),
@@ -4706,7 +4721,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     // Skills are loaded on-demand from disk each time they are needed;
                     // there is no persistent cache to clear.  Just confirm to the user.
                     report.push_str(
-                        "✓ Skills will be reloaded from disk on next use (no cache to clear)\n",
+                        "[ok] Skills will be reloaded from disk on next use (no cache to clear)\n",
                     );
                     self.push_log_no_agent(
                         LogLevel::Info,
@@ -4731,14 +4746,15 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             }
             "resume" => {
                 if is_help_args(args) {
-                    self.append_assistant_text(
-                        "From: /resume help\n\n## /resume — Resume a halted agent\n\n| Subcommand | Description |\n|---|---|\n| `/resume` | Continue a halted agent from where it was interrupted by the user |\n| `/resume help` | Show this help |",
-                    );
+                    self.append_assistant_text(&crate::app::helpers::from_cmd(
+                        "resume help",
+                        "## /resume - Resume a halted agent\n\n| Subcommand | Description |\n|---|---|\n| `/resume` | Continue a halted agent from where it was interrupted by the user |\n| `/resume help` | Show this help |",
+                    ));
                     self.status = "resume: help".to_string();
                     return;
                 }
                 if !self.agent_halted {
-                    self.status = "Nothing to resume — agent was not halted".to_string();
+                    self.status = "Nothing to resume - agent was not halted".to_string();
                     self.push_log_no_agent(LogLevel::Warn, "Nothing to resume".to_string());
                     return;
                 }
@@ -4749,7 +4765,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             "system" => {
                 if is_help_args(args) {
                     self.append_assistant_text(
-                        "From: /system help\n\n## /system \u{2014} System prompt override\n\n| Subcommand | Description |\n|---|---|\n| `/system` | Show the current agent system prompt |\n| `/system <prompt>` | Override the active agent’s system prompt for this session |\n| `/system help` | Show this help |",
+                        "From: /system help\n\n## /system \u{2014} System prompt override\n\n| Subcommand | Description |\n|---|---|\n| `/system` | Show the current agent system prompt |\n| `/system <prompt>` | Override the active agent's system prompt for this session |\n| `/system help` | Show this help |",
                     );
                     self.status = "system: help".to_string();
                     return;
@@ -4998,11 +5014,13 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                         } else {
                             for s in &self.mcp_servers {
                                 let status_icon = match &s.status {
-                                    ragent_agent::mcp::McpStatus::Connected => "🟢 connected",
-                                    ragent_agent::mcp::McpStatus::Disabled => "⚪ disabled",
-                                    ragent_agent::mcp::McpStatus::NeedsAuth => "🟡 needs auth",
+                                    ragent_agent::mcp::McpStatus::Connected => "[green] connected",
+                                    ragent_agent::mcp::McpStatus::Disabled => "o disabled",
+                                    ragent_agent::mcp::McpStatus::NeedsAuth => {
+                                        "[yellow] needs auth"
+                                    }
                                     ragent_agent::mcp::McpStatus::Failed { error } => {
-                                        &format!("🔴 failed: {}", error)
+                                        &format!("[red] failed: {}", error)
                                     }
                                 };
                                 let endpoint = match s.config.type_ {
@@ -5091,18 +5109,18 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 format!("{:?}", team.status).to_lowercase()
                             ));
                             output.push_str(&format!(
-                                "  ● lead (you)  session: {}\n",
+                                "  * lead (you)  session: {}\n",
                                 team.lead_session_id
                             ));
                             if self.team_members.is_empty() {
                                 output.push_str(
-                                    "  (no teammates yet — use team_spawn tool or /team create)\n",
+                                    "  (no teammates yet - use team_spawn tool or /team create)\n",
                                 );
                             } else {
                                 for m in &self.team_members {
                                     let status = format!("{:?}", m.status).to_lowercase();
                                     let task =
-                                        m.current_task_id.as_deref().unwrap_or("—").to_string();
+                                        m.current_task_id.as_deref().unwrap_or("-").to_string();
                                     let model_str = m
                                         .model_override
                                         .as_ref()
@@ -5131,29 +5149,28 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         // Parse blueprint (mandatory) then optional name
                         let mut parts = rest.split_whitespace();
                         let blueprint = parts.next().unwrap_or("").to_string();
-                        let mut name = parts.next().map(|s| s.to_string());
+                        let name = parts.next().map(|s| s.to_string());
 
                         if blueprint.is_empty() {
                             self.status = "Usage: /team create <blueprint> [name]".to_string();
                             return;
                         }
 
-                        // If no name provided, generate one from blueprint + timestamp
-                        if name.is_none() {
-                            // SEC-ragent-tui-004: slugify the blueprint segment so
-                            // the generated name is always a valid team name.
-                            let generated_name = format!(
+                        // Use the supplied name, or generate one from the
+                        // blueprint and a timestamp when none was given.
+                        // SEC-ragent-tui-004: slugify the blueprint segment so
+                        // the generated name is always a valid team name.
+                        let name = name.unwrap_or_else(|| {
+                            format!(
                                 "{}-{}",
-                                ragent_team::team::slugify_team_name(&blueprint),
+                                ragent_agent::team::slugify_team_name(&blueprint),
                                 chrono::Utc::now().format("%Y%m%d-%H-%M-%S")
-                            );
-                            name = Some(generated_name);
-                        }
-                        let name = name.expect("name guaranteed Some above");
+                            )
+                        });
 
                         // SEC-ragent-tui-004: reject a name that is not a single
                         // safe path component before it reaches the store.
-                        if let Err(e) = ragent_team::team::validate_team_name(&name) {
+                        if let Err(e) = ragent_agent::team::validate_team_name(&name) {
                             self.status = format!("{e}");
                             return;
                         }
@@ -5285,7 +5302,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                 "global"
                                             };
                                             output.push_str(&format!(
-                                                "  ● {:<18} {:<10} lead:{} teammates:{}\n",
+                                                "  * {:<18} {:<10} lead:{} teammates:{}\n",
                                                 team.name,
                                                 format!("{:?}", team.status).to_lowercase(),
                                                 team.lead_session_id,
@@ -5299,7 +5316,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                         }
                                         Err(e) => {
                                             output.push_str(&format!(
-                                                "  ● {} (failed to load: {})\n",
+                                                "  * {} (failed to load: {})\n",
                                                 name, e
                                             ));
                                         }
@@ -5325,7 +5342,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     format!("{:?}", team.status).to_lowercase()
                                 ));
                                 output.push_str(&format!(
-                                    "  ● lead-session: {}\n",
+                                    "  * lead-session: {}\n",
                                     team.lead_session_id
                                 ));
                                 if team.members.is_empty() {
@@ -5334,8 +5351,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     for m in &team.members {
                                         let status = format!("{:?}", m.status).to_lowercase();
                                         let task =
-                                            m.current_task_id.as_deref().unwrap_or("—").to_string();
-                                        let sid = m.session_id.as_deref().unwrap_or("—");
+                                            m.current_task_id.as_deref().unwrap_or("-").to_string();
+                                        let sid = m.session_id.as_deref().unwrap_or("-");
                                         output.push_str(&format!(
                                             "  └ {:<18} {:<10} agent:{} session:{} task:{}\n",
                                             m.name, status, m.agent_id, sid, task
@@ -5392,7 +5409,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         }
                         // SEC-ragent-tui-004: the name reaches `remove_dir_all` via
                         // the resolved store directory, so it is validated first.
-                        if let Err(e) = ragent_team::team::validate_team_name(rest) {
+                        if let Err(e) = ragent_agent::team::validate_team_name(rest) {
                             self.status = format!("{e}");
                             return;
                         }
@@ -5408,7 +5425,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 .count();
                             if active_count > 0 {
                                 self.status = format!(
-                                    "{} teammate(s) still active — shut them down first",
+                                    "{} teammate(s) still active - shut them down first",
                                     active_count
                                 );
                                 return;
@@ -5509,7 +5526,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                     Ok(_) => {
                                                         self.push_log_no_agent(
                                                             LogLevel::Info,
-                                                            format!("📨 lead → {name}: {text}"),
+                                                            format!("[msg] lead -> {name}: {text}"),
                                                         );
                                                         self.status =
                                                             format!("message sent to {name}");
@@ -5548,7 +5565,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     Ok(task_store) => match task_store.read() {
                                         Ok(task_list) => {
                                             let mut output = format!(
-                                                "From: /team tasks\n## Tasks — team '{}'\n\n",
+                                                "From: /team tasks\n## Tasks - team '{}'\n\n",
                                                 team.name
                                             );
                                             if task_list.tasks.is_empty() {
@@ -5570,7 +5587,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                         TaskStatus::Cancelled => "cancelled",
                                                     };
                                                     let assignee =
-                                                        task.assigned_to.as_deref().unwrap_or("—");
+                                                        task.assigned_to.as_deref().unwrap_or("-");
                                                     output.push_str(&format!(
                                                         "  {:<12}  {:<34}  {:<12}  {}\n",
                                                         task.id, task.title, status, assignee
@@ -5625,7 +5642,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                             self.push_log_no_agent(
                                                 LogLevel::Info,
                                                 format!(
-                                                    "🧹 Cleared {} task(s) from team '{}'",
+                                                    "[broom] Cleared {} task(s) from team '{}'",
                                                     cleared_count, team.name
                                                 ),
                                             );
@@ -5693,7 +5710,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 self.append_assistant_text(&msg);
 
                                 self.status = format!(
-                                    "{} teammate(s) still active — shut them down first",
+                                    "{} teammate(s) still active - shut them down first",
                                     active_count
                                 );
                                 return;
@@ -5815,7 +5832,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                 {
                                                     let tm = tm_arc.clone();
                                                     tokio::spawn(async move {
-                                                        let _ = tm
+                                                        let _ = tm  // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
                                                             .spawn_teammate(
                                                                 &team_name_clone,
                                                                 &m_name,
@@ -5919,7 +5936,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             return;
                         }
                         if rest.is_empty() {
-                            // No arg → clear focus
+                            // No arg -> clear focus
                             self.focused_teammate = None;
                             self.output_view = None;
                             self.append_assistant_text("From: /team focus\nTeammate focus cleared. Input returns to lead session.");
@@ -5977,7 +5994,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         let help = "\
 From: /bash help
 
-## /bash — Bash command list management
+## /bash - Bash command list management
 
 Manage the user-defined **allowlist** and **denylist** that complement the
 built-in safety rules.
@@ -6228,7 +6245,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                         let help = "\
             From: /dirs help
             
-            ## /dirs — Directory/file permission management
+            ## /dirs - Directory/file permission management
             
             Manage glob patterns for file operations that are automatically **allowed** or **denied**            by the permission system without prompting.
 
@@ -6247,8 +6264,8 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
 
             ### Flags
 
-            - `--global` — Persist to global config (`~/.config/ragent/ragent.json`)
-            - (default) — Persist to project config (`./.ragent/ragent.json`)
+            - `--global` - Persist to global config (`~/.config/ragent/ragent.json`)
+            - (default) - Persist to project config (`./.ragent/ragent.json`)
 
             ### Examples
 
@@ -6344,7 +6361,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                         out.push_str("### Allowed Roots (path escape checking)\n");
                         if allowed_roots.is_empty() {
                             out.push_str(
-                                "*(empty)* — only the session's working directory is allowed\n\n",
+                                "*(empty)* - only the session's working directory is allowed\n\n",
                             );
                         } else {
                             out.push_str("*Additional directory paths treated as valid roots for path escape checking*\n\n");
@@ -6545,10 +6562,10 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                         if new_state {
                             output.push_str(
                                 "All command validation is now **bypassed**:\n\
-                                 - Bash denied-pattern checks — **off**\n\
-                                 - Dynamic context allowlist — **off**\n\
-                                 - MCP config validation — **off**\n\
-                                 - Obfuscation detection — **off**\n\n\
+                                 - Bash denied-pattern checks - **off**\n\
+                                 - Dynamic context allowlist - **off**\n\
+                                 - MCP config validation - **off**\n\
+                                 - Obfuscation detection - **off**\n\n\
                                  [warn]  The agent can now execute **any** command without restriction.\n\
                                  Use `/yolo` again to re-enable safety checks.\n",
                             );
@@ -6585,9 +6602,14 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
             // This allows users to correct mistakes or backtrack from unhelpful responses.
             "undo" => {
                 if args.trim() == "help" {
-                    self.append_assistant_text(
-                        "From: /undo help\n\n## /undo — Remove the last turn\n\n| Subcommand | Description |\n|---|---|\n| `/undo` | Remove the last user message and everything after it (typically one assistant response) from the conversation |\n| `/undo help` | Show this help |",
-                    );
+                    // reason: LOW-2 - the ~44 `/X help` blocks are near-identical
+                    // inline `format!` tables. This is the first routed through the
+                    // shared `helpers::from_cmd` builder; the rest are left inline to
+                    // keep the M6 change surgical and are the migration target.
+                    self.append_assistant_text(&crate::app::helpers::from_cmd(
+                        "undo help",
+                        "## /undo - Remove the last turn\n\n| Subcommand | Description |\n|---|---|\n| `/undo` | Remove the last user message and everything after it (typically one assistant response) from the conversation |\n| `/undo help` | Show this help |",
+                    ));
                     self.status = "undo: help".to_string();
                     return;
                 }
@@ -6717,7 +6739,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                     "help" | "--help" | "-h" => {
                         let help = "\
 From: /swarm help\n\
-## Swarm — Fleet-Style Auto-Decomposition\n\n\
+## Swarm - Fleet-Style Auto-Decomposition\n\n\
 | Command | Description |\n\
 |---------|-------------|\n\
 | `/swarm <prompt>` | Decompose a goal into parallel subtasks and spawn a team |\n\
@@ -6735,12 +6757,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.handle_swarm_cancel().await;
                     }
                     _ => {
-                        // /swarm <prompt> — decompose and execute
+                        // /swarm <prompt> - decompose and execute
                         // Parse optional flags: --agent <type>
                         let (full_prompt, default_agent_type) = parse_swarm_args(args);
 
                         if full_prompt.is_empty() {
-                            let help = "From: /swarm\n\nUsage: `/swarm <prompt>` — describe what you want the swarm to accomplish.\nUse `/swarm --agent <type> <prompt>` to set a default agent type for all subtasks.\nType `/swarm help` for more info.\n";
+                            let help = "From: /swarm\n\nUsage: `/swarm <prompt>` - describe what you want the swarm to accomplish.\nUse `/swarm --agent <type> <prompt>` to set a default agent type for all subtasks.\nType `/swarm help` for more info.\n";
                             self.append_assistant_text(help);
 
                             return;
@@ -6748,7 +6770,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                         if self.swarm_state.is_some() {
                             self.status =
-                                "[warn] A swarm is already active — use /swarm cancel first"
+                                "[warn] A swarm is already active - use /swarm cancel first"
                                     .to_string();
                             return;
                         }
@@ -6773,25 +6795,25 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             Some(pair) => pair,
                             None => {
                                 self.status =
-                                    "[warn] /swarm requires a configured model — use /model"
+                                    "[warn] /swarm requires a configured model - use /model"
                                         .to_string();
                                 return;
                             }
                         };
 
-                        self.status = "[wait] swarm: decomposing goal…".to_string();
+                        self.status = "[wait] swarm: decomposing goal...".to_string();
                         self.push_log_no_agent(
                             LogLevel::Info,
                             format!(
-                                "Swarm: decomposing — {}",
+                                "Swarm: decomposing - {}",
                                 &full_prompt[..full_prompt.len().min(80)]
                             ),
                         );
 
                         // Show user message in chat
                         self.append_assistant_text(&format!(
-                                                                                                  "From: /swarm\n## 🐝 Swarm Decomposition\n\n\
-                                                                                                  Analysing your goal and breaking it into parallel subtasks…\n\n\
+                                                                                                  "From: /swarm\n## [bee] Swarm Decomposition\n\n\
+                                                                                                  Analysing your goal and breaking it into parallel subtasks...\n\n\
                                                                                                   > {}\n",
                                                                                                   full_prompt
                                                                                               ));
@@ -6876,7 +6898,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                         if let Some(bad) = parse_error {
                             self.append_assistant_text(&format!(
-                                "From: /autopilot\n[err] invalid value for `{bad}` — \
+                                "From: /autopilot\n[err] invalid value for `{bad}` - \
                                  expected a positive integer."
                             ));
                             self.status = "autopilot: invalid argument".to_string();
@@ -6887,7 +6909,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.autopilot_time_limit_secs = time_secs;
                         self.autopilot_started_at = Some(std::time::Instant::now());
                         let mut msg =
-                            "⚡ **Autopilot ON** — agent will run autonomously.".to_string();
+                            " **Autopilot ON** - agent will run autonomously.".to_string();
                         if let Some(t) = token_budget {
                             msg.push_str(&format!(" Token budget: {t}."));
                         }
@@ -6896,7 +6918,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                         msg.push_str("\nCall `task_complete` to signal completion, or `/autopilot off` to stop.");
                         self.append_assistant_text(&format!("From: /autopilot\n{msg}"));
-                        self.status = "⚡ autopilot".to_string();
+                        self.status = " autopilot".to_string();
                         self.push_log_no_agent(LogLevel::Info, "autopilot enabled".to_string());
                     }
                     "off" => {
@@ -6905,7 +6927,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.autopilot_time_limit_secs = None;
                         self.autopilot_started_at = None;
                         self.autopilot_pending_continue = None;
-                        self.append_assistant_text("From: /autopilot\n⚡ **Autopilot OFF** — returning to interactive mode.");
+                        self.append_assistant_text(
+                            "From: /autopilot\n **Autopilot OFF** - returning to interactive mode.",
+                        );
                         self.status = "ready".to_string();
                         self.status_set_at = None;
                         self.push_log_no_agent(LogLevel::Info, "autopilot disabled".to_string());
@@ -6916,9 +6940,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 .autopilot_started_at
                                 .map(|s| s.elapsed().as_secs())
                                 .unwrap_or(0);
-                            format!("⚡ Autopilot: **ON** (running for {}s)", elapsed)
+                            format!(" Autopilot: **ON** (running for {}s)", elapsed)
                         } else {
-                            "⚡ Autopilot: **OFF**".to_string()
+                            " Autopilot: **OFF**".to_string()
                         };
                         self.append_assistant_text(&format!("From: /autopilot status\n{state}"));
                     }
@@ -7090,6 +7114,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let spec_id_owned = spec_id.clone();
                         // Validation returns Ok(jtbd_exists) so the caller can
                         // enforce the overwrite guard (FR-003 / FR-004).
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let validation: Result<bool, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                 // FR-008: confirm spec directory exists
@@ -7220,7 +7245,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 event_bus.publish(ragent_agent::event::Event::AgentNotice {
                                     session_id: sid.clone(),
                                     message: format!(
-                                        "spec jtbd: cancelled — partial JTBD.md for `{}` removed",
+                                        "spec jtbd: cancelled - partial JTBD.md for `{}` removed",
                                         spec_id_for_cleanup
                                     ),
                                 });
@@ -7250,6 +7275,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         );
                         let mgr = spec_manager();
                         let rt = tokio::runtime::Handle::current();
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                 let specs = if let Some(id_str) = spec_id {
@@ -7321,6 +7347,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                         let rt = tokio::runtime::Handle::current();
                         let result: Result<(usize, String), String> =
+                            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                             tokio::task::block_in_place(|| {
                                 rt.block_on(async {
                                     let specs = match mgr.list_specs(&filter).await {
@@ -7370,6 +7397,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     SpecCommand::Search { query } => {
                         let mgr = spec_manager();
                         let rt = tokio::runtime::Handle::current();
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                 let results = match mgr.search_specs(&query).await {
@@ -7415,6 +7443,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             return;
                         };
                         let rt = tokio::runtime::Handle::current();
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                                                                                                                                                                                                                                           let mut spec = match mgr.read_spec(&id).await {
@@ -7447,7 +7476,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                                                                                                                                                                                                                               let next = ragent_specs::manager::next_statuses(spec.status);
                                                                                                                                                                                                                                                               let next_str = next.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
                                                                                                                                                                                                                                                               Ok(format!(
-                                                                                                                                                                                                                                                                  "From: /spec status\n\n**{}** — current status: `{}`\nAllowed transitions: {}",
+                                                                                                                                                                                                                                                                  "From: /spec status\n\n**{}** - current status: `{}`\nAllowed transitions: {}",
                                                                                                                                                                                                                                                                   spec.id, spec.status.as_str(), next_str
                                                                                                                                                                                                                                                               ))
                                                                                                                                                                                                                                                           }
@@ -7478,6 +7507,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             return;
                         };
                         let rt = tokio::runtime::Handle::current();
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                                                                                                                                                                                                                                           let mut spec = match mgr.read_spec(&id).await {
@@ -7503,7 +7533,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                                                                                                                                                                                                                                   match task {
                                                                                                                                                                                                                                                                       Some(t) => {
                                                                                                                                                                                                                                                                           let mut lines = vec![
-                                                                                                                                                                                                                                                                              format!("From: /spec task\n\n## Task {} — {}", t.id, t.title),
+                                                                                                                                                                                                                                                                              format!("From: /spec task\n\n## Task {} - {}", t.id, t.title),
                                                                                                                                                                                                                                                                               format!("- **Status:** {}", t.status.as_str()),
                                                                                                                                                                                                                                                                               format!("- **Effort:** {}", t.effort),
                                                                                                                                                                                                                                                                               format!("- **Priority:** {}", t.priority),
@@ -7562,6 +7592,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             return;
                         };
                         let rt = tokio::runtime::Handle::current();
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let result: Result<_, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                 match mgr.read_spec(&id).await {
@@ -7580,7 +7611,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 // Wrap the nested `block_on` in `block_in_place` so it
                                 // releases the current worker instead of deadlocking on
                                 // the UI runtime (FUNC-015).
+                                // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                                 let _ = tokio::task::block_in_place(|| {
+                                    // INTENTIONAL: bridge to the async spec manager; the value is the spec id, not an error
                                     rt.block_on(async {
                                         self.session_processor
                                             .active_spec
@@ -7594,7 +7627,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 self.session_processor
                                     .system_prompt_cache()
                                     .invalidate_spec_cache();
-                                let _ = self
+                                let _ = self // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
                                     .session_processor
                                     .spec_manager
                                     // Reuse the manager Arc built above instead of
@@ -7625,14 +7658,15 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Deactivate => {
-                        if self.active_spec.is_some() {
-                            let prev = self.active_spec.take().unwrap();
+                        if let Some(prev) = self.active_spec.take() {
                             self.spec_manager = None;
                             let rt = tokio::runtime::Handle::current();
                             // `block_in_place` keeps the nested `block_on` off the
                             // UI runtime's worker, avoiding the deadlock in
                             // FUNC-015.
+                            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                             let _ = tokio::task::block_in_place(|| {
+                                // INTENTIONAL: bridge to the async spec manager; the value is the spec id, not an error
                                 rt.block_on(async {
                                     self.session_processor.active_spec.write().await.take()
                                 })
@@ -7668,7 +7702,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             ));
                             return;
                         }
-                        self.status = format!("spec: deleting '{}'…", spec_id);
+                        self.status = format!("spec: deleting '{}'...", spec_id);
                         let event_bus = self.event_bus.clone();
                         let session_id = self.session_id.clone().unwrap_or_default();
                         tokio::spawn(async move {
@@ -7703,6 +7737,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             return;
                         };
                         let rt = tokio::runtime::Handle::current();
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                 let spec = match mgr.read_spec(&id).await {
@@ -7745,12 +7780,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let specs_root = working_dir.join("specs");
 
                         // Validate spec exists
-                        let sid_opt = ragent_specs::spec::SpecId::new(&spec_id);
-                        if sid_opt.is_none() {
+                        let Some(sid) = ragent_specs::spec::SpecId::new(&spec_id) else {
                             self.status = format!("spec: invalid spec ID: {}", spec_id);
                             return;
-                        }
-                        let sid = sid_opt.unwrap();
+                        };
 
                         // Check spec exists on disk and read its status
                         let mgr = spec_manager();
@@ -7758,6 +7791,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let (spec_exists, spec_status): (
                             bool,
                             Option<ragent_specs::spec::SpecStatus>,
+                            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         ) = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                 let spec = mgr.read_spec(&sid).await;
@@ -7769,6 +7803,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         });
                         if !spec_exists {
                             // List available specs with plans
+                            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                             let available: Vec<String> = tokio::task::block_in_place(|| {
                                 rt.block_on(async {
                                     match mgr.discover_specs().await {
@@ -7824,6 +7859,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                         // Create runner
                         let runner_result: Result<SpecImplRunner, String> =
+                            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                             tokio::task::block_in_place(|| {
                                 rt.block_on(async {
                                     match SpecImplRunner::new(&spec_id, specs_root.clone(), opts)
@@ -7838,6 +7874,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         match runner_result {
                             Ok(runner) => {
                                 let is_dry_run = dry_run;
+                                // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                                 let result: Result<_, String> = tokio::task::block_in_place(|| {
                                     rt.block_on(async {
                                         match runner.run().await {
@@ -7940,27 +7977,27 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         match sub.as_str() {
                             "reverse" => {
                                 self.append_assistant_text(&format!(
-                                    "[err] **missing required argument** — no repository given \
+                                    "[err] **missing required argument** - no repository given \
                                      (the first argument after `/spec reverse` must be `<repo>`)\n\n{}",
                                     crate::app::reverse::reverse_help_message()
                                 ));
                             }
                             "govcreate" => {
                                 self.append_assistant_text(&format!(
-                                    "[err] **missing required argument** — `/spec govcreate` \
+                                    "[err] **missing required argument** - `/spec govcreate` \
                                      requires `<specid> <content-ref> <target-folder>`\n\n{}",
                                     SpecCommand::build_govcreate_help_message()
                                 ));
                             }
                             other => {
                                 self.append_assistant_text(&format!(
-                                    "[err] **missing required argument** — `/spec {other}` was \
+                                    "[err] **missing required argument** - `/spec {other}` was \
                                      given incomplete arguments\n\n{}",
                                     SpecCommand::build_help_message()
                                 ));
                             }
                         }
-                        self.status = format!("Usage: /spec {sub} — try /spec help");
+                        self.status = format!("Usage: /spec {sub} - try /spec help");
                     }
                     SpecCommand::Add { spec_id, feature } => {
                         self.append_assistant_text(&SpecCommand::build_add_message(
@@ -7978,6 +8015,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let spec_id_owned = spec_id.clone();
                         let feature_owned = feature.clone();
                         let result: Result<(String, u32, u32, u32), String> =
+                            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                             tokio::task::block_in_place(|| {
                                 rt.block_on(async {
                                     use ragent_specs::id_scanner;
@@ -8025,7 +8063,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         match result {
                             Ok((prompt, _next_fr, _next_nfr, _next_task)) => {
                                 let sid = self.session_id.clone().unwrap_or_default();
-                                // Select general agent (not explore — add requires
+                                // Select general agent (not explore - add requires
                                 // editing SPEC.md and PLAN.md, and explore's prompt
                                 // says "Do NOT modify any files").
                                 let agent = self.select_general_agent();
@@ -8044,7 +8082,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     crate::app::helpers::current_working_dir().join("specs");
                                 let spec_id_phase2 = spec_id.clone();
                                 tokio::spawn(async move {
-                                    // Phase 1: incremental add — the LLM uses the
+                                    // Phase 1: incremental add - the LLM uses the
                                     // `read` and `edit` tools directly to insert new
                                     // requirements into SPEC.md and new task rows
                                     // into PLAN.md. No post-processing needed.
@@ -8061,7 +8099,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     }
 
                                     // Phase 2: regenerate PLAN.md + TESTPLAN.md
-                                    // (same as /spec update — re-read the updated
+                                    // (same as /spec update - re-read the updated
                                     // SPEC.md and fully regenerate both files)
                                     let sid2 =
                                         match ragent_specs::spec::SpecId::new(&spec_id_phase2) {
@@ -8136,6 +8174,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                         // FR-005/FR-010: read spec, guard archived, read PLAN.md
                         let spec_id_owned = spec_id.clone();
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                 let spec = match mgr.read_spec(&sid).await {
@@ -8196,7 +8235,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             SpecCommand::build_update_log(&spec_id),
                         );
 
-                        // Select general agent (not explore — update requires
+                        // Select general agent (not explore - update requires
                         // writing files, and explore's prompt says "Do NOT
                         // modify any files").
                         let agent = self.select_general_agent();
@@ -8323,6 +8362,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         // Read SPEC.md (and existing PLAN.md for status preservation)
                         let spec_id_owned = spec_id.clone();
                         let result: Result<(String, String, String), String> =
+                            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                             tokio::task::block_in_place(|| {
                                 rt.block_on(async {
                                     let spec = match mgr.read_spec(&sid).await {
@@ -8464,6 +8504,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let result: Result<
                             (String, String, String, ragent_specs::spec::SpecStatus),
                             String,
+                            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         > = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                 let spec = match mgr.read_spec(&sid).await {
@@ -8549,6 +8590,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                         // Write TASKS.md atomically
                         let tasks_path = specs_root.join(&spec_id).join("TASKS.md");
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let write_result = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                 ragent_specs::io::SpecIo::atomic_write(&tasks_path, &tasks_md).await
@@ -8570,6 +8612,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     SpecCommand::build_quickstart_md(&spec_id, &title, &spec_md);
                                 let quickstart_written = match &quickstart_md {
                                     Some(qs_md) => {
+                                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                                         let qs_result = tokio::task::block_in_place(|| {
                                             rt.block_on(async {
                                                 ragent_specs::io::SpecIo::atomic_write(
@@ -8642,6 +8685,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let spec_id_owned = spec_id.clone();
                         let note_owned = note.clone();
                         let result: Result<(String, String), String> =
+                            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                             tokio::task::block_in_place(|| {
                                 rt.block_on(async {
                                     let spec = match mgr.read_spec(&sid).await {
@@ -8697,6 +8741,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                         // Write FEEDBACK.md to disk
                         let feedback_path = specs_root.join(sid.dir_name()).join("FEEDBACK.md");
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let write_result: Result<(), String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
                                 ragent_specs::io::SpecIo::atomic_write(
@@ -8805,7 +8850,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     self.role_mode = None;
                     self.status = "mode: normal".to_string();
                     self.append_assistant_text(
-                        "From: /mode\n[ok] Role mode cleared — back to normal mode.",
+                        "From: /mode\n[ok] Role mode cleared - back to normal mode.",
                     );
                     self.push_log_no_agent(LogLevel::Info, "role mode cleared".to_string());
                 } else if let Some(mode) = RoleMode::from_str(&sub) {
@@ -8938,6 +8983,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     };
 
+                    // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                     let start = tokio::task::block_in_place(|| {
                         handle.block_on(ragent_agent::github::auth::start_device_flow(
                             &ragent_agent::github::GitHubClient::client_id(),
@@ -8962,7 +9008,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     self.push_log(
                         LogLevel::Info,
                         format!(
-                            "GitHub login started — enter code {user_code} at {verification_uri}"
+                            "GitHub login started - enter code {user_code} at {verification_uri}"
                         ),
                         None,
                     );
@@ -8983,7 +9029,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 event_bus.publish(Event::GithubDeviceFlowComplete {
                                     success: false,
                                     error: Some(
-                                        "Device flow timed out — please try /github login again."
+                                        "Device flow timed out - please try /github login again."
                                             .to_string(),
                                     ),
                                 });
@@ -9145,7 +9191,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 }
                 "install" => {
                     self.append_assistant_text(
-                        "From: /update install\n⬇️ Downloading latest release…",
+                        "From: /update install\nv Downloading latest release...",
                     );
                     let event_bus = self.event_bus.clone();
                     let sid = self.session_id.clone().unwrap_or_default();
@@ -9198,7 +9244,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     });
                 }
                 _ => {
-                    self.append_assistant_text("From: /update\n🔍 Checking for updates…");
+                    self.append_assistant_text("From: /update\n[search] Checking for updates...");
                     let event_bus = self.event_bus.clone();
                     let sid = self.session_id.clone().unwrap_or_default();
                     tokio::spawn(async move {
@@ -9212,7 +9258,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 event_bus.publish(ragent_agent::event::Event::AgentError {
                                         session_id: sid,
                                         error: format!(
-                                            "🆕 Update available: **v{}**\n\n{}\n\nRun `/update install` to install.",
+                                            "[new] Update available: **v{}**\n\n{}\n\nRun `/update install` to install.",
                                             info.version, notes
                                         ),
                                     });
@@ -9233,13 +9279,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
             "doctor" => {
                 if is_help_args(args) {
-                    self.append_assistant_text(
-                        "From: /doctor help\n\n## /doctor — System diagnostics\n\n| Subcommand | Description |\n|---|---|\n| `/doctor` | Check git, ripgrep, GitHub token, config, and other environment prerequisites, then print a diagnostic report |\n| `/doctor help` | Show this help |",
-                    );
+                    self.append_assistant_text(&crate::app::helpers::from_cmd(
+                        "doctor help",
+                        "## /doctor - System diagnostics\n\n| Subcommand | Description |\n|---|---|\n| `/doctor` | Check git, ripgrep, GitHub token, config, and other environment prerequisites, then print a diagnostic report |\n| `/doctor help` | Show this help |",
+                    ));
                     self.status = "doctor: help".to_string();
                     return;
                 }
-                self.append_assistant_text("From: /doctor\n🩺 Running diagnostics…");
+                self.append_assistant_text("From: /doctor\n[stethoscope] Running diagnostics...");
                 let event_bus = self.event_bus.clone();
                 let sid = self.session_id.clone().unwrap_or_default();
                 let working_dir = crate::app::helpers::current_working_dir();
@@ -9272,7 +9319,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         if rg_ok {
                             "[ok]"
                         } else {
-                            "[err] ripgrep not found — install at https://github.com/BurntSushi/ripgrep"
+                            "[err] ripgrep not found - install at https://github.com/BurntSushi/ripgrep"
                         }
                     ));
 
@@ -9283,7 +9330,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         if gh_ok {
                             "[ok]"
                         } else {
-                            "[warn]  no GitHub token — run /github login"
+                            "[warn]  no GitHub token - run /github login"
                         }
                     ));
 
@@ -9343,7 +9390,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         ));
                     } else {
                         lines.push(format!(
-                            "[warn]  no provider configured — run /provider or set an API-key env var"
+                            "[warn]  no provider configured - run /provider or set an API-key env var"
                         ));
                     }
 
@@ -9368,7 +9415,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         if memory_config.enabled {
                             "[ok]"
                         } else {
-                            "ℹ️  disabled"
+                            "[i]  disabled"
                         },
                         if memory_config.enabled {
                             "enabled"
@@ -9414,7 +9461,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                         None => {
                             lines.push(format!(
-                                "ℹ️  no AGENTS.md / instruction file found (optional)"
+                                "[i]  no AGENTS.md / instruction file found (optional)"
                             ));
                         }
                     }
@@ -9428,7 +9475,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         if mcp_configured {
                             "[ok]"
                         } else {
-                            "ℹ️  no MCP servers configured (optional)"
+                            "[i]  no MCP servers configured (optional)"
                         }
                     ));
 
@@ -9461,12 +9508,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     } else {
                         lines.push(format!(
-                            "ℹ️  code index: disabled (use /codeindex on to enable)"
+                            "[i]  code index: disabled (use /codeindex on to enable)"
                         ));
                     }
 
                     // Check for update
-                    lines.push("\n**Checking for updates…**".to_string());
+                    lines.push("\n**Checking for updates...**".to_string());
                     let update_msg = match ragent_agent::updater::check_for_update().await {
                         Some(info) => format!("[warn]  Update available: v{}", info.version),
                         None => {
@@ -9554,19 +9601,19 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     if let Some(handle) = self.webapi_server.take() {
                         handle.abort();
                         self.webapi_token = None;
-                        self.append_assistant_text("🛑 **Web API disabled.**");
+                        self.append_assistant_text("[stop] **Web API disabled.**");
                     } else {
                         self.append_assistant_text(
-                            "ℹ️ Web API is not running. Use `/webapi enable` to start it.",
+                            "[i] Web API is not running. Use `/webapi enable` to start it.",
                         );
                     }
                 }
                 "help" | "--help" | "-h" | "status" | "" => {
                     let base = format!("http://{}", self.webapi_addr);
                     let status = if self.webapi_server.is_some() {
-                        format!("🟢 **Running** — {base}")
+                        format!("[green] **Running** - {base}")
                     } else {
-                        "🔴 **Disabled** — run `/webapi enable` to start".to_string()
+                        "[red] **Disabled** - run `/webapi enable` to start".to_string()
                     };
                     let auth_note = if let Some(ref tok) = self.webapi_token {
                         let curl_example = format!(
@@ -9583,25 +9630,25 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                       Add `Authorization: Bearer {tok}` to all requests (except `/health`).{curl_example}"
                         )
                     } else {
-                        "\n*No token set — start the server with `/webapi enable`.*".to_string()
+                        "\n*No token set - start the server with `/webapi enable`.*".to_string()
                     };
                     self.append_assistant_text(&format!(
-                            "## 🌐 Web API\n\n\
+                            "## [globe] Web API\n\n\
                             **Status:** {status}{auth_note}\n\n\
                             ### Endpoints\n\n\
                             | Method | Path | Description |\n\
                             |--------|------|-------------|\n\
-                            | `GET` | [{base}/health]({base}/health) | Health check — no auth required |\n\
+                            | `GET` | [{base}/health]({base}/health) | Health check - no auth required |\n\
                             | `GET` | [{base}/config]({base}/config) | Get application configuration |\n\
                             | `GET` | [{base}/providers]({base}/providers) | List available LLM providers |\n\
                             | `GET` | [{base}/sessions]({base}/sessions) | List all sessions |\n\
-                            | `POST` | [{base}/sessions]({base}/sessions) | Create session · body: `{{\"directory\": \"/path\"}}` |\n\
+                            | `POST` | [{base}/sessions]({base}/sessions) | Create session * body: `{{\"directory\": \"/path\"}}` |\n\
                             | `GET` | [{base}/sessions/{{id}}]({base}/sessions) | Get session details |\n\
                             | `DELETE` | [{base}/sessions/{{id}}]({base}/sessions) | Archive a session |\n\
                             | `GET` | [{base}/sessions/{{id}}/messages]({base}/sessions) | List session messages |\n\
-                            | `POST` | [{base}/sessions/{{id}}/messages]({base}/sessions) | Send message · body: `{{\"content\": \"...\", \"attachments\": []}}` |\n\
+                            | `POST` | [{base}/sessions/{{id}}/messages]({base}/sessions) | Send message * body: `{{\"content\": \"...\", \"attachments\": []}}` |\n\
                             | `POST` | [{base}/sessions/{{id}}/abort]({base}/sessions) | Abort current operation |\n\
-                            | `POST` | [{base}/sessions/{{id}}/permission/{{req_id}}]({base}/sessions) | Reply to permission · body: `{{\"allow\": true}}` |\n\
+                            | `POST` | [{base}/sessions/{{id}}/permission/{{req_id}}]({base}/sessions) | Reply to permission * body: `{{\"allow\": true}}` |\n\
                             | `GET` | [{base}/sessions/{{id}}/tasks]({base}/sessions) | List background tasks |\n\
                             | `POST` | [{base}/sessions/{{id}}/tasks]({base}/sessions) | Spawn a background task |\n\
                             | `GET` | [{base}/sessions/{{id}}/tasks/{{tid}}]({base}/sessions) | Get task status |\n\
@@ -9626,7 +9673,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 }
                 _ => {
                     self.append_assistant_text(
-                        "Usage: `/webapi enable` · `/webapi disable` · `/webapi help`",
+                        "Usage: `/webapi enable` * `/webapi disable` * `/webapi help`",
                     );
                 }
             },
@@ -9639,16 +9686,16 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                     "From: /websearch\n\
                                                     Web search engine diagnostics.\n\n\
                                                     Usage:\n\n\
-                                                    • `/websearch show`\n\
-                                                      — list all engines with enabled / in-use / failed status\n\n\
-                                                    • `/websearch test`\n\
-                                                      — run a live diagnostic query on each configured engine and report counts\n\n\
-                                                    • `/websearch search <query>`\n\
-                                                      — query all engines with your text and list each result\n\
+                                                    * `/websearch show`\n\
+                                                      - list all engines with enabled / in-use / failed status\n\n\
+                                                    * `/websearch test`\n\
+                                                      - run a live diagnostic query on each configured engine and report counts\n\n\
+                                                    * `/websearch search <query>`\n\
+                                                      - query all engines with your text and list each result\n\
                                                         with its engine source, title/URL, and relevancy,\n\
                                                         followed by a per-engine summary\n\n\
-                                                    • `/websearch help`\n\
-                                                      — show this help",
+                                                    * `/websearch help`\n\
+                                                      - show this help",
                                                 );
                         self.status = "websearch: help".to_string();
                     }
@@ -9663,7 +9710,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         spawn_websearch_render(
                             Arc::clone(&self.websearch_test_result),
                             "From: /websearch test\n\n\
-                             [err] engine test task panicked — see the application log",
+                             [err] engine test task panicked - see the application log",
                             websearch_diag_and_render(),
                         );
                     }
@@ -9672,7 +9719,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let Some(query) = query.filter(|q| !q.is_empty()) else {
                             self.append_assistant_text(
                                 "From: /websearch search\n\
-                                 [warn] missing query — usage: `/websearch search <query>`",
+                                 [warn] missing query - usage: `/websearch search <query>`",
                             );
                             self.status = "websearch: search needs a query".to_string();
                             return;
@@ -9688,7 +9735,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         spawn_websearch_render(
                             Arc::clone(&self.websearch_test_result),
                             "From: /websearch search\n\n\
-                             [err] search task panicked — see the application log",
+                             [err] search task panicked - see the application log",
                             async move { websearch_search_query(&query_owned).await },
                         );
                     }
@@ -9752,7 +9799,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     "off" => {
                         self.mouse_enabled = false;
                         self.append_assistant_text(
-                                        "From: /mouse off\n[ok] **Mouse support disabled.**\n\nKeyboard-only mode active. All mouse interactions are now disabled.\n\nKeyboard shortcuts:\n• Alt+Up/Down: Focus teammates\n• Tab: Navigate UI elements\n• Enter: Select/activate\n• Esc: Close dialogs\n• Ctrl+C: Copy selection\n• Ctrl+V: Paste"
+                                        "From: /mouse off\n[ok] **Mouse support disabled.**\n\nKeyboard-only mode active. All mouse interactions are now disabled.\n\nKeyboard shortcuts:\n* Alt+Up/Down: Focus teammates\n* Tab: Navigate UI elements\n* Enter: Select/activate\n* Esc: Close dialogs\n* Ctrl+C: Copy selection\n* Ctrl+V: Paste"
                                     );
                         self.status = "mouse: disabled (keyboard-only mode)".to_string();
                     }
@@ -9787,7 +9834,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         cfg.tool_visibility = self.tool_visibility.clone();
                         self.sync_tool_visibility_from_config(&cfg);
                         if self.code_index.is_some() {
-                            // Already active — just ensure watcher is running
+                            // Already active - just ensure watcher is running
                             if self.code_index_watch_session.is_none() {
                                 if let Some(ref idx) = self.code_index {
                                     match ragent_codeindex::start_watching(
@@ -9824,7 +9871,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             match ragent_codeindex::CodeIndex::open(&index_config) {
                                 Ok(idx) => {
                                     let arc_idx = Arc::new(idx);
-                                    // Start watching — this performs an initial full reindex
+                                    // Start watching - this performs an initial full reindex
                                     // to catch any changes made while the index was disabled.
                                     match ragent_codeindex::start_watching(
                                         arc_idx.clone(),
@@ -9890,12 +9937,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.code_index_stats_cache = None;
                         if was_active {
                             self.append_assistant_text(
-                                "⛔ **Code index:** disabled and deactivated. Codeindex tools will no longer be available.\n\n\
+                                "[no] **Code index:** disabled and deactivated. Codeindex tools will no longer be available.\n\n\
                                  Use `/codeindex on` and restart to re-enable.",
                             );
                         } else {
                             self.append_assistant_text(
-                                "ℹ️ **Code index:** disabled. It was not currently active.",
+                                "[i] **Code index:** disabled. It was not currently active.",
                             );
                         }
                         match cfg.save_to_source() {
@@ -9958,7 +10005,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                                     // FTS sync warning
                                     if stats.total_symbols > 0 && stats.fts_doc_count == 0 {
-                                        output.push_str("\n\u{26a0}\u{fe0f} **FTS index is empty** — search will not work. Use `/codeindex rebuild` to fix.\n");
+                                        output.push_str("\n\u{26a0}\u{fe0f} **FTS index is empty** - search will not work. Use `/codeindex rebuild` to fix.\n");
                                     } else if stats.fts_doc_count > 0
                                         && (stats.fts_doc_count as f64
                                             / stats.total_symbols.max(1) as f64)
@@ -10051,7 +10098,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                             // succeeded so this is transient.
                                             output.push_str(
                                                 "\u{26a0}\u{fe0f} Graph stats unavailable \
-                                                 (index busy — retry shortly).\n",
+                                                 (index busy - retry shortly).\n",
                                             );
                                         }
                                     }
@@ -10089,7 +10136,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     ));
                                     if reindexing {
                                         output
-                                            .push_str("**Index:** busy — reindexing in progress\n");
+                                            .push_str("**Index:** busy - reindexing in progress\n");
                                         output.push_str(&format!(
                                             "**Reindexing:** {done}/{total} files\n"
                                         ));
@@ -10103,17 +10150,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                             "**Graph:** building ({gdone}/{gtotal} files)\n"
                                         ));
                                         output.push_str(
-                                            "**Index:** available — the graph build holds the \
+                                            "**Index:** available - the graph build holds the \
                                              store lock only briefly for its \
                                              snapshot/persist phases\n",
                                         );
                                     } else {
                                         output.push_str(
-                                            "**Index:** busy — the store lock is held by a \
+                                            "**Index:** busy - the store lock is held by a \
                                              background operation\n",
                                         );
                                         output.push_str(
-                                            "Wait a moment and retry — the background \
+                                            "Wait a moment and retry - the background \
                                              operation will release the lock when done.\n",
                                         );
                                     }
@@ -10151,7 +10198,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             self.append_assistant_text(
                                 "[sync] **Re-indexing codebase...** scanning files and extracting symbols. This runs in the background; watch the status bar for the indexing indicator.",
                             );
-                            self.status = "[wait] codeindex: reindexing…".to_string();
+                            self.status = "[wait] codeindex: reindexing...".to_string();
                             match self.spawn_codeindex_reindex() {
                                 Ok(()) => {}
                                 Err(reason) => {
@@ -10189,7 +10236,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     self.append_assistant_text(
                                         "\u{1f517} **Building semantic edge graph...** deriving typed edges from indexed symbols. This runs in the background; the status bar shows a graph indicator while it works.",
                                     );
-                                    self.status = "[wait] codeindex: building graph…".to_string();
+                                    self.status = "[wait] codeindex: building graph...".to_string();
                                     match self.spawn_codeindex_graph_build(None) {
                                         Ok(()) => {}
                                         Err(reason) => {
@@ -10224,7 +10271,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                           "\u{1f517} **Building graph for language `{lang}`...** This runs in the background; the status bar shows a graph indicator while it works."
                                       ));
                                     self.status =
-                                        format!("[wait] codeindex: building graph ({lang})…");
+                                        format!("[wait] codeindex: building graph ({lang})...");
                                     match self.spawn_codeindex_graph_build(Some(lang.to_string())) {
                                         Ok(()) => {}
                                         Err(reason) => {
@@ -10419,7 +10466,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 match idx.path(from, to) {
                                     Ok(Some(result)) => {
                                         let mut output = format!(
-                                            "## Shortest Path: {} → {} ({} hops)\n\n",
+                                            "## Shortest Path: {} -> {} ({} hops)\n\n",
                                             from, to, result.hops,
                                         );
                                         if result.steps.is_empty() {
@@ -10486,7 +10533,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                             output.push_str("| Community | Label | Members |\n");
                                             output.push_str("|-----------|-------|--------|\n");
                                             for comm in &communities {
-                                                let label = comm.label.as_deref().unwrap_or("—");
+                                                let label = comm.label.as_deref().unwrap_or("-");
                                                 output.push_str(&format!(
                                                     "| {} | {} | {} |\n",
                                                     comm.id, label, comm.member_count,
@@ -10622,7 +10669,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     "help" | "" => {
                         self.append_assistant_text(
                                                                       "From: /router\n\
-                                                                       ## /router — Model Router Management\n\n\
+                                                                       ## /router - Model Router Management\n\n\
                                                                        | Sub-command | Description |\n\
                                                                        |-------------|-------------|\n\
                                                                        | `/router on` | Enable the router (set `enabled: true`) |\n\
@@ -10636,7 +10683,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                                        | `/router weights set <dimension> <value>` | Override a single dimension weight |\n\
                                                                        | `/router weights reset` | Restore built-in default weights |\n\
                                                                        | `/router boundaries` | Display the three tier boundary thresholds |\n\
-                                                                       | `/router boundaries set <boundary> <value>` | Set a boundary threshold (0.0–1.0) |\n\
+                                                                       | `/router boundaries set <boundary> <value>` | Set a boundary threshold (0.0-1.0) |\n\
                                                                        | `/router test <prompt>` | Classify a prompt and show dimension scores, composite score, and selected tier |\n\
                                                                        | `/router stats` | Display cumulative routing statistics |\n\
                                                                        | `/router stats reset` | Zero out cumulative routing statistics |\n\
@@ -10645,7 +10692,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                                        The router analyses every prompt using a 15-dimension weighted classifier\n\
                                                                        and automatically selects the cheapest model that can satisfy the request.\n\
                                                                        Tiers: SIMPLE, MEDIUM, COMPLEX, REASONING.\n\n\
-                                                                       **Prompt modifiers** — prefix your prompt to force a tier:\n\
+                                                                       **Prompt modifiers** - prefix your prompt to force a tier:\n\
                                                                        - `/simple`, `/medium`, `/complex`, `/max`, `/reasoning`, `/basic`, `/cheap`, `/balanced`, `/advanced`, `/think`, `/deep`\n\
                                                                        - `[simple]`, `[complex]`, etc.\n\
                                                                        - `simple mode:`, `deep mode:`, etc.",
@@ -10686,7 +10733,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                                                                                                                                           self.router_enabled = router_config.enabled;
                                                                                                                                                                           self.router_current_tier = None; // reset on reload
                                                                                                                                                                           self.append_assistant_text(&format!(
-                                                                                                                                                                              "From: /router\n✓ Router config reloaded from {}\n  enabled: {}\n  tiers: {}\n  boundaries: {:.2}/{:.2}/{:.2}",
+                                                                                                                                                                              "From: /router\n[ok] Router config reloaded from {}\n  enabled: {}\n  tiers: {}\n  boundaries: {:.2}/{:.2}/{:.2}",
                                                                                                                                                                               path.display(),
                                                                                                                                                                               router_config.enabled,
                                                                                                                                                                               router_config.tiers.len(),
@@ -10750,14 +10797,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     "on" => {
                         self.router_enabled = true;
                         self.append_assistant_text(
-                                                                      "From: /router\n✓ Router enabled. Prompts will be classified and routed to the appropriate model.",
+                                                                      "From: /router\n[ok] Router enabled. Prompts will be classified and routed to the appropriate model.",
                                                                   );
                         self.status = "router: on".to_string();
                     }
                     "off" => {
                         self.router_enabled = false;
                         self.append_assistant_text(
-                                                                      "From: /router\n✓ Router disabled. All prompts will use the default model.",
+                                                                      "From: /router\n[ok] Router disabled. All prompts will use the default model.",
                                                                   );
                         self.status = "router: off".to_string();
                     }
@@ -10782,7 +10829,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let prompt = rest.strip_prefix("test").unwrap_or("").trim();
                         if prompt.is_empty() {
                             self.append_assistant_text(
-                                                                          "From: /router\nUsage: `/router test <prompt>` — classify a prompt and show scores.",
+                                                                          "From: /router\nUsage: `/router test <prompt>` - classify a prompt and show scores.",
                                                                       );
                         } else {
                             use ragent_agent::provider::router_classifier::{
@@ -10823,7 +10870,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             table.push_str("```\n");
                             self.append_assistant_text(&table);
                             self.router_current_tier = Some(result.tier.to_string());
-                            self.status = format!("router: test → {}", result.tier);
+                            self.status = format!("router: test -> {}", result.tier);
                         }
                     }
                     "weights" => {
@@ -10860,7 +10907,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         if sub2.is_empty() {
                             let b = BoundaryConfig::default();
                             self.append_assistant_text(&format!(
-                                                                          "From: /router\n```\nBoundary            Threshold\n──────────────────────────\nSIMPLE → MEDIUM     {:.2}\nMEDIUM → COMPLEX    {:.2}\nCOMPLEX → REASONING {:.2}\n```",
+                                                                          "From: /router\n```\nBoundary            Threshold\n──────────────────────────\nSIMPLE -> MEDIUM     {:.2}\nMEDIUM -> COMPLEX    {:.2}\nCOMPLEX -> REASONING {:.2}\n```",
                                                                           b.simple_medium, b.medium_complex, b.complex_reasoning,
                                                                       ));
                             self.status = "router: boundaries".to_string();
@@ -10936,11 +10983,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     // Check provider/model are configured
                     if self.configured_provider.is_none() {
                         self.status =
-                            "[warn] No provider configured — use /provider to set up".to_string();
+                            "[warn] No provider configured - use /provider to set up".to_string();
                         return;
                     }
                     if self.selected_model.is_none() {
-                        self.status = "[warn] No model selected — use /model to choose".to_string();
+                        self.status = "[warn] No model selected - use /model to choose".to_string();
                         return;
                     }
                     // Ensure a session exists
@@ -10974,7 +11021,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         &skill.allowed_tools,
                     );
 
-                    self.status = format!("invoking skill /{}…", cmd);
+                    self.status = format!("invoking skill /{}...", cmd);
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!("Invoking skill /{} with args: {}", cmd, args),
@@ -11160,10 +11207,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             "in_progress" => "[sync]",
                             "done" | "completed" => "[ok]",
                             "blocked" => "[stop]",
-                            _ => "❓",
+                            _ => "[?]",
                         };
                         output.push_str(&format!(
-                            "- {} **{}** — {} `[{}]`\n",
+                            "- {} **{}** - {} `[{}]`\n",
                             status_icon, task.id, task.title, task.status
                         ));
                         if !task.description.is_empty() {
@@ -11256,7 +11303,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     fn handle_cron_help(&mut self) {
         self.append_assistant_text(
             "From: /cron help\n\n\
-             ## /cron — Scheduled agent runs\n\n\
+             ## /cron - Scheduled agent runs\n\n\
              | Sub-command | Usage | Description |\n\
              |---|---|---|\n\
              | `add` | `/cron add <cronname> <agent> <schedule> \"<prompt>\"` | Create a new event |\n\
@@ -11476,7 +11523,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
         match self.storage.set_cron_event_enabled(event_id, enabled) {
             Ok(true) => {
-                let mark = if enabled { "[ok]" } else { "[pause]️" };
+                let mark = if enabled { "[ok]" } else { "[pause]" };
                 self.append_assistant_text(&format!(
                     "From: /cron {action}\n{mark} Event `{}` {}.",
                     event_id,
@@ -11504,12 +11551,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         }
     }
 
-    /// Handle `/cron list` — display all scheduled events.
+    /// Handle `/cron list` - display all scheduled events.
     fn handle_cron_list(&mut self) {
         match self.storage.list_cron_events() {
             Ok(rows) if rows.is_empty() => {
                 self.append_assistant_text(
-                    "From: /cron list\n\nℹ️  No scheduled events.\n\n\
+                    "From: /cron list\n\n[i]  No scheduled events.\n\n\
                      Use `/cron add <cronname> <agent> <schedule> \"<prompt>\"` to create one.",
                 );
                 self.status = "cron: list empty".to_string();
@@ -11524,7 +11571,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     // Reconstruct a human-readable schedule description from the row.
                     let desc = row_to_human_readable(row);
                     let prompt_preview = truncate_field(&row.prompt, 41);
-                    let enabled_str = if row.enabled { "✓" } else { "✗" };
+                    let enabled_str = if row.enabled { "[ok]" } else { "[x]" };
                     let next_due_display = format_next_due(&row.next_due, row.enabled);
                     output.push_str(&format!(
                         "| `{}` | `{}` | {} ({}) | {} | {} | \"{}\" |\n",
@@ -11549,7 +11596,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         }
     }
 
-    /// Handle `/cron detail <event_id>` — show full details of a single event.
+    /// Handle `/cron detail <event_id>` - show full details of a single event.
     ///
     /// Displays every stored field including the complete (untruncated) prompt.
     fn handle_cron_detail(&mut self, rest: &str) {
@@ -11564,16 +11611,16 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             Ok(Some(row)) => {
                 let desc = row_to_human_readable(&row);
                 let enabled_str = if row.enabled {
-                    "✓ enabled"
+                    "[ok] enabled"
                 } else {
-                    "✗ disabled"
+                    "[x] disabled"
                 };
                 let next_due_display = format_next_due(&row.next_due, row.enabled);
-                let start_at_display = row.start_at.as_deref().unwrap_or("—");
+                let start_at_display = row.start_at.as_deref().unwrap_or("-");
                 let duration_display = row
                     .duration_secs
                     .map(duration_secs_to_string)
-                    .unwrap_or_else(|| "—".to_string());
+                    .unwrap_or_else(|| "-".to_string());
                 let last_fired_display = row.last_fired.as_deref().unwrap_or("never");
 
                 let output = format!(
@@ -11628,7 +11675,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         }
     }
 
-    /// Handle `/cron log [event_id]` — display execution log.
+    /// Handle `/cron log [event_id]` - display execution log.
     fn handle_cron_log(&mut self, rest: &str) {
         let filter = rest.trim();
         let working_dir = crate::app::helpers::current_working_dir();
@@ -11642,7 +11689,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
         if entries.is_empty() {
             self.append_assistant_text(&format!(
-                "From: /cron log\n\nℹ️  No execution log entries{}.",
+                "From: /cron log\n\n[i]  No execution log entries{}.",
                 if event_id.is_some() {
                     format!(" for event `{}`", filter)
                 } else {
@@ -11663,8 +11710,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             let outcome_icon = match entry.outcome.as_str() {
                 "success" => "[ok]",
                 "error" => "[err]",
-                "skipped" => "⏭️",
-                _ => "•",
+                "skipped" => "[>>]",
+                _ => "*",
             };
             output.push_str(&format!(
                 "| {} | `{}` | `{}` | {} {} | \"{}\" |\n",
@@ -11727,16 +11774,18 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         true
     }
 
-    /// Handle `/triggers list` — display all registered trigger rules.
+    /// Handle `/triggers list` - display all registered trigger rules.
     fn handle_triggers_list(&mut self) {
         if !self.ensure_trigger_runtime() {
             return;
         }
-        let runtime = self.trigger_runtime.as_ref().unwrap();
+        let Some(runtime) = self.trigger_runtime.as_ref() else {
+            return;
+        };
         let rules = runtime.list_rules();
         if rules.is_empty() {
             self.append_assistant_text(
-                "From: /triggers list\n\nℹ️  No trigger rules registered.\n\n\
+                "From: /triggers list\n\n[i]  No trigger rules registered.\n\n\
                  Trigger rules are created by asking the agent in natural language,\n\
                  e.g. \"when $HOME/build.done exists, run cargo test\".",
             );
@@ -11786,14 +11835,16 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         if !self.ensure_trigger_runtime() {
             return;
         }
-        let runtime = self.trigger_runtime.as_ref().unwrap();
+        let Some(runtime) = self.trigger_runtime.as_ref() else {
+            return;
+        };
         let found = if enabled {
             runtime.enable_rule(rule_id)
         } else {
             runtime.disable_rule(rule_id)
         };
         if found {
-            let mark = if enabled { "[ok]" } else { "[pause]️" };
+            let mark = if enabled { "[ok]" } else { "[pause]" };
             let action = if enabled { "enabled" } else { "disabled" };
             self.append_assistant_text(&format!(
                 "From: /triggers\n{mark} Rule `{}` {action}.",
@@ -11826,7 +11877,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         if !self.ensure_trigger_runtime() {
             return;
         }
-        let runtime = self.trigger_runtime.as_ref().unwrap();
+        let Some(runtime) = self.trigger_runtime.as_ref() else {
+            return;
+        };
         if runtime.remove_rule(rule_id) {
             self.append_assistant_text(&format!(
                 "From: /triggers remove\n[clr] Rule `{}` removed.",
@@ -11846,12 +11899,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         }
     }
 
-    /// Handle `/triggers status` — show runtime stats.
+    /// Handle `/triggers status` - show runtime stats.
     fn handle_triggers_status(&mut self) {
         if !self.ensure_trigger_runtime() {
             return;
         }
-        let runtime = self.trigger_runtime.as_ref().unwrap();
+        let Some(runtime) = self.trigger_runtime.as_ref() else {
+            return;
+        };
         let rule_count = runtime.rule_count();
         let dedup_size = runtime.dedup_cache_size();
         let cycle_size = runtime.cycle_tracker_size();
@@ -11899,7 +11954,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     fn handle_triggers_help(&mut self) {
         self.append_assistant_text(
             "From: /triggers help\n\n\
-             ## /triggers — Manage trigger rules\n\n\
+             ## /triggers - Manage trigger rules\n\n\
              | Sub-command | Usage | Description |\n\
              |---|---|---|\n\
              | `list` | `/triggers list` | Show all registered trigger rules |\n\
@@ -11919,13 +11974,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
     // ── /bug-report slash-command handler (spec piegap T-011) ──────────────
 
-    /// Handle `/bug-report` — generate a diagnostic dump with redaction (FR-007).
+    /// Handle `/bug-report` - generate a diagnostic dump with redaction (FR-007).
     ///
     /// Collects session state (model, agent, tool count, cost summary), recent
     /// log entries, and the session transcript. Redacts well-known secret patterns
     /// (API keys, tokens, passwords) before writing to `log/bug-report-<timestamp>.md`.
     fn handle_bug_report(&mut self) {
-        use std::fs::{self, File};
+        use std::fs;
         use std::io::Write;
 
         let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
@@ -11979,39 +12034,39 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             "- **Tools visible**: {}\n- **Tool families**:\n  - Office: {}\n  - GitHub: {}\n  - GitLab: {}\n  - Teams: {}\n  - Agents: {}\n  - Plan: {}\n  - CodeIndex: {}",
             tool_count,
             if self.tool_visibility.office {
-                "✓"
+                "[ok]"
             } else {
-                "✗"
+                "[x]"
             },
             if self.tool_visibility.github {
-                "✓"
+                "[ok]"
             } else {
-                "✗"
+                "[x]"
             },
             if self.tool_visibility.gitlab {
-                "✓"
+                "[ok]"
             } else {
-                "✗"
+                "[x]"
             },
             if self.tool_visibility.teams {
-                "✓"
+                "[ok]"
             } else {
-                "✗"
+                "[x]"
             },
             if self.tool_visibility.agents {
-                "✓"
+                "[ok]"
             } else {
-                "✗"
+                "[x]"
             },
             if self.tool_visibility.plan {
-                "✓"
+                "[ok]"
             } else {
-                "✗"
+                "[x]"
             },
             if self.tool_visibility.codeindex {
-                "✓"
+                "[ok]"
             } else {
-                "✗"
+                "[x]"
             }
         );
 
@@ -12051,8 +12106,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             let mut lines = String::new();
             for msg in &self.messages {
                 let role = match msg.role {
-                    ragent_types::Role::User => "👤 User",
-                    ragent_types::Role::Assistant => "🤖 Assistant",
+                    ragent_types::Role::User => "[person] User",
+                    ragent_types::Role::Assistant => "[agent] Assistant",
                     ragent_types::Role::Compaction => "[spin] Compaction",
                 };
                 let content = redact_secrets(&msg.text_content());
@@ -12085,7 +12140,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         );
 
         // Write the report
-        match File::create(&output_path) {
+        // ANTIPAT MEDIUM-3: the report was created with the process umask, so
+        // on a multi-user host the diagnostic dump (session metadata, file
+        // paths, tool output) was world-readable. Create it owner-only, matching
+        // the 0o600 log spool.
+        match crate::app::helpers::open_owner_only(&output_path, true) {
             Ok(mut file) => {
                 if let Err(e) = file.write_all(report.as_bytes()) {
                     self.append_assistant_text(&format!(
@@ -12152,7 +12211,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         }
     }
 
-    /// Handle `/inbox list` — display all inbox findings.
+    /// Handle `/inbox list` - display all inbox findings.
     fn handle_inbox_list(&mut self) {
         let data_dir = crate::app::helpers::current_working_dir();
         let entries = match ragent_agent::loop_state::read_inbox(&data_dir) {
@@ -12167,7 +12226,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         };
         if entries.is_empty() {
             self.append_assistant_text(
-                "From: /inbox list\n\nℹ️  Inbox is empty.\n\n\
+                "From: /inbox list\n\n[i]  Inbox is empty.\n\n\
                  Findings are added by stateful cron jobs that use the `<inbox>` tag protocol.",
             );
             self.status = "inbox: list empty".to_string();
@@ -12249,7 +12308,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         }
     }
 
-    /// Handle `/inbox clear` — remove all inbox findings.
+    /// Handle `/inbox clear` - remove all inbox findings.
     fn handle_inbox_clear(&mut self) {
         let data_dir = crate::app::helpers::current_working_dir();
         match ragent_agent::loop_state::clear_inbox(&data_dir) {
@@ -12273,7 +12332,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     fn handle_inbox_help(&mut self) {
         self.append_assistant_text(
             "From: /inbox help\n\n\
-             ## /inbox — Triage inbox findings\n\n\
+             ## /inbox - Triage inbox findings\n\n\
              The inbox collects findings from stateful cron jobs that use the\n\
              `<inbox>` tag protocol. Findings are stored in a global JSONL file\n\
              shared across all sessions.\n\n\
@@ -12294,10 +12353,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     ///
     /// Inspects the in-memory input queue. Sub-commands:
     ///
-    /// - `list` (default) — print the queued entries in FIFO order;
-    /// - `clear` — empty the queue;
-    /// - `next` — immediately dispatch the oldest entry;
-    /// - `help` — show this usage.
+    /// - `list` (default) - print the queued entries in FIFO order;
+    /// - `clear` - empty the queue;
+    /// - `next` - immediately dispatch the oldest entry;
+    /// - `help` - show this usage.
     ///
     /// `clear` and `next` intentionally do **not** mutate or halt the currently
     /// executing turn: `next` only dispatches when the turn boundary is free
@@ -12319,12 +12378,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         }
     }
 
-    /// `/queue list` — print the queued entries in submission order (FR-001).
+    /// `/queue list` - print the queued entries in submission order (FR-001).
     fn handle_queue_list(&mut self) {
         let count = self.input_queue_len();
         if count == 0 {
             self.append_assistant_text(
-                "From: /queue list\n\nℹ️  The input queue is empty.\n\n\
+                "From: /queue list\n\n[i]  The input queue is empty.\n\n\
                  Messages typed while the agent is executing are staged here and run in order.",
             );
             self.status = "queue: list empty".to_string();
@@ -12346,7 +12405,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         self.status = format!("queue: {}", pluralize(count, "entry", "entries"));
     }
 
-    /// `/queue clear` — empty the input queue and repaint the prompt (FR-028).
+    /// `/queue clear` - empty the input queue and repaint the prompt (FR-028).
     fn handle_queue_clear(&mut self) {
         let count = self.input_queue_len();
         self.clear_input_queue();
@@ -12358,7 +12417,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         self.status = "queue: cleared".to_string();
     }
 
-    /// `/queue next` — dispatch the oldest queued entry now (FR-024 analogue).
+    /// `/queue next` - dispatch the oldest queued entry now (FR-024 analogue).
     ///
     /// Delegates to [`App::advance_input_queue`], which owns the single boundary
     /// guard (FR-016/FR-030): it dispatches only when no turn is executing and
@@ -12367,14 +12426,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     async fn handle_queue_next(&mut self) {
         if self.input_queue_len() == 0 {
             self.append_assistant_text(
-                "From: /queue next\n\nℹ️  The input queue is empty — nothing to run.",
+                "From: /queue next\n\n[i]  The input queue is empty - nothing to run.",
             );
             self.status = "queue: next empty".to_string();
             return;
         }
         if self.is_input_blocked() {
             self.append_assistant_text(
-                "From: /queue next\n\n[warn] The agent is still executing — the next queued \
+                "From: /queue next\n\n[warn] The agent is still executing - the next queued \
                  entry will run at the turn boundary. Use the ALT-Q menu's `Next` to stop the \
                  current turn and run it immediately.",
             );
@@ -12401,7 +12460,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     fn handle_queue_help(&mut self) {
         self.append_assistant_text(
             "From: /queue help\n\n\
-             ## /queue — Message input queue\n\n\
+             ## /queue - Message input queue\n\n\
              While the primary agent is executing, messages you submit are staged in a\n\
              bounded FIFO queue and run in order at each turn boundary.\n\n\
              | Sub-command | Usage | Description |\n\
@@ -12422,7 +12481,7 @@ fn truncate_field(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         let truncated: String = s.chars().take(max.saturating_sub(1)).collect();
-        format!("{truncated}…")
+        format!("{truncated}...")
     }
 }
 
@@ -12434,19 +12493,24 @@ fn extract_quoted_prompt(s: &str) -> Option<(&str, String)> {
     let last_open = s.rfind('"')?;
     let first_open = s.find('"')?;
     if last_open == first_open {
-        return None; // Only one quote — unbalanced.
+        return None; // Only one quote - unbalanced.
     }
     let prompt = s[first_open + 1..last_open].to_string();
     let before = s[..first_open].trim_end();
     Some((before, prompt))
 }
 
+/// Seconds from now equivalent to the far-future sentinel (year ~9999) that
+/// disabled one-shot cron events are pushed to. A delta larger than this is
+/// not a real scheduled time, so the relative suffix is suppressed.
+const FAR_FUTURE_SENTINEL_SECS: i64 = 315_576_000;
+
 /// Format the next-due timestamp with a compact relative time suffix.
 ///
 /// Returns the raw timestamp followed by a parenthesised relative
 /// duration such as `2026-08-08T14:30:00Z (in 12m)` or
 /// `2026-08-08T14:30:00Z (overdue 5m)` when the timestamp is in the past.
-/// Disabled events with a far-future sentinel timestamp show `—` for
+/// Disabled events with a far-future sentinel timestamp show `-` for
 /// the relative part.
 fn format_next_due(next_due: &str, enabled: bool) -> String {
     let Ok(ts) = chrono::DateTime::parse_from_rfc3339(next_due) else {
@@ -12457,11 +12521,11 @@ fn format_next_due(next_due: &str, enabled: bool) -> String {
     let total_secs = delta.num_seconds();
 
     // Far-future sentinel (disabled one-shot events pushed to 9999-12-31).
-    if total_secs > 315_576_000 {
+    if total_secs > FAR_FUTURE_SENTINEL_SECS {
         return if enabled {
             format!("{next_due}")
         } else {
-            format!("{next_due} (—)")
+            format!("{next_due} (-)")
         };
     }
 
@@ -12573,18 +12637,22 @@ fn duration_secs_to_string(secs: i64) -> String {
 /// - Generic secrets/tokens/passwords in key=value format
 fn redact_secrets(input: &str) -> String {
     // API key patterns (Anthropic, OpenAI, etc.)
+    // INVARIANT: static literal pattern, compilation cannot fail at runtime.
     static API_KEY_PATTERN: std::sync::LazyLock<Regex> =
         std::sync::LazyLock::new(|| Regex::new(r"(?i)(sk-[a-zA-Z0-9]{20,})").unwrap());
 
     // Bearer token pattern
+    // INVARIANT: static literal pattern, compilation cannot fail at runtime.
     static BEARER_PATTERN: std::sync::LazyLock<Regex> =
         std::sync::LazyLock::new(|| Regex::new(r"(?i)(Bearer\s+[a-zA-Z0-9\-_\.]{20,})").unwrap());
 
     // AWS access key pattern
+    // INVARIANT: static literal pattern, compilation cannot fail at runtime.
     static AWS_KEY_PATTERN: std::sync::LazyLock<Regex> =
         std::sync::LazyLock::new(|| Regex::new(r"(?i)(AKIA[0-9A-Z]{16})").unwrap());
 
     // Generic key=value secrets
+    // INVARIANT: static literal pattern, compilation cannot fail at runtime.
     static SECRET_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
         Regex::new(r"(?i)((?:api[_-]?key|secret|token|password|passwd|pwd|auth)\s*[=:]\s*\S{8,})")
             .unwrap()
@@ -12618,9 +12686,9 @@ fn redact_secrets(input: &str) -> String {
 /// Handle the `/blueprints` slash command for listing installed team blueprints.
 ///
 /// Usage:
-/// - `/blueprints` or `/blueprints list` — list all installed blueprints
-/// - `/blueprints help` — show the list (same as no args)
-/// - `/blueprints <name>` — show detailed summary of a specific blueprint
+/// - `/blueprints` or `/blueprints list` - list all installed blueprints
+/// - `/blueprints help` - show the list (same as no args)
+/// - `/blueprints <name>` - show detailed summary of a specific blueprint
 fn handle_blueprints_command(app: &mut App, args: &str) {
     let working_dir = crate::app::helpers::current_working_dir();
     let blueprint_dirs = blueprints::list_installed_blueprints(&working_dir);
@@ -12657,9 +12725,9 @@ fn handle_blueprints_command(app: &mut App, args: &str) {
 /// Handle the `/template` slash command for listing and applying reusable prompt templates.
 ///
 /// Usage:
-/// - `/template` — list all available templates
-/// - `/template <name>` — show template details and apply with no arguments
-/// - `/template <name> <args>` — apply template with arguments
+/// - `/template` - list all available templates
+/// - `/template <name>` - show template details and apply with no arguments
+/// - `/template <name> <args>` - apply template with arguments
 fn handle_template_command(app: &mut App, args: &str) {
     use ragent_agent::template::{TemplateInfo, discover_templates};
 
@@ -12691,9 +12759,9 @@ fn handle_template_command(app: &mut App, args: &str) {
             output.push_str("Templates support placeholders like `{{title}}`, `{{description}}`, `{{arguments}}`, etc.\n");
         } else {
             for template in template_list {
-                let desc = template.description.as_deref().unwrap_or("—");
+                let desc = template.description.as_deref().unwrap_or("-");
                 let placeholders = if template.placeholders.is_empty() {
-                    "—".to_string()
+                    "-".to_string()
                 } else {
                     template.placeholders.join(", ")
                 };
@@ -12765,10 +12833,10 @@ fn handle_template_command(app: &mut App, args: &str) {
 /// Handle the `/goal` slash command for goal-based autonomous stop hook.
 ///
 /// Usage:
-/// - `/goal set <description>` — set a goal condition
-/// - `/goal clear` — clear the current goal
-/// - `/goal show` — show the current goal status
-/// - `/goal test` — manually test if the current goal is satisfied
+/// - `/goal set <description>` - set a goal condition
+/// - `/goal clear` - clear the current goal
+/// - `/goal show` - show the current goal status
+/// - `/goal test` - manually test if the current goal is satisfied
 fn handle_goal_command(app: &mut App, args: &str) {
     use ragent_agent::goal::GoalCondition;
 
@@ -12776,10 +12844,10 @@ fn handle_goal_command(app: &mut App, args: &str) {
         let output = r"## Goal-Based Autonomous Stop
 
 Usage:
-  `/goal set <description>` — Set a goal condition for autonomous execution
-  `/goal clear` — Clear the current goal
-  `/goal show` — Show the current goal status
-  `/goal test` — Manually test if the goal is satisfied
+  `/goal set <description>` - Set a goal condition for autonomous execution
+  `/goal clear` - Clear the current goal
+  `/goal show` - Show the current goal status
+  `/goal test` - Manually test if the goal is satisfied
 
 Example:
   `/goal set Stop when all tests pass and the build succeeds`
@@ -12946,12 +13014,12 @@ fn handle_loop_command(app: &mut App, args: &str) {
         None => (args.trim(), String::new()),
     };
     if goal.is_empty() {
-        // FR-005: an empty goal cannot start a loop — name the missing
+        // FR-005: an empty goal cannot start a loop - name the missing
         // field and re-open the dialog so the user can complete the form.
         app.append_assistant_text(&format!(
             r"From: /loop
 
-**Error:** missing field: goal — a loop cannot start without a goal.
+**Error:** missing field: goal - a loop cannot start without a goal.
 
 Usage: `/loop <agent> <goal text...>` or `/loop` for the setup dialog.
 Re-opening the setup dialog with your agent (`{agent}`) pre-selected."

@@ -5,12 +5,12 @@
 //! discovered by [`crate::store::scan_dirs`] (a disabled plugin is inert and
 //! contributes nothing, FR-016):
 //!
-//! - [`plugin_skill_dirs`] / [`scanned_plugin_skill_dirs`] — resolve each
+//! - [`plugin_skill_dirs`] / [`scanned_plugin_skill_dirs`] - resolve each
 //!   plugin's `skills` section into absolute directories so the session's
 //!   skill discovery can append them to its scan roots. A skill directory is
 //!   the folder that *contains* per-skill subdirectories, each holding a
 //!   `SKILL.md` (the same layout `SkillRegistry::load` expects).
-//! - [`plugin_mcp_servers`] / [`scanned_plugin_mcp_servers`] — resolve each
+//! - [`plugin_mcp_servers`] / [`scanned_plugin_mcp_servers`] - resolve each
 //!   plugin's `mcpServers` section into `(server_id, McpServerConfig)` pairs so
 //!   the session can connect them at startup exactly like a configured server.
 //!   The server id is prefixed with the plugin id (`<plugin-id>.<server>`) so
@@ -30,6 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use ragent_config::McpServerConfig;
+use ragent_tools_core::guard::validate_relative_component;
 
 use crate::manifest::{
     AGENTS_DIR, ParsedManifest, PluginCommandDef, PluginHook, PluginMcpServer, extract_mcp_servers,
@@ -216,35 +217,24 @@ fn read_external_mcp_servers(root: &Path, rel: &str) -> Option<Vec<PluginMcpServ
 
 /// Join `rel` onto `root` and normalise it, returning `None` when the result
 /// escapes `root` or `rel` is absolute. Purely lexical (no filesystem access),
-/// so a plugin cannot use a symlink to point outside its root here — the
+/// so a plugin cannot use a symlink to point outside its root here - the
 /// caller's own reads stay within the plugin directory.
+///
+/// The containment rule is the shared
+/// [`ragent_tools_core::guard::validate_relative_component`] predicate (ANTIPAT M14);
+/// the same predicate backs `manifest.rs::is_contained_relative_path`.
 fn resolve_within(root: &Path, rel: &str) -> Option<PathBuf> {
-    let rel_path = Path::new(rel.trim());
-    if rel_path.is_absolute() {
-        return None;
-    }
-    let mut depth: i32 = 0;
-    let mut parts: Vec<&std::ffi::OsStr> = Vec::new();
-    for comp in rel_path.components() {
-        match comp {
-            Component::Normal(part) => {
-                parts.push(part);
-                depth += 1;
-            }
-            Component::CurDir => {}
-            Component::ParentDir => {
-                depth -= 1;
-                if depth < 0 {
-                    return None;
-                }
-                parts.pop();
-            }
-            Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
+    let trimmed = rel.trim();
+    validate_relative_component(trimmed, "plugin path").ok()?;
     let mut resolved = root.to_path_buf();
-    for part in parts {
-        resolved.push(part);
+    for comp in Path::new(trimmed).components() {
+        match comp {
+            Component::Normal(part) => resolved.push(part),
+            // Validation rejects every other component kind; ignore `.` for
+            // normalisation and keep the match exhaustive without a wildcard.
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
     }
     Some(resolved)
 }

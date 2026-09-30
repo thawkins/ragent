@@ -1,22 +1,22 @@
 //! Extracted setup and loop steps for `process_user_message` (T6.5).
 //!
 //! These methods split the 2,273-line `process_user_message` into named
-//! steps per the REMPLAN.md plan. Each step is `≤ ~400 lines`.
+//! steps per the REMPLAN.md plan. Each step is `<= ~400 lines`.
 //! `process_user_message` in `processor.rs` becomes a thin orchestrator
 //! that calls them in order.
 //!
 //! ## Step order
 //!
-//! 1. [`Self::prepare_client`] — resolve model / provider / API key / client.
-//! 2. [`Self::build_turn_system_prompt`] — assemble the system prompt.
-//! 3. [`Self::build_turn_chat_messages`] — load history, optionally compress,
+//! 1. [`Self::prepare_client`] - resolve model / provider / API key / client.
+//! 2. [`Self::build_turn_system_prompt`] - assemble the system prompt.
+//! 3. [`Self::build_turn_chat_messages`] - load history, optionally compress,
 //!    convert to `ChatMessage`s.
-//! 4. [`Self::run_inline_init_acknowledgement`] — AGENTS.md init exchange.
-//! 5. (loop) [`Self::call_llm_step`] — call the LLM with retry + stream
+//! 4. [`Self::run_inline_init_acknowledgement`] - AGENTS.md init exchange.
+//! 5. (loop) [`Self::call_llm_step`] - call the LLM with retry + stream
 //!    event handling.
-//! 6. (loop) [`Self::dispatch_tool_calls`] — execute tool calls and collect
+//! 6. (loop) [`Self::dispatch_tool_calls`] - execute tool calls and collect
 //!    results.
-//! 7. [`Self::finalize_assistant_message`] — final save + timing + hooks.
+//! 7. [`Self::finalize_assistant_message`] - final save + timing + hooks.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -85,7 +85,7 @@ pub(crate) struct LoopState {
     /// can share the history by refcount bump instead of cloning the entire
     /// `Vec` (including all tool-result `ContentPart`s) on every attempt.
     /// Mutation is performed via `Arc::make_mut`, which clones only when
-    /// another `Arc` reference is still live — so an unchanged history is
+    /// another `Arc` reference is still live - so an unchanged history is
     /// shared for free.
     pub chat_messages: Arc<Vec<ChatMessage>>,
     /// Accumulated assistant message parts for the final save (COW via `Arc`).
@@ -474,7 +474,7 @@ impl SessionProcessor {
         }
         // T-009 (FR-008): when a goal-driven loop with a configured tool set
         // is active, the system-prompt tool reference is restricted to that
-        // set plus the mandatory safety tools — matching the filtered tool
+        // set plus the mandatory safety tools - matching the filtered tool
         // definitions sent on the wire.
         let loop_tool_set: Option<std::collections::HashSet<String>> = {
             let specs = self.active_loop_specs.read().await;
@@ -550,11 +550,11 @@ impl SessionProcessor {
                  If the answer should be one of a fixed set of choices, provide the `options` \
                  parameter as an array of strings. The user will see a multiple-choice dialog \
                  instead of a free-text input, which is faster and less error-prone.\n\n\
-                 Example — multiple choice:\n\
+                 Example - multiple choice:\n\
                  ```\n\
                  question(question: \"Which build profile?\", options: [\"Debug\", \"Release\", \"Check only\"])\n\
                  ```\n\n\
-                 Example — free-text input (no options):\n\
+                 Example - free-text input (no options):\n\
                  ```\n\
                  question(question: \"What is your name?\")\n\
                  ```\n\n",
@@ -580,10 +580,10 @@ impl SessionProcessor {
 
         if team_context.map(|tc| tc.is_lead).unwrap_or(false) {
             system_prompt.push_str(
-                "\n## Team Lead — Task Distribution Rules\n\n\
+                "\n## Team Lead - Task Distribution Rules\n\n\
                  When you receive a request that involves a list of N independent items \
                  (e.g. N competitors, N modules, N documents), ALWAYS spawn **exactly one \
-                 teammate per item** — never assign multiple items from the list to a single \
+                 teammate per item** - never assign multiple items from the list to a single \
                  teammate.\n\n\
                  **Why:** Each teammate has a finite context window.  Assigning all items \
                  to one teammate will overflow its context and cause it to fail.\n\n\
@@ -592,7 +592,7 @@ impl SessionProcessor {
                  2. **One teammate per item.** Spawn one `team_spawn` call per item in the \
                     same response turn (all in parallel).\n\
                  3. **Bounded prompt per teammate.** Each teammate's `prompt` must reference \
-                    **only its one assigned item** — never a list.  Keep the prompt under \
+                    **only its one assigned item** - never a list.  Keep the prompt under \
                     ~500 words; link to files rather than pasting large content.\n\
                  4. **Pre-assign tasks.** When spawning, always include `task_id` parameter \
                     to pre-claim the work item on the teammate's behalf. This ensures they \
@@ -604,29 +604,29 @@ impl SessionProcessor {
                     all teammates report idle or complete.\n\
                  6. **Synthesise.** Read each teammate's output and combine results yourself.\n\
                  7. **Iterate if needed.** If you have more items than available teammates, \
-                    distribute in waves — spawn a batch, wait, synthesise, then spawn the \
+                    distribute in waves - spawn a batch, wait, synthesise, then spawn the \
                     next batch with freshly-idle teammates.\n\n\
-                 **Example — analysing 3 competitors A, B, C:**\n\
+                 **Example - analysing 3 competitors A, B, C:**\n\
                  ```\n\
-                 team_spawn(teammate_name: \"analyst-A\", task_id: \"s1\", prompt: \"Analyse competitor A only …\")\n\
-                 team_spawn(teammate_name: \"analyst-B\", task_id: \"s2\", prompt: \"Analyse competitor B only …\")\n\
-                 team_spawn(teammate_name: \"analyst-C\", task_id: \"s3\", prompt: \"Analyse competitor C only …\")\n\
+                 team_spawn(teammate_name: \"analyst-A\", task_id: \"s1\", prompt: \"Analyse competitor A only ...\")\n\
+                 team_spawn(teammate_name: \"analyst-B\", task_id: \"s2\", prompt: \"Analyse competitor B only ...\")\n\
+                 team_spawn(teammate_name: \"analyst-C\", task_id: \"s3\", prompt: \"Analyse competitor C only ...\")\n\
                  team_wait()\n\
                  ```\n\
-                 Never: `team_spawn(prompt: \"Analyse competitors A, B, and C …\")`\n\n\
+                 Never: `team_spawn(prompt: \"Analyse competitors A, B, and C ...\")`\n\n\
                  **Critical:** The `team_spawn` tool **rejects multi-item prompts**. If your \
                  prompt contains patterns like \"1.\", \"2.\", \"- Item\", or \"and\" joining multiple \
-                 items, the spawn will fail. This is intentional — it forces correct distribution.\n\n",
+                 items, the spawn will fail. This is intentional - it forces correct distribution.\n\n",
             );
         } else if team_context.is_some() {
             system_prompt.push_str(
-                "\n## Teammate — Task Workflow\n\n\
+                "\n## Teammate - Task Workflow\n\n\
                  You are a member of a team. Always follow this workflow:\n\n\
                  **CRITICAL:** Before starting any work:\n\
                  1. Call `team_task_claim` to claim your assigned task. This returns the task ID \
                     and details.\n\
                  2. Perform the work described in the task.\n\
-                 3. Call `team_task_complete(task_id)` with the task ID you claimed in step 1 — \
+                 3. Call `team_task_complete(task_id)` with the task ID you claimed in step 1 - \
                     **never guess or try to complete a different task**.\n\
                  4. Call `team_idle` to signal you are done and ready for new assignments.\n\n\
                  **Do NOT:**\n\
@@ -635,7 +635,7 @@ impl SessionProcessor {
                  - Complete a task that you did not claim\n\
                  - Go idle while you still have an uncompleted task assigned to you\n\n\
                  If `team_task_claim` returns \"already has task\", complete that task first \
-                 (step 3–4 above), then call `team_task_claim` again.\n\n",
+                 (step 3-4 above), then call `team_task_claim` again.\n\n",
             );
         }
 
@@ -666,14 +666,14 @@ impl SessionProcessor {
                         );
                         for req in &spec.requirements {
                             spec_section.push_str(&format!(
-                                "- `{}` ({:?}) — {}\n",
+                                "- `{}` ({:?}) - {}\n",
                                 req.id, req.template, req.text
                             ));
                         }
                         spec_section.push_str("\n### Tasks\n\n");
                         for task in &spec.tasks {
                             spec_section.push_str(&format!(
-                                "- `{}` — {} ({})\n",
+                                "- `{}` - {} ({})\n",
                                 task.id,
                                 task.title,
                                 task.status.as_str()
@@ -884,7 +884,7 @@ impl SessionProcessor {
                                     tracing::warn!(
                                         session_id = %session_id,
                                         stall_secs,
-                                        "AGENTS.md init exchange stream stalled — no data"
+                                        "AGENTS.md init exchange stream stalled - no data"
                                     );
                                     break;
                                 }
@@ -919,7 +919,7 @@ impl SessionProcessor {
                         tracing::warn!(
                             session_id = %session_id,
                             error = %e,
-                            "AGENTS.md init exchange failed — skipping acknowledgement"
+                            "AGENTS.md init exchange failed - skipping acknowledgement"
                         );
                         self.event_bus.publish(Event::MessageEnd {
                             session_id: session_id.to_string(),
@@ -1054,8 +1054,8 @@ impl SessionProcessor {
             // after the first 30s, until the first stream event arrives.
             let first_event_arrived = Arc::new(AtomicBool::new(false));
             // R-1: Wrap the notice task in an `AbortOnDrop` guard so it is
-            // aborted on every scope exit — including the `continue 'retry`
-            // and `bail!` error paths below — not just the success path.
+            // aborted on every scope exit - including the `continue 'retry`
+            // and `bail!` error paths below - not just the success path.
             use crate::session::AbortOnDrop;
             let notice_handle = {
                 let event_bus = Arc::clone(&self.event_bus);
@@ -1155,7 +1155,7 @@ impl SessionProcessor {
                                         self.event_bus.publish(Event::AgentNotice {
                                             session_id: session_id.to_string(),
                                             message: format!(
-                                                "{error_message} — emergency-compacted, will retry"
+                                                "{error_message} - emergency-compacted, will retry"
                                             ),
                                         });
                                     }
@@ -1178,7 +1178,7 @@ impl SessionProcessor {
                             } else {
                                 self.event_bus.publish(Event::AgentNotice {
                                     session_id: session_id.to_string(),
-                                    message: format!("{error_message} — will retry"),
+                                    message: format!("{error_message} - will retry"),
                                 });
                             }
                             continue 'retry;
@@ -1218,7 +1218,7 @@ impl SessionProcessor {
                     let wait_started = Instant::now();
                     // Per-chunk stall safety net. The H1 optimisation assumed
                     // every provider wraps `stream.next()` in its own timeout,
-                    // but only Ollama does — all other providers (OpenAI,
+                    // but only Ollama does - all other providers (OpenAI,
                     // Anthropic, Gemini, Bedrock, Copilot, Azure, Router, etc.)
                     // have an unguarded `stream.next().await` that hangs forever
                     // on a stalled connection (low CPU, no progress). We wrap the
@@ -1238,12 +1238,12 @@ impl SessionProcessor {
                         Err(_) => {
                             debug!(
                                 stall_secs,
-                                "Stream stalled — no data for {stall_secs}s, \
+                                "Stream stalled - no data for {stall_secs}s, \
                                  treating as retryable error"
                             );
                             Some(StreamEvent::Error {
                                 message: format!(
-                                    "stream stalled — no data received for {stall_secs}s"
+                                    "stream stalled - no data received for {stall_secs}s"
                                 ),
                             })
                         }
@@ -1412,7 +1412,7 @@ impl SessionProcessor {
                                 // with the compacted history. This path is
                                 // eligible regardless of `compaction.auto` (when
                                 // `auto` is false the runner relies solely on
-                                // emergency summarisation — FR-008). The
+                                // emergency summarisation - FR-008). The
                                 // `compaction_attempted_this_turn` guard ensures
                                 // only a single compaction attempt per turn, so a
                                 // skipped emergency compaction is not retried.
@@ -1459,7 +1459,7 @@ impl SessionProcessor {
                                         self.event_bus.publish(Event::AgentNotice {
                                             session_id: session_id.to_string(),
                                             message: format!(
-                                                "{message} — emergency-compacted, will retry"
+                                                "{message} - emergency-compacted, will retry"
                                             ),
                                         });
                                         had_retryable_error = true;
@@ -1484,7 +1484,7 @@ impl SessionProcessor {
                             ) {
                                 self.event_bus.publish(Event::AgentNotice {
                                     session_id: session_id.to_string(),
-                                    message: format!("{} — will retry", message),
+                                    message: format!("{} - will retry", message),
                                 });
                                 had_retryable_error = true;
                             } else if crate::session::history::is_retryable_stream_error(&message)
@@ -1493,7 +1493,7 @@ impl SessionProcessor {
                                 self.event_bus.publish(Event::AgentNotice {
                                     session_id: session_id.to_string(),
                                     message: format!(
-                                        "{} — keeping partial output from this attempt",
+                                        "{} - keeping partial output from this attempt",
                                         message
                                     ),
                                 });
@@ -1551,7 +1551,7 @@ impl SessionProcessor {
             if let Some(reason) = saw_finish_reason.clone() {
                 loop_state.last_finish_reason = Some(reason.clone());
             } else if tool_calls.is_empty() {
-                // Stream ended silently — the provider never emitted an
+                // Stream ended silently - the provider never emitted an
                 // explicit `Finish` signal. This is the signature of an
                 // output-truncating provider: the response simply stops.
                 // Mark it so the task-layer can retry / flag the result.
@@ -1578,8 +1578,8 @@ impl SessionProcessor {
                 self.event_bus.publish(Event::AgentNotice {
                     session_id: session_id.to_string(),
                     message: "Provider truncated the reply without an explicit \
-                               finish signal — asking the model to continue from \
-                               where it stopped…"
+                               finish signal - asking the model to continue from \
+                               where it stopped..."
                         .to_string(),
                 });
                 tracing::warn!(
@@ -1595,7 +1595,7 @@ impl SessionProcessor {
             ) && !tool_calls.is_empty()
             {
                 // A truncation observed on a step that produced tool calls is
-                // most likely a pre-tool preamble cut — the tool phase will
+                // most likely a pre-tool preamble cut - the tool phase will
                 // advance the conversation anyway, so no continuation is
                 // required. Log it for diagnostics, then normalise the
                 // recorded reason back to `ToolUse` so the final message is

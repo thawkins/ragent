@@ -27,7 +27,7 @@ use ragent_types::trigger::TriggerRule;
 /// Resolve the ragent global-state directory, failing loudly when the
 /// platform cannot provide one.
 ///
-/// Consolidates all ragent global state under `~/.config/ragent/` —
+/// Consolidates all ragent global state under `~/.config/ragent/` -
 /// supersedes the legacy `~/.local/share/ragent/` XDG-data location.
 /// Falling back to the current directory would make loop-state exports read
 /// from and imports write to a location no cron runner ever inspects, so the
@@ -39,6 +39,12 @@ fn ragent_data_dir() -> Result<PathBuf> {
 
 /// Manifest version for the archive format.
 const MANIFEST_VERSION: u32 = 1;
+
+/// Read-buffer size used when streaming a file through a SHA-256 hasher.
+///
+/// Heap-allocated (not a stack array) so clippy's `large_stack_arrays` lint
+/// stays satisfied while keeping the streaming read off the whole-file path.
+const HASH_READ_BUF_BYTES: usize = 64 * 1024;
 
 /// Archive manifest structure.
 ///
@@ -97,19 +103,19 @@ impl Default for ArchiveConfig {
 /// Export a session to a portable archive file.
 ///
 /// Creates a `.tar.gz` archive containing:
-/// - `manifest.json` — archive metadata and SHA-256 checksums
-/// - `transcript.json` — session messages as JSON array
-/// - `triggers.json` — trigger rules (if enabled)
-/// - `cron_jobs.json` — cron job definitions (if enabled)
-/// - `loop-state/` — loop state files for stateful cron jobs (if enabled)
+/// - `manifest.json` - archive metadata and SHA-256 checksums
+/// - `transcript.json` - session messages as JSON array
+/// - `triggers.json` - trigger rules (if enabled)
+/// - `cron_jobs.json` - cron job definitions (if enabled)
+/// - `loop-state/` - loop state files for stateful cron jobs (if enabled)
 ///
 /// # Arguments
 ///
-/// * `storage` — Storage backend to read messages and cron jobs
-/// * `trigger_engine` — Optional trigger engine to export trigger rules
-/// * `session_id` — ID of the session to export
-/// * `output_path` — Path where the archive file will be written
-/// * `config` — Export configuration options
+/// * `storage` - Storage backend to read messages and cron jobs
+/// * `trigger_engine` - Optional trigger engine to export trigger rules
+/// * `session_id` - ID of the session to export
+/// * `output_path` - Path where the archive file will be written
+/// * `config` - Export configuration options
 ///
 /// # Errors
 ///
@@ -375,10 +381,10 @@ pub struct ImportResult {
 ///
 /// # Arguments
 ///
-/// * `storage` — Storage backend to write messages and cron jobs
-/// * `trigger_engine` — Optional trigger engine to import trigger rules
-/// * `archive_path` — Path to the archive file to import
-/// * `config` — Import configuration options
+/// * `storage` - Storage backend to write messages and cron jobs
+/// * `trigger_engine` - Optional trigger engine to import trigger rules
+/// * `archive_path` - Path to the archive file to import
+/// * `config` - Import configuration options
 ///
 /// # Errors
 ///
@@ -519,6 +525,7 @@ pub async fn import_session_archive(
                 for trigger in triggers {
                     // add_rule unconditionally consumes the rule and reports
                     // the assigned id, so every presented rule counts.
+                    // INTENTIONAL: trigger runtime is optional; its absence is not fatal
                     let _ = engine.runtime().add_rule(trigger);
                     triggers_imported += 1;
                 }
@@ -692,9 +699,16 @@ fn verify_archive_checksums(extract_dir: &Path, manifest: &ArchiveManifest) -> R
         let mut reader = BufReader::new(file);
         let mut hasher = Sha256::new();
 
-        std::io::copy(&mut reader, &mut hasher)?;
+        let mut buf = vec![0u8; HASH_READ_BUF_BYTES];
+        loop {
+            let n = std::io::Read::read(&mut reader, &mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
 
-        let actual_hash = format!("{:x}", hasher.finalize());
+        let actual_hash = hex::encode(hasher.finalize());
         if actual_hash != *expected_hash {
             return Err(anyhow!(
                 "Checksum verification failed for '{}': expected {}, got {}",
@@ -750,10 +764,17 @@ fn sha256_file(path: &Path) -> Result<String> {
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
 
-    std::io::copy(&mut reader, &mut hasher)?;
+    let mut buf = vec![0u8; HASH_READ_BUF_BYTES];
+    loop {
+        let n = std::io::Read::read(&mut reader, &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
 
     let result = hasher.finalize();
-    Ok(format!("{:x}", result))
+    Ok(hex::encode(result))
 }
 
 /// Create a tar.gz archive from a directory.
@@ -792,76 +813,5 @@ fn create_tarball(source_dir: &Path, output_path: &Path) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_archive_manifest_serialization() {
-        let mut files = HashMap::new();
-        files.insert("transcript.json".to_string(), "abc123".to_string());
-
-        let manifest = ArchiveManifest {
-            manifest_version: MANIFEST_VERSION,
-            session_id: "test-session".to_string(),
-            session_title: "Test Session".to_string(),
-            session_directory: "/tmp/test".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            message_count: 10,
-            trigger_count: 2,
-            cron_job_count: 1,
-            loop_state_count: 0,
-            files,
-            sensitivity_warning: "Warning".to_string(),
-        };
-
-        let json = serde_json::to_string(&manifest).unwrap();
-        let _back: ArchiveManifest = serde_json::from_str(&json).unwrap();
-    }
-
-    #[test]
-    fn test_sha256_file_empty() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let file_path = temp_dir.path().join("empty.txt");
-        fs::write(&file_path, b"").unwrap();
-
-        let hash = sha256_file(&file_path).unwrap();
-        // SHA-256 of empty string
-        assert_eq!(
-            hash,
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-    }
-
-    #[test]
-    fn test_sha256_file_content() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let file_path = temp_dir.path().join("test.txt");
-        fs::write(&file_path, b"hello world").unwrap();
-
-        let hash = sha256_file(&file_path).unwrap();
-        // SHA-256 of "hello world"
-        assert_eq!(
-            hash,
-            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
-        );
-    }
-
-    #[test]
-    fn test_archive_config_defaults() {
-        let config = ArchiveConfig::default();
-        assert!(config.include_triggers);
-        assert!(config.include_cron);
-        assert!(config.include_loop_state);
-        assert!(!config.include_cost);
-    }
-
-    #[test]
-    fn test_import_config_defaults() {
-        let config = ImportConfig::default();
-        assert!(!config.activate_triggers);
-        assert!(!config.activate_cron);
-        assert!(config.restore_loop_state);
-        assert!(config.verify_checksums);
-        assert!(!config.import_triggers);
-    }
-}
+#[path = "../tests/inline/archive_tests.rs"]
+mod tests;

@@ -74,7 +74,7 @@ impl Tool for CodeIndexStatusTool {
     }
 
     fn description(&self) -> &'static str {
-        "Show the current status and statistics of the codebase index — \
+        "Show the current status and statistics of the codebase index - \
          whether the index is enabled, whether the FTS search index is built \
          or still building, whether the semantic edge graph is built or still \
          building, plus files indexed, symbols extracted, languages, index \

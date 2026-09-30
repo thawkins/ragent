@@ -312,7 +312,7 @@ fn test_parse_summary_response_truncates_long_extract() {
     let result = parse_summary_response(&value).expect("should parse");
     // Snippet should be truncated to ~300 chars + ellipsis
     assert!(result.snippet.chars().count() <= 310);
-    assert!(result.snippet.ends_with('…'));
+    assert!(result.snippet.ends_with("..."));
 }
 
 // ---------------------------------------------------------------------------

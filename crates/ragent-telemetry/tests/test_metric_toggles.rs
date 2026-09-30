@@ -539,3 +539,153 @@ fn test_disabled_recorders_ignore_toggles() {
 
     // If we got here, none of the disabled recorder calls panicked.
 }
+
+// ── 9. ANTIPAT M0.15: the previously toggle-blind recorders ──────────────
+//
+// HIGH-4: `ToolRecorder`, `SessionRecorder`, `CoordinatorRecorder`, and
+// `CompressionRecorder` ignored the FR-027 metric toggles entirely, so a
+// metric disabled in `telemetry.otel.metrics` was still exported by those
+// recorders. Each test below disables one metric, calls the recorder method
+// that would write it, and asserts no data point was exported.
+
+/// `ToolRecorder::record_invocation` honours the `ragent.tool.invocations`
+/// toggle (ANTIPAT HIGH-4).
+#[test]
+fn test_tool_recorder_record_invocation_is_toggle_gated() {
+    let (provider, exporter, rt) = build_in_memory_provider();
+
+    let mut toggles = HashMap::new();
+    toggles.insert("ragent.tool.invocations".to_string(), false);
+    let registry = registry_with_toggles(&provider, toggles);
+    let recorder = ToolRecorder::new(registry);
+
+    recorder.record_invocation("bash");
+    // The sibling metric is still emitted.
+    recorder.record_duration("bash", 12.0);
+
+    let metrics = flush_and_collect(&provider, &exporter, &rt);
+    assert!(
+        !has_metric(&metrics, "ragent.tool.invocations"),
+        "a disabled tool.invocations metric must not be exported"
+    );
+    assert!(
+        has_metric(&metrics, "ragent.tool.duration"),
+        "the enabled sibling metric must still be exported"
+    );
+}
+
+/// `SessionRecorder::record_session_start` gates `sessions.active` but still
+/// records `sessions.total` (ANTIPAT HIGH-4).
+#[test]
+fn test_session_recorder_start_is_toggle_gated() {
+    let (provider, exporter, rt) = build_in_memory_provider();
+
+    let mut toggles = HashMap::new();
+    toggles.insert("ragent.sessions.active".to_string(), false);
+    let registry = registry_with_toggles(&provider, toggles);
+    let recorder = SessionRecorder::new(registry);
+
+    recorder.record_session_start();
+
+    let metrics = flush_and_collect(&provider, &exporter, &rt);
+    assert!(
+        !has_metric(&metrics, "ragent.sessions.active"),
+        "a disabled sessions.active metric must not be exported"
+    );
+    assert!(
+        has_metric(&metrics, "ragent.sessions.total"),
+        "the enabled sibling metric must still be exported"
+    );
+}
+
+/// `SessionRecorder::record_agent_loop` gates both loop metrics
+/// (ANTIPAT HIGH-4).
+#[test]
+fn test_session_recorder_agent_loop_is_toggle_gated() {
+    let (provider, exporter, rt) = build_in_memory_provider();
+
+    let mut toggles = HashMap::new();
+    toggles.insert("ragent.agent_loop.duration".to_string(), false);
+    toggles.insert("ragent.agent_loop.iterations".to_string(), false);
+    let registry = registry_with_toggles(&provider, toggles);
+    let recorder = SessionRecorder::new(registry);
+
+    recorder.record_agent_loop(120.0, 7);
+
+    let metrics = flush_and_collect(&provider, &exporter, &rt);
+    assert!(!has_metric(&metrics, "ragent.agent_loop.duration"));
+    assert!(!has_metric(&metrics, "ragent.agent_loop.iterations"));
+}
+
+/// `CoordinatorRecorder` gates its four metrics (ANTIPAT HIGH-4).
+#[test]
+fn test_coordinator_recorder_is_toggle_gated() {
+    let (provider, exporter, rt) = build_in_memory_provider();
+
+    let mut toggles = HashMap::new();
+    toggles.insert("ragent.subagent.spawns".to_string(), false);
+    toggles.insert("ragent.agents.active".to_string(), false);
+    toggles.insert("ragent.agents.completed".to_string(), false);
+    toggles.insert("ragent.errors.total".to_string(), false);
+    toggles.insert("ragent.timeouts.total".to_string(), false);
+    let registry = registry_with_toggles(&provider, toggles);
+    let recorder = CoordinatorRecorder::new(registry);
+
+    recorder.record_agent_spawn();
+    recorder.record_agent_complete();
+    recorder.record_error("session");
+    recorder.record_timeout();
+
+    let metrics = flush_and_collect(&provider, &exporter, &rt);
+    for name in [
+        "ragent.subagent.spawns",
+        "ragent.agents.active",
+        "ragent.agents.completed",
+        "ragent.errors.total",
+        "ragent.timeouts.total",
+    ] {
+        assert!(
+            !has_metric(&metrics, name),
+            "a disabled {name} metric must not be exported"
+        );
+    }
+}
+
+/// `CompressionRecorder` gates its two metrics (ANTIPAT HIGH-4).
+#[test]
+fn test_compression_recorder_is_toggle_gated() {
+    let (provider, exporter, rt) = build_in_memory_provider();
+
+    let mut toggles = HashMap::new();
+    toggles.insert("ragent.context.compressions".to_string(), false);
+    toggles.insert("ragent.context.compression_ratio".to_string(), false);
+    let registry = registry_with_toggles(&provider, toggles);
+    let recorder = CompressionRecorder::new(registry);
+
+    recorder.record_compression(1000, 400, 0.4);
+
+    let metrics = flush_and_collect(&provider, &exporter, &rt);
+    assert!(!has_metric(&metrics, "ragent.context.compressions"));
+    assert!(!has_metric(&metrics, "ragent.context.compression_ratio"));
+}
+
+/// `InstrumentRegistry::noop()` never exports, even when a global provider is
+/// installed (ANTIPAT HIGH-5).
+#[test]
+fn test_noop_registry_ignores_an_installed_global_provider() {
+    let (provider, exporter, rt) = build_in_memory_provider();
+    // Install a real global provider: the pre-fix `noop()` built its meter from
+    // this, so its recordings would have been exported.
+    opentelemetry::global::set_meter_provider(provider.clone());
+
+    let noop = InstrumentRegistry::noop();
+    noop.tool_invocations.add(1, &[]);
+    noop.sessions_total.add(1, &[]);
+
+    let metrics = flush_and_collect(&provider, &exporter, &rt);
+    assert!(
+        !has_metric(&metrics, "ragent.tool.invocations")
+            && !has_metric(&metrics, "ragent.sessions.total"),
+        "noop() must never export data points"
+    );
+}

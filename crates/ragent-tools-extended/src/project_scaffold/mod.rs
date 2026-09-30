@@ -2,32 +2,32 @@
 //!
 //! Module family layout:
 //!
-//! - [`flags`] — scaffold flag types, argument parsing, validation, and the
+//! - [`flags`] - scaffold flag types, argument parsing, validation, and the
 //!   error enum. Pure logic, no filesystem access (T-001).
-//! - [`recipes`] — per-language scaffold recipes (manifests, hello-world
+//! - [`recipes`] - per-language scaffold recipes (manifests, hello-world
 //!   sources, run/test commands, gitignore bodies). Pure data (T-002).
-//! - [`workspace`] — ragent workspace initialiser planner (`.ragent/`,
+//! - [`workspace`] - ragent workspace initialiser planner (`.ragent/`,
 //!   `specs/`, `log/`, `.gitignore`, `AGENTS.md`). Pure logic (T-005).
-//! - [`guard`] — FR-002 empty-directory guard I/O shell: gathers real
+//! - [`guard`] - FR-002 empty-directory guard I/O shell: gathers real
 //!   directory entries and runs the pure emptiness decision (T-006).
-//! - [`layout`] — FR-006 app-type layout mapping: composes recipe + app type
+//! - [`layout`] - FR-006 app-type layout mapping: composes recipe + app type
 //!   + slug into the concrete file plan. Pure logic (T-003).
-//! - [`emit`] — FR-016 no-silent-overwrite emitter: writes planned files,
+//! - [`emit`] - FR-016 no-silent-overwrite emitter: writes planned files,
 //!   skips and reports existing ones (T-007).
-//! - [`gitinit`] — local git init + initial commit (FR-008 local half,
+//! - [`gitinit`] - local git init + initial commit (FR-008 local half,
 //!   FR-015 tolerance) (T-008).
-//! - [`remote`] — GitHub + GitLab remote-init flows: hosting repo create,
+//! - [`remote`] - GitHub + GitLab remote-init flows: hosting repo create,
 //!   `origin` registration, initial push, FR-010 failure containment,
 //!   FR-015 retry tolerance (T-009, T-010).
-//! - [`summary`] — FR-011 scaffold summary report: created files, chosen
+//! - [`summary`] - FR-011 scaffold summary report: created files, chosen
 //!   language/type/stack, git + remote status (T-008).
-//! - [`stack`] — FR-007 stack overlay planner: known-stack dependency +
+//! - [`stack`] - FR-007 stack overlay planner: known-stack dependency +
 //!   starter snippets layered onto the base layout, unknown stacks warn and
 //!   continue (T-004).
-//! - [`help`] — FR-018 `/new help` detailed help renderer: purpose,
+//! - [`help`] - FR-018 `/new help` detailed help renderer: purpose,
 //!   per-argument docs, registry-derived value lists, and worked examples
 //!   (T-016).
-//! - [`docs`] — FR-019 documentation scaffold: `README.md`, `QUICKSTART.md`,
+//! - [`docs`] - FR-019 documentation scaffold: `README.md`, `QUICKSTART.md`,
 //!   `STATS.md`, and the `docs/` folder, all rendered from the language
 //!   recipe data (NFR-002) (T-017).
 

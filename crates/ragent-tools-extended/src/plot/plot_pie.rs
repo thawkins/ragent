@@ -1,4 +1,4 @@
-//! `plot_pie` tool — render a pie/donut chart on the message window.
+//! `plot_pie` tool - render a pie/donut chart on the message window.
 
 use anyhow::Result;
 use ratatui_plt::prelude::{Color, Theme};
@@ -6,8 +6,8 @@ use ratatui_plt::widgets::pie_chart::{PieChart, PieSlice};
 use serde_json::{Value, json};
 
 use super::{
-    DEFAULT_HEIGHT, DEFAULT_WIDTH, MAX_HEIGHT, MAX_WIDTH, canvas_dimension, error_output,
-    parse_bool, parse_color, parse_title, render_ansi, render_text, success_output,
+    DEFAULT_HEIGHT, DEFAULT_WIDTH, MAX_HEIGHT, MAX_WIDTH, canvas_dimension, checked_len,
+    error_output, parse_bool, parse_color, parse_title, render_ansi, render_text, success_output,
 };
 use crate::{Tool, ToolContext, ToolOutput};
 
@@ -22,7 +22,7 @@ fn parse_slices(input: &Value) -> Result<Vec<SliceSpec>> {
     let arr = input
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("'slices' must be an array of objects, got {input}"))?;
-    let mut out = Vec::with_capacity(arr.len());
+    let mut out = Vec::with_capacity(checked_len(arr, "'slices'")?);
     for item in arr {
         let obj = item
             .as_object()
@@ -59,7 +59,7 @@ impl Tool for PlotPieTool {
 
     fn description(&self) -> &'static str {
         "Render a pie (or donut) chart on the message window. Required: \
-         'slices' — an array of {label, value, color?}. Optional: 'title', \
+         'slices' - an array of {label, value, color?}. Optional: 'title', \
          'donut' (bool, default false), 'radius' (donut hole ratio \
          [0,1), default 0.35), 'percentages' (bool, default true), \
          'labels' (bool, default true), 'width', 'height'."

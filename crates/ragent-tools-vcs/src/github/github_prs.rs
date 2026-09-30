@@ -3,18 +3,12 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
+use super::helpers::detect;
 use super::{Tool, ToolContext, ToolOutput};
-use crate::github::client::GitHubClient;
+use crate::limits::{DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, NOTES_PER_PAGE};
+use crate::vocab::normalize_issue_state;
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-fn detect(ctx: &ToolContext) -> Result<(GitHubClient, String, String)> {
-    let client = GitHubClient::new()
-        .map_err(|_| anyhow::anyhow!("GitHub not authenticated. Run /github login."))?;
-    let (owner, repo) = GitHubClient::detect_repo(&ctx.working_dir)
-        .ok_or_else(|| anyhow::anyhow!("Could not detect GitHub repository from git remote."))?;
-    Ok((client, owner, repo))
-}
+// -- helpers ------------------------------------------------------------------
 
 /// Validate the optional `method` parameter for `github_merge_pr`.
 ///
@@ -32,7 +26,7 @@ pub fn parse_merge_method(value: Option<&str>) -> Result<&'static str> {
     }
 }
 
-// ── GithubListPrsTool ─────────────────────────────────────────────────────────
+// -- GithubListPrsTool ---------------------------------------------------------
 
 /// Tool that lists pull requests in a GitHub repository.
 pub struct GithubListPrsTool;
@@ -46,9 +40,11 @@ impl Tool for GithubListPrsTool {
     fn description(&self) -> &'static str {
         "List GitHub pull requests in the repository detected from the current working directory. \
          No required parameters. 'state' (enum 'open', 'closed', 'all', default 'open') filters by PR state; \
+         both 'open' and GitLab's 'opened' spelling are accepted. \
          'base' (string) filters by the target (base) branch name; 'limit' (integer, default 20, max 100) caps results. \
          Requires a configured GitHub authentication and a GitHub-backed git repo. \
-         Common gotcha: 'base' must exactly match the branch name in the repository; the tool returns only the most recent PRs up to 'limit'."
+         Common gotcha: 'base' must exactly match the branch name in the repository; the tool returns only the most recent PRs up to 'limit'. \
+         Cross-provider note: GitHub calls these 'pull requests' filtered by 'base' where GitLab calls them 'merge requests' filtered by 'target_branch'."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -59,7 +55,7 @@ impl Tool for GithubListPrsTool {
                 "state": {
                     "type": "string",
                     "enum": ["open", "closed", "all"],
-                    "description": "Filter by PR state"
+                    "description": "Filter by PR state (GitLab's 'opened' is also accepted)"
                 },
                 "base": {
                     "type": "string",
@@ -80,12 +76,15 @@ impl Tool for GithubListPrsTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let (client, owner, repo) = detect(ctx)?;
 
-        let state = input["state"].as_str().unwrap_or("open");
-        let limit = input["limit"].as_u64().unwrap_or(20).min(100);
+        let state = normalize_issue_state(input["state"].as_str().unwrap_or("open"));
+        let limit = input["limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_PAGE_LIMIT)
+            .min(MAX_PAGE_LIMIT);
 
         let mut path = format!("/repos/{owner}/{repo}/pulls?state={state}&per_page={limit}");
         if let Some(base) = input["base"].as_str() {
-            // FUNC-063: percent-encode the branch name — a branch containing
+            // FUNC-063: percent-encode the branch name - a branch containing
             // `&`, `=`, `#`, or a non-ASCII character would otherwise inject
             // extra query parameters or an invalid fragment.
             path.push_str(&format!("&base={}", crate::percent::encode_component(base)));
@@ -112,7 +111,7 @@ impl Tool for GithubListPrsTool {
             let head = pr["head"]["ref"].as_str().unwrap_or("?");
             let base = pr["base"]["ref"].as_str().unwrap_or("?");
             lines.push(format!(
-                "#{number} [{state}] {title} (by {author}, from {head} → {base})"
+                "#{number} [{state}] {title} (by {author}, from {head} -> {base})"
             ));
         }
 
@@ -123,7 +122,7 @@ impl Tool for GithubListPrsTool {
     }
 }
 
-// ── GithubGetPrTool ───────────────────────────────────────────────────────────
+// -- GithubGetPrTool -----------------------------------------------------------
 
 /// Tool that retrieves a single GitHub pull request by number.
 pub struct GithubGetPrTool;
@@ -166,7 +165,8 @@ impl Tool for GithubGetPrTool {
             .context("Missing required 'number' parameter")?;
 
         let pr_path = format!("/repos/{owner}/{repo}/pulls/{number}");
-        let reviews_path = format!("/repos/{owner}/{repo}/pulls/{number}/reviews");
+        let reviews_path =
+            format!("/repos/{owner}/{repo}/pulls/{number}/reviews?per_page={NOTES_PER_PAGE}");
 
         let (pr, reviews) = tokio::try_join!(client.get(&pr_path), client.get(&reviews_path))?;
 
@@ -182,7 +182,7 @@ impl Tool for GithubGetPrTool {
             "## PR #{number}: {title}\n\n\
              **State**: {state}  \n\
              **Author**: {author}  \n\
-             **Branch**: {head} → {base}  \n\
+             **Branch**: {head} -> {base}  \n\
              **URL**: {url}\n\n\
              ### Description\n\n{body}\n"
         );
@@ -210,7 +210,7 @@ impl Tool for GithubGetPrTool {
     }
 }
 
-// ── GithubCreatePrTool ────────────────────────────────────────────────────────
+// -- GithubCreatePrTool --------------------------------------------------------
 
 /// Tool that creates a new GitHub pull request.
 pub struct GithubCreatePrTool;
@@ -318,7 +318,7 @@ impl Tool for GithubCreatePrTool {
     }
 }
 
-// ── GithubMergePrTool ─────────────────────────────────────────────────────────
+// -- GithubMergePrTool ---------------------------------------------------------
 
 /// Tool that merges a GitHub pull request.
 pub struct GithubMergePrTool;
@@ -392,7 +392,7 @@ impl Tool for GithubMergePrTool {
     }
 }
 
-// ── GithubReviewPrTool ────────────────────────────────────────────────────────
+// -- GithubReviewPrTool --------------------------------------------------------
 
 /// Tool that submits a review on a GitHub pull request.
 pub struct GithubReviewPrTool;

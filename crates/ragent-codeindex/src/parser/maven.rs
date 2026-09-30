@@ -5,13 +5,13 @@
 //! plugins, profiles, properties, and repositories.
 //!
 //! Maven POM files are XML documents. The tree-sitter XML grammar produces
-//! `document` → `element` → `STag`/`ETag`/`content` nodes. Each XML element
+//! `document` -> `element` -> `STag`/`ETag`/`content` nodes. Each XML element
 //! is represented by its tag name (`Name` child inside `STag`), its
 //! attributes (`Attribute` children), and its `content` child holding
 //! character data and nested elements.
 
 use super::{LanguageParser, ParsedFile};
-use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
+use crate::types::{ImportEntry, Symbol, SymbolKind, Visibility};
 use anyhow::{Context, Result};
 use tree_sitter::Node;
 
@@ -43,13 +43,7 @@ impl LanguageParser for MavenParser {
         let tree = Self::parse_tree(source)?;
         let root = tree.root_node();
 
-        let mut ctx = Ctx {
-            source,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            references: Vec::new(),
-            next_id: 0,
-        };
+        let mut ctx = Ctx::new(source);
 
         walk(&mut ctx, root, None);
 
@@ -65,27 +59,10 @@ impl LanguageParser for MavenParser {
 // ── Extraction context ──────────────────────────────────────────────────────
 
 /// Mutable context threaded through recursive extraction.
-struct Ctx<'a> {
-    source: &'a [u8],
-    symbols: Vec<Symbol>,
-    imports: Vec<ImportEntry>,
-    references: Vec<SymbolRef>,
-    next_id: i64,
-}
+/// Parser-local alias of the shared extraction context.
+type Ctx<'a> = super::ctx::Ctx<'a>;
 
-impl Ctx<'_> {
-    const fn alloc_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
-    fn text(&self, node: Node) -> &str {
-        node.utf8_text(self.source).unwrap_or("")
-    }
-}
-
-// ── Maven-specific tag classification ────────────────────────────��───────────
+// ── Maven-specific tag classification ───────────────────────────────────────
 
 /// Maven POM tags that represent important structural elements.
 const MAVEN_SYMBOL_TAGS: &[&str] = &[
@@ -126,10 +103,22 @@ const MAVEN_SYMBOL_TAGS: &[&str] = &[
 /// Maven coordinate tags used to identify a POM artifact.
 const MAVEN_COORD_TAGS: &[&str] = &["groupId", "artifactId", "version", "packaging"];
 
+/// Maximum length of an element's text kept in a synthesized signature before
+/// it is truncated with an ellipsis (ANTIPAT M5.3 / audit 3.3).
+const MAVEN_TAG_SNIPPET_LEN: usize = 60;
+
+/// Length the truncated element text is cut back to; kept below
+/// [`MAVEN_TAG_SNIPPET_LEN`] so the appended `"..."` fits the same budget.
+const MAVEN_TAG_SNIPPET_CUT: usize = MAVEN_TAG_SNIPPET_LEN - 3;
+
 // ── Recursive walk ──────────────────────────────────────────────────────────
 
 /// Walk a tree-sitter node, extracting Maven POM symbols.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
+    let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
+        return;
+    };
+
     match node.kind() {
         "document" => {
             // The document has a root element child.
@@ -398,12 +387,12 @@ fn build_element_sig(ctx: &Ctx, node: Node, tag: &str) -> String {
             if text.is_empty() {
                 format!("<{tag}>")
             } else {
-                let truncated = if text.len() > 60 {
-                    let mut end = 57;
+                let truncated = if text.len() > MAVEN_TAG_SNIPPET_LEN {
+                    let mut end = MAVEN_TAG_SNIPPET_CUT;
                     while end > 0 && !text.is_char_boundary(end) {
                         end -= 1;
                     }
-                    format!("{}…", &text[..end])
+                    format!("{}...", &text[..end])
                 } else {
                     text
                 };
@@ -430,10 +419,12 @@ fn map_tag_to_kind(tag: &str) -> SymbolKind {
     }
 }
 
-/// Compute a blake3 hash of the node's text for change detection.
+/// Content hash of the node's text for change detection.
+///
+/// Routes through [`super::util::node_hash`] so every parser hashes
+/// identically (ANTIPAT M5.3 / audit 3.2).
 fn hash_node(ctx: &Ctx, node: Node) -> String {
-    let text = ctx.text(node);
-    blake3::hash(text.as_bytes()).to_hex().to_string()
+    super::util::node_hash(ctx.source, node)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

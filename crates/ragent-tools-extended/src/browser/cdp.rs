@@ -2,9 +2,9 @@
 //!
 //! Implements the low-level CDP wire protocol: JSON-RPC over WebSocket with
 //! incremental message IDs, response correlation, and event fan-out. This
-//! module is transport-only — it knows nothing about browser actions. The
+//! module is transport-only - it knows nothing about browser actions. The
 //! higher-level [`super::BrowserTool`] wraps this client to implement the
-//! `open`/`snapshot`/`click`/… action surface.
+//! `open`/`snapshot`/`click`/... action surface.
 //!
 //! # Protocol overview
 //!
@@ -16,14 +16,14 @@
 //!
 //! # Connection lifecycle
 //!
-//! 1. HTTP GET `http://<host>:<port>/json/version` → discover the
+//! 1. HTTP GET `http://<host>:<port>/json/version` -> discover the
 //!    `webSocketDebuggerUrl` for the browser-level endpoint.
 //! 2. (Optional) `Target.createTarget` via the browser endpoint to open a new
 //!    tab and receive its `targetId`.
-//! 3. HTTP GET `http://<host>:<port>/json` → list open targets; pick one and
+//! 3. HTTP GET `http://<host>:<port>/json` -> list open targets; pick one and
 //!    use its `webSocketDebuggerUrl`.
 //! 4. Open a WebSocket to the target's `webSocketDebuggerUrl`.
-//! 5. Enable domains (`Page.enable`, `DOM.enable`, `Runtime.enable`, …).
+//! 5. Enable domains (`Page.enable`, `DOM.enable`, `Runtime.enable`, ...).
 //! 6. Send commands and correlate responses by `id`.
 //!
 //! # Design
@@ -84,7 +84,7 @@ pub enum CdpError {
     NoTarget,
 }
 
-/// Response from `GET /json/version` — the browser-level discovery endpoint.
+/// Response from `GET /json/version` - the browser-level discovery endpoint.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VersionInfo {
     /// Browser version string (e.g. `"Chrome/131.0.6778.85"`).
@@ -104,7 +104,7 @@ pub struct VersionInfo {
     pub user_agent: Option<String>,
 }
 
-/// Response from `GET /json` — list of available targets (tabs).
+/// Response from `GET /json` - list of available targets (tabs).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TargetInfo {
     /// Target id.
@@ -140,7 +140,7 @@ pub struct CdpEvent {
 /// broadcast channel. The write half is accessed via an unbounded channel
 /// guarded by a mutex for sequential command sends.
 pub struct CdpConnection {
-    /// Write channel — sends messages to the write task.
+    /// Write channel - sends messages to the write task.
     write_tx: Mutex<tokio::sync::mpsc::UnboundedSender<WsMessage>>,
     /// Pending command responses keyed by command id.
     pending: PendingMap,
@@ -157,7 +157,7 @@ impl CdpConnection {
     ///
     /// # Arguments
     ///
-    /// * `ws_url` — the `webSocketDebuggerUrl` from `GET /json` or
+    /// * `ws_url` - the `webSocketDebuggerUrl` from `GET /json` or
     ///   `GET /json/version`.
     ///
     /// # Errors
@@ -188,7 +188,7 @@ impl CdpConnection {
                 }
             }
             closed_w.store(true, Ordering::SeqCst);
-            let _ = writer.close().await;
+            let _ = writer.close().await; // INTENTIONAL: best-effort websocket write-half close
         });
 
         // Read loop: dispatch responses and events.
@@ -213,7 +213,7 @@ impl CdpConnection {
                         break;
                     }
                     Ok(WsMessage::Ping(payload)) => {
-                        let _ = write_tx_clone.send(WsMessage::Pong(payload));
+                        let _ = write_tx_clone.send(WsMessage::Pong(payload)); // INTENTIONAL: channel send on a closed receiver is benign
                     }
                     Ok(_) => {}
                 }
@@ -222,7 +222,7 @@ impl CdpConnection {
             closed_r.store(true, Ordering::SeqCst);
             let mut pending = pending_r.lock().await;
             for (_id, sender) in pending.drain() {
-                let _ = sender.send(Err(CdpError::ConnectionClosed.into()));
+                let _ = sender.send(Err(CdpError::ConnectionClosed.into())); // INTENTIONAL: channel send on a closed receiver is benign
             }
         });
 
@@ -258,7 +258,7 @@ impl CdpConnection {
 
             let mut pending = pending.lock().await;
             if let Some(sender) = pending.remove(&id) {
-                let _ = sender.send(result);
+                let _ = sender.send(result); // INTENTIONAL: channel send on a closed receiver is benign
             }
         } else if let Some(method) = msg.get("method").and_then(Value::as_str) {
             // CDP event (has "method" but no "id").
@@ -266,7 +266,7 @@ impl CdpConnection {
                 method: method.to_string(),
                 params: msg.get("params").cloned().unwrap_or(Value::Null),
             };
-            let _ = events.send(event);
+            let _ = events.send(event); // INTENTIONAL: channel send on a closed receiver is benign
         }
     }
 
@@ -285,9 +285,9 @@ impl CdpConnection {
     ///
     /// # Arguments
     ///
-    /// * `method` — the CDP method (e.g. `"Page.navigate"`).
-    /// * `params` — optional parameters as a JSON value.
-    /// * `timeout` — maximum time to wait for a response.
+    /// * `method` - the CDP method (e.g. `"Page.navigate"`).
+    /// * `params` - optional parameters as a JSON value.
+    /// * `timeout` - maximum time to wait for a response.
     ///
     /// # Errors
     ///
@@ -356,7 +356,7 @@ impl CdpConnection {
     pub fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
         if let Ok(write_tx) = self.write_tx.try_lock() {
-            let _ = write_tx.send(WsMessage::Close(None));
+            let _ = write_tx.send(WsMessage::Close(None)); // INTENTIONAL: channel send on a closed receiver is benign
         }
     }
 }
@@ -365,7 +365,7 @@ impl CdpConnection {
 ///
 /// # Arguments
 ///
-/// * `http_endpoint` — the HTTP base URL (e.g. `"http://127.0.0.1:9222"`).
+/// * `http_endpoint` - the HTTP base URL (e.g. `"http://127.0.0.1:9222"`).
 ///
 /// # Errors
 ///
@@ -373,11 +373,22 @@ impl CdpConnection {
 /// parsed.
 pub async fn discover_version(http_endpoint: &str) -> Result<VersionInfo> {
     let url = format!("{http_endpoint}/json/version");
-    let client = reqwest::Client::builder()
+    // ANTIPAT M5.9 / 3.2: reuse the shared client singleton; the short
+    // discovery timeout is applied per-request instead of on a fresh client.
+    let client = crate::masterfetch::http::shared_client()?;
+    let resp = client
+        .get(&url)
         .timeout(Duration::from_secs(DEFAULT_DISCOVERY_TIMEOUT_SECS))
-        .build()?;
-    let resp = client.get(&url).send().await?;
-    let info: VersionInfo = resp.json().await?;
+        .send()
+        .await?;
+    // ANTIPAT M5.9 / 3.5: bound the response body before parsing.
+    let text = crate::masterfetch::http::read_body_capped_lossy(
+        resp,
+        crate::masterfetch::http::MAX_SMALL_BODY_BYTES,
+    )
+    .await
+    .map_err(anyhow::Error::msg)?;
+    let info: VersionInfo = serde_json::from_str(&text)?;
     Ok(info)
 }
 
@@ -387,7 +398,7 @@ pub async fn discover_version(http_endpoint: &str) -> Result<VersionInfo> {
 ///
 /// # Arguments
 ///
-/// * `http_endpoint` — the HTTP base URL (e.g. `"http://127.0.0.1:9222"`).
+/// * `http_endpoint` - the HTTP base URL (e.g. `"http://127.0.0.1:9222"`).
 ///
 /// # Errors
 ///
@@ -395,11 +406,22 @@ pub async fn discover_version(http_endpoint: &str) -> Result<VersionInfo> {
 /// parsed.
 pub async fn list_targets(http_endpoint: &str) -> Result<Vec<TargetInfo>> {
     let url = format!("{http_endpoint}/json");
-    let client = reqwest::Client::builder()
+    // ANTIPAT M5.9 / 3.2: reuse the shared client singleton; the short
+    // discovery timeout is applied per-request instead of on a fresh client.
+    let client = crate::masterfetch::http::shared_client()?;
+    let resp = client
+        .get(&url)
         .timeout(Duration::from_secs(DEFAULT_DISCOVERY_TIMEOUT_SECS))
-        .build()?;
-    let resp = client.get(&url).send().await?;
-    let targets: Vec<TargetInfo> = resp.json().await?;
+        .send()
+        .await?;
+    // ANTIPAT M5.9 / 3.5: bound the response body before parsing.
+    let text = crate::masterfetch::http::read_body_capped_lossy(
+        resp,
+        crate::masterfetch::http::MAX_SMALL_BODY_BYTES,
+    )
+    .await
+    .map_err(anyhow::Error::msg)?;
+    let targets: Vec<TargetInfo> = serde_json::from_str(&text)?;
     Ok(targets)
 }
 
@@ -416,87 +438,5 @@ pub fn first_page_target(targets: &[TargetInfo]) -> Result<&TargetInfo> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version_info_deserialises() {
-        let json = r#"{
-            "Browser": "Chrome/131.0.6778.85",
-            "V8": "13.1.201.7",
-            "WebKit": "537.36",
-            "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/abc-123",
-            "User-Agent": "Mozilla/5.0"
-        }"#;
-        let info: VersionInfo = serde_json::from_str(json).unwrap();
-        assert_eq!(info.browser, "Chrome/131.0.6778.85");
-        assert_eq!(
-            info.web_socket_debugger_url,
-            "ws://127.0.0.1:9222/devtools/browser/abc-123"
-        );
-    }
-
-    #[test]
-    fn test_target_info_deserialises() {
-        let json = r#"{
-            "id": "target-1",
-            "type": "page",
-            "title": "Example",
-            "url": "https://example.com",
-            "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/target-1",
-            "attached": false
-        }"#;
-        let target: TargetInfo = serde_json::from_str(json).unwrap();
-        assert_eq!(target.id, "target-1");
-        assert_eq!(target.target_type, "page");
-        assert_eq!(target.url, "https://example.com");
-    }
-
-    #[test]
-    fn test_first_page_target_finds_page() {
-        let targets = vec![
-            TargetInfo {
-                id: "bg".to_string(),
-                target_type: "background_page".to_string(),
-                title: String::new(),
-                url: String::new(),
-                web_socket_debugger_url: String::new(),
-                attached: false,
-            },
-            TargetInfo {
-                id: "page1".to_string(),
-                target_type: "page".to_string(),
-                title: "Test".to_string(),
-                url: "https://example.com".to_string(),
-                web_socket_debugger_url: "ws://127.0.0.1:9222/devtools/page/page1".to_string(),
-                attached: false,
-            },
-        ];
-        let result = first_page_target(&targets).unwrap();
-        assert_eq!(result.id, "page1");
-    }
-
-    #[test]
-    fn test_first_page_target_no_page() {
-        let targets = vec![TargetInfo {
-            id: "bg".to_string(),
-            target_type: "background_page".to_string(),
-            title: String::new(),
-            url: String::new(),
-            web_socket_debugger_url: String::new(),
-            attached: false,
-        }];
-        let result = first_page_target(&targets);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_cdp_error_display() {
-        let err = CdpError::CommandError {
-            code: -32000,
-            message: "Cannot navigate to invalid URL".to_string(),
-        };
-        assert!(err.to_string().contains("-32000"));
-        assert!(err.to_string().contains("Cannot navigate"));
-    }
-}
+#[path = "../tests/inline/cdp_tests.rs"]
+mod tests;

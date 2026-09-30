@@ -6,37 +6,37 @@
 //!
 //! ## Modules
 //!
-//! - [`research_name`] — the URL-safe `ResearchName` newtype with full FR-002
+//! - [`research_name`] - the URL-safe `ResearchName` newtype with full FR-002
 //!   validation (lowercase ASCII letters/digits/hyphens, starting with a
 //!   letter, 3-64 chars) and FR-017 path-traversal rejection.
-//! - [`status`] — the `ResearchStatus` enum (draft, in-progress, complete,
+//! - [`status`] - the `ResearchStatus` enum (draft, in-progress, complete,
 //!   archived) covering FR-013.
-//! - [`source`] — the `Source` enum (Web/Local/Spec/Other) backing the
+//! - [`source`] - the `Source` enum (Web/Local/Spec/Other) backing the
 //!   References Index block in every `RESEARCH.md`.
-//! - [`item`] — the `ResearchItem` struct that ties name, title, status,
+//! - [`item`] - the `ResearchItem` struct that ties name, title, status,
 //!   timestamps, and sources together for FR-005. Includes YAML frontmatter
 //!   rendering and parsing.
-//! - [`web_gatherer`] — the `WebGatherer` that orchestrates web discovery
+//! - [`web_gatherer`] - the `WebGatherer` that orchestrates web discovery
 //!   and capture for FR-006 and FR-007.
-//! - [`local_gatherer`] — the `LocalGatherer` that orchestrates local
+//! - [`local_gatherer`] - the `LocalGatherer` that orchestrates local
 //!   cross-referencing and FR-019 `--sources-dir` scanning for FR-006,
 //!   FR-008, and FR-009.
-//! - [`limits`] — output-limit defaults and the shared reverse-relevance
+//! - [`limits`] - output-limit defaults and the shared reverse-relevance
 //!   ordering helper for the concept and finding lists (spec `researchmax`).
-//! - [`plan_dep`] — the parser for `research: <name>` dependency lines in
+//! - [`plan_dep`] - the parser for `research: <name>` dependency lines in
 //!   `specs/<id>/PLAN.md` for FR-015.
 //!
 //! ## Future modules
 //!
 //! Additional modules will be added as later milestones land:
 //!
-//! - `manager` — `ResearchManager` with create/list/show/delete/archive
-//! - `session` — gathering orchestration engine
-//! - `index` — `research/INDEX.md` derived cache
+//! - `manager` - `ResearchManager` with create/list/show/delete/archive
+//! - `session` - gathering orchestration engine
+//! - `index` - `research/INDEX.md` derived cache
 //!
 //! ## Implemented modules (Milestone 1+)
 //!
-//! - [`io`] — atomic file I/O, supporting-file paths, References Index and
+//! - [`io`] - atomic file I/O, supporting-file paths, References Index and
 //!   `research/INDEX.md` rendering (T-006, T-012, T-013).
 
 #![deny(unsafe_code)]
@@ -126,8 +126,9 @@ pub use corpus_critic::{
 pub use diagram::render_findings_diagram;
 pub use document::{
     AssembledDocument, CrossReference, MAX_SOURCE_BODY_BYTES, REQUIRED_SECTIONS, ResearchDocument,
-    assemble_document, fence_source_body, mark_complete, mark_in_progress, render_corpa_skeleton,
-    render_skeleton, render_supporting_file, truncate_body_to_bytes,
+    assemble_document, fence_source_body, mark_complete, mark_in_progress, provider_calls_suffix,
+    render_bibliography, render_corpa_skeleton, render_skeleton, render_supporting_file,
+    truncate_body_to_bytes,
 };
 pub use engine::{
     Critic, CriticResult, EngineConfig, IterationResult, IterativeEngine, SimpleCritic,
@@ -143,8 +144,9 @@ pub use item::{
     derive_title_full,
 };
 pub use limits::{
-    DEFAULT_ENTRY_RANK, DEFAULT_MAX_CONCEPTS, DEFAULT_MAX_FINDINGS, cited_source_indices,
-    cited_source_ranks, rank_entries_by_reverse_relevance, source_rank_lookup,
+    BIBLIOGRAPHY_PREVIEW_CHARS, DEFAULT_ENTRY_RANK, DEFAULT_MAX_CONCEPTS, DEFAULT_MAX_FINDINGS,
+    cited_source_indices, cited_source_ranks, effective_limit, rank_entries_by_reverse_relevance,
+    source_rank_lookup,
 };
 pub use local_gatherer::{
     DEFAULT_GLOBS, DEFAULT_LOCAL_CONCURRENCY, DEFAULT_MAX_LOCAL_SOURCES, GrepMatch,

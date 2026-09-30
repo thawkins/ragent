@@ -1,16 +1,30 @@
-//! GitHub Actions tools — retrieve recent workflow runs and their logs.
+//! GitHub Actions tools - retrieve recent workflow runs and their logs.
 //!
 //! The [`GithubGetActionsTool`] lists the last `N` workflow runs for the
 //! current repository. For each run it reports the run status (`OK` or
 //! `Failed`). For failed runs it downloads the run's log archive (a zip of
 //! per-job log files) and extracts log lines that contain `error` or `failed`,
-//! showing ±10 lines of context around each match.
+//! showing +/-10 lines of context around each match.
+//!
+//! # Feature-surface asymmetry vs GitLab (ANTIPAT.md I-6)
+//!
+//! GitHub exposes this single read-only Actions tool. GitLab exposes a much
+//! wider pipeline/job surface (`gitlab_list_pipelines`, `gitlab_get_pipeline`,
+//! `gitlab_list_jobs`, `gitlab_get_job`, `gitlab_get_job_log`,
+//! `gitlab_retry_job`, `gitlab_cancel_job`, `gitlab_retry_pipeline`,
+//! `gitlab_cancel_pipeline`). The asymmetry is deliberate: GitHub Actions has
+//! no first-class "retry/cancel a run" endpoint equivalent to GitLab's, and no
+//! per-job log endpoint that does not require downloading the whole run archive.
+//! Adding parity tools would either be no-ops or duplicate the archive download
+//! this tool already performs, so no GitHub retry/cancel/job-list tools are
+//! planned here.
 
 use std::io::{Cursor, Read};
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
+use super::helpers::{detect_repo, make_client};
 use crate::github::GitHubClient;
 
 use super::{Tool, ToolContext, ToolOutput};
@@ -26,20 +40,14 @@ const ERROR_KEYWORDS: &[&str] = &["error", "failed"];
 /// SEC-ragent-tools-vcs-006 (SECTASKS T-043).
 const MAX_LOG_EXCERPT_BYTES: usize = 64 * 1024;
 
-/// Returns the authenticated `GitHubClient` or a human-readable error.
-fn make_client() -> Result<GitHubClient> {
-    GitHubClient::new().context("GitHub not authenticated. Run /github login to authenticate.")
-}
+/// Default number of workflow runs inspected by `github_get_actions`.
+const DEFAULT_ACTION_RUNS: u64 = 1;
 
-/// Resolve owner/repo from the working directory or return an error.
-fn detect_repo(ctx: &ToolContext) -> Result<(String, String)> {
-    GitHubClient::detect_repo(&ctx.working_dir).ok_or_else(|| {
-        anyhow::anyhow!(
-            "Could not detect GitHub repository from git remote. \
-             Ensure you're in a git repo with a GitHub remote."
-        )
-    })
-}
+/// Maximum number of workflow runs inspected by `github_get_actions`.
+///
+/// Each inspected run may trigger a log-archive download, so this is capped
+/// well below the generic page limit (ANTIPAT.md A-5).
+const MAX_ACTION_RUNS: u64 = 30;
 
 /// Normalise a GitHub run conclusion into a short status label.
 ///
@@ -220,7 +228,10 @@ impl Tool for GithubGetActionsTool {
         let client = make_client()?;
         let (owner, repo) = detect_repo(ctx)?;
 
-        let limit = input["limit"].as_u64().unwrap_or(1).clamp(1, 30) as u32;
+        let limit = input["limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_ACTION_RUNS)
+            .clamp(DEFAULT_ACTION_RUNS, MAX_ACTION_RUNS) as u32;
         let path = format!("/repos/{owner}/{repo}/actions/runs?per_page={limit}");
 
         let resp = client.get(&path).await?;
@@ -249,7 +260,7 @@ impl Tool for GithubGetActionsTool {
             let label = run_status(conclusion, status);
 
             content.push_str(&format!(
-                "Run #{run_id} [{label}] {name} — branch {branch}, event {event}"
+                "Run #{run_id} [{label}] {name} - branch {branch}, event {event}"
             ));
             if !html_url.is_empty() {
                 content.push_str(&format!("\n  {html_url}"));

@@ -6,10 +6,10 @@
 //! (FR-020).
 //!
 //! Modifier aliases map to tiers per FR-019:
-//! - `simple`, `basic`, `cheap` → SIMPLE
-//! - `medium`, `balanced` → MEDIUM
-//! - `complex`, `advanced` → COMPLEX
-//! - `max`, `reasoning`, `think`, `deep` → REASONING
+//! - `simple`, `basic`, `cheap` -> SIMPLE
+//! - `medium`, `balanced` -> MEDIUM
+//! - `complex`, `advanced` -> COMPLEX
+//! - `max`, `reasoning`, `think`, `deep` -> REASONING
 
 use super::router_config::Tier;
 
@@ -106,7 +106,6 @@ fn split_first_word(s: &str) -> Option<(&str, &str)> {
     }
 }
 
-#[cfg(test)]
 #[cfg(test)]
 #[path = "../../tests/inline/router_modifiers.rs"]
 mod router_modifiers_tests;

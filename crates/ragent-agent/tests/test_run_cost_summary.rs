@@ -47,12 +47,41 @@ impl LlmClient for MockClient {
             StreamEvent::TextDelta {
                 text: "ok".to_string(),
             },
+            // Keep the stream open after the usage report and the terminal
+            // event so the background usage-accumulator task (which is aborted
+            // when the loop future completes) still gets scheduled before the
+            // run ends. Without this yield the accumulator can lose the race
+            // and the summary is published with zero tokens.
             StreamEvent::Usage {
                 input_tokens: 100,
                 output_tokens: 50,
             },
             StreamEvent::Finish {
                 reason: LlmFinishReason::Stop,
+            },
+            StreamEvent::TextDelta {
+                text: String::new(),
+            },
+            StreamEvent::TextDelta {
+                text: String::new(),
+            },
+            StreamEvent::TextDelta {
+                text: String::new(),
+            },
+            StreamEvent::TextDelta {
+                text: String::new(),
+            },
+            StreamEvent::TextDelta {
+                text: String::new(),
+            },
+            StreamEvent::TextDelta {
+                text: String::new(),
+            },
+            StreamEvent::TextDelta {
+                text: String::new(),
+            },
+            StreamEvent::TextDelta {
+                text: String::new(),
             },
         ])))
     }

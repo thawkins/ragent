@@ -112,7 +112,7 @@ fn test_paid_provider_from_config_rejects_unsupported_provider() {
 
 #[test]
 fn test_paid_provider_new_rejects_empty_name() {
-    let err = ragent_tools_extended::finance::PaidProvider::new("", "key", None)
+    let err = ragent_tools_extended::finance::PaidProvider::new("", "key", None, 0)
         .expect_err("empty provider name should fail");
     assert!(
         matches!(err, FinanceError::ConfigError(ref msg) if msg.contains("name is empty")),
@@ -123,7 +123,7 @@ fn test_paid_provider_new_rejects_empty_name() {
 
 #[test]
 fn test_paid_provider_new_rejects_empty_api_key() {
-    let err = ragent_tools_extended::finance::PaidProvider::new("alpha_vantage", "", None)
+    let err = ragent_tools_extended::finance::PaidProvider::new("alpha_vantage", "", None, 0)
         .expect_err("empty API key should fail");
     assert!(
         matches!(err, FinanceError::ConfigError(ref msg) if msg.contains("API key is empty")),
@@ -419,7 +419,7 @@ async fn test_twelvedata_quote_and_history_with_api_key() {
         return;
     }
 
-    let provider = TwelveDataProvider::new(&api_key, None).expect("valid key should build");
+    let provider = TwelveDataProvider::new(&api_key, None, 0).expect("valid key should build");
 
     // US ticker works unchanged.
     let quote = provider

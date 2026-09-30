@@ -1,4 +1,4 @@
-//! History ↔ [`ChatMessage`] conversion, token-overflow helpers, and stream
+//! History <-> [`ChatMessage`] conversion, token-overflow helpers, and stream
 //! error classification for the agent loop.
 //!
 //! This module groups the free-standing helpers used by
@@ -42,7 +42,7 @@ const EXEMPT_TOOL_INLINE_LIMIT: usize = 32_000;
 /// Using `content.len()` (bytes) avoids an expensive UTF-8 decode when the
 /// payload is well under the limit.  For ASCII text (the common case for tool
 /// results) `len()` equals `chars().count()` exactly, so behaviour is identical.
-/// For multi-byte UTF-8 we may truncate slightly earlier — conservative and safe.
+/// For multi-byte UTF-8 we may truncate slightly earlier - conservative and safe.
 const MAX_TOOL_RESULT_BYTES_FOR_LLM: usize = MAX_TOOL_RESULT_CHARS_FOR_LLM;
 
 /// Minimum raw-JSON size (in characters) a tool result must reach before the
@@ -51,7 +51,7 @@ const MAX_TOOL_RESULT_BYTES_FOR_LLM: usize = MAX_TOOL_RESULT_CHARS_FOR_LLM;
 const GCF_MIN_JSON_CHARS: usize = 200;
 
 /// Minimum savings (percent) the labelled GCF block must achieve over the raw
-/// JSON to be emitted (spec `gcf` FR-004 — no negative-savings encodes).
+/// JSON to be emitted (spec `gcf` FR-004 - no negative-savings encodes).
 const GCF_MIN_SAVINGS_PERCENT: u64 = 10;
 
 /// Labelled GCF block markers wrapping the encoded payload (spec `gcf`
@@ -316,9 +316,9 @@ pub fn tool_result_content_for_llm(
     }
 
     // Fast-path: use byte length for the threshold check (safe because we
-    // truncate anyway — a few bytes off is fine). Only decode UTF-8 once
+    // truncate anyway - a few bytes off is fine). Only decode UTF-8 once
     // when we actually need to truncate.  We allocate a single `Arc<str>`
-    // from the input bytes (cheap — no UTF-8 validation needed for the
+    // from the input bytes (cheap - no UTF-8 validation needed for the
     // `Arc<str>::from` path because we go through `String`).
     if content.len() <= MAX_TOOL_RESULT_BYTES_FOR_LLM {
         // PERF-015: avoid the intermediate `String` allocation on the fast
@@ -346,7 +346,7 @@ pub fn tool_result_content_for_llm(
          For `wait_agents` the full per-agent reports are kept in the tool's metadata \
          `\"results\"` array (one object per agent with its complete `\"output\"`) AND \
          under `log/subagents/<task-id>.md` (path shown in the results entry as \
-         `\"output_file\"`) — read that file with the `read` tool if the middle \
+         `\"output_file\"`) - read that file with the `read` tool if the middle \
          segment below omitted findings you need.]\n\n\
          {head}\n\n[... {omitted_chars} chars omitted ...]\n\n{tail}"
     );
@@ -424,7 +424,7 @@ fn exempt_tool_result_for_llm(
         path = batch_path
             .as_ref()
             .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "(unavailable — filesystem error)".to_string())
+            .unwrap_or_else(|| "(unavailable - filesystem error)".to_string())
     ));
 
     if let Some(meta) = metadata
@@ -454,7 +454,7 @@ fn exempt_tool_result_for_llm(
                 })
                 .unwrap_or_default();
             index.push_str(&format!(
-                "- {} `{}` — {} — report {} — full text: {}\n  preview: {}\n\n",
+                "- {} `{}` - {} - report {} - full text: {}\n  preview: {}\n\n",
                 if success { "ok" } else { "ERR" },
                 task_id,
                 agent,
@@ -468,8 +468,8 @@ fn exempt_tool_result_for_llm(
             ));
         }
     } else {
-        // Not the shape we expected (should be unreachable — the tool always
-        // sends `results`) — fall back to head+tail rather than dropping
+        // Not the shape we expected (should be unreachable - the tool always
+        // sends `results`) - fall back to head+tail rather than dropping
         // everything.
         let head = truncate_at_char_boundary(content, TOOL_RESULT_HEAD_CHARS_FOR_LLM);
         let tail = trailing_at_char_boundary(content, TOOL_RESULT_TAIL_CHARS_FOR_LLM);
@@ -546,7 +546,7 @@ pub fn estimate_request_bytes_with_tool_bytes(
                     .map(|p| match p {
                         ContentPart::Text { text } => text.len(),
                         // PERF-014: only the *actual* tool-call inputs (typically
-                        // 1–5 per step) pay the `to_string()` cost now; the
+                        // 1-5 per step) pay the `to_string()` cost now; the
                         // per-tool-definition schema size is supplied by the
                         // caller via `estimate_request_bytes_with_tool_bytes`.
                         ContentPart::ToolUse { id, name, input } => {
@@ -586,10 +586,10 @@ pub fn estimate_request_bytes_with_tool_bytes(
 /// [`ToolDefinition`]s.
 ///
 /// `estimate_request_bytes` previously called `t.parameters.to_string()`
-/// for every tool definition on every step — with ~111 tools that is
+/// for every tool definition on every step - with ~111 tools that is
 /// ~111 JSON serialisations per estimate. This helper computes the sum
 /// once (ideally alongside the cached `definitions()` list) so the per-step
-/// estimate only pays for the *actual* tool-call inputs (typically 1–5).
+/// estimate only pays for the *actual* tool-call inputs (typically 1-5).
 pub fn estimate_tool_definition_bytes(tools: &[ToolDefinition]) -> u64 {
     tools
         .iter()
@@ -597,7 +597,7 @@ pub fn estimate_tool_definition_bytes(tools: &[ToolDefinition]) -> u64 {
         .sum::<usize>() as u64
 }
 
-/// Kept for backward compatibility — now delegates to the cheap estimator.
+/// Kept for backward compatibility - now delegates to the cheap estimator.
 pub fn chat_request_payload_bytes(request: &ChatRequest) -> u64 {
     estimate_request_bytes(request)
 }
@@ -826,7 +826,7 @@ pub(crate) async fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent 
 /// the session so far.
 ///
 /// Returns `true` when the user appears to have asked for a file to be
-/// created/written but no write tool has been called — indicating the task
+/// created/written but no write tool has been called - indicating the task
 /// is incomplete.
 ///
 /// This is intentionally conservative: it only triggers on clear

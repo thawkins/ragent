@@ -58,14 +58,18 @@ impl Drop for EnvGuard {
 #[test]
 fn test_activity_log_defaults_to_true() {
     // When deserialised from JSON with the field absent, `#[serde(default =
-    // "default_true")]` yields `true`. The derived `Default` impl (used by
-    // `Config::default()`) zeroes bools to `false`, so we test the serde
-    // deserialisation path instead, which is the one used at startup.
+    // "default_true")]` yields `true`. Since ANTIPAT M-7 the explicit
+    // `Default` impl for `Config` agrees with that serde default, so both the
+    // deserialisation path and `Config::default()` report logging on.
     let json = "{}";
     let config: Config = serde_json::from_str(json).expect("parse config");
     assert!(
         config.activity_log,
         "activity_log should default to true when absent from JSON"
+    );
+    assert!(
+        Config::default().activity_log,
+        "Config::default() must agree with the serde default (M-7)"
     );
 }
 

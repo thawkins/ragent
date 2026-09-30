@@ -19,7 +19,7 @@ pub struct BlueprintInfo {
 /// Discover all installed team blueprints.
 ///
 /// Searches the following directories from highest to lowest priority; the
-/// closest directory wins — the first directory that defines a blueprint name
+/// closest directory wins - the first directory that defines a blueprint name
 /// takes precedence over the others:
 ///
 /// | Priority | Directory |

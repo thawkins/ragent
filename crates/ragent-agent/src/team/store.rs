@@ -1,8 +1,8 @@
 //! Team store: discovery, creation, loading, and saving of team configs.
 //!
 //! Teams are stored in:
-//! - `~/.ragent/teams/{name}/` — user-global (lower priority)
-//! - `[PROJECT]/.ragent/teams/{name}/` — project-local (higher priority)
+//! - `~/.ragent/teams/{name}/` - user-global (lower priority)
+//! - `[PROJECT]/.ragent/teams/{name}/` - project-local (higher priority)
 //!
 //! `config.json` writes are serialised using a companion `config.json.lock`
 //! file and an atomic rename so concurrent saves cannot clobber each other
@@ -29,8 +29,8 @@ pub fn global_teams_dir() -> Option<PathBuf> {
 
 /// Validate a team name before it is used as a filesystem path component.
 ///
-/// A team name reaches `base.join(name)`, `create_dir_all`, `is_dir`, and — via
-/// `team_cleanup` — `remove_dir_all`. Taken straight from tool input or a slash
+/// A team name reaches `base.join(name)`, `create_dir_all`, `is_dir`, and - via
+/// `team_cleanup` - `remove_dir_all`. Taken straight from tool input or a slash
 /// command it is therefore an arbitrary-path write/delete primitive: a name of
 /// `../../../../tmp/pwned` escapes `.ragent/teams/`, `..` resolves to the
 /// project root, and `/etc` replaces the base entirely because `Path::join`
@@ -39,7 +39,7 @@ pub fn global_teams_dir() -> Option<PathBuf> {
 ///
 /// The accepted shape is a single ordinary path component: lowercase
 /// alphanumerics and `-`, starting with an alphanumeric, at most 64 characters
-/// — `^[a-z0-9][a-z0-9-]{0,63}$`. `TeamConfig::new` slugifies the name it is
+///   `^[a-z0-9][a-z0-9-]{0,63}$`. `TeamConfig::new` slugifies the name it is
 /// given (uppercase and `_`/`.` become `-`), so every previously usable name
 /// still validates. Callers that also accept an id derived from another name
 /// (a blueprint) must slugify before calling.

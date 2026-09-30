@@ -1,4 +1,4 @@
-//! Codebase index communities tool — community detection (FR-013).
+//! Codebase index communities tool - community detection (FR-013).
 //!
 //! Runs label-propagation community detection over the semantic code graph,
 //! displaying each detected community with its auto-generated label and
@@ -74,7 +74,7 @@ impl Tool for CodeIndexCommunitiesTool {
         output.push_str("| Community | Label | Members |\n");
         output.push_str("|-----------|-------|--------|\n");
         for comm in &communities {
-            let label = comm.label.as_deref().unwrap_or("—");
+            let label = comm.label.as_deref().unwrap_or("-");
             output.push_str(&format!(
                 "| {} | {} | {} |\n",
                 comm.id, label, comm.member_count,

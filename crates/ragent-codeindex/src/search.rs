@@ -1,7 +1,7 @@
 //! Full-text search index backed by tantivy.
 //!
 //! [`FtsIndex`] manages a tantivy index that provides fast full-text
-//! search over extracted code symbols — names, signatures, doc comments,
+//! search over extracted code symbols - names, signatures, doc comments,
 //! and body snippets.
 
 use anyhow::{Context, Result};
@@ -46,7 +46,7 @@ impl std::fmt::Display for SearchResult {
             // Detailed mode: {:#}
             writeln!(
                 f,
-                "{} {} — {}:{}",
+                "{} {} - {}:{}",
                 self.kind, self.symbol_name, self.file_path, self.line
             )?;
             if !self.qualified_name.is_empty() {
@@ -63,7 +63,7 @@ impl std::fmt::Display for SearchResult {
             // Compact mode: {}
             write!(
                 f,
-                "{} {} — {}:{}",
+                "{} {} - {}:{}",
                 self.kind, self.symbol_name, self.file_path, self.line
             )
         }
@@ -221,8 +221,8 @@ impl FtsIndex {
 
     /// Search the FTS index with the given query string.
     ///
-    /// Fields are boosted: name 10×, `qualified_name` 5×, signature 3×,
-    /// `doc_comment` 2×, `body_snippet` 1×.
+    /// Fields are boosted: name 10x, `qualified_name` 5x, signature 3x,
+    /// `doc_comment` 2x, `body_snippet` 1x.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         self.reader.reload()?;
         let searcher = self.reader.searcher();
@@ -256,7 +256,7 @@ impl FtsIndex {
             .parse_query(&sanitized)
             .with_context(|| format!("cannot parse FTS query: {sanitized}"))?;
         let top_docs = searcher
-            .search(&parsed_query, &TopDocs::with_limit(limit))
+            .search(&parsed_query, &TopDocs::with_limit(limit).order_by_score())
             .context("FTS search failed")?;
 
         let mut results = Vec::with_capacity(top_docs.len());
@@ -297,7 +297,7 @@ impl FtsIndex {
     /// (`::`) are replaced with spaces so each path segment becomes a
     /// separate search term.
     pub fn sanitize_query(raw: &str) -> String {
-        // Replace :: with space first — the default tokenizer splits on
+        // Replace :: with space first - the default tokenizer splits on
         // punctuation anyway, so the index never contains literal colons.
         let replaced = raw.replace("::", " ");
         let mut out = String::with_capacity(replaced.len() * 2);
@@ -333,7 +333,7 @@ impl FtsIndex {
     fn build_schema() -> Schema {
         let mut builder = Schema::builder();
 
-        // TEXT fields — tokenized and searchable, stored for retrieval
+        // TEXT fields - tokenized and searchable, stored for retrieval
         let text_opts = TextOptions::default()
             .set_indexing_options(
                 TextFieldIndexing::default()
@@ -355,7 +355,7 @@ impl FtsIndex {
         );
         builder.add_text_field("body_snippet", body_opts);
 
-        // STRING fields — stored, not tokenized (exact match / filters)
+        // STRING fields - stored, not tokenized (exact match / filters)
         let string_opts = TextOptions::default()
             .set_indexing_options(
                 TextFieldIndexing::default()
@@ -441,44 +441,25 @@ impl FtsIndex {
 
         // Use the index's own schema for field lookups to ensure field IDs
         // match what's on disk, even if field insertion order differed.
+        // A field absent from both schemas is a corrupt index: propagate the
+        // error instead of panicking on the search path.
         let idx_schema = index.schema();
+        let resolve = |name: &str| -> Result<Field> {
+            idx_schema
+                .get_field(name)
+                .or_else(|_| schema.get_field(name))
+                .map_err(|e| anyhow::anyhow!("FTS schema is missing required field '{name}': {e}"))
+        };
         let fields = FtsFields {
-            name: idx_schema
-                .get_field("name")
-                .or_else(|_| schema.get_field("name"))
-                .unwrap(),
-            qualified_name: idx_schema
-                .get_field("qualified_name")
-                .or_else(|_| schema.get_field("qualified_name"))
-                .unwrap(),
-            kind: idx_schema
-                .get_field("kind")
-                .or_else(|_| schema.get_field("kind"))
-                .unwrap(),
-            file_path: idx_schema
-                .get_field("file_path")
-                .or_else(|_| schema.get_field("file_path"))
-                .unwrap(),
-            signature: idx_schema
-                .get_field("signature")
-                .or_else(|_| schema.get_field("signature"))
-                .unwrap(),
-            doc_comment: idx_schema
-                .get_field("doc_comment")
-                .or_else(|_| schema.get_field("doc_comment"))
-                .unwrap(),
-            body_snippet: idx_schema
-                .get_field("body_snippet")
-                .or_else(|_| schema.get_field("body_snippet"))
-                .unwrap(),
-            start_line: idx_schema
-                .get_field("start_line")
-                .or_else(|_| schema.get_field("start_line"))
-                .unwrap(),
-            end_line: idx_schema
-                .get_field("end_line")
-                .or_else(|_| schema.get_field("end_line"))
-                .unwrap(),
+            name: resolve("name")?,
+            qualified_name: resolve("qualified_name")?,
+            kind: resolve("kind")?,
+            file_path: resolve("file_path")?,
+            signature: resolve("signature")?,
+            doc_comment: resolve("doc_comment")?,
+            body_snippet: resolve("body_snippet")?,
+            start_line: resolve("start_line")?,
+            end_line: resolve("end_line")?,
         };
 
         Ok(Self {
@@ -492,6 +473,12 @@ impl FtsIndex {
     /// PERF-075: runs `f` against the single long-lived `IndexWriter`,
     /// creating it on first use.  Reusing one writer avoids re-allocating its
     /// heap and re-opening the segment set on every batch.
+    ///
+    /// Poisoned-lock policy (ANTIPAT M5.3 / audit 3.1): unlike the reader
+    /// guards in `CodeIndex` (which recover), this writable guard fails closed
+    /// to `Result`. A poisoned `IndexWriter` may hold a half-committed
+    /// transaction, so surfacing the poison lets the caller skip the write
+    /// instead of persisting a corrupt segment.
     fn with_writer<T>(&self, f: impl FnOnce(&mut IndexWriter) -> Result<T>) -> Result<T> {
         let mut guard = self
             .writer

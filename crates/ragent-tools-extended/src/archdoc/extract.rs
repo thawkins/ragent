@@ -242,7 +242,7 @@ pub fn parse_architecture_response(response: &str) -> Option<ArchitectureStructu
     match serde_json::from_str::<ArchitectureStructure>(&response[start..=end]) {
         Ok(structure) => Some(structure),
         Err(e) => {
-            // A prose `{` before the actual JSON (e.g. "shape {components: …}")
+            // A prose `{` before the actual JSON (e.g. "shape {components: ...}")
             // widens the span past the real object; log the offsets so a
             // fallback-heavy run shows whether extraction or parsing failed.
             tracing::debug!(

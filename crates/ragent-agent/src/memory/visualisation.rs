@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use crate::storage::{MemoryRow, Storage};
 
 // FR-010: The tag map type used by batch-fetched visualisation functions.
-// Inlined as `HashMap<i64, Vec<String>>` throughout — the `implicit_hasher`
+// Inlined as `HashMap<i64, Vec<String>>` throughout - the `implicit_hasher`
 // lint is intentionally suppressed because `Storage::get_all_memory_tags`
 // returns exactly this concrete type and all callers are internal.
 
@@ -158,14 +158,14 @@ pub fn generate_visualisation(storage: &Storage) -> anyhow::Result<Visualisation
 /// # Arguments
 ///
 /// * `memories` - Pre-fetched memory rows.
-/// * `all_tags` - Pre-fetched tag map (memory_id → tags), obtained from a
+/// * `all_tags` - Pre-fetched tag map (memory_id -> tags), obtained from a
 ///   single `get_all_memory_tags` query (FR-010).
 #[allow(clippy::implicit_hasher)]
 pub fn generate_graph(memories: &[MemoryRow], all_tags: &HashMap<i64, Vec<String>>) -> MemoryGraph {
     let mut nodes: Vec<GraphNode> = Vec::new();
     let mut edges: Vec<GraphEdge> = Vec::new();
 
-    // Category nodes — single pass per category (count + sum together).
+    // Category nodes - single pass per category (count + sum together).
     for cat in crate::memory::store::MEMORY_CATEGORIES {
         let (count, conf_sum) = memories
             .iter()
@@ -224,7 +224,7 @@ pub fn generate_graph(memories: &[MemoryRow], all_tags: &HashMap<i64, Vec<String
 /// # Arguments
 ///
 /// * `memories` - Pre-fetched memory rows.
-/// * `all_tags` - Pre-fetched tag map (memory_id → tags), obtained from a
+/// * `all_tags` - Pre-fetched tag map (memory_id -> tags), obtained from a
 ///   single `get_all_memory_tags` query (FR-010).
 #[allow(clippy::implicit_hasher)]
 pub fn generate_tag_cloud(

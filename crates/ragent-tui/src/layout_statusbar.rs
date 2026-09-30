@@ -36,7 +36,7 @@ pub struct StatusBarConfig {
 /// Responsive mode based on terminal width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResponsiveMode {
-    /// Full (≥120 chars): All information, full paths, complete metrics
+    /// Full (>=120 chars): All information, full paths, complete metrics
     Full,
     /// Compact (80-120 chars): Shortened paths, abbreviated labels
     Compact,
@@ -112,30 +112,30 @@ pub mod indicators {
 ///
 /// Each service gets a distinct glyph and a fixed accent color so the
 /// indicators are recognizable at a glance without reading the text label.
-/// The enabled/disabled state is conveyed by the trailing `✓`/`✗` marker
+/// The enabled/disabled state is conveyed by the trailing `[ok]`/`[x]` marker
 /// (green/red), while the icon itself keeps its own accent color.
 pub mod service_icons {
     use ratatui::style::Color;
 
-    /// Code Index — magnifying glass over a document.
+    /// Code Index - magnifying glass over a document.
     pub const CODE_INDEX: (&str, Color) = ("🔍", Color::Cyan);
 
-    /// Activity Log — scroll/parchment.
+    /// Activity Log - scroll/parchment.
     pub const ACTIVITY_LOG: (&str, Color) = ("📜", Color::Yellow);
 
-    /// Autopilot — airplane.
+    /// Autopilot - airplane.
     pub const AUTOPILOT: (&str, Color) = ("✈️", Color::Magenta);
 
-    /// Edit Log — pencil.
+    /// Edit Log - pencil.
     pub const EDIT_LOG: (&str, Color) = ("✏️", Color::LightBlue);
 
-    /// Telemetry — satellite dish / signal.
+    /// Telemetry - satellite dish / signal.
     pub const TELEMETRY: (&str, Color) = ("📡", Color::LightGreen);
 
-    /// YOLO — warning triangle (bold, changes command-validation behaviour).
+    /// YOLO - warning triangle (bold, changes command-validation behaviour).
     pub const YOLO: (&str, Color) = ("⚠️", Color::LightRed);
 
-    /// GCF encoding — compression clamp (token-efficient tool-result encoding).
+    /// GCF encoding - compression clamp (token-efficient tool-result encoding).
     pub const GCF: (&str, Color) = ("🗜", Color::LightMagenta);
 }
 
@@ -259,7 +259,7 @@ fn build_line1(
     mode: ResponsiveMode,
     width: u16,
 ) -> Line<'static> {
-    // Application name and version prefix — identifies the running build at a
+    // Application name and version prefix - identifies the running build at a
     // glance. Built once here and reused below for both the width budget and
     // the rendered line (PERF-048).
     let prefix = Span::styled(
@@ -587,7 +587,7 @@ fn build_line2_left(
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
-    // Compression / Compaction activity indicator — always visible, even in Minimal mode.
+    // Compression / Compaction activity indicator - always visible, even in Minimal mode.
     if app.compact_in_progress || app.compress_in_progress {
         let label = if app.compact_in_progress && app.compress_in_progress {
             "cmp+compress"
@@ -703,9 +703,9 @@ fn build_line2_right(
     config: &StatusBarConfig,
     _mode: ResponsiveMode,
 ) -> Vec<Span<'static>> {
-    // Push one `<icon>✓/✗ ` indicator span: the icon keeps its own accent
-    // color, while the trailing marker conveys enabled (green ✓) vs disabled
-    // (red ✗). Shared by every service indicator on this line.
+    // Push one `<icon>[ok]/[x] ` indicator span: the icon keeps its own accent
+    // color, while the trailing marker conveys enabled (green [ok]) vs disabled
+    // (red [x]). Shared by every service indicator on this line.
     fn push_indicator(
         spans: &mut Vec<Span<'static>>,
         icon: (&'static str, Color),
@@ -734,7 +734,7 @@ fn build_line2_right(
         return spans; // Defer to `/status` in minimal/compact
     }
 
-    // GCF encoding status (leftmost — user-requested position, left of the
+    // GCF encoding status (leftmost - user-requested position, left of the
     // codeindex icon). Reads the runtime GCF flag directly so `/gcf on|off`
     // and the Alt+G toggle are reflected immediately.
     push_indicator(
@@ -784,7 +784,7 @@ fn build_line2_right(
         false,
     );
 
-    // YOLO mode status (bold — it changes command-validation behaviour)
+    // YOLO mode status (bold - it changes command-validation behaviour)
     push_indicator(
         &mut spans,
         service_icons::YOLO,
@@ -828,26 +828,5 @@ fn shorten_path(path: &str, max_len: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_responsive_mode_from_width() {
-        assert_eq!(ResponsiveMode::from_width(50), ResponsiveMode::Minimal);
-        assert_eq!(ResponsiveMode::from_width(79), ResponsiveMode::Minimal);
-        assert_eq!(ResponsiveMode::from_width(80), ResponsiveMode::Compact);
-        assert_eq!(ResponsiveMode::from_width(119), ResponsiveMode::Compact);
-        assert_eq!(ResponsiveMode::from_width(120), ResponsiveMode::Full);
-        assert_eq!(ResponsiveMode::from_width(200), ResponsiveMode::Full);
-    }
-
-    #[test]
-    fn test_shorten_path() {
-        assert_eq!(shorten_path("/home/user", 50), "/home/user");
-
-        let long_path = "/very/long/path/that/exceeds/maximum";
-        let shortened = shorten_path(long_path, 20);
-        assert!(shortened.chars().count() <= 20);
-        assert!(shortened.contains('…'));
-    }
-}
+#[path = "../tests/inline/layout_statusbar_tests.rs"]
+mod tests;

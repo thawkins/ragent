@@ -39,7 +39,7 @@ fn test_slash_spec_create_starts_generation() {
     assert_eq!(
         status,
         "spec: writing specs/websocket/SPEC.md + specs/websocket/PLAN.md + \
-         specs/websocket/TESTPLAN.md…",
+         specs/websocket/TESTPLAN.md...",
         "status should indicate generation"
     );
 
@@ -506,7 +506,7 @@ fn test_plan_prompt_includes_spec_md_and_tech_context() {
 #[test]
 fn test_plan_prompt_with_existing_plan_preservation() {
     let spec_md = "## Requirements\n### FR-001\nThe system shall do X.";
-    let plan_md = "## Tasks\n| T-001 | Do thing | FR-001 | S | High | — |";
+    let plan_md = "## Tasks\n| T-001 | Do thing | FR-001 | S | High | - |";
     let prompt =
         SpecCommand::build_plan_prompt("myspec", "WebSocket", spec_md, plan_md, false, false, "");
     assert!(
@@ -614,7 +614,7 @@ fn test_plan_prompt_without_data_model_no_instruction() {
 #[test]
 fn test_plan_prompt_with_data_model_and_existing_plan() {
     let spec_md = "## Requirements\n### FR-001\nThe system shall store user profiles.";
-    let plan_md = "## Tasks\n| T-001 | Do thing | FR-001 | S | High | — |";
+    let plan_md = "## Tasks\n| T-001 | Do thing | FR-001 | S | High | - |";
     let prompt =
         SpecCommand::build_plan_prompt("myspec", "PostgreSQL", spec_md, plan_md, true, false, "");
     assert!(
@@ -745,7 +745,7 @@ fn test_plan_prompt_with_data_model_and_contracts_both_enabled() {
 #[test]
 fn test_plan_prompt_with_contracts_and_existing_plan() {
     let spec_md = "## Requirements\n### FR-001\nThe system shall expose a REST API.";
-    let plan_md = "## Tasks\n| T-001 | Do thing | FR-001 | S | High | — |";
+    let plan_md = "## Tasks\n| T-001 | Do thing | FR-001 | S | High | - |";
     let prompt =
         SpecCommand::build_plan_prompt("myspec", "axum", spec_md, plan_md, false, true, "");
     assert!(
@@ -947,7 +947,7 @@ fn test_spec_feedback_log_truncation() {
     let long_note = "A".repeat(100);
     let log = SpecCommand::build_feedback_log("myspec", &long_note);
     assert!(
-        log.contains("…"),
+        log.contains("..."),
         "log should truncate long notes with ellipsis: {log}"
     );
 }
@@ -1290,7 +1290,7 @@ fn test_build_tasks_md_extracts_task_table() {
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |---|---|---|---|---|---|
-| T-001 | Define types | FR-003 | S | Critical | — |
+| T-001 | Define types | FR-003 | S | Critical | - |
 | T-002 | Build parser | FR-004 | M | High | T-001 |
 | T-003 | Add tests | FR-005 | M | High | T-002 |
 
@@ -1337,7 +1337,7 @@ fn test_build_tasks_md_with_status_column() {
 
 | ID | Title | Requirement | Effort | Priority | Status | Dependencies |
 |---|---|---|---|---|---|---|
-| T-001 | Define types | FR-003 | S | Critical | completed | — |
+| T-001 | Define types | FR-003 | S | Critical | completed | - |
 | T-002 | Build parser | FR-004 | M | High | in_progress | T-001 |
 ";
     let md = SpecCommand::build_tasks_md("myspec", "", plan_md)
@@ -1379,7 +1379,7 @@ fn test_build_tasks_md_includes_footer() {
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |---|---|---|---|---|---|
-| T-001 | Task one | FR-001 | S | High | — |
+| T-001 | Task one | FR-001 | S | High | - |
 ";
     let md = SpecCommand::build_tasks_md("myspec", "My Spec", plan_md)
         .expect("valid PLAN.md should not error")
@@ -1401,7 +1401,7 @@ fn test_build_tasks_md_handles_dependencies() {
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |---|---|---|---|---|---|
-| T-001 | First | FR-001 | S | High | — |
+| T-001 | First | FR-001 | S | High | - |
 | T-002 | Second | FR-002 | M | Medium | T-001 |
 | T-003 | Third | FR-003 | L | Low | T-001, T-002 |
 ";
@@ -1413,7 +1413,7 @@ fn test_build_tasks_md_handles_dependencies() {
         "TASKS.md should join multiple dependencies: {md}"
     );
     assert!(
-        md.contains("—"),
+        md.contains('-'),
         "TASKS.md should show em-dash for no dependencies: {md}"
     );
 }
@@ -1425,7 +1425,7 @@ fn test_build_tasks_md_without_title() {
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |---|---|---|---|---|---|
-| T-001 | Task one | FR-001 | S | High | — |
+| T-001 | Task one | FR-001 | S | High | - |
 ";
     let md = SpecCommand::build_tasks_md("myspec", "", plan_md)
         .expect("valid PLAN.md should not error")
@@ -1735,10 +1735,10 @@ fn test_build_quickstart_md_with_requirements() {
     let spec_md = r"
 ## Requirements
 
-### FR-001 — User Login
+### FR-001 - User Login
 `The system shall allow users to log in with email and password.`
 
-### FR-002 — Password Reset
+### FR-002 - Password Reset
 `The system shall send a password reset email when requested.`
 ";
     let md = SpecCommand::build_quickstart_md("myspec", "My Spec", spec_md)
@@ -1776,7 +1776,7 @@ fn test_build_quickstart_md_with_requirements() {
 #[test]
 fn test_build_quickstart_md_without_title() {
     let spec_md = r"
-### FR-001 — Basic Feature
+### FR-001 - Basic Feature
 `The system shall do something useful.`
 ";
     let md = SpecCommand::build_quickstart_md("myspec", "", spec_md)
@@ -1813,7 +1813,7 @@ fn test_build_quickstart_md_returns_none_for_empty_spec() {
 #[test]
 fn test_build_quickstart_md_includes_intro_text() {
     let spec_md = r"
-### FR-001 — Feature One
+### FR-001 - Feature One
 `The system shall provide feature one.`
 ";
     let md = SpecCommand::build_quickstart_md("myspec", "My Spec", spec_md)
@@ -1831,7 +1831,7 @@ fn test_build_quickstart_md_includes_intro_text() {
 #[test]
 fn test_build_quickstart_md_includes_footer() {
     let spec_md = r"
-### FR-001 — Feature One
+### FR-001 - Feature One
 `The system shall provide feature one.`
 ";
     let md = SpecCommand::build_quickstart_md("myspec", "My Spec", spec_md)
@@ -1896,13 +1896,13 @@ fn test_build_tasks_message_mentions_quickstart() {
 #[test]
 fn test_build_quickstart_md_multiple_requirements_all_included() {
     let spec_md = r"
-### FR-001 — First
+### FR-001 - First
 `The system shall do first thing.`
 
-### FR-002 — Second
+### FR-002 - Second
 `The system shall do second thing.`
 
-### FR-003 — Third
+### FR-003 - Third
 `The system shall do third thing.`
 ";
     let md = SpecCommand::build_quickstart_md("myspec", "Multi", spec_md)

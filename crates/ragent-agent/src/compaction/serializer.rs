@@ -7,14 +7,14 @@
 //!
 //! # Output format
 //!
-//! - `user` → `[User]: <text>` plus one line per file attachment.
-//! - `assistant` → one or more of:
+//! - `user` -> `[User]: <text>` plus one line per file attachment.
+//! - `assistant` -> one or more of:
 //!   - `[Assistant]: <text>`
 //!   - `[Assistant reasoning]: <text>`
 //!   - `[Assistant tool call]: name(input)`
 //!   - `[Tool result]: <truncated text>`
 //!   - `[Tool error]: <message>`
-//! - `system` → `[System update]: <text>`.
+//! - `system` -> `[System update]: <text>`.
 //!
 //! Tool outputs are truncated to [`TOOL_OUTPUT_MAX_CHARS`] characters so the
 //! compaction prompt stays bounded. Images and other non-text parts are
@@ -34,8 +34,8 @@ pub const TOOL_OUTPUT_MAX_CHARS: usize = 2_000;
 ///
 /// # Arguments
 ///
-/// * `messages` — conversation history in ragent internal format.
-/// * `tool_output_max_chars` — cap for individual tool output lines.
+/// * `messages` - conversation history in ragent internal format.
+/// * `tool_output_max_chars` - cap for individual tool output lines.
 #[must_use]
 pub fn serialize_messages(messages: &[Message], tool_output_max_chars: usize) -> Option<String> {
     let lines: Vec<String> = messages

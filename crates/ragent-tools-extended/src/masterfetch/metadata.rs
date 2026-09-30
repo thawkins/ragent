@@ -5,20 +5,20 @@
 //! This module extracts structured metadata from HTML pages using three
 //! sources, in priority order:
 //!
-//! 1. **`OpenGraph` meta tags** — `<meta property="og:title" content="...">`,
+//! 1. **`OpenGraph` meta tags** - `<meta property="og:title" content="...">`,
 //!    `og:description`, `og:site_name`, `og:type`, `og:image`,
 //!    `article:published_time`, `article:modified_time`, `article:author`.
-//! 2. **JSON-LD blocks** — `<script type="application/ld+json">` containing
+//! 2. **JSON-LD blocks** - `<script type="application/ld+json">` containing
 //!    schema.org objects. Supports `Article`, `NewsArticle`, `BlogPosting`,
 //!    `TechArticle`, and generic objects. Extracts `headline` (title),
 //!    `description`, `datePublished`, `dateModified`, `author`, `image`.
-//! 3. **Standard HTML fallbacks** — `<title>` tag, `<meta name="description">`,
+//! 3. **Standard HTML fallbacks** - `<title>` tag, `<meta name="description">`,
 //!    `<link rel="canonical">`, `<html lang="...">`.
 //!
 //! `OpenGraph` values take priority over JSON-LD, which takes priority over
 //! standard HTML. This matches Hound's `metadata.py` merge strategy.
 //!
-//! All functions are pure — no network I/O — enabling unit tests without live
+//! All functions are pure - no network I/O - enabling unit tests without live
 //! pages (NFR-003).
 
 use regex::Regex;
@@ -50,7 +50,7 @@ static CONTENT_DQ_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)\bcontent\s*=\s*"([^"]*)""#).expect("content regex is valid")
 });
 
-/// Single-quoted `content='...'` attribute.
+/// Single-quoted `content="..."` attribute.
 static CONTENT_SQ_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\bcontent\s*=\s*'([^']*)'").expect("content single-quote regex is valid")
 });
@@ -72,7 +72,7 @@ static REL_CANONICAL_RE: LazyLock<Regex> = LazyLock::new(|| {
 static HREF_DQ_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)\bhref\s*=\s*"([^"]*)""#).expect("href regex is valid"));
 
-/// Single-quoted `href='...'` attribute.
+/// Single-quoted `href="..."` attribute.
 static HREF_SQ_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\bhref\s*=\s*'([^']*)'").expect("href single-quote regex is valid")
 });
@@ -141,11 +141,11 @@ fn meta_values(metas: &[(String, String)], keys: &[&str]) -> Vec<String> {
 ///
 /// # Arguments
 ///
-/// * `html` — the raw HTML response body.
+/// * `html` - the raw HTML response body.
 ///
 /// # Returns
 ///
-/// A [`PageMetadata`] with all recoverable fields. Never panics — malformed
+/// A [`PageMetadata`] with all recoverable fields. Never panics - malformed
 /// HTML, invalid JSON-LD, and missing tags all produce `None` fields.
 ///
 /// # Example
@@ -197,8 +197,8 @@ pub fn extract_metadata(html: &str) -> PageMetadata {
 
     // Author extraction priority:
     // 1. article:author (OpenGraph article namespace)
-    // 2. Dublin Core creator tags (dc.creator, dcterms.creator, …)
-    // 3. Standard meta author tags (author, citation_author, byl, …)
+    // 2. Dublin Core creator tags (dc.creator, dcterms.creator, ...)
+    // 3. Standard meta author tags (author, citation_author, byl, ...)
     // 4. JSON-LD author field
     // Multiple authors are joined with ", ".
     let author = meta_values(&metas, &["article:author"])

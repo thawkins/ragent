@@ -42,7 +42,7 @@ pub struct PluginsConfig {
     /// Master switch for the plugin subsystem. When `false`, no discovery or
     /// loading happens and `/plugins` subcommands other than `help` report the
     /// system is disabled. Default: `true`.
-    #[serde(default = "default_enabled")]
+    #[serde(default = "crate::config::default_true")]
     pub enabled: bool,
     /// Per-plugin-tool wall-clock execution budget in milliseconds.
     /// Default: 5000 (5 seconds).
@@ -122,7 +122,7 @@ pub struct PluginStoreEndpoint {
 impl Default for PluginsConfig {
     fn default() -> Self {
         Self {
-            enabled: default_enabled(),
+            enabled: crate::config::default_true(),
             max_execution_ms: default_max_execution_ms(),
             max_entry_ms: default_max_entry_ms(),
             max_memory_mb: default_max_memory_mb(),
@@ -146,10 +146,6 @@ impl PluginsConfig {
     pub fn stores_or_default(&self) -> PluginStoresConfig {
         self.stores.clone().unwrap_or_default()
     }
-}
-
-const fn default_enabled() -> bool {
-    true
 }
 
 const fn default_max_execution_ms() -> u64 {

@@ -456,3 +456,81 @@ fn test_registered_in_extended_registry() {
     let registry = ragent_tools_extended::create_extended_registry();
     assert!(registry.contains("send_channel_message"));
 }
+
+// ---------------------------------------------------------------------------
+// ANTIPAT M0.5: public-target (SSRF) validation on the Discord sink
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_send_discord_refuses_a_private_target() {
+    let tool = SendChannelMessageTool::new();
+    let channels = ChannelsConfig {
+        enabled: true,
+        telegram: None,
+        // A config that points the webhook at an internal service must be
+        // refused before any request is made (ANTIPAT 3.1).
+        discord: Some(DiscordChannelConfig {
+            webhook_url: Some("http://169.254.169.254/latest/meta-data/".into()),
+        }),
+    };
+    let ctx = ctx_with_channels(channels);
+    let err = tool
+        .execute(
+            json!({"action": "send", "message": "hi", "channel": "discord"}),
+            &ctx,
+        )
+        .await
+        .expect_err("a private/metadata target must be refused");
+    assert!(
+        err.to_string().contains("discord webhook_url"),
+        "error must name the rejected target, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_send_discord_refuses_a_rfc1918_target() {
+    let tool = SendChannelMessageTool::new();
+    let channels = ChannelsConfig {
+        enabled: true,
+        telegram: None,
+        discord: Some(DiscordChannelConfig {
+            webhook_url: Some("http://10.0.0.5/hook".into()),
+        }),
+    };
+    let ctx = ctx_with_channels(channels);
+    let err = tool
+        .execute(
+            json!({"action": "send", "message": "hi", "channel": "discord"}),
+            &ctx,
+        )
+        .await
+        .expect_err("an RFC1918 target must be refused");
+    assert!(
+        err.to_string().contains("discord webhook_url"),
+        "error must name the rejected target, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_send_discord_still_accepts_a_public_target() {
+    // The guard must not break the documented happy path: a public https
+    // webhook URL is validated and the request is attempted.
+    let (base_url, _captured) = spawn_mock_server(false).await;
+    let tool = SendChannelMessageTool::new();
+    let channels = ChannelsConfig {
+        enabled: true,
+        telegram: None,
+        discord: Some(DiscordChannelConfig {
+            webhook_url: Some(format!("{base_url}/api/webhooks/1/x")),
+        }),
+    };
+    let ctx = ctx_with_channels(channels);
+    // `base_url` is a loopback literal, which the shared policy accepts for the
+    // documented local-mock shape.
+    tool.execute(
+        json!({"action": "send", "message": "hi", "channel": "discord"}),
+        &ctx,
+    )
+    .await
+    .expect("a loopback mock target is permitted");
+}

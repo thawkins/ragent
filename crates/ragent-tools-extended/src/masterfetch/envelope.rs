@@ -5,25 +5,25 @@
 //! This module computes the Hound v10 "envelope" signals that make every fetch
 //! and crawl response actionable:
 //!
-//! - **Page-type detection** ([`detect_page_type`]) — classifies the HTML
+//! - **Page-type detection** ([`detect_page_type`]) - classifies the HTML
 //!   structure into [`PageType`] variants (article, docs, list, forum, qa,
 //!   `js_shell`, `auth_wall`, paywall, redirect, image, json, unknown). Drives the
 //!   `next_action` suggestion (FR-029).
-//! - **Source-authority classification** ([`classify_source_type`]) — maps the
+//! - **Source-authority classification** ([`classify_source_type`]) - maps the
 //!   URL domain to [`SourceType`] (gov, edu, github, `vendor_docs`, `docs_site`,
 //!   qa, forum, blog, news, ecommerce, unknown) and computes `is_official`
 //!   (FR-030).
-//! - **Freshness computation** ([`compute_freshness`]) — parses the page's
+//! - **Freshness computation** ([`compute_freshness`]) - parses the page's
 //!   published/modified date metadata, prefers modified over published,
 //!   computes `content_age_days` and `is_stale` (stale = age > 365 days)
 //!   (FR-030).
-//! - **Envelope assembly** ([`build_envelope`]) — combines all three signals
+//! - **Envelope assembly** ([`build_envelope`]) - combines all three signals
 //!   plus `content_ok` into an [`EnvelopeSignals`] struct ready for embedding
 //!   in `ToolOutput.metadata` (FR-003).
 //!
 //! # Testability (NFR-003)
 //!
-//! All functions are pure — no network I/O. They take HTML strings, URLs, and
+//! All functions are pure - no network I/O. They take HTML strings, URLs, and
 //! [`PageMetadata`] by reference and return plain structs. This enables unit
 //! tests with fixture HTML without any live pages.
 //!
@@ -221,32 +221,32 @@ const DOCS_SITE_PREFIXES: &[&str] = &["docs.", "developer.", "developers.", "doc
 ///
 /// # Arguments
 ///
-/// - `html` — the raw HTML response body.
-/// - `url` — the final URL (after redirects), used for JSON content-type
+/// - `html` - the raw HTML response body.
+/// - `url` - the final URL (after redirects), used for JSON content-type
 ///   inference and domain-based heuristics.
-/// - `extracted_text_length` — the length of the extracted text content (after
+/// - `extracted_text_length` - the length of the extracted text content (after
 ///   readability/html2text processing). Used to distinguish JS shells (large
 ///   HTML, tiny text) from real articles.
 ///
 /// # Returns
 ///
-/// A [`PageType`] variant. Never panics — malformed HTML produces
+/// A [`PageType`] variant. Never panics - malformed HTML produces
 /// [`PageType::Unknown`].
 ///
 /// # Detection order
 ///
-/// 1. **JSON** — body starts with `{` or `[` and looks like JSON.
-/// 2. **Redirect** — `<meta http-equiv="refresh">` present.
-/// 3. **Auth wall** — login form signals in the first 5000 chars.
-/// 4. **Paywall** — subscription signals in the first 5000 chars.
-/// 5. **JS shell** — large body + tiny text + JS-required signals.
-/// 6. **Article** — `<article>` tag or substantial text with low link density.
-/// 7. **Docs** — documentation signals (code blocks, `<nav>` with many links).
-/// 8. **List** — high link density, many `<a>` tags relative to text.
-/// 9. **Forum** — forum/thread signals or forum domain.
-/// 10. **QA** — Q&A signals or Q&A domain.
-/// 11. **Image** — page is mostly a single `<img>`.
-/// 12. **Unknown** — fallback.
+/// 1. **JSON** - body starts with `{` or `[` and looks like JSON.
+/// 2. **Redirect** - `<meta http-equiv="refresh">` present.
+/// 3. **Auth wall** - login form signals in the first 5000 chars.
+/// 4. **Paywall** - subscription signals in the first 5000 chars.
+/// 5. **JS shell** - large body + tiny text + JS-required signals.
+/// 6. **Article** - `<article>` tag or substantial text with low link density.
+/// 7. **Docs** - documentation signals (code blocks, `<nav>` with many links).
+/// 8. **List** - high link density, many `<a>` tags relative to text.
+/// 9. **Forum** - forum/thread signals or forum domain.
+/// 10. **QA** - Q&A signals or Q&A domain.
+/// 11. **Image** - page is mostly a single `<img>`.
+/// 12. **Unknown** - fallback.
 ///
 /// # Examples
 ///
@@ -266,7 +266,7 @@ pub fn detect_page_type(html: &str, url: &str, extracted_text_length: usize) -> 
     let html_lower = html.to_ascii_lowercase();
     let body_bytes = html.len();
 
-    // 1. JSON — body starts with { or [ (after optional whitespace).
+    // 1. JSON - body starts with { or [ (after optional whitespace).
     let trimmed = html.trim_start();
     if trimmed.starts_with('{') || trimmed.starts_with('[') {
         // Quick sanity: try to verify it looks like JSON (not just HTML starting
@@ -276,7 +276,7 @@ pub fn detect_page_type(html: &str, url: &str, extracted_text_length: usize) -> 
         }
     }
 
-    // 2. Redirect — meta refresh.
+    // 2. Redirect - meta refresh.
     for indicator in REDIRECT_INDICATORS {
         if html_lower.contains(indicator) {
             // Meta refresh with a very short delay (0-3 seconds) is a redirect.
@@ -291,7 +291,7 @@ pub fn detect_page_type(html: &str, url: &str, extracted_text_length: usize) -> 
         }
     }
 
-    // 3. Auth wall — login signals in the first 5000 chars (where the
+    // 3. Auth wall - login signals in the first 5000 chars (where the
     //    above-the-fold content would be).
     let head = &html_lower[..head_len(html_lower.as_str(), 5000)];
     for signal in AUTH_WALL_SIGNALS {
@@ -304,7 +304,7 @@ pub fn detect_page_type(html: &str, url: &str, extracted_text_length: usize) -> 
         }
     }
 
-    // 4. Paywall — subscription signals.
+    // 4. Paywall - subscription signals.
     for signal in PAYWALL_SIGNALS {
         if head.contains(signal) {
             // Paywall pages may have article preview text, but the signals are
@@ -313,7 +313,7 @@ pub fn detect_page_type(html: &str, url: &str, extracted_text_length: usize) -> 
         }
     }
 
-    // 5. JS shell — large body + tiny text + JS-required signals.
+    // 5. JS shell - large body + tiny text + JS-required signals.
     if body_bytes >= JS_SHELL_MIN_BODY_BYTES && extracted_text_length < JS_SHELL_MAX_TEXT_CHARS {
         for signal in JS_SHELL_SIGNALS {
             if html_lower.contains(signal) {
@@ -327,32 +327,32 @@ pub fn detect_page_type(html: &str, url: &str, extracted_text_length: usize) -> 
         }
     }
 
-    // 6. Article — <article> tag with substantial text.
+    // 6. Article - <article> tag with substantial text.
     if html_lower.contains("<article") && extracted_text_length >= MIN_ARTICLE_TEXT_CHARS {
         return PageType::Article;
     }
 
-    // 7. Docs — documentation signals.
+    // 7. Docs - documentation signals.
     if is_docs_page(&html_lower, url) {
         return PageType::Docs;
     }
 
-    // 8. List — high link density.
+    // 8. List - high link density.
     if is_list_page(&html_lower, extracted_text_length) {
         return PageType::List;
     }
 
-    // 9. Forum — forum signals or forum domain.
+    // 9. Forum - forum signals or forum domain.
     if is_forum_page(&html_lower, url) {
         return PageType::Forum;
     }
 
-    // 10. QA — Q&A signals or Q&A domain.
+    // 10. QA - Q&A signals or Q&A domain.
     if is_qa_page(&html_lower, url) {
         return PageType::Qa;
     }
 
-    // 11. Article fallback — substantial text without other signals.
+    // 11. Article fallback - substantial text without other signals.
     if extracted_text_length >= MIN_ARTICLE_TEXT_CHARS {
         // Check for article-like structure: paragraphs.
         let p_count = html_lower.matches("<p").count();
@@ -361,7 +361,7 @@ pub fn detect_page_type(html: &str, url: &str, extracted_text_length: usize) -> 
         }
     }
 
-    // 12. Image — page is mostly a single <img>.
+    // 12. Image - page is mostly a single <img>.
     let img_count = html_lower.matches("<img").count();
     if img_count == 1 && extracted_text_length < 100 {
         return PageType::Image;
@@ -380,7 +380,7 @@ fn find_meta_refresh_content(html_lower: &str) -> Option<String> {
     let after_content = &meta_tag[content_pos + "content=".len()..];
     let quote = after_content.chars().next()?;
     if quote != '"' && quote != '\'' {
-        // Unquoted value — read until whitespace.
+        // Unquoted value - read until whitespace.
         let end = after_content
             .find(|c: char| c.is_whitespace())
             .unwrap_or(after_content.len());
@@ -512,7 +512,7 @@ fn is_qa_page(html_lower: &str, url: &str) -> bool {
 }
 
 /// Safely get the first `n` bytes of a string (or the whole string if shorter).
-/// Return a byte index ≤ `n` that is also a valid UTF-8 char boundary.
+/// Return a byte index <= `n` that is also a valid UTF-8 char boundary.
 ///
 /// `str::len()` counts **bytes**, so `&s[..min(s.len(), n)]` can panic when
 /// byte index `n` lands inside a multi-byte UTF-8 sequence. This helper walks
@@ -542,7 +542,7 @@ fn head_len(s: &str, n: usize) -> usize {
 ///
 /// # Arguments
 ///
-/// - `url` — the page URL (final URL after redirects).
+/// - `url` - the page URL (final URL after redirects).
 ///
 /// # Returns
 ///
@@ -665,16 +665,16 @@ pub fn classify_source_type(url: &str) -> (SourceType, bool) {
 ///
 /// # Arguments
 ///
-/// - `metadata` — the page's structured metadata (may have `published_time`
+/// - `metadata` - the page's structured metadata (may have `published_time`
 ///   and/or `modified_time` as ISO 8601 strings).
 ///
 /// # Returns
 ///
 /// A tuple of (`content_age_days`, `is_stale`):
 ///
-/// - `content_age_days` — number of days since the content date. `-1` when no
+/// - `content_age_days` - number of days since the content date. `-1` when no
 ///   date is recoverable or the date is in the future.
-/// - `is_stale` — `true` when `content_age_days > 365`.
+/// - `is_stale` - `true` when `content_age_days > 365`.
 ///
 /// # Examples
 ///
@@ -682,7 +682,7 @@ pub fn classify_source_type(url: &str) -> (SourceType, bool) {
 /// use ragent_tools_extended::masterfetch::envelope::compute_freshness;
 /// use ragent_tools_extended::masterfetch::PageMetadata;
 ///
-/// // No dates → content_age_days = -1.
+/// // No dates -> content_age_days = -1.
 /// let metadata = PageMetadata::default();
 /// let (age, stale) = compute_freshness(&metadata);
 /// assert_eq!(age, -1);
@@ -707,7 +707,7 @@ pub fn compute_freshness(metadata: &PageMetadata) -> (i64, bool) {
 
     let now = Utc::now();
 
-    // Future date → -1 (FR-030).
+    // Future date -> -1 (FR-030).
     if page_date > now {
         return (-1, false);
     }
@@ -731,7 +731,7 @@ pub fn compute_freshness(metadata: &PageMetadata) -> (i64, bool) {
 ///
 /// - `2024-01-15T10:30:00Z` (RFC 3339 / ISO 8601 with Z)
 /// - `2024-01-15T10:30:00+00:00` (with explicit offset)
-/// - `2024-01-15T10:30:00` (no timezone → assumed UTC)
+/// - `2024-01-15T10:30:00` (no timezone -> assumed UTC)
 /// - `2024-01-15 10:30:00` (space separator)
 /// - `2024-01-15` (date only)
 #[must_use]
@@ -777,20 +777,20 @@ pub fn parse_iso_date(s: &str) -> Option<DateTime<Utc>> {
 ///
 /// This is the primary entry point for envelope computation. It combines:
 ///
-/// - [`detect_page_type`] → `page_type`
-/// - [`classify_source_type`] → `source_type`, `is_official`
-/// - [`compute_freshness`] → `content_age_days`, `is_stale`
+/// - [`detect_page_type`] -> `page_type`
+/// - [`classify_source_type`] -> `source_type`, `is_official`
+/// - [`compute_freshness`] -> `content_age_days`, `is_stale`
 /// - The caller-supplied `content_ok` flag
 /// - A computed `next_action` suggestion based on the page type
 /// - A computed `summary` (empty by default; the caller can populate it)
 ///
 /// # Arguments
 ///
-/// - `html` — the raw HTML response body (used for page-type detection).
-/// - `url` ��� the final URL after redirects (used for source classification).
-/// - `metadata` — the page's structured metadata (used for freshness).
-/// - `content_ok` — `true` if usable content was extracted.
-/// - `extracted_text_length` — the length of the extracted text (used for
+/// - `html` - the raw HTML response body (used for page-type detection).
+/// - `url`  the final URL after redirects (used for source classification).
+/// - `metadata` - the page's structured metadata (used for freshness).
+/// - `content_ok` - `true` if usable content was extracted.
+/// - `extracted_text_length` - the length of the extracted text (used for
 ///   page-type detection).
 ///
 /// # Returns
@@ -876,5 +876,5 @@ fn extract_host(url: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — see tests/test_mf_envelope.rs (T-033, NFR-003)
+// Tests - see tests/test_mf_envelope.rs (T-033, NFR-003)
 // ---------------------------------------------------------------------------

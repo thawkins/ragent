@@ -1,4 +1,4 @@
-//! Teams subpanel — shown at the bottom of the log panel when a team is active.
+//! Teams subpanel - shown at the bottom of the log panel when a team is active.
 //!
 //! Renders the active team as a compact table with lead + teammates, including
 //! status, elapsed time, step count, and tasks claimed/completed.
@@ -13,7 +13,7 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use ragent_team::team::{MemberStatus, TaskStatus, TaskStore, TeamStore};
+use ragent_agent::team::{MemberStatus, TaskStatus, TaskStore, TeamStore};
 
 use crate::app::App;
 use crate::utils::{format_elapsed, short_id};
@@ -118,7 +118,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(format!("{:>6} ", "done"), dim),
         Span::styled(format!("{:>5} ", "sent"), dim),
         Span::styled(format!("{:>5} ", "recv"), dim),
-        Span::styled(format!(" {:>3} {:>3}", "▷⏹", "✕"), dim),
+        Span::styled(format!(" {:>3} {:>3}", ">[stop]", "[x]"), dim),
     ]));
 
     // ── lead row ─────────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         .copied()
         .unwrap_or((0, 0));
     lines.push(Line::from(vec![
-        Span::styled("● ", Style::default().fg(lead_status_color)),
+        Span::styled("* ", Style::default().fg(lead_status_color)),
         Span::styled(
             format!("{:<8} ", short_id(&lead_session)),
             Style::default()
@@ -212,7 +212,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         } else {
             Modifier::empty()
         };
-        let focus_marker = if is_focused { "▸" } else { " " };
+        let focus_marker = if is_focused { ">" } else { " " };
         let name_label = {
             let name_with_id = format!("{}-{}", member.name, id_short);
             let truncated: String = name_with_id.chars().take(31).collect();
@@ -290,9 +290,9 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         );
         if !is_terminal {
             let (btn_char, btn_fg) = if member.status == MemberStatus::Suspended {
-                ("▷", Color::Green)
+                (">", Color::Green)
             } else {
-                ("⏹", Color::Yellow)
+                ("[stop]", Color::Yellow)
             };
             spans.push(Span::styled("  ", Style::default()));
             spans.push(Span::styled(
@@ -301,7 +301,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             ));
             spans.push(Span::styled("  ", Style::default()));
             spans.push(Span::styled(
-                "✕",
+                "[x]",
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ));
             // Compute x positions from cumulative column widths.
@@ -327,7 +327,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     // Show a hint when no teammates yet.
     if members.is_empty() {
         lines.push(Line::from(vec![Span::styled(
-            "  (no teammates yet — use team_spawn tool or blueprint)",
+            "  (no teammates yet - use team_spawn tool or blueprint)",
             Style::default()
                 .fg(colors::HINT)
                 .add_modifier(Modifier::DIM),

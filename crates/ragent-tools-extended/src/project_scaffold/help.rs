@@ -9,8 +9,8 @@
 //!
 //! NFR-001: the `--language` / `--type` value lists come from
 //! [`language_value_list`] / [`app_type_value_list`] and the known-stack
-//! examples from [`STACK_RECIPES`] — the same registries `parse_flags`
-//! validates against — so the help text cannot drift out of sync with
+//! examples from [`STACK_RECIPES`] - the same registries `parse_flags`
+//! validates against - so the help text cannot drift out of sync with
 //! what the command actually accepts.
 
 use super::flags::{Language, app_type_value_list, language_value_list};
@@ -46,12 +46,12 @@ fn stack_help_lines() -> Vec<String> {
 ///
 /// # Arguments
 ///
-/// * `usage_lines` — surface-specific usage block, pre-indented lines
-///   without a trailing newline (e.g. the `/new …` slash spelling or the
-///   `ragent new …` binary spelling).
-/// * `example_minimal` — a minimal (no-hosting) example invocation line,
+/// * `usage_lines` - surface-specific usage block, pre-indented lines
+///   without a trailing newline (e.g. the `/new ...` slash spelling or the
+///   `ragent new ...` binary spelling).
+/// * `example_minimal` - a minimal (no-hosting) example invocation line,
 ///   pre-indented.
-/// * `example_hosted` — a hosting-flag example invocation line,
+/// * `example_hosted` - a hosting-flag example invocation line,
 ///   pre-indented.
 ///
 /// The accepted-value lists are derived from the language and app-type

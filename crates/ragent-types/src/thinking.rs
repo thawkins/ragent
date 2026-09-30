@@ -22,7 +22,7 @@ pub enum ThinkingLevel {
     /// Let the model/provider decide the appropriate thinking depth.
     #[default]
     Auto,
-    /// No reasoning / thinking — standard chat completion.
+    /// No reasoning / thinking - standard chat completion.
     Off,
     /// Low reasoning effort (fast, minimal chain-of-thought).
     Low,
@@ -90,7 +90,7 @@ impl ThinkingConfig {
         }
     }
 
-    /// Create an "off" config — thinking disabled.
+    /// Create an "off" config - thinking disabled.
     #[must_use]
     pub const fn off() -> Self {
         Self {
@@ -111,9 +111,9 @@ impl ThinkingConfig {
 /// Controls how thinking/reasoning content is surfaced in the model response.
 ///
 /// Maps to Anthropic's `thinking.type` field:
-/// - `Full` → `"enabled"` — include full thinking content in the response stream.
-/// - `Summarized` → future use (not yet supported by Anthropic).
-/// - `Omitted` → `"disabled"` — no thinking content in response.
+/// - `Full` -> `"enabled"` - include full thinking content in the response stream.
+/// - `Summarized` -> future use (not yet supported by Anthropic).
+/// - `Omitted` -> `"disabled"` - no thinking content in response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingDisplay {

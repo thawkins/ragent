@@ -1817,6 +1817,39 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.122
+
+Security and anti-pattern remediation sweep, folding in the staged working tree
+on top of `6cf0b60f` (MS-04).
+
+- **`ANTIPAT.md` milestones M2-M7 complete** — the anti-pattern remediation
+  plan closed its standards-conformance (M2), shared-helper de-duplication (M3),
+  silent-error suppression (M4), vocabulary unification (M5), structural /
+  complexity-debt (M6) and dependency/tooling-hygiene (M7) milestones. Only M1
+  (the ASCII/non-ASCII conformance sweep) remains open.
+- **`ragent-team` shim removed** — the 59-line pure re-export crate over
+  `ragent-agent` is deleted. `ragent-tui` already depended on `ragent-agent`
+  directly, so the team runtime keeps its single home in `ragent-agent` and the
+  workspace is now **16 crates** (`scripts/check-team-duplication.sh` fails if it
+  is reintroduced).
+- **Major dependency bumps** — `rmcp` 1.8 -> 3.5, `rusqlite` 0.32 -> 0.40,
+  `similar` 2.7 -> 3.2, `dirs` 6 -> 7, `sha2` 0.10 -> 0.11, `base64` 0.22 -> 0.23,
+  `printpdf` 0.9 -> 0.12 and `ratatui` 0.29 -> 0.30 (with the wrap-port parity
+  fix in the TUI message cache).
+- **`SECTASKS.md` MS-05 "prevent recurrence"** — the new
+  `ragent_types::guard` module (re-exported as `ragent_tools_core::guard`) owns
+  `reject_option_like`, `is_safe_operand`, `validate_identifier`,
+  `validate_relative_component`, `contained_join`, `clamp_retry_after` and
+  `cap_read`. `ragent-agent`, `ragent-storage` and `ragent-tools-core` re-export
+  `ragent_types::sanitize`, so there is one secret registry and one redaction
+  chokepoint. The `security-guards` CI job runs
+  `check-file-tool-containment.sh`, `check-security-unwraps.sh`,
+  `check-shared-guards.sh` and `check-vcs-duplication.sh` (each with a
+  `--self-test`).
+- **Earlier commits on the tree** — `da83d927` (MS-03 network and secret
+  hardening) and `6cf0b60f` (MS-04 defence in depth) close the Medium and Low
+  `SECTASKS.md` findings; `14c25e1d` tracks the `research/` output folder.
+
 ## Version 1.0.121
 
 - **`tool_info` and `commands_info` introspection tools** — two new read-only

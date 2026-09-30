@@ -264,7 +264,7 @@ fn parse_govcreate_hosting_conflict_is_usage() {
 
 #[test]
 fn parse_govcreate_flag_error_message_matches_new_surface() {
-    // FR-002: error text must not drift from `/new` — the shared parser is the
+    // FR-002: error text must not drift from `/new` - the shared parser is the
     // single source of truth, so the govcreate failure equals the /new failure.
     let direct = parse_flags(&["--language", "rust"])
         .unwrap_err()

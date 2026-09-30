@@ -301,7 +301,7 @@ fn truncate_for_log(s: &str) -> String {
 }
 // ---------- Whitespace-only wrapped rows must not shift the painted tail ----------
 
-/// ratatui 0.29 re-wraps a whitespace-only input row (e.g. `"  "`) into TWO
+/// ratatui re-wraps a whitespace-only input row (e.g. `"  "`) into TWO
 /// painted rows: a blank row plus the row of spaces (`WordWrapper
 /// ::process_input` pushes `vec![]` before draining the pending whitespace,
 /// and trim=false keeps the whitespace run).  The messages window therefore

@@ -1,20 +1,35 @@
-//! Tree-sitter–based source code parsing and symbol extraction.
+//! Tree-sitter-based source code parsing and symbol extraction.
 //!
 //! This module defines the `LanguageParser` trait and a [`ParserRegistry`]
 //! that dispatches parsing to language-specific implementations.
 
+/// C and C++ language parser.
 pub mod c_cpp;
+/// CMake language parser.
 pub mod cmake;
+/// Shared tree-sitter extraction context.
+pub mod ctx;
+/// Go language parser.
 pub mod go;
+/// Gradle (Groovy DSL) language parser.
 pub mod gradle;
+/// Gradle (Kotlin DSL) language parser.
 pub mod gradle_kts;
+/// HCL / Terraform language parser.
 pub mod hcl;
+/// Java language parser.
 pub mod java;
+/// Maven POM (XML) language parser.
 pub mod maven;
+/// OpenSCAD language parser.
 pub mod openscad;
+/// Python language parser.
 pub mod python;
+/// Rust language parser.
 pub mod rust;
+/// TypeScript / JavaScript / JSX / TSX language parser.
 pub mod typescript;
+/// Shared helpers for tree-sitter language parsers.
 pub mod util;
 
 use crate::types::{ImportEntry, Symbol, SymbolRef};

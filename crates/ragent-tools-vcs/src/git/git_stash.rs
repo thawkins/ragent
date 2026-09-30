@@ -1,4 +1,4 @@
-//! `git_stash` — Stash and unstash changes.
+//! `git_stash` - Stash and unstash changes.
 
 use anyhow::Result;
 use serde_json::{Value, json};

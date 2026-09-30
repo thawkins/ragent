@@ -363,3 +363,162 @@ fn add_confines_a_traversal_declared_id_to_the_store() {
         "a traversal id must not create a directory outside the store"
     );
 }
+
+// ── ANTIPAT M0.6: install integrity, aggregate cap, symlink refusal ─────────
+
+/// A successful install records the observed content digest in the store
+/// ledger (ANTIPAT H2), and the digest is stable across a reinstall of
+/// identical content.
+#[test]
+fn add_records_a_content_digest_in_the_ledger() {
+    let tree = TempTree::new("digest-recorded");
+    let store = tree.0.join("proj/.ragent/plugins");
+    let source = stage_codex_plugin(&tree.0.join("src"), CODEX);
+
+    add(
+        &dirs(&tree),
+        &tree.0,
+        source.to_str().expect("utf-8"),
+        false,
+    )
+    .expect("add");
+
+    let ledger = ragent_plugins::StoreLedger::load(&store);
+    let digest = ledger
+        .state("weather")
+        .expect("state present")
+        .content_digest
+        .clone()
+        .expect("a freshly installed plugin must carry a content digest");
+    assert_eq!(digest.len(), 64, "SHA-256 hex digest, got {digest:?}");
+    assert!(
+        digest.chars().all(|c| c.is_ascii_hexdigit()),
+        "digest must be hex, got {digest:?}"
+    );
+
+    // Reinstalling identical content must produce the same digest.
+    add(&dirs(&tree), &tree.0, source.to_str().expect("utf-8"), true).expect("force re-add");
+    let ledger = ragent_plugins::StoreLedger::load(&store);
+    assert_eq!(
+        ledger
+            .state("weather")
+            .expect("state present")
+            .content_digest
+            .as_deref(),
+        Some(digest.as_str()),
+        "the digest must be content-derived, not time-derived"
+    );
+}
+
+/// A changed file changes the recorded digest.
+#[test]
+fn add_digest_changes_when_content_changes() {
+    let tree = TempTree::new("digest-changes");
+    let store = tree.0.join("proj/.ragent/plugins");
+    let source = stage_codex_plugin(&tree.0.join("src"), CODEX);
+
+    add(
+        &dirs(&tree),
+        &tree.0,
+        source.to_str().expect("utf-8"),
+        false,
+    )
+    .expect("add");
+    let first = ragent_plugins::StoreLedger::load(&store)
+        .state("weather")
+        .expect("state present")
+        .content_digest
+        .clone()
+        .expect("digest");
+
+    std::fs::write(source.join("index.js"), "// tampered entry").expect("rewrite entry");
+    add(&dirs(&tree), &tree.0, source.to_str().expect("utf-8"), true).expect("force re-add");
+    let second = ragent_plugins::StoreLedger::load(&store)
+        .state("weather")
+        .expect("state present")
+        .content_digest
+        .clone()
+        .expect("digest");
+
+    assert_ne!(first, second, "a content change must change the digest");
+}
+
+/// A symlink inside the source directory is refused rather than dereferenced
+/// (ANTIPAT M18).
+#[cfg(unix)]
+#[test]
+fn add_refuses_a_symlinked_source_entry() {
+    let tree = TempTree::new("symlink-refused");
+    let store = tree.0.join("proj/.ragent/plugins");
+    let source = stage_codex_plugin(&tree.0.join("src"), CODEX);
+
+    let outside = tree.0.join("outside-secret.txt");
+    std::fs::write(&outside, "top secret").expect("write target");
+    std::os::unix::fs::symlink(&outside, source.join("linked.txt")).expect("symlink");
+
+    let err = add(
+        &dirs(&tree),
+        &tree.0,
+        source.to_str().expect("utf-8"),
+        false,
+    )
+    .expect_err("a symlink in the source must refuse the install");
+    assert!(
+        err.to_string().contains("symlink"),
+        "error must name the refused symlink, got: {err}"
+    );
+    assert!(
+        !store.join("weather/linked.txt").exists(),
+        "the symlink target must never be copied into the store"
+    );
+}
+
+// ── ANTIPAT M14: the shared identifier predicate backs the install sink ─────
+
+/// `confined_dest_dir` (via the `add` sink) must accept a valid id and refuse
+/// a traversal / absolute / multi-component id using the shared guard rule,
+/// while the error message keeps its original wording.
+#[test]
+fn add_still_installs_a_legitimate_plugin_id() {
+    let tree = TempTree::new("id-ok");
+    let source = stage_codex_plugin(&tree.0.join("src"), CODEX);
+    let outcome = add(
+        &dirs(&tree),
+        &tree.0,
+        source.to_str().expect("utf-8"),
+        false,
+    )
+    .expect("a safe declared id installs");
+    assert_eq!(outcome.parsed.descriptor.id, "weather");
+    assert!(outcome.installed_dir.ends_with("weather"));
+}
+
+// ── ANTIPAT M15: Io errors keep their source chain ──────────────────────────
+
+/// The `Io` variants now hold the structured `IoError`, whose `Display`
+/// preserves the underlying chain. A failed git clone surfaces the git detail
+/// rather than an opaque string.
+#[test]
+fn add_error_io_preserves_the_source_chain() {
+    // A `git+` source that cannot succeed (an unreachable host+port) surfaces
+    // the git failure through the chain-preserving IoError.
+    let tree = TempTree::new("io-chain");
+    let err = add(
+        &dirs(&tree),
+        &tree.0,
+        "git+https://127.0.0.1:1/none/none.git#main",
+        false,
+    )
+    .expect_err("an unreachable git remote must fail");
+    let AddError::Io(io) = &err else {
+        panic!("expected AddError::Io, got {err:?}");
+    };
+    assert!(
+        io.message_str().contains("git clone"),
+        "the IoError must carry the git detail, got: {}",
+        io.message_str()
+    );
+    // The wrapped error is a real error type, so a caller can walk its source
+    // rather than parse a string.
+    let _: &dyn std::error::Error = io;
+}

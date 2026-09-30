@@ -1,22 +1,22 @@
-//! `skill_manage` — Runtime management of the skill registry.
+//! `skill_manage` - Runtime management of the skill registry.
 //!
 //! Implements JCODEPLAN M8 T-071: lets the agent inspect, load, reload, and
 //! invoke skills on demand without restarting the session. Works against the
 //! canonical [`crate::skill::SkillRegistry`], reusing its scope-precedence
-//! rules (bundled → enterprise → OpenSkills → personal → project).
+//! rules (bundled -> enterprise -> OpenSkills -> personal -> project).
 //!
 //! # Actions
 //!
-//! - `list`     — enumerate registered skills (metadata only)
-//! - `read`     — return a skill's processed prompt/body (with optional
+//! - `list`     - enumerate registered skills (metadata only)
+//! - `read`     - return a skill's processed prompt/body (with optional
 //!                argument substitution)
-//! - `load`     — (re)discover skills and return the target skill's prompt,
+//! - `load`     - (re)discover skills and return the target skill's prompt,
 //!                the same content the model would receive on a `/skill`
 //!                invocation
-//! - `reload`   — drop all cached skill bodies and re-discover from disk;
+//! - `reload`   - drop all cached skill bodies and re-discover from disk;
 //!                returns a summary of what changed
 //!
-//! Skill bodies are loaded lazily per SPEC §3.19 / §21.1 — this tool forces
+//! Skill bodies are loaded lazily per SPEC S.3.19 / S.21.1 - this tool forces
 //! the lazy load and returns the fully processed prompt (arguments
 //! substituted, dynamic context injected when allowed).
 
@@ -72,7 +72,7 @@ impl Tool for SkillManageTool {
                 },
                 "include_bodies": {
                     "type": "boolean",
-                    "description": "When true, list includes each skill's full prompt body (default: false — metadata only)"
+                    "description": "When true, list includes each skill's full prompt body (default: false - metadata only)"
                 }
             },
             "required": ["action"],
@@ -111,7 +111,7 @@ fn build_registry(ctx: &ToolContext, extra_dirs: &[String]) -> crate::skill::Ski
     crate::skill::SkillRegistry::load(&ctx.working_dir, extra_dirs)
 }
 
-/// `list` — enumerate registered skills.
+/// `list` - enumerate registered skills.
 async fn action_list(
     input: &Value,
     ctx: &ToolContext,
@@ -267,7 +267,7 @@ async fn read_or_load(
     })
 }
 
-/// `read` — fetch a skill's processed prompt.
+/// `read` - fetch a skill's processed prompt.
 async fn action_read(
     input: &Value,
     ctx: &ToolContext,
@@ -276,7 +276,7 @@ async fn action_read(
     read_or_load("read", input, ctx, skill_dirs).await
 }
 
-/// `load` — discover + return a skill's prompt.
+/// `load` - discover + return a skill's prompt.
 async fn action_load(
     input: &Value,
     ctx: &ToolContext,
@@ -285,7 +285,7 @@ async fn action_load(
     read_or_load("load", input, ctx, skill_dirs).await
 }
 
-/// `reload` — re-discover all skills and report what changed.
+/// `reload` - re-discover all skills and report what changed.
 async fn action_reload(
     input: &Value,
     ctx: &ToolContext,

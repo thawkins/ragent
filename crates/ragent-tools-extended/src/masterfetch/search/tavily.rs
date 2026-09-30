@@ -15,13 +15,13 @@
 //! The [`build_request_body`] helper maps the shared [`SearchOptions`] to
 //! the Tavily JSON body:
 //!
-//! - `query` — the search query verbatim, truncated to Tavily's 400-character
+//! - `query` - the search query verbatim, truncated to Tavily's 400-character
 //!   limit.
-//! - `max_results` — `min(opts.max_results, 20)`, clamped to Tavily's
+//! - `max_results` - `min(opts.max_results, 20)`, clamped to Tavily's
 //!   documented maximum of 20.
-//! - `include_answer` — `false`, matching the legacy `websearch` tool
+//! - `include_answer` - `false`, matching the legacy `websearch` tool
 //!   behaviour and avoiding extra answer text in the response.
-//! - `search_depth` — `"basic"`, matching the legacy `websearch` tool
+//! - `search_depth` - `"basic"`, matching the legacy `websearch` tool
 //!   behaviour.
 //!
 //! # Response parsing
@@ -79,11 +79,11 @@ pub const MAX_QUERY_CHARS: usize = 400;
 ///
 /// # Requirements
 ///
-/// - **FR-001** — Tavily backend that plugs into the `SearchEngine` trait.
-/// - **FR-003** — translate `SearchOptions` into the Tavily JSON body.
-/// - **FR-005** — failures are reported as `engine_blocked` so the other
+/// - **FR-001** - Tavily backend that plugs into the `SearchEngine` trait.
+/// - **FR-003** - translate `SearchOptions` into the Tavily JSON body.
+/// - **FR-005** - failures are reported as `engine_blocked` so the other
 ///   `mf_search` backends can still return results.
-/// - **FR-012** — the API key is never logged in plain text.
+/// - **FR-012** - the API key is never logged in plain text.
 #[derive(Debug, Clone)]
 pub struct TavilyEngine {
     /// Tavily API key (`Authorization: Bearer {api_key}`).
@@ -210,10 +210,10 @@ impl SearchEngine for TavilyEngine {
 ///
 /// The returned [`serde_json::Value`] contains:
 ///
-/// - `query` — trimmed to Tavily's 400-character limit.
-/// - `max_results` — clamped to 1–20.
-/// - `include_answer` — `false`.
-/// - `search_depth` — `"basic"`.
+/// - `query` - trimmed to Tavily's 400-character limit.
+/// - `max_results` - clamped to 1-20.
+/// - `include_answer` - `false`.
+/// - `search_depth` - `"basic"`.
 ///
 /// # Examples
 ///

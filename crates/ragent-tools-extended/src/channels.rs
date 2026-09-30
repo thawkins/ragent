@@ -1,10 +1,10 @@
-//! Channel messaging tool (`send_channel_message`) — JCODEPLAN M7 (T-061).
+//! Channel messaging tool (`send_channel_message`) - JCODEPLAN M7 (T-061).
 //!
 //! Posts notification messages to externally configured messaging channels.
 //! Currently supported channel kinds:
 //!
-//! - **Telegram** — via the Bot API `sendMessage` endpoint.
-//! - **Discord** — via channel webhooks (`POST <webhook_url>`).
+//! - **Telegram** - via the Bot API `sendMessage` endpoint.
+//! - **Discord** - via channel webhooks (`POST <webhook_url>`).
 //!
 //! # Configuration
 //!
@@ -36,14 +36,12 @@
 use anyhow::{Context, Result, bail};
 use ragent_config::ChannelsConfig;
 use serde_json::{Value, json};
-use std::time::Duration;
 
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Tool name used by the LLM.
 pub const SEND_CHANNEL_MESSAGE_TOOL_NAME: &str = "send_channel_message";
 
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_MESSAGE_BYTES: usize = 4096;
 const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
 
@@ -155,7 +153,7 @@ impl SendChannelMessageTool {
 
     /// Build the status payload describing configured channels.
     ///
-    /// Never includes secret material — only booleans describing whether each
+    /// Never includes secret material - only booleans describing whether each
     /// channel is fully configured.
     fn status_payload(ctx: &ToolContext) -> Value {
         let Some(channels) = Self::channels_config(ctx) else {
@@ -202,10 +200,10 @@ impl SendChannelMessageTool {
             "{}/bot{}/sendMessage",
             resolved.base_url, resolved.bot_token
         );
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-            .build()
-            .context("Failed to build HTTP client")?;
+        // ANTIPAT M5.9 / 3.2: reuse the shared client singleton (connection
+        // pool + TLS session cache) instead of building a fresh client per send.
+        let client =
+            crate::masterfetch::http::shared_client().context("Failed to build HTTP client")?;
 
         let resp = client
             .post(&url)
@@ -218,7 +216,16 @@ impl SendChannelMessageTool {
             .with_context(|| "Failed to reach Telegram Bot API".to_string())?;
 
         let status = resp.status();
-        let body: Value = resp.json().await.unwrap_or(Value::Null);
+        // ANTIPAT M5.9 / 3.5: bound the response body before parsing instead of
+        // an unbounded `resp.json()`.
+        let body: Value = crate::masterfetch::http::read_body_capped_lossy(
+            resp,
+            crate::masterfetch::http::MAX_SMALL_BODY_BYTES,
+        )
+        .await
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or(Value::Null);
         if !status.is_success() || body.get("ok").and_then(Value::as_bool) == Some(false) {
             let description = body
                 .get("description")
@@ -235,10 +242,17 @@ impl SendChannelMessageTool {
     }
 
     async fn send_discord(webhook_url: &str, message: &str) -> Result<String> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-            .build()
-            .context("Failed to build HTTP client")?;
+        // SEC-tools-extended-00x (ANTIPAT 3.1): `channels.discord.webhook_url`
+        // is config-supplied, and this sibling of `send_telegram` had no
+        // public-target check, so a config could point the tool at an internal
+        // service. Same policy as Telegram: a loopback target is permitted
+        // (documented local-mock/test shape); every other private, link-local,
+        // metadata, and rebinding host is refused.
+        refuse_non_public_target("discord webhook_url", webhook_url)?;
+        // ANTIPAT M5.9 / 3.2: reuse the shared client singleton instead of
+        // building a fresh client per send.
+        let client =
+            crate::masterfetch::http::shared_client().context("Failed to build HTTP client")?;
 
         let resp = client
             .post(webhook_url)
@@ -251,7 +265,14 @@ impl SendChannelMessageTool {
         // object when ?wait=true) on success.
         if !resp.status().is_success() {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+            // ANTIPAT 4.1: cap the error body (a hostile upstream can answer
+            // with an arbitrarily large one).
+            let body = crate::masterfetch::http::read_body_capped(
+                resp,
+                crate::masterfetch::http::MAX_SMALL_BODY_BYTES,
+            )
+            .await
+            .unwrap_or_default();
             bail!("Discord webhook send failed (HTTP {status}): {body}");
         }
         Ok("discord webhook delivered".to_string())
@@ -338,7 +359,7 @@ impl Tool for SendChannelMessageTool {
                         let enabled = payload["enabled"].as_bool().unwrap_or(false);
                         let configured = payload["configured"].as_bool().unwrap_or(false);
                         format!(
-                            "channels.enabled={enabled}, configured={configured} — {}",
+                            "channels.enabled={enabled}, configured={configured} - {}",
                             serde_json::to_string_pretty(&payload["channels"]).unwrap_or_default()
                         )
                     }

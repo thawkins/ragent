@@ -1,4 +1,4 @@
-//! `git_commit` — Create a commit.
+//! `git_commit` - Create a commit.
 
 use anyhow::Result;
 use serde_json::{Value, json};

@@ -260,6 +260,7 @@ async fn test_write_govcreate_spec_creates_directory_and_files() {
     let temp = tempfile::tempdir().expect("tempdir");
     let dir = SpecCommand::write_govcreate_spec(
         temp.path(),
+        temp.path(),
         "payments-arch",
         "---\nstatus: draft\n---\n## Requirements\n",
         "## Tasks\n",
@@ -284,6 +285,7 @@ async fn test_write_govcreate_spec_refuses_existing_without_force() {
     std::fs::write(existing.join("SPEC.md"), "original").expect("seed SPEC.md");
 
     let result = SpecCommand::write_govcreate_spec(
+        temp.path(),
         temp.path(),
         "payments-arch",
         "new SPEC",
@@ -316,6 +318,7 @@ async fn test_write_govcreate_spec_overwrites_with_force() {
 
     SpecCommand::write_govcreate_spec(
         temp.path(),
+        temp.path(),
         "payments-arch",
         "new SPEC",
         "new PLAN",
@@ -334,6 +337,7 @@ async fn test_write_govcreate_spec_overwrites_with_force() {
 async fn test_write_govcreate_spec_writes_atomically_without_tmp_leftovers() {
     let temp = tempfile::tempdir().expect("tempdir");
     let dir = SpecCommand::write_govcreate_spec(
+        temp.path(),
         temp.path(),
         "clean-arch",
         "SPEC",
@@ -354,4 +358,67 @@ async fn test_write_govcreate_spec_writes_atomically_without_tmp_leftovers() {
         leftovers.is_empty(),
         "no temp files should remain: {leftovers:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// ANTIPAT M0.7: the target folder is contained to the invoking root
+// ---------------------------------------------------------------------------
+
+/// A `../..` target folder must be refused (ANTIPAT H-1): the join reached a
+/// `create_dir_all` plus three file writes with no containment check.
+#[tokio::test]
+async fn test_write_govcreate_spec_refuses_an_escaping_target_folder() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("project");
+    std::fs::create_dir_all(&root).expect("project dir");
+    let escaping = root.join("../../../escaped-specs");
+
+    let err = SpecCommand::write_govcreate_spec(
+        &escaping,
+        &root,
+        "payments-arch",
+        "SPEC",
+        "PLAN",
+        "TESTPLAN",
+        false,
+    )
+    .await
+    .expect_err("an escaping target folder must be refused");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("escapes the invoking root"),
+        "refusal must name the containment failure, got: {message}"
+    );
+    assert!(
+        !temp
+            .path()
+            .join("escaped-specs/specs/payments-arch")
+            .exists(),
+        "nothing may be written outside the invoking root"
+    );
+}
+
+/// A target folder inside the invoking root still succeeds.
+#[tokio::test]
+async fn test_write_govcreate_spec_accepts_a_contained_target_folder() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("project");
+    std::fs::create_dir_all(&root).expect("project dir");
+    let nested = root.join("docs");
+
+    let dir = SpecCommand::write_govcreate_spec(
+        &nested,
+        &root,
+        "payments-arch",
+        "SPEC",
+        "PLAN",
+        "TESTPLAN",
+        false,
+    )
+    .await
+    .expect("a contained target folder must be accepted");
+
+    assert!(dir.join("SPEC.md").is_file());
+    assert!(dir.starts_with(root.canonicalize().expect("canonical root")));
 }

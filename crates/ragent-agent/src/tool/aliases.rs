@@ -1,6 +1,6 @@
 //! Alias tools that map commonly hallucinated tool names to canonical implementations.
 //!
-//! Many LLMs emit tool names that differ from ragent's canonical names — either
+//! Many LLMs emit tool names that differ from ragent's canonical names - either
 //! because they have been trained on different coding-agent frameworks or because
 //! they extrapolate plausible-sounding names from the task context.  Rather than
 //! returning "Unknown tool" errors, each alias tool normalises its parameter names
@@ -11,7 +11,7 @@
 //! | Alias name          | Canonical tool | Notes                              |
 //! |---------------------|----------------|------------------------------------|
 //! | `update_file`       | `write`        | `content` pass-through            |
-//! | `run_code`          | `bash`         | `code` → `command`                |
+//! | `run_code`          | `bash`         | `code` -> `command`                |
 //! | `ask_user`          | (self)         | free-text or multiple-choice user prompt |
 
 use anyhow::{Context, Result};
@@ -52,7 +52,7 @@ fn extract_command(input: &mut Value) -> Option<String> {
         input["command"] = Value::String(s.clone());
         return Some(s);
     }
-    // Then `cmd` — may be a string or an array
+    // Then `cmd` - may be a string or an array
     match &input["cmd"] {
         Value::String(s) => {
             let cmd = s.clone();
@@ -77,7 +77,7 @@ fn extract_command(input: &mut Value) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// update_file → write
+// update_file -> write
 // ---------------------------------------------------------------------------
 
 /// Alias for `write`. Accepts `path` and `content`.

@@ -1,13 +1,13 @@
-//! Process resource limits — bounded concurrency for child process spawns
+//! Process resource limits - bounded concurrency for child process spawns
 //! and tool execution.
 //!
 //! Provides global [`Semaphore`](tokio::sync::Semaphore) instances that gate:
 //!
-//! 1. **Process spawning** — how many child processes may be in flight at once.
+//! 1. **Process spawning** - how many child processes may be in flight at once.
 //!    All process-spawning call sites (`BashTool`, dynamic context commands, MCP
 //!    stdio servers) should acquire a permit from [`acquire_process_permit`].
 //!
-//! 2. **Tool execution** — how many tool calls may run concurrently within a
+//! 2. **Tool execution** - how many tool calls may run concurrently within a
 //!    single agent loop iteration.  The session processor acquires a permit
 //!    from [`acquire_tool_permit`] before spawning each tool call task.
 //!
@@ -29,7 +29,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 /// Maximum number of concurrent child processes the agent may spawn.
 ///
 /// This covers `BashTool` executions, dynamic context commands, and MCP stdio
-/// server processes.  The value is intentionally conservative — most workloads
+/// server processes.  The value is intentionally conservative - most workloads
 /// need at most 4-6 concurrent processes.
 pub const MAX_CONCURRENT_PROCESSES: usize = 16;
 

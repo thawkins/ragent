@@ -2,15 +2,15 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use ragent_agent::team::{
+    self, Mailbox, MailboxMessage, MemberStatus, MessageType, TeamMember, TeamStore,
+};
 use ragent_agent::{
     agent::ModelRef,
     event::{Event, FinishReason},
     message::{Message, MessagePart, Role},
     permission::PermissionRequest,
     provider::ModelInfo,
-};
-use ragent_team::team::{
-    self, Mailbox, MailboxMessage, MemberStatus, MessageType, TeamMember, TeamStore,
 };
 use ragent_telemetry::counters as telemetry_counters;
 
@@ -25,6 +25,11 @@ use crate::app::state::{
 use crate::app::helpers::{hard_break_lines, short_session_id, summarise_error};
 use crate::app::session_ops::recover_poisoned;
 use crate::widgets::message_widget::truncate_str;
+
+/// Maximum number of characters of an error string shown in the log/status
+/// before it is truncated, so a multi-kilobyte provider error cannot flood the
+/// message window (used by the `TeammateFailed` event handler).
+const ERROR_PREVIEW_CHARS: usize = 200;
 
 impl App {
     /// Render a swarm failure uniformly: status line, chat panel message,
@@ -98,7 +103,7 @@ impl App {
             self.status = format!("agent: plan (delegated from {})", prev_name);
             self.push_log_no_agent(
                 LogLevel::Info,
-                format!("plan delegation: {} → plan", prev_name),
+                format!("plan delegation: {} -> plan", prev_name),
             );
 
             // Publish the switch event
@@ -235,7 +240,7 @@ impl App {
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
-                            "Context compression finished: {} → {} tokens ({:.2}x ratio, saved {})",
+                            "Context compression finished: {} -> {} tokens ({:.2}x ratio, saved {})",
                             original_tokens, compressed_tokens, compression_ratio, saved
                         ),
                     );
@@ -259,7 +264,7 @@ impl App {
             } if self.is_current_session(session_id) => {
                 // Accumulate across the whole turn (reset happens at turn
                 // start in dispatch_user_message / dispatch_bang_command /
-                // start_goal_loop), not per LLM request — each tool-call
+                // start_goal_loop), not per LLM request - each tool-call
                 // round-trip within a turn also fires RequestStarted.
                 self.stream_out_bytes += outbound_bytes;
                 telemetry_counters::increment_llm_requests(1);
@@ -304,7 +309,7 @@ impl App {
 
                     // If args were received before the start event, apply them now.
                     if let Some(args_json) = self.pending_tool_args.remove(call_id) {
-                        let _ = self.update_tool_call_input(call_id, &args_json);
+                        let _ = self.update_tool_call_input(call_id, &args_json); // INTENTIONAL: returns whether the pending call matched; no error
                     }
                     self.status = format!("running: {}", tool);
                 }
@@ -427,14 +432,14 @@ impl App {
                         // render with a missing input summary. Apply any pending
                         // args now so the header shows the path/command/etc.
                         if let Some(args_json) = self.pending_tool_args.remove(&entry.call_id) {
-                            let _ = self.update_tool_call_input(&entry.call_id, &args_json);
+                            let _ = self.update_tool_call_input(&entry.call_id, &args_json); // INTENTIONAL: returns whether the pending call matched; no error
                         }
                         // The batch entry now carries the call's raw JSON args, so
                         // apply them as a fallback when the per-call ToolCallArgs
-                        // event never arrived (e.g. the broadcast→mpsc bridge task
+                        // event never arrived (e.g. the broadcast->mpsc bridge task
                         // aborted after a Lagged error racing a permission prompt).
                         // Pending args already applied above take precedence.
-                        let _ = self.update_tool_call_input(&entry.call_id, &entry.args);
+                        let _ = self.update_tool_call_input(&entry.call_id, &entry.args); // INTENTIONAL: returns whether the pending call matched; no error
                         self.update_tool_call_status(
                             &entry.call_id,
                             entry.success,
@@ -474,7 +479,7 @@ impl App {
             } if self.is_current_session(session_id) => {
                 // The "init" message_id is used exclusively by the AGENTS.md
                 // acknowledgment exchange that runs before the main agent loop.
-                // It must NOT reset processing state — the main loop hasn't
+                // It must NOT reset processing state - the main loop hasn't
                 // started yet.  Only set force_new_message so the real response
                 // starts in a fresh message block.
                 if message_id == "init" {
@@ -486,7 +491,7 @@ impl App {
                 self.cancel_flag = None;
                 if *reason == FinishReason::Cancelled {
                     self.agent_halted = true;
-                    self.status = "halted — /resume to continue".to_string();
+                    self.status = "halted - /resume to continue".to_string();
                     self.push_log_no_agent(LogLevel::Warn, "Agent halted by user".to_string());
                 } else {
                     self.agent_halted = false;
@@ -510,7 +515,7 @@ impl App {
                     self.execute_plan_delegation(session_id, task, context);
                 }
 
-                // FR-012: /spec reverse --create <name> chaining — after the LLM
+                // FR-012: /spec reverse --create <name> chaining - after the LLM
                 // finishes generating the synthetic prompt, invoke
                 // `/spec create <name> <generated-prompt>` using the last
                 // assistant message as the prompt text.
@@ -555,7 +560,7 @@ impl App {
                 // agent_complete, automatically send a continuation prompt so the agent
                 // keeps working towards its goal.
                 // If TaskCompleted was consumed before us, autopilot_enabled will already
-                // be false and this block is unreachable — this is just a defensive fallback.
+                // be false and this block is unreachable - this is just a defensive fallback.
                 if self.autopilot_enabled
                     && *reason != FinishReason::Cancelled
                     && self.last_task_completed_at.is_none()
@@ -573,9 +578,7 @@ impl App {
                         self.autopilot_started_at = None;
                         self.autopilot_pending_continue = None;
                         self.status = "autopilot: time limit reached".to_string();
-                        self.append_assistant_text(
-                            "⚡ **Autopilot stopped** — time limit reached.",
-                        );
+                        self.append_assistant_text(" **Autopilot stopped** - time limit reached.");
                         self.push_log_no_agent(
                             LogLevel::Warn,
                             "autopilot stopped: time limit".to_string(),
@@ -585,7 +588,7 @@ impl App {
                         self.autopilot_pending_continue = Some(
                                 "Continue working on the task. When fully done, call agent_complete with a summary.".to_string()
                             );
-                        self.status = "⚡ autopilot".to_string();
+                        self.status = " autopilot".to_string();
                     }
                 }
 
@@ -605,7 +608,7 @@ impl App {
                 //
                 // A queue-control `Next` selection (FR-024) cancels the turn
                 // precisely so the oldest entry can run, so it forces the drain at
-                // the very boundary its own cancel opened — otherwise the deferred
+                // the very boundary its own cancel opened - otherwise the deferred
                 // run would never fire on the cancelled path.
                 if *reason != FinishReason::Cancelled || self.queue_next_pending {
                     self.advance_input_queue().await;
@@ -652,7 +655,7 @@ impl App {
                         self.status = "awaiting permission".to_string();
                         self.push_log_no_agent(
                             LogLevel::Warn,
-                            format!("permission requested: {} — {}", permission, description),
+                            format!("permission requested: {} - {}", permission, description),
                         );
                     }
                 } else {
@@ -742,7 +745,7 @@ impl App {
                 }
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("agent switched: {} → {}", from, to),
+                    format!("agent switched: {} -> {}", from, to),
                 );
             }
             Event::AgentSwitchRequested {
@@ -753,7 +756,7 @@ impl App {
             } if self.is_current_session(session_id) => {
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("agent switch requested → {} ({})", to, task),
+                    format!("agent switch requested -> {} ({})", to, task),
                 );
                 self.pending_plan_task = Some((task.clone(), context.clone()));
             }
@@ -832,7 +835,7 @@ impl App {
                         self.push_log_no_agent(
                             level,
                             format!(
-                                "research: {} — {}",
+                                "research: {} - {}",
                                 decoded.phase.as_str(),
                                 crate::app::helpers::sanitize_for_display(&decoded.detail)
                             ),
@@ -849,7 +852,7 @@ impl App {
                         self.status = format!("[warn] research: {}", decoded.detail);
                     } else if decoded.total_sources.is_none() {
                         self.status = format!(
-                            "[wait] research: {} — {} ({}) — running",
+                            "[wait] research: {} - {} ({}) - running",
                             decoded.name,
                             decoded.phase.as_str(),
                             decoded.status.icon(),
@@ -890,7 +893,7 @@ impl App {
                         // message and arm the auto-expiry timer so it
                         // transitions to "ready" after the grace period.
                         let mut status =
-                            format!("research: {} complete — {total} sources", decoded.name);
+                            format!("research: {} complete - {total} sources", decoded.name);
                         if decoded.pdf_count > 0 {
                             status.push_str(&format!(
                                 ", {} PDF{}",
@@ -931,8 +934,12 @@ impl App {
                 // other, and again afterwards so streamed text does not merge
                 // into the notice bubble (the renderer adds a trailing blank
                 // line after every notice for separation).
+                // A `[notice] ` marker is prepended so the renderer can style
+                // the bubble (see `is_agent_notice`); the plain-text prefix
+                // `Agent Notice` is what the widget matches on (ANTIPAT M1:
+                // the emoji prefix was replaced with the ASCII marker).
                 self.force_new_message = true;
-                self.append_assistant_text(&format!("📋 Agent Notice\n{}", message));
+                self.append_assistant_text(&format!("[notice] Agent Notice\n{}", message));
                 self.force_new_message = true;
             }
             Event::AgentError {
@@ -996,22 +1003,22 @@ impl App {
                 ref reason,
             } if self.is_current_session(session_id) => {
                 // T-025 (FR-019): the termination renders as a status-aware
-                // banner in the message window — icon + phrase + iteration
-                // count — with verification outcome and failure reason
+                // banner in the message window - icon + phrase + iteration
+                // count - with verification outcome and failure reason
                 // appended when present. The log panel carries the same
                 // detail on a single line.
                 let mut banner = crate::app::helpers::loop_termination_banner(status, iterations);
                 let mut line = format!(
-                    "loop terminated · {status} · {}",
+                    "loop terminated * {status} * {}",
                     crate::app::helpers::plural(iterations, "iteration"),
                 );
                 if let Some(outcome) = verification {
                     banner.push_str(&format!("\nVerification: {outcome}"));
-                    line.push_str(&format!(" · verification: {outcome}"));
+                    line.push_str(&format!(" * verification: {outcome}"));
                 }
                 if let Some(why) = reason {
                     banner.push_str(&format!("\nReason: {why}"));
-                    line.push_str(&format!(" · {why}"));
+                    line.push_str(&format!(" * {why}"));
                 }
                 self.force_new_message = true;
                 self.append_assistant_text(&banner);
@@ -1033,8 +1040,8 @@ impl App {
                 // the same summary as a diffstat line in the message window
                 // and arms the interactive rollback offer.
                 let mut line = format!(
-                    "loop changes · {status} · {} · \
-                     {modified} modified, {created} created, {deleted} deleted · \
+                    "loop changes * {status} * {} * \
+                     {modified} modified, {created} created, {deleted} deleted * \
                      {diffstat}",
                     crate::app::helpers::plural(iterations, "iteration"),
                     modified = files_modified,
@@ -1045,8 +1052,8 @@ impl App {
                 // Diffstat line in the message window: counts + diffstat +
                 // affected paths, mirroring the log line.
                 let mut summary_line = format!(
-                    "⟳ Loop changes ({status}, {}): \
-                     {modified} modified, {created} created, {deleted} deleted — {diffstat}",
+                    "* Loop changes ({status}, {}): \
+                     {modified} modified, {created} created, {deleted} deleted - {diffstat}",
                     crate::app::helpers::plural(iterations, "iteration"),
                     modified = files_modified,
                     created = files_created,
@@ -1072,7 +1079,7 @@ impl App {
                     files: files.clone(),
                 });
                 self.status =
-                    "loop ended — Enter: roll back to pre-loop snapshot, Esc: keep changes"
+                    "loop ended - Enter: roll back to pre-loop snapshot, Esc: keep changes"
                         .to_string();
                 self.needs_redraw = true;
             }
@@ -1088,7 +1095,7 @@ impl App {
                 let duration_secs = (duration_ms as f64) / 1000.0;
                 // Compact one-line banner shown transiently (dismissed on keypress).
                 let banner = format!(
-                    "⟡ run complete · {in}+{out} tokens · ${cost:.4} · {dur:.1}s",
+                    "* run complete * {in}+{out} tokens * ${cost:.4} * {dur:.1}s",
                     in = input_tokens,
                     out = output_tokens,
                     cost = total_cost_usd,
@@ -1101,7 +1108,7 @@ impl App {
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!(
-                        "⟡ run complete · {in}in / {out}out tokens · model {model} · ${cost:.6} · {ms}ms ({dur:.2}s)",
+                        "* run complete * {in}in / {out}out tokens * model {model} * ${cost:.6} * {ms}ms ({dur:.2}s)",
                         in = input_tokens,
                         out = output_tokens,
                         model = model_id,
@@ -1125,11 +1132,11 @@ impl App {
                     while end > 0 && !stderr.is_char_boundary(end) {
                         end -= 1;
                     }
-                    format!("{}…", &stderr[..end])
+                    format!("{}...", &stderr[..end])
                 } else {
                     stderr.clone()
                 };
-                self.status = format!("hook warning: {} — {}", tool, short_reason);
+                self.status = format!("hook warning: {} - {}", tool, short_reason);
                 self.arm_status_expiry();
                 self.push_log_no_agent(
                     LogLevel::Warn,
@@ -1233,7 +1240,7 @@ impl App {
                 let preview = crate::app::helpers::truncate_chars(pretty.trim(), 200);
                 self.push_log_no_agent(
                     LogLevel::Tool,
-                    format!("{}→ {}({})", step_tag, tool, preview),
+                    format!("{}-> {}({})", step_tag, tool, preview),
                 );
                 self.needs_redraw = true;
             }
@@ -1271,12 +1278,12 @@ impl App {
                     .get(call_id)
                     .map(|(_sid, step, substep)| format!("[{step}.{substep}] "))
                     .unwrap_or_default();
-                let icon = if success { "✓" } else { "✗" };
+                let icon = if success { "[ok]" } else { "[x]" };
                 let display_content = truncate_str(content, 2516);
                 let log_line = if display_content.is_empty() {
-                    format!("{}← {} {}", step_tag, tool, icon)
+                    format!("{}<- {} {}", step_tag, tool, icon)
                 } else {
-                    format!("{}← {} {} {}", step_tag, tool, icon, display_content)
+                    format!("{}<- {} {} {}", step_tag, tool, icon, display_content)
                 };
                 self.push_log_no_agent(LogLevel::Tool, log_line);
                 // Mark the Tasks side-panel cache stale when task data
@@ -1446,7 +1453,7 @@ impl App {
                 }
                 self.push_log_for(
                     LogLevel::Info,
-                    format!("▷ Task resumed ({})", &task_id[..8.min(task_id.len())]),
+                    format!("> Task resumed ({})", &task_id[..8.min(task_id.len())]),
                     None,
                     Some(child_session_id.clone()),
                 );
@@ -1570,7 +1577,7 @@ impl App {
                         m.session_id = stored.session_id.clone();
                         m.status = stored.status.clone();
                         m.current_task_id = stored.current_task_id.clone();
-                        // Map this teammate's session short_sid → a unique display
+                        // Map this teammate's session short_sid -> a unique display
                         // label (name + agent id) so tool step tags and panels can
                         // distinguish teammates with the same name.
                         if let Some(ref sid) = stored.session_id {
@@ -1612,7 +1619,7 @@ impl App {
                 }
                 self.push_log_for(
                     LogLevel::Info,
-                    format!("📨 [{team_name}] {from} → {to} ({message_type}): {preview}"),
+                    format!("[msg] [{team_name}] {from} -> {to} ({message_type}): {preview}"),
                     None,
                     self.team_member_session_id_by_agent_id(from),
                 );
@@ -1636,7 +1643,9 @@ impl App {
                 to_counts.1 = to_counts.1.saturating_add(1);
                 self.push_log_for(
                     LogLevel::Info,
-                    format!("🔀 [{team_name}] P2P {from} → {to} ({message_type}): {preview}"),
+                    format!(
+                        "[shuffle] [{team_name}] P2P {from} -> {to} ({message_type}): {preview}"
+                    ),
                     None,
                     self.team_member_session_id_by_agent_id(from),
                 );
@@ -1660,7 +1669,7 @@ impl App {
                 }
                 self.push_log_for(
                     LogLevel::Info,
-                    format!("💤 [{team_name}] Teammate {agent_id} is idle"),
+                    format!("[sleep] [{team_name}] Teammate {agent_id} is idle"),
                     None,
                     self.team_member_session_id_by_agent_id(agent_id),
                 );
@@ -1684,15 +1693,9 @@ impl App {
                 if let Some(tm) = self.session_processor.team_manager.get() {
                     tm.record_progress(agent_id);
                 }
-                let short_err = if error.len() > 200 {
-                    let mut end = 200;
-                    while end > 0 && !error.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    format!("{}…", &error[..end])
-                } else {
-                    error.to_string()
-                };
+                // Truncate on a char boundary so the appended ellipsis cannot
+                // split a multi-byte UTF-8 sequence.
+                let short_err = truncate_str(error, ERROR_PREVIEW_CHARS);
                 self.push_log_for(
                     LogLevel::Error,
                     format!("[err] [{team_name}] Teammate {agent_id} failed: {short_err}"),
@@ -1720,7 +1723,7 @@ impl App {
                 }
                 self.push_log_for(
                     LogLevel::Info,
-                    format!("📋 [{team_name}] {agent_id} claimed task {task_id}"),
+                    format!("[notice] [{team_name}] {agent_id} claimed task {task_id}"),
                     None,
                     self.team_member_session_id_by_agent_id(agent_id),
                 );
@@ -1887,7 +1890,7 @@ impl App {
                     while end > 0 && !prompt.is_char_boundary(end) {
                         end -= 1;
                     }
-                    format!("{}…", &prompt[..end])
+                    format!("{}...", &prompt[..end])
                 } else {
                     prompt.clone()
                 };
@@ -2342,7 +2345,7 @@ impl App {
                 m.name.clone(),
                 m.session_id.clone(),
             );
-            self.status = format!("team: focused → {}", m.name);
+            self.status = format!("team: focused -> {}", m.name);
         }
     }
 
@@ -2396,7 +2399,7 @@ impl App {
                             Ok(_) => {
                                 self.push_log_no_agent(
                                     LogLevel::Info,
-                                    format!("📨 lead → {teammate_name}: {text}"),
+                                    format!("[msg] lead -> {teammate_name}: {text}"),
                                 );
                                 self.status = format!("message sent to {teammate_name}");
                             }
@@ -2522,7 +2525,7 @@ impl App {
         };
         let rendered = self.render_markdown_to_ascii(&progress.render());
         // Must match the first line emitted by `ResearchProgress::render`
-        // ("[research] Research Progress — `{name}`") so the existing
+        // ("[research] Research Progress - `{name}`") so the existing
         // message is replaced in place instead of duplicating per event.
         const HEADER: &str = "[research] Research Progress";
         // Each research run gets its own message in the window, tagged with
@@ -2530,7 +2533,7 @@ impl App {
         // We look for an existing assistant message whose first text part
         // starts with the header AND carries this run's name on its first
         // line, replacing it in place; otherwise we insert a new message.
-        let header_line = format!("{HEADER} — `{}`", name);
+        let header_line = format!("{HEADER} - `{}`", name);
 
         for (i, msg) in self.messages.iter_mut().enumerate() {
             if msg.role != Role::Assistant {
@@ -2742,7 +2745,7 @@ impl App {
                             // Never overwrite an input that was already populated
                             // (e.g. by the per-call ToolCallArgs event). A later
                             // ToolCallBatch fallback carrying the same args would
-                            // otherwise clobber it — and batch entries built by
+                            // otherwise clobber it - and batch entries built by
                             // older code paths may carry a placeholder `{}`.
                             if state.input.is_null() {
                                 state.input = input.clone();
@@ -2929,7 +2932,7 @@ impl App {
         let flag = Arc::new(AtomicBool::new(false));
         self.cancel_flag = Some(flag.clone());
         self.is_processing = true;
-        self.status = format!("spec: implementing {spec_id} — task {rank}/{total}");
+        self.status = format!("spec: implementing {spec_id} - task {rank}/{total}");
 
         let event_bus = self.event_bus.clone();
         let sid = session_id;
@@ -2957,7 +2960,7 @@ impl App {
             None => {
                 self.spec_impl_state = None;
                 self.append_assistant_text(&format!(
-                    "From: /spec impl\n\n[warn] Invalid spec ID `{}` — run stopped.",
+                    "From: /spec impl\n\n[warn] Invalid spec ID `{}` - run stopped.",
                     state.spec_id,
                 ));
                 return;
@@ -2965,6 +2968,7 @@ impl App {
         };
 
         // Read the spec to check the just-run task's status.
+        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
         let spec = tokio::task::block_in_place(|| rt.block_on(async { mgr.read_spec(&sid).await }));
         let spec = match spec {
             Ok(s) => s,
@@ -2990,7 +2994,7 @@ impl App {
             .map(|t| t.status)
             .unwrap_or(ragent_specs::spec::TaskStatus::Pending);
 
-        // Only `Blocked` stops the run — the agent explicitly signalled it
+        // Only `Blocked` stops the run - the agent explicitly signalled it
         // cannot proceed. For `Pending` or `InProgress` (the agent finished
         // its turn but forgot to call `spec_task_update`), auto-mark the task
         // as `Completed` and continue to the next task. This is the common
@@ -2999,13 +3003,13 @@ impl App {
         if task_status == ragent_specs::spec::TaskStatus::Blocked {
             self.spec_impl_state = None;
             self.append_assistant_text(&format!(
-                "From: /spec impl\n\n[stop] Task **{}** ({}/{}) is **blocked** — run stopped.\n\n\
+                "From: /spec impl\n\n[stop] Task **{}** ({}/{}) is **blocked** - run stopped.\n\n\
                  Re-run `/spec impl {}` to resume from this task.",
                 current_task_id, state.current_rank, state.total, state.spec_id,
             ));
             self.push_log_no_agent(
                 LogLevel::Warn,
-                format!("spec impl: task {} blocked — run stopped", current_task_id),
+                format!("spec impl: task {} blocked - run stopped", current_task_id),
             );
             return;
         }
@@ -3014,6 +3018,7 @@ impl App {
         // so the PLAN.md reflects reality and the run can continue.
         let mut spec = spec;
         if task_status != ragent_specs::spec::TaskStatus::Completed {
+            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
             if let Err(e) = tokio::task::block_in_place(|| {
                 rt.block_on(async {
                     mgr.update_task_status(
@@ -3040,12 +3045,13 @@ impl App {
             );
         }
 
-        // Task completed — advance to the next task or finish the run.
+        // Task completed - advance to the next task or finish the run.
         let next_rank = state.current_rank + 1;
         if next_rank > state.total {
-            // All tasks done — transition the spec to `implemented`.
+            // All tasks done - transition the spec to `implemented`.
             self.spec_impl_state = None;
             if spec.status == SpecStatus::InProgress {
+                // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                 if let Err(e) = tokio::task::block_in_place(|| {
                     rt.block_on(async {
                         mgr.transition(&mut spec, SpecStatus::Implemented, "spec-impl")
@@ -3059,7 +3065,7 @@ impl App {
                 }
             }
             self.append_assistant_text(&format!(
-                "From: /spec impl\n\n🎉 All {} tasks completed for spec **{}**. \
+                "From: /spec impl\n\n[done] All {} tasks completed for spec **{}**. \
                  Spec status set to `implemented`.",
                 state.total, state.spec_id,
             ));
@@ -3080,7 +3086,7 @@ impl App {
             None => {
                 self.spec_impl_state = None;
                 self.append_assistant_text(&format!(
-                    "From: /spec impl\n\n[warn] No task at rank {} — run stopped.",
+                    "From: /spec impl\n\n[warn] No task at rank {} - run stopped.",
                     next_rank,
                 ));
                 return;

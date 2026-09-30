@@ -166,7 +166,7 @@ impl EditStaging {
         let orig = tokio::fs::read_to_string(&path)
             .await
             .context("reading original file")?;
-        let checksum = format!("sha256:{:x}", Sha256::digest(orig.as_bytes()));
+        let checksum = format!("sha256:{}", hex::encode(Sha256::digest(orig.as_bytes())));
         self.edits.push(StagedEdit {
             path,
             original_checksum: checksum,
@@ -228,7 +228,8 @@ impl EditStaging {
                 if path.exists() {
                     match tokio::fs::read_to_string(&path).await {
                         Ok(cur) => {
-                            let cur_sum = format!("sha256:{:x}", Sha256::digest(cur.as_bytes()));
+                            let cur_sum =
+                                format!("sha256:{}", hex::encode(Sha256::digest(cur.as_bytes())));
                             if cur_sum != original_checksum {
                                 return Ok((
                                     path.clone(),

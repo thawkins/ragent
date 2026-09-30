@@ -184,7 +184,7 @@ fn tag_inline_manifest(entry: StoreEntry, root: &Value, manifest_key: &str) -> S
     // `transform_vendor_entry` keeps the two in sync; an entry whose id was
     // overridden by an `id` field never reaches this vendor path (native
     // documents returned early), so name-based lookup is safe here. The parsed
-    // `root` is queried directly — no serialise/re-parse round trip.
+    // `root` is queried directly - no serialise/re-parse round trip.
     match marketplace::inline_manifest_in(root, &entry.name) {
         Some(_) => StoreEntry {
             source: format!("{}@{manifest_key}", entry.source),

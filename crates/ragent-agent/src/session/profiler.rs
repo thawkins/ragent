@@ -145,8 +145,8 @@ impl AgentLoopProfiler {
             // FR-002: Only emit per-scope log lines when the
             // `RAGENT_AGENT_PERF=1` env var (or the `agent_perf.profiling`
             // config field) is set.  This keeps the hot path quiet by
-            // default — every `tracing::info!` is a no-op when no
-            // subscriber is listening — but the toggle is a single
+            // default - every `tracing::info!` is a no-op when no
+            // subscriber is listening - but the toggle is a single
             // relaxed load.
             log_on_drop: perf::is_profiling_enabled(),
         }

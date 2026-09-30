@@ -4,6 +4,22 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.122)
+
+- **`ragent-team` shim removed** — the workspace is now 16 crates; the team
+  runtime and its 20 tools live only in `ragent-agent` (unchanged command
+  surface: `/team`, `team_*`, `/swarm`).
+- **Dependency bumps** — `ratatui` 0.29 -> 0.30 (the TUI message-cache wrap port
+  was realigned with upstream so the pinned-scroll row count still matches
+  `Paragraph::line_count`), plus `rmcp` 3.5, `rusqlite` 0.40, `similar` 3.2,
+  `dirs` 7, `sha2` 0.11, `base64` 0.23 and `printpdf` 0.12.
+- **Security hardening milestones** — `SECTASKS.md` MS-03 (network/secret),
+  MS-04 (defence in depth) and MS-05 (recurrence prevention) are complete; the
+  `ragent_types::guard` shared-guard module and a single
+  `ragent_types::sanitize` redaction chokepoint replace the per-crate copies, so
+  credentials are masked consistently on the log panel, SSE stream and
+  `/config` output.
+
 ## Highlights (v1.0.121)
 
 - **Introspection tools** — `tool_info` / `commands_info` (read-only, auto-

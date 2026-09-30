@@ -15,12 +15,17 @@ use super::thinking::{
 };
 use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::event::FinishReason;
 
 /// Default API base URL for Google Gemini API.
 pub const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com";
+
+/// Fallback context window (tokens) for a discovered Gemini model whose
+/// `/v1beta/models` entry declares no `input_token_limit` (ANTIPAT M6.10).
+const DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
 
 /// Returns the default Gemini model catalog with `provider_id` attached.
 #[must_use]
@@ -197,6 +202,8 @@ impl Provider for GeminiProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
+        // ANTIPAT 3.6: GeminiClient::new registers the key with the shared
+        // redaction registry centrally; no per-provider field redaction here.
         let resolved = base_url
             .unwrap_or(GEMINI_API_BASE)
             .trim_end_matches('/')
@@ -301,7 +308,7 @@ fn gemini_discovered_model_to_info(
             .input_token_limit
             .and_then(|limit| usize::try_from(limit).ok())
             .or_else(|| default.map(|existing| existing.context_window))
-            .unwrap_or(1_048_576),
+            .unwrap_or(DEFAULT_CONTEXT_WINDOW),
         max_output: model
             .output_token_limit
             .and_then(|limit| usize::try_from(limit).ok())
@@ -361,9 +368,10 @@ pub async fn list_gemini_models(api_key: &str, base_url: Option<&str>) -> Result
 
 /// HTTP client for the Google Gemini API with streaming SSE support.
 ///
-/// The `api_key` is credential material: `Debug` is implemented by hand
-/// (SEC-ragent-llm-001 / SECTASKS T-012) so a `{:?}` of this struct can never
-/// print it.
+/// The `api_key` is credential material: `Debug` redacts it
+/// (SEC-ragent-llm-001 / SECTASKS T-012) and `GeminiClient::new` registers it
+/// with the shared redaction registry (ANTIPAT 3.6), so a `{:?}` of this
+/// struct can never print it.
 pub(crate) struct GeminiClient {
     api_key: String,
     base_url: String,
@@ -373,7 +381,7 @@ pub(crate) struct GeminiClient {
 impl std::fmt::Debug for GeminiClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GeminiClient")
-            .field("api_key", &"<redacted>")
+            .field("api_key", &"[REDACTED]")
             .field("base_url", &self.base_url)
             .finish_non_exhaustive()
     }
@@ -381,9 +389,9 @@ impl std::fmt::Debug for GeminiClient {
 
 impl GeminiClient {
     pub(crate) fn new(api_key: &str, base_url: &str) -> Self {
-        // SEC-ragent-llm-001 (SECTASKS T-012): register the key with the
-        // shared redaction registry so any path that runs text through
-        // `ragent_types::sanitize::redact_secrets` (logs, SSE, error
+        // SEC-ragent-llm-001 (SECTASKS T-012) / ANTIPAT 3.6: register the key
+        // with the shared redaction registry so any path that runs text
+        // through `ragent_types::sanitize::redact_secrets` (logs, SSE, error
         // rendering) masks it even if it appears verbatim.
         ragent_types::sanitize::register_secret(api_key);
         Self {
@@ -556,10 +564,8 @@ impl LlmClient for GeminiClient {
             .with_context(|| format!("Failed to send request to Gemini API at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
-            let error_body = response.text().await.unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "Failed to read Gemini error response body");
-                String::new()
-            });
+            // ANTIPAT 3.1/3.2: capped error-body read.
+            let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
             tracing::warn!(
                 url = %url,
                 model = %request.model,
@@ -617,7 +623,7 @@ impl LlmClient for GeminiClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "Gemini: stream stalled — no data received for {}s",
+                                "Gemini: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -822,32 +828,5 @@ impl LlmClient for GeminiClient {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_gemini_discovered_model_to_info_uses_live_thinking_flag() {
-        let defaults = gemini_default_models("gemini")
-            .into_iter()
-            .map(|model| (model.id.clone(), model))
-            .collect::<HashMap<_, _>>();
-        let model = GeminiDiscoveredModel {
-            name: "models/gemini-2.5-pro-preview-05-06".to_string(),
-            base_model_id: Some("gemini-2.5-pro-preview-05-06".to_string()),
-            display_name: Some("Gemini 2.5 Pro Preview".to_string()),
-            input_token_limit: Some(2_000_000),
-            output_token_limit: Some(65_536),
-            supported_generation_methods: vec!["generateContent".to_string()],
-            thinking: Some(true),
-        };
-
-        let model = gemini_discovered_model_to_info(model, &defaults).expect("model info");
-        assert!(model.capabilities.reasoning);
-        assert_eq!(
-            model.capabilities.thinking_levels,
-            gemini_thinking_levels_for_model("gemini-2.5-pro-preview-05-06")
-        );
-        assert_eq!(model.context_window, 2_000_000);
-        assert_eq!(model.max_output, Some(65_536));
-    }
-}
+#[path = "../tests/inline/gemini_tests.rs"]
+mod tests;

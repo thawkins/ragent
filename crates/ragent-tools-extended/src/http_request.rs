@@ -11,9 +11,9 @@ use std::str::FromStr as _;
 use std::time::Duration;
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::masterfetch::http::DEFAULT_TIMEOUT_SECS;
 use crate::masterfetch::security::validate_url;
 
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_BODY_BYTES: usize = 1024 * 1024; // 1 MiB response cap
 
 /// Perform an HTTP request with configurable method, headers, and body.

@@ -1,3 +1,11 @@
+//! Model-router client: a provider that forwards each request to a downstream
+//! model selected by the router, while presenting the standard `Provider`
+//! surface to the rest of the application.
+//!
+//! Routing decisions (classification, modifiers, and per-request model choice)
+//! live in the sibling `router_classifier` and `router_modifiers` modules; this
+//! module owns the transport, connection, and provider plumbing.
+
 use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -32,9 +40,9 @@ pub struct RouterClient {
     /// Reused for continuation calls (tool-result messages) so the router does
     /// not re-classify or re-log after every tool execution.
     cached_entry: Mutex<Option<TierEntry>>,
-    /// Cache of downstream `(provider, model)` → client so a delegated call
+    /// Cache of downstream `(provider, model)` -> client so a delegated call
     /// reuses a warm client (and its connection pool) instead of rebuilding
-    /// one — and re-establishing TLS/keep-alive — on every loop step (H2).
+    /// one - and re-establishing TLS/keep-alive - on every loop step (H2).
     downstream_clients: Mutex<HashMap<String, Arc<dyn LlmClient>>>,
 }
 
@@ -280,7 +288,7 @@ impl LlmClient for RouterClient {
                     let active_dimensions = format_active_dimensions(&result.dimension_scores);
                     anyhow::anyhow!(
                         "Router classified prompt into {} tier (composite {:.4}, \
-                         requires_vision={}, dimensions=[{}]) — no suitable model is configured.",
+                         requires_vision={}, dimensions=[{}]) - no suitable model is configured.",
                         result.tier,
                         result.composite_score,
                         result.requires_vision,
@@ -359,7 +367,7 @@ impl RouterClient {
             Some(r) => r,
             None => {
                 bail!(
-                    "Router selected model {} — \
+                    "Router selected model {} - \
                      but no provider registry is attached. Enable a concrete provider to use chat.",
                     selected_model,
                 );
@@ -489,7 +497,7 @@ fn format_classification_summary(
         while end > 0 && !prompt.is_char_boundary(end) {
             end -= 1;
         }
-        format!("{}…", &prompt[..end])
+        format!("{}...", &prompt[..end])
     } else {
         prompt.to_string()
     };
@@ -513,7 +521,7 @@ fn format_classification_summary(
         parts.push(format!("dimensions=[{}]", active_dimensions.join(", ")));
     }
 
-    format!("Router classification — {}", parts.join(" | "))
+    format!("Router classification - {}", parts.join(" | "))
 }
 
 /// Format a comma-separated list of active classification dimensions for error
@@ -619,7 +627,7 @@ fn resolve_env_base_url(provider_id: &str) -> Option<String> {
 /// F7: when the request carries tools (`needs_tools`), a model known to lack
 /// tool-use capability is skipped so the tool definitions are not sent to a
 /// model that can only narrate the invocation as text. Unknown-capability
-/// models (not in the registry) remain eligible — the first entry is used
+/// models (not in the registry) remain eligible - the first entry is used
 /// rather than rejecting the tier outright.
 fn select_tier_entry<'a>(
     tier_config: &'a TierConfig,
@@ -633,7 +641,7 @@ fn select_tier_entry<'a>(
 
     // Unknown-capability handling: a missing registry means capabilities are
     // unknown, which per the F7 contract keeps models eligible. Vision is the
-    // exception — it was a hard requirement before F7 and stays one.
+    // exception - it was a hard requirement before F7 and stays one.
     let Some(registry) = registry else {
         if requires_vision {
             return None;
@@ -656,7 +664,7 @@ fn select_tier_entry<'a>(
                 return None;
             }
             // F7: when every known model lacks tool capability, fall back to
-            // the first entry rather than failing the request entirely — the
+            // the first entry rather than failing the request entirely - the
             // downstream provider's own gating plus the agent loop's text
             // recovery pass handle the mismatch.
             tracing::warn!(

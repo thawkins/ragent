@@ -1,4 +1,4 @@
-//! `model_info` — Report metadata about the currently connected LLM.
+//! `model_info` - Report metadata about the currently connected LLM.
 //!
 //! Implements a read-only introspection tool that returns the active
 //! provider/model pair plus resolved capabilities, context window, output

@@ -116,8 +116,8 @@ fn test_parse_response_json_snippet_truncation() {
         ]
     });
     let results = parse_response_json(&value);
-    assert_eq!(results[0].snippet.chars().count(), 201);
-    assert!(results[0].snippet.ends_with('…'));
+    assert_eq!(results[0].snippet.chars().count(), 200);
+    assert!(results[0].snippet.ends_with("..."));
 }
 
 #[test]

@@ -2,9 +2,9 @@
 //!
 //! [`ProviderCallStats`] counts the logical search calls issued by the
 //! research pipeline, keyed on the underlying search tool (e.g. `mf_search`,
-//! `websearch`). It is shared by `Arc` across every gather pass in the run —
+//! `websearch`). It is shared by `Arc` across every gather pass in the run -
 //! including supervisor/competitive researchers, which clone one
-//! [`crate::web_gatherer::WebGatherer`] into N parallel workers — so the
+//! [`crate::web_gatherer::WebGatherer`] into N parallel workers - so the
 //! totals are per-run rather than per-researcher.
 //!
 //! The counter is incremented once per logical search (retries included,

@@ -432,7 +432,7 @@ fn parse_jtbd_force_and_agent() {
 
 #[test]
 fn parse_jtbd_agent_before_force() {
-    // Order shouldn't matter — agent before force
+    // Order shouldn't matter - agent before force
     let cmd = SpecCommand::parse("jtbd my-spec --agent general --force");
     assert!(matches!(cmd, SpecCommand::Jtbd { spec_id, force, agent }
             if spec_id == "my-spec" && force && agent.as_deref() == Some("general")));
@@ -440,7 +440,7 @@ fn parse_jtbd_agent_before_force() {
 
 #[test]
 fn parse_jtbd_agent_without_name() {
-    // --agent with no value following — agent stays None, no panic
+    // --agent with no value following - agent stays None, no panic
     let cmd = SpecCommand::parse("jtbd my-spec --agent");
     assert!(matches!(cmd, SpecCommand::Jtbd { spec_id, force, agent }
             if spec_id == "my-spec" && !force && agent.is_none()));
@@ -557,7 +557,7 @@ fn build_add_prompt_includes_spec_md_and_plan_md_content() {
     assert!(prompt.contains("`edit` tool"));
     assert!(prompt.contains("FR-019"));
     assert!(prompt.contains("T-040"));
-    // No delimited text blocks — the LLM writes files directly.
+    // No delimited text blocks - the LLM writes files directly.
     assert!(!prompt.contains("---NEW REQUIREMENTS---"));
     assert!(!prompt.contains("---END---"));
 }

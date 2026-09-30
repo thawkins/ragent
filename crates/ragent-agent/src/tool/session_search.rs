@@ -1,4 +1,4 @@
-//! `session_search` — Search across all stored sessions.
+//! `session_search` - Search across all stored sessions.
 //!
 //! Performs ranked full-text search over every persisted session transcript,
 //! with filters for date range, working directory, role, per-session limits,
@@ -7,6 +7,7 @@
 //! provider is available.
 
 use anyhow::{Context, Result};
+use ragent_types::strutil::truncate_bytes_no_ellipsis;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
@@ -188,15 +189,15 @@ fn format_session_results(
             .filter(|s| !s.is_empty())
             .unwrap_or("(untitled)");
         let dir = result.session_directory.as_deref().unwrap_or("(unknown)");
-        let preview = truncate(&result.content, 300);
+        let preview = truncate_bytes_no_ellipsis(&result.content, 300);
         let suffix = if result.content.len() > 300 {
-            "…"
+            "..."
         } else {
             ""
         };
 
         output.push_str(&format!(
-            "{}. [{}] {} — {}\n   dir: {}\n   [{}] {}: {preview}{suffix}\n",
+            "{}. [{}] {} - {}\n   dir: {}\n   [{}] {}: {preview}{suffix}\n",
             i + 1,
             result.created_at,
             result.session_id,
@@ -235,26 +236,14 @@ fn append_context(
     output.push_str("   Context:\n");
     for (offset, msg) in messages[start..=end].iter().enumerate() {
         let idx = start + offset;
-        let marker = if idx == pos { "▶" } else { " " };
+        let marker = if idx == pos { ">" } else { " " };
         let text = msg.text_content();
-        let preview = truncate(&text, 200);
-        let suffix = if text.len() > 200 { "…" } else { "" };
+        let preview = truncate_bytes_no_ellipsis(&text, 200);
+        let suffix = if text.len() > 200 { "..." } else { "" };
         output.push_str(&format!(
             "   {marker} turn {} [{}]: {preview}{suffix}\n",
             idx + 1,
             msg.role
         ));
     }
-}
-
-/// Truncate a string to `max` bytes without breaking UTF-8 boundaries.
-fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
 }

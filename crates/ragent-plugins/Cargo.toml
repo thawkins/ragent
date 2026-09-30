@@ -24,6 +24,7 @@ tar = "0.4"
 reqwest = { workspace = true, features = ["blocking"] }
 rquickjs = "0.10"
 sha2 = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 ragent-config = { path = "../ragent-config" }

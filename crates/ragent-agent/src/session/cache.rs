@@ -187,7 +187,7 @@ impl SystemPromptCache {
         let version = self.version();
 
         // Compute hash of agent's prompt
-        // PERF-031: FxHash (~2–5× faster than `DefaultHasher` for short
+        // PERF-031: FxHash (~2-5x faster than `DefaultHasher` for short
         // non-adversarial cache keys).
         let prompt_hash = agent
             .prompt
@@ -277,8 +277,8 @@ impl SystemPromptCache {
         Some(defs)
     }
 
-    /// PERF-034: get or compute the subagent wire surface — the tool
-    /// definitions with interactive tools removed — keyed by the tool-registry
+    /// PERF-034: get or compute the subagent wire surface - the tool
+    /// definitions with interactive tools removed - keyed by the tool-registry
     /// version so repeated sub-agent steps share one immutable vector.
     pub fn get_subagent_tool_definitions(
         &self,

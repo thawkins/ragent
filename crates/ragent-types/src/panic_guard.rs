@@ -4,7 +4,7 @@
 //! decoding, readability, html2text, prompt classifiers) in
 //! [`std::panic::catch_unwind`] so that a dependency bug degrades into an
 //! `Err` instead of killing the process. However, Rust's panic *hook* fires
-//! at panic time — before the unwind reaches the `catch_unwind` frame — so
+//! at panic time - before the unwind reaches the `catch_unwind` frame - so
 //! every caught panic still wrote a `log/panic-*.log` file and, in the TUI,
 //! tore down the terminal even though the caller recovered successfully.
 //!
@@ -16,7 +16,7 @@
 
 /// Set the thread-local contained-panic flag.
 ///
-/// Private — use [`run`], which wraps the call and guarantees the flag is
+/// Private - use [`run`], which wraps the call and guarantees the flag is
 /// cleared on all exit paths (including when `f` panics).
 fn set_active(active: bool) {
     PANIC_CONTAINED.with(|c| c.set(active));
@@ -28,8 +28,8 @@ thread_local! {
 
 /// Returns `true` when the current thread is inside a [`run`] container.
 ///
-/// Global panic hooks call this to decide whether a panic is deliberate —
-/// i.e. about to be caught by a `catch_unwind` inside [`run`] — or an actual
+/// Global panic hooks call this to decide whether a panic is deliberate -
+/// i.e. about to be caught by a `catch_unwind` inside [`run`] - or an actual
 /// crash that requires terminal teardown and a panic log.
 pub fn is_active() -> bool {
     PANIC_CONTAINED.with(std::cell::Cell::get)

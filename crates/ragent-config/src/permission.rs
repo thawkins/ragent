@@ -94,7 +94,7 @@ impl From<&str> for Permission {
     ///
     /// This function is infallible; unknown strings become [`Permission::Custom`].
     fn from(s: &str) -> Self {
-        // Normalize: strip namespace prefix (e.g. "file:read" → "read")
+        // Normalize: strip namespace prefix (e.g. "file:read" -> "read")
         let normalized = s.split(':').next_back().unwrap_or(s).to_lowercase();
 
         match normalized.as_str() {

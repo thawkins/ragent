@@ -205,7 +205,7 @@ impl Parser {
         }
     }
 
-    /// `power := atom ('^' unary)?` — right-associative.
+    /// `power := atom ('^' unary)?` - right-associative.
     fn parse_power(&mut self) -> Result<f64> {
         let base = self.parse_atom()?;
         self.skip_whitespace();

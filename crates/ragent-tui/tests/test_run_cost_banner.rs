@@ -33,7 +33,7 @@ async fn test_run_cost_summary_sets_banner_and_logs() {
         .as_ref()
         .expect("banner should be populated");
     assert!(
-        banner.contains("⟡ run complete"),
+        banner.contains("* run complete"),
         "banner should start with the run-complete marker, got: {banner}"
     );
     assert!(

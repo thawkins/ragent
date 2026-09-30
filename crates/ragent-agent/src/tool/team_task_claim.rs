@@ -1,4 +1,4 @@
-//! `team_task_claim` — Atomically claim the next available task.
+//! `team_task_claim` - Atomically claim the next available task.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -21,7 +21,7 @@ impl Tool for TeamTaskClaimTool {
              'task_id' (string) to claim a specific task; if omitted, the next available \
              pending task is claimed atomically using file locking. Returns the task details \
              or a message if the task is unavailable. Common gotcha: if no task_id is provided \
-             and no pending tasks remain, the result indicates no work is available — call \
+             and no pending tasks remain, the result indicates no work is available - call \
              team_idle when appropriate."
     }
 
@@ -204,7 +204,7 @@ impl Tool for TeamTaskClaimTool {
                     // Agent already has a task in progress
                     Ok(ToolOutput {
                         content: format!(
-                            "⚠ You already have task '{}' in progress.\n\
+                            "[!] You already have task '{}' in progress.\n\
                                            Title: {}\nDescription: {}\n\
                                            You must call `team_task_complete` for this task before claiming another.",
                             task.id, task.title, task.description

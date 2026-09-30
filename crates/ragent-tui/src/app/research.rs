@@ -63,18 +63,10 @@ fn clarification_answered(answer: &str) -> bool {
 /// Format a `provider_tool_calls` list as a human-readable suffix like
 /// `", 12 search request(s) (web_search: 8, mf_search: 4)"`.
 ///
-/// Returns an empty string when the list is empty.
+/// Delegates to [`ragent_research::provider_calls_suffix`] so the CLI and TUI
+/// surfaces render the summary identically (see `ANTIPAT.md` M3.10).
 fn format_provider_calls(calls: &[(String, usize)]) -> String {
-    if calls.is_empty() {
-        return String::new();
-    }
-    let total: usize = calls.iter().map(|(_, count)| count).sum();
-    let per_tool = calls
-        .iter()
-        .map(|(tool, count)| format!("{tool}: {count}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(", {total} search request(s) ({per_tool})")
+    ragent_research::provider_calls_suffix(calls)
 }
 
 /// Run a research session, routing a `NeedsClarification` result through the
@@ -139,7 +131,7 @@ async fn run_cluster_extraction(
     publish_progress(
         SessionPhase::Setup,
         "started",
-        "reading sources…".to_string(),
+        "reading sources...".to_string(),
     );
 
     let payload = ragent_research::build_cluster_payload(root, valid_name, Some(context_window))
@@ -161,7 +153,7 @@ async fn run_cluster_extraction(
     publish_progress(
         SessionPhase::Synthesize,
         "started",
-        format!("sending concept-extraction prompt to {model_label}…"),
+        format!("sending concept-extraction prompt to {model_label}..."),
     );
 
     let prompt = ragent_research::build_concept_extraction_prompt(&payload);
@@ -184,7 +176,7 @@ async fn run_cluster_extraction(
     publish_progress(
         SessionPhase::Finalize,
         "started",
-        "writing CONCEPTS.md…".to_string(),
+        "writing CONCEPTS.md...".to_string(),
     );
 
     let path = ragent_research::write_concepts_md(root, valid_name, &text)
@@ -311,7 +303,7 @@ impl App {
                 // session is still running. The live progress events update
                 // this status per-phase (see the AgentNotice handler), and
                 // the completion notice sets a terminal status.
-                self.status = format!("[wait] research: {name}…");
+                self.status = format!("[wait] research: {name}...");
                 self.push_log_no_agent(
                     LogLevel::Info,
                     if !from_urls.is_empty() {
@@ -467,7 +459,7 @@ impl App {
                 };
                 let rendered = format!(
                     "From: /research create\n\
-                     📝 **Gathering sources for `{name}`…**\n\n\
+                     [note] **Gathering sources for `{name}`...**\n\n\
                      {subject_line}\n\
                      Mode: `{resolved_mode}`\n\
                      Format: `{resolved_format}`\n\n\
@@ -478,7 +470,7 @@ impl App {
             }
             ResearchCliCommand::List { all, .. } => {
                 self.status = format!(
-                    "research: listing items{}…",
+                    "research: listing items{}...",
                     if all { " (including archived)" } else { "" }
                 );
                 let mgr = manager.clone();
@@ -518,7 +510,7 @@ impl App {
                 });
             }
             ResearchCliCommand::Open { name } => {
-                self.status = format!("research: opening '{name}'…");
+                self.status = format!("research: opening '{name}'...");
                 let mgr = manager.clone();
                 let event_bus = self.event_bus.clone();
                 let app_event_bus = self.event_bus.clone();
@@ -561,7 +553,7 @@ impl App {
                 });
             }
             ResearchCliCommand::Search { query, .. } => {
-                self.status = format!("research: searching for '{query}'…");
+                self.status = format!("research: searching for '{query}'...");
                 let mgr = manager.clone();
                 let event_bus = self.event_bus.clone();
                 let session_id = self.session_id.clone().unwrap_or_default();
@@ -590,7 +582,7 @@ impl App {
                 });
             }
             ResearchCliCommand::Show { name, .. } => {
-                self.status = format!("research: showing '{name}'…");
+                self.status = format!("research: showing '{name}'...");
                 let mgr = manager.clone();
                 let event_bus = self.event_bus.clone();
                 let session_id = self.session_id.clone().unwrap_or_default();
@@ -642,7 +634,7 @@ impl App {
                     ));
                     return;
                 }
-                self.status = format!("research: deleting '{name}'…");
+                self.status = format!("research: deleting '{name}'...");
                 let mgr = manager.clone();
                 let event_bus = self.event_bus.clone();
                 let session_id = self.session_id.clone().unwrap_or_default();
@@ -671,7 +663,7 @@ impl App {
                 });
             }
             ResearchCliCommand::Archive { name, .. } => {
-                self.status = format!("research: archiving '{name}'…");
+                self.status = format!("research: archiving '{name}'...");
                 let mgr = manager.clone();
                 let event_bus = self.event_bus.clone();
                 let session_id = self.session_id.clone().unwrap_or_default();
@@ -707,8 +699,8 @@ impl App {
                 // Replay the invocation recorded in the item's frontmatter and
                 // overwrite RESEARCH.md (and its supporting files) with a
                 // fresh run. The lookup is async, so all item work happens in
-                // the spawned task — mirroring the `create` spawn pattern.
-                self.status = format!("[wait] research: update {name}…");
+                // the spawned task - mirroring the `create` spawn pattern.
+                self.status = format!("[wait] research: update {name}...");
                 self.push_log_no_agent(LogLevel::Info, format!("research: update '{name}'"));
                 self.research_progress
                     .push(crate::research_progress::ResearchProgress::new(
@@ -768,7 +760,7 @@ impl App {
                         event_bus.publish(Event::AgentNotice {
                             session_id: session_id.clone(),
                             message: format!(
-                                "research: updating `{name}` — replaying `{recorded}`"
+                                "research: updating `{name}` - replaying `{recorded}`"
                             ),
                         });
                         run_with_clarification(
@@ -790,7 +782,7 @@ impl App {
                                 session_id: session_id.clone(),
                                 text: format!(
                                     "From: /research update\n\n\
-                                     ✅ **Updated `research/{}`** with {} sources.{}\n\n\
+                                     [ok] **Updated `research/{}`** with {} sources.{}\n\n\
                                      Tip: run `/research open {}` to view the refreshed report.",
                                     o.research_name,
                                     o.sources.len(),
@@ -877,7 +869,8 @@ impl App {
                             .unwrap_or(ragent_research::DEFAULT_CONTEXT_WINDOW_TOKENS);
                         let model_label = self.selected_model.clone().unwrap_or_default();
 
-                        self.status = format!("[wait] research: cluster '{name}' reading sources…");
+                        self.status =
+                            format!("[wait] research: cluster '{name}' reading sources...");
                         self.append_assistant_text(&format!(
                             "From: /research cluster\n\n[ok] Request accepted for `{name}` \
                                (force={force}). Reading sources and preparing payload; \

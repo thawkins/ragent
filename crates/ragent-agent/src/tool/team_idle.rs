@@ -1,4 +1,4 @@
-//! `team_idle` — Teammate reports idle state; fires `TeammateIdle` hook.
+//! `team_idle` - Teammate reports idle state; fires `TeammateIdle` hook.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -74,7 +74,7 @@ impl Tool for TeamIdleTool {
             if let Some(active) = list.in_progress_for(&agent_id) {
                 return Ok(ToolOutput {
                     content: format!(
-                        "⚠ You cannot go idle while task '{}' is still in progress.\n\
+                        "[!] You cannot go idle while task '{}' is still in progress.\n\
                          Title: {}\n\
                          Call `team_task_complete` (task_id: '{}') first, then call \
                          `team_task_claim` to pick up more work or `team_idle` once done.",
@@ -100,7 +100,7 @@ impl Tool for TeamIdleTool {
         let outcome = run_team_hook(&team_dir, HookEvent::TeammateIdle, Some(&hook_stdin)).await;
 
         if let HookOutcome::Feedback(feedback) = outcome {
-            // Hook rejected idle — keep teammate working.
+            // Hook rejected idle - keep teammate working.
             {
                 let mut store = TeamStore::load(&team_dir)?;
                 if let Some(member) = store.config.member_by_id_mut(&agent_id) {

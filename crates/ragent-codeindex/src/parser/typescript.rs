@@ -1,10 +1,11 @@
 //! TypeScript / JavaScript parser using tree-sitter.
 //!
-//! Handles `.ts`, `.tsx`, `.js`, `.jsx` via a shared [`TypeScriptParser`] that
-//! is parameterised by [`TsVariant`].
+//! Handles `.ts`, `.tsx`, `.js`, `.jsx` via a shared
+//! [`TypeScriptParser`](crate::parser::typescript::TypeScriptParser) that is parameterised by
+//! [`TsVariant`](crate::parser::typescript::TsVariant).
 
 use super::{LanguageParser, ParsedFile};
-use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
+use crate::types::{ImportEntry, Symbol, SymbolKind, Visibility};
 use anyhow::{Context, Result};
 use tree_sitter::{Node, Parser};
 
@@ -90,13 +91,7 @@ impl LanguageParser for TypeScriptParser {
             .context("tree-sitter parse returned None")?;
         let root = tree.root_node();
 
-        let mut ctx = Ctx {
-            source,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            references: Vec::new(),
-            next_id: 0,
-        };
+        let mut ctx = Ctx::new(source);
 
         walk(&mut ctx, root, None, &[], false);
 
@@ -109,28 +104,16 @@ impl LanguageParser for TypeScriptParser {
     }
 }
 
-struct Ctx<'a> {
-    source: &'a [u8],
-    symbols: Vec<Symbol>,
-    imports: Vec<ImportEntry>,
-    references: Vec<SymbolRef>,
-    next_id: i64,
-}
-
-impl Ctx<'_> {
-    const fn alloc_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-    fn text(&self, node: Node) -> &str {
-        node.utf8_text(self.source).unwrap_or("")
-    }
-}
+/// Parser-local alias of the shared extraction context.
+type Ctx<'a> = super::ctx::Ctx<'a>;
 
 // ── Recursive walk ──────────────────────────────────────────────────────────
 
 fn walk(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String], exported: bool) {
+    let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
+        return;
+    };
+
     match node.kind() {
         // Declarations
         "function_declaration" | "generator_function_declaration" => {
@@ -646,8 +629,7 @@ fn build_fn_sig(ctx: &Ctx, node: Node, name: &str, exported: bool) -> String {
 }
 
 fn field_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {
-    node.child_by_field_name(field)
-        .map(|n| ctx.text(n).to_string())
+    super::util::field_text(ctx.source, node, field)
 }
 
 /// Build a qualified name from the current scope and a local name.
@@ -659,13 +641,11 @@ fn build_qname(scope: &[String], name: &str) -> String {
 }
 
 fn ext_scope(scope: &[String], name: &str) -> Vec<String> {
-    let mut s = scope.to_vec();
-    s.push(name.to_string());
-    s
+    super::util::extend_scope(scope, name)
 }
 
 fn hash_node(ctx: &Ctx, node: Node) -> String {
-    crate::scanner::hash_content(ctx.text(node).as_bytes())
+    super::util::node_hash(ctx.source, node)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

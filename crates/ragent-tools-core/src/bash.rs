@@ -141,7 +141,7 @@ fn discover_shell() -> ShellType {
         return ShellType::PowerShell(path);
     }
 
-    // No shell found — return Bash anyway so that execute() can produce a
+    // No shell found - return Bash anyway so that execute() can produce a
     // clear error message.
     tracing::error!("No suitable shell found on Windows");
     ShellType::Bash
@@ -241,7 +241,7 @@ pub fn restrict_to_owner(path: &Path) -> bool {
     }
     #[cfg(not(unix))]
     {
-        let _ = path;
+        let _ = path; // INTENTIONAL: parameter retained for API stability
         true
     }
 }
@@ -397,7 +397,7 @@ const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
 const SAFE_COMMANDS: &[&str] = &[
     // --- File management ---
     "ls", "cd", "pwd", "mkdir", "touch", "cp", "mv",
-    // NOTE: "rm" is intentionally excluded — prefix matching cannot distinguish
+    // NOTE: "rm" is intentionally excluded - prefix matching cannot distinguish
     // safe "rm file.txt" from destructive "rm -rf /". DENIED_PATTERNS blocks the
     // destructive variants; individual rm calls go through normal permission flow.
     // --- File reading & search ---
@@ -874,7 +874,7 @@ fn is_directory_escape_attempt_inner(
                         && arg_bytes[0].is_ascii_alphabetic()
                         && arg_bytes[1] == b':'
                     {
-                        // This is a Windows absolute path like C:\Users — reject it
+                        // This is a Windows absolute path like C:\Users - reject it
                         return true;
                     }
                     // Match bare backslash: \ (root of current drive)
@@ -1031,22 +1031,25 @@ pub fn build_powershell_wrapper(state_file: &str, script_file: &str) -> String {
     )
 }
 
-/// Validate a shell command against all background-task security layers.
+/// Validate a shell command against all seven security layers.
 ///
-/// This is a stripped-down version of [`BashTool::execute`] that performs
-/// the same banned/denied/directory-escape/syntax/obfuscation checks without
-/// executing the command. It is used by the `bg` background task manager
-/// before spawning a long-running process.
-// reason: used by the `bg` tool via `spawn_background_shell` in the lib;
+/// This is the single canonical implementation of the ordered security checks
+/// (safe-command log, banned tools, directory escape, syntax, denied command
+/// names, denied patterns, user denylist, obfuscation). It is called once by
+/// [`BashTool::execute`] before executing and by [`spawn_background_shell`]
+/// before spawning a long-running process, so the two paths cannot drift
+/// (ANTIPAT F-13).
+// reason: used by `BashTool::execute` and `spawn_background_shell` in the lib;
 // flagged dead only when bash.rs is re-included into the test crate via
-// #[path], where the bg path is not exercised.
+// #[path], where neither call site is exercised.
 #[allow(dead_code)]
 pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path) -> Result<()> {
     let shell = get_shell();
 
     if is_windows() && matches!(shell, ShellType::Bash) {
         bail!(
-            "No suitable shell found on Windows.              Please install Git for Windows or PowerShell 7+."
+            "No suitable shell found on Windows. \
+             Please install Git for Windows or PowerShell 7+."
         );
     }
 
@@ -1063,14 +1066,16 @@ pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path
             tracing::info!("Banned command allowed by user allowlist");
         } else {
             bail!(
-                "Command rejected: uses banned external tool (curl, wget, nc, telnet, axel, aria2c, lynx, w3m).                  These tools could exfiltrate data or connect to external systems."
+                "Command rejected: uses banned external tool (curl, wget, nc, telnet, axel, aria2c, lynx, w3m). \
+                 These tools could exfiltrate data or connect to external systems."
             );
         }
     }
 
     if is_directory_escape_attempt(command, working_dir) {
         bail!(
-            "Command rejected: attempts to escape working directory {}.              Use only relative paths (cd ./subdir, cd subdir).",
+            "Command rejected: attempts to escape working directory {}. \
+             Use only relative paths (cd ./subdir, cd subdir).",
             working_dir.display()
         );
     }
@@ -1082,7 +1087,8 @@ pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path
             tracing::warn!("YOLO mode: allowing denied command name");
         } else {
             bail!(
-                "Command rejected: uses dangerous command (mkfs, insmod, useradd, etc.).                  These commands could cause irreversible damage to the system."
+                "Command rejected: uses dangerous command (mkfs, insmod, useradd, etc.). \
+                 These commands could cause irreversible damage to the system."
             );
         }
     }
@@ -1103,7 +1109,8 @@ pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path
         && let Some(pattern) = ragent_config::bash_lists::matches_denylist(command)
     {
         bail!(
-            "Command rejected: matches user-defined deny pattern '{pattern}'.                 Use `/bash remove deny \"{pattern}\"` to remove this restriction."
+            "Command rejected: matches user-defined deny pattern '{pattern}'. \
+             Use `/bash remove deny \"{pattern}\"` to remove this restriction."
         );
     }
 
@@ -1166,9 +1173,9 @@ fn build_shell_command(shell: &ShellType, wrapper: &str, working_dir: &std::path
 ///
 /// The direct child is spawned in its own process group (see
 /// [`build_shell_command`]). When a foreground command times out, killing the
-/// whole group guarantees that orphaned grandchildren — most importantly a
+/// whole group guarantees that orphaned grandchildren - most importantly a
 /// deadlocked `cargo test --workspace` binary that inherited the pipe
-/// write-ends and is stuck holding a mutex — are terminated too, not just the
+/// write-ends and is stuck holding a mutex - are terminated too, not just the
 /// direct `bash`. Returns an error if the group no longer exists (it may
 /// already have exited by the time the timeout fires).
 ///
@@ -1286,7 +1293,7 @@ async fn run_with_output(mut cmd: Command, capture: Arc<SharedCapture>) -> Resul
     // tokio may resume this future and the timeout handler on different
     // worker threads, so the value must cross threads).
     if let Some(pid) = child_pid {
-        let _ = capture.pgid.set(pid);
+        let _ = capture.pgid.set(pid); // INTENTIONAL: OnceLock set race is benign
     }
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -1325,10 +1332,11 @@ async fn run_with_output(mut cmd: Command, capture: Arc<SharedCapture>) -> Resul
     // was still in flight when the child exited. If a grandchild inherited the
     // pipe write-end, EOF never arrives and the window simply expires.
     let _ = tokio::time::timeout(
+        // INTENTIONAL: bounded drain window; expiry is the expected outcome
         std::time::Duration::from_secs(POST_EXIT_DRAIN_TIMEOUT_SECS),
         async {
             for t in &mut tasks {
-                let _ = t.await;
+                let _ = t.await; // INTENTIONAL: reader task is drained, not checked
             }
         },
     )
@@ -1513,97 +1521,18 @@ impl Tool for BashTool {
             "Executing bash command"
         );
 
-        if is_windows() && matches!(shell, ShellType::Bash) {
-            // ShellType::Bash on Windows means no shell was found.
-            bail!(
-                "No suitable shell found on Windows. \
-                 Please install Git for Windows or PowerShell 7+."
-            );
-        }
-
         // ── Security checks (all 7 layers, shell-agnostic) ───────────────
         //
-        // SEC-ragent-tools-core-002 (SECTASKS T-021): the banned-command list
-        // is consulted BEFORE the safe-command whitelist. Previously the
-        // whitelist was evaluated first, so a whitelisted prefix could carry a
-        // banned tool past the check (`python3 -c "...curl..."` matched the
-        // "python3" prefix and short-circuited). Ordering is now deny-first.
-        let safe_command = is_safe_command(command);
-        if safe_command {
-            tracing::info!("Safe bash command auto-approved");
-        }
-
-        // CC1-T4: Check for banned commands (curl, wget, nc, etc.)
-        // A user-defined allowlist entry (via /bash add allow <cmd>) exempts the command.
-        if contains_banned_command(command) {
-            if ragent_config::yolo::is_enabled() {
-                tracing::warn!("YOLO mode: allowing banned command tool");
-            } else if ragent_config::bash_lists::is_allowlisted(command) {
-                tracing::info!("Banned command allowed by user allowlist");
-            } else {
-                bail!(
-                    "Command rejected: uses banned external tool (curl, wget, nc, telnet, axel, aria2c, lynx, w3m). \
-                     These tools could exfiltrate data or connect to external systems."
-                );
-            }
-        }
-
-        // CC1-T5: Check for directory escape attempts (cd to parent or absolute paths)
-        if is_directory_escape_attempt(command, &ctx.working_dir) {
-            bail!(
-                "Command rejected: attempts to escape working directory {}. \
-                 Use only relative paths (cd ./subdir, cd subdir).",
-                ctx.working_dir.display()
-            );
-        }
-
-        // CC1-T6: Pre-check bash syntax (skipped for PowerShell)
-        validate_bash_syntax(command).await?;
-
-        // Check for denied command names (word-boundary matched, e.g. mkfs, insmod, useradd)
-        if contains_denied_command(command) {
-            if ragent_config::yolo::is_enabled() {
-                tracing::warn!("YOLO mode: allowing denied command name");
-            } else {
-                bail!(
-                    "Command rejected: uses dangerous command (mkfs, insmod, useradd, etc.). \
-                     These commands could cause irreversible damage to the system."
-                );
-            }
-        }
-
-        // Check for denied patterns (substring-matched, e.g. "rm -rf /", "sudo ", "/dev/tcp/")
-        for pattern in DENIED_PATTERNS {
-            if command.contains(pattern) {
-                if ragent_config::yolo::is_enabled() {
-                    tracing::warn!(pattern, "YOLO mode: allowing denied pattern");
-                } else {
-                    bail!(
-                        "Command rejected: contains dangerous pattern '{pattern}'. This pattern could cause irreversible damage to the system."
-                    );
-                }
-            }
-        }
-
-        // Check user-defined denylist (from ragent.json `bash.denylist`)
-        if !ragent_config::yolo::is_enabled()
-            && let Some(pattern) = ragent_config::bash_lists::matches_denylist(command)
-        {
-            bail!(
-                "Command rejected: matches user-defined deny pattern '{pattern}'. \
-                    Use `/bash remove deny \"{pattern}\"` to remove this restriction."
-            );
-        }
-
-        // Reject commands that use encoding/eval tricks to bypass the denylist.
-        if !ragent_config::yolo::is_enabled() {
-            validate_no_obfuscation(command)?;
-        }
+        // ANTIPAT F-13: the ordered security checks live in exactly one place,
+        // `validate_shell_command`, shared with the background-spawn path so
+        // the two copies cannot drift. It also performs the "no suitable shell
+        // on Windows" guard and the safe-command log.
+        validate_shell_command(command, &ctx.working_dir).await?;
 
         // Acquire a process-spawn permit to bound concurrency.
         let _permit = crate::resource::acquire_process_permit().await?;
 
-        // ── Persistent shell state ────────────────────��───────────────────
+        // ── Persistent shell state ───────────────────────────────────────
         let state_file = state_file_path(&ctx.session_id);
         let script_file = script_file_path(&ctx.session_id, shell)?;
 
@@ -1612,7 +1541,9 @@ impl Tool for BashTool {
             .context("Failed to write command to temporary script file")?;
         // SEC-ragent-tools-core-004 (SECTASKS T-054): the state file holds
         // `export -p` output (API keys), so both scratch files are owner-only.
-        let _ = restrict_to_owner(Path::new(&script_file));
+        if !restrict_to_owner(Path::new(&script_file)) {
+            tracing::warn!("failed to restrict bash script scratch file to owner");
+        }
 
         // Build the appropriate wrapper script for the detected shell.
         let wrapper = match shell {
@@ -1643,8 +1574,8 @@ impl Tool for BashTool {
                     // can block on it; sudo is handled via SUDO_ASKPASS instead.
                     // `kill_on_drop(true)` + `process_group(0)` ensure that when
                     // the future is dropped (e.g. the timeout below elapses) the
-                    // *whole process group* — including any orphaned grandchildren
-                    // like a deadlocked `cargo test` binary — is terminated, not
+                    // *whole process group* - including any orphaned grandchildren
+                    // like a deadlocked `cargo test` binary - is terminated, not
                     // just the direct `bash`. This was the root cause of orphaned
                     // test binaries continuing to consume CPU / hold locks after a
                     // timeout fired.
@@ -1716,7 +1647,7 @@ impl Tool for BashTool {
                         }
                         #[cfg(not(unix))]
                         {
-                            let _ = &cmd;
+                            let _ = &cmd; // INTENTIONAL: cfg-gated unused binding
                         }
                     }
 
@@ -1734,7 +1665,9 @@ impl Tool for BashTool {
         // After execution, read the saved cwd and publish ShellCwdChanged.
         // The state file is `export -p` output (SEC-ragent-tools-core-004 /
         // SECTASKS T-054), so restrict it before anything can read it.
-        let _ = restrict_to_owner(Path::new(&state_file));
+        if !restrict_to_owner(Path::new(&state_file)) {
+            tracing::warn!("failed to restrict bash state file to owner");
+        }
         if let Ok(state_content) = std::fs::read_to_string(&state_file)
             && let Some(cwd) = parse_cwd_from_state(&state_content)
         {
@@ -1859,7 +1792,7 @@ fn validate_no_obfuscation(command: &str) -> Result<()> {
     Ok(())
 }
 
-// ── Tests ─────────────────────────���────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 #[path = "../tests/inline/bash.rs"]

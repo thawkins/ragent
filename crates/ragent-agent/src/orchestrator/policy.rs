@@ -1,10 +1,10 @@
 //! Policy-based conflict resolution and human-in-the-loop fallbacks (Task 5.3).
 //!
 //! Provides:
-//! - [`ConflictPolicy`] — strategy used when multiple agents return responses.
-//! - [`ConflictResolver`] — applies a [`ConflictPolicy`] to a list of
+//! - [`ConflictPolicy`] - strategy used when multiple agents return responses.
+//! - [`ConflictResolver`] - applies a [`ConflictPolicy`] to a list of
 //!   `(agent_id, response)` pairs and returns a single aggregated result.
-//! - [`HumanFallback`] — trait for human-review callbacks; see
+//! - [`HumanFallback`] - trait for human-review callbacks; see
 //!   [`LoggingFallback`] for the default implementation.
 //!
 //! ## Wire into Coordinator
@@ -48,7 +48,7 @@ pub enum ConflictPolicy {
         threshold: usize,
     },
 
-    /// Escalate to the [`HumanFallback`] handler — useful when the coordinator
+    /// Escalate to the [`HumanFallback`] handler - useful when the coordinator
     /// cannot automatically resolve a conflict.
     HumanReview,
 }
@@ -75,7 +75,7 @@ impl HumanFallback for LoggingFallback {
         tracing::warn!(
             job_id = %job_id,
             agents = ?responses.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
-            "ConflictPolicy::HumanReview triggered — concatenating all responses"
+            "ConflictPolicy::HumanReview triggered - concatenating all responses"
         );
         let parts: Vec<String> = responses
             .iter()
@@ -132,7 +132,7 @@ impl ConflictResolver {
                         return Ok(format!("--- agent: {id} ---\n{resp}"));
                     }
                 }
-                // All were errors — return last as Err (guaranteed non-empty above).
+                // All were errors - return last as Err (guaranteed non-empty above).
                 let (_, last) = &responses[responses.len() - 1];
                 Err(anyhow::anyhow!("all agents returned errors; last: {last}"))
             }
@@ -166,7 +166,7 @@ impl ConflictResolver {
                         .map_or("", |(_, r)| r.as_str());
                     Ok(format!("--- agent: {first_id} (consensus) ---\n{resp}"))
                 } else {
-                    // No consensus — concatenate all with a warning tag.
+                    // No consensus - concatenate all with a warning tag.
                     let parts: Vec<String> = responses
                         .iter()
                         .map(|(id, resp)| format!("--- agent: {id} ---\n{resp}"))

@@ -1,4 +1,4 @@
-//! Goal-based autonomous stop hook — evaluator model call + goal management.
+//! Goal-based autonomous stop hook - evaluator model call + goal management.
 //!
 //! This module implements FR-011 from the piegap spec: a goal-based stop hook
 //! that evaluates a user-defined goal condition after each agent turn and
@@ -15,11 +15,11 @@
 //! # Architecture
 //!
 //! ```text
-//! User sets goal → GoalCondition stored in session
-//!                      ↓
-//! After each turn → GoalEvaluator calls LLM
-//!                      ↓
-//! Goal satisfied? → Yes: halt autonomous execution
+//! User sets goal -> GoalCondition stored in session
+//!                      v
+//! After each turn -> GoalEvaluator calls LLM
+//!                      v
+//! Goal satisfied? -> Yes: halt autonomous execution
 //!                   No: continue
 //! ```
 //!
@@ -85,9 +85,9 @@ impl GoalCondition {
     /// Returns a summary of the goal for display.
     pub fn summary(&self) -> String {
         let status = if self.satisfied {
-            "✓ satisfied"
+            "[ok] satisfied"
         } else {
-            "✗ not satisfied"
+            "[x] not satisfied"
         };
         format!(
             "Goal: {}\nStatus: {}\nEvaluated: {} times\nLast: {}",
@@ -108,7 +108,7 @@ pub struct GoalEvaluation {
     pub satisfied: bool,
     /// Reasoning from the LLM about the evaluation.
     pub reasoning: String,
-    /// Confidence score (0.0–1.0) if provided by the evaluator.
+    /// Confidence score (0.0-1.0) if provided by the evaluator.
     pub confidence: Option<f64>,
 }
 
@@ -305,7 +305,7 @@ pub fn build_evaluation_context(messages: &[Message], max_bytes: usize) -> Strin
             }
 
             if !wrote_any {
-                // First text part for this message — write the role prefix.
+                // First text part for this message - write the role prefix.
                 context.push('[');
                 context.push_str(role_str);
                 context.push_str("] ");
@@ -349,90 +349,5 @@ pub fn build_evaluation_context(messages: &[Message], max_bytes: usize) -> Strin
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_goal_new() {
-        let goal = GoalCondition::new("All tests pass");
-        assert_eq!(goal.description, "All tests pass");
-        assert!(!goal.satisfied);
-        assert_eq!(goal.evaluation_count, 0);
-        assert!(goal.last_evaluated.is_none());
-    }
-
-    #[test]
-    fn test_goal_record_evaluation() {
-        let mut goal = GoalCondition::new("Tests pass");
-        goal.record_evaluation(true, Some("All 10 tests passed".to_string()));
-
-        assert!(goal.satisfied);
-        assert_eq!(goal.evaluation_count, 1);
-        assert!(goal.last_evaluated.is_some());
-        assert_eq!(goal.last_reasoning, Some("All 10 tests passed".to_string()));
-    }
-
-    #[test]
-    fn test_goal_summary() {
-        let goal = GoalCondition::new("Feature complete");
-        let summary = goal.summary();
-        assert!(summary.contains("Feature complete"));
-        assert!(summary.contains("not satisfied"));
-    }
-
-    #[test]
-    fn test_parse_evaluation_yes() {
-        // Test the parsing logic directly
-        let text = "SATISFIED: YES\nCONFIDENCE: 0.95\nREASONING: All tests have passed and the feature is implemented.";
-
-        let mut satisfied = false;
-        let mut confidence = None;
-        let mut reasoning = String::new();
-
-        for line in text.lines() {
-            let line = line.trim();
-            if line.starts_with("SATISFIED:") {
-                let value = line.strip_prefix("SATISFIED:").unwrap_or("").trim();
-                satisfied = value.eq_ignore_ascii_case("YES");
-            } else if line.starts_with("CONFIDENCE:") {
-                let value = line.strip_prefix("CONFIDENCE:").unwrap_or("").trim();
-                confidence = value.parse::<f64>().ok();
-            } else if line.starts_with("REASONING:") {
-                reasoning = line
-                    .strip_prefix("REASONING:")
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-            }
-        }
-
-        assert!(satisfied);
-        assert_eq!(confidence, Some(0.95));
-        assert!(reasoning.contains("All tests"));
-    }
-
-    #[test]
-    fn test_build_context() {
-        let messages = vec![
-            Message::new(
-                "session-1",
-                Role::User,
-                vec![MessagePart::Text {
-                    text: "Run the tests".to_string(),
-                }],
-            ),
-            Message::new(
-                "session-1",
-                Role::Assistant,
-                vec![MessagePart::Text {
-                    text: "Running cargo test...".to_string(),
-                }],
-            ),
-        ];
-
-        let context = build_evaluation_context(&messages, 1000);
-        assert!(context.contains("User"));
-        assert!(context.contains("Assistant"));
-        assert!(context.contains("Run the tests"));
-    }
-}
+#[path = "../tests/inline/goal_mod_tests.rs"]
+mod tests;

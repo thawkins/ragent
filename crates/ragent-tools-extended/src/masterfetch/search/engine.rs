@@ -7,29 +7,29 @@
 //! keyless; the remaining five (Tavily, Exa, Serper, Perplexity, LangSearch)
 //! are API-key-backed services:
 //!
-//! - [`SearchEngine`] — an `async` trait implemented by each search backend
+//! - [`SearchEngine`] - an `async` trait implemented by each search backend
 //!   adapter (OpenAlex, Wikipedia, Tavily, Exa, Serper, Perplexity,
 //!   LangSearch). Each adapter returns results from its respective API; some
 //!   are keyless (OpenAlex, Wikipedia), others require an API key (FR-023).
-//! - [`RawResult`] — a single search result as returned by one engine, before
+//! - [`RawResult`] - a single search result as returned by one engine, before
 //!   merging / dedup / ranking. Carries the engine name (`source`) and an
-//!   optional relevance `score` (0.0–1.0) if the engine provides one.
-//! - [`EngineReport`] — the complete output of one engine's search: a list of
+//!   optional relevance `score` (0.0-1.0) if the engine provides one.
+//! - [`EngineReport`] - the complete output of one engine's search: a list of
 //!   [`RawResult`]s plus metadata about whether the engine was blocked, rate-
 //!   limited, or errored. The `engine_blocked` flag lets the consensus merger
 //!   report honest `engine_blocked` signals to the agent (FR-008).
-//! - [`SearchOptions`] — query modifiers: `max_results`, `site`, `exclude_sites`,
+//! - [`SearchOptions`] - query modifiers: `max_results`, `site`, `exclude_sites`,
 //!   `freshness`, `page`. Shared across all backends.
-//! - [`Freshness`] — time filter enum (`Day`, `Week`, `Month`, `Year`).
-//! - [`normalise_result_url`] — normalises a result URL for dedup using the
+//! - [`Freshness`] - time filter enum (`Day`, `Week`, `Month`, `Year`).
+//! - [`normalise_result_url`] - normalises a result URL for dedup using the
 //!   shared [`urlnorm`](crate::masterfetch::urlnorm) module. Falls back to the
 //!   raw URL if normalisation fails (e.g. relative URLs).
-//! - [`dedup_results_by_url`] — removes duplicate results by normalised URL,
+//! - [`dedup_results_by_url`] - removes duplicate results by normalised URL,
 //!   preserving first occurrence.
 //!
 //! # Testability (NFR-003)
 //!
-//! All data types are plain structs with public fields — no I/O, no async.
+//! All data types are plain structs with public fields - no I/O, no async.
 //! The [`SearchEngine`] trait can be implemented by a mock in tests (see
 //! `tests/test_mf_search_engine.rs`). Real backends (T-013, T-014) perform HTTP
 //! I/O and are tested with `#[ignore]`-gated integration tests.
@@ -65,9 +65,13 @@ use crate::masterfetch::urlnorm::normalise_url;
 // ---------------------------------------------------------------------------
 
 /// Default maximum number of results to request from each engine (FR-008).
+///
+/// Also the shared default for the `max_results` tool input
+/// ([`crate::masterfetch::tools::search_tool`]) so the orchestrator default and
+/// the tool default cannot drift (ANTIPAT M5.9 / 3.7).
 pub const DEFAULT_MAX_RESULTS: usize = 10;
 
-/// Maximum allowed `max_results` value — the overall merge cap across all
+/// Maximum allowed `max_results` value - the overall merge cap across all
 /// engines (engines may cap lower).
 pub const MAX_MAX_RESULTS: usize = 500;
 
@@ -160,11 +164,11 @@ impl std::str::FromStr for Freshness {
 /// translates these into its own query-string syntax.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchOptions {
-    /// Maximum results to return after merge/dedup (1–500, default 10).
+    /// Maximum results to return after merge/dedup (1-500, default 10).
     /// This is the overall cap applied by `merge_and_rank_with_cap`.
     pub max_results: usize,
     /// Maximum results to request from each individual engine
-    /// (1–200, default 75). Each backend receives an opts copy with
+    /// (1-200, default 75). Each backend receives an opts copy with
     /// `max_results` set to this value.
     pub per_engine_results: usize,
     /// Restrict results to this domain (site: filter). Empty = no restriction.
@@ -218,7 +222,7 @@ impl SearchOptions {
         self
     }
 
-    /// Builder: set the per-engine result cap (1–200).
+    /// Builder: set the per-engine result cap (1-200).
     #[must_use]
     pub fn with_per_engine_results(mut self, n: usize) -> Self {
         self.per_engine_results = n.clamp(1, MAX_PER_ENGINE_RESULTS);
@@ -253,7 +257,7 @@ impl Default for SearchOptions {
 /// `"duckduckgo"`, `"brave"`). This is used by the consensus merger to compute
 /// `engines_consensus`.
 ///
-/// The `score` field is an optional relevance score (0.0–1.0) if the engine
+/// The `score` field is an optional relevance score (0.0-1.0) if the engine
 /// provides one. Most keyless backends do not provide scores; the consensus
 /// merger assigns scores based on rank position and cross-engine consensus.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -266,7 +270,7 @@ pub struct RawResult {
     pub snippet: String,
     /// Engine name that produced this result (e.g. `"duckduckgo"`).
     pub source: String,
-    /// Optional relevance score (0.0–1.0) if the engine provides one.
+    /// Optional relevance score (0.0-1.0) if the engine provides one.
     pub score: Option<f64>,
     /// Author name when the engine exposes one in the result payload (e.g.
     /// Exa's `author` field or OpenAlex's `authorships[*].author.display_name`).
@@ -313,14 +317,14 @@ impl RawResult {
 /// Returned by [`SearchEngine::search`]. Contains the list of [`RawResult`]s
 /// plus metadata about the engine's status:
 ///
-/// - `engine` — the engine name (matches `SearchEngine::name()`).
-/// - `results` — the raw results (may be empty if blocked or errored).
-/// - `error` — an error message if the engine failed (empty on success).
-/// - `engine_blocked` — `true` if the engine was rate-limited (HTTP 429/202)
+/// - `engine` - the engine name (matches `SearchEngine::name()`).
+/// - `results` - the raw results (may be empty if blocked or errored).
+/// - `error` - an error message if the engine failed (empty on success).
+/// - `engine_blocked` - `true` if the engine was rate-limited (HTTP 429/202)
 ///   or otherwise blocked. Reported to the agent as an honest signal.
-/// - `result_count` — number of results returned (convenience; equals
+/// - `result_count` - number of results returned (convenience; equals
 ///   `results.len()`).
-/// - `duration_ms` — time spent on the request in milliseconds.
+/// - `duration_ms` - time spent on the request in milliseconds.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EngineReport {
     /// Engine name (e.g. `"duckduckgo"`, `"brave"`).
@@ -417,8 +421,8 @@ pub enum SearchEngineError {
     #[error("search query must not be empty")]
     EmptyQuery,
 
-    /// `max_results` is out of range (must be 1–500).
-    #[error("max_results out of range: {0} (must be 1–{1})")]
+    /// `max_results` is out of range (must be 1-500).
+    #[error("max_results out of range: {0} (must be 1-{1})")]
     MaxResultsOutOfRange(usize, usize),
 
     /// HTTP request failed (network error, timeout).
@@ -448,7 +452,7 @@ pub enum SearchEngineError {
 /// Adapters query their respective backend API (keyless or API-key-backed)
 /// and return results as [`EngineReport`]s.
 ///
-/// Each adapter (OpenAlex, Wikipedia, …) implements this trait and is queried
+/// Each adapter (OpenAlex, Wikipedia, ...) implements this trait and is queried
 /// in parallel by the `mf_search` consensus merger. The merger collects
 /// [`EngineReport`]s from all backends, merges and deduplicates results by
 /// normalised URL, and ranks them with cross-engine consensus boosting.
@@ -492,7 +496,7 @@ pub trait SearchEngine: Send + Sync {
     ///
     /// Returns an [`EngineReport`] containing the raw results or an error /
     /// blocked status. This method **must not** return `Err` for engine-level
-    /// failures (rate limits, parse errors, network errors) — those are
+    /// failures (rate limits, parse errors, network errors) - those are
     /// captured in the `EngineReport`'s `error` and `engine_blocked` fields,
     /// matching Hound's catch-and-return pattern (FR-024).
     ///
@@ -501,8 +505,8 @@ pub trait SearchEngine: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// - `query` — the search query string (must not be empty).
-    /// - `opts` — search modifiers (max results, site filter, freshness, …).
+    /// - `query` - the search query string (must not be empty).
+    /// - `opts` - search modifiers (max results, site filter, freshness, ...).
     async fn search(&self, query: &str, opts: &SearchOptions) -> EngineReport;
 }
 
@@ -514,7 +518,7 @@ pub trait SearchEngine: Send + Sync {
 ///
 /// Uses the shared [`urlnorm`](crate::masterfetch::urlnorm) module to
 /// lowercase the host, strip default ports, remove trailing slashes, and strip
-/// tracking parameters (`utm_*`, `fbclid`, `gclid`, `ref`, …).
+/// tracking parameters (`utm_*`, `fbclid`, `gclid`, `ref`, ...).
 ///
 /// If the URL fails to normalise (e.g. it's a relative URL or malformed), the
 /// raw URL is returned unchanged. This ensures dedup never panics on bad input.
@@ -534,7 +538,7 @@ pub trait SearchEngine: Send + Sync {
 ///     normalise_result_url("https://example.com/article?utm_source=x&keep=1"),
 ///     "https://example.com/article?keep=1",
 /// );
-/// // Same URL after normalisation → same string.
+/// // Same URL after normalisation -> same string.
 /// let a = normalise_result_url("https://example.com/page/");
 /// let b = normalise_result_url("https://example.com/page");
 /// assert_eq!(a, b);
@@ -547,9 +551,9 @@ pub fn normalise_result_url(url: &str) -> String {
 /// Remove quote characters from a search query.
 ///
 /// Several search backends reject quoted-phrase syntax on restricted (free)
-/// accounts — Serper returns HTTP 400 "Query pattern not allowed for free
+/// accounts - Serper returns HTTP 400 "Query pattern not allowed for free
 /// accounts", which blocks that engine for the whole query. Stripping both
-/// ASCII quotes and smart/typographic quotes (`'` `"` `'` `"` `"` `«` `»`)
+/// ASCII quotes and smart/typographic quotes (`'` `"` `'` `"` `"` `<<` `>>`)
 /// keeps every engine reachable; the unquoted multi-term query still matches
 /// the same terms without phrase semantics. Callers that embed quoted phrases
 /// (e.g. a TUI echoing a quoted slash-command argument) therefore degrade
@@ -606,7 +610,12 @@ pub fn strip_disallowed_quotes(query: &str) -> String {
 #[must_use]
 pub fn dedup_results_by_url(results: &[RawResult]) -> Vec<RawResult> {
     let mut seen: HashSet<String> = HashSet::default();
-    let mut deduped: Vec<RawResult> = Vec::with_capacity(results.len());
+    // No `Vec::with_capacity(results.len())` here: `results` is parsed from raw
+    // upstream JSON, so a hostile/buggy engine can return an arbitrarily large
+    // array and force a large up-front allocation before any dedup happens
+    // (ANTIPAT 4.4). Dedup typically shrinks the list anyway, so growing from
+    // empty is both safer and rarely less efficient.
+    let mut deduped: Vec<RawResult> = Vec::new();
 
     for result in results {
         let norm = normalise_result_url(&result.url);
@@ -621,7 +630,7 @@ pub fn dedup_results_by_url(results: &[RawResult]) -> Vec<RawResult> {
 /// Collect results from multiple [`EngineReport`]s into a single flat list.
 ///
 /// All results from all reports are concatenated in order. Deduplication is
-/// not performed here — use [`dedup_results_by_url`] afterwards if needed.
+/// not performed here - use [`dedup_results_by_url`] afterwards if needed.
 ///
 /// # Examples
 ///
@@ -774,7 +783,7 @@ pub fn report_is_transient(report: &EngineReport) -> bool {
     }
     let lower = msg.to_ascii_lowercase();
     if msg.contains("429") || lower.contains("rate-limit") {
-        // OpenAlex's budget-based 429 is a daily quota, not a burst window —
+        // OpenAlex's budget-based 429 is a daily quota, not a burst window -
         // the provider payload itself says "Insufficient budget"; do not
         // retry it, but DO retry Wikipedia's plain per-IP limiter.
         let openalex_daily_quota = report.engine == "openalex" && msg.contains("budget");
@@ -851,7 +860,11 @@ pub(crate) fn engine_http_client(
     if let Some(c) = client {
         return Ok(c.clone());
     }
-    crate::masterfetch::http::build_default_client()
+    // Reuse the process-wide shared client singleton (connection pool + TLS
+    // session cache) instead of rebuilding an equivalent client on every
+    // engine call (ANTIPAT M5.9 / 3.2).
+    crate::masterfetch::http::shared_client()
+        .cloned()
         .map_err(|e| format!("failed to build HTTP client: {e}"))
 }
 
@@ -870,13 +883,33 @@ pub fn truncate_query_to(query: &str, max: usize) -> String {
 /// ellipsis when the input was longer.
 #[must_use]
 pub fn truncate_snippet(snippet: &str) -> String {
-    let mut chars = snippet.chars();
-    let truncated: String = chars.by_ref().take(SNIPPET_MAX_CHARS).collect();
-    if chars.next().is_some() {
-        format!("{truncated}…")
-    } else {
-        truncated
+    if snippet.chars().count() <= SNIPPET_MAX_CHARS {
+        return snippet.to_string();
     }
+    // Keep the result within `SNIPPET_MAX_CHARS` including the 3-char ellipsis.
+    let head = SNIPPET_MAX_CHARS.saturating_sub(3);
+    let truncated: String = snippet.chars().take(head).collect();
+    format!("{truncated}...")
+}
+
+/// Truncate a snippet to at most `max` bytes (rounded down to a char
+/// boundary), appending an ellipsis when the input was longer.
+///
+/// Some engines (OpenAlex, Wikipedia) budget snippets in bytes rather than
+/// characters; they share this one implementation instead of forking it
+/// (see `ANTIPAT.md` M3.8).
+#[must_use]
+pub fn truncate_snippet_bytes(snippet: &str, max: usize) -> String {
+    if snippet.len() <= max {
+        return snippet.to_string();
+    }
+    let end = snippet
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i <= max)
+        .last()
+        .unwrap_or(0);
+    format!("{}...", &snippet[..end])
 }
 
 /// Mask a sensitive API key for display.
@@ -935,7 +968,14 @@ pub(crate) async fn finish_json_search(
         tracing::warn!(status = %status, engine = engine, "api returned error status");
         return EngineReport::blocked(engine, on_error(status));
     }
-    let text = match response.text().await {
+    // ANTIPAT 4.1: cap the body so a hostile/buggy upstream (or a gzip bomb,
+    // which the shared client decompresses) cannot exhaust memory.
+    let text = match crate::masterfetch::http::read_body_capped(
+        response,
+        crate::masterfetch::http::MAX_RESPONSE_BODY_BYTES,
+    )
+    .await
+    {
         Ok(t) => t,
         Err(e) => {
             return EngineReport::error(engine, format!("failed to read response body: {e}"));
@@ -961,571 +1001,5 @@ pub(crate) async fn finish_json_search(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // --- Freshness ---
-
-    #[test]
-    fn test_freshness_as_str() {
-        assert_eq!(Freshness::Day.as_str(), "day");
-        assert_eq!(Freshness::Week.as_str(), "week");
-        assert_eq!(Freshness::Month.as_str(), "month");
-        assert_eq!(Freshness::Year.as_str(), "year");
-        assert_eq!(Freshness::Any.as_str(), "any");
-    }
-
-    #[test]
-    fn test_freshness_display() {
-        assert_eq!(Freshness::Day.to_string(), "day");
-        assert_eq!(Freshness::Any.to_string(), "any");
-    }
-
-    #[test]
-    fn test_freshness_from_str() {
-        assert_eq!("day".parse::<Freshness>().unwrap(), Freshness::Day);
-        assert_eq!("WEEK".parse::<Freshness>().unwrap(), Freshness::Week);
-        assert_eq!("Month".parse::<Freshness>().unwrap(), Freshness::Month);
-        assert_eq!("year".parse::<Freshness>().unwrap(), Freshness::Year);
-        assert_eq!("any".parse::<Freshness>().unwrap(), Freshness::Any);
-        assert_eq!("".parse::<Freshness>().unwrap(), Freshness::Any);
-    }
-
-    #[test]
-    fn test_freshness_from_str_invalid() {
-        assert!("hour".parse::<Freshness>().is_err());
-        assert!("invalid".parse::<Freshness>().is_err());
-    }
-
-    #[test]
-    fn test_freshness_default_is_any() {
-        assert_eq!(Freshness::default(), Freshness::Any);
-    }
-
-    // --- SearchOptions ---
-
-    #[test]
-    fn test_search_options_default() {
-        let opts = SearchOptions::default();
-        assert_eq!(opts.max_results, DEFAULT_MAX_RESULTS);
-        assert_eq!(opts.per_engine_results, DEFAULT_PER_ENGINE_RESULTS);
-        assert_eq!(opts.site, String::new());
-        assert_eq!(opts.exclude_sites, Vec::<String>::new());
-        assert_eq!(opts.freshness, Freshness::Any);
-        assert_eq!(opts.page, DEFAULT_PAGE);
-    }
-
-    #[test]
-    fn test_search_options_new_clamps_max_results() {
-        let opts = SearchOptions::new(0);
-        assert_eq!(opts.max_results, 1);
-
-        let opts = SearchOptions::new(1000);
-        assert_eq!(opts.max_results, MAX_MAX_RESULTS);
-
-        let opts = SearchOptions::new(6);
-        assert_eq!(opts.max_results, 6);
-    }
-
-    #[test]
-    fn test_search_options_per_engine_results_default() {
-        let opts = SearchOptions::new(10);
-        assert_eq!(opts.per_engine_results, DEFAULT_PER_ENGINE_RESULTS);
-    }
-
-    #[test]
-    fn test_search_options_with_per_engine_results_clamps() {
-        let opts = SearchOptions::new(10).with_per_engine_results(0);
-        assert_eq!(opts.per_engine_results, 1);
-
-        let opts = SearchOptions::new(10).with_per_engine_results(300);
-        assert_eq!(opts.per_engine_results, MAX_PER_ENGINE_RESULTS);
-
-        let opts = SearchOptions::new(10).with_per_engine_results(50);
-        assert_eq!(opts.per_engine_results, 50);
-    }
-
-    #[test]
-    fn test_search_options_builder() {
-        let opts = SearchOptions::new(5)
-            .with_site("example.com")
-            .with_exclude_sites(vec!["spam.com".into()])
-            .with_freshness(Freshness::Week)
-            .with_page(2)
-            .with_per_engine_results(50);
-        assert_eq!(opts.max_results, 5);
-        assert_eq!(opts.per_engine_results, 50);
-        assert_eq!(opts.site, "example.com");
-        assert_eq!(opts.exclude_sites, vec!["spam.com"]);
-        assert_eq!(opts.freshness, Freshness::Week);
-        assert_eq!(opts.page, 2);
-    }
-
-    // --- RawResult ---
-
-    #[test]
-    fn test_raw_result_new() {
-        let r = RawResult::new("Title", "https://example.com", "Snippet", "ddg");
-        assert_eq!(r.title, "Title");
-        assert_eq!(r.url, "https://example.com");
-        assert_eq!(r.snippet, "Snippet");
-        assert_eq!(r.source, "ddg");
-        assert!(r.score.is_none());
-    }
-
-    #[test]
-    fn test_raw_result_default() {
-        let r = RawResult::default();
-        assert_eq!(r.title, String::new());
-        assert_eq!(r.url, String::new());
-        assert_eq!(r.snippet, String::new());
-        assert_eq!(r.source, String::new());
-        assert!(r.score.is_none());
-    }
-
-    #[test]
-    fn test_raw_result_normalised_url() {
-        let r = RawResult::new("T", "https://Example.com/page/", "", "ddg");
-        assert_eq!(r.normalised_url(), "https://example.com/page");
-    }
-
-    #[test]
-    fn test_raw_result_normalised_url_strips_tracking() {
-        let r = RawResult::new("T", "https://example.com/a?utm_source=x&keep=1", "", "ddg");
-        assert_eq!(r.normalised_url(), "https://example.com/a?keep=1");
-    }
-
-    #[test]
-    fn test_raw_result_normalised_url_invalid_falls_back() {
-        let r = RawResult::new("T", "not a url", "", "ddg");
-        // Falls back to raw URL.
-        assert_eq!(r.normalised_url(), "not a url");
-    }
-
-    // --- EngineReport ---
-
-    #[test]
-    fn test_engine_report_ok() {
-        let results = vec![RawResult::new("A", "https://a.com", "", "ddg")];
-        let report = EngineReport::ok("ddg", results);
-        assert_eq!(report.engine, "ddg");
-        assert_eq!(report.result_count, 1);
-        assert!(!report.engine_blocked);
-        assert_eq!(report.error, String::new());
-        assert!(report.has_results());
-        assert!(report.is_success());
-    }
-
-    #[test]
-    fn test_engine_report_ok_empty_results() {
-        let report = EngineReport::ok("ddg", vec![]);
-        assert_eq!(report.result_count, 0);
-        assert!(!report.has_results());
-        assert!(report.is_success()); // success even with 0 results
-    }
-
-    #[test]
-    fn test_engine_report_blocked() {
-        let report = EngineReport::blocked("brave", "rate limited (429)");
-        assert_eq!(report.engine, "brave");
-        assert!(report.engine_blocked);
-        assert_eq!(report.error, "rate limited (429)");
-        assert!(!report.has_results());
-        assert!(!report.is_success());
-    }
-
-    #[test]
-    fn test_engine_report_error() {
-        let report = EngineReport::error("mojeek", "timeout");
-        assert_eq!(report.engine, "mojeek");
-        assert!(!report.engine_blocked);
-        assert_eq!(report.error, "timeout");
-        assert!(!report.has_results());
-        assert!(!report.is_success());
-    }
-
-    #[test]
-    fn test_engine_report_default() {
-        let report = EngineReport::default();
-        assert_eq!(report.engine, String::new());
-        assert!(report.results.is_empty(), "results should be empty");
-        assert!(!report.engine_blocked);
-        assert_eq!(report.result_count, 0);
-    }
-
-    // --- normalise_result_url ---
-
-    #[test]
-    fn test_normalise_result_url_basic() {
-        assert_eq!(
-            normalise_result_url("https://Example.com/page/"),
-            "https://example.com/page"
-        );
-    }
-
-    #[test]
-    fn test_normalise_result_url_strips_tracking() {
-        assert_eq!(
-            normalise_result_url("https://example.com/a?utm_source=x&keep=1"),
-            "https://example.com/a?keep=1"
-        );
-    }
-
-    #[test]
-    fn test_normalise_result_url_idempotent() {
-        let once = normalise_result_url("https://example.com/page/");
-        let twice = normalise_result_url(&once);
-        assert_eq!(once, twice);
-    }
-
-    #[test]
-    fn test_normalise_result_url_invalid_falls_back() {
-        assert_eq!(normalise_result_url("not a url"), "not a url");
-        assert_eq!(normalise_result_url(""), "");
-    }
-
-    #[test]
-    fn test_normalise_result_url_strips_default_port() {
-        assert_eq!(
-            normalise_result_url("https://example.com:443/page"),
-            "https://example.com/page"
-        );
-    }
-
-    // --- dedup_results_by_url ---
-
-    #[test]
-    fn test_dedup_removes_duplicates() {
-        let results = vec![
-            RawResult::new("A", "https://example.com/page/", "", "ddg"),
-            RawResult::new("B", "https://example.com/page", "", "brave"),
-            RawResult::new("C", "https://other.com", "", "ddg"),
-        ];
-        let deduped = dedup_results_by_url(&results);
-        assert_eq!(deduped.len(), 2);
-        assert_eq!(deduped[0].title, "A"); // first kept
-        assert_eq!(deduped[1].title, "C");
-    }
-
-    #[test]
-    fn test_dedup_preserves_first_occurrence() {
-        let results = vec![
-            RawResult::new("Brave", "https://example.com/page", "", "brave"),
-            RawResult::new("DDG", "https://example.com/page/", "", "ddg"),
-        ];
-        let deduped = dedup_results_by_url(&results);
-        assert_eq!(deduped.len(), 1);
-        assert_eq!(deduped[0].title, "Brave"); // first kept
-    }
-
-    #[test]
-    fn test_dedup_empty_input() {
-        let deduped = dedup_results_by_url(&[]);
-        assert!(deduped.is_empty(), "deduped should be empty");
-    }
-
-    #[test]
-    fn test_dedup_no_duplicates() {
-        let results = vec![
-            RawResult::new("A", "https://a.com", "", "ddg"),
-            RawResult::new("B", "https://b.com", "", "ddg"),
-            RawResult::new("C", "https://c.com", "", "ddg"),
-        ];
-        let deduped = dedup_results_by_url(&results);
-        assert_eq!(deduped.len(), 3);
-    }
-
-    #[test]
-    fn test_dedup_tracking_params_ignored() {
-        let results = vec![
-            RawResult::new("A", "https://example.com/page?utm_source=x", "", "ddg"),
-            RawResult::new("B", "https://example.com/page", "", "brave"),
-        ];
-        let deduped = dedup_results_by_url(&results);
-        assert_eq!(deduped.len(), 1);
-    }
-
-    #[test]
-    fn test_dedup_case_insensitive_host() {
-        let results = vec![
-            RawResult::new("A", "https://Example.COM/page", "", "ddg"),
-            RawResult::new("B", "https://example.com/page", "", "brave"),
-        ];
-        let deduped = dedup_results_by_url(&results);
-        assert_eq!(deduped.len(), 1);
-    }
-
-    #[test]
-    fn test_dedup_default_port_normalized() {
-        let results = vec![
-            RawResult::new("A", "https://example.com:443/page", "", "ddg"),
-            RawResult::new("B", "https://example.com/page", "", "brave"),
-        ];
-        let deduped = dedup_results_by_url(&results);
-        assert_eq!(deduped.len(), 1);
-    }
-
-    #[test]
-    fn test_dedup_different_paths_not_duplicates() {
-        let results = vec![
-            RawResult::new("A", "https://example.com/page1", "", "ddg"),
-            RawResult::new("B", "https://example.com/page2", "", "brave"),
-        ];
-        let deduped = dedup_results_by_url(&results);
-        assert_eq!(deduped.len(), 2);
-    }
-
-    #[test]
-    fn test_dedup_different_queries_not_duplicates() {
-        let results = vec![
-            RawResult::new("A", "https://example.com/search?q=1", "", "ddg"),
-            RawResult::new("B", "https://example.com/search?q=2", "", "brave"),
-        ];
-        let deduped = dedup_results_by_url(&results);
-        assert_eq!(deduped.len(), 2);
-    }
-
-    // --- collect_all_results ---
-
-    #[test]
-    fn test_collect_all_results_flattens() {
-        let reports = vec![
-            EngineReport::ok(
-                "ddg",
-                vec![
-                    RawResult::new("A", "https://a.com", "", "ddg"),
-                    RawResult::new("B", "https://b.com", "", "ddg"),
-                ],
-            ),
-            EngineReport::ok(
-                "brave",
-                vec![RawResult::new("C", "https://c.com", "", "brave")],
-            ),
-        ];
-        let all = collect_all_results(&reports);
-        assert_eq!(all.len(), 3);
-        assert_eq!(all[0].title, "A");
-        assert_eq!(all[2].title, "C");
-    }
-
-    #[test]
-    fn test_collect_all_results_empty_reports() {
-        let all = collect_all_results(&[]);
-        assert!(all.is_empty(), "all should be empty");
-    }
-
-    #[test]
-    fn test_collect_all_results_blocked_reports_contribute_nothing() {
-        let reports = vec![
-            EngineReport::ok("ddg", vec![RawResult::new("A", "https://a.com", "", "ddg")]),
-            EngineReport::blocked("brave", "rate limited"),
-        ];
-        let all = collect_all_results(&reports);
-        assert_eq!(all.len(), 1);
-    }
-
-    // --- count_engines_with_results ---
-
-    #[test]
-    fn test_count_engines_with_results() {
-        let reports = vec![
-            EngineReport::ok("ddg", vec![RawResult::new("A", "https://a.com", "", "ddg")]),
-            EngineReport::blocked("brave", "rate limited"),
-            EngineReport::ok("mojeek", vec![]), // 0 results but not blocked
-        ];
-        assert_eq!(count_engines_with_results(&reports), 1);
-    }
-
-    #[test]
-    fn test_count_engines_with_results_all_blocked() {
-        let reports = vec![
-            EngineReport::blocked("ddg", "blocked"),
-            EngineReport::blocked("brave", "blocked"),
-        ];
-        assert_eq!(count_engines_with_results(&reports), 0);
-    }
-
-    #[test]
-    fn test_count_engines_with_results_all_success() {
-        let reports = vec![
-            EngineReport::ok("ddg", vec![RawResult::new("A", "https://a.com", "", "ddg")]),
-            EngineReport::ok(
-                "brave",
-                vec![RawResult::new("B", "https://b.com", "", "brave")],
-            ),
-        ];
-        assert_eq!(count_engines_with_results(&reports), 2);
-    }
-
-    // --- count_total_results ---
-
-    #[test]
-    fn test_count_total_results() {
-        let reports = vec![
-            EngineReport::ok(
-                "ddg",
-                vec![
-                    RawResult::new("A", "https://a.com", "", "ddg"),
-                    RawResult::new("B", "https://b.com", "", "ddg"),
-                ],
-            ),
-            EngineReport::ok(
-                "brave",
-                vec![RawResult::new("C", "https://c.com", "", "brave")],
-            ),
-        ];
-        assert_eq!(count_total_results(&reports), 3);
-    }
-
-    #[test]
-    fn test_count_total_results_empty() {
-        assert_eq!(count_total_results(&[]), 0);
-    }
-
-    // --- blocked_engine_names ---
-
-    #[test]
-    fn test_blocked_engine_names() {
-        let reports = vec![
-            EngineReport::ok("ddg", vec![]),
-            EngineReport::blocked("brave", "rate limited"),
-            EngineReport::error("mojeek", "timeout"),
-        ];
-        let blocked = blocked_engine_names(&reports);
-        assert!(blocked.contains(&"brave"));
-        assert!(blocked.contains(&"mojeek"));
-        assert!(!blocked.contains(&"ddg"));
-    }
-
-    #[test]
-    fn test_blocked_engine_names_all_ok() {
-        let reports = vec![EngineReport::ok(
-            "ddg",
-            vec![RawResult::new("A", "https://a.com", "", "ddg")],
-        )];
-        let blocked = blocked_engine_names(&reports);
-        assert!(blocked.is_empty(), "blocked should be empty");
-    }
-
-    // --- SearchEngineError ---
-
-    #[test]
-    fn test_search_engine_error_display() {
-        assert_eq!(
-            SearchEngineError::EmptyQuery.to_string(),
-            "search query must not be empty"
-        );
-        assert_eq!(
-            SearchEngineError::RateLimited(429).to_string(),
-            "engine rate-limited (HTTP 429)"
-        );
-    }
-
-    // --- SearchEngine trait (mock implementation) ---
-
-    struct MockEngine {
-        name: &'static str,
-        results: Vec<RawResult>,
-    }
-
-    #[async_trait::async_trait]
-    impl SearchEngine for MockEngine {
-        fn name(&self) -> &str {
-            self.name
-        }
-
-        async fn search(&self, _query: &str, _opts: &SearchOptions) -> EngineReport {
-            EngineReport::ok(self.name, self.results.clone())
-        }
-    }
-
-    struct BlockedEngine;
-
-    #[async_trait::async_trait]
-    impl SearchEngine for BlockedEngine {
-        fn name(&self) -> &'static str {
-            "blocked-engine"
-        }
-
-        async fn search(&self, _query: &str, _opts: &SearchOptions) -> EngineReport {
-            EngineReport::blocked("blocked-engine", "rate limited (429)")
-        }
-    }
-
-    #[tokio::test]
-    async fn test_mock_engine_returns_results() {
-        let engine = MockEngine {
-            name: "mock",
-            results: vec![
-                RawResult::new("A", "https://a.com", "Snippet A", "mock"),
-                RawResult::new("B", "https://b.com", "Snippet B", "mock"),
-            ],
-        };
-        let report = engine.search("test", &SearchOptions::default()).await;
-        assert_eq!(report.engine, "mock");
-        assert_eq!(report.result_count, 2);
-        assert!(report.is_success());
-        assert!(!report.engine_blocked);
-    }
-
-    #[tokio::test]
-    async fn test_blocked_engine_returns_blocked_report() {
-        let engine = BlockedEngine;
-        let report = engine.search("test", &SearchOptions::default()).await;
-        assert_eq!(report.engine, "blocked-engine");
-        assert!(report.engine_blocked);
-        assert!(!report.is_success());
-        assert!(!report.has_results());
-    }
-
-    #[tokio::test]
-    async fn test_multiple_engines_in_parallel() {
-        let engines: Vec<Box<dyn SearchEngine>> = vec![
-            Box::new(MockEngine {
-                name: "ddg",
-                results: vec![RawResult::new("A", "https://a.com", "", "ddg")],
-            }),
-            Box::new(MockEngine {
-                name: "brave",
-                results: vec![RawResult::new("B", "https://b.com", "", "brave")],
-            }),
-            Box::new(BlockedEngine),
-        ];
-
-        let query = "test query";
-        let opts = SearchOptions::default();
-
-        // Run all engines concurrently.
-        let mut handles = Vec::new();
-        for _engine in &engines {
-            let query = query.to_string();
-            handles.push(tokio::spawn(async move {
-                // Can't move Box<dyn SearchEngine> across spawn, so we
-                // call directly — this test just verifies the pattern works.
-                let _ = query;
-            }));
-        }
-        // For the test, call sequentially (the parallel pattern is tested
-        // by the consensus merger in T-015).
-        let mut reports = Vec::new();
-        for engine in &engines {
-            reports.push(engine.search(query, &opts).await);
-        }
-        assert_eq!(reports.len(), 3);
-        assert_eq!(count_engines_with_results(&reports), 2);
-        assert_eq!(count_total_results(&reports), 2);
-        assert!(blocked_engine_names(&reports).contains(&"blocked-engine"));
-    }
-
-    #[tokio::test]
-    async fn test_trait_object_dyn_compatibility() {
-        // Verify the trait is dyn-compatible (object-safe).
-        let engine: Box<dyn SearchEngine> = Box::new(MockEngine {
-            name: "mock",
-            results: vec![RawResult::new("A", "https://a.com", "", "mock")],
-        });
-        assert_eq!(engine.name(), "mock");
-        let report = engine.search("test", &SearchOptions::default()).await;
-        assert!(report.is_success());
-    }
-}
+#[path = "../tests/inline/engine_tests.rs"]
+mod tests;

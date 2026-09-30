@@ -24,7 +24,7 @@ use std::collections::HashSet;
 /// Result of a deterministic corpus-critic pass.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CorpusCriticReport {
-    /// Overall corpus quality score 0–100.
+    /// Overall corpus quality score 0-100.
     pub score: u32,
     /// Coverage subscore: how many detected dimensions are populated.
     pub coverage_score: u32,
@@ -40,7 +40,7 @@ pub struct CorpusCriticReport {
     pub gaps: Vec<String>,
     /// Recommendations for improving the corpus before synthesis.
     pub recommendations: Vec<String>,
-    /// Ratio of contested claims to total claims (0–100).
+    /// Ratio of contested claims to total claims (0-100).
     pub contested_ratio: u32,
     /// Dimensions that only have surface-level support.
     pub shallow_dimensions: Vec<String>,

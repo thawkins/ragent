@@ -39,7 +39,7 @@ impl MemoryScope {
 /// Resolve the memory directory for a given agent name and scope.
 ///
 /// Returns `None` when `scope` is [`MemoryScope::None`].
-/// The directory is **not** created — callers should create it on first write.
+/// The directory is **not** created - callers should create it on first write.
 #[must_use]
 pub fn resolve_memory_dir(
     scope: MemoryScope,
@@ -201,9 +201,9 @@ pub enum HookEvent {
 /// When the matching `event` fires, the `command` is executed as a shell
 /// command.  Exit codes follow the quality-gate protocol:
 ///
-/// - **Exit 0** → allow the action.
-/// - **Exit 2** → reject / send feedback (stdout is returned to the agent).
-/// - **Other** → log a warning, allow the action.
+/// - **Exit 0** -> allow the action.
+/// - **Exit 2** -> reject / send feedback (stdout is returned to the agent).
+/// - **Other** -> log a warning, allow the action.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookEntry {
     /// The lifecycle event that triggers this hook.

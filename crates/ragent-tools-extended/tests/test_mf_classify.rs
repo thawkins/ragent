@@ -547,8 +547,8 @@ fn test_summary_truncated_when_too_long() {
         &ClassifyOptions::default(),
     );
     // Summary should be truncated to 120 chars + ellipsis.
-    assert!(result.summary.ends_with('…'));
-    assert!(result.summary.chars().count() <= 121); // 120 + ellipsis
+    assert!(result.summary.ends_with("..."));
+    assert!(result.summary.chars().count() <= 120);
 }
 
 #[test]

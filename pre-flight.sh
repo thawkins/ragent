@@ -97,6 +97,7 @@ fi
 # Inline test guard (M8/T8.5)
 print_step "Inline test guard..."
 bash "$(dirname "$0")/scripts/check-inline-tests.sh" || print_failure "Inline test guard failed"
+bash "$(dirname "$0")/scripts/check-inline-tests.sh" --self-test || print_failure "Inline test guard self-test failed"
 
 # Dead-code reason guard (RMPLAN.md Milestone 7 / T7.2)
 print_step "Dead-code reason guard..."
@@ -106,9 +107,37 @@ bash "$(dirname "$0")/scripts/check-dead-code-reasons.sh" || print_failure "Dead
 print_step "Poison-lock guard..."
 bash "$(dirname "$0")/scripts/check-poison-locks.sh" || print_failure "Poison-lock guard failed"
 
+# File-tool path containment guard (SECTASKS MS-05 T-070)
+print_step "File-tool containment guard..."
+bash "$(dirname "$0")/scripts/check-file-tool-containment.sh" || print_failure "File-tool containment guard failed"
+bash "$(dirname "$0")/scripts/check-file-tool-containment.sh" --self-test || print_failure "File-tool containment guard self-test failed"
+
+# Panicking-unwrap baseline guard (SECTASKS MS-05 T-070)
+print_step "Security unwrap guard..."
+bash "$(dirname "$0")/scripts/check-security-unwraps.sh" || print_failure "Security unwrap guard failed"
+
+# Shared-guard duplication guard (SECTASKS MS-05 T-067/T-069)
+print_step "Shared-guard duplication guard..."
+bash "$(dirname "$0")/scripts/check-shared-guards.sh" || print_failure "Shared-guard duplication guard failed"
+
 # VCS tool duplication guard (DUPPLAN.md Milestone A)
 print_step "VCS tool duplication guard..."
 bash "$(dirname "$0")/scripts/check-vcs-duplication.sh" || print_failure "VCS tool duplication guard failed"
+
+# Team duplication guard (ANTIPAT M7.7)
+print_step "Team duplication guard..."
+bash "$(dirname "$0")/scripts/check-team-duplication.sh" || print_failure "Team duplication guard failed"
+bash "$(dirname "$0")/scripts/check-team-duplication.sh" --self-test || print_failure "Team duplication guard self-test failed"
+
+# Non-ASCII sweep guard (ANTIPAT M1.16)
+print_step "Non-ASCII guard..."
+bash "$(dirname "$0")/scripts/check-non-ascii.sh" || print_failure "Non-ASCII guard failed"
+bash "$(dirname "$0")/scripts/check-non-ascii.sh" --self-test || print_failure "Non-ASCII guard self-test failed"
+
+# Silent error-suppression guard (ANTIPAT M4)
+print_step "Silent error-suppression guard..."
+bash "$(dirname "$0")/scripts/check-silent-errors.sh" --self-test || print_failure "Silent error guard self-test failed"
+bash "$(dirname "$0")/scripts/check-silent-errors.sh" || print_failure "Silent error guard failed"
 
 # PERFPLAN F-5: agent-loop bench regression guard (skipped in --quick mode).
 if [[ "${QUICK_MODE}" != "true" ]]; then

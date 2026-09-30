@@ -8,13 +8,13 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::masterfetch::http::DEFAULT_TIMEOUT_SECS;
 use crate::masterfetch::security::validate_url;
 
 /// Fetches web content from a URL, with optional HTML-to-text conversion.
 pub struct WebFetchTool;
 
 const DEFAULT_MAX_LENGTH: usize = 50_000;
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_REDIRECTS: usize = 5;
 // reason: kept as documentation of the max-redirect limit; redirects are
 // handled implicitly by reqwest, so this constant is not read at runtime.
@@ -72,7 +72,7 @@ impl Tool for WebFetchTool {
                 },
                 "format": {
                     "type": "string",
-                    "description": "Output format: 'raw' (unchanged), 'text' (HTML→plain text). Default: 'text'",
+                    "description": "Output format: 'raw' (unchanged), 'text' (HTML->plain text). Default: 'text'",
                     "enum": ["raw", "text"]
                 },
                 "max_length": {
@@ -199,7 +199,7 @@ impl Tool for WebFetchTool {
 
         // The streaming read above already capped the body at
         // `download_cap` (M-015). Reuse the existing post-processing that
-        // handles HTML→text conversion and final `max_length` truncation.
+        // handles HTML->text conversion and final `max_length` truncation.
         let (processed, extracted_title) = if is_html && format != "raw" {
             match extract_article_text(&body, url) {
                 Some((text, title)) if text.len() >= MIN_READABILITY_TEXT_LEN => {

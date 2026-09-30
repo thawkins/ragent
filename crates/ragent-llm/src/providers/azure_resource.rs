@@ -1,4 +1,4 @@
-//! Azure Resource Provider — file-based model catalog.
+//! Azure Resource Provider - file-based model catalog.
 //!
 //! Reads model definitions from `azureresources.json` so users can register
 //! Azure-hosted endpoints (e.g. Azure OpenAI, Azure AI Foundry, custom
@@ -36,8 +36,13 @@ use std::path::{Path, PathBuf};
 use crate::llm::LlmClient;
 use crate::provider::anthropic::AnthropicClient;
 use crate::provider::azure_foundry::AzureFoundryClient;
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
+
+/// Default context window (tokens) for an Azure resource whose entry does not
+/// declare one (ANTIPAT 5.6: named default limit).
+pub(crate) const DEFAULT_AZURE_CONTEXT_WINDOW: usize = 128_000;
 
 /// A single Azure resource entry parsed from `azureresources.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -48,7 +53,7 @@ pub struct AzureResourceEntry {
     pub name: String,
     /// Base endpoint URL for the Azure resource.
     pub endpoint: String,
-    /// Optional inline API key (discouraged — prefer `api_key_env`).
+    /// Optional inline API key (discouraged - prefer `api_key_env`).
     #[serde(default)]
     pub api_key: Option<String>,
     /// Name of the environment variable that holds the API key.
@@ -269,6 +274,9 @@ impl Provider for AzureResourceProvider {
         base_url: Option<&str>,
         options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
+        // ANTIPAT 3.6: register the credential with the shared redaction
+        // registry so any text passed through `redact_secrets` masks it.
+        ragent_types::sanitize::register_secret(api_key);
         let resolved = base_url
             .unwrap_or_default()
             .trim_end_matches('/')
@@ -338,7 +346,7 @@ fn entry_to_model_info(entry: AzureResourceEntry) -> ModelInfo {
                 }
             }
         },
-        context_window: entry.context_window.unwrap_or(128_000),
+        context_window: entry.context_window.unwrap_or(DEFAULT_AZURE_CONTEXT_WINDOW),
         max_output: None,
         request_multiplier: None,
         thinking_config: entry.thinking,
@@ -382,10 +390,8 @@ impl LlmClient for AzureAnthropicClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body_text = response.text().await.unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "Failed to read response body");
-                String::new()
-            });
+            // ANTIPAT 3.1/3.2: capped error-body read.
+            let body_text = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
             tracing::warn!(
                 url = %url,
                 model = %request.model,
@@ -399,7 +405,7 @@ impl LlmClient for AzureAnthropicClient {
         // Reuse the Anthropic SSE stream parser by delegating to the inner client.
         // The AnthropicClient::chat method is what we want, but it hardcodes
         // "x-api-key" and its own URL.  Instead, we inline the response handling
-        // below — but since the response format is identical, we can call the
+        // below - but since the response format is identical, we can call the
         // private helper logic by constructing an identical response and passing
         // it through.
         //
@@ -453,7 +459,7 @@ impl LlmClient for AzureAnthropicClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "Azure Resource: stream stalled — no data received for {}s",
+                                "Azure Resource: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -500,7 +506,17 @@ impl LlmClient for AzureAnthropicClient {
 
                           let parsed: Value = match serde_json::from_str(data) {
                               Ok(v) => v,
-                              Err(_) => continue,
+                              Err(e) => {
+                                  // FUNC-032 (ANTIPAT 3.3): a corrupt frame must be
+                                  // logged, not silently dropped - it can carry
+                                  // tool-call deltas.
+                                  tracing::warn!(
+                                      error = %e,
+                                      frame = %data,
+                                      "Azure Anthropic: dropping malformed SSE data frame"
+                                  );
+                                  continue;
+                              }
                           };
 
                         match current_event_type.as_str() {

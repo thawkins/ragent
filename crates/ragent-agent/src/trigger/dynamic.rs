@@ -1,4 +1,4 @@
-//! Dynamic trigger rules — natural-language polling + sub-agent action
+//! Dynamic trigger rules - natural-language polling + sub-agent action
 //! (spec `piegap` FR-002).
 //!
 //! This module implements the dynamic trigger rule engine that:
@@ -17,11 +17,11 @@
 //! The engine is decoupled from the LLM and sub-agent infrastructure through
 //! two traits:
 //!
-//! - [`ConditionEvaluator`] — evaluates a natural-language condition string
+//! - [`ConditionEvaluator`] - evaluates a natural-language condition string
 //!   and returns `true` when it matches. In production this calls the LLM;
 //!   in tests a simple pattern-matching implementation is used.
 //!
-//! - [`ActionDispatcher`] — dispatches a fired trigger's action prompt. In
+//! - [`ActionDispatcher`] - dispatches a fired trigger's action prompt. In
 //!   production this spawns a background sub-agent; in tests a recording
 //!   implementation captures the dispatch for verification.
 //!
@@ -243,7 +243,7 @@ pub fn parse_trigger_request(input: &str) -> Result<ParsedTriggerRequest, Dynami
         return Ok(ParsedTriggerRequest { condition, action });
     }
 
-    // No delimiter found — treat entire input as condition, empty action.
+    // No delimiter found - treat entire input as condition, empty action.
     Err(DynamicTriggerError::ParseFailed(format!(
         "no condition/action delimiter found in: {input}"
     )))
@@ -510,68 +510,5 @@ impl DynamicTriggerEngine {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_when_comma() {
-        let parsed = parse_trigger_request("when build.done exists, run cargo test").unwrap();
-        assert_eq!(parsed.condition, "build.done exists");
-        assert_eq!(parsed.action, "run cargo test");
-    }
-
-    #[test]
-    fn test_parse_if_comma() {
-        let parsed = parse_trigger_request("if tests pass, deploy to staging").unwrap();
-        assert_eq!(parsed.condition, "tests pass");
-        assert_eq!(parsed.action, "deploy to staging");
-    }
-
-    #[test]
-    fn test_parse_then_delimiter() {
-        let parsed = parse_trigger_request("when file exists then run tests").unwrap();
-        assert_eq!(parsed.condition, "file exists");
-        assert_eq!(parsed.action, "run tests");
-    }
-
-    #[test]
-    fn test_parse_arrow_delimiter() {
-        let parsed = parse_trigger_request("file exists -> run tests").unwrap();
-        assert_eq!(parsed.condition, "file exists");
-        assert_eq!(parsed.action, "run tests");
-    }
-
-    #[test]
-    fn test_parse_no_delimiter_fails() {
-        assert!(parse_trigger_request("just a condition").is_err());
-    }
-
-    #[test]
-    fn test_parse_empty_condition_fails() {
-        assert!(parse_trigger_request("when , do something").is_err());
-    }
-
-    #[test]
-    fn test_parse_empty_action_fails() {
-        assert!(parse_trigger_request("when something, ").is_err());
-    }
-
-    #[test]
-    fn test_simple_evaluator_matches() {
-        let eval = SimpleConditionEvaluator::new();
-        eval.add_matching("file exists");
-        assert!(eval.matches("file exists"));
-        assert!(!eval.matches("file does not exist"));
-    }
-
-    #[tokio::test]
-    async fn test_noop_dispatcher_records() {
-        let dispatcher = NoopActionDispatcher::new();
-        dispatcher.dispatch("run tests", false).await.unwrap();
-        dispatcher.dispatch("deploy", true).await.unwrap();
-        assert_eq!(dispatcher.count(), 2);
-        let dispatched = dispatcher.dispatched();
-        assert_eq!(dispatched[0], ("run tests".to_string(), false));
-        assert_eq!(dispatched[1], ("deploy".to_string(), true));
-    }
-}
+#[path = "../tests/inline/dynamic_tests.rs"]
+mod tests;

@@ -20,7 +20,7 @@ impl Tool for CodeIndexDependenciesTool {
         "Query file-level dependencies from the code index. Required parameter: \
          'path' (relative file path). Optional 'direction': 'imports' (what this \
          file uses, default) or 'dependents' (what uses this file). USE THIS instead \
-         of `grep` for import/use statements — the index tracks dependency edges that \
+         of `grep` for import/use statements - the index tracks dependency edges that \
          grep can only approximate with fragile pattern matching."
     }
     fn parameters_schema(&self) -> Value {

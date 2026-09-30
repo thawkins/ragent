@@ -1,4 +1,4 @@
-//! MCP auto-discovery — scans `PATH`, npm global packages, and well-known
+//! MCP auto-discovery - scans `PATH`, npm global packages, and well-known
 //! directories for MCP server executables.
 //!
 //! [`discover`] returns a list of [`DiscoveredMcpServer`] entries for any servers
@@ -191,7 +191,7 @@ const KNOWN_SERVERS: &[KnownMcpServer] = &[
 ///
 /// # Errors
 ///
-/// This function never fails — missing servers are silently skipped.
+/// This function never fails - missing servers are silently skipped.
 pub async fn discover() -> Vec<DiscoveredMcpServer> {
     let mut found = Vec::new();
 
@@ -565,31 +565,5 @@ async fn try_mcp_json_config(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_discovered_server_to_config() {
-        let server = DiscoveredMcpServer {
-            id: "test".to_string(),
-            name: "Test Server".to_string(),
-            executable: PathBuf::from("/usr/bin/mcp-test"),
-            args: vec!["--arg1".to_string()],
-            env: HashMap::from([("KEY".to_string(), "VALUE".to_string())]),
-            source: McpDiscoverySource::SystemPath,
-        };
-
-        let config = server.to_config();
-        assert_eq!(config.command, Some("/usr/bin/mcp-test".to_string()));
-        assert_eq!(config.args, vec!["--arg1"]);
-        assert!(config.disabled);
-        assert_eq!(config.env.get("KEY"), Some(&"VALUE".to_string()));
-    }
-
-    #[test]
-    fn test_which_sync_not_found() {
-        // Test with a definitely non-existent command
-        let result = which_sync("definitely_not_a_real_command_12345");
-        assert!(result.is_none());
-    }
-}
+#[path = "../tests/inline/discovery_tests.rs"]
+mod tests;

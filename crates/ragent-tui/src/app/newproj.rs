@@ -89,9 +89,9 @@ impl App {
     /// Handle the `/new` slash command (FR-001, FR-012, FR-014).
     ///
     /// Splits into three paths:
-    /// - `help` / bare `/new` — print the usage page (FR-012), zero writes.
-    /// - invalid flags — print the FR-003 validation error plus usage.
-    /// - valid request — run the scaffold in the foreground (FR-014): the
+    /// - `help` / bare `/new` - print the usage page (FR-012), zero writes.
+    /// - invalid flags - print the FR-003 validation error plus usage.
+    /// - valid request - run the scaffold in the foreground (FR-014): the
     ///   FR-002 guard runs inline, then the emit / git / remote pipeline is
     ///   handed to a worker thread while streamed progress lines land in the
     ///   message window; `poll_newproj_result` prints the FR-011 summary.

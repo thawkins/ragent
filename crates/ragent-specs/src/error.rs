@@ -1,3 +1,8 @@
+//! Error types for the spec management system.
+//!
+//! Defines the single `SpecError` enum used across spec discovery, parsing,
+//! validation, and lifecycle transitions, plus its `Result` alias.
+
 use thiserror::Error;
 
 /// Errors that can occur in the spec management system.

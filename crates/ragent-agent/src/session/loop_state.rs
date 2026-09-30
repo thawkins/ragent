@@ -4,9 +4,9 @@
 //! ([`LoopSpec`]) and the runtime tracker that enforces the loop's stop
 //! conditions ([`LoopTracker`]). It formalises the loop contract described in
 //! `specs/agentloop/SPEC.md` (FR-006, FR-013, FR-014): a loop is started with
-//! a structured goal — an agent, a goal text, an optional verification
+//! a structured goal - an agent, a goal text, an optional verification
 //! command, scope boundaries, read-only constraints, a tool set, and budget
-//! limits — and iterates plan-act-observe until a stop condition fires.
+//! limits - and iterates plan-act-observe until a stop condition fires.
 //!
 //! # Usage (`/loop`)
 //!
@@ -28,10 +28,10 @@
 //!
 //! # Stop conditions ([`StopCondition`])
 //!
-//! - `GoalAchieved`       — the model signalled completion (verification passed).
-//! - `UnrecoverableError` — a stage failed unrecoverably; no retry.
-//! - `BudgetExhausted`    — the step or token budget was consumed.
-//! - `HumanIntervention`  — the user interrupted or denied a checkpoint.
+//! - `GoalAchieved`       - the model signalled completion (verification passed).
+//! - `UnrecoverableError` - a stage failed unrecoverably; no retry.
+//! - `BudgetExhausted`    - the step or token budget was consumed.
+//! - `HumanIntervention`  - the user interrupted or denied a checkpoint.
 //!
 //! Dependencies: `serde` (serialisable loop specs), `globset` (already a
 //! dependency of this crate for permission-rule matching; no new
@@ -173,7 +173,7 @@ impl StopCondition {
 /// Runtime tracker for one loop run: enforces the budget gates
 /// (FR-013, FR-014) and carries the loop's terminal stop condition.
 ///
-/// The tracker is the single source of truth for "has the loop stopped?" —
+/// The tracker is the single source of truth for "has the loop stopped?" -
 /// once [`LoopTracker::stop`] is set, no further stage may run (FR-017:
 /// no iteration after a stop condition).
 ///
@@ -305,7 +305,7 @@ impl LoopTracker {
 
     /// Record the tool calls started during an iteration (FR-025): adds
     /// `count` to the per-run tool-call tally. Does not affect the step
-    /// counter — call [`LoopTracker::begin_step`] for that.
+    /// counter - call [`LoopTracker::begin_step`] for that.
     pub fn record_tool_calls(&mut self, count: u64) {
         self.tool_calls = self.tool_calls.saturating_add(count);
     }
@@ -550,7 +550,7 @@ fn bash_sub_commands(command: &str) -> Vec<String> {
 /// Best-effort heuristic: file-mutating command names count unconditionally;
 /// `sed` counts when an in-place flag (`-i`) is present; output redirection
 /// (`>`, `>>`) counts. Package managers / build tools and `git` are NOT
-/// treated as path writes here — destructive commands are the concern of the
+/// treated as path writes here - destructive commands are the concern of the
 /// checkpoint layer (spec T-010), not the read-only path constraint.
 fn bash_sub_command_is_write(sub_command: &str) -> bool {
     let tokens: Vec<&str> = sub_command.split_whitespace().collect();
@@ -597,8 +597,8 @@ fn bash_redirection_target(sub_command: &str) -> Option<String> {
 impl LoopSpec {
     /// Evaluate the loop's restrictions against one tool invocation.
     ///
-    /// Returns `Some(reason)` — the denial observation to append to the
-    /// model's context — when the call must not execute:
+    /// Returns `Some(reason)` - the denial observation to append to the
+    /// model's context - when the call must not execute:
     ///
     /// - **tool out of scope** (FR-009): the tool is not in the configured
     ///   tool set and is not a mandatory safety tool.
@@ -618,7 +618,7 @@ impl LoopSpec {
             let mandatory = LOOP_ALWAYS_ALLOWED_TOOLS.contains(&tool_name);
             if !mandatory {
                 return Some(format!(
-                    "scope violation: tool out of scope — tool '{tool_name}' is \
+                    "scope violation: tool out of scope - tool '{tool_name}' is \
                      outside the loop's tool set (allowed: {}). Continue with \
                      the tools configured for this loop.",
                     self.tool_set.join(", ")

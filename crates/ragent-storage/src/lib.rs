@@ -23,7 +23,7 @@ pub use storage::{
 
 // Backward-compatible aliases for code that has not yet migrated (e.g.
 // `crates/ragent-tui`).  These are intentionally narrow and do NOT
-// represent the canonical API — new code should use `TaskRow` and the
+// represent the canonical API - new code should use `TaskRow` and the
 // `*_simple` / full task methods.
 #[doc(hidden)]
 pub use storage::TaskRow as TodoRow;

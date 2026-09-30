@@ -11,6 +11,15 @@
 //! Symbol names and file locations in the trace are most informative when the
 //! binary is built with debug symbols (debug builds or `RUSTFLAGS="-C
 //! symbol-mapping"` for release).
+//!
+//! # Deliberate `eprintln!` (ANTIPAT A-05)
+//!
+//! This module uses `eprintln!` rather than `tracing` on purpose: the panic
+//! hook may fire before the tracing subscriber is installed (or after it has
+//! been torn down), so a `tracing` call could be silently dropped. Writing
+//! directly to stderr guarantees the diagnostic is visible. This is the
+//! documented CLI-presentation exception in `AGENTS-RUST.md`; the hook itself
+//! is best-effort and never panics on its own.
 
 use std::backtrace::Backtrace;
 use std::io::Write;
@@ -28,7 +37,7 @@ pub fn install() {
     std::panic::set_hook(Box::new(move |info| {
         // A panic raised inside a deliberate contained-panic container
         // (ragent_types::panic_guard) is about to be caught by the caller and
-        // degraded gracefully — do not write a panic report or chain to the
+        // degraded gracefully - do not write a panic report or chain to the
         // default hook (which prints "thread panicked" noise and, in the TUI,
         // tears down the terminal even though the app keeps running).
         if ragent_types::panic_guard::is_active() {
@@ -72,7 +81,7 @@ fn write_panic_log(info: &std::panic::PanicHookInfo<'_>) {
 
     let path = panic_log_path(&panics_dir);
 
-    // Capture the backtrace immediately — it is only valid on this thread
+    // Capture the backtrace immediately - it is only valid on this thread
     // at this point in the unwinding process.
     let backtrace = Backtrace::force_capture();
 
@@ -99,7 +108,12 @@ fn write_panic_log(info: &std::panic::PanicHookInfo<'_>) {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "<unknown>".to_string());
 
-    let args: Vec<String> = std::env::args().collect();
+    // ANTIPAT A-02: argv can carry a credential (`ragent auth openai sk-...`,
+    // `--model ...sk-...`) and this report is written to disk. Route every
+    // argument through the shared redactor before it is embedded.
+    let args: Vec<String> = std::env::args()
+        .map(|a| ragent_types::sanitize::redact_secrets(&a))
+        .collect();
 
     let rust_backtrace =
         std::env::var("RUST_BACKTRACE").unwrap_or_else(|_| "<not set>".to_string());
@@ -140,10 +154,13 @@ fn write_panic_log(info: &std::panic::PanicHookInfo<'_>) {
     content.push_str(" End of panic report\n");
     content.push_str("===============================================================\n");
 
-    match std::fs::File::create(&path).and_then(|mut f| f.write_all(content.as_bytes())) {
+    // ANTIPAT A-02: the panic report carries argv and must be owner-only.
+    match crate::crash_dump::create_owner_only(&path)
+        .and_then(|mut f| f.write_all(content.as_bytes()))
+    {
         Ok(()) => {
             eprintln!(
-                "ragent: panic captured — full report written to {}",
+                "ragent: panic captured - full report written to {}",
                 path.display()
             );
         }
@@ -157,24 +174,5 @@ fn write_panic_log(info: &std::panic::PanicHookInfo<'_>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_panic_log_path_format() {
-        let dir = PathBuf::from("/tmp/test-log");
-        let path = panic_log_path(&dir);
-        let name = path.file_name().unwrap().to_string_lossy();
-        assert!(
-            name.starts_with("panic-"),
-            "expected panic- prefix, got {name}"
-        );
-        assert!(name.ends_with(".log"), "expected .log suffix, got {name}");
-    }
-
-    #[test]
-    fn test_panics_dir_under_cwd() {
-        let dir = panics_dir();
-        assert!(dir.ends_with("panics"));
-    }
-}
+#[path = "../tests/inline/panic_hook_tests.rs"]
+mod tests;

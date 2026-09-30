@@ -1,7 +1,7 @@
 //! Redirect the process's stderr into a truncating spool while the TUI runs.
 //!
-//! The TUI owns the alternate screen, so anything written to raw stderr —
-//! Rust's default panic hook, `eprintln!`, C-library diagnostics — is painted
+//! The TUI owns the alternate screen, so anything written to raw stderr -
+//! Rust's default panic hook, `eprintln!`, C-library diagnostics - is painted
 //! over by the next ratatui frame and lost. This module replaces the
 //! process-wide standard-error *file descriptor* (fd 2) with the write end of a
 //! pipe and drains that pipe on a dedicated thread into a
@@ -20,8 +20,8 @@ use ragent_types::stderr_spool::Spool;
 /// Redirect fd 2 into a truncating spool file under `log_dir`.
 ///
 /// Returns the [`Spool`] so the caller can attach a mirror sink (the TUI uses
-/// this to surface raw stderr in its log panel). Returns `None` — leaving
-/// stderr untouched — when the spool directory cannot be created or the `dup2`
+/// this to surface raw stderr in its log panel). Returns `None` - leaving
+/// stderr untouched - when the spool directory cannot be created or the `dup2`
 /// redirection fails.
 ///
 /// # Safety

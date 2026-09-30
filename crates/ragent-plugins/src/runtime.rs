@@ -8,7 +8,7 @@
 //!
 //! | Criterion                     | rquickjs 0.10                                   | boa 0.21                                       |
 //! | ----------------------------- | ----------------------------------------------- | ---------------------------------------------- |
-//! | (a) deadline interruption     | `Runtime::set_interrupt_handler` aborts `while(true){}` 200 ms after the deadline was set to now+200 ms (interrupted=true, elapsed=199.8 ms — fires within ~50 ms of the deadline). | No deadline hook; only a loop-*iteration* budget via `RuntimeLimits`, which cannot express a wall-clock budget (FR-017). |
+//! | (a) deadline interruption     | `Runtime::set_interrupt_handler` aborts `while(true){}` 200 ms after the deadline was set to now+200 ms (interrupted=true, elapsed=199.8 ms - fires within ~50 ms of the deadline). | No deadline hook; only a loop-*iteration* budget via `RuntimeLimits`, which cannot express a wall-clock budget (FR-017). |
 //! | (b) memory ceiling            | `Runtime::set_memory_limit(8 MiB)` contained an unbounded allocation loop; host process intact. | No allocation-budget API.                        |
 //! | (c) JSON marshalling          | No serde integration in 0.10; JSON crosses as strings via `JSON.parse`/`JSON.stringify` + `serde_json`. Adequate for host API v1. | Equivalent ergonomics (string round-trip).       |
 //!
@@ -35,6 +35,13 @@ use std::time::{Duration, Instant};
 use crate::error::PluginError;
 use crate::host_api::HostApiInstall;
 
+/// QuickJS sandbox stack size per script context, in bytes (ANTIPAT L10).
+///
+/// 1 MiB: the engine default (256 KiB quickjs stack inside the interpreter
+/// loop) plus headroom for host-API recursion; plugin code should not be able
+/// to overflow the host stack via JS recursion (FR-026).
+const SANDBOX_STACK_BYTES: usize = 1024 * 1024;
+
 /// Per-tool and per-entry budgets for one plugin execution, derived from
 /// `plugins.max_execution_ms` / `plugins.max_entry_ms` /
 /// `plugins.max_memory_mb` (FR-017).
@@ -56,11 +63,7 @@ impl SandboxBudget {
         Self {
             memory_bytes: (config.max_memory_mb.max(1)) as usize * 1024 * 1024,
             deadline: Duration::from_millis(config.max_execution_ms.max(1)),
-            // 1 MiB stack: the engine default (256 KiB quickjs stack inside
-            // the interpreter loop) plus headroom for host-API recursion;
-            // plugin code should not be able to overflow the host stack via
-            // JS recursion (FR-026).
-            stack_bytes: 1024 * 1024,
+            stack_bytes: SANDBOX_STACK_BYTES,
         }
     }
 
@@ -182,7 +185,7 @@ impl SandboxContext {
     /// Evaluate JavaScript source in this sandbox, discarding the result and
     /// mapping every engine outcome to a [`PluginError`] variant (FR-026).
     /// For a result-carrying evaluation use [`SandboxContext::eval_to_string`]
-    /// or [`SandboxContext::eval_json`] — a raw `rquickjs::Value` cannot
+    /// or [`SandboxContext::eval_json`] - a raw `rquickjs::Value` cannot
     /// escape its context's lifetime.
     ///
     /// Timeout and memory-limit aborts are distinguished from ordinary
@@ -221,16 +224,6 @@ impl SandboxContext {
             .with(|ctx| ctx.eval(wrapped).map_err(|e| classify_error(&ctx, e)))
     }
 
-    /// Evaluate JavaScript and expect the result to be a **JSON document
-    /// string** (the v1 marshalling contract for tool handlers, FR-005): the
-    /// script is responsible for `JSON.stringify`ing its result. The returned
-    /// string is parsed into `serde_json::Value` on the Rust side. A script
-    /// returning a non-string is an error (FR-005 marshalling rules).
-    ///
-    /// # Errors
-    ///
-    /// See [`SandboxContext::eval`]; additionally [`PluginError::Script`] when
-    /// the script yields a non-string or the string is not valid JSON.
     /// Evaluate JavaScript and expect the result to be a **JSON document
     /// string** (the v1 marshalling contract for tool handlers, FR-005): the
     /// script is responsible for `JSON.stringify`ing its result. The returned
@@ -346,6 +339,6 @@ fn engine_err(e: rquickjs::Error) -> PluginError {
 /// Quote a JavaScript source snippet as a JS string literal so it can be
 /// evaluated inside a wrapper function via the sandbox's own `eval`. Uses
 /// `JSON.stringify` semantics for escaping (valid JS string literal syntax).
-fn js_string_literal(source: &str) -> String {
-    serde_json::to_string(source).unwrap_or_else(|_| "\"\"".to_string())
+fn js_string_literal(text: &str) -> String {
+    crate::tool_adapter::js_literal(text)
 }

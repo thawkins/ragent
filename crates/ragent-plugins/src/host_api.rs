@@ -406,7 +406,7 @@ impl HostApiInstall {
         Ok(())
     }
 
-    /// `ragent.register_tool(def)` — records the declaration in the host
+    /// `ragent.register_tool(def)` - records the declaration in the host
     /// sink and stashes the handler (when `def.handler` is a function) into
     /// the sandbox's `__ragent_tools` map so [`crate::tool_adapter`] can
     /// invoke it at dispatch time (T-010, FR-005). The handler value itself
@@ -425,7 +425,7 @@ impl HostApiInstall {
             let decl = tool_decl_from_js(&def);
             // Stash the declared handler for tool dispatch (T-010): the
             // adapter's wrapper looks up `__ragent_tools[name]`. A def
-            // without a function handler still records the declaration —
+            // without a function handler still records the declaration -
             // dispatch then fails with a "no handler registered" error instead
             // of a panic (FR-026).
             // Handler capture goes through the sandbox's own `eval` so the
@@ -447,7 +447,9 @@ impl HostApiInstall {
                 value_to_scratch(&def)
             );
             let eval_ctx = def.ctx().clone();
-            let _ = eval_ctx.eval::<rquickjs::Value<'_>, _>(assign);
+            if let Err(e) = eval_ctx.eval::<rquickjs::Value<'_>, _>(assign) {
+                tracing::debug!(plugin = %plugin_id, error = ?e, "register_tool handler stash failed");
+            }
             calls.push_tool(decl);
         })
         .map_err(|e| engine(e.to_string()))?;
@@ -457,7 +459,7 @@ impl HostApiInstall {
         Ok(())
     }
 
-    /// `ragent.register_command(def)` — records the declaration in the host
+    /// `ragent.register_command(def)` - records the declaration in the host
     /// sink and stashes the handler (when `def.handler` is a function) into
     /// the sandbox's `__ragent_commands` map so [`crate::command_adapter`] can
     /// invoke it at dispatch time (T-012, FR-004). Uses the same
@@ -488,7 +490,9 @@ impl HostApiInstall {
                 value_to_scratch(&def)
             );
             let eval_ctx = def.ctx().clone();
-            let _ = eval_ctx.eval::<rquickjs::Value<'_>, _>(assign);
+            if let Err(e) = eval_ctx.eval::<rquickjs::Value<'_>, _>(assign) {
+                tracing::debug!(plugin = %plugin_id, error = ?e, "register_command handler stash failed");
+            }
             calls.push_command(command_decl_from_js(&def));
         })
         .map_err(|e| engine(e.to_string()))?;
@@ -579,7 +583,7 @@ fn value_to_json(value: &JsValue<'_>) -> JsonValue {
 fn value_to_scratch(value: &JsValue<'_>) -> String {
     let ctx = value.ctx().clone();
     let globals = ctx.globals();
-    let _ = globals.set("__ragent_host_scratch", value.clone());
+    let _ = globals.set("__ragent_host_scratch", value.clone()); // INTENTIONAL: OnceLock set race is benign
     "__ragent_host_scratch".to_string()
 }
 

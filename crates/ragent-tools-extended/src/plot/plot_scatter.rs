@@ -1,4 +1,4 @@
-//! `plot_scatter` tool — render a scatter plot on the message window.
+//! `plot_scatter` tool - render a scatter plot on the message window.
 
 use anyhow::Result;
 use ratatui_plt::prelude::{AspectRatio, Axis, MarkerShape, Theme};
@@ -21,7 +21,7 @@ impl Tool for PlotScatterTool {
 
     fn description(&self) -> &'static str {
         "Render a scatter plot on the message window. Required parameter: \
-         'series' — one object {name?, data: [[x,y],...], color?} or an array \
+         'series' - one object {name?, data: [[x,y],...], color?} or an array \
          of such objects. Optional: 'title', 'x_label', 'y_label', 'width', \
          'height', 'x_grid', 'y_grid', 'show_legend'. Points are drawn with \
          dot markers."

@@ -1,4 +1,4 @@
-//! `mf_search` tool — keyless multi-engine web search with consensus ranking.
+//! `mf_search` tool - keyless multi-engine web search with consensus ranking.
 //!
 //! Implements FR-008 through FR-010, FR-022, FR-023, FR-025, FR-026.
 //!
@@ -39,6 +39,7 @@ use std::sync::Arc;
 
 use super::super::MASTERFETCH_VERSION;
 use super::super::search::consensus::MergeOutput;
+use super::super::search::engine::DEFAULT_MAX_RESULTS;
 use super::super::search::exa::ExaEngine;
 use super::super::search::langsearch::LangSearchEngine;
 use super::super::search::openalex::OpenAlexEngine;
@@ -304,7 +305,7 @@ impl Tool for MfSearchTool {
                  'openalex_email' in ragent.json or the OPENALEX_EMAIL env var to join the polite \
                  pool. Wikipedia queries the English Wikipedia REST API for encyclopedia \
                  summaries. Optional 'site', 'exclude_sites', 'freshness' (day/week/month/year), \
-                 'max_results' (1-500, default 6) for the overall merge cap, and 'page' (0-10). \
+                 'max_results' (1-500, default 10) for the overall merge cap, and 'page' (0-10). \
                  Optional 'per_engine_results' (1-200, default 75) caps how many results each \
                  individual engine returns before merge/dedup. Optional 'engine' restricts the \
                  search to a single backend (openalex, wikipedia, langsearch, \
@@ -339,7 +340,7 @@ impl Tool for MfSearchTool {
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum results to return after merge/dedup (1-500, default: 6)"
+                    "description": "Maximum results to return after merge/dedup (1-500, default: 10)"
                 },
                 "per_engine_results": {
                     "type": "integer",
@@ -379,8 +380,12 @@ impl Tool for MfSearchTool {
             anyhow::bail!("Search query must not be empty");
         }
 
-        // Build search options from input parameters.
-        let max_results = input["max_results"].as_u64().unwrap_or(6) as usize;
+        // Build search options from input parameters. The default comes from
+        // the engine constant so the tool and orchestrator defaults cannot drift
+        // (ANTIPAT M5.9 / 3.7).
+        let max_results = input["max_results"]
+            .as_u64()
+            .map_or(DEFAULT_MAX_RESULTS, |v| v as usize);
         let mut opts = SearchOptions::new(max_results);
 
         if let Some(per_engine) = input["per_engine_results"].as_u64() {

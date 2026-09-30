@@ -5,8 +5,8 @@
 This plan implements the Spec Management System defined in SPEC.md. The approach is incremental: build the core data structures and file I/O first, add validation and status tracking, then wire up TUI slash commands and agent integration. Each milestone delivers a working increment that can be demonstrated and tested independently.
 
 The implementation spans two new crates:
-- `ragent-specs` — core logic: spec discovery, validation, status transitions, task tracking
-- Integration points in `ragent-tui` and `ragent-agent` — slash commands and programmatic API
+- `ragent-specs` - core logic: spec discovery, validation, status transitions, task tracking
+- Integration points in `ragent-tui` and `ragent-agent` - slash commands and programmatic API
 
 ---
 
@@ -69,7 +69,7 @@ The implementation spans two new crates:
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |----|-------|-------------|--------|----------|--------------|
-| T-001 | Define `SpecId` and `SpecStatus` enums | FR-005 | S | Critical | — |
+| T-001 | Define `SpecId` and `SpecStatus` enums | FR-005 | S | Critical | - |
 | T-002 | Define `Requirement` struct with EARS template type | FR-003 | S | Critical | T-001 |
 | T-003 | Define `Task` struct with requirement linkage | FR-015 | S | Critical | T-001 |
 | T-004 | Define `Spec` and `Plan` structs | FR-001, FR-004 | S | Critical | T-002, T-003 |
@@ -114,12 +114,12 @@ The implementation spans two new crates:
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| **Markdown parsing complexity** — Pulldown-cmark may not expose enough structure for reliable EARS validation | Medium | High | Use regex as primary validator; treat markdown parser as supplementary. Maintain a comprehensive test corpus of valid and invalid specs. |
-| **Performance at scale** — Projects with 1,000+ specs may exceed the 500ms listing target | Medium | Medium | Implement optional SQLite index (T-019). Benchmark early (Milestone 3). Allow spec ID prefix filtering to limit traversal. |
-| **File I/O race conditions** — Concurrent agent and user edits to the same spec | Low | High | Use atomic writes (write to temp, rename). Detect mtime changes on read and warn. Consider file locking for future enhancement. |
-| **TUI command bloat** — Too many `/spec` commands may clutter slash command help | Low | Low | Group commands logically (`/spec create`, `/spec list`, etc.). Provide `/spec help` for detailed subcommand help. |
-| **Agent integration fragility** — Agents may not reliably update task status | Medium | Medium | Make task updates idempotent. Provide manual `/spec task complete` as fallback. Add validation that warns on stale task states. |
-| **Template drift** — EARS templates may evolve, invalidating old specs | Low | Medium | Version the EARS schema in spec frontmatter. Maintain backward compatibility in validators. Document template changes in CHANGELOG. |
+| **Markdown parsing complexity** - Pulldown-cmark may not expose enough structure for reliable EARS validation | Medium | High | Use regex as primary validator; treat markdown parser as supplementary. Maintain a comprehensive test corpus of valid and invalid specs. |
+| **Performance at scale** - Projects with 1,000+ specs may exceed the 500ms listing target | Medium | Medium | Implement optional SQLite index (T-019). Benchmark early (Milestone 3). Allow spec ID prefix filtering to limit traversal. |
+| **File I/O race conditions** - Concurrent agent and user edits to the same spec | Low | High | Use atomic writes (write to temp, rename). Detect mtime changes on read and warn. Consider file locking for future enhancement. |
+| **TUI command bloat** - Too many `/spec` commands may clutter slash command help | Low | Low | Group commands logically (`/spec create`, `/spec list`, etc.). Provide `/spec help` for detailed subcommand help. |
+| **Agent integration fragility** - Agents may not reliably update task status | Medium | Medium | Make task updates idempotent. Provide manual `/spec task complete` as fallback. Add validation that warns on stale task states. |
+| **Template drift** - EARS templates may evolve, invalidating old specs | Low | Medium | Version the EARS schema in spec frontmatter. Maintain backward compatibility in validators. Document template changes in CHANGELOG. |
 
 ---
 
@@ -127,16 +127,16 @@ The implementation spans two new crates:
 
 The Spec Management System is considered complete when all the following criteria are met:
 
-1. **All Milestones Delivered** — Milestones 1 through 6 are implemented, merged, and tagged.
-2. **All Critical and High Priority Tasks Complete** — Tasks T-001 through T-026, T-034, and T-035 are done.
-3. **Test Coverage** — Unit and integration tests achieve >80% code coverage for `ragent-specs`.
-4. **Validation Passes** — Running `/spec validate` on the project's own `specs/` directory reports zero structural violations.
-5. **Performance Targets Met** — Listing 1,000 specs completes in <500ms; search returns results in <2s.
-6. **Documentation Complete** — `docs/specs.md` exists and describes all commands, configuration, and workflow.
-7. **No Critical Bugs** — Zero open issues labeled `bug` with `priority: critical` or `priority: high`.
-8. **CI Integration** — A CI job runs `/spec validate` and fails the build on violations.
-9. **User Acceptance** — At least one non-author user has created a spec, advanced it through the lifecycle, and implemented it without assistance.
-10. **Code Review** — All changes reviewed by at least one maintainer and approved.
+1. **All Milestones Delivered** - Milestones 1 through 6 are implemented, merged, and tagged.
+2. **All Critical and High Priority Tasks Complete** - Tasks T-001 through T-026, T-034, and T-035 are done.
+3. **Test Coverage** - Unit and integration tests achieve >80% code coverage for `ragent-specs`.
+4. **Validation Passes** - Running `/spec validate` on the project's own `specs/` directory reports zero structural violations.
+5. **Performance Targets Met** - Listing 1,000 specs completes in <500ms; search returns results in <2s.
+6. **Documentation Complete** - `docs/specs.md` exists and describes all commands, configuration, and workflow.
+7. **No Critical Bugs** - Zero open issues labeled `bug` with `priority: critical` or `priority: high`.
+8. **CI Integration** - A CI job runs `/spec validate` and fails the build on violations.
+9. **User Acceptance** - At least one non-author user has created a spec, advanced it through the lifecycle, and implemented it without assistance.
+10. **Code Review** - All changes reviewed by at least one maintainer and approved.
 
 ---
 

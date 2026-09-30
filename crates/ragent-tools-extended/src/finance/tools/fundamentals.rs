@@ -1,4 +1,4 @@
-//! `stock_fundamentals` tool — key metrics for a company.
+//! `stock_fundamentals` tool - key metrics for a company.
 
 use crate::finance::tools::with_yahoo_fallback;
 use crate::{Tool, ToolContext, ToolOutput};

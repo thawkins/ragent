@@ -141,7 +141,7 @@ impl App {
                         if builtin_names.contains(&info.name) {
                             let new_name = format!("custom:{}", info.name);
                             all_diagnostics.push(format!(
-                          "custom agent '{}' collides with a built-in agent name — loaded as '{}'",
+                          "custom agent '{}' collides with a built-in agent name - loaded as '{}'",
                           info.name, new_name
                       ));
                             info.name = new_name;

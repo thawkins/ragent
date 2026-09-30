@@ -332,7 +332,7 @@ pub fn acquire_local(path: &Path, budget: &LocalAcquisitionBudget) -> GatheredCo
         }
         if stats.files_extracted >= budget.max_files || stats.total_chars >= budget.max_total_chars
         {
-            // `stopped_early` marks only a walk cut short by budget pressure —
+            // `stopped_early` marks only a walk cut short by budget pressure -
             // reaching the end of the candidate list is natural completion,
             // not budget exhaustion.
             stopped_early = true;
@@ -410,7 +410,7 @@ pub fn acquire_local(path: &Path, budget: &LocalAcquisitionBudget) -> GatheredCo
     stats.elapsed_ms = started.elapsed().as_millis() as u64;
     // Budget exhaustion is reported when the walk stopped under pressure
     // (flagged at the break sites) or when the *measured* end-state hit the
-    // deadline — the zero-deadline case can finish the one-file corpus before
+    // deadline - the zero-deadline case can finish the one-file corpus before
     // the per-file guard sees another iteration, so it never sets the flag.
     let budget_reached = if stopped_early || stats.elapsed_ms >= budget.deadline_ms {
         local_budget_exhausted(&stats, budget).map(|r| r.as_corpus_reason())

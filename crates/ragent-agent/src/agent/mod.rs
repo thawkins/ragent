@@ -23,7 +23,7 @@ use ragent_types::{ThinkingConfig, ThinkingLevel};
 
 /// PERF-008: serde adapter for `Arc<HashMap<String, Value>>`.
 ///
-/// On the wire this is a plain JSON object — identical to the legacy
+/// On the wire this is a plain JSON object - identical to the legacy
 /// `HashMap<String, Value>` representation. In memory the field is an
 /// `Arc<HashMap>` so `AgentInfo::options` can be cheaply `Arc::clone`d
 /// on every `ChatRequest` construction without deep-cloning each entry.
@@ -59,8 +59,52 @@ static PROMPT_CONTEXT_CACHE: OnceLock<Mutex<HashMap<String, PromptContextCache>>
 static NO_GIT_CONTEXT: AtomicBool = AtomicBool::new(false);
 static NO_README_CONTEXT: AtomicBool = AtomicBool::new(false);
 
+/// Hard upper bound on the number of entries held in [`PROMPT_CONTEXT_CACHE`].
+///
+/// The cache is process-lifetime and keyed by canonicalised working directory,
+/// so a long-lived process (server or a TUI session that opens many projects)
+/// would otherwise grow without bound. On insert, expired entries are dropped
+/// first and, once this cap is reached, the oldest surviving entry is evicted.
+const MAX_PROMPT_CONTEXT_CACHE_ENTRIES: usize = 64;
+
+/// Hard upper bound on the number of entries held in the `ENTRY_TOKENS`
+/// memoisation map (keyed by memory row id).
+///
+/// The key space is the memory store's primary key, so the map grows with the
+/// store; this cap keeps a long-lived process from retaining an entry for every
+/// row it has ever rendered. Once reached, the map is cleared before the next
+/// insert (the token estimate is cheap to recompute).
+const MAX_ENTRY_TOKENS_CACHE_ENTRIES: usize = 4096;
+
 fn prompt_context_cache() -> &'static Mutex<HashMap<String, PromptContextCache>> {
     PROMPT_CONTEXT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Evict entries from the prompt-context cache so its size stays bounded (M6.6).
+///
+/// Called before an insert. First every entry whose `cached_at` is missing or
+/// older than `ttl` is dropped (they are already ineffective for reads); then,
+/// if the map is still at the cap, the entry with the oldest `cached_at` is
+/// removed to make room. This keeps the time-based invalidation semantics
+/// intact while guaranteeing a hard upper bound on retained memory.
+fn evict_prompt_context_cache(
+    cache: &mut HashMap<String, PromptContextCache>,
+    ttl: std::time::Duration,
+) {
+    cache.retain(|_, entry| {
+        entry
+            .cached_at
+            .is_some_and(|cached_at| cached_at.elapsed() < ttl)
+    });
+    if cache.len() >= MAX_PROMPT_CONTEXT_CACHE_ENTRIES {
+        let oldest = cache
+            .iter()
+            .min_by_key(|(_, entry)| entry.cached_at)
+            .map(|(key, _)| key.clone());
+        if let Some(key) = oldest {
+            cache.remove(&key);
+        }
+    }
 }
 
 fn prompt_context_cache_key(working_dir: &Path) -> String {
@@ -288,6 +332,9 @@ pub async fn collect_prompt_context(working_dir: &Path) -> (String, String, Stri
         .unwrap_or_default();
 
     if let Ok(mut cache) = prompt_context_cache().lock() {
+        // M6.6: drop expired entries and enforce the entry cap before inserting
+        // so the process-lifetime map cannot grow without bound.
+        evict_prompt_context_cache(&mut cache, TTL);
         cache.insert(
             key,
             PromptContextCache {
@@ -472,7 +519,7 @@ pub struct AgentInfo {
     // construction can `Arc::clone` the options in O(1) instead of
     // deep-cloning every entry (a `HashMap<String, Value>` allocates per
     // entry on `clone()`).  Agent options are effectively read-only after
-    // construction — the only in-place mutation site
+    // construction - the only in-place mutation site
     // (`agent.options.insert(...)` in `resolve_agent`) runs once during
     // agent resolution and uses `Arc::make_mut` to preserve COW semantics.
     #[serde(
@@ -542,8 +589,8 @@ impl Default for AgentInfo {
 ///
 /// [`create_builtin_agents`] constructs ~15 [`AgentInfo`] structs, each with
 /// long `String` prompts, on every call. `resolve_agent` (and friends) call
-/// it on every agent resolution — every `process_user_message` and every
-/// sub-agent spawn — even though the built-in definitions are static for the
+/// it on every agent resolution - every `process_user_message` and every
+/// sub-agent spawn - even though the built-in definitions are static for the
 /// lifetime of the process. This `OnceLock` caches the result of the first
 /// call so subsequent resolutions search the cached `Vec` instead of
 /// rebuilding it.
@@ -574,7 +621,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
     vec![
         AgentInfo {
             name: "ask".to_string(),
-            description: "Quick Q&A — answers questions without tools".to_string(),
+            description: "Quick Q&A - answers questions without tools".to_string(),
             mode: AgentMode::Primary,
             hidden: false,
             temperature: None,
@@ -582,7 +629,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             model: None,
             prompt: Some(Arc::from(
                 "You are a helpful AI assistant. Answer the user's questions clearly and \
-                 concisely. You do not have access to any tools — just respond with your \
+                 concisely. You do not have access to any tools - just respond with your \
                  best knowledge.",
             )),
             permission: read_only_permissions(),
@@ -658,7 +705,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                 "You are a planning agent. Your job is to analyze requirements and create \
                  detailed implementation plans. Read the codebase to understand existing patterns \
                  and architecture. Output a structured plan with clear steps. Do NOT make any \
-                 changes yourself — only plan and document.",
+                 changes yourself - only plan and document.",
             )),
             permission: read_only_permissions(),
             max_steps: Some(1024),
@@ -741,7 +788,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
         // ── Domain-specific agents ───────────────────────────────────────
         AgentInfo {
             name: "rust-coder".to_string(),
-            description: "Rust coding specialist — idiomatic code, error handling, async"
+            description: "Rust coding specialist - idiomatic code, error handling, async"
                 .to_string(),
             mode: AgentMode::Primary,
             hidden: false,
@@ -780,7 +827,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
         },
         AgentInfo {
             name: "python-coder".to_string(),
-            description: "Python coding specialist — idiomatic code, type hints, testing"
+            description: "Python coding specialist - idiomatic code, type hints, testing"
                 .to_string(),
             mode: AgentMode::Primary,
             hidden: false,
@@ -819,7 +866,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
         },
         AgentInfo {
             name: "typescript-coder".to_string(),
-            description: "TypeScript/JavaScript coding specialist — type safety, modern JS"
+            description: "TypeScript/JavaScript coding specialist - type safety, modern JS"
                 .to_string(),
             mode: AgentMode::Primary,
             hidden: false,
@@ -858,7 +905,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
         },
         AgentInfo {
             name: "fastapi-agent".to_string(),
-            description: "FastAPI project specialist — API design, Pydantic, async".to_string(),
+            description: "FastAPI project specialist - API design, Pydantic, async".to_string(),
             mode: AgentMode::Primary,
             hidden: false,
             temperature: None,
@@ -895,7 +942,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
         },
         AgentInfo {
             name: "security-auditor".to_string(),
-            description: "Security code reviewer — OWASP Top 10, CWE, mitigations".to_string(),
+            description: "Security code reviewer - OWASP Top 10, CWE, mitigations".to_string(),
             mode: AgentMode::Primary,
             hidden: false,
             temperature: Some(0.2),
@@ -928,7 +975,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
         },
         AgentInfo {
             name: "test-writer".to_string(),
-            description: "Test generation specialist — unit, integration, e2e coverage".to_string(),
+            description: "Test generation specialist - unit, integration, e2e coverage".to_string(),
             mode: AgentMode::Primary,
             hidden: false,
             temperature: Some(0.3),
@@ -964,7 +1011,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
         },
         AgentInfo {
             name: "documenter".to_string(),
-            description: "Documentation specialist — docstrings, READMEs, API docs".to_string(),
+            description: "Documentation specialist - docstrings, READMEs, API docs".to_string(),
             mode: AgentMode::Primary,
             hidden: false,
             temperature: Some(0.5),
@@ -1000,7 +1047,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
         },
         AgentInfo {
             name: "devops-agent".to_string(),
-            description: "DevOps specialist — Docker, Kubernetes, CI/CD, infrastructure"
+            description: "DevOps specialist - Docker, Kubernetes, CI/CD, infrastructure"
                 .to_string(),
             mode: AgentMode::Primary,
             hidden: false,
@@ -1038,7 +1085,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
         },
         AgentInfo {
             name: "database-agent".to_string(),
-            description: "Database specialist — SQL, migrations, performance, schema design"
+            description: "Database specialist - SQL, migrations, performance, schema design"
                 .to_string(),
             mode: AgentMode::Primary,
             hidden: false,
@@ -1049,10 +1096,10 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                 "You are a database specialist. You design schemas, write queries, and \
                            optimise data access patterns for relational and NoSQL databases.\n\n\
                            Expertise:\n\
-                           - Relational: PostgreSQL, MySQL, SQLite — schema design, indexing, query plans\n\
-                           - NoSQL: MongoDB, Redis, DynamoDB — document modelling, key patterns\n\
-                           - Migrations: Alembic, Flyway, dbmate — forward-only, rollback-safe\n\
-                           - ORMs: SQLAlchemy, Diesel, Prisma, TypeORM — type-safe query builders\n\
+                           - Relational: PostgreSQL, MySQL, SQLite - schema design, indexing, query plans\n\
+                           - NoSQL: MongoDB, Redis, DynamoDB - document modelling, key patterns\n\
+                           - Migrations: Alembic, Flyway, dbmate - forward-only, rollback-safe\n\
+                           - ORMs: SQLAlchemy, Diesel, Prisma, TypeORM - type-safe query builders\n\
                            - Performance: EXPLAIN ANALYZE, query rewriting, materialised views\n\
                            - Transactions: ACID guarantees, isolation levels, deadlock avoidance\n\
                            - Data integrity: constraints, triggers, foreign keys, normalisation\n\
@@ -1076,7 +1123,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
         },
         AgentInfo {
             name: "frontend-agent".to_string(),
-            description: "Frontend specialist — React, Vue, CSS, accessibility, performance"
+            description: "Frontend specialist - React, Vue, CSS, accessibility, performance"
                 .to_string(),
             mode: AgentMode::Primary,
             hidden: false,
@@ -1120,8 +1167,8 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
 ///
 /// [`create_builtin_agents`] constructs ~15 [`AgentInfo`] structs, each with
 /// long `String` prompts, on every call. `resolve_agent` (and friends) call
-/// it on every agent resolution — every `process_user_message` and every
-/// sub-agent spawn — even though the built-in definitions are static for the
+/// it on every agent resolution - every `process_user_message` and every
+/// sub-agent spawn - even though the built-in definitions are static for the
 /// lifetime of the process. This `OnceLock` caches the result of the first
 /// call so subsequent resolutions search the cached `Vec` instead of
 /// rebuilding it.
@@ -1225,7 +1272,7 @@ fn read_only_permissions() -> PermissionRuleset {
 
 /// Returns the default thinking configuration for a model's supported levels.
 ///
-/// Currently always returns [`ThinkingConfig::off`] — no model has a
+/// Currently always returns [`ThinkingConfig::off`] - no model has a
 /// built-in thinking default. The `levels` parameter is accepted for API
 /// symmetry with the model-resolution path and future expansion.
 #[must_use]
@@ -1235,7 +1282,7 @@ pub fn default_thinking_config_for_levels(_levels: &[ThinkingLevel]) -> Thinking
 
 /// Returns the fallback thinking configuration for a resolved provider/model.
 ///
-/// Precedence: config per-model → config per-provider → model metadata →
+/// Precedence: config per-model -> config per-provider -> model metadata ->
 /// built-in default. The built-in default is always [`ThinkingConfig::off`]
 /// (no thinking), matching the behaviour of
 /// [`default_thinking_config_for_levels`] and the bench resolution path
@@ -1491,7 +1538,7 @@ pub fn load_all_agents(working_dir: &Path) -> (Vec<Arc<AgentInfo>>, Vec<String>)
         if builtin_names.contains(&def.agent_info.name) {
             let new_name = format!("custom:{}", def.agent_info.name);
             diagnostics.push(format!(
-                "custom agent '{}' collides with a built-in — loaded as '{}'",
+                "custom agent '{}' collides with a built-in - loaded as '{}'",
                 def.agent_info.name, new_name
             ));
             Arc::make_mut(&mut def.agent_info).name = new_name;
@@ -1662,7 +1709,7 @@ impl InstructionFileDiscovery {
                     .display()
                     .to_string();
                 let priority_note = if self.used_global_fallback {
-                    "global fallback — no local root instruction file found"
+                    "global fallback - no local root instruction file found"
                 } else {
                     "project root takes priority"
                 };
@@ -1783,7 +1830,7 @@ pub fn collect_agents_md_content_with_discovery(
     sort_by_name(&mut global_files);
     sort_by_name(&mut sub_files);
 
-    // Priority: project root → global → subdirectories
+    // Priority: project root -> global -> subdirectories
     let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
     candidates.extend(root_files);
     candidates.extend(global_files);
@@ -1838,7 +1885,7 @@ pub fn collect_agents_md_content_with_discovery(
                 .display()
                 .to_string();
             let marker = if Some(file) == discovery.loaded_file.as_ref() {
-                " ✅ LOADED"
+                " [ok] LOADED"
             } else {
                 ""
             };
@@ -1906,13 +1953,13 @@ const MAX_INCLUDE_DEPTH: usize = 16;
 ///
 /// # Arguments
 ///
-/// - `content`  — the raw text of the file being expanded.
-/// - `base_dir` — directory used to resolve relative include paths.
-/// - `allowed_roots` — canonicalised prefixes that included files must
+/// - `content`  - the raw text of the file being expanded.
+/// - `base_dir` - directory used to resolve relative include paths.
+/// - `allowed_roots` - canonicalised prefixes that included files must
 ///   live under.
-/// - `visited`  — canonicalised paths already on the current include
+/// - `visited`  - canonicalised paths already on the current include
 ///   chain (cycle detection).
-/// - `depth`    — current nesting depth (0 for the root file).
+/// - `depth`    - current nesting depth (0 for the root file).
 pub(crate) fn expand_includes(
     content: &str,
     base_dir: &Path,
@@ -1962,7 +2009,7 @@ enum IncludeLine {
     Include(String),
     /// A leading `@@` escape sequence (collapse to a single literal `@`).
     Escape,
-    /// Ordinary line — emit verbatim.
+    /// Ordinary line - emit verbatim.
     Literal,
 }
 
@@ -1984,7 +2031,7 @@ enum IncludeLine {
 /// `@@` collapsed to a single literal `@`. Any line that does not start with
 /// `@` (or where the `@` is not in column 0) is [`IncludeLine::Literal`].
 fn parse_include_directive(line: &str) -> IncludeLine {
-    // `@` must be in the first column — no leading whitespace allowed.
+    // `@` must be in the first column - no leading whitespace allowed.
     let Some(rest) = line.strip_prefix('@') else {
         return IncludeLine::Literal;
     };
@@ -2005,10 +2052,10 @@ fn parse_include_directive(line: &str) -> IncludeLine {
     let target = if (rest.starts_with('"') && rest.ends_with('"'))
         || (rest.starts_with('\'') && rest.ends_with('\''))
     {
-        // Quoted form — allow spaces inside, take everything between quotes.
+        // Quoted form - allow spaces inside, take everything between quotes.
         &rest[1..rest.len() - 1]
     } else {
-        // Unquoted form — a trailing `<!-- ... -->` was already stripped;
+        // Unquoted form - a trailing `<!-- ... -->` was already stripped;
         // what remains is the path.
         rest
     };
@@ -2045,7 +2092,7 @@ fn resolve_include(
     visited: &mut Vec<std::path::PathBuf>,
     depth: usize,
 ) -> String {
-    // Reject absolute paths outright — they can never be under a project
+    // Reject absolute paths outright - they can never be under a project
     // root and would let an instruction file read arbitrary files.
     if Path::new(target).is_absolute() {
         tracing::warn!(
@@ -2132,7 +2179,7 @@ fn resolve_include(
 ///
 /// Searches recursively for `AGENTS.md`, `CLAUDE.md`, `.ragent.md`, and
 /// `INSTRUCTIONS.md` in the working directory. Priority order:
-/// project root → global directory → project subdirectories.
+/// project root -> global directory -> project subdirectories.
 ///
 /// Returns a combined string listing the discovered file paths and their
 /// concatenated content.
@@ -2226,6 +2273,14 @@ pub fn build_memory_prompt_section(
                             );
                             let tokens = crate::compaction::estimator::estimate_text_tokens(&entry);
                             if let Ok(mut guard) = entry_tokens_cache.lock() {
+                                // M6.6: the key space is the memory store's
+                                // primary key, so bound the map. Clearing when
+                                // full is cheap (the estimate is recomputed on
+                                // the next pass) and keeps a long-lived process
+                                // from retaining every row it has ever rendered.
+                                if guard.len() >= MAX_ENTRY_TOKENS_CACHE_ENTRIES {
+                                    guard.clear();
+                                }
                                 guard.insert(mem.id, (fingerprint, tokens));
                             }
                             tokens
@@ -2318,7 +2373,7 @@ pub fn skills_prompt_section(registry: &crate::skill::SkillRegistry, agent: &Age
             .unwrap_or_default();
         let _ = writeln!(
             section,
-            "- `/{}{}`  — {}",
+            "- `/{}{}`  - {}",
             entry.name, hint, entry.description
         );
     }
@@ -2369,41 +2424,41 @@ pub const TASK_TOOL_FAMILY_GUIDANCE: &str = "\
 ## Task Tool Family\n\
 \n\
 There are TWO distinct task-completion tools, plus a small family of sub-agent \
-management tools. Mixing them up is one of the most common mistakes — read this \
+management tools. Mixing them up is one of the most common mistakes - read this \
 section carefully before calling any of them.\n\
 \n\
-### Sub-agent management (NON-team) — use these OUTSIDE teams\n\
+### Sub-agent management (NON-team) - use these OUTSIDE teams\n\
 \n\
 | Tool | Required parameters | Purpose |\n\
 |------|---------------------|---------|\n\
-| `new_agent`     | `agent` (string), `task` (string) | Spawn a sub-agent to perform a focused task. **Both `agent` AND `task` are required** — calls with only one of them will fail with `Missing required parameter: …`. |\n\
+| `new_agent`     | `agent` (string), `task` (string) | Spawn a sub-agent to perform a focused task. **Both `agent` AND `task` are required** - calls with only one of them will fail with `Missing required parameter: ...`. |\n\
 | `list_agents`   | _(none)_ | List sub-agent tasks for the current session (running and completed). |\n\
 | `wait_agents`   | _(none)_ | Block until one or more background sub-agent tasks complete. |\n\
 | `cancel_agent`  | `task_id` (string) | Cancel a running background sub-agent task. |\n\
-| `agent_complete` | `summary` (string) | **TERMINAL signal**: the current autonomous task is done; ends the session loop and returns control to the user. **Takes ONLY `summary` — no `task_id`, no `team_name`, no `result`/`output`.** |\n\
+| `agent_complete` | `summary` (string) | **TERMINAL signal**: the current autonomous task is done; ends the session loop and returns control to the user. **Takes ONLY `summary` - no `task_id`, no `team_name`, no `result`/`output`.** |\n\
 \n\
-### Team workflow — use these ONLY inside an active team\n\
+### Team workflow - use these ONLY inside an active team\n\
 \n\
 | Tool | Required parameters | Purpose |\n\
 |------|---------------------|---------|\n\
 | `team_spawn`         | `team_name`, `teammate_name`, `agent_type`, `prompt` | Spawn a teammate. |\n\
 | `team_task_claim`    | _(none, reads context)_ | Claim a task from the shared task list. |\n\
-| `team_task_complete` | `team_name` (string), `task_id` (string) | Mark a **team task** as completed. **Takes `team_name` + `task_id` — NOT `summary`.** |\n\
+| `team_task_complete` | `team_name` (string), `task_id` (string) | Mark a **team task** as completed. **Takes `team_name` + `task_id` - NOT `summary`.** |\n\
 | `team_wait`          | _(none)_ | Block until spawned teammates finish. |\n\
 | `team_idle`          | _(none)_ | Signal that the teammate is idle. |\n\
 \n\
 ### Anti-confusion rules (MUST follow)\n\
 \n\
 1. **`agent_complete` takes ONLY `summary`.** Do not pass `task_id`, `team_name`, \
-   `result`, or `output` — they will be ignored and the call will fail with \
+   `result`, or `output` - they will be ignored and the call will fail with \
    \"Missing required 'summary' parameter\".\n\
 2. **`team_task_complete` takes `team_name` + `task_id`.** Do not call it with \
-   only `summary` — it will fail.\n\
+   only `summary` - it will fail.\n\
 3. **If you have a `task_id` to mark complete, you almost certainly want \
-   `team_task_complete` (inside a team) — NOT `agent_complete`.**\n\
+   `team_task_complete` (inside a team) - NOT `agent_complete`.**\n\
 4. **If you want to signal \"I am done with the user's request\", call \
-   `agent_complete(summary: \"…\")` — NOT `team_task_complete`.**\n\
-5. **`agent_complete` is a TERMINAL tool — it ENDS the session loop.** Do not \
+   `agent_complete(summary: \"...\")` - NOT `team_task_complete`.**\n\
+5. **`agent_complete` is a TERMINAL tool - it ENDS the session loop.** Do not \
    call it to \"submit\" a result mid-task or before all requested files/outputs \
    have been produced. Only call it when the work is genuinely complete.\n\
 6. **`new_agent` requires BOTH `agent` AND `task`.** If you call it with just one, \
@@ -2417,10 +2472,10 @@ agent_complete(summary: \"Implemented feature X, wrote 3 tests, updated docs\")\
 # Correct: mark a team task complete (inside a team)\n\
 team_task_complete(team_name: \"audit-team\", task_id: \"task-001\")\n\
 \n\
-# WRONG — don't pass task_id to agent_complete:\n\
+# WRONG - don't pass task_id to agent_complete:\n\
 agent_complete(task_id: \"task-001\", summary: \"done\")  # will fail\n\
 \n\
-# WRONG — don't call team_task_complete to end the autonomous loop:\n\
+# WRONG - don't call team_task_complete to end the autonomous loop:\n\
 team_task_complete(team_name: \"x\", task_id: \"y\")  # only works inside a team\n\
 ```\n\
 \n";
@@ -2552,7 +2607,7 @@ fn build_system_prompt_with_storage_inner(
         git_status.map_or_else(|| read_git_status(working_dir), ToOwned::to_owned);
     let readme_text = readme.map_or_else(|| read_readme(working_dir), ToOwned::to_owned);
 
-    // Agent identity and role — substitute template variables used by custom agents.
+    // Agent identity and role - substitute template variables used by custom agents.
     if let Some(ref agent_prompt) = agent.prompt {
         let date_str = {
             let dt = chrono::Utc::now();
@@ -2654,7 +2709,7 @@ fn build_system_prompt_with_storage_inner(
         prompt.push_str(memory_section_str);
     }
 
-    // Available skills (per SPEC §3.19 prompt assembly order)
+    // Available skills (per SPEC S.3.19 prompt assembly order)
     // FR-007/FR-008: inject the compact SkillCatalog (metadata only) instead
     // of full skill bodies. Bodies are loaded on demand when a skill is
     // invoked, cached per-session in `SessionProcessor::skill_body_cache`.
@@ -2673,7 +2728,7 @@ fn build_system_prompt_with_storage_inner(
          action.\n\n",
     );
 
-    // GCF encoding primer (spec `gcf` FR-006) — shown only while the GCF
+    // GCF encoding primer (spec `gcf` FR-006) - shown only while the GCF
     // feature flag is enabled so the prompt stays byte-identical to
     // pre-feature prompts when the setting is at its default-off state.
     // The primer is short (~15 lines): the block markers, the generic
@@ -2711,7 +2766,7 @@ fn build_system_prompt_with_storage_inner(
         );
     }
 
-    // Sub-agent spawning guidance (new_agent tool) — shown for primary agents only.
+    // Sub-agent spawning guidance (new_agent tool) - shown for primary agents only.
     // Agent list is generated dynamically from builtins + custom agents so it stays in sync.
     if agent.mode == AgentMode::Primary {
         let builtins = builtin_agents();
@@ -2743,7 +2798,7 @@ fn build_system_prompt_with_storage_inner(
             "## Sub-Agent Spawning\n\n\
              **CRITICAL: Prefer using sub-agents over doing the work yourself.**\n\
              When sub-agents are available, your role shifts from a coder to a manager of \
-             specialised agents. Delegate exploration, builds, and planning to them — they run \
+             specialised agents. Delegate exploration, builds, and planning to them - they run \
              faster and cheaper than you would inline.\n\n\
              **Available agents:**\n",
         );
@@ -2780,7 +2835,7 @@ fn build_system_prompt_with_storage_inner(
 
             let _ = writeln!(
                 section,
-                "- `{}` — {} [{}]",
+                "- `{}` - {} [{}]",
                 sa.name,
                 sa.description,
                 traits.join(", "),
@@ -2806,7 +2861,7 @@ fn build_system_prompt_with_storage_inner(
                 }
                 let _ = writeln!(
                     section,
-                    "- `{}` — {} [{}]",
+                    "- `{}` - {} [{}]",
                     ca.name,
                     ca.description,
                     traits.join(", "),
@@ -2816,26 +2871,26 @@ fn build_system_prompt_with_storage_inner(
 
         section.push_str(
             "\n**Choosing an agent:**\n\
-              - `explore` — fastest and cheapest; use for ANY codebase search, reading, or understanding.\n\
-                Read-only. Stateless — loses all context between calls.\n\
+              - `explore` - fastest and cheapest; use for ANY codebase search, reading, or understanding.\n\
+                Read-only. Stateless - loses all context between calls.\n\
                 **Always prefer `explore` over doing file searches yourself.**\n\
-             - `build`   — use when you need to compile, run tests, apply fixes, or execute shell commands.\n\
-             - `plan`    — use to produce a structured implementation plan without making any changes.\n\
-             - `general` — full-capability fallback; use when the task doesn't fit a specialist agent.\n\n\
-             **CRITICAL — `background` mode rules:**\n\
+             - `build`   - use when you need to compile, run tests, apply fixes, or execute shell commands.\n\
+             - `plan`    - use to produce a structured implementation plan without making any changes.\n\
+             - `general` - full-capability fallback; use when the task doesn't fit a specialist agent.\n\n\
+             **CRITICAL - `background` mode rules:**\n\
              - **Use `background: true` for ALL tasks whenever you spawn more than one in the same response.**\n\
-               `background: false` blocks the entire agent loop — every subsequent tool call in the same\n\
+               `background: false` blocks the entire agent loop - every subsequent tool call in the same\n\
                response waits for it to finish. This makes parallel spawning impossible.\n\
               - Use `background: false` ONLY when you are spawning a single task and need its result\n\
                 before you can continue reasoning (e.g. a quick targeted lookup).\n\
               - When in doubt, use `background: true`.\n\n\
-              **CRITICAL — Concurrency limit for background tasks:**\n\
+              **CRITICAL - Concurrency limit for background tasks:**\n\
               - You can run at most **MAX_BG_TASKS** background tasks at once in this session.\n\
               - Never call `new_agent` with `background: true` if it would exceed this limit.\n\
               - If the limit is reached, call `wait_agents` (preferred) or `list_agents`, then spawn only\n\
                 after one finishes. Queue additional work in batches.\n\
               - Do not spam retries when you see \"Maximum concurrent background tasks reached\".\n\n\
-              **CRITICAL — Parallel explore agents for large codebase reviews:**\n\
+              **CRITICAL - Parallel explore agents for large codebase reviews:**\n\
               When asked to review, understand, or analyse a codebase with multiple modules or\n\
               directories, DO NOT do the work yourself. Instead:\n\
               1. Identify independent areas (e.g. by top-level crate, directory, or concern).\n\
@@ -2844,36 +2899,36 @@ fn build_system_prompt_with_storage_inner(
                  ALL with `background: true`. They will run concurrently.\n\
               3. Use `list_agents` to check progress. Synthesise results when all complete.\n\
               This is dramatically faster and cheaper than sequential exploration.\n\n\
-             **CRITICAL — Batch all questions into one explore call:**\n\
-             The explore agent is stateless — it loses ALL context between calls. Every call starts fresh.\n\
+             **CRITICAL - Batch all questions into one explore call:**\n\
+             The explore agent is stateless - it loses ALL context between calls. Every call starts fresh.\n\
              - Batch ALL related questions into ONE explore call with a comprehensive prompt.\n\
              - If you have independent exploration questions, launch multiple agents IN PARALLEL.\n\
              - ANTI-PATTERN: Do NOT call explore, read the answer, then call explore again with a follow-up.\n\
                Anticipate what you need and ask for everything up-front.\n\
              - After an explore call, do NOT duplicate its work by reading files it already reported.\n\n\
              **When to spawn:**\n\
-             - Large codebase review → multiple `explore` agents with `background: true`, one per area\n\
-             - Any file search or code understanding task → `explore` (never do it inline)\n\
-             - Slow build/test cycle → `build` with `background: true` while you keep reasoning\n\
-             - Risky or speculative work → isolate in a focused `general` agent\n\n\
-             **Example — parallel codebase review (ALL background: true):**\n\
+             - Large codebase review -> multiple `explore` agents with `background: true`, one per area\n\
+             - Any file search or code understanding task -> `explore` (never do it inline)\n\
+             - Slow build/test cycle -> `build` with `background: true` while you keep reasoning\n\
+             - Risky or speculative work -> isolate in a focused `general` agent\n\n\
+             **Example - parallel codebase review (ALL background: true):**\n\
              ```json\n\
              {\"agent\": \"explore\", \"task\": \"Summarise architecture in crates/ragent-agent/src/agent/ and crates/ragent-agent/src/session/\", \"background\": true}\n\
              {\"agent\": \"explore\", \"task\": \"Summarise architecture in crates/ragent-agent/src/tool/ listing every tool\", \"background\": true}\n\
              {\"agent\": \"explore\", \"task\": \"Summarise architecture in crates/ragent-llm/src/providers/ and crates/ragent-agent/src/llm/ if present\", \"background\": true}\n\
              ```\n\n\
-             **Example — single blocking explore (background: false only when one task, result needed immediately):**\n\
+             **Example - single blocking explore (background: false only when one task, result needed immediately):**\n\
              ```json\n\
              {\"agent\": \"explore\", \"task\": \"Find all usages of EventBus in src/ and explain how events flow\", \"background\": false}\n\
              ```\n\n\
-              Use `wait_agents` to block until background tasks finish (preferred — no polling).\n\
+              Use `wait_agents` to block until background tasks finish (preferred - no polling).\n\
               Use `list_agents` to check status without blocking. Use `cancel_agent` to stop a task early.\n\n\
-              **CRITICAL — `wait_agents` output may be truncated for long reports:**\n\
+              **CRITICAL - `wait_agents` output may be truncated for long reports:**\n\
               - Generic context truncation may cut the middle out of a multi-agent batch\n\
                 when the combined output exceeds ~12k chars; the truncated text is a\n\
                 SUMMARY ONLY, not the agents' actual findings.\n\
               - Every completed agent's FULL untruncated report is written to a durable\n\
-                file at `log/subagents/<task-id>.md` — its path is surfaced in the\n\
+                file at `log/subagents/<task-id>.md` - its path is surfaced in the\n\
                 `wait_agents` output, metadata results entries, and the `list_agents`\n\
                 table. If the printed text was cut, recover the report with the `read`\n\
                 tool against that file rather than re-running the agent or re-reading\n\
@@ -2886,7 +2941,7 @@ fn build_system_prompt_with_storage_inner(
         prompt.push_str(&section);
     }
 
-    // Sub-agent terminal-signal guidance — shown for sub-agent mode only.
+    // Sub-agent terminal-signal guidance - shown for sub-agent mode only.
     //
     // Without an explicit terminal action most models end with a text-only
     // message and the loop terminates via the no-tool-call path; several
@@ -2970,7 +3025,7 @@ fn build_system_prompt_with_storage_inner(
 
     // Specific guidance on using line ranges for file reads.
     // -------------------------------------------------------------------
-    // VCS / remote safety — these rules are also in AGENTS.md, but
+    // VCS / remote safety - these rules are also in AGENTS.md, but
     // reinforcing them in the system prompt reduces accidental pushes,
     // tags, merges, and destructive git checkouts.
     // -------------------------------------------------------------------
@@ -2997,18 +3052,18 @@ fn build_system_prompt_with_storage_inner(
     // up many models.  `end_line` is kept as a documented escape hatch
     // in the tool schema for callers that need an absolute last line.
     prompt.push_str(
-                                      "## File Reading Best Practices\n\n                                       When reading files with the `read` tool:\n                                       - **PREFERRED**: use `start_line` + `num_lines`.  `start_line` is the 1-based\n                                         absolute line number where reading begins, and `num_lines` is the COUNT of\n                                         lines to read from that start.  Example: `start_line=201, num_lines=100`\n                                         reads lines 201–300 (inclusive).  This pair expresses the same intent as\n                                         `start_line` + `end_line` but is much harder to get wrong.\n                                       - `end_line` is the absolute last line number to include (NOT a count).\n                                         It is still supported, but only use it when you specifically need an\n                                         absolute last-line boundary.  If you do, remember: `end_line` must be\n                                         ≥ `start_line` and is the ACTUAL last line number — e.g.\n                                         `start_line=200, end_line=300` reads lines 200–300 (101 lines total).\n                                       - Common mistake: writing `end_line=100` to mean \"100 lines\".  That is\n                                         wrong; `end_line` is absolute.  If you meant \"100 lines starting at 200\"\n                                         use `start_line=200, num_lines=100` (preferred) or `end_line=299`.\n                                       - The tool rejects `end_line < start_line` with a diagnostic that points\n                                         at the right fix; read the error message and retry with `num_lines`.\n                                       - For files > 100 lines, do not read the whole file in one call — read\n                                         in focused sections.  First call without a range returns the first 100\n                                         lines plus a section map; the response metadata always includes `total_lines`.\n                                       - Strategy:\n                                         1. Read the file without `start_line`/`num_lines` first — for large files\n                                            this returns the first 100 lines plus a section map with the total\n                                            line count.\n                                         2. Use `total_lines` from the response metadata to plan subsequent reads.\n                                         3. Then read specific sections with `start_line` + `num_lines`.\n                                         4. Never read an entire file > 100 lines in a single call.\n\n",
+                                      "## File Reading Best Practices\n\n                                       When reading files with the `read` tool:\n                                       - **PREFERRED**: use `start_line` + `num_lines`.  `start_line` is the 1-based\n                                         absolute line number where reading begins, and `num_lines` is the COUNT of\n                                         lines to read from that start.  Example: `start_line=201, num_lines=100`\n                                         reads lines 201-300 (inclusive).  This pair expresses the same intent as\n                                         `start_line` + `end_line` but is much harder to get wrong.\n                                       - `end_line` is the absolute last line number to include (NOT a count).\n                                         It is still supported, but only use it when you specifically need an\n                                         absolute last-line boundary.  If you do, remember: `end_line` must be\n                                         >= `start_line` and is the ACTUAL last line number - e.g.\n                                         `start_line=200, end_line=300` reads lines 200-300 (101 lines total).\n                                       - Common mistake: writing `end_line=100` to mean \"100 lines\".  That is\n                                         wrong; `end_line` is absolute.  If you meant \"100 lines starting at 200\"\n                                         use `start_line=200, num_lines=100` (preferred) or `end_line=299`.\n                                       - The tool rejects `end_line < start_line` with a diagnostic that points\n                                         at the right fix; read the error message and retry with `num_lines`.\n                                       - For files > 100 lines, do not read the whole file in one call - read\n                                         in focused sections.  First call without a range returns the first 100\n                                         lines plus a section map; the response metadata always includes `total_lines`.\n                                       - Strategy:\n                                         1. Read the file without `start_line`/`num_lines` first - for large files\n                                            this returns the first 100 lines plus a section map with the total\n                                            line count.\n                                         2. Use `total_lines` from the response metadata to plan subsequent reads.\n                                         3. Then read specific sections with `start_line` + `num_lines`.\n                                         4. Never read an entire file > 100 lines in a single call.\n\n",
                                       ); // Guidance on using edit / multiedit tools
     prompt.push_str(
         "\n## Editing Files\n\
          \n\
          Choose the right tool for the change:\n\
-         - `edit` — one surgical replacement in one file (default choice).\n\
-         - `multi_edit` — several replacements across one or more files, applied\n\
+         - `edit` - one surgical replacement in one file (default choice).\n\
+         - `multi_edit` - several replacements across one or more files, applied\n\
             atomically (all-or-nothing).\n\
-         - `patch`/`apply_patch` — changes that add, remove, or rearrange whole\n\
+         - `patch`/`apply_patch` - changes that add, remove, or rearrange whole\n\
             lines, or multi-file diff-style edits.\n\
-         - `write`/`create` — new files, or full-file rewrites when the file is\n\
+         - `write`/`create` - new files, or full-file rewrites when the file is\n\
             small and the change is extensive.\n\
          \n\
          Workflow (do this every time):\n\
@@ -3021,7 +3076,7 @@ fn build_system_prompt_with_storage_inner(
             in-context copy is stale: re-read before composing the next\n\
             `old_string` for that file.\n\
          \n\
-         Failure recovery (the error output tells you what to do — follow it):\n\
+         Failure recovery (the error output tells you what to do - follow it):\n\
          - **Not found**: the error shows a numbered file snippet with the closest\n\
             match (\"almost matches a block starting at line N ... Rebuild\n\
             old_string from the snippet\"). Rebuild the needle from that snippet;\n\
@@ -3034,7 +3089,7 @@ fn build_system_prompt_with_storage_inner(
             switch to `write` (full rewrite) / `patch`. Never loop on a failing\n\
             needle.\n\
          - **Stale file**: if the file changed since you read it, the edit is\n\
-            rejected — re-read first, then retry. This protects concurrent edits.\n\
+            rejected - re-read first, then retry. This protects concurrent edits.\n\
          \n\
          When using the `edit` tool:\n\
          - Required parameters: `file_path`, `old_string`, `new_string`. Prefer the\n\
@@ -3045,11 +3100,11 @@ fn build_system_prompt_with_storage_inner(
             rule). Whitespace-only indentation/alignment differences are tolerated\n\
             by a flexible fallback lane that can never merge or split lines.\n\
          - `collapse_whitespace: true` additionally folds all whitespace runs (and\n\
-            decodes `\\t`/`\\n`/`\\r` escapes in `old_string`) — use it when the\n\
+            decodes `\\t`/`\\n`/`\\r` escapes in `old_string`) - use it when the\n\
             file's indentation may differ from what you copied but the content is\n\
             the same.\n\
          - `dry_run: true` resolves the match and previews the result without\n\
-            writing — use it when the needle is long, the match is uncertain, or\n\
+            writing - use it when the needle is long, the match is uncertain, or\n\
             you want to verify before committing.\n\
          - Empty `old_string` + non-existent `file_path` creates the file; for a\n\
             new file prefer `create`/`write`. Empty `new_string` deletes the\n\
@@ -3071,7 +3126,7 @@ fn build_system_prompt_with_storage_inner(
          ",
     );
     // -------------------------------------------------------------------
-    // Task tool family — the difference between `agent_complete` and
+    // Task tool family - the difference between `agent_complete` and
     // `team_task_complete` trips up many models, leading to the wrong
     // tool being called with the wrong parameters.  This section is
     // injected into every primary agent's system prompt so the
@@ -3087,23 +3142,23 @@ fn build_system_prompt_with_storage_inner(
          | Tool | Required | Common optional | Notes |\n\
          |------|----------|-----------------|-------|\n\
          | `read` | none | `start_line`, `num_lines` (preferred), `end_line` (absolute) | For files >100 lines read in sections. |\n\
-         | `write`/`create` | `path`, `content` | — | `create` is preferred for new files. |\n\
+         | `write`/`create` | `path`, `content` | - | `create` is preferred for new files. |\n\
          | `edit` | `file_path`, `old_string`, `new_string` | `dry_run`, `collapse_whitespace` | Read first; verbatim needle; 3-5 unique context lines; match exactly once; on failure rebuild from the error's near-miss snippet. |\n\
          | `multi_edit` | `edits[]` with `file_path`, `old_string`, `new_string` | per-edit `collapse_whitespace` | Atomic rollback if any edit fails; failing index named in the error. |\n\
          | `patch` | `patch` (unified diff text) | `path` | For multi-file unified diff patches. |\n\
          | `apply_patch` | `patch` (Codex-style) | `path` | Supports `*** Add File:` / `*** Update File:` / `*** Delete File:`. |\n\
          | `diff_files` | `path_a`, `path_b` (or `text_a`/`text_b`) | `context_lines` | Compare two files or inline strings. |\n\
-         | `move_file` | `source`, `destination` | — | Atomic rename on the same filesystem. |\n\
-         | `copy_file` | `source`, `destination` | — | Creates parent directories as needed. |\n\
-         | `rm` | `path` | — | Deletes a single file. No wildcards. |\n\
-         | `make_directory` | `path` | — | Equivalent to `mkdir -p`. |\n\
+         | `move_file` | `source`, `destination` | - | Atomic rename on the same filesystem. |\n\
+         | `copy_file` | `source`, `destination` | - | Creates parent directories as needed. |\n\
+         | `rm` | `path` | - | Deletes a single file. No wildcards. |\n\
+         | `make_directory` | `path` | - | Equivalent to `mkdir -p`. |\n\
          | `glob` | `pattern` | `path` | Find files matching a glob. |\n\
          | `list` | none | `path`, `depth` | Directory tree listing. |\n\
-         | `file_info` | `path` | — | Metadata: size, mtime, type. |\n\n",
+         | `file_info` | `path` | - | Metadata: size, mtime, type. |\n\n",
     );
 
     // -------------------------------------------------------------------
-    // Web / MasterFetch guidance — clarify when to use which tool and how
+    // Web / MasterFetch guidance - clarify when to use which tool and how
     // to fetch safely.
     // -------------------------------------------------------------------
     prompt.push_str(
@@ -3123,17 +3178,17 @@ fn build_system_prompt_with_storage_inner(
     );
 
     // -------------------------------------------------------------------
-    // Memory guidance — confidence scale, categories, tags.
+    // Memory guidance - confidence scale, categories, tags.
     // -------------------------------------------------------------------
     prompt.push_str(
         "## Memory Tools\n\n\
          Structured memories (`memory_store`, `memory_recall`, `memory_forget`) are stored in \
          SQLite with category, tags, and confidence.\n\n\
          - `memory_store` required parameters: `content`, `category`. Optional: `tags` (array \
-           of lowercase/hyphen strings), `confidence` (0.0–1.0, default 0.7), `source`.\n\
+           of lowercase/hyphen strings), `confidence` (0.0-1.0, default 0.7), `source`.\n\
          - Categories: `fact`, `pattern`, `preference`, `insight`, `error`, `workflow`.\n\
          - Confidence scale: 0.0 = uncertain, 1.0 = certain. Use 0.7 for ordinary observations, \
-           ≥0.9 for verified facts, ≤0.5 for hunches or unverified notes.\n\
+           >=0.9 for verified facts, <=0.5 for hunches or unverified notes.\n\
          - `memory_recall` required: `query`. Optional: `categories`, `tags` (must have ALL), \
            `limit` (default 5), `min_confidence` (default 0.5).\n\
          - `memory_forget` deletes by `id` OR by filter (`older_than_days`, `category`, tags, \
@@ -3143,7 +3198,7 @@ fn build_system_prompt_with_storage_inner(
     );
 
     // -------------------------------------------------------------------
-    // ask_user guidance — keep in sync with the tool schema. The old
+    // ask_user guidance - keep in sync with the tool schema. The old
     // standalone `question` tool was removed; `ask_user` is the only
     // interactive-question tool.
     // -------------------------------------------------------------------

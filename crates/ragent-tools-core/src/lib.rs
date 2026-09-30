@@ -76,6 +76,15 @@ pub mod sanitize {
     pub use ragent_types::sanitize::*;
 }
 
+/// Shared security guards (SECTASKS MS-05 T-067/T-068).
+///
+/// Re-exported from `ragent_types::guard` so the tools crates share one
+/// implementation of `reject_option_like`, `contained_join`,
+/// `validate_identifier`, and `cap_read` instead of re-deriving them.
+pub mod guard {
+    pub use ragent_types::guard::*;
+}
+
 /// Minimal process resource gate used by shell-based tools.
 ///
 /// Re-exported from `ragent_types::resource` (DUPPLAN.md Milestone E).
@@ -96,7 +105,7 @@ pub struct ToolOutput {
 ///
 /// `canonicalize()` issues a blocking syscall.  Within a single agent-loop
 /// step the same paths (especially the working-directory root) are
-/// canonicalised repeatedly — once in the permission check and again in
+/// canonicalised repeatedly - once in the permission check and again in
 /// `check_path_within_root`.  This cache stores the result (or failure) of
 /// each canonicalize call so subsequent lookups for the same path are free.
 ///
@@ -199,7 +208,7 @@ pub fn check_path_within_any_root(path: &Path, roots: &[&Path]) -> anyhow::Resul
     let canonical = if let Ok(c) = path.canonicalize() {
         c
     } else {
-        // Path does not exist — walk up to the longest existing prefix
+        // Path does not exist - walk up to the longest existing prefix
         // and reconstruct, using the first root as fallback.
         let fallback_root = roots[0]
             .canonicalize()
@@ -283,7 +292,7 @@ pub fn check_path_within_any_root_cached(
     let canonical = if let Some(c) = cache.get_or_canonicalize(path) {
         c
     } else {
-        // Path does not exist — walk up to the longest existing prefix
+        // Path does not exist - walk up to the longest existing prefix
         // and reconstruct, using the first root as fallback.
         let fallback_root = cache
             .get_or_canonicalize(roots[0])

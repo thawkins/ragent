@@ -60,16 +60,5 @@ impl SourceRegistry for BuiltinSourceRegistry {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn builtin_registry_lists_sources() {
-        let reg = BuiltinSourceRegistry::new();
-        let sources = reg.discover().await.unwrap();
-        assert_eq!(sources.len(), 3);
-        assert!(sources.iter().any(|s| s.id == "web"));
-        assert!(sources.iter().any(|s| s.id == "local"));
-        assert!(sources.iter().any(|s| s.id == "spec"));
-    }
-}
+#[path = "../tests/inline/source_registry_tests.rs"]
+mod tests;

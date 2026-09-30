@@ -7,13 +7,13 @@
 //!
 //! Design goals (see `specs/AgentPerf/SPEC.md`, FR-001 / FR-005):
 //!
-//! * **Hermetic** — no network, no I/O, no environment-variable lookups.
-//! * **Deterministic** — the same request always produces the same event
+//! * **Hermetic** - no network, no I/O, no environment-variable lookups.
+//! * **Deterministic** - the same request always produces the same event
 //!   sequence, byte-for-byte, across runs and platforms.  A fixed RNG seed
 //!   and a `Cow<'static, str>` for the canned text guarantee this.
-//! * **Fast** — no allocation in the stream body apart from the `StreamEvent`
+//! * **Fast** - no allocation in the stream body apart from the `StreamEvent`
 //!   values themselves.
-//! * **Composable** — pre-canned scenarios (text reply, single tool call,
+//! * **Composable** - pre-canned scenarios (text reply, single tool call,
 //!   multi-step loop, large history) are exposed as constructor helpers and
 //!   as enum variants so that benchmarks and tests can pick the shape they
 //!   need without hand-rolling events.
@@ -43,10 +43,10 @@ pub enum MockScenario {
     ///
     /// The tool call has a stable id and pre-canned JSON arguments.
     SingleToolCall,
-    /// Three sequential tool calls (read → grep → read) followed by a final
+    /// Three sequential tool calls (read -> grep -> read) followed by a final
     /// text reply, mirroring a typical multi-step agent turn.
     MultiStepLoop,
-    /// No events at all — a `Finish { reason: Stop }` is emitted
+    /// No events at all - a `Finish { reason: Stop }` is emitted
     /// immediately.  Used to stress the early-exit code path.
     Empty,
 }
@@ -55,7 +55,7 @@ impl MockScenario {
     /// Returns a stable string identifier for the scenario.
     ///
     /// Useful in benchmark reports and log lines.
-    // NOTE: intentional duplication — see DUPPLAN.md Milestone J
+    // NOTE: intentional duplication - see DUPPLAN.md Milestone J
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -180,7 +180,7 @@ fn scenario_events(scenario: MockScenario) -> Vec<StreamEvent> {
     }
 }
 
-/// `SimpleTextReply` — 50-token text reply then `Stop`.
+/// `SimpleTextReply` - 50-token text reply then `Stop`.
 ///
 /// The text is split into five 10-character deltas so the stream consumer
 /// can exercise the `StreamBuffer` coalescing path under benchmark.
@@ -201,7 +201,7 @@ fn simple_text_reply_events() -> Vec<StreamEvent> {
     events
 }
 
-/// `SingleToolCall` — `read` tool call then `ToolUse` finish.
+/// `SingleToolCall` - `read` tool call then `ToolUse` finish.
 fn single_tool_call_events() -> Vec<StreamEvent> {
     vec![
         StreamEvent::ToolCallStart {
@@ -225,7 +225,7 @@ fn single_tool_call_events() -> Vec<StreamEvent> {
     ]
 }
 
-/// `MultiStepLoop` — three tool calls followed by a final text reply.
+/// `MultiStepLoop` - three tool calls followed by a final text reply.
 ///
 /// The 8-event sequence is fixed and reproduces the typical shape of a
 /// real multi-step agent turn.
@@ -259,7 +259,7 @@ fn multi_step_loop_events() -> Vec<StreamEvent> {
     ]
 }
 
-/// `Empty` — emit `Finish { reason: Stop }` immediately.
+/// `Empty` - emit `Finish { reason: Stop }` immediately.
 fn empty_events() -> Vec<StreamEvent> {
     vec![StreamEvent::Finish {
         reason: FinishReason::Stop,

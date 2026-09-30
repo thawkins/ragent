@@ -1,4 +1,4 @@
-//! `git_push` — Push branches and tags to remote.
+//! `git_push` - Push branches and tags to remote.
 
 use anyhow::Result;
 use serde_json::{Value, json};

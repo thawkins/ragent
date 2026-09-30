@@ -12,14 +12,14 @@
 //! The [`build_request_body`] helper maps the shared [`SearchOptions`] to
 //! the Perplexity Sonar JSON body (OpenAI chat-completions compatible):
 //!
-//! - `model` — `"sonar"`, the base Sonar model for web-grounded answers.
-//! - `messages` — a single user message containing the search query verbatim,
+//! - `model` - `"sonar"`, the base Sonar model for web-grounded answers.
+//! - `messages` - a single user message containing the search query verbatim,
 //!   truncated to the 4000-character limit.
-//! - `max_tokens` — `min(opts.max_results * 200, 4000)` as a rough budget; the
+//! - `max_tokens` - `min(opts.max_results * 200, 4000)` as a rough budget; the
 //!   Sonar API does not accept a `max_results` field directly.
-//! - `search_recency_filter` — mapped from [`Freshness`] as `Day`→`day`,
-//!   `Week`→`week`, `Month`→`month`, `Year`→`hour` (Perplexity has no "year"
-//!   option so the broadest available filter is used), `Any`→omitted.
+//! - `search_recency_filter` - mapped from [`Freshness`] as `Day`->`day`,
+//!   `Week`->`week`, `Month`->`month`, `Year`->`hour` (Perplexity has no "year"
+//!   option so the broadest available filter is used), `Any`->omitted.
 //!
 //! # Response parsing
 //!
@@ -225,10 +225,10 @@ impl SearchEngine for PerplexityEngine {
 ///
 /// The returned [`serde_json::Value`] contains:
 ///
-/// - `model` — the Sonar model name.
-/// - `messages` — a single user message with the truncated query.
-/// - `max_tokens` — a rough token budget based on `max_results`.
-/// - `search_recency_filter` — mapped from [`Freshness`] (omitted for `Any`).
+/// - `model` - the Sonar model name.
+/// - `messages` - a single user message with the truncated query.
+/// - `max_tokens` - a rough token budget based on `max_results`.
+/// - `search_recency_filter` - mapped from [`Freshness`] (omitted for `Any`).
 ///
 /// # Examples
 ///
@@ -268,7 +268,7 @@ pub fn truncate_query(query: &str) -> String {
 /// Map a [`Freshness`] value to the Perplexity `search_recency_filter` string.
 ///
 /// Returns `None` for [`Freshness::Any`] (no filter). Perplexity does not have
-/// a "year" option, so `Year` maps to `"hour"` — the broadest available filter
+/// a "year" option, so `Year` maps to `"hour"` - the broadest available filter
 /// that still constrains recency.
 const fn freshness_to_recency(freshness: Freshness) -> Option<&'static str> {
     match freshness {

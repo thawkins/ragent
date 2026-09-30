@@ -1,4 +1,4 @@
-//! `git_clone` — Clone a repository.
+//! `git_clone` - Clone a repository.
 
 use anyhow::Result;
 use serde_json::{Value, json};

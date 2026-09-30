@@ -1,9 +1,9 @@
-//! Legacy web search tool — compatibility wrapper around `mf_search`.
+//! Legacy web search tool - compatibility wrapper around `mf_search`.
 //!
 //! [`WebSearchTool`] is retained for direct agent use and backwards
 //! compatibility. It delegates to the multi-engine `mf_search` pipeline
 //! (via [`MfSearchTool::build_orchestrator`]) so that all configured
-//! backends — OpenAlex, Wikipedia, LangSearch, and Tavily — contribute
+//! backends - OpenAlex, Wikipedia, LangSearch, and Tavily - contribute
 //! results. The tool preserves its original name (`websearch`), parameter
 //! schema (`query`, `num_results`), and human-readable output format.
 //!
@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
 use crate::masterfetch::search::SearchOptions;
+use crate::masterfetch::search::engine::DEFAULT_MAX_RESULTS;
 use crate::masterfetch::tools::search_tool::MfSearchTool;
 
 /// Performs a web search and returns structured results.
@@ -24,7 +25,9 @@ use crate::masterfetch::tools::search_tool::MfSearchTool;
 /// keys are configured.
 pub struct WebSearchTool;
 
-const DEFAULT_NUM_RESULTS: u64 = 5;
+/// Default `num_results` - aligned with the `mf_search` engine default so the
+/// legacy wrapper and the primary tool agree (ANTIPAT M5.9 / 3.7).
+const DEFAULT_NUM_RESULTS: u64 = DEFAULT_MAX_RESULTS as u64;
 const MAX_NUM_RESULTS: u64 = 20;
 
 #[async_trait::async_trait]
@@ -35,7 +38,7 @@ impl Tool for WebSearchTool {
 
     fn description(&self) -> &'static str {
         "Search the web and return results with titles, URLs, and snippets. \
-         Required parameter: 'query'. Optional 'num_results' (default 5, max 20). \
+         Required parameter: 'query'. Optional 'num_results' (default 10, max 20). \
          By default uses the keyless mf_search pipeline (OpenAlex, Wikipedia); \
          optional Tavily/LangSearch API keys improve quality but are not required."
     }
@@ -49,7 +52,7 @@ impl Tool for WebSearchTool {
                 },
                 "num_results": {
                     "type": "integer",
-                    "description": "Number of results to return (default: 5, max: 20)"
+                    "description": "Number of results to return (default: 10, max: 20)"
                 }
             },
             "required": ["query"],

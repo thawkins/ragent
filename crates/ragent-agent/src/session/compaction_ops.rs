@@ -7,7 +7,7 @@
 //! for the summarisation request, which re-sent the whole history plus ~169
 //! tool definitions, ran the AGENTS.md init acknowledgement exchange (an extra
 //! LLM call), applied the current model's thinking configuration, and allowed
-//! the in-loop pre-send compaction trigger to fire again — producing up to
+//! the in-loop pre-send compaction trigger to fire again - producing up to
 //! three summarisation LLM calls for one `/compact`.
 //!
 //! The runner path makes exactly one no-tools LLM call with a lean,
@@ -30,8 +30,8 @@ impl SessionProcessor {
     /// Compact a session's history via the dedicated compaction runner.
     ///
     /// Loads the persisted history from storage, runs a single no-tools LLM
-    /// summarisation call through [`crate::compaction::compact`], and — on
-    /// success — replaces the persisted history with
+    /// summarisation call through [`crate::compaction::compact`], and - on
+    /// success - replaces the persisted history with
     /// `[compaction_message, ...recent]` so the next turn loads history from
     /// the compaction point forward (FR-005 / FR-007).
     ///
@@ -42,11 +42,11 @@ impl SessionProcessor {
     ///
     /// # Arguments
     ///
-    /// * `session_id` — the session to compact.
-    /// * `model_ref` — provider/model used for the summarisation call.
-    /// * `reason` — label carried on compaction lifecycle events (e.g.
+    /// * `session_id` - the session to compact.
+    /// * `model_ref` - provider/model used for the summarisation call.
+    /// * `reason` - label carried on compaction lifecycle events (e.g.
     ///   `"manual"` for `/compact`, `"auto"` for pre-send compaction).
-    /// * `cancel` — cooperative cancellation flag checked before the LLM call.
+    /// * `cancel` - cooperative cancellation flag checked before the LLM call.
     ///
     /// # Errors
     ///
@@ -182,8 +182,8 @@ impl SessionProcessor {
         // pre-compaction history again.
         //
         // `get_messages` orders rows by `created_at ASC`, but the synthetic
-        // compaction message carries `Utc::now()` — newer than every retained
-        // message — which would sort it to the END of the persisted history
+        // compaction message carries `Utc::now()` - newer than every retained
+        // message - which would sort it to the END of the persisted history
         // and send the summary as the last context entry. Backdate it to one
         // millisecond before the oldest retained message so the chronological
         // order matches the FR-005 conceptual order.

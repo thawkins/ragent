@@ -4,7 +4,7 @@
 //! described in `specs/agentloop/SPEC.md` (FR-007): a loop may carry an
 //! optional verification command whose exit status gates goal achievement.
 //! When the model first responds without tool calls, the command runs
-//! automatically — success completes the loop, failure with steps remaining
+//! automatically - success completes the loop, failure with steps remaining
 //! appends the failure output as an observation so the model can self-correct,
 //! and failure without steps remaining ends the run as a budget exhaustion.
 //!
@@ -109,7 +109,7 @@ impl VerificationOutcome {
 /// Returns an error only when the command could not be spawned at all
 /// (e.g. the program does not exist). A non-zero exit status, a timeout, or
 /// an abnormal termination are reported as [`VerificationOutcome::Failure`],
-/// not as errors — the gate must see them, not crash on them.
+/// not as errors - the gate must see them, not crash on them.
 pub async fn run_verification_command(
     cmd: &str,
     working_dir: &std::path::Path,
@@ -126,7 +126,7 @@ pub async fn run_verification_command(
 /// Spawns `bash -c <script>` with piped output, drains stdout/stderr on
 /// helper threads (so a chatty child cannot deadlock on a full pipe buffer),
 /// and polls the child with a poll interval until either it exits or the
-/// deadline passes — on expiry the child is killed and the run reports a
+/// deadline passes - on expiry the child is killed and the run reports a
 /// timeout failure. The blocking work runs on the tokio blocking pool via
 /// the async wrapper.
 fn execute_verification_script(
@@ -185,7 +185,9 @@ fn execute_verification_script(
                 // Reap the killed child so it does not linger as a zombie
                 // (the timeout branch below pairs kill() with wait() too).
                 let _ = child.wait();
+                // INTENTIONAL: reader-thread join; output is collected via the pipes
                 let _ = stdout_handle.join();
+                // INTENTIONAL: reader-thread join; output is collected via the pipes
                 let _ = stderr_handle.join();
                 return Ok(VerificationOutcome::Failure {
                     reason: format!("wait error: {e}"),
@@ -292,88 +294,5 @@ pub fn verification_failure_observation(cmd: &str, outcome: &VerificationOutcome
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn temp_dir() -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "ragent-verification-test-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        dir
-    }
-
-    #[tokio::test]
-    async fn success_and_failure_status_are_reported() {
-        let dir = temp_dir();
-        let ok = run_verification_command("true", &dir).await.expect("run");
-        assert!(ok.passed());
-        assert!(matches!(ok, VerificationOutcome::Success(_)));
-
-        let fail = run_verification_command("exit 3", &dir).await.expect("run");
-        assert!(!fail.passed());
-        match fail {
-            VerificationOutcome::Failure { reason, output } => {
-                assert!(reason.contains('3'), "reason mentions exit code: {reason}");
-                assert_eq!(output, String::new());
-            }
-            other => panic!("expected failure, got {other:?}"),
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[tokio::test]
-    async fn stderr_is_captured_and_trimmed() {
-        let dir = temp_dir();
-        let outcome = run_verification_command("echo out; echo err >&2", &dir)
-            .await
-            .expect("run");
-        assert!(outcome.passed());
-        assert!(outcome.output().contains("out"));
-        assert!(outcome.output().contains("err"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-    #[tokio::test]
-    async fn missing_program_is_a_failure_not_an_error() {
-        let dir = temp_dir();
-        let outcome = run_verification_command("definitely-not-a-real-program-xyz", &dir)
-            .await
-            .expect("run");
-        // `bash` itself exists, so the spawn succeeds and bash reports the
-        // missing command with exit status 127.
-        match outcome {
-            VerificationOutcome::Failure { reason, .. } => {
-                assert!(reason.contains("exit code"), "reason: {reason}");
-            }
-            other => panic!("expected failure, got {other:?}"),
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[tokio::test]
-    async fn long_output_is_head_tail_truncated() {
-        let dir = temp_dir();
-        let script = "for i in $(seq 1 3000); do echo line-$i; done";
-        let outcome = run_verification_command(script, &dir).await.expect("run");
-        let output = outcome.output();
-        assert!(output.contains("line-1"));
-        assert!(output.contains("line-3000"));
-        assert!(output.contains("truncated"));
-        assert!(output.chars().count() <= VERIFICATION_HEAD_CHARS + VERIFICATION_TAIL_CHARS + 200);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[tokio::test]
-    async fn failure_observation_includes_command_and_output() {
-        let dir = temp_dir();
-        let outcome = run_verification_command("echo boom; exit 2", &dir)
-            .await
-            .expect("run");
-        let observation = verification_failure_observation("cargo test", &outcome);
-        assert!(observation.contains("cargo test"));
-        assert!(observation.contains("boom"));
-        assert!(observation.contains("exit code 2"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
+#[path = "../tests/inline/verification_tests.rs"]
+mod tests;

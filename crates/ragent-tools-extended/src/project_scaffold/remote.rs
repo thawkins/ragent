@@ -4,21 +4,21 @@
 //! repository, register it as `origin`, and push the initial commit. This
 //! module implements both hosting paths (T-009 GitHub, T-010 GitLab):
 //!
-//! - **GitHub** — resolve the token (`GITHUB_TOKEN` env, then the
+//! - **GitHub** - resolve the token (`GITHUB_TOKEN` env, then the
 //!   `~/.ragent/github_token` file written by `/github login`, then the
 //!   authenticated `gh` CLI when the stored token is a GitHub App token that
 //!   lacks repository-admin permission); create the
 //!   repository via `POST /user/repos`, reusing an existing same-name
-//!   repository (422 → `GET /repos/{login}/{name}`, FR-015 idempotent retry).
-//! - **GitLab** — resolve the token (`GITLAB_TOKEN` env, then the
+//!   repository (422 -> `GET /repos/{login}/{name}`, FR-015 idempotent retry).
+//! - **GitLab** - resolve the token (`GITLAB_TOKEN` env, then the
 //!   `~/.ragent/gitlab_token` file) and instance URL (`GITLAB_URL` env, then
 //!   `~/.ragent/gitlab_config.json`, else `https://gitlab.com`); create the
 //!   project via `POST /projects`, reusing an existing same-name project
-//!   (400 "has already been taken" → `GET /projects/{user}%2F{name}`),
+//!   (400 "has already been taken" -> `GET /projects/{user}%2F{name}`),
 //!   authenticating with the `PRIVATE-TOKEN` header.
 //!
 //! Both paths then register `origin` (`git remote add`, or `git remote
-//! set-url` when a remote already exists — FR-015 retry tolerance) and push
+//! set-url` when a remote already exists - FR-015 retry tolerance) and push
 //! the initial commit (`git push -u origin <branch>`).
 //!
 //! Failure containment (FR-010): every failure is returned as a
@@ -269,8 +269,13 @@ fn reuse_existing(
 /// Build the blocking HTTP client used by both hosting flows, mapping a
 /// builder failure onto `step`.
 fn build_client(step: RemoteStep) -> Result<Client, RemoteFailure> {
+    // ANTIPAT M5.9 / 3.3: use the single shared timeout constant instead of an
+    // inline `from_secs(30)`. The scaffolder runs on the synchronous TUI path,
+    // so it keeps a blocking client but still bounds the request.
     Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(
+            crate::masterfetch::http::DEFAULT_TIMEOUT_SECS,
+        ))
         .build()
         .map_err(|err| RemoteFailure {
             step,
@@ -319,7 +324,7 @@ fn run_remote_git(root: &Path, step: RemoteStep, args: &[&str]) -> Result<String
     }
 }
 
-/// Register `origin` (or re-point it via set-url when it already exists —
+/// Register `origin` (or re-point it via set-url when it already exists -
 /// FR-015 retry tolerance) and push the initial commit. Shared tail of the
 /// GitHub and GitLab hosting flows, which otherwise duplicate this block
 /// verbatim.
@@ -371,7 +376,7 @@ fn register_origin_and_push(root: &Path, url: &str) -> Result<RemoteReport, Remo
 }
 
 /// Create a private GitHub repository, register it as `origin`, and push
-/// the initial commit — resolving the token from the environment/credential
+/// the initial commit - resolving the token from the environment/credential
 /// file (FR-008, T-009).
 ///
 /// # Errors
@@ -584,7 +589,7 @@ fn path_taken(value: &Value) -> bool {
 }
 
 /// Create a private GitLab project, register it as `origin`, and push the
-/// initial commit — resolving the token and instance URL from the
+/// initial commit - resolving the token and instance URL from the
 /// environment/credential files (FR-008, T-010).
 ///
 /// # Errors

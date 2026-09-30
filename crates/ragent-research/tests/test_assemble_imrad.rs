@@ -201,7 +201,7 @@ fn imrad_populated_fields_render_in_sections() {
         "Results must contain Findings sub-section: {results_body}"
     );
     assert!(
-        results_body.contains("### **Finding 1** — Finding one headline"),
+        results_body.contains("### **Finding 1** - Finding one headline"),
         "Results must render numbered findings: {results_body}"
     );
     assert!(
@@ -259,7 +259,7 @@ fn imrad_references_index_unchanged() {
     assert!(
         assembled
             .body
-            .contains("| 1 | web | page | — | [https://example.com](https://example.com) |"),
+            .contains("| 1 | web | page | - | [https://example.com](https://example.com) |"),
         "References Index must linkify the source URL: {}",
         assembled.body
     );

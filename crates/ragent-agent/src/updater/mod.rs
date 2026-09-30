@@ -97,7 +97,7 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 }
 
 fn parse_version(v: &str) -> (u64, u64, u64, String) {
-    // Split "0.1.0-alpha.21" → ("0.1.0", "alpha.21")
+    // Split "0.1.0-alpha.21" -> ("0.1.0", "alpha.21")
     let (base, pre) = v.split_once('-').unwrap_or((v, ""));
     let mut parts = base.splitn(3, '.');
     let major = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
@@ -150,7 +150,7 @@ pub async fn download_and_replace(download_url: &str) -> Result<()> {
 
     // Atomically replace current binary
     std::fs::rename(&tmp_path, &current_exe)
-        .context("Failed to replace binary — may need elevated permissions")?;
+        .context("Failed to replace binary - may need elevated permissions")?;
 
     Ok(())
 }

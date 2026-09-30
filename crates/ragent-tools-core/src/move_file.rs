@@ -20,8 +20,8 @@ impl Tool for MoveFileTool {
 
     fn description(&self) -> &'static str {
         "Move or rename a file or directory within the agent's working-directory \
-         root. Required parameters: `source` (string) — the existing file or \
-         directory, and `destination` (string) — the target path including the \
+         root. Required parameters: `source` (string) - the existing file or \
+         directory, and `destination` (string) - the target path including the \
          new name. Uses an atomic OS rename when source and destination are on \
          the same filesystem, so the operation is usually instant. Parent \
          directories on the destination side are created if missing. To copy \
@@ -70,7 +70,8 @@ impl Tool for MoveFileTool {
 
         // FUNC-061: verify the source exists before touching the destination
         // side, so a failed move never creates orphan destination directories.
-        if !src.exists() {
+        // ANTIPAT F-10: probe via the async metadata call, not blocking exists().
+        if tokio::fs::metadata(&src).await.is_err() {
             anyhow::bail!("Source not found: {}", src.display());
         }
 
@@ -81,7 +82,11 @@ impl Tool for MoveFileTool {
         match tokio::fs::rename(&src, &dst).await {
             Ok(()) => {}
             Err(first_err) => {
-                let parent_missing = dst.parent().is_some_and(|p| !p.exists());
+                // ANTIPAT F-10: async metadata probe rather than blocking exists().
+                let parent_missing = match dst.parent() {
+                    Some(p) => tokio::fs::metadata(p).await.is_err(),
+                    None => false,
+                };
                 if !parent_missing {
                     return Err(first_err).with_context(|| {
                         format!("Failed to move '{}' to '{}'", src.display(), dst.display())
@@ -99,7 +104,7 @@ impl Tool for MoveFileTool {
         }
 
         Ok(ToolOutput {
-            content: format!("Moved '{}' → '{}'", src.display(), dst.display()),
+            content: format!("Moved '{}' -> '{}'", src.display(), dst.display()),
             metadata: Some(json!({
                 "source": src.display().to_string(),
                 "destination": dst.display().to_string(),

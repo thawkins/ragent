@@ -2,17 +2,17 @@
 //!
 //! Composes a [`LanguageRecipe`] with an [`AppType`] and a project slug into
 //! the concrete code-artifact plan (manifest + hello-world source) that the
-//! emitter milestone writes. Pure functions — no filesystem access.
+//! emitter milestone writes. Pure functions - no filesystem access.
 //!
 //! FR-006 semantics:
 //!
-//! - `library` — library layout: no binary entrypoint; an exported module
+//! - `library` - library layout: no binary entrypoint; an exported module
 //!   with a public function (`src/lib.rs`, `src/{name}/__init__.py`,
 //!   `{name}.go`, `src/index.ts`);
-//! - `cmdline` — console-entry layout;
-//! - `tui` — terminal-UI starter;
-//! - `gui` — GUI starter appropriate to the language;
-//! - `webapp` — web-application starter where the language has a web idiom
+//! - `cmdline` - console-entry layout;
+//! - `tui` - terminal-UI starter;
+//! - `gui` - GUI starter appropriate to the language;
+//! - `webapp` - web-application starter where the language has a web idiom
 //!   (HTTP server or static front-end), otherwise manifest-only.
 
 use super::flags::AppType;

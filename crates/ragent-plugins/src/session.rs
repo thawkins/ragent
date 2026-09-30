@@ -5,7 +5,7 @@
 //! [`PluginSession`] is the single entry point a session bootstrap calls once
 //! the tool registry and command surface exist:
 //!
-//! 1. [`PluginSession::start`] discovers plugins (manifest parse only — FR-023),
+//! 1. [`PluginSession::start`] discovers plugins (manifest parse only - FR-023),
 //!    loads every **enabled** plugin through [`PluginManager::load_all_enabled`]
 //!    (FR-008: descriptor validation, host-API version check, sandbox checkout,
 //!    host-API install, entry execution), then registers each loaded plugin's
@@ -47,10 +47,10 @@ use crate::tool_adapter::PluginToolAdapter;
 /// stays free of agent/TUI dependencies.
 pub trait PluginSurface {
     /// Registry names already taken (built-in tools plus any tool already
-    /// registered this session) — the tool collision surface (FR-024).
+    /// registered this session) - the tool collision surface (FR-024).
     fn existing_tool_names(&self) -> BTreeSet<String>;
     /// Triggers already taken (built-in `SLASH_COMMANDS` plus any command
-    /// already registered this session) — the command collision surface
+    /// already registered this session) - the command collision surface
     /// (FR-024).
     fn existing_command_names(&self) -> BTreeSet<String>;
     /// Register one plugin-contributed tool.
@@ -133,7 +133,7 @@ impl PluginSession {
         surface: &mut impl PluginSurface,
     ) -> Self {
         // Master switch (SPEC configuration schema): with `plugins.enabled`
-        // false the subsystem is inert — no discovery, no loading, nothing
+        // false the subsystem is inert - no discovery, no loading, nothing
         // registered (acceptance criterion 8).
         let enabled = config.is_enabled();
         let mut manager = PluginManager::new(dirs, config);

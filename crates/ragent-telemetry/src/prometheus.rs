@@ -6,14 +6,14 @@
 //!
 //! This module provides:
 //!
-//! - [`SharedManualReader`] — a newtype wrapper around `Arc<ManualReader>`
+//! - [`SharedManualReader`] - a newtype wrapper around `Arc<ManualReader>`
 //!   that implements the OTEL `MetricReader` trait, so the same reader
 //!   instance can be registered on a `SdkMeterProvider` (which takes
 //!   ownership) and held by the Prometheus HTTP server (which needs to call
 //!   `collect` on demand).
-//! - [`render_prometheus_text`] — a pure function that collects a metric
+//! - [`render_prometheus_text`] - a pure function that collects a metric
 //!   snapshot and renders it as Prometheus text-format exposition.
-//! - [`serve`] — an async HTTP server that binds `127.0.0.1:<port>` and
+//! - [`serve`] - an async HTTP server that binds `127.0.0.1:<port>` and
 //!   serves the rendered text at `GET /metrics`.
 //!
 //! # Architecture
@@ -21,7 +21,7 @@
 //! The Prometheus endpoint is **independent** of the OTLP export path. It
 //! uses a [`SharedManualReader`] registered alongside the `PeriodicReader`
 //! on the same `SdkMeterProvider`, so both paths see the same metrics.
-//! Recording is unaffected — the OTLP exporter batches on a timer, while
+//! Recording is unaffected - the OTLP exporter batches on a timer, while
 //! the Prometheus endpoint collects on-demand when a scraper hits
 //! `/metrics`.
 //!
@@ -51,7 +51,13 @@ use opentelemetry_sdk::metrics::data::{
 use opentelemetry_sdk::metrics::reader::MetricReader;
 use opentelemetry_sdk::metrics::{InstrumentKind, ManualReader, MetricResult, Temporality};
 
-// ── SharedManualReader ────────────────────────────────��───────────────────
+/// Size of the HTTP request read buffer used by the scrape server (LOW-2).
+///
+/// The scrape server only needs the request line to distinguish `/metrics`
+/// from any other path, so a 1 KiB buffer is sufficient for the request head.
+const HTTP_READ_BUF: usize = 1024;
+
+// ── SharedManualReader ───────────────────────────────────────────────────
 
 /// A newtype wrapper around `Arc<ManualReader>` that implements
 /// [`MetricReader`], so the same reader instance can be registered on a
@@ -121,7 +127,7 @@ impl MetricReader for SharedManualReader {
 ///
 /// # Arguments
 ///
-/// * `reader` — A [`ManualReader`] registered on the provider whose
+/// * `reader` - A [`ManualReader`] registered on the provider whose
 ///   metrics should be rendered.
 ///
 /// # Non-blocking guarantee (FR-031, FR-033)
@@ -304,7 +310,7 @@ fn append_le_label(base: &str, le: &str) -> String {
     if base.is_empty() {
         format!("{{{le}}}")
     } else {
-        // base is like "{k1=\"v1\",k2=\"v2\"}" — insert before the closing }.
+        // base is like "{k1=\"v1\",k2=\"v2\"}" - insert before the closing }.
         format!("{{{}, {le}}}", &base[1..base.len() - 1])
     }
 }
@@ -352,14 +358,14 @@ fn escape_label_value(s: &str) -> String {
 ///
 /// # Arguments
 ///
-/// * `reader` — A [`ManualReader`] (wrapped in `Arc`) registered on the
+/// * `reader` - A [`ManualReader`] (wrapped in `Arc`) registered on the
 ///   live [`SdkMeterProvider`]. The reader must outlive the server.
-/// * `port` — The TCP port to bind on `127.0.0.1`.
+/// * `port` - The TCP port to bind on `127.0.0.1`.
 ///
 /// # Errors
 ///
 /// Returns [`std::io::Error`] if the `TcpListener` cannot bind (e.g. port
-/// in use). The server task itself never panics — a failed scrape returns
+/// in use). The server task itself never panics - a failed scrape returns
 /// an empty body with a 503 status (FR-031, FR-033).
 pub async fn serve(
     reader: Arc<ManualReader>,
@@ -381,7 +387,7 @@ pub async fn serve(
                 }
             };
 
-            let mut buf = [0u8; 1024];
+            let mut buf = [0u8; HTTP_READ_BUF];
             let n = match sock.read(&mut buf).await {
                 Ok(n) => n,
                 Err(_) => continue,
@@ -409,8 +415,12 @@ pub async fn serve(
                 "HTTP/1.1 {status}\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             );
-            let _ = sock.write_all(response.as_bytes()).await;
-            let _ = sock.flush().await;
+            if let Err(e) = sock.write_all(response.as_bytes()).await {
+                tracing::debug!(error = %e, "prometheus scrape response write failed");
+            }
+            if let Err(e) = sock.flush().await {
+                tracing::debug!(error = %e, "prometheus scrape response flush failed");
+            }
         }
     });
 
@@ -420,147 +430,5 @@ pub async fn serve(
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::Resource;
-
-    #[test]
-    fn test_escape_label_value() {
-        assert_eq!(escape_label_value("simple"), "simple");
-        assert_eq!(escape_label_value("has\"quote"), "has\\\"quote");
-        assert_eq!(escape_label_value("back\\slash"), "back\\\\slash");
-        assert_eq!(escape_label_value("multi\nline"), "multi\\nline");
-    }
-
-    #[test]
-    fn test_render_after_shutdown_returns_empty() {
-        // A ManualReader with no registered provider → collect fails → empty.
-        let reader = ManualReader::builder().build();
-        let text = render_prometheus_text(&reader);
-        assert_eq!(text, "", "unregistered reader should produce empty output");
-    }
-
-    #[test]
-    fn test_format_resource_metrics_with_resource() {
-        let rm = ResourceMetrics {
-            resource: Resource::builder_empty()
-                .with_attribute(opentelemetry::KeyValue::new("service.name", "test-ragent"))
-                .build(),
-            scope_metrics: vec![],
-        };
-        let text = format_resource_metrics(&rm);
-        assert!(
-            text.contains("target_info"),
-            "should contain target_info, got: {text}"
-        );
-        assert!(
-            text.contains("service.name"),
-            "should contain service.name label"
-        );
-    }
-
-    #[test]
-    fn test_format_resource_metrics_empty() {
-        // Use an explicitly-empty Resource (not Resource::default(), which
-        // includes SDK defaults like telemetry.sdk.* and unknown_service).
-        let rm = ResourceMetrics {
-            resource: Resource::builder_empty().build(),
-            scope_metrics: vec![],
-        };
-        let text = format_resource_metrics(&rm);
-        // Empty resource → no target_info line.
-        assert!(!text.contains("target_info"));
-    }
-
-    #[test]
-    fn test_shared_manual_reader_delegates() {
-        use opentelemetry_sdk::metrics::SdkMeterProvider;
-
-        // SharedManualReader wraps an Arc<ManualReader> and delegates
-        // MetricReader trait methods. We verify it can be registered on a
-        // provider (which takes ownership) while we hold a handle, and
-        // that calling `collect` on the handle returns a non-empty
-        // snapshot (proving the delegation works end-to-end).
-        let shared = SharedManualReader::new();
-        let handle = shared.handle();
-
-        let provider = SdkMeterProvider::builder()
-            .with_resource(
-                Resource::builder_empty()
-                    .with_attribute(opentelemetry::KeyValue::new("service.name", "ragent"))
-                    .build(),
-            )
-            .with_reader(shared) // ownership moves to the provider
-            .build();
-
-        // Record a metric.
-        let meter = provider.meter("ragent");
-        let counter = meter.u64_counter("ragent.llm.requests").build();
-        counter.add(7, &[]);
-
-        // Collect via the handle (the Arc<ManualReader> we kept).
-        let mut rm = ResourceMetrics {
-            resource: Resource::builder_empty().build(),
-            scope_metrics: vec![],
-        };
-        assert!(
-            handle.collect(&mut rm).is_ok(),
-            "collect via the handle should succeed (delegation works)"
-        );
-        // The resource must be present (proving the reader is wired).
-        assert!(
-            rm.resource
-                .get(&opentelemetry::Key::from("service.name"))
-                .is_some(),
-            "resource attributes must be collected via the handle"
-        );
-        // The counter must appear in the scope_metrics.
-        let has_counter = rm
-            .scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.llm.requests");
-        assert!(
-            has_counter,
-            "the recorded counter must appear in the collected metrics"
-        );
-
-        // The renderer should also produce the metric name.
-        let text = render_prometheus_text(&handle);
-        assert!(
-            text.contains("ragent.llm.requests"),
-            "renderer should contain metric name, got: {text}"
-        );
-    }
-
-    #[test]
-    fn test_build_labels() {
-        let attrs = vec![
-            opentelemetry::KeyValue::new("model", "claude"),
-            opentelemetry::KeyValue::new("provider", "anthropic"),
-        ];
-        let labels = build_labels(&attrs);
-        // Labels are sorted by key: model, provider.
-        assert_eq!(labels, "{model=\"claude\",provider=\"anthropic\"}");
-    }
-
-    #[test]
-    fn test_build_labels_empty() {
-        let attrs: Vec<opentelemetry::KeyValue> = vec![];
-        let labels = build_labels(&attrs);
-        assert_eq!(labels, "");
-    }
-
-    #[test]
-    fn test_append_le_label_empty() {
-        let result = append_le_label("", "le=\"100\"");
-        assert_eq!(result, "{le=\"100\"}");
-    }
-
-    #[test]
-    fn test_append_le_label_with_base() {
-        let result = append_le_label("{model=\"claude\"}", "le=\"100\"");
-        assert_eq!(result, "{model=\"claude\", le=\"100\"}");
-    }
-}
+#[path = "../tests/inline/prometheus_tests.rs"]
+mod tests;

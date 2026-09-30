@@ -18,6 +18,7 @@ use super::thinking::{
 };
 use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::ThinkingConfig;
@@ -180,9 +181,9 @@ impl OllamaShowResponse {
     /// Checks if the model supports thinking/reasoning.
     ///
     /// Detects thinking support from two sources:
-    /// 1. The `capabilities` array — Ollama may include a "thinking" capability
+    /// 1. The `capabilities` array - Ollama may include a "thinking" capability
     ///    for models whose template contains `{{--think}}` tags.
-    /// 2. The `template` field — models with `<!-- think -->` markers in their
+    /// 2. The `template` field - models with `<!-- think -->` markers in their
     ///    Modelfile template support the `think` parameter.
     fn has_thinking(&self) -> bool {
         // Check the capabilities array first (structured detection).
@@ -312,6 +313,8 @@ impl Provider for OllamaCloudProvider {
         let key = if api_key.is_empty() {
             bail!("Ollama Cloud requires an API key.");
         } else {
+            // ANTIPAT 3.6: register the key with the shared redaction registry.
+            ragent_types::sanitize::register_secret(api_key);
             api_key.to_string()
         };
 
@@ -338,7 +341,7 @@ impl OllamaCloudClient {
     fn build_request_body(&self, request: &ChatRequest, tools: &[ToolDefinition]) -> Value {
         let mut messages = Vec::new();
 
-        // Build a map of tool_use_id → tool_name so we can include both
+        // Build a map of tool_use_id -> tool_name so we can include both
         // `tool_call_id` (OpenAI format) and `tool_name` (native Ollama format)
         // in tool result messages, satisfying whichever format the model expects.
         let mut tool_id_to_name: HashMap<String, String> = HashMap::new();
@@ -547,7 +550,9 @@ impl LlmClient for OllamaCloudClient {
             tool_count = request.tools.len(),
             "Ollama Cloud request"
         );
-        let timeout_secs = request.stream_timeout_secs.unwrap_or(600);
+        let timeout_secs = request
+            .stream_timeout_secs
+            .unwrap_or(super::http_client::DEFAULT_STREAM_TIMEOUT_SECS);
         // PERF-062: serialise the request body exactly once. The debug preview
         // is a borrowed slice of the same bytes and is only built when debug
         // logging is actually enabled, so a disabled log costs nothing.
@@ -570,24 +575,26 @@ impl LlmClient for OllamaCloudClient {
         )
         .await
         .inspect_err(|e| {
-            tracing::warn!(url = %url, error = %e, "Ollama Cloud chat request timed out");
+            tracing::warn!(provider = "ollama_cloud", url = %url, error = %e, "chat request timed out");
         })
         .map_err(|_| {
             anyhow::anyhow!("Ollama Cloud: initial response timed out after {timeout_secs}s")
         })?
         .inspect_err(|e| {
-            tracing::warn!(url = %url, error = %e, "Ollama Cloud chat request failed");
+            tracing::warn!(provider = "ollama_cloud", url = %url, error = %e, "chat request failed");
         })
         .with_context(|| format!("Failed to connect to Ollama Cloud at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
-            let error_body = response.text().await.unwrap_or_default();
+            // ANTIPAT 3.1/3.2: capped error-body read.
+            let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
             tracing::warn!(
+                provider = "ollama_cloud",
                 url = %url,
                 model = %request.model,
                 status = %status,
                 error = %error_body,
-                "Ollama Cloud API error"
+                "API error"
             );
             bail!("Ollama Cloud API error ({status}): {error_body}");
         }
@@ -625,7 +632,7 @@ impl LlmClient for OllamaCloudClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "Ollama Cloud: stream stalled — no data received for {}s",
+                                "Ollama Cloud: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -661,11 +668,16 @@ impl LlmClient for OllamaCloudClient {
 
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-
-                    let data = line.strip_prefix("data: ").unwrap_or(line).trim();
+                    // ANTIPAT 5.2: standard `match line.strip_prefix("data: ")`
+                    // form. NOTE: the native Ollama `/api/chat` endpoint streams
+                    // newline-delimited JSON (NDJSON), not SSE, so each line is
+                    // itself a complete data frame; an SSE-style `data: ` prefix
+                    // from an intermediate proxy is still tolerated. A
+                    // prefix-less line IS the frame, never a line to skip.
+                    let data = match line.strip_prefix("data: ") {
+                        Some(d) => d.trim(),
+                        None => line,
+                    };
                     if data == "[DONE]" {
                         stream_done = true;
                         break;
@@ -674,7 +686,7 @@ impl LlmClient for OllamaCloudClient {
                     let parsed: Value = match serde_json::from_str(data) {
                         Ok(v) => v,
                         Err(e) => {
-                            tracing::warn!(model=%model_name, line=%data, error=%e, "Ollama Cloud: failed to parse stream line");
+                            tracing::warn!(provider = "ollama_cloud", model=%model_name, line=%data, error=%e, "failed to parse stream line");
                             continue;
                         }
                     };                      // Log key stream lines for diagnostics (first 3 + any with tool_calls or done)
@@ -711,7 +723,7 @@ impl LlmClient for OllamaCloudClient {
                             .get("tool_calls")
                             .and_then(|v| v.as_array())
                             .is_some_and(|a| !a.is_empty());
-                        // F6: stream-scoped suppression — once real tool calls
+                        // F6: stream-scoped suppression - once real tool calls
                         // have been seen, later content is duplicate narration
                         // (pre-call narration cannot be retracted).
                         if has_tool_calls {
@@ -950,90 +962,5 @@ pub async fn list_ollama_cloud_models(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_provider_defaults() {
-        let provider = OllamaCloudProvider::new();
-        assert_eq!(provider.id(), "ollama_cloud");
-        assert_eq!(provider.name(), "Ollama Cloud");
-        assert!(provider.default_models().is_empty());
-    }
-
-    #[test]
-    fn test_with_custom_url() {
-        let provider = OllamaCloudProvider::with_url("https://example.com/");
-        assert_eq!(provider.base_url, "https://example.com");
-    }
-
-    #[test]
-    fn test_context_length_parses_top_level_string_fields() {
-        let response: OllamaShowResponse = serde_json::from_value(json!({
-            "context_length": "1048576",
-            "capabilities": []
-        }))
-        .expect("show response should parse");
-
-        assert_eq!(response.context_length(), Some(1_048_576));
-    }
-
-    #[test]
-    fn test_context_length_parses_alternate_model_info_keys() {
-        let response: OllamaShowResponse = serde_json::from_value(json!({
-            "model_info": {
-                "llama.context_window": 1_048_576
-            },
-            "capabilities": []
-        }))
-        .expect("show response should parse");
-
-        assert_eq!(response.context_length(), Some(1_048_576));
-    }
-
-    #[test]
-    fn test_has_thinking_from_capabilities() {
-        let response: OllamaShowResponse = serde_json::from_value(json!({
-            "capabilities": ["vision", "thinking"]
-        }))
-        .expect("show response should parse");
-
-        assert!(response.has_thinking());
-    }
-
-    #[test]
-    fn test_has_thinking_from_template_markers() {
-        // Template with <!-- think --> marker
-        let response: OllamaShowResponse = serde_json::from_value(json!({
-            "template": "Some text <!-- think --> thinking block {{ .Content }}",
-            "capabilities": []
-        }))
-        .expect("show response should parse");
-
-        assert!(response.has_thinking());
-    }
-
-    #[test]
-    fn test_has_thinking_from_template_go_template() {
-        // Template with Go template {{--think}} marker
-        let response: OllamaShowResponse = serde_json::from_value(json!({
-            "template": "{{--think}}\n{{ .Content }}",
-            "capabilities": []
-        }))
-        .expect("show response should parse");
-
-        assert!(response.has_thinking());
-    }
-
-    #[test]
-    fn test_has_thinking_false_when_no_indicators() {
-        let response: OllamaShowResponse = serde_json::from_value(json!({
-            "template": "{{ .Content }}",
-            "capabilities": ["vision"]
-        }))
-        .expect("show response should parse");
-
-        assert!(!response.has_thinking());
-    }
-}
+#[path = "../tests/inline/ollama_cloud_tests.rs"]
+mod tests;

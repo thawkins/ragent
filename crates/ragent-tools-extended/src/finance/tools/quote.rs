@@ -1,4 +1,4 @@
-//! `stock_quote` tool — latest price and session data for a ticker.
+//! `stock_quote` tool - latest price and session data for a ticker.
 
 use crate::finance::{QuoteCache, default_provider, yahoo_fallback_provider};
 use crate::{Tool, ToolContext, ToolOutput};

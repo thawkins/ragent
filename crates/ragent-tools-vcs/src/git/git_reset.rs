@@ -1,4 +1,4 @@
-//! `git_reset` — Unstage files or reset to a commit.
+//! `git_reset` - Unstage files or reset to a commit.
 
 use anyhow::Result;
 use serde_json::{Value, json};

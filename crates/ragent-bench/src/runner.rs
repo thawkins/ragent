@@ -22,6 +22,23 @@ use crate::workbook::{
 
 const BENCH_RUN_STATE_VERSION: u32 = 1;
 
+/// Number of leading hex characters of the config hash kept in the debug
+/// sidecar file name.
+///
+/// The config hash is a 64-character SHA-256 hex digest; the debug sidecar path
+/// embeds only this prefix to keep the file name short while remaining unique
+/// per config. This is longer than [`RUN_ID_HASH_PREFIX_LEN`] because the
+/// sidecar is a stable on-disk path that is read back on resume, so a collision
+/// would silently overwrite another config's debug state.
+const CONFIG_HASH_PREFIX_LEN: usize = 12;
+
+/// Number of leading hex characters of the run-id digest kept in the run id.
+///
+/// The run id is a human-facing, timestamped identifier (`bench-<ts>-<slug>-<slug>-<prefix>`);
+/// a short prefix is enough to disambiguate runs that share a timestamp and
+/// slugs, and the full digest is still available elsewhere if needed.
+const RUN_ID_HASH_PREFIX_LEN: usize = 8;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BenchRunStateSummary {
     metric_name: String,
@@ -303,7 +320,8 @@ pub fn run_target_with_progress(
             selection,
         );
         let resume_state_path = workbook_resume_state_path(&workbook_path);
-        let debug_state_path = workbook_debug_sidecar_path(&workbook_path, &config_hash[..12]);
+        let debug_state_path =
+            workbook_debug_sidecar_path(&workbook_path, &config_hash[..CONFIG_HASH_PREFIX_LEN]);
         if options.resume
             && let Some(resumed_summaries) = try_resume_existing_run(
                 project_root,
@@ -526,13 +544,13 @@ fn build_run_id(
     hasher.update(language.as_bytes());
     hasher.update(selection.provider_id.as_bytes());
     hasher.update(selection.model_id.as_bytes());
-    let digest = format!("{:x}", hasher.finalize());
+    let digest = hex::encode(hasher.finalize());
     format!(
         "bench-{}-{}-{}-{}",
         timestamp,
         selection.provider_slug,
         selection.model_slug,
-        &digest[..8]
+        &digest[..RUN_ID_HASH_PREFIX_LEN]
     )
 }
 
@@ -613,7 +631,7 @@ fn build_run_notes(
 fn hash_string(value: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn build_run_config_hash(
@@ -715,7 +733,7 @@ fn build_run_config_hash(
         hasher.update(segment.as_bytes());
         hasher.update(b"\n");
     }
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn try_resume_existing_run(

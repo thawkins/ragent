@@ -259,7 +259,7 @@ server.listen(port, () => {\n\
 
 // --------------------------------------------------------------------- C ---
 
-const C_MANIFEST: &str = "# {name} — C project. Build with cc or your build\n\
+const C_MANIFEST: &str = "# {name} - C project. Build with cc or your build\n\
 # system of choice (cmake, make).\n";
 
 const C_MAIN: &str = "#include <stdio.h>\n\n\
@@ -278,7 +278,7 @@ printf(\"Hello, world! (gui starter)\\n\");\n    return 0;\n}\n";
 
 // ------------------------------------------------------------------- C++ ---
 
-const CPP_MANIFEST: &str = "# {name} — C++ project. Build with c++ or your\n\
+const CPP_MANIFEST: &str = "# {name} - C++ project. Build with c++ or your\n\
 # build system of choice (cmake, make).\n";
 
 const CPP_MAIN: &str = "#include <iostream>\n\n\
@@ -297,7 +297,7 @@ std::cout << \"Hello, world! (gui starter)\" << std::endl;\n    return 0;\n}\n";
 
 // ------------------------------------------------------------------- Java ---
 
-const JAVA_MANIFEST: &str = "# {name} — Java project. Build with javac or your\n\
+const JAVA_MANIFEST: &str = "# {name} - Java project. Build with javac or your\n\
 # build tool of choice (maven, gradle).\n";
 
 const JAVA_MAIN: &str = "public class Main {\n    public static void main(String[] args) {\n    \
@@ -316,7 +316,7 @@ const JAVA_GUI_MAIN: &str = "public class Main {\n    public static void main(St
 
 // ----------------------------------------------------------------- Kotlin ---
 
-const KOTLIN_MANIFEST: &str = "# {name} — Kotlin project. Build with kotlinc or\n\
+const KOTLIN_MANIFEST: &str = "# {name} - Kotlin project. Build with kotlinc or\n\
 # your build tool of choice (gradle).\n";
 
 const KOTLIN_MAIN: &str = "fun main() {\n    println(\"Hello, world!\")\n}\n";
@@ -334,7 +334,7 @@ println(\"Hello, world! (gui starter)\")\n}\n";
 
 // ------------------------------------------------------------------- Ruby ---
 
-const RUBY_MANIFEST: &str = "# {name} — Ruby project. Dependencies go in a\n\
+const RUBY_MANIFEST: &str = "# {name} - Ruby project. Dependencies go in a\n\
 # Gemfile; run with ruby.\n";
 
 const RUBY_MAIN: &str = "def main\n  puts 'Hello, world!'\nend\n\nmain\n";
@@ -350,7 +350,7 @@ puts 'Hello, world! (gui starter)'\nend\n\nmain\n";
 
 // ------------------------------------------------------------------ Swift ---
 
-const SWIFT_MANIFEST: &str = "// {name} — Swift project.\n";
+const SWIFT_MANIFEST: &str = "// {name} - Swift project.\n";
 
 const SWIFT_MAIN: &str = "func main() {\n    print(\"Hello, world!\")\n}\n\nmain()\n";
 
@@ -367,7 +367,7 @@ print(\"Hello, world! (gui starter)\")\n}\n\nmain()\n";
 
 // ------------------------------------------------------------------- C# ---
 
-const CSHARP_MANIFEST: &str = "# {name} — C# project. Build with dotnet or your\n\
+const CSHARP_MANIFEST: &str = "# {name} - C# project. Build with dotnet or your\n\
 # build tool of choice.\n";
 
 const CSHARP_MAIN: &str = "class Program {\n    static void Main() {\n    \
@@ -386,7 +386,7 @@ const CSHARP_GUI_MAIN: &str = "class Program {\n    static void Main() {\n    \
 
 // -------------------------------------------------------------------- Lua ---
 
-const LUA_MANIFEST: &str = "-- {name} — Lua project. Dependencies go in a\n\
+const LUA_MANIFEST: &str = "-- {name} - Lua project. Dependencies go in a\n\
 -- rockspec; run with lua.\n";
 
 const LUA_MAIN: &str = "local function main()\n  print(\"Hello, world!\")\nend\n\n\
@@ -405,7 +405,7 @@ print(\"Hello, world! (gui starter)\")\nend\n\nmain()\n";
 
 // --------------------------------------------------------------------- Zig ---
 
-const ZIG_MANIFEST: &str = "// {name} — Zig project. Build with `zig build`.\n";
+const ZIG_MANIFEST: &str = "// {name} - Zig project. Build with `zig build`.\n";
 
 const ZIG_MAIN: &str = "const std = @import(\"std\");\n\n\
 pub fn main() !void {\n    std.debug.print(\"Hello, world!\\n\", .{});\n}\n";
@@ -425,7 +425,7 @@ std.debug.print(\"Hello, world! (gui starter)\\n\", .{});\n}\n";
 
 // --------------------------------------------------------------------- Nim ---
 
-const NIM_MANIFEST: &str = "# {name} — Nim project. Build with `nim c`.\n";
+const NIM_MANIFEST: &str = "# {name} - Nim project. Build with `nim c`.\n";
 
 const NIM_MAIN: &str = "proc main() =\n  echo \"Hello, world!\"\n\nmain()\n";
 
@@ -442,7 +442,7 @@ echo \"Hello, world! (gui starter)\"\n\nmain()\n";
 
 // ----------------------------------------------------------------- Elixir ---
 
-const ELIXIR_MANIFEST: &str = "# {name} — Elixir project. Scaffolding only:\n\
+const ELIXIR_MANIFEST: &str = "# {name} - Elixir project. Scaffolding only:\n\
 # run `mix new` for a full mix project layout.\n";
 
 const ELIXIR_MAIN: &str = "defmodule Main do\n  def run do\n    \
@@ -461,7 +461,7 @@ IO.puts(\"Hello, world! (gui starter)\")\n  end\nend\n\nMain.run()\n";
 
 // ----------------------------------------------------------------- Erlang ---
 
-const ERLANG_MANIFEST: &str = "%% {name} — Erlang project. Build with rebar3\n\
+const ERLANG_MANIFEST: &str = "%% {name} - Erlang project. Build with rebar3\n\
 %% or escript.\n";
 
 const ERLANG_MAIN: &str = "main() ->\n    io:format(\"Hello, world!~n\").\n";
@@ -477,7 +477,7 @@ io:format(\"Hello, world! (gui starter)~n\").\n";
 
 // ---------------------------------------------------------------- Haskell ---
 
-const HASKELL_MANIFEST: &str = "-- {name} — Haskell project. Build with cabal\n\
+const HASKELL_MANIFEST: &str = "-- {name} - Haskell project. Build with cabal\n\
 -- or ghc.\n";
 
 const HASKELL_MAIN: &str = "main :: IO ()\nmain = putStrLn \"Hello, world!\"\n";
@@ -496,7 +496,7 @@ putStrLn \"Hello, world! (gui starter)\"\n";
 
 // ------------------------------------------------------------------- OCaml ---
 
-const OCAML_MANIFEST: &str = "(* {name} — OCaml project. Build with dune or\n\
+const OCAML_MANIFEST: &str = "(* {name} - OCaml project. Build with dune or\n\
  ocamlfind. *)\n";
 
 const OCAML_MAIN: &str = "let () = print_endline \"Hello, world!\"\n";
@@ -512,7 +512,7 @@ let () = print_endline \"Hello, world! (gui starter)\"\n";
 
 // ---------------------------------------------------------------------- R ---
 
-const R_MANIFEST: &str = "# {name} — R project. Dependencies go in a\n\
+const R_MANIFEST: &str = "# {name} - R project. Dependencies go in a\n\
 # DESCRIPTION file; run with Rscript.\n";
 
 const R_MAIN: &str = "main <- function() {\n  cat(\"Hello, world!\\n\")\n}\n\nmain()\n";
@@ -530,7 +530,7 @@ cat(\"Hello, world! (gui starter)\\n\")\n}\n\nmain()\n";
 
 // ------------------------------------------------------------------- Dart ---
 
-const DART_MANIFEST: &str = "# {name} — Dart project. For a full package\n\
+const DART_MANIFEST: &str = "# {name} - Dart project. For a full package\n\
 # layout, run `dart create`.\n";
 
 const DART_MAIN: &str = "void main() {\n  print('Hello, world!');\n}\n";
@@ -568,7 +568,7 @@ echo \"Hello, world! (gui starter)\\n\";\n}\n\nmain();\n";
 
 // ------------------------------------------------------------------- Perl ---
 
-const PERL_MANIFEST: &str = "# {name} — Perl project. Dependencies go in a\n\
+const PERL_MANIFEST: &str = "# {name} - Perl project. Dependencies go in a\n\
 # cpanfile; run with perl.\n";
 
 const PERL_MAIN: &str = "use strict;\nuse warnings;\n\n\
@@ -1033,7 +1033,7 @@ variable \"greeting\" {\n\
 
 /// The language registry (FR-017): one recipe per supported language.
 ///
-/// Single source of truth — `/new help` value lists and the renderer both
+/// Single source of truth - `/new help` value lists and the renderer both
 /// derive from this table, so adding a language extends the whole surface.
 pub static REGISTRY: &[LanguageRecipe] = &[
     LanguageRecipe {

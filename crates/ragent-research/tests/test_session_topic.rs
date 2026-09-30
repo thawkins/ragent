@@ -53,7 +53,7 @@ fn derive_topic_prefers_cleaned_title_over_body() {
     let title = "InfoQ HomepageArticlesLarge Concept Models: a Paradigm Shift in AI Reasoning";
     assert_eq!(
         derive_topic_from_url_body(body, title, "https://example.com/article"),
-        Some("Large Concept Models: a Paradigm Shift in AI Reasoning — The actual article begins here with useful content".into())
+        Some("Large Concept Models: a Paradigm Shift in AI Reasoning - The actual article begins here with useful content".into())
     );
 }
 
@@ -66,7 +66,7 @@ fn derive_topic_appends_description_and_skips_title_duplicate() {
         topic
             .as_deref()
             .unwrap_or("")
-            .starts_with("Large Concept Models: a Paradigm Shift in AI Reasoning — They move"),
+            .starts_with("Large Concept Models: a Paradigm Shift in AI Reasoning - They move"),
         "expected title + body description, got {topic:?}"
     );
 }
@@ -95,7 +95,7 @@ fn derive_topic_description_truncates_long_sentences() {
         "topic too long: {}",
         topic.len()
     );
-    assert!(topic.starts_with("Some Article Title —"), "topic: {topic}");
+    assert!(topic.starts_with("Some Article Title -"), "topic: {topic}");
 }
 
 #[test]

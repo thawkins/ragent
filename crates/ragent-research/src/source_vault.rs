@@ -118,7 +118,7 @@ impl NewVaultSource {
 ///
 /// The store methods are synchronous and take a blocking `std::sync::Mutex`
 /// around the SQLite connection plus blocking filesystem I/O. Async callers
-/// must not call them directly on a tokio worker — use the `*_async` wrappers,
+/// must not call them directly on a tokio worker - use the `*_async` wrappers,
 /// which move the work to the blocking pool (FUNC-017).
 #[derive(Clone)]
 pub struct SourceVault {
@@ -429,7 +429,7 @@ impl SourceVault {
         // T-013 migration: older vaults created before `summary_text` existed
         // need the column added. SQLite does not support `ADD COLUMN IF NOT
         // EXISTS`, so we ignore the error when the column already exists.
-        let _ = conn.execute("ALTER TABLE vault_sources ADD COLUMN summary_text TEXT", []);
+        let _ = conn.execute("ALTER TABLE vault_sources ADD COLUMN summary_text TEXT", []); // INTENTIONAL: column may already exist (migration)
         Ok(())
     }
 
@@ -505,7 +505,7 @@ impl SourceVault {
     }
 
     /// Async [`Self::read_summary`]: off-loads the blocking vault query
-    /// (FUNC-052 — the sync method holds a `Mutex<Connection>` and must not be
+    /// (FUNC-052 - the sync method holds a `Mutex<Connection>` and must not be
     /// called directly from an async task).
     ///
     /// # Errors

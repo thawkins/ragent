@@ -118,7 +118,7 @@ pub struct SkillInfo {
     /// Subagent type when `context` is `Fork` (e.g. `"explore"`, `"general-purpose"`).
     pub agent: Option<String>,
     /// Hooks scoped to this skill's lifecycle. Stored as raw JSON until the
-    /// hooks system (SPEC §3.17) is implemented.
+    /// hooks system (SPEC S.3.17) is implemented.
     pub hooks: Option<serde_json::Value>,
     /// License information (Anthropic Agent Skills spec).
     pub license: Option<String>,
@@ -131,7 +131,7 @@ pub struct SkillInfo {
     /// Defaults to the skill name when not specified in frontmatter.
     pub trigger: Option<String>,
     /// Whether this skill allows `!`command`` dynamic context injection.
-    /// Defaults to `false` — skills must opt in explicitly via
+    /// Defaults to `false` - skills must opt in explicitly via
     /// `allow_dynamic_context: true` in the YAML frontmatter.
     #[serde(default)]
     pub allow_dynamic_context: bool,
@@ -384,7 +384,7 @@ impl SkillRegistry {
     pub fn load(working_dir: &std::path::Path, extra_dirs: &[String]) -> Self {
         let mut registry = Self::new();
 
-        // 1. Register bundled skills (lowest priority — overridable)
+        // 1. Register bundled skills (lowest priority - overridable)
         for skill in bundled::bundled_skills() {
             registry.register(skill);
         }

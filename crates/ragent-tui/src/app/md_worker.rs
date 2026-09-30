@@ -3,7 +3,7 @@
 //! The TUI's `render_markdown_pipeline` converts markdown to HTML via
 //! `pulldown-cmark` and then HTML to plain text via `html2text`.  The
 //! `html2text` step may panic on malformed HTML (word-wrapper subtraction
-//! overflow), so it must run on a dedicated thread — never the UI thread.
+//! overflow), so it must run on a dedicated thread - never the UI thread.
 //!
 //! Previously, every cache miss spawned a **new** OS thread (`std::thread::
 //! Builder::spawn` + `join`), which is expensive during streaming: each
@@ -21,7 +21,7 @@
 //! html2text's table layout derives per-column widths from *estimate* sizes
 //! that count the backtick decoration produced by `do_decorate()` CSS rules,
 //! but the rendered text of such a cell can end up one (or, when the cell
-//! wraps, two) characters shorter — the renderer re-emits a backtick via
+//! wraps, two) characters shorter - the renderer re-emits a backtick via
 //! `add_inline_text` only when the code span actually fits in the column.
 //! The estimate then exceeds the rendered width, the column shrinks, and
 //! text from later rows visually "moves" into an earlier column.
@@ -209,9 +209,9 @@ pub fn preprocess_markdown_tables(markdown: &str) -> String {
     out
 }
 
-/// Sentinel tokens used to mark a `[red]…[/red]` span. `preprocess_red_markers`
-/// rewrites the markers into these before the markdown→HTML→text pass, and
-/// `restore_red_markers` converts the surviving tokens back into `[red]…[/red]`
+/// Sentinel tokens used to mark a `[red]...[/red]` span. `preprocess_red_markers`
+/// rewrites the markers into these before the markdown->HTML->text pass, and
+/// `restore_red_markers` converts the surviving tokens back into `[red]...[/red]`
 /// markers, so `/tools` can render disabled tool rows in red.
 ///
 /// The tokens are deliberately made of printable characters: `html2text`
@@ -221,7 +221,7 @@ pub fn preprocess_markdown_tables(markdown: &str) -> String {
 const RED_OPEN: &str = "@@ragent-red@@";
 const RED_CLOSE: &str = "@@/ragent-red@@";
 
-/// Rewrite `[red]…[/red]` span markers into [`RED_OPEN`] / [`RED_CLOSE`]
+/// Rewrite `[red]...[/red]` span markers into [`RED_OPEN`] / [`RED_CLOSE`]
 /// sentinels before the markdown pipeline runs.
 ///
 /// The tokens are plain printable text at this stage, so they survive
@@ -251,7 +251,7 @@ pub(crate) fn preprocess_red_markers(md: &str) -> String {
     out
 }
 
-/// Convert [`RED_OPEN`] / [`RED_CLOSE`] sentinels back into `[red]…[/red]`
+/// Convert [`RED_OPEN`] / [`RED_CLOSE`] sentinels back into `[red]...[/red]`
 /// markers after the markdown pipeline has rendered the text.
 pub(crate) fn restore_red_markers(text: &str) -> String {
     if !text.contains(RED_OPEN) {
@@ -287,7 +287,7 @@ impl MdWorker {
                 // Process requests until the channel is closed.
                 while let Ok(req) = rx.recv() {
                     let md = preprocess_markdown_tables(&req.input_markdown);
-                    // Second pass: `[red]…[/red]` spans must survive as printable
+                    // Second pass: `[red]...[/red]` spans must survive as printable
                     // sentinel tokens until after html2text, which would strip an
                     // ANSI escape to plain text; they are restored to markers on
                     // the output.
@@ -304,7 +304,7 @@ impl MdWorker {
                         .map_err(|e| format!("{e:?}"));
                     // If the response channel is closed (caller dropped), just
                     // continue to the next request.
-                    let _ = req.response_tx.send(result);
+                    let _ = req.response_tx.send(result); // INTENTIONAL: channel send on a closed receiver is benign
                 }
             })
             .expect("failed to spawn md-html2text worker thread");

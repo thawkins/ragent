@@ -46,7 +46,7 @@ libc = { workspace = true }
 
 # Utilities
 chrono = { workspace = true }
-dirs = "6"
+dirs = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.14"

@@ -176,7 +176,7 @@ fn empty_findings_and_no_concepts_report_is_byte_stable() {
     assert!(
         after
             .body
-            .contains("_(no findings yet — the gathering pass will populate this section)_"),
+            .contains("_(no findings yet - the gathering pass will populate this section)_"),
         "the empty-findings placeholder must be preserved"
     );
     assert!(

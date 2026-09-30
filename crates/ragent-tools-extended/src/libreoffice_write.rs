@@ -162,8 +162,8 @@ enum OdtStyle {
 /// Resolve the content `Value` into a flat list of `OdtPara`.
 ///
 /// Accepts:
-/// - Plain string → one paragraph per line
-/// - Bare array / object with `content` or `paragraphs` key → structured elements
+/// - Plain string -> one paragraph per line
+/// - Bare array / object with `content` or `paragraphs` key -> structured elements
 fn resolve_odt_paras(content: &Value) -> Vec<OdtPara> {
     // Plain text fast path
     if let Some(text) = content.as_str() {
@@ -473,7 +473,7 @@ fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
                                 .as_str()
                                 .unwrap_or_else(|| li["text"].as_str().unwrap_or(""));
                             if !text.is_empty() {
-                                lines.push(format!("• {text}"));
+                                lines.push(format!("* {text}"));
                             }
                         }
                     }
@@ -522,7 +522,7 @@ fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
         return arr.iter().map(&slide_from_obj).collect();
     }
 
-    // Single-key wrapper — look inside
+    // Single-key wrapper - look inside
     if let Some(obj) = content.as_object() {
         if obj.len() == 1 {
             let inner = obj.values().next().unwrap();

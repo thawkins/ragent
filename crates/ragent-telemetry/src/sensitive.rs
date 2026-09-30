@@ -23,11 +23,11 @@
 //!   `gho_`, `github_pat_`, `xoxb-`, `AKIA`, `AIza`).
 //! - It contains a `:` separator between two long alphanumeric runs (the
 //!   classic `username:password` or `key:secret` shape).
-//! - It contains a newline, tab, or carriage return — legitimate model,
+//! - It contains a newline, tab, or carriage return - legitimate model,
 //!   provider, tool, and session identifiers never contain whitespace
 //!   beyond simple spaces; multi-line values indicate file content or a
 //!   pasted prompt.
-//! - It exceeds 256 characters — legitimate low-cardinality identifiers
+//! - It exceeds 256 characters - legitimate low-cardinality identifiers
 //!   are short; a very long value suggests a pasted blob.
 //! - It contains an `=` followed by a long base64-like run (a common
 //!   shape for inline tokens / credentials).
@@ -52,6 +52,18 @@ pub const REDACTED: &str = "redacted";
 /// (file content, prompt text, a long token).
 pub const MAX_ATTR_VALUE_LEN: usize = 256;
 
+/// Minimum length of each side of a `key:secret` shaped value before the guard
+/// treats it as a credential (LOW-2).
+///
+/// Shorter fragments are common in legitimate identifiers (e.g. a `name:tag`
+/// model id) and are not flagged; a credential-shaped value has dense parts of
+/// at least this length on both sides of the colon.
+pub const MIN_CRED_PART_LEN: usize = 4;
+
+/// Minimum length of a base64-like run following `=` before the guard treats it
+/// as an inline token (LOW-2).
+pub const MIN_B64_RUN_LEN: usize = 20;
+
 /// Returns `true` when `value` matches a known sensitive pattern (FR-034).
 ///
 /// This is the core predicate used by [`sanitize_attr_value`]. It is kept
@@ -59,7 +71,7 @@ pub const MAX_ATTR_VALUE_LEN: usize = 256;
 ///
 /// # Arguments
 ///
-/// * `value` — The candidate attribute value to inspect.
+/// * `value` - The candidate attribute value to inspect.
 ///
 /// # Examples
 ///
@@ -133,8 +145,8 @@ pub fn looks_sensitive(value: &str) -> bool {
             let right = rest;
             // Both parts must be at least 4 chars and contain no spaces or
             // dots (dots are common in model versions like "1.7b").
-            if left.len() >= 4
-                && right.len() >= 4
+            if left.len() >= MIN_CRED_PART_LEN
+                && right.len() >= MIN_CRED_PART_LEN
                 && !left.contains(' ')
                 && !right.contains(' ')
                 && !left.contains('.')
@@ -156,7 +168,7 @@ pub fn looks_sensitive(value: &str) -> bool {
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '_' | '-'))
             .count();
-        if run_len >= 20 {
+        if run_len >= MIN_B64_RUN_LEN {
             return true;
         }
     }
@@ -171,11 +183,11 @@ pub fn looks_sensitive(value: &str) -> bool {
 /// [`InstrumentRegistry`](crate::instruments::InstrumentRegistry) and by
 /// the resource-attribute builder in
 /// [`TelemetrySubsystem`](crate::subsystem::TelemetrySubsystem). It never
-/// panics and never blocks — it is a pure string inspection.
+/// panics and never blocks - it is a pure string inspection.
 ///
 /// # Arguments
 ///
-/// * `value` — The candidate attribute value.
+/// * `value` - The candidate attribute value.
 ///
 /// # Returns
 ///
@@ -204,5 +216,3 @@ pub fn sanitize_attr_value(value: &str) -> String {
         value.to_string()
     }
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────

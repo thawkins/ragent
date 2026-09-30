@@ -12,12 +12,21 @@ use std::pin::Pin;
 use super::thinking::{openai_thinking_levels_for_model, reasoning_effort_from_request};
 use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::event::FinishReason;
 
 /// Default API base URL for OpenAI-compatible endpoints.
 pub const OPENAI_API_BASE: &str = "https://api.openai.com";
+
+/// Fallback context window (tokens) reported for a discovered model whose
+/// `/v1/models` entry does not declare one (ANTIPAT M6.10).
+const DEFAULT_DISCOVERED_CONTEXT_WINDOW: usize = 128_000;
+
+/// Fallback max-output (tokens) reported for a discovered model whose
+/// `/v1/models` entry does not declare one (ANTIPAT M6.10).
+const DEFAULT_DISCOVERED_MAX_OUTPUT: usize = 16_384;
 
 /// Returns the default `OpenAI` model catalog with `provider_id` attached.
 ///
@@ -128,6 +137,9 @@ impl Provider for OpenAiProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
+        // ANTIPAT 3.6: register the credential with the shared redaction
+        // registry so any text passed through `redact_secrets` masks it.
+        ragent_types::sanitize::register_secret(api_key);
         let resolved = base_url.unwrap_or(OPENAI_API_BASE);
         let client = OpenAiClient::new(api_key, resolved);
         tracing::info!(chat_endpoint = %format!("{}/v1/chat/completions", resolved.trim_end_matches('/')), "OpenAI provider connected");
@@ -343,22 +355,21 @@ impl LlmClient for OpenAiClient {
             .send()
             .await
             .inspect_err(|e| {
-                tracing::warn!(url = %url, error = %e, "OpenAI chat request failed");
+                tracing::warn!(provider = %self.provider_name, url = %url, error = %e, "chat request failed");
             })
             .with_context(|| format!("Failed to send request to OpenAI API at {url}"))?;
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "Failed to read response body");
-                String::new()
-            });
+            // ANTIPAT 3.1/3.2: capped error-body read.
+            let body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
             tracing::warn!(
+                provider = %self.provider_name,
                 url = %url,
                 model = %request.model,
                 status = %status,
                 error = %body,
-                "OpenAI API error"
+                "API error"
             );
             bail!("OpenAI API error ({status}): {body}");
         }
@@ -466,7 +477,7 @@ impl OpenAiClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "{}: stream stalled — no data received for {}s",
+                                "{}: stream stalled - no data received for {}s",
                                 provider_name,
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
@@ -514,7 +525,7 @@ impl OpenAiClient {
                         Ok(v) => v,
                         Err(e) => {
                             // FUNC-032: a corrupt frame must be logged, not
-                            // silently dropped — it can carry tool-call deltas.
+                            // silently dropped - it can carry tool-call deltas.
                             tracing::warn!(
                                 error = %e,
                                 frame = %data,
@@ -594,7 +605,7 @@ impl OpenAiClient {
                                     // F4: accept both argument forms. String
                                     // form preserves delta semantics; object
                                     // form (llama.cpp / vLLM servers) is
-                                    // serialised whole — the previous
+                                    // serialised whole - the previous
                                     // `.as_str()`-only read yielded empty
                                     // args for those servers.
                                     let args_json = super::tool_cache::tool_arguments_json(function);
@@ -759,8 +770,8 @@ pub async fn discover_openai_models(
                     tool_use: true,
                     thinking_levels: openai_thinking_levels_for_model(&model_id),
                 },
-                context_window: 128_000,
-                max_output: Some(16_384),
+                context_window: DEFAULT_DISCOVERED_CONTEXT_WINDOW,
+                max_output: Some(DEFAULT_DISCOVERED_MAX_OUTPUT),
                 request_multiplier: None,
                 thinking_config: None,
             }

@@ -1,7 +1,7 @@
 //! File diff tool.
 //!
 //! Provides [`DiffFilesTool`], which computes a unified diff between two files
-//! (or two inline text strings) using the [`similar`] crate — the same library
+//! (or two inline text strings) using the [`similar`] crate - the same library
 //! used by Git, ripgrep, and many other Rust tools.
 
 use anyhow::{Context, Result};
@@ -56,7 +56,14 @@ impl Tool for DiffFilesTool {
         // Resolve left side
         let (label_a, text_a) = if let Some(p) = input["path_a"].as_str() {
             let path = resolve_path(&ctx.working_dir, p);
-            super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+            // FUNC-068 (ANTIPAT F-06): honour `allowed_roots`, not just the
+            // working directory, so a whitelisted root is accepted here too.
+            super::check_path_within_allowed_roots_cached(
+                &path,
+                &ctx.working_dir,
+                &ctx.allowed_roots,
+                &ctx.canonical_cache,
+            )?;
             let content = tokio::fs::read_to_string(&path)
                 .await
                 .with_context(|| format!("Cannot read file: {}", path.display()))?;
@@ -70,7 +77,12 @@ impl Tool for DiffFilesTool {
         // Resolve right side
         let (label_b, text_b) = if let Some(p) = input["path_b"].as_str() {
             let path = resolve_path(&ctx.working_dir, p);
-            super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+            super::check_path_within_allowed_roots_cached(
+                &path,
+                &ctx.working_dir,
+                &ctx.allowed_roots,
+                &ctx.canonical_cache,
+            )?;
             let content = tokio::fs::read_to_string(&path)
                 .await
                 .with_context(|| format!("Cannot read file: {}", path.display()))?;

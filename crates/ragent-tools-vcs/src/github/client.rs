@@ -7,7 +7,7 @@ use serde_json::Value;
 ///
 /// Override via the `RAGENT_GITHUB_CLIENT_ID` environment variable, or set in
 /// `~/.ragent/config.toml` as `github_client_id`. Requires a registered
-/// GitHub OAuth App — see docs/github-oauth.md.
+/// GitHub OAuth App - see docs/github-oauth.md.
 ///
 /// This value is shared with the GitHub Copilot provider, which already
 /// performs GitHub OAuth device flow. Using the same OAuth application keeps
@@ -219,11 +219,32 @@ impl GitHubClient {
     async fn handle_response(&self, resp: reqwest::Response, path: &str) -> Result<Value> {
         let status = resp.status();
 
-        if (status.as_u16() == 403 || status.as_u16() == 429)
-            && let Some(reset) = resp.headers().get("x-ratelimit-reset")
-        {
-            let reset_str = reset.to_str().unwrap_or("unknown");
+        // A 429 is always a rate limit. A 403 is a rate limit only when the
+        // quota is exhausted (`x-ratelimit-remaining: 0`); otherwise it is an
+        // ordinary permission denial, matching the GitLab client (ANTIPAT.md
+        // I-5).
+        let rate_limited = if status.as_u16() == 429 {
+            true
+        } else if status.as_u16() == 403 {
+            resp.headers()
+                .get("x-ratelimit-remaining")
+                .and_then(|v| v.to_str().ok())
+                == Some("0")
+        } else {
+            false
+        };
+
+        if rate_limited {
+            let reset_str = resp
+                .headers()
+                .get("x-ratelimit-reset")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("unknown");
             bail!("GitHub rate limit exceeded. Resets at epoch {reset_str}. Path: {path}");
+        }
+
+        if status.as_u16() == 403 {
+            bail!("GitHub permission denied for {path}. Check your token scopes.");
         }
 
         if status.as_u16() == 401 {
@@ -429,6 +450,29 @@ impl GitHubClient {
         })
     }
 
+    /// Reject an `owner`/`repo` path segment that could escape the request path.
+    ///
+    /// SEC-ragent-tools-vcs-00x (ANTIPAT A-2): `owner` and `repo` are joined
+    /// into `/repos/{owner}/{repo}/...`, so a `..`, a `/`, or a leading `-`
+    /// would let the caller address a different API route (and, on the
+    /// `resolve_url` path, a different origin segment). Only the characters RFC
+    /// 3986 allows inside a path segment are accepted.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming `label` when the segment is empty or contains a
+    /// character outside `[A-Za-z0-9._~-]`.
+    fn validate_repo_segment(value: &str, label: &str) -> Result<()> {
+        if value.is_empty()
+            || !value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '-'))
+        {
+            bail!("Invalid GitHub {label} '{value}': only [A-Za-z0-9._~-] characters are allowed");
+        }
+        Ok(())
+    }
+
     /// Fetch repository metadata via `GET /repos/{owner}/{repo}`.
     ///
     /// Returns a typed [`RepoMetadata`] struct extracting at minimum the
@@ -440,6 +484,10 @@ impl GitHubClient {
     /// Returns an error if the GitHub API call fails (network, auth, or
     /// non-success status code).
     pub async fn fetch_repo_metadata(&self, owner: &str, repo: &str) -> Result<RepoMetadata> {
+        // SEC-ragent-tools-vcs-00x (ANTIPAT A-2): reject a `..`-bearing owner or
+        // repo before it is interpolated into the request path.
+        Self::validate_repo_segment(owner, "owner")?;
+        Self::validate_repo_segment(repo, "repo")?;
         let path = format!("/repos/{owner}/{repo}");
         let value = self.get(&path).await?;
         Ok(RepoMetadata::from_response(&value))
@@ -456,6 +504,8 @@ impl GitHubClient {
     /// Returns an error if the GitHub API call fails (network, auth, or
     /// non-success status code).
     pub async fn fetch_root_tree(&self, owner: &str, repo: &str) -> Result<Vec<String>> {
+        Self::validate_repo_segment(owner, "owner")?;
+        Self::validate_repo_segment(repo, "repo")?;
         let path = format!("/repos/{owner}/{repo}/contents");
         let value = self.get(&path).await?;
         Ok(parse_root_tree(&value))
@@ -478,7 +528,7 @@ impl GitHubClient {
     /// # Errors
     ///
     /// Returns an error if any API call fails. Individual directory fetch
-    /// failures are tolerated — the directory entry is still listed (with a
+    /// failures are tolerated - the directory entry is still listed (with a
     /// trailing slash) but its children are omitted.
     pub async fn fetch_tree_recursive(
         &self,
@@ -559,8 +609,8 @@ impl GitHubClient {
                 // required because async fns cannot be directly recursive
                 // (the future size would be infinite).
                 if remaining > 1 {
-                    // Tolerate failure — keep the dir entry but skip children.
-                    let _ = Box::pin(self.fetch_tree_recursive_inner(
+                    // Tolerate failure - keep the dir entry but skip children.
+                    if let Err(e) = Box::pin(self.fetch_tree_recursive_inner(
                         owner,
                         repo,
                         &full_path,
@@ -568,7 +618,14 @@ impl GitHubClient {
                         entries,
                         budget,
                     ))
-                    .await;
+                    .await
+                    {
+                        tracing::debug!(
+                            path = %full_path,
+                            error = %e,
+                            "recursive tree fetch failed; keeping directory entry only"
+                        );
+                    }
                 }
             } else {
                 entries.push(full_path);
@@ -591,10 +648,16 @@ impl GitHubClient {
     /// # Errors
     ///
     /// Returns an error for non-404 API failures (network, auth, rate limit,
-    /// 500, etc.). A 404 is **not** an error — it yields `Ok(None)`.
+    /// 500, etc.). A 404 is **not** an error - it yields `Ok(None)`.
     pub async fn fetch_readme(&self, owner: &str, repo: &str) -> Result<Option<String>> {
+        Self::validate_repo_segment(owner, "owner")?;
+        Self::validate_repo_segment(repo, "repo")?;
         let path = format!("/repos/{owner}/{repo}/readme");
-        let url = format!("https://api.github.com{path}");
+        // SEC-ragent-tools-vcs-00x (ANTIPAT A-2): this call hardcoded
+        // `https://api.github.com`, so a configured GitHub Enterprise
+        // `base_url` was ignored and the Bearer token was attached to the
+        // public origin. Route it through `resolve_url` like every other verb.
+        let url = self.resolve_url(&path);
 
         let resp = self
             .client
@@ -608,7 +671,7 @@ impl GitHubClient {
 
         let status = resp.status();
         if status.as_u16() == 404 {
-            // No README present — proceed with empty README, per FR-007.
+            // No README present - proceed with empty README, per FR-007.
             return Ok(None);
         }
         if status.as_u16() == 401 {
@@ -777,10 +840,10 @@ pub fn format_reset_time(reset: u64) -> String {
 ///
 /// # Arguments
 ///
-/// - `status` — the HTTP status code.
-/// - `repo_id` — the repository identifier (e.g. `"owner/repo"`).
-/// - `body` — the raw response body (for diagnostic context).
-/// - `reset_time` — optional `X-RateLimit-Reset` Unix timestamp (for 403/429).
+/// - `status` - the HTTP status code.
+/// - `repo_id` - the repository identifier (e.g. `"owner/repo"`).
+/// - `body` - the raw response body (for diagnostic context).
+/// - `reset_time` - optional `X-RateLimit-Reset` Unix timestamp (for 403/429).
 ///
 /// # Returns
 ///
@@ -860,7 +923,7 @@ pub const README_MAX_CHARS: usize = 8000;
 /// When `scaffold` is `Some(spec)`, a `## Project Scaffold` section is emitted
 /// immediately after the repository source, naming the target language, app
 /// type, and optional stack the `/new` command would scaffold. Each field is
-/// an optional line (`- Language: …`, `- Type: …`, `- Stack: …`); fields that
+/// an optional line (`- Language: ...`, `- Type: ...`, `- Stack: ...`); fields that
 /// are `None` are omitted, so a scaffold with no stack produces only the
 /// language and type lines.
 ///
@@ -873,14 +936,14 @@ pub const README_MAX_CHARS: usize = 8000;
 ///
 /// # Arguments
 ///
-/// - `metadata` — typed repo metadata (description, language, topics, stars,
+/// - `metadata` - typed repo metadata (description, language, topics, stars,
 ///   default branch).
-/// - `tree` — root-level file and directory names.
-/// - `readme` — optional raw README text (`None` means no README was found).
-/// - `tech` — optional technology-stack constraint to include in the context.
-/// - `provider_label` — optional VCS provider label for the `## Repository
+/// - `tree` - root-level file and directory names.
+/// - `readme` - optional raw README text (`None` means no README was found).
+/// - `tech` - optional technology-stack constraint to include in the context.
+/// - `provider_label` - optional VCS provider label for the `## Repository
 ///   Source` section (FR-016). Pass `None` to omit the section.
-/// - `scaffold` — optional target scaffold, as `(language, app_type, stack)`.
+/// - `scaffold` - optional target scaffold, as `(language, app_type, stack)`.
 ///   Pass `None` to omit the `## Project Scaffold` section.
 #[must_use]
 pub fn build_reverse_prompt(

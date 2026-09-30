@@ -34,7 +34,7 @@ use crate::utils::{
     ResponsiveBreakpoint, centered_rect, centered_rect_fixed, centered_rect_max,
     is_below_minimum_size, shorten_middle,
 };
-use ragent_team::team::MemberStatus;
+use ragent_agent::team::MemberStatus;
 
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 use ragent_storage::storage::MemoryRow;
@@ -104,7 +104,7 @@ fn model_picker_entry_cells(entry: &ModelPickerEntry, selected: bool) -> Vec<Str
     };
 
     // Format cost: display tier (Free, Low, Medium, etc.) and multiplier.
-    let cost_str = format!("{} · {}", entry.cost_tier, entry.cost_multiplier);
+    let cost_str = format!("{} * {}", entry.cost_tier, entry.cost_multiplier);
     let thinking_str = App::format_thinking_levels(&entry.thinking_levels);
 
     // Format features.
@@ -126,7 +126,7 @@ fn model_picker_entry_cells(entry: &ModelPickerEntry, selected: bool) -> Vec<Str
 
     // Selection indicator lives inside the name cell.
     let model_name = if selected {
-        format!("▸ {}", entry.name)
+        format!("> {}", entry.name)
     } else {
         format!("  {}", entry.name)
     };
@@ -210,12 +210,12 @@ fn content_sized_columns(cells: &[Vec<String>]) -> Vec<Constraint> {
 /// ```
 pub fn render(frame: &mut Frame, app: &mut App) {
     render_chat(frame, app);
-    // Config-save picker overlay — rendered on top of chat, before history
+    // Config-save picker overlay - rendered on top of chat, before history
     // picker so that whichever picker is open gets drawn last (i.e. on top).
     if app.config_save_picker.is_some() {
         render_config_save_picker(frame, app);
     }
-    // History picker overlay — rendered on top of everything.
+    // History picker overlay - rendered on top of everything.
     if app.history_picker.is_some() {
         render_history_picker(frame, app);
     }
@@ -224,7 +224,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.run_cost_banner.is_some() {
         render_run_cost_banner(frame, app);
     }
-    // Queue-control menu overlay (ALT-Q) — a modal drawn above everything so the
+    // Queue-control menu overlay (ALT-Q) - a modal drawn above everything so the
     // actions stay reachable while the queue drains underneath (FR-021). The
     // queue-entry panel (the menu's `Show` row) is drawn above it when open.
     if app.queue_menu_open {
@@ -237,7 +237,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         app.queue_show_area = Rect::default();
     }
-    // `Clear the input queue?` confirmation dialog (ALT-Q `Clear` row) — a modal
+    // `Clear the input queue?` confirmation dialog (ALT-Q `Clear` row) - a modal
     // drawn above the menu/chat that reuses the shared overlay machinery
     // (spec `inputqueue` FR-033, NFR-010).
     if app.queue_clear_confirm_open {
@@ -245,7 +245,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         app.queue_clear_confirm_area = Rect::default();
     }
-    // Plugin-store browse panel (spec `pluginstores` T-006) — a full-screen-ish
+    // Plugin-store browse panel (spec `pluginstores` T-006) - a full-screen-ish
     // modal drawn last so it sits above every other overlay while it owns the
     // keyboard (FR-004, FR-015).
     if app.plugin_store.is_some() {
@@ -259,7 +259,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 /// near the top of the screen (FR-012).
 ///
 /// The banner text is produced by the `Event::RunCostSummary` handler and
-/// takes the form `⟡ run complete · {in}+{out} tokens · ${cost} · {dur}s`.
+/// takes the form `* run complete * {in}+{out} tokens * ${cost} * {dur}s`.
 /// It is drawn on top of all other UI and cleared on the next keypress.
 fn render_run_cost_banner(frame: &mut Frame, app: &mut App) {
     let Some(text) = app.run_cost_banner.as_ref() else {
@@ -314,7 +314,7 @@ fn render_queue_menu(frame: &mut Frame, app: &mut App) {
     use ratatui::widgets::{List, ListItem, ListState};
 
     let labels = app.queue_menu_labels();
-    let title = format!(" Queue control — {} pending ", app.input_queue_len());
+    let title = format!(" Queue control - {} pending ", app.input_queue_len());
 
     // Width fits the widest label (with its selection marker and padding) and
     // the title, whichever is longer; height is the rows plus the
@@ -375,7 +375,7 @@ fn render_queue_menu(frame: &mut Frame, app: &mut App) {
     // Footer hints for navigation/selection of the queue-control menu.
     let footer = if inner.height > labels.len() as u16 {
         Line::from(Span::styled(
-            "↑/↓ move · Enter select · Esc close",
+            "^/v move * Enter select * Esc close",
             Style::default().fg(Color::DarkGray),
         ))
     } else {
@@ -414,7 +414,7 @@ fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
     // Keep the highlight within range while the queue length can change under
     // the panel (e.g. a turn-boundary drain) so the block cursor is always valid.
     let selected = app.queue_show_selected.min(len.saturating_sub(1));
-    let title = format!(" Queued messages — {len} ");
+    let title = format!(" Queued messages - {len} ");
 
     // Size the panel to the entries and the widest entry text, clamped to the
     // screen so a long queue scrolls instead of overflowing.
@@ -472,7 +472,7 @@ fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
 
     let footer = if inner.height > len as u16 {
         Line::from(Span::styled(
-            "↑/↓ move · Enter move up · Del remove · Esc close",
+            "^/v move * Enter move up * Del remove * Esc close",
             Style::default().fg(Color::DarkGray),
         ))
     } else {
@@ -753,7 +753,7 @@ fn plugin_store_footer(
 /// two options, `Yes` and `No`, with `No` selected by default so a stray `Enter`
 /// cannot empty the queue (FR-034).
 ///
-/// The dialog only paints state here — it removes no entry. The queue is emptied
+/// The dialog only paints state here - it removes no entry. The queue is emptied
 /// by the `Yes` gating step (FR-036); `No`/`Esc` leave it unchanged (FR-035).
 fn render_queue_clear_confirm(frame: &mut Frame, app: &mut App) {
     use ratatui::widgets::{List, ListItem, ListState};
@@ -804,7 +804,7 @@ fn render_queue_clear_confirm(frame: &mut Frame, app: &mut App) {
 
     let footer = if inner.height > options.len() as u16 {
         Line::from(Span::styled(
-            "←/→ move · Enter select · Esc close",
+            "<-/-> move * Enter select * Esc close",
             Style::default().fg(Color::DarkGray),
         ))
     } else {
@@ -1044,7 +1044,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    format!("{} Fetching model list…", spinner),
+                    format!("{} Fetching model list...", spinner),
                     Style::default().fg(Color::Yellow),
                 )),
                 Line::from(""),
@@ -1070,7 +1070,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 .border_style(Style::default().fg(Color::Cyan));
             let inner = block.inner(area);
 
-            // Determine which providers have saved credentials so we can show a ✓ tick.
+            // Determine which providers have saved credentials so we can show a [ok] tick.
             let configured_ids: std::collections::HashSet<String> =
                 App::get_configured_providers(&app.storage)
                     .into_iter()
@@ -1082,7 +1082,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             for (i, (pid, pname)) in PROVIDER_LIST.iter().enumerate() {
                 let (indicator, style) = if i == *selected {
                     (
-                        "▸ ",
+                        "> ",
                         Style::default()
                             .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
@@ -1091,7 +1091,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                     ("  ", Style::default().fg(Color::White))
                 };
                 let tick = if configured_ids.contains(*pid) {
-                    " ✓"
+                    " [ok]"
                 } else {
                     ""
                 };
@@ -1146,7 +1146,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 let visible_start = scroll_offset + 1;
                 let visible_end = (scroll_offset + visible_providers.len()).min(total);
                 let scroll_hint = format!(
-                    "▲ {} more above — {}–{} of {} ▼ {} more below",
+                    "^ {} more above - {}-{} of {} v {} more below",
                     scroll_offset,
                     visible_start,
                     visible_end,
@@ -1155,7 +1155,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 );
                 vec![
                     Line::from(Span::styled(
-                        "↑/↓ navigate  Enter select  Esc cancel",
+                        "^/v navigate  Enter select  Esc cancel",
                         Style::default().fg(Color::DarkGray),
                     )),
                     Line::from(Span::styled(
@@ -1169,7 +1169,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 vec![
                     Line::from(""),
                     Line::from(Span::styled(
-                        "↑/↓ navigate  Enter select  Esc cancel",
+                        "^/v navigate  Enter select  Esc cancel",
                         Style::default().fg(Color::DarkGray),
                     )),
                 ]
@@ -1207,7 +1207,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             error,
             ..
         } => {
-            // Wider dialog so the full API key (≥ 48 chars) is visible.
+            // Wider dialog so the full API key (>= 48 chars) is visible.
             let area = centered_rect_max(80, 80, 100, 30, frame.area());
             frame.render_widget(Clear, area);
 
@@ -1337,7 +1337,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 ]),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "Waiting for authorisation…",
+                    "Waiting for authorisation...",
                     Style::default().fg(Color::DarkGray),
                 )),
                 Line::from(""),
@@ -1450,7 +1450,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             // Render footer hint at the bottom of the area
             if area.height > 2 {
                 let hint = Span::styled(
-                    "↑/↓ navigate  Enter select  Esc cancel",
+                    "^/v navigate  Enter select  Esc cancel",
                     Style::default().fg(Color::DarkGray),
                 );
                 let hint_line = Line::from(hint);
@@ -1516,7 +1516,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 for (i, entry) in entries.iter().enumerate() {
                     let (indicator, style) = if i == *selected {
                         (
-                            "▸ ",
+                            "> ",
                             Style::default()
                                 .fg(Color::Cyan)
                                 .add_modifier(Modifier::BOLD),
@@ -1533,7 +1533,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
 
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "↑/↓ to move, Enter to select, Esc to cancel",
+                "^/v to move, Enter to select, Esc to cancel",
                 Style::default().fg(Color::DarkGray),
             )));
 
@@ -1578,7 +1578,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                     };
                     vec![
                         Line::from(vec![
-                            Span::styled(if i == *selected { "▸ " } else { "  " }, style),
+                            Span::styled(if i == *selected { "> " } else { "  " }, style),
                             Span::styled(label, style),
                         ]),
                         Line::from(Span::styled(
@@ -1601,7 +1601,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             content.extend(lines);
             content.push(Line::from(""));
             content.push(Line::from(Span::styled(
-                "↑/↓ navigate  Enter select  Esc cancel",
+                "^/v navigate  Enter select  Esc cancel",
                 Style::default().fg(Color::DarkGray),
             )));
 
@@ -1623,7 +1623,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             let mut lines = vec![
                 Line::from(""),
                 Line::from(Span::styled(
-                    "✓ Provider Configured",
+                    "[ok] Provider Configured",
                     Style::default()
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),
@@ -1667,7 +1667,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 let is_current = i == app.current_agent_index;
                 let (indicator, style) = if i == *selected {
                     (
-                        "▸ ",
+                        "> ",
                         Style::default()
                             .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
@@ -1675,7 +1675,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 } else {
                     ("  ", Style::default().fg(Color::White))
                 };
-                let current_marker = if is_current { " ●" } else { "" };
+                let current_marker = if is_current { " *" } else { "" };
                 let mut spans = vec![
                     Span::styled(indicator, style),
                     Span::styled(name.as_str(), style),
@@ -1695,7 +1695,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
 
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "↑/↓ navigate  Enter select  Esc cancel",
+                "^/v navigate  Enter select  Esc cancel",
                 Style::default().fg(Color::DarkGray),
             )));
 
@@ -1727,7 +1727,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             for (i, prov) in providers.iter().enumerate() {
                 let (indicator, style) = if i == *selected {
                     (
-                        "▸ ",
+                        "> ",
                         Style::default()
                             .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
@@ -1735,7 +1735,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 } else {
                     ("  ", Style::default().fg(Color::White))
                 };
-                let checkmark = " ✓";
+                let checkmark = " [ok]";
                 lines.push(Line::from(vec![
                     Span::styled(indicator, style),
                     Span::styled(format!("{}", prov.name), style),
@@ -1745,7 +1745,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
 
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "↑/↓ navigate  Enter select  Esc cancel",
+                "^/v navigate  Enter select  Esc cancel",
                 Style::default().fg(Color::DarkGray),
             )));
 
@@ -1776,7 +1776,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             for (i, prov) in providers.iter().enumerate() {
                 let (indicator, style) = if i == *selected {
                     (
-                        "▸ ",
+                        "> ",
                         Style::default()
                             .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
@@ -1792,7 +1792,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
 
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "↑/↓ navigate  Enter show config  Esc cancel",
+                "^/v navigate  Enter show config  Esc cancel",
                 Style::default().fg(Color::DarkGray),
             )));
 
@@ -1822,7 +1822,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 let is_active = active_id == Some(*pid);
                 let (indicator, style) = if i == *selected {
                     (
-                        "▸ ",
+                        "> ",
                         Style::default()
                             .fg(Color::Yellow)
                             .add_modifier(Modifier::BOLD),
@@ -1830,7 +1830,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 } else {
                     ("  ", Style::default().fg(Color::White))
                 };
-                let active_marker = if is_active { " ●" } else { "" };
+                let active_marker = if is_active { " *" } else { "" };
                 let badge = if *pid == "ollama" { " [local]" } else { "" };
                 lines.push(Line::from(vec![
                     Span::styled(indicator, style),
@@ -1841,7 +1841,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "↑/↓ navigate  Enter reset  Esc cancel",
+                "^/v navigate  Enter reset  Esc cancel",
                 Style::default().fg(Color::DarkGray),
             )));
 
@@ -1865,7 +1865,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             active_field,
             error,
         } => {
-            // Wider dialog so the full token (≥ 48 chars) is visible.
+            // Wider dialog so the full token (>= 48 chars) is visible.
             let area = centered_rect_max(80, 80, 100, 30, frame.area());
             frame.render_widget(Clear, area);
 
@@ -2057,7 +2057,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "Validating token…",
+                    "Validating token...",
                     Style::default().fg(Color::Yellow),
                 )),
                 Line::from(""),
@@ -2136,7 +2136,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                     let tick = if in_cluster { "[x]" } else { "[ ]" };
                     let (indicator, style) = if is_selected && *left_pane_focused {
                         (
-                            "▸ ",
+                            "> ",
                             Style::default()
                                 .fg(Color::Cyan)
                                 .add_modifier(Modifier::BOLD),
@@ -2161,7 +2161,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 .wrap(Wrap { trim: false });
             frame.render_widget(left_para, chunks[0]);
 
-            // ── Right pane: four tier buckets in a 2×2 grid ──
+            // ── Right pane: four tier buckets in a 2x2 grid ──
             let right_block = Block::default()
                 .borders(Borders::ALL)
                 .title(if *left_pane_focused {
@@ -2262,7 +2262,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                             ),
                         ]));
 
-                        // Line 2: retained model properties — context window,
+                        // Line 2: retained model properties - context window,
                         // features, thinking levels, and cost tier.
                         if let Some(m) = &metadata {
                             let ctx_str = if m.context_window >= 1_000_000 {
@@ -2295,7 +2295,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                                 Span::styled(format!("feat {} ", features_str), props_style),
                                 Span::styled(format!("think {} ", thinking_str), props_style),
                                 Span::styled(
-                                    format!("cost {}·{}", m.cost_tier, m.cost_multiplier),
+                                    format!("cost {}*{}", m.cost_tier, m.cost_multiplier),
                                     props_style,
                                 ),
                             ]));
@@ -2323,10 +2323,10 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             // Footer with hints/error.
             let footer_text = if let Some(err) = error {
                 format!(
-                    "Esc cancel | Tab switch pane | ↑↓ move | Space toggle | Enter assign | Ctrl+S save | Ctrl+↑↓ reorder | Del remove — Error: {err}"
+                    "Esc cancel | Tab switch pane | ^v move | Space toggle | Enter assign | Ctrl+S save | Ctrl+^v reorder | Del remove - Error: {err}"
                 )
             } else {
-                "Esc cancel | Tab switch pane | ↑↓ move | Space toggle provider | Enter assign | Ctrl+S save | Ctrl+↑↓ reorder | Del remove".to_string()
+                "Esc cancel | Tab switch pane | ^v move | Space toggle provider | Enter assign | Ctrl+S save | Ctrl+^v reorder | Del remove".to_string()
             };
             let footer = Paragraph::new(Line::from(Span::styled(
                 footer_text,
@@ -2366,7 +2366,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             let block = Block::default()
                 .borders(Borders::ALL)
                 .title(format!(
-                    " Assign model for {} → {} ",
+                    " Assign model for {} -> {} ",
                     provider_name, target_tier
                 ))
                 .border_style(Style::default().fg(Color::Cyan));
@@ -2438,7 +2438,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 // Footer hint.
                 if inner.height > 1 {
                     let hint = Span::styled(
-                        "↑/↓ navigate  Enter assign  Esc cancel",
+                        "^/v navigate  Enter assign  Esc cancel",
                         Style::default().fg(Color::DarkGray),
                     );
                     let hint_area = Rect::new(
@@ -2518,7 +2518,7 @@ fn render_slash_menu(frame: &mut Frame, app: &App, input_area: Rect) {
         let is_selected = i == menu.selected;
         let (indicator, name_style, desc_style) = if is_selected {
             (
-                "▸ ",
+                "> ",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -2595,7 +2595,7 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
             let is_selected = absolute_i == menu.selected;
             let (indicator, path_style) = if is_selected {
                 (
-                    "▸ ",
+                    "> ",
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
@@ -2605,7 +2605,7 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
             } else {
                 ("  ", Style::default().fg(Color::White))
             };
-            let icon = if entry.is_dir { "📁 " } else { "📄 " };
+            let icon = if entry.is_dir { "[dir] " } else { "[file] " };
             let display = shorten_middle(&entry.display, width.saturating_sub(8) as usize);
             lines.push(Line::from(vec![
                 Span::styled(indicator, path_style),
@@ -2919,11 +2919,11 @@ fn refresh_input_render_cache(app: &mut App, inner_width: u16) {
 /// Wrap one rendered [`Line`] into styled display rows that match ratatui's
 /// `Paragraph` word-wrapping (`Wrap { trim: false }`).
 ///
-/// Rows are broken exactly where ratatui's `WordWrapper` (0.29
-/// `widgets/reflow.rs`, `WordWrapper::process_input`) breaks them, and each
-/// row keeps the original span styles.  Because no row ever exceeds the
-/// target width, re-wrapping a row inside `Paragraph` is a no-op: the cache
-/// geometry and the painted output stay in one coordinate system.
+/// Rows are broken exactly where ratatui's `WordWrapper` (`ratatui-widgets`
+/// `reflow.rs`, `WordWrapper::process_input`) breaks them, and each row keeps
+/// the original span styles.  Because no row ever exceeds the target width,
+/// re-wrapping a row inside `Paragraph` is a no-op: the cache geometry and the
+/// painted output stay in one coordinate system.
 fn wrap_line_styled(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
     use unicode_segmentation::UnicodeSegmentation;
     use unicode_width::UnicodeWidthStr;
@@ -2935,6 +2935,9 @@ fn wrap_line_styled(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
     let max = width;
     // Flat stream of (grapheme symbol, patched style) mirroring
     // `Paragraph::styled_graphemes` (line style patched with span style).
+    // ratatui 0.30 filters every grapheme that contains a control character
+    // (`filter(|g| !g.contains(char::is_control))`), not just `"\n"` as 0.29
+    // did, so tabs must be dropped here too or the port over-counts rows.
     let base = line.style;
     let graphemes: Vec<(String, ratatui::style::Style)> = line
         .spans
@@ -2943,6 +2946,7 @@ fn wrap_line_styled(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
             let span_style = base.patch(span.style);
             span.content
                 .graphemes(true)
+                .filter(|g| !g.contains(char::is_control))
                 .map(move |g| (g.to_string(), span_style))
         })
         .collect();
@@ -2960,7 +2964,7 @@ fn wrap_line_styled(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
     let mut non_ws_previous = false;
 
     for (g, style) in graphemes {
-        // ratatui 0.29 treats NBSP as a regular (non-whitespace) grapheme
+        // ratatui treats NBSP as a regular (non-whitespace) grapheme
         // and ZWSP (zero-width space) as whitespace, so the port must agree
         // with `StyledGrapheme::is_whitespace` or the wrapped geometry
         // drifts from the painted output.
@@ -3022,11 +3026,11 @@ fn wrap_line_styled(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
         non_ws_previous = !is_ws;
     }
 
-    // Tail: emit whatever is still buffered for this input line (trim =
-    // false keeps trailing whitespace on the row).
-    if row.is_empty() && word.is_empty() && !ws.is_empty() {
-        rows.push(vec![]);
-    }
+    // Tail: emit whatever is still buffered for this input line.  With
+    // `trim = false` the pending whitespace run stays on the final row;
+    // ratatui only emits a separate blank row for a whitespace-only input
+    // when `trim` is set (`&& self.trim` in `WordWrapper::process_input`),
+    // so the port must not add one here or the cache gains a phantom row.
     row.append(&mut ws);
     row.append(&mut word);
     if !row.is_empty() {
@@ -3177,7 +3181,7 @@ fn input_lines_with_kb_selection(
     let continuation_prefix: String = " ".repeat(prefix.chars().count());
 
     for (line_i, logical_line) in input.split('\n').enumerate() {
-        // Each logical line starts a new display line — flush a boundary marker.
+        // Each logical line starts a new display line - flush a boundary marker.
         // We represent this as a "newline flush" by letting the chunker know when
         // to start a new display row; we do this by resetting a counter below.
         // The first row shows the prompt (with the queue counter when present).
@@ -3215,13 +3219,13 @@ fn input_lines_with_kb_selection(
 
     for (c, idx) in flat {
         if c == '\0' {
-            // Logical line boundary — flush current display row.
+            // Logical line boundary - flush current display row.
             display_lines.push(std::mem::take(&mut current));
             col = 0;
             continue;
         }
         if col == inner_width {
-            // Width wrap — flush and start new display row.
+            // Width wrap - flush and start new display row.
             display_lines.push(std::mem::take(&mut current));
             col = 0;
         }
@@ -3310,10 +3314,10 @@ fn render_router_save_dialog(frame: &mut Frame, app: &App) {
 /// output without duplicating metric definitions.
 ///
 /// # Arguments
-/// - `frame` — the ratatui frame to render into.
-/// - `app` — mutable `App` state; reads `telemetry_scroll_offset`; writes
+/// - `frame` - the ratatui frame to render into.
+/// - `app` - mutable `App` state; reads `telemetry_scroll_offset`; writes
 ///   `telemetry_area`, `telemetry_max_scroll`, and `telemetry_content_lines`.
-/// - `area` — the rect allocated to the panel by the side-panel split.
+/// - `area` - the rect allocated to the panel by the side-panel split.
 fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -3350,14 +3354,14 @@ fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     ] {
         lines.push(Line::from(Span::styled(title.to_string(), header_style)));
         for (name, kind, desc, value) in group {
-            // Compact line: "name value — type — description", matching the
+            // Compact line: "name value - type - description", matching the
             // `/telemetry counters` chat output as closely as the narrow panel
             // allows.
             lines.push(Line::from(vec![
                 Span::styled(format!("{name} "), metric_style),
                 Span::styled(value.to_string(), value_style),
-                Span::styled(format!(" — {kind}"), type_style),
-                Span::styled(format!(" — {desc}"), desc_style),
+                Span::styled(format!(" - {kind}"), type_style),
+                Span::styled(format!(" - {desc}"), desc_style),
             ]));
         }
         lines.push(Line::raw(""));
@@ -3651,7 +3655,7 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         format!("{:.1}KB", bytes as f64 / 1024.0)
     }
     let io_label = format!(
-        "io: ↑{} ↓{}",
+        "io: ^{} v{}",
         format_kilobytes(app.stream_out_bytes),
         format_kilobytes(app.stream_in_bytes)
     );
@@ -3997,7 +4001,7 @@ fn render_memory_view_overlay(frame: &mut Frame, app: &mut App) {
         return;
     };
 
-    let title = format!(" Memory #{} — {} ", view.row.id, view.row.category);
+    let title = format!(" Memory #{} - {} ", view.row.id, view.row.category);
     let base = app.cwd_path.clone();
 
     let block = Block::default()
@@ -4015,7 +4019,7 @@ fn render_memory_view_overlay(frame: &mut Frame, app: &mut App) {
     let inner_width = inner.width.saturating_sub(2);
     let cache_width = inner_width;
     // PERF-048: the memory viewer stores its rendered rows once, in
-    // `wrapped_lines` (the `lines` field is left empty — the markdown rows
+    // `wrapped_lines` (the `lines` field is left empty - the markdown rows
     // returned by `markdown_to_lines` are already wrapped to `cache_width`, so
     // no un-wrapped copy is needed).
     let need_rebuild =
@@ -4060,7 +4064,7 @@ fn render_memory_view_overlay(frame: &mut Frame, app: &mut App) {
             .style(l.style)
         }));
 
-        // Store the rendered rows once — no `lines.clone()` duplicate.
+        // Store the rendered rows once - no `lines.clone()` duplicate.
         view.line_cache.wrapped_lines = lines;
         view.line_cache.cache_width = cache_width;
         view.line_cache.content_lines = wrapped_lines_to_strings(&view.line_cache.wrapped_lines);
@@ -4196,7 +4200,7 @@ fn render_research_view_overlay(frame: &mut Frame, app: &mut App) {
     let inner_width = inner.width.saturating_sub(2);
     let cache_width = inner_width;
     // PERF-048: the research viewer stores its rendered rows once, in
-    // `wrapped_lines` (the `lines` field is left empty — `markdown_to_lines`
+    // `wrapped_lines` (the `lines` field is left empty - `markdown_to_lines`
     // already wraps to `cache_width`, so no un-wrapped copy is needed).
     let need_rebuild =
         view.line_cache.cache_width != cache_width || view.line_cache.wrapped_lines.is_empty();
@@ -4308,7 +4312,7 @@ fn markdown_to_lines<'a>(
                     if let Some(ref lang) = in_code_block {
                         let is_mermaid = lang.eq_ignore_ascii_case("mermaid");
                         let label = if is_mermaid {
-                            "[Mermaid diagram — rendered as text below]"
+                            "[Mermaid diagram - rendered as text below]"
                         } else {
                             ""
                         };
@@ -4465,7 +4469,7 @@ fn markdown_to_lines<'a>(
     // Footer note about terminal limitations for images and links.
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "[Esc to close · images shown as placeholders · links are plain text]".to_string(),
+        "[Esc to close * images shown as placeholders * links are plain text]".to_string(),
         Style::default().fg(Color::DarkGray),
     )));
 
@@ -4514,9 +4518,9 @@ fn list_prefix(list_stack: &[u8]) -> String {
     }
     let indent = "  ".repeat(depth.saturating_sub(1));
     let marker = if list_stack.last().copied().unwrap_or(1) == 0 {
-        "• "
+        "* "
     } else {
-        "• "
+        "* "
     };
     format!("{indent}{marker}")
 }
@@ -4540,7 +4544,7 @@ fn render_model_loading_popup(frame: &mut Frame, app: &App) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            format!("{} Fetching model list…", spinner),
+            format!("{} Fetching model list...", spinner),
             Style::default().fg(Color::Yellow),
         )),
         Line::from(""),
@@ -4582,7 +4586,7 @@ fn render_model_download_popup(frame: &mut Frame, app: &App) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            format!("{:.1}% • {} elapsed", percent, format_elapsed(elapsed)),
+            format!("{:.1}% * {} elapsed", percent, format_elapsed(elapsed)),
             Style::default().fg(Color::Yellow),
         )),
     ];
@@ -4694,7 +4698,7 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     // Re-render stale groups. A group is stale when its `version` stamp does
     // not match the entry's own `seq`. Only newly-added groups (with
     // `version: 0`) and any group added while trimming dropped cache entries
-    // fall into this path — previously-rendered groups keep their cached
+    // fall into this path - previously-rendered groups keep their cached
     // lines and are not re-rendered (C-008).
     for (i, entry) in all_entries.iter().enumerate() {
         let group = &mut app.log_line_cache[i];
@@ -4760,7 +4764,7 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             &g.wrapped_lines
         });
 
-    // NOTE: no `.wrap(...)` — mirrors render_messages.  The cached log rows
+    // NOTE: no `.wrap(...)` - mirrors render_messages.  The cached log rows
     // are pre-wrapped to the inner width; re-wrapping whitespace-only rows in
     // WordWrapper paints an extra blank row each and shifts the visible tail
     // below the scroll geometry (hidden tail lines at the bottom of the pane).
@@ -4885,7 +4889,7 @@ fn log_entry_to_lines(
 /// Each row is rendered as `[<STATUS>] <subject>` with the status prefix
 /// coloured: `pending` = yellow, `in_progress` = cyan, `completed` = green,
 /// `blocked` = red (FR-007). When a task is derived-blocked (FR-005), the
-/// entire line is rendered in red and a `[blocked by #id, …]` annotation
+/// entire line is rendered in red and a `[blocked by #id, ...]` annotation
 /// is appended (FR-018). An `(owner)` suffix is appended when the task has
 /// an owner set (FR-018). When a task is `in_progress` and has an
 /// `active_form`, it is rendered as an indented sub-line beneath the
@@ -4895,11 +4899,11 @@ fn log_entry_to_lines(
 /// is rendered when the row count exceeds the visible height.
 ///
 /// # Arguments
-/// - `frame` — the ratatui frame to render into.
-/// - `app` — mutable `App` state; reads `session_id`, `tasks_scroll_offset`,
+/// - `frame` - the ratatui frame to render into.
+/// - `app` - mutable `App` state; reads `session_id`, `tasks_scroll_offset`,
 ///   and `storage`; writes `tasks_area`, `tasks_max_scroll`, and
 ///   `tasks_content_lines`.
-/// - `area` — the rect allocated to the panel by the side-panel split.
+/// - `area` - the rect allocated to the panel by the side-panel split.
 fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -4949,7 +4953,7 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Build display lines from the cached rows.  When the cache is empty
-    // we must distinguish "no tasks" from "query failed" — the latter only
+    // we must distinguish "no tasks" from "query failed" - the latter only
     // happens on the refresh attempt, so we can rely on cache emptiness
     // for the placeholder.
     let lines: Vec<Line> = if app.tasks_cache_rows.is_empty() {
@@ -4959,7 +4963,7 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             Style::default().fg(Color::DarkGray),
         ))]
     } else {
-        // Compute derived DAG fields so we can show [blocked by …]
+        // Compute derived DAG fields so we can show [blocked by ...]
         // annotations (FR-005, FR-018).
         let dag = ragent_storage::compute_task_dag(&app.tasks_cache_rows);
 
@@ -5004,7 +5008,7 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                 ));
             }
 
-            // Append [blocked by #id, …] when derived blocked (FR-018).
+            // Append [blocked by #id, ...] when derived blocked (FR-018).
             if is_derived_blocked {
                 let deps: Vec<String> = row.blocked_by.iter().map(|id| format!("#{id}")).collect();
                 spans.push(Span::styled(
@@ -5022,7 +5026,7 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                 && !active.is_empty()
             {
                 all_lines.push(Line::from(Span::styled(
-                    format!("  → {active}"),
+                    format!("  -> {active}"),
                     Style::default().fg(Color::Cyan),
                 )));
             }
@@ -5194,7 +5198,7 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         // Pre-fetch tags for each row so the render path does not issue a
         // per-row SQLite query.
         for row in &entries {
-            let _ = app.storage.get_memory_tags(row.id);
+            let _ = app.storage.get_memory_tags(row.id); // INTENTIONAL: read hint; empty/None on error is acceptable for display
         }
         app.memory_cache_count = count;
         app.memory_cache_entries = entries;
@@ -5455,7 +5459,7 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         }
 
         // Live-progress hint: for another session's target (a running
-        // sub-agent or teammate) the generation key above is frozen mid-run —
+        // sub-agent or teammate) the generation key above is frozen mid-run -
         // the assistant placeholder is created once (constant message count)
         // and `edit_seq` is not persisted to SQLite. Mix in the same
         // per-session step / tool-call counters the Agents panel shows so the
@@ -5625,12 +5629,12 @@ fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
 /// Shows each teammate as a compact pill: `[icon] name (status)`.
 /// The focused teammate is highlighted with a different background.
 fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
-    use ragent_team::team::MemberStatus;
+    use ragent_agent::team::MemberStatus;
 
     let bg = Color::Rgb(30, 30, 40);
     let mut spans: Vec<Span<'_>> = Vec::new();
     spans.push(Span::styled(
-        " 👥 ",
+        " [people] ",
         Style::default().fg(Color::Blue).bg(bg),
     ));
 
@@ -5638,15 +5642,15 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
         let is_focused = app.focused_teammate.as_ref() == Some(&member.agent_id);
 
         let (status_icon, status_color) = match member.status {
-            MemberStatus::Working => ("▶", Color::Cyan),
-            MemberStatus::Idle => ("●", Color::Green),
-            MemberStatus::Spawning => ("◌", Color::Yellow),
-            MemberStatus::Blocked => ("◈", Color::DarkGray),
-            MemberStatus::PlanPending => ("◎", Color::Magenta),
+            MemberStatus::Working => (">", Color::Cyan),
+            MemberStatus::Idle => ("*", Color::Green),
+            MemberStatus::Spawning => ("o", Color::Yellow),
+            MemberStatus::Blocked => ("*", Color::DarkGray),
+            MemberStatus::PlanPending => ("o", Color::Magenta),
             MemberStatus::Suspended => ("[pause]", Color::DarkGray),
-            MemberStatus::ShuttingDown => ("◌", Color::Yellow),
-            MemberStatus::Stopped => ("○", Color::DarkGray),
-            MemberStatus::Failed => ("✗", Color::Red),
+            MemberStatus::ShuttingDown => ("o", Color::Yellow),
+            MemberStatus::Stopped => ("o", Color::DarkGray),
+            MemberStatus::Failed => ("[x]", Color::Red),
         };
 
         let pill_bg = if is_focused {
@@ -5659,7 +5663,7 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             Color::Gray
         };
-        let border_char = if is_focused { "▸" } else { " " };
+        let border_char = if is_focused { ">" } else { " " };
 
         spans.push(Span::styled(
             format!("{border_char}{status_icon} "),
@@ -5682,7 +5686,7 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Hint at right edge
-    let hint = " Alt+↑↓:cycle ";
+    let hint = " Alt+^v:cycle ";
     let used: usize = spans.iter().map(|s| s.content.len()).sum();
     let remaining = (area.width as usize).saturating_sub(used + hint.len());
     spans.push(Span::styled(" ".repeat(remaining), Style::default().bg(bg)));
@@ -5797,7 +5801,7 @@ fn messages_to_lines(
                             ("[compaction] ", Style::default().fg(Color::DarkGray), 13)
                         }
                         Role::Assistant => (
-                            "● ",
+                            "* ",
                             Style::default()
                                 .fg(Color::Magenta)
                                 .add_modifier(Modifier::BOLD),
@@ -5838,19 +5842,19 @@ fn messages_to_lines(
                     };
                     let (indicator, ind_style, name_style) = match state.status {
                         ToolCallStatus::Completed => (
-                            "● ",
+                            "* ",
                             Style::default().fg(Color::Green),
                             Style::default()
                                 .fg(Color::Green)
                                 .add_modifier(Modifier::BOLD),
                         ),
                         ToolCallStatus::Error => (
-                            "✗ ",
+                            "[x] ",
                             Style::default().fg(Color::Red),
                             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                         ),
                         ToolCallStatus::Running | ToolCallStatus::Pending => (
-                            "● ",
+                            "* ",
                             Style::default().fg(Color::DarkGray),
                             Style::default().fg(Color::DarkGray),
                         ),
@@ -5962,7 +5966,7 @@ fn messages_to_lines(
                             {
                                 for line in thought.lines() {
                                     lines.push(Line::from(Span::styled(
-                                        format!("  💭 {}", line),
+                                        format!("  {}", line),
                                         theme::think(),
                                     )));
                                 }
@@ -6077,7 +6081,7 @@ fn messages_to_lines(
                 MessagePart::Reasoning { text } => {
                     for line in text.lines() {
                         lines.push(Line::from(Span::styled(
-                            format!("  💭 {}", line),
+                            format!("  {}", line),
                             theme::think(),
                         )));
                     }
@@ -6177,7 +6181,7 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let scan_from = app.message_cache_dirty_from.min(messages_to_show.len());
     // PERF-042: bound streaming re-render frequency.  `edit_seq` is bumped on
     // every `TextDelta`, so without throttling a growing reply is re-parsed and
-    // re-wrapped on every token — O(n^2) over the reply.  A group that has
+    // re-wrapped on every token - O(n^2) over the reply.  A group that has
     // already been rendered may refresh at most once per
     // `MESSAGE_STREAM_MIN_INTERVAL`; intermediate edits stay pending via the
     // dirty watermark and render on a later frame.
@@ -6267,7 +6271,7 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         app.message_content_lines_dirty = false;
     }
 
-    // Compute scroll geometry from the cached wrapped counts (cheap — no
+    // Compute scroll geometry from the cached wrapped counts (cheap - no
     // re-wrapping involved).
     let session_display = app
         .session_id
@@ -6301,10 +6305,10 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     //
     // Handing ratatui a Paragraph containing the ENTIRE transcript with
     // `.scroll((offset, 0))` makes Paragraph::render re-run WordWrapper and
-    // unicode-width measurement over EVERY line on EVERY frame (ratatui
-    // 0.29 only skips work for the no-wrap path).  With hundreds of
-    // messages that is millions of width computations per frame, which
-    // pinned a core even when the agent was idle.
+    // unicode-width measurement over EVERY line on EVERY frame (only the
+    // no-wrap path skips work).  With hundreds of messages that is millions of
+    // width computations per frame, which pinned a core even when the agent
+    // was idle.
     //
     // Instead, slice the cached pre-wrapped rows down to the visible window
     // and let ratatui lay out only ~`visible` rows.  Because the slice and
@@ -6317,14 +6321,14 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         });
 
     // NOTE: no `.wrap(...)` here.  The cached rows are already pre-wrapped to
-    // the inner width, and ratatui 0.29 re-wrapping them with `Wrap { trim:
-    // false }` would split whitespace-only rows (a whitespace-only input line
-    // paints as a blank row PLUS a row of spaces) and add one phantom row per
-    // such row to the painted output.  The scroll window and the geometry are
-    // both derived from the cache, so painting must consume exactly one row
-    // per cached row: without `.wrap`, the LineTruncator path renders each
-    // cached row verbatim (rows never exceed the inner width) and the two
-    // coordinate systems cannot diverge.
+    // the inner width, and re-wrapping them with `Wrap { trim: false }` would
+    // split whitespace-only rows (a whitespace-only input line paints as a
+    // blank row PLUS a row of spaces) and add one phantom row per such row to
+    // the painted output.  The scroll window and the geometry are both derived
+    // from the cache, so painting must consume exactly one row per cached row:
+    // without `.wrap`, the LineTruncator path renders each cached row verbatim
+    // (rows never exceed the inner width) and the two coordinate systems
+    // cannot diverge.
     let paragraph = Paragraph::new(window).block(messages_block);
 
     frame.render_widget(paragraph, area);
@@ -6398,7 +6402,7 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
             .map(|m| m.name.as_str())
             .unwrap_or("?");
         (
-            format!(" → {name} (focused) "),
+            format!(" -> {name} (focused) "),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -6475,8 +6479,8 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
 /// All documented keybindings: (keys column, description column).
 const KEYBINDINGS: &[(&str, &str)] = &[
     // ── Typing ──────────────────────────────────────────────────────────
-    ("@", "Mention a file — opens file picker"),
-    ("/", "Slash command — opens command menu"),
+    ("@", "Mention a file - opens file picker"),
+    ("/", "Slash command - opens command menu"),
     ("?", "Show this keybindings help panel"),
     (
         "Shift+Enter / Alt+Enter",
@@ -6510,9 +6514,9 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Enter", "Send message / confirm"),
     ("Ctrl+C, Ctrl+D", "Quit application (guarded sequence)"),
     // ── Navigation ──────────────────────────────────────────────────────
-    ("Shift+↑ / PageUp", "Scroll messages up"),
-    ("Shift+↓ / PageDown", "Scroll messages down"),
-    ("↑ / ↓", "Browse input history"),
+    ("Shift+^ / PageUp", "Scroll messages up"),
+    ("Shift+v / PageDown", "Scroll messages down"),
+    ("^ / v", "Browse input history"),
     ("Ctrl+PageUp", "Scroll log panel up"),
     ("Ctrl+PageDown", "Scroll log panel down"),
     ("PageUp / PageDown", "Scroll opened output overlay"),
@@ -6521,8 +6525,8 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Tab", "Cycle to next agent"),
     ("Esc / Ctrl+X", "Cancel running agent (while processing)"),
     // ── Teams ────────────────────────────────────────────────────────────
-    ("Alt+↓", "Focus next teammate"),
-    ("Alt+↑", "Focus previous teammate (or clear focus)"),
+    ("Alt+v", "Focus next teammate"),
+    ("Alt+^", "Focus previous teammate (or clear focus)"),
     // ── Dialogs ──────────────────────────────────────────────────────────
     ("Esc", "Close any open dialog or menu"),
     ("y / a / n", "Allow / Always / Deny permission request"),
@@ -6767,13 +6771,13 @@ fn render_question_dialog(frame: &mut Frame, app: &App) {
             } else {
                 Style::default().fg(Color::White)
             };
-            let prefix = if is_selected { "▶ " } else { "  " };
+            let prefix = if is_selected { "> " } else { "  " };
             text.push(Line::from(Span::styled(format!("{prefix}{option}"), style)));
         }
 
         text.push(Line::from(""));
         text.push(Line::from(Span::styled(
-            "↑/↓ or j/k to navigate  Enter to select  Esc to dismiss",
+            "^/v or j/k to navigate  Enter to select  Esc to dismiss",
             Style::default().fg(Color::DarkGray),
         )));
 
@@ -6794,7 +6798,7 @@ fn render_question_dialog(frame: &mut Frame, app: &App) {
     let area = centered_rect(70, 40, frame.area());
     frame.render_widget(Clear, area);
 
-    let input_display = format!("▶ {}_", app.pending_question_input);
+    let input_display = format!("> {}_", app.pending_question_input);
     let text = vec![
         Line::from(Span::styled(
             "Agent Question",
@@ -7102,7 +7106,7 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
             } else {
                 (Color::Magenta, Color::White, Color::Green, Color::DarkGray)
             };
-            let enabled_tag = if already_enabled { " ✓" } else { "" };
+            let enabled_tag = if already_enabled { " [ok]" } else { "" };
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("  {:<3}", num),
@@ -7127,7 +7131,7 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
 
     // Feedback line (error or success)
     if let Some(ref msg) = state.feedback {
-        let color = if msg.starts_with('✓') {
+        let color = if msg.starts_with("[ok]") {
             Color::Green
         } else {
             Color::Red
@@ -7207,7 +7211,7 @@ fn render_history_picker(frame: &mut Frame, app: &App) {
         .map(|(i, entry)| {
             let truncated = if entry.len() > (popup.width as usize).saturating_sub(4) {
                 format!(
-                    "{}…",
+                    "{}...",
                     &entry[..entry
                         .char_indices()
                         .map(|(pos, _)| pos)
@@ -7231,7 +7235,7 @@ fn render_history_picker(frame: &mut Frame, app: &App) {
         .collect();
 
     let title = format!(
-        " History ({} entries) — ↑/↓ navigate · Enter select · c copy · Esc close ",
+        " History ({} entries) - ^/v navigate * Enter select * c copy * Esc close ",
         total
     );
     let block = Block::default()
@@ -7309,7 +7313,7 @@ fn render_config_save_picker(frame: &mut Frame, app: &App) {
             let label = format!("{file_name}{meta_label}");
             let truncated = if label.len() > (popup.width as usize).saturating_sub(4) {
                 format!(
-                    "{}…",
+                    "{}...",
                     &label[..label
                         .char_indices()
                         .map(|(pos, _)| pos)
@@ -7333,7 +7337,7 @@ fn render_config_save_picker(frame: &mut Frame, app: &App) {
         .collect();
 
     let title = format!(
-        " Saved configurations ({} entries) — ↑/↓ navigate · Enter restore · Esc close ",
+        " Saved configurations ({} entries) - ^/v navigate * Enter restore * Esc close ",
         total
     );
     let block = Block::default()
@@ -7366,136 +7370,5 @@ fn render_config_save_picker(frame: &mut Frame, app: &App) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::messages_to_lines;
-    use ragent_agent::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
-    use serde_json::json;
-    use std::collections::HashMap;
-
-    #[test]
-    fn test_messages_to_lines_renders_agent_notice_bright_yellow_one_line_per_item() {
-        let message = Message::new(
-            "s1",
-            Role::Assistant,
-            vec![MessagePart::Text {
-                text: "📋 Agent Notice\nFirst item\nSecond item".to_string(),
-            }],
-        );
-
-        let lines = messages_to_lines(&[message], &HashMap::new(), &HashMap::new(), "/project");
-        let rendered: Vec<String> = lines.iter().map(ToString::to_string).collect();
-
-        // Header plus each list item gets its own line.
-        assert!(rendered.iter().any(|line| line.contains("📋 Agent Notice")));
-        assert!(rendered.iter().any(|line| line.contains("First item")));
-        assert!(rendered.iter().any(|line| line.contains("Second item")));
-
-        // All notice lines are styled bright yellow + bold.
-        for line in &lines {
-            for span in line.spans.iter() {
-                assert_eq!(span.style.fg, Some(ratatui::style::Color::Yellow));
-                assert!(
-                    span.style
-                        .add_modifier
-                        .contains(ratatui::style::Modifier::BOLD)
-                );
-            }
-        }
-
-        // A trailing blank line separates the notice bubble from following content.
-        assert!(
-            lines.last().is_some_and(|line| line.spans.is_empty()
-                || line.spans.iter().all(|span| span.content.is_empty()))
-        );
-    }
-
-    #[test]
-    fn test_messages_to_lines_renders_full_thinktool_output_multiline() {
-        let message = Message::new(
-            "s1",
-            Role::Assistant,
-            vec![MessagePart::ToolCall {
-                tool: "think".to_string(),
-                call_id: "call-1".to_string(),
-                state: Box::new(ToolCallState {
-                    status: ToolCallStatus::Completed,
-                    input: json!({"thought": "First line.\nSecond line."}),
-                    output: Some(json!({"thought": "First line.\nSecond line."})),
-                    error: None,
-                    duration_ms: Some(42),
-                }),
-            }],
-        );
-
-        let lines = messages_to_lines(&[message], &HashMap::new(), &HashMap::new(), "/project");
-        let rendered: Vec<String> = lines.iter().map(ToString::to_string).collect();
-
-        assert!(
-            rendered.iter().any(|line| line.contains("Think")),
-            "Expected tool header line in rendered output: {rendered:?}"
-        );
-        assert!(
-            rendered
-                .iter()
-                .filter(|line| line.contains("Think"))
-                .all(|line| !line.contains("First line.")),
-            "Expected think header to omit inline thought summary: {rendered:?}"
-        );
-        assert!(
-            rendered.iter().any(|line| line == "  💭 First line."),
-            "Expected first thought line in rendered output: {rendered:?}"
-        );
-        assert!(
-            rendered.iter().any(|line| line == "  💭 Second line."),
-            "Expected second thought line in rendered output: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn test_messages_to_lines_renders_full_agent_complete_output_multiline() {
-        let message = Message::new(
-            "s1",
-            Role::Assistant,
-            vec![MessagePart::ToolCall {
-                tool: "agent_complete".to_string(),
-                call_id: "call-1".to_string(),
-                state: Box::new(ToolCallState {
-                    status: ToolCallStatus::Completed,
-                    input: json!({"summary": "First line.\nSecond line."}),
-                    output: Some(json!({
-                        "agent_complete": true,
-                        "summary": "First line.\nSecond line."
-                    })),
-                    error: None,
-                    duration_ms: Some(42),
-                }),
-            }],
-        );
-
-        let lines = messages_to_lines(&[message], &HashMap::new(), &HashMap::new(), "/project");
-        let rendered: Vec<String> = lines.iter().map(ToString::to_string).collect();
-
-        // Each summary line must be rendered as its own ratatui Line. A single
-        // Line containing the whole summary would lose the '\n' graphemes
-        // (ratatui filters them out of Spans), collapsing the summary into one
-        // visual paragraph.
-        assert!(
-            rendered
-                .iter()
-                .any(|line| line.contains("  └ [ok] First line.")),
-            "Expected first summary line on its own rendered line: {rendered:?}"
-        );
-        assert!(
-            rendered
-                .iter()
-                .any(|line| line.contains("  └ [ok] Second line.")),
-            "Expected second summary line on its own rendered line: {rendered:?}"
-        );
-        assert!(
-            !rendered
-                .iter()
-                .any(|line| { line.contains("First line.") && line.contains("Second line.") }),
-            "Summary lines must not be joined into a single Line: {rendered:?}"
-        );
-    }
-}
+#[path = "../tests/inline/layout_tests.rs"]
+mod tests;

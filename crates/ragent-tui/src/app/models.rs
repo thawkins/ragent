@@ -3,12 +3,12 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use ragent_agent::team::TeamManager;
+use ragent_agent::team::TeamStore;
 use ragent_agent::{
     agent::{AgentInfo, ModelRef},
     event::Event,
     storage::Storage,
 };
-use ragent_team::team::TeamStore;
 use ragent_types::{ThinkingConfig, ThinkingLevel};
 
 use ragent_llm::providers::thinking::full_reasoning_levels;
@@ -199,7 +199,7 @@ impl App {
 
     /// Render a markdown string to ASCII for the chat log, preserving research
     /// slash-command preformatted blocks and passing through plain runtime text
-    /// unchanged. Otherwise runs the markdown→HTML→text pipeline and normalizes
+    /// unchanged. Otherwise runs the markdown->HTML->text pipeline and normalizes
     /// ASCII tables.
     pub fn render_markdown_to_ascii(&mut self, text: &str) -> String {
         if let Some(bypassed) = Self::bypass_research_text(text) {
@@ -213,7 +213,7 @@ impl App {
         self.render_markdown_pipeline(text)
     }
 
-    /// Render a markdown string unconditionally through the markdown→HTML→text
+    /// Render a markdown string unconditionally through the markdown->HTML->text
     /// pipeline.
     ///
     /// Unlike [`render_markdown_to_ascii`], this does NOT require a `From: /`
@@ -231,7 +231,7 @@ impl App {
         self.render_markdown_pipeline(text)
     }
 
-    /// Shared markdown→HTML→text rendering pipeline with caching and panic
+    /// Shared markdown->HTML->text rendering pipeline with caching and panic
     /// isolation.
     fn render_markdown_pipeline(&mut self, text: &str) -> String {
         // Check cache using FNV-1a hash of input.
@@ -253,14 +253,14 @@ impl App {
         let rendered = match rendered {
             Ok(text) => sanitize_for_display(&text),
             Err(_) => {
-                // Worker channel closed or worker panicked — fall back to
+                // Worker channel closed or worker panicked - fall back to
                 // sanitized text so the UI still shows something.
                 sanitize_for_display(text)
             }
         };
         // `sanitize_for_display` strips the ANSI sentinel codes the worker used
-        // to protect `[red]…[/red]` spans through the markdown pass; convert
-        // those sentinels back into the TUI's own `[red]…[/red]` markers.
+        // to protect `[red]...[/red]` spans through the markdown pass; convert
+        // those sentinels back into the TUI's own `[red]...[/red]` markers.
         let rendered = crate::app::md_worker::restore_red_markers(&rendered);
         let cleaned = rendered
             .lines()
@@ -286,10 +286,7 @@ impl App {
             return;
         }
         self.input_history.push(text);
-        // Trim to 100 entries
-        if self.input_history.len() > 100 {
-            self.input_history.remove(0);
-        }
+        self.trim_input_history();
         // Mark dirty; the main loop will flush after the debounce window.
         self.history_dirty = true;
         if self.history_save_deadline.is_none() {
@@ -298,6 +295,19 @@ impl App {
         }
         self.history_index = None;
         self.history_draft.clear();
+    }
+
+    /// Trim `input_history` to [`crate::app::state::INPUT_HISTORY_MAX`] entries,
+    /// dropping the oldest first.
+    ///
+    /// The single home for the history cap: both the on-load path
+    /// (`App::load_input_history`) and the append path (`App::add_to_history`)
+    /// call this so the two policies can never diverge (MEDIUM-4).
+    pub(crate) fn trim_input_history(&mut self) {
+        if self.input_history.len() > crate::app::state::INPUT_HISTORY_MAX {
+            let overflow = self.input_history.len() - crate::app::state::INPUT_HISTORY_MAX;
+            self.input_history.drain(0..overflow);
+        }
     }
 
     pub(crate) fn selected_model_context_window(&self) -> Option<usize> {
@@ -373,7 +383,7 @@ impl App {
 
     pub(crate) fn format_thinking_levels(levels: &[ThinkingLevel]) -> String {
         if levels.is_empty() {
-            "—".to_string()
+            "-".to_string()
         } else {
             levels
                 .iter()
@@ -463,10 +473,10 @@ impl App {
         // C-006: the status-bar label includes the thinking level, so the
         // cached label is stale once the level changes.
         self.cached_provider_model_label = None;
-        let _ = self
+        let _ = self // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
             .storage
             .set_setting("thinking_level", Self::thinking_level_setting_value(level));
-        let _ = self.storage.set_setting("thinking_level_explicit", "1");
+        let _ = self.storage.set_setting("thinking_level_explicit", "1"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
     }
 
     pub(crate) fn apply_selected_model_and_thinking(&self, agent: &mut AgentInfo) {
@@ -580,16 +590,17 @@ impl App {
             .iter()
             .find(|e| e.id.to_lowercase() == lower_model_id)
         {
-            // Model still available — restore it without showing the picker (FR-003).
+            // Model still available - restore it without showing the picker (FR-003).
             let model_value = format!("{}/{}", provider_id, entry.id);
-            let _ = self.storage.set_setting("selected_model", &model_value);
-            let _ = self.storage.set_setting("preferred_provider", provider_id);
+            let _ = self.storage.set_setting("selected_model", &model_value); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
+            let _ = self.storage.set_setting("preferred_provider", provider_id); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
             let _ = self.storage.set_setting(
+                // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
                 "selected_model_ctx_window",
                 &entry.context_window.to_string(),
             );
             // Re-persist with the correct casing from the current model list.
-            let _ = self.storage.set_setting(&last_model_key, &entry.id);
+            let _ = self.storage.set_setting(&last_model_key, &entry.id); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
             self.selected_model = Some(model_value);
             self.selected_model_ctx_window = Some(entry.context_window);
             let default_level = Self::default_thinking_level_for_entry(entry);
@@ -604,10 +615,10 @@ impl App {
             return Some(entry.clone());
         }
 
-        // Stale model — prune the persisted key (FR-004).
-        let _ = self.storage.delete_setting(&last_model_key);
+        // Stale model - prune the persisted key (FR-004).
+        let _ = self.storage.delete_setting(&last_model_key); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
         self.status = format!(
-            "Previous model `{}` is no longer available — please choose a new one",
+            "Previous model `{}` is no longer available - please choose a new one",
             model_id
         );
         None
@@ -629,7 +640,7 @@ impl App {
         };
         let previous_context_window = self.selected_model_ctx_window;
 
-        // Use only cached/default metadata — never block on network discovery.
+        // Use only cached/default metadata - never block on network discovery.
         let cached = self.cached_model_entries(provider_id);
         let models = if !cached.is_empty() {
             cached
@@ -644,6 +655,7 @@ impl App {
             if entry.context_window > 0 && previous_context_window != Some(entry.context_window) {
                 self.selected_model_ctx_window = Some(entry.context_window);
                 let _ = self.storage.set_setting(
+                    // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
                     "selected_model_ctx_window",
                     &entry.context_window.to_string(),
                 );
@@ -781,18 +793,6 @@ impl App {
         (tier, multiplier)
     }
 
-    /// Build the default HuggingFace model picker entries. Currently unused
-    /// because the model picker now uses the generic provider-based flow, but
-    /// retained as a documented helper in case a provider-specific default list
-    /// is reintroduced.
-    #[allow(dead_code)]
-    pub(crate) fn hf_default_model_entries(&self) -> Vec<ModelPickerEntry> {
-        self.provider_registry
-            .get("huggingface")
-            .map(|p| self.picker_entries_from_models(p.default_models()))
-            .unwrap_or_default()
-    }
-
     /// Detect the best configured provider at startup.
     ///
     /// Only providers with an explicit credential source (environment
@@ -815,15 +815,15 @@ impl App {
     ///
     /// Only providers with an explicit credential source are returned:
     ///
-    /// - **Environment variable** — a provider-specific env var (e.g.
+    /// - **Environment variable** - a provider-specific env var (e.g.
     ///   `ANTHROPIC_API_KEY`) is set and non-empty.
-    /// - **Secure storage** — a key is stored in the ragent encrypted
+    /// - **Secure storage** - a key is stored in the ragent encrypted
     ///   credential store (`provider_auth` table).
-    /// - **Config-based resource file** — for providers like Azure Resource
+    /// - **Config-based resource file** - for providers like Azure Resource
     ///   that use a user-created config file (`azureresources.json`).
     ///
     /// Auto-discovery via external tooling (e.g. `gh auth token` CLI, IDE
-    /// `apps.json` scraping) has been removed — those are not explicit
+    /// `apps.json` scraping) has been removed - those are not explicit
     /// credential sources.
     fn get_configured_providers_impl(storage: &Storage) -> Vec<ConfiguredProvider> {
         // Helper: returns true when the user has explicitly reset this provider.
@@ -994,19 +994,6 @@ impl App {
             .collect()
     }
 
-    /// Detect whether the router virtual provider has been enabled by reading
-    /// the [`RouterProvider`] state from the provider registry, if present.
-    #[allow(dead_code)]
-    pub(crate) fn is_router_enabled(
-        provider_registry: &ragent_llm::provider::ProviderRegistry,
-    ) -> bool {
-        provider_registry
-            .get_as_any("router")
-            .and_then(|p| p.downcast_ref::<ragent_llm::providers::router::RouterProvider>())
-            .map(|rp| rp.is_enabled())
-            .unwrap_or(false)
-    }
-
     /// Re-detect the configured provider and update `configured_provider`.
     pub(crate) fn refresh_provider(&mut self) {
         self.configured_provider = Self::detect_provider(&self.storage);
@@ -1021,9 +1008,9 @@ impl App {
     /// provider so the router remains active across restarts (FR-049).
     pub(crate) fn select_router_as_active(&mut self) {
         let model_value = "router/router".to_string();
-        let _ = self.storage.set_setting("selected_model", &model_value);
-        let _ = self.storage.set_setting("preferred_provider", "router");
-        let _ = self.storage.delete_setting("selected_thinking_level");
+        let _ = self.storage.set_setting("selected_model", &model_value); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
+        let _ = self.storage.set_setting("preferred_provider", "router"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
+        let _ = self.storage.delete_setting("selected_thinking_level"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
 
         self.selected_model = Some(model_value);
         self.selected_model_ctx_window = None;
@@ -1347,7 +1334,7 @@ impl App {
         models: &[ragent_agent::provider::ModelInfo],
     ) {
         if let Ok(models_json) = serde_json::to_string(models) {
-            let _ = self
+            let _ = self // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
                 .storage
                 .set_discovered_models(provider_id, &models_json);
         }
@@ -1413,7 +1400,7 @@ impl App {
                 if !cached.is_empty() {
                     cached
                 } else {
-                    // No cached models — return the selected-model fallback so
+                    // No cached models - return the selected-model fallback so
                     // the picker shows *something* while the async discovery
                     // (triggered via `start_model_discovery` in the provider
                     // setup flow) populates the cache.  Never block the UI
@@ -1691,8 +1678,28 @@ impl App {
             if !path.exists() {
                 continue;
             }
-            let raw = std::fs::read_to_string(path).unwrap_or_default();
-            let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
+            let raw = match std::fs::read_to_string(path) {
+                Ok(contents) => contents,
+                Err(e) => {
+                    tracing::debug!(
+                        path = %path.display(),
+                        error = %e,
+                        "failed to read router config file; skipping"
+                    );
+                    return None;
+                }
+            };
+            let json: serde_json::Value = match serde_json::from_str(&raw) {
+                Ok(value) => value,
+                Err(e) => {
+                    tracing::debug!(
+                        path = %path.display(),
+                        error = %e,
+                        "router config is not valid JSON; skipping"
+                    );
+                    return None;
+                }
+            };
             let router_value = json.get("provider")?.get("router")?;
             let router_config = serde_json::from_value::<
                 ragent_llm::providers::router_config::RouterConfig,
@@ -2199,7 +2206,7 @@ impl App {
     }
 
     /// Build the `/tools` report: the tool-family visibility table, then the
-    /// full tool list — visible tools plus any disabled by a family visibility
+    /// full tool list - visible tools plus any disabled by a family visibility
     /// switch (hidden from the model but still registered).
     ///
     /// Both listings share one column layout and one header so the disabled

@@ -24,7 +24,14 @@ use ragent_agent::event::Event;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use super::AppState;
+use super::{AppState, error_response, internal_error_response, serialize_response};
+
+/// Upper bound on memories loaded for a visualisation response (F-L1).
+///
+/// The visualisation endpoints render the whole memory set, so the read is
+/// capped rather than unbounded; a very large store degrades to a truncated
+/// (still representative) view instead of an OOM.
+const MAX_VISUALISATION_MEMORIES: usize = 10_000;
 
 // ── Response types ───────────────────────────────────────────────────
 
@@ -39,7 +46,7 @@ pub struct MemoryResponse {
     pub category: String,
     /// Source of the memory.
     pub source: String,
-    /// Confidence score (0.0–1.0).
+    /// Confidence score (0.0-1.0).
     pub confidence: f64,
     /// Project this memory belongs to.
     pub project: String,
@@ -70,7 +77,7 @@ pub struct StoreMemoryRequest {
     /// Source identifier (e.g., "api", "auto-extract").
     #[serde(default = "default_source")]
     pub source: String,
-    /// Confidence score (0.0–1.0).
+    /// Confidence score (0.0-1.0).
     #[serde(default = "default_confidence")]
     pub confidence: f64,
     /// Project identifier.
@@ -138,7 +145,7 @@ fn memory_row_to_response(
 
 // ── Handlers ──────────────────────────────────────────────────────────
 
-/// `GET /memory/search` — search structured memories (FTS5).
+/// `GET /memory/search` - search structured memories (FTS5).
 pub async fn search_memories(
     State(state): State<AppState>,
     Query(query): Query<SearchMemoryQuery>,
@@ -169,10 +176,7 @@ pub async fn search_memories(
     let results = match results {
         Ok(r) => r,
         Err(e) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Search task panicked: {e}"),
-            );
+            return internal_error_response("search_memories (task)", e);
         }
     };
 
@@ -198,7 +202,7 @@ pub async fn search_memories(
                 Ok(Ok(responses)) => responses,
                 Ok(Err(e)) => {
                     // One storage failure must not silently blank every tag:
-                    // surface it (best-effort — keep serving the rows without
+                    // surface it (best-effort - keep serving the rows without
                     // tags rather than failing the whole search).
                     tracing::warn!("Batched tag fetch failed for memory search: {e}");
                     Vec::new()
@@ -218,14 +222,11 @@ pub async fn search_memories(
 
             serialize_response(responses, "search_memories")
         }
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Search failed: {e}"),
-        ),
+        Err(e) => internal_error_response("search_memories", e),
     }
 }
 
-/// `POST /memory/store` — store a new structured memory.
+/// `POST /memory/store` - store a new structured memory.
 pub async fn store_memory(
     State(state): State<AppState>,
     Json(body): Json<StoreMemoryRequest>,
@@ -243,7 +244,7 @@ pub async fn store_memory(
         return error_response(
             StatusCode::BAD_REQUEST,
             format!(
-                "Invalid category '{}'. Must be one of: {}",
+                "invalid category '{}': must be one of: {}",
                 body.category,
                 valid_categories.join(", ")
             ),
@@ -254,7 +255,7 @@ pub async fn store_memory(
     if !(0.0..=1.0).contains(&body.confidence) {
         return error_response(
             StatusCode::BAD_REQUEST,
-            "Confidence must be between 0.0 and 1.0",
+            "confidence must be between 0.0 and 1.0",
         );
     }
 
@@ -277,10 +278,7 @@ pub async fn store_memory(
     let create_result = match create_result {
         Ok(r) => r,
         Err(e) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Store task panicked: {e}"),
-            );
+            return internal_error_response("store_memory (task)", e);
         }
     };
 
@@ -292,41 +290,49 @@ pub async fn store_memory(
                 category: body.category.clone(),
             });
 
-            // Fetch the created memory to return full response
+            // Fetch the created memory to return the full response.
+            //
+            // ANTIPAT F-H2: this previously used `.ok().flatten()` and
+            // `.unwrap_or_default()`, so a storage failure after a successful
+            // write answered `201` with a silently degraded (empty) body.
+            // Failures are now logged and surfaced.
             let storage = Arc::clone(&state.storage);
             let fetch = tokio::task::spawn_blocking(move || {
-                (
-                    storage.get_memory(id).ok().flatten(),
-                    storage.get_memory_tags(id).unwrap_or_default(),
-                )
+                let row = storage.get_memory(id).map_err(|e| e.to_string())?;
+                let tags = storage.get_memory_tags(id).map_err(|e| e.to_string())?;
+                Ok::<_, String>((row, tags))
             })
             .await;
             let (row, tags) = match fetch {
-                Ok(pair) => pair,
+                Ok(Ok(pair)) => pair,
+                Ok(Err(e)) => {
+                    tracing::warn!(error = %e, "fetch-after-store failed");
+                    return internal_error_response("store_memory (fetch-after-store)", e);
+                }
                 Err(e) => {
-                    tracing::warn!("Memory fetch-after-store task panicked: {e}");
-                    (None, Vec::new())
+                    tracing::warn!(error = %e, "fetch-after-store task panicked");
+                    return internal_error_response("store_memory (fetch-after-store task)", e);
                 }
             };
 
             match row {
-                Some(r) => (
-                    StatusCode::CREATED,
-                    Json(
-                        serde_json::to_value(memory_row_to_response(&r, tags)).unwrap_or_default(),
-                    ),
-                ),
+                Some(r) => {
+                    let body = match serde_json::to_value(memory_row_to_response(&r, tags)) {
+                        Ok(value) => value,
+                        Err(e) => {
+                            return internal_error_response("store_memory (serialise)", e);
+                        }
+                    };
+                    (StatusCode::CREATED, Json(body))
+                }
                 None => (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))),
             }
         }
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to store memory: {e}"),
-        ),
+        Err(e) => internal_error_response("store_memory", e),
     }
 }
 
-/// `DELETE /memory/{id}` — forget (delete) a structured memory by ID.
+/// `DELETE /memory/{id}` - forget (delete) a structured memory by ID.
 pub async fn forget_memory(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -344,41 +350,13 @@ pub async fn forget_memory(
             });
             (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
         }
-        Ok(Ok(false)) => error_response(StatusCode::NOT_FOUND, "Memory not found"),
-        Ok(Err(e)) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Delete failed: {e}"),
-        ),
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Delete task panicked: {e}"),
-        ),
+        Ok(Ok(false)) => error_response(StatusCode::NOT_FOUND, "memory not found"),
+        Ok(Err(e)) => internal_error_response("forget_memory", e),
+        Err(e) => internal_error_response("forget_memory (task)", e),
     }
 }
 
-// ── Helpers (shared with parent module) ──────────────────────────��────
-
-/// Standardized error JSON response.
-fn error_response(
-    status: StatusCode,
-    message: impl Into<String>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    (status, Json(serde_json::json!({ "error": message.into() })))
-}
-
-/// Serialize a value to JSON and return a response.
-fn serialize_response<T: serde::Serialize>(
-    value: T,
-    context: &str,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match serde_json::to_value(&value) {
-        Ok(val) => (StatusCode::OK, Json(val)),
-        Err(e) => {
-            tracing::warn!(error = %e, context, "Serialization failed");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "serialization failed")
-        }
-    }
-}
+// ── Helpers ──────────────────────────────────────────────────────────
 
 /// Register memory routes on an Axum router.
 pub fn memory_routes() -> axum::Router<AppState> {
@@ -391,9 +369,9 @@ pub fn memory_routes() -> axum::Router<AppState> {
         .route("/visualisation/tags", get(get_visualisation_tags))
         .route("/visualisation/heatmap", get(get_visualisation_heatmap))
 }
-// ���─ Visualisation endpoints ──────────────────────────────────────────────────
+// ─ Visualisation endpoints ──────────────────────────────────────────────────
 
-/// GET /memory/visualisation — Generate visualisation data for all memories.
+/// GET /memory/visualisation - Generate visualisation data for all memories.
 pub async fn get_visualisation(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -405,18 +383,12 @@ pub async fn get_visualisation(
     .await
     {
         Ok(Ok(data)) => serialize_response(data, "visualisation"),
-        Ok(Err(e)) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to generate visualisation: {e}"),
-        ),
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Visualisation task panicked: {e}"),
-        ),
+        Ok(Err(e)) => internal_error_response("get_visualisation", e),
+        Err(e) => internal_error_response("get_visualisation (task)", e),
     }
 }
 
-/// GET /memory/visualisation/graph — Memory category relationship graph.
+/// GET /memory/visualisation/graph - Memory category relationship graph.
 pub async fn get_visualisation_graph(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -425,7 +397,7 @@ pub async fn get_visualisation_graph(
     let storage = Arc::clone(&state.storage);
     let loaded = tokio::task::spawn_blocking(move || {
         (
-            storage.list_memories("", 10_000),
+            storage.list_memories("", MAX_VISUALISATION_MEMORIES),
             storage.get_all_memory_tags(),
         )
     })
@@ -434,23 +406,17 @@ pub async fn get_visualisation_graph(
     let (memories, all_tags) = match loaded {
         Ok((Ok(m), Ok(t))) => (m, t),
         Ok((Err(e), _)) | Ok((_, Err(e))) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to load memories for graph: {e}"),
-            );
+            return internal_error_response("get_visualisation_graph", e);
         }
         Err(e) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Graph task panicked: {e}"),
-            );
+            return internal_error_response("get_visualisation_graph (task)", e);
         }
     };
     let graph = ragent_agent::memory::generate_graph(&memories, &all_tags);
     serialize_response(graph, "graph")
 }
 
-/// GET /memory/visualisation/tags — Tag cloud.
+/// GET /memory/visualisation/tags - Tag cloud.
 pub async fn get_visualisation_tags(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -459,7 +425,7 @@ pub async fn get_visualisation_tags(
     let storage = Arc::clone(&state.storage);
     let loaded = tokio::task::spawn_blocking(move || {
         (
-            storage.list_memories("", 10_000),
+            storage.list_memories("", MAX_VISUALISATION_MEMORIES),
             storage.get_all_memory_tags(),
         )
     })
@@ -468,40 +434,30 @@ pub async fn get_visualisation_tags(
     let (memories, all_tags) = match loaded {
         Ok((Ok(m), Ok(t))) => (m, t),
         Ok((Err(e), _)) | Ok((_, Err(e))) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to load memories for tag cloud: {e}"),
-            );
+            return internal_error_response("get_visualisation_tags", e);
         }
         Err(e) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Tag cloud task panicked: {e}"),
-            );
+            return internal_error_response("get_visualisation_tags (task)", e);
         }
     };
     let cloud = ragent_agent::memory::generate_tag_cloud(&memories, &all_tags);
     serialize_response(cloud, "tag_cloud")
 }
 
-/// GET /memory/visualisation/heatmap — Access pattern heatmap.
+/// GET /memory/visualisation/heatmap - Access pattern heatmap.
 pub async fn get_visualisation_heatmap(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    // M-005: `list_memories("", 10_000)` is a blocking SQLite read; off-load it.
+    // M-005: `list_memories("", MAX_VISUALISATION_MEMORIES)` is a blocking SQLite read; off-load it.
     let storage = Arc::clone(&state.storage);
-    match tokio::task::spawn_blocking(move || storage.list_memories("", 10_000)).await {
+    match tokio::task::spawn_blocking(move || storage.list_memories("", MAX_VISUALISATION_MEMORIES))
+        .await
+    {
         Ok(Ok(memories)) => {
             let heatmap = ragent_agent::memory::generate_heatmap(&memories);
             serialize_response(heatmap, "heatmap")
         }
-        Ok(Err(e)) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to generate heatmap: {e}"),
-        ),
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Heatmap task panicked: {e}"),
-        ),
+        Ok(Err(e)) => internal_error_response("get_visualisation_heatmap", e),
+        Err(e) => internal_error_response("get_visualisation_heatmap (task)", e),
     }
 }

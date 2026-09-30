@@ -16,7 +16,7 @@
 //! isolation strategy used for `html2text` rendering.
 //!
 //! See `vendor/pdf-extract/src/lib.rs` lines 832 and 882 for the patched
-//! fallback logic, and lines 421–448 for the CFF Expert encoding guard.
+//! fallback logic, and lines 421-448 for the CFF Expert encoding guard.
 
 use anyhow::{Context, Result};
 

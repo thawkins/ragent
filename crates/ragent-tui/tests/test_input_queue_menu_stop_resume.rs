@@ -63,7 +63,7 @@ async fn test_stop_row_halts_the_running_turn() {
         "FR-025: selecting Stop must set the turn's cancel flag"
     );
     assert_eq!(
-        app.status, "halting agent…",
+        app.status, "halting agent...",
         "FR-025: Stop must report the same halting status as CancelAgent"
     );
 }
@@ -251,7 +251,7 @@ async fn test_resume_row_when_not_halted_reports_nothing_to_resume() {
     app.queue_menu_select_halt();
 
     assert_eq!(
-        app.status, "Nothing to resume — agent was not halted",
+        app.status, "Nothing to resume - agent was not halted",
         "FR-027: resuming a non-halted agent must say so"
     );
     assert_eq!(

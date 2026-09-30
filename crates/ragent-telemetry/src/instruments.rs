@@ -1,4 +1,4 @@
-//! OTEL instrument registry — constructs and holds all metrics from the catalog.
+//! OTEL instrument registry - constructs and holds all metrics from the catalog.
 //!
 //! The [`InstrumentRegistry`] owns a [`Meter`] and all OTEL instruments
 //! (counters, histograms, gauges, up/down counters) defined in the otel
@@ -23,10 +23,6 @@ use crate::cardinality::CardinalityCache;
 /// source of truth (FR-003). The module is public so external callers (e.g.
 /// dashboards, exporters, and integration tests) can use the canonical names
 /// without duplicating them.
-// `#[allow(dead_code)]` — some constants are not yet referenced by live
-// instrumentation but are part of the approved Metric Catalog and may be used
-// by later tasks.
-#[allow(dead_code)]
 pub mod names {
     // ── Usage metrics ───────────────────────────────────────────────────
     /// Metric name for total LLM requests (`ragent.llm.requests`).
@@ -118,14 +114,6 @@ pub mod names {
 #[cfg(feature = "telemetry")]
 #[derive(Clone)]
 pub struct InstrumentRegistry {
-    /// The OpenTelemetry [`Meter`] used to create the instruments below.
-    ///
-    /// This field is kept primarily to anchor the meter lifetime to the
-    /// registry; it is not directly exposed because callers interact with
-    /// the typed instrument handles instead.
-    #[allow(dead_code)]
-    // anchors the `Meter` lifetime; read by future debug/introspection paths
-    meter: opentelemetry::metrics::Meter,
     /// Cardinality cache shared across all clones (FR-035).
     /// Tracks distinct attribute combinations per metric and collapses
     /// overflow into an `unknown` bucket.
@@ -134,14 +122,14 @@ pub struct InstrumentRegistry {
     /// Per-metric enable/disable toggles keyed by instrument name (FR-027).
     ///
     /// A metric absent from this map is enabled by default. A metric
-    /// present and set to `false` is disabled — recording calls to that
+    /// present and set to `false` is disabled - recording calls to that
     /// instrument are short-circuited by
     /// [`is_metric_enabled`](Self::is_metric_enabled) before they reach the
     /// underlying OTEL instrument, so the metric produces zero exported
     /// data points.
     metric_toggles: std::sync::Arc<std::collections::HashMap<String, bool>>,
 
-    // ── Usage: counters ──��──────────────────────────────────────────────
+    // ── Usage: counters ────────────────────────────────────────────────
     /// Total LLM API requests made by the harness (`ragent.llm.requests`).
     pub llm_requests: opentelemetry::metrics::Counter<u64>,
     /// Total number of sessions created (`ragent.sessions.total`).
@@ -241,13 +229,20 @@ impl InstrumentRegistry {
         Self::from_meter(meter)
     }
 
-    /// Build the instrument registry from a no-op [`Meter`].
+    /// Build the instrument registry from a genuinely no-op [`Meter`].
     ///
     /// Used when telemetry is disabled so all instrument calls are cheap
     /// no-ops with zero overhead (FR-022, NFR-002).
+    ///
+    /// ANTIPAT HIGH-5: this previously built from
+    /// `opentelemetry::global::meter_provider()`. If any code (a test, another
+    /// library) had installed a global provider, `noop()` recordings would have
+    /// exported real data points, contradicting the zero-traffic guarantee.
+    /// The no-op provider is now an explicit, locally-owned SDK provider with a
+    /// discarding reader, so it can never export anything.
     #[must_use]
     pub fn noop() -> Self {
-        let provider = opentelemetry::global::meter_provider();
+        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder().build();
         let meter = provider.meter("ragent");
         Self::from_meter(meter)
     }
@@ -395,7 +390,7 @@ impl InstrumentRegistry {
             .with_description("Currently active sub-agents")
             .build();
 
-        // ── Usage: gauges ──────────────────────────��────────────────
+        // ── Usage: gauges ──────────────────────────────────────────
         let team_members = meter
             .i64_gauge(TEAM_MEMBERS)
             .with_unit("{member}")
@@ -540,7 +535,6 @@ impl InstrumentRegistry {
             .build();
 
         Self {
-            meter,
             cardinality: std::sync::Arc::new(CardinalityCache::default()),
             metric_toggles,
             llm_requests,
@@ -618,21 +612,33 @@ impl InstrumentRegistry {
 
     /// Returns the [`KeyValue`] attribute for a session ID (FR-025).
     ///
-    /// While `service.name`, `service.version`, and `host.name` are static
-    /// resource attributes set at provider construction, `session.id` is
-    /// dynamic — it changes per session — so it is attached as a metric
-    /// attribute rather than a resource attribute. Callers should include
-    /// this in the `attributes` slice when recording metrics within a
-    /// specific session context.
+    /// `service.name`, `service.version`, and `host.name` are static resource
+    /// attributes set at provider construction, while `session.id` is dynamic -
+    /// it changes per session - so it is attached as a metric attribute rather
+    /// than a resource attribute. Callers include it in the `attributes` slice
+    /// when recording metrics within a specific session context.
+    ///
+    /// # Status: not yet applied by a production recorder (ANTIPAT M5.2, MEDIUM-6)
+    ///
+    /// No production recorder threads a session id into its instrument calls
+    /// yet. The session-scoped [`SessionRecorder`](crate::recorder::SessionRecorder)
+    /// methods do not receive a session id, and the call sites that hold one
+    /// live in the `ragent-agent` crate - so wiring `session.id` through them
+    /// requires a cross-crate API change that is out of scope for this crate's
+    /// cleanup. The helper is retained (and hidden from the rendered docs) as
+    /// the sanctioned FR-025 attribute source for that follow-up; the attribute
+    /// is covered directly by `tests/test_resource_attributes.rs` and
+    /// `tests/test_sensitive_data_guard.rs`.
     ///
     /// Sanitised via [`crate::sensitive::sanitize_attr_value`] (FR-034).
+    #[doc(hidden)]
     #[must_use]
     pub fn attr_session(id: &str) -> KeyValue {
         KeyValue::new("session.id", crate::sensitive::sanitize_attr_value(id))
     }
 }
 
-// ── No-op stub when `telemetry` feature is off ─────────���────────────────
+// ── No-op stub when `telemetry` feature is off ─────────────────────────
 
 /// A no-op instrument registry that discards all recorded metrics.
 ///
@@ -640,7 +646,7 @@ impl InstrumentRegistry {
 /// provides the same public fields as the feature-gated
 /// [`InstrumentRegistry`](crate::InstrumentRegistry) but all methods are
 /// no-ops. In practice, when the feature is off, callers should not hold
-/// an `InstrumentRegistry` at all — the [`TelemetrySubsystem`] returns
+/// an `InstrumentRegistry` at all - the [`TelemetrySubsystem`] returns
 /// `None` from `instruments()`.
 #[cfg(not(feature = "telemetry"))]
 pub struct NoopInstrumentRegistry;
@@ -664,142 +670,5 @@ impl Default for NoopInstrumentRegistry {
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(all(test, feature = "telemetry"))]
-mod tests {
-    use super::*;
-    use crate::OtelConfig;
-    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-    use opentelemetry_sdk::metrics::SdkMeterProvider;
-    use std::time::Duration;
-
-    fn build_registry() -> InstrumentRegistry {
-        let config = OtelConfig {
-            enabled: true,
-            endpoint: "http://localhost:4318".to_string(),
-            ..Default::default()
-        };
-
-        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-        let sub = rt
-            .block_on(async { crate::TelemetrySubsystem::new(config).expect("enabled subsystem") });
-        InstrumentRegistry::from_provider(&sub.provider().unwrap())
-    }
-
-    /// Build an [`InstrumentRegistry`] backed by an [`SdkMeterProvider`] that
-    /// uses an [`InMemoryMetricExporter`] (NFR-005). Returns the registry, the
-    /// exporter, the provider, and the tokio runtime so callers can flush and
-    /// inspect the exported metric data.
-    fn build_registry_with_exporter() -> (
-        InstrumentRegistry,
-        InMemoryMetricExporter,
-        SdkMeterProvider,
-        tokio::runtime::Runtime,
-    ) {
-        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-        let exporter = InMemoryMetricExporter::default();
-        let exporter_clone = exporter.clone();
-        let provider = rt.block_on(async {
-            let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone)
-                .with_interval(Duration::from_hours(1))
-                .build();
-            SdkMeterProvider::builder().with_reader(reader).build()
-        });
-        let registry = InstrumentRegistry::from_provider(&provider);
-        (registry, exporter, provider, rt)
-    }
-
-    #[test]
-    fn test_registry_constructs_all_instruments() {
-        // FR-003: the registry must register every metric in the catalog.
-        let registry = build_registry();
-        // Just accessing the fields proves they were constructed.
-        let _ = &registry.llm_requests;
-        let _ = &registry.sessions_active;
-        let _ = &registry.team_members;
-        let _ = &registry.llm_duration;
-        let _ = &registry.tokens_input;
-        let _ = &registry.cost_estimated;
-        let _ = &registry.errors_total;
-        let _ = &registry.context_compression_ratio;
-    }
-
-    #[test]
-    fn test_counter_can_add() {
-        let (registry, exporter, provider, rt) = build_registry_with_exporter();
-        registry.llm_requests.add(1, &[]);
-        rt.block_on(async { provider.force_flush().expect("flush") });
-        let metrics = exporter.get_finished_metrics().unwrap_or_default();
-        assert!(
-            !metrics.is_empty(),
-            "counter add should produce a metric batch"
-        );
-    }
-
-    #[test]
-    fn test_histogram_can_record() {
-        let (registry, exporter, provider, rt) = build_registry_with_exporter();
-        registry.llm_duration.record(42.0, &[]);
-        rt.block_on(async { provider.force_flush().expect("flush") });
-        let metrics = exporter.get_finished_metrics().unwrap_or_default();
-        let has_histogram = metrics.iter().any(|rm| {
-            rm.scope_metrics
-                .iter()
-                .flat_map(|sm| sm.metrics.iter())
-                .any(|m| m.name == "ragent.llm.duration")
-        });
-        assert!(
-            has_histogram,
-            "histogram record should produce ragent.llm.duration"
-        );
-    }
-
-    #[test]
-    fn test_gauge_can_record() {
-        let (registry, exporter, provider, rt) = build_registry_with_exporter();
-        registry.team_members.record(3, &[]);
-        rt.block_on(async { provider.force_flush().expect("flush") });
-        let metrics = exporter.get_finished_metrics().unwrap_or_default();
-        let has_gauge = metrics.iter().any(|rm| {
-            rm.scope_metrics
-                .iter()
-                .flat_map(|sm| sm.metrics.iter())
-                .any(|m| m.name == "ragent.team.members")
-        });
-        assert!(has_gauge, "gauge record should produce ragent.team.members");
-    }
-
-    #[test]
-    fn test_up_down_counter_can_add() {
-        let (registry, exporter, provider, rt) = build_registry_with_exporter();
-        registry.sessions_active.add(1, &[]);
-        registry.sessions_active.add(-1, &[]);
-        rt.block_on(async { provider.force_flush().expect("flush") });
-        let metrics = exporter.get_finished_metrics().unwrap_or_default();
-        let has_up_down = metrics.iter().any(|rm| {
-            rm.scope_metrics
-                .iter()
-                .flat_map(|sm| sm.metrics.iter())
-                .any(|m| m.name == "ragent.sessions.active")
-        });
-        assert!(
-            has_up_down,
-            "up-down counter add should produce ragent.sessions.active"
-        );
-    }
-
-    #[test]
-    fn test_attrs_are_sanitised() {
-        // FR-034: sensitive tool names should be redacted.
-        let tool_attr = InstrumentRegistry::attr_tool("sk-secret-key");
-        assert_eq!(tool_attr.value.to_string(), "redacted");
-    }
-
-    #[test]
-    fn test_metric_toggles_disable_metric() {
-        // FR-027: a metric set to false should be disabled.
-        let mut toggles = std::collections::HashMap::new();
-        toggles.insert("ragent.llm.requests".to_string(), false);
-        let registry = build_registry().with_metric_toggles(toggles);
-        assert!(!registry.is_metric_enabled("ragent.llm.requests"));
-        assert!(registry.is_metric_enabled("ragent.tool.invocations"));
-    }
-}
+#[path = "../tests/inline/instruments_tests.rs"]
+mod tests;

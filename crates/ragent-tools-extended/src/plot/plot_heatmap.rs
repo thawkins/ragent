@@ -1,4 +1,4 @@
-//! `plot_heatmap` tool — render a 2D heatmap on the message window.
+//! `plot_heatmap` tool - render a 2D heatmap on the message window.
 
 use anyhow::Result;
 use ratatui_plt::prelude::{AspectRatio, Axis, Theme};
@@ -29,7 +29,7 @@ impl Tool for PlotHeatmapTool {
     }
 
     fn description(&self) -> &'static str {
-        "Render a 2D heatmap on the message window. Required: 'grid' — an \
+        "Render a 2D heatmap on the message window. Required: 'grid' - an \
          object {x: [values], y: [values], values: [[row-rows...]]} or simply \
          {values: [[...]]}. Optional: 'colormap' (e.g. viridis, plasma, \
          inferno, magma, coolwarm), 'title', 'x_label', 'y_label', \

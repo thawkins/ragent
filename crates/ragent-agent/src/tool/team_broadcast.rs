@@ -1,4 +1,4 @@
-//! `team_broadcast` — Send a message to all active teammates.
+//! `team_broadcast` - Send a message to all active teammates.
 //!
 //! M4-T3: per-recipient results are collected and reported. A failure to
 //! deliver to one teammate no longer aborts delivery to the rest; the tool

@@ -43,7 +43,7 @@ fn skeleton_contains_zero_findings_placeholder() {
     // FR-013: the section carries the zero-findings placeholder text.
     let skeleton = skeleton();
     assert!(
-        skeleton.contains("_(no findings yet — the gathering pass will populate this section)_"),
+        skeleton.contains("_(no findings yet - the gathering pass will populate this section)_"),
         "skeleton diagram section must carry the zero-findings placeholder (FR-013): {skeleton}"
     );
 }

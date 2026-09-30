@@ -4,7 +4,7 @@
 //! constants, and type hints from Python source code.
 
 use super::{LanguageParser, ParsedFile};
-use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
+use crate::types::{ImportEntry, Symbol, SymbolKind, Visibility};
 use anyhow::{Context, Result};
 use tree_sitter::Node;
 
@@ -36,13 +36,7 @@ impl LanguageParser for PythonParser {
         let tree = Self::parse_tree(source)?;
         let root = tree.root_node();
 
-        let mut ctx = ExtractCtx {
-            source,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            references: Vec::new(),
-            next_id: 0,
-        };
+        let mut ctx = Ctx::new(source);
 
         extract_node(&mut ctx, root, None, &[]);
 
@@ -55,29 +49,16 @@ impl LanguageParser for PythonParser {
     }
 }
 
-struct ExtractCtx<'a> {
-    source: &'a [u8],
-    symbols: Vec<Symbol>,
-    imports: Vec<ImportEntry>,
-    references: Vec<SymbolRef>,
-    next_id: i64,
-}
-
-impl ExtractCtx<'_> {
-    const fn alloc_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
-    fn node_text(&self, node: Node) -> &str {
-        node.utf8_text(self.source).unwrap_or("")
-    }
-}
+/// Parser-local alias of the shared extraction context.
+type Ctx<'a> = super::ctx::Ctx<'a>;
 
 // ── Recursive extraction ────────────────────────────────────────────────────
 
-fn extract_node(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, scope: &[String]) {
+fn extract_node(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
+    let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
+        return;
+    };
+
     match node.kind() {
         "function_definition" => extract_function(ctx, node, parent_id, scope),
         "class_definition" => extract_class(ctx, node, parent_id, scope),
@@ -105,7 +86,7 @@ fn extract_node(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, scope:
 
 // ── Function / Method ───────────────────────────────────────────────────────
 
-fn extract_function(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, scope: &[String]) {
+fn extract_function(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
         return;
@@ -125,7 +106,7 @@ fn extract_function(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, sc
     let visibility = python_visibility(&name);
     let doc_comment = extract_docstring(ctx, node);
     let signature = extract_function_sig(ctx, node, is_static, is_classmethod, is_property);
-    let qualified_name = build_qualified(scope, &name);
+    let qualified_name = build_qname(scope, &name);
     let body_hash = hash_node(ctx, node);
 
     let id = ctx.alloc_id();
@@ -158,7 +139,7 @@ fn extract_function(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, sc
 
 // ── Class ───────────────────────────────────────────────────────────────────
 
-fn extract_class(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, scope: &[String]) {
+fn extract_class(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
         return;
@@ -171,7 +152,7 @@ fn extract_class(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, scope
         Some(s) => format!("class {name}{s}"),
         None => format!("class {name}"),
     };
-    let qualified_name = build_qualified(scope, &name);
+    let qualified_name = build_qname(scope, &name);
     let body_hash = hash_node(ctx, node);
 
     let id = ctx.alloc_id();
@@ -204,9 +185,9 @@ fn extract_class(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, scope
 
 // ── Imports ─────────────────────────────────────────────────────────────────
 
-fn extract_import(ctx: &mut ExtractCtx, node: Node) {
+fn extract_import(ctx: &mut Ctx, node: Node) {
     let line = node.start_position().row as u32 + 1;
-    let text = ctx.node_text(node).trim().to_string();
+    let text = ctx.text(node).trim().to_string();
 
     // `import foo` or `import foo.bar as baz`
     let path = text.strip_prefix("import ").unwrap_or(&text).trim();
@@ -231,9 +212,9 @@ fn extract_import(ctx: &mut ExtractCtx, node: Node) {
     }
 }
 
-fn extract_from_import(ctx: &mut ExtractCtx, node: Node) {
+fn extract_from_import(ctx: &mut Ctx, node: Node) {
     let line = node.start_position().row as u32 + 1;
-    let text = ctx.node_text(node).trim().to_string();
+    let text = ctx.text(node).trim().to_string();
 
     // `from foo.bar import Baz, Quux as Q`
     let rest = text.strip_prefix("from ").unwrap_or(&text);
@@ -264,18 +245,13 @@ fn extract_from_import(ctx: &mut ExtractCtx, node: Node) {
 
 // ── Module-level constants ──────────────────────────────────────────────────
 
-fn try_extract_assignment(
-    ctx: &mut ExtractCtx,
-    node: Node,
-    parent_id: Option<i64>,
-    scope: &[String],
-) {
+fn try_extract_assignment(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let cursor = &mut node.walk();
     for child in node.children(cursor) {
         if child.kind() == "assignment"
             && let Some(left) = child.child_by_field_name("left")
         {
-            let name = ctx.node_text(left).trim().to_string();
+            let name = ctx.text(left).trim().to_string();
             // Only treat ALL_CAPS names as constants.
             if !name.is_empty()
                 && name
@@ -285,12 +261,12 @@ fn try_extract_assignment(
             {
                 let type_ann = child
                     .child_by_field_name("type")
-                    .map(|n| ctx.node_text(n).to_string());
+                    .map(|n| ctx.text(n).to_string());
                 let sig = match &type_ann {
                     Some(t) => format!("{name}: {t}"),
                     None => name.clone(),
                 };
-                let qualified_name = build_qualified(scope, &name);
+                let qualified_name = build_qname(scope, &name);
 
                 let id = ctx.alloc_id();
                 ctx.symbols.push(Symbol {
@@ -328,12 +304,12 @@ fn python_visibility(name: &str) -> Visibility {
     }
 }
 
-fn collect_decorators(ctx: &ExtractCtx, node: Node) -> Vec<String> {
+fn collect_decorators(ctx: &Ctx, node: Node) -> Vec<String> {
     let mut decorators = Vec::new();
     let mut sib = node.prev_sibling();
     while let Some(s) = sib {
         if s.kind() == "decorator" {
-            let text = ctx.node_text(s).trim().to_string();
+            let text = ctx.text(s).trim().to_string();
             let name = text
                 .strip_prefix('@')
                 .unwrap_or(&text)
@@ -353,13 +329,13 @@ fn collect_decorators(ctx: &ExtractCtx, node: Node) -> Vec<String> {
     decorators
 }
 
-fn extract_docstring(ctx: &ExtractCtx, node: Node) -> Option<String> {
+fn extract_docstring(ctx: &Ctx, node: Node) -> Option<String> {
     let body = node.child_by_field_name("body")?;
     let first = body.child(0)?;
     if first.kind() == "expression_statement" {
         let inner = first.child(0)?;
         if inner.kind() == "string" || inner.kind() == "concatenated_string" {
-            let text = ctx.node_text(inner);
+            let text = ctx.text(inner);
             let trimmed = text
                 .trim_start_matches("\"\"\"")
                 .trim_start_matches("'''")
@@ -375,7 +351,7 @@ fn extract_docstring(ctx: &ExtractCtx, node: Node) -> Option<String> {
 }
 
 fn extract_function_sig(
-    ctx: &ExtractCtx,
+    ctx: &Ctx,
     node: Node,
     is_static: bool,
     is_classmethod: bool,
@@ -400,7 +376,7 @@ fn extract_function_sig(
     let is_async = {
         let cursor = &mut node.walk();
         node.children(cursor)
-            .any(|c| c.kind() == "async" || ctx.node_text(c) == "async")
+            .any(|c| c.kind() == "async" || ctx.text(c) == "async")
     };
     let def_kw = if is_async { "async def" } else { "def" };
 
@@ -410,28 +386,25 @@ fn extract_function_sig(
     }
 }
 
-fn child_by_field_text(ctx: &ExtractCtx, node: Node, field: &str) -> Option<String> {
+fn child_by_field_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {
     node.child_by_field_name(field)
-        .map(|n| ctx.node_text(n).to_string())
+        .map(|n| ctx.text(n).to_string())
 }
 
 /// Build a qualified name from the current scope and a local name.
 ///
 /// Delegates to [`super::util::build_qname`] with the `.` separator.
 #[inline]
-fn build_qualified(scope: &[String], name: &str) -> String {
+fn build_qname(scope: &[String], name: &str) -> String {
     super::util::build_qname(scope, name, ".")
 }
 
 fn extend_scope(scope: &[String], name: &str) -> Vec<String> {
-    let mut s = scope.to_vec();
-    s.push(name.to_string());
-    s
+    super::util::extend_scope(scope, name)
 }
 
-fn hash_node(ctx: &ExtractCtx, node: Node) -> String {
-    let text = ctx.node_text(node);
-    crate::scanner::hash_content(text.as_bytes())
+fn hash_node(ctx: &Ctx, node: Node) -> String {
+    super::util::node_hash(ctx.source, node)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

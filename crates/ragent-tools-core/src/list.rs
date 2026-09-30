@@ -25,9 +25,9 @@ impl Tool for ListTool {
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
         "List directory contents in a tree-like format with depth control. \
-         No parameters are required. Optional parameters: `path` (string) — \
+         No parameters are required. Optional parameters: `path` (string) - \
          the directory to list (default: working directory); `depth` (integer) \
-         — maximum recursion depth (default: 2). Returns a formatted tree \
+         - maximum recursion depth (default: 2). Returns a formatted tree \
          with directories sorted before files. Use `glob` instead if you need \
          pattern matching rather than browsing."
     }
@@ -66,28 +66,38 @@ impl Tool for ListTool {
             |p| resolve_path(&ctx.working_dir, p),
         );
 
-        // C-002: directory listings must stay inside the allowed roots.
-        // Use configured allowed_roots if available, otherwise fall back to working_dir.
-        if ctx.allowed_roots.is_empty() {
-            super::check_path_within_root_cached(&dir, &ctx.working_dir, &ctx.canonical_cache)?;
-        } else {
-            let root_refs: Vec<&std::path::Path> =
-                ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
-            super::check_path_within_any_root_cached(&dir, &root_refs, &ctx.canonical_cache)?;
-        }
+        // C-002 / FUNC-068 (ANTIPAT F-06): directory listings must stay inside
+        // the allowed roots. The helper falls back to `working_dir` when
+        // `allowed_roots` is empty, so the two branches below are equivalent to
+        // the old form.
+        super::check_path_within_allowed_roots_cached(
+            &dir,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
 
         let max_depth = input["depth"].as_u64().unwrap_or(2) as usize;
 
-        if !dir.is_dir() {
-            anyhow::bail!(
-                "Path '{}' is not a directory or does not exist",
-                dir.display()
-            );
-        }
+        // ANTIPAT F-10: the recursive walk (and the leading is_dir probe) is
+        // filesystem-bound; run it on the blocking pool so a large tree does not
+        // pin an async worker (mirrors glob.rs / grep.rs).
+        let walk_dir = dir.clone();
+        let lines = tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
+            if !walk_dir.is_dir() {
+                anyhow::bail!(
+                    "Path '{}' is not a directory or does not exist",
+                    walk_dir.display()
+                );
+            }
 
-        let mut lines = Vec::new();
-        lines.push(format!("{}/", dir.display()));
-        list_recursive(&dir, "", 0, max_depth, &mut lines)?;
+            let mut lines = Vec::new();
+            lines.push(format!("{}/", walk_dir.display()));
+            list_recursive(&walk_dir, "", 0, max_depth, &mut lines)?;
+            Ok(lines)
+        })
+        .await
+        .context("list directory walk task failed")??;
 
         let entry_count = lines.len().saturating_sub(1); // exclude the header line
         Ok(ToolOutput {

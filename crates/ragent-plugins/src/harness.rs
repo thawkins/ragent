@@ -3,16 +3,16 @@
 //! [`test_plugin`] exercises one installed plugin end-to-end **without touching
 //! the live session**:
 //!
-//! 1. discovery — locate the plugin directory in the configured stores
+//! 1. discovery - locate the plugin directory in the configured stores
 //!    (manifest parse only, FR-023);
-//! 2. manifest validation — the parse outcome from discovery;
-//! 3. version check — refuse a plugin declaring a newer host-API version
+//! 2. manifest validation - the parse outcome from discovery;
+//! 3. version check - refuse a plugin declaring a newer host-API version
 //!    (FR-019);
-//! 4. entry execution — checkout a **fresh** sandbox under the entry budget
+//! 4. entry execution - checkout a **fresh** sandbox under the entry budget
 //!    (FR-017) and evaluate the entry point with the host API installed against
 //!    a captured [`HostCalls`] sink (a stubbed host API: registrations and
 //!    messages are collected, never wired into any registry);
-//! 5. per-tool sample invocation — invoke every contributed tool once with
+//! 5. per-tool sample invocation - invoke every contributed tool once with
 //!    schema-valid sample arguments generated from the tool's JSON schema.
 //!
 //! Every step is reported as one `[ ok ]`/`[fail]` line with its wall-clock

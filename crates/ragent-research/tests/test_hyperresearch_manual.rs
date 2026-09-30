@@ -331,8 +331,8 @@ fn manual_case_6_open_access_recovery_is_disclosed() {
         frontmatter.contains("open_access_recovery: true"),
         "frontmatter must disclose OA recovery; frontmatter:\n{frontmatter}"
     );
-    let rendered =
-        ragent_research::render_supporting_file(&doc.item.sources[0]).expect("web source renders");
+    let rendered = ragent_research::render_supporting_file(&doc.item.sources[0], false)
+        .expect("web source renders");
     assert!(
         rendered.contains("https://pmc.ncbi.nlm.nih.gov/articles/PMC123456/"),
         "supporting file must link to recovered OA URL: {rendered}"

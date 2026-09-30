@@ -77,7 +77,7 @@ pub struct MemoryCandidate {
     pub category: String,
     /// Tags for filtering and categorisation.
     pub tags: Vec<String>,
-    /// Confidence score (0.0–1.0).
+    /// Confidence score (0.0-1.0).
     pub confidence: f64,
     /// Source of the extraction (e.g., "auto-extract/bash", "auto-extract/edit").
     pub source: String,
@@ -94,7 +94,7 @@ pub struct MemoryCandidate {
 ///
 /// # Thread safety
 ///
-/// The engine is `Send + Sync` — all mutable state is protected by interior
+/// The engine is `Send + Sync` - all mutable state is protected by interior
 /// mutability (`std::sync::Mutex`).
 pub struct ExtractionEngine {
     /// Configuration controlling extraction behaviour.

@@ -9,6 +9,11 @@ use crate::input::{self, InputAction};
 
 // Prompt optimization templates
 
+/// Number of lines moved per `Shift+Up`/`Shift+Down`, mouse-wheel notch, or
+/// page-scroll key in the message window and the side panels. A single named
+/// step keeps every scroll surface moving by the same amount (LOW-4).
+const SCROLL_STEP_LINES: u16 = 3;
+
 // State types from app/state.rs
 use crate::app::state::{
     App, ContextAction, ContextMenuState, LogLevel, ProviderSetupStep, ScrollbarDragPane,
@@ -97,7 +102,7 @@ impl App {
                             .and_then(|n| n.to_str())
                             .unwrap_or("<unknown>");
                         self.append_assistant_text(&format!(
-                            "From: /config list\n✅ **Restored configuration from `{name}`**\n\n\
+                            "From: /config list\n[ok] **Restored configuration from `{name}`**\n\n\
                              Active config file updated:\n  `{}`",
                             target.display()
                         ));
@@ -117,7 +122,7 @@ impl App {
                             .and_then(|n| n.to_str())
                             .unwrap_or("<unknown>");
                         self.append_assistant_text(&format!(
-                            "From: /config list\n❌ **Failed to restore `{name}`:**\n  {e}"
+                            "From: /config list\n[x] **Failed to restore `{name}`:**\n  {e}"
                         ));
                         self.push_log_no_agent(
                             LogLevel::Error,
@@ -138,7 +143,7 @@ impl App {
         let before_input = self.input.clone();
         let before_cursor = self.input_cursor;
         // Self-heal any selection/menu anchored on a panel that a recent
-        // toggle (e.g. Alt+T) dismissed — the render pass zeroes those
+        // toggle (e.g. Alt+T) dismissed - the render pass zeroes those
         // areas, and a stale reference would trip assert_ui_invariants.
         self.prune_stale_selection();
         // If context menu is open, intercept clicks.
@@ -161,81 +166,94 @@ impl App {
                         .research_view_area
                         .contains((event.column, event.row).into())
                 {
-                    self.scroll_research_view_by(3);
+                    self.scroll_research_view_by(SCROLL_STEP_LINES as i16);
                 } else if self.output_view.is_some()
                     && self
                         .output_view_area
                         .contains((event.column, event.row).into())
                 {
-                    self.scroll_output_view_by(3);
-                } else if self.show_profile
-                    && self.profile_area.contains((event.column, event.row).into())
+                    self.scroll_output_view_by(SCROLL_STEP_LINES as i16);
+                } else {
+                    match self.pane_at(event.column, event.row) {
+                        Some(SelectionPane::Messages) => {
+                            self.scroll_offset = self.scroll_offset.saturating_add(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Log) => {
+                            self.log_scroll_offset =
+                                self.log_scroll_offset.saturating_add(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Profile) => {
+                            self.profile_scroll_offset =
+                                self.profile_scroll_offset.saturating_add(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Tasks) => {
+                            self.tasks_scroll_offset =
+                                self.tasks_scroll_offset.saturating_add(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Memory) => {
+                            self.memory_scroll_offset =
+                                self.memory_scroll_offset.saturating_add(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Telemetry) => {
+                            self.telemetry_scroll_offset =
+                                self.telemetry_scroll_offset.saturating_add(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::ContextPanel) => {
+                            self.context_scroll_offset =
+                                self.context_scroll_offset.saturating_add(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Input) | None => {}
+                    }
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if self.research_view.is_some()
+                    && self
+                        .research_view_area
+                        .contains((event.column, event.row).into())
                 {
-                    self.profile_scroll_offset = self.profile_scroll_offset.saturating_add(3);                  } else if self.show_log && self.log_area.contains((event.column, event.row).into())
-                  {
-                      self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
-                  } else if self.show_tasks_panel
-                      && self.tasks_area.contains((event.column, event.row).into())
-                  {
-                      self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_add(3);                    } else if self.show_memory
-                        && self.memory_area.contains((event.column, event.row).into())
-                    {
-                        self.memory_scroll_offset = self.memory_scroll_offset.saturating_add(3);
-                    } else if self.show_telemetry
-                        && self.telemetry_area.contains((event.column, event.row).into())
-                    {
-                        self.telemetry_scroll_offset =
-                            self.telemetry_scroll_offset.saturating_add(3);
-                    } else if self.show_context_panel
-                        && self.context_panel_area.contains((event.column, event.row).into())
-                    {
-                        self.context_scroll_offset = self.context_scroll_offset.saturating_add(3);
-                    } else if self.message_area.contains((event.column, event.row).into()) {
-                        self.scroll_offset = self.scroll_offset.saturating_add(3);
+                    self.scroll_research_view_by(-(SCROLL_STEP_LINES as i16));
+                } else if self.output_view.is_some()
+                    && self
+                        .output_view_area
+                        .contains((event.column, event.row).into())
+                {
+                    self.scroll_output_view_by(-(SCROLL_STEP_LINES as i16));
+                } else {
+                    match self.pane_at(event.column, event.row) {
+                        Some(SelectionPane::Messages) => {
+                            self.scroll_offset = self.scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Log) => {
+                            self.log_scroll_offset =
+                                self.log_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Profile) => {
+                            self.profile_scroll_offset =
+                                self.profile_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Tasks) => {
+                            self.tasks_scroll_offset =
+                                self.tasks_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Memory) => {
+                            self.memory_scroll_offset =
+                                self.memory_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Telemetry) => {
+                            self.telemetry_scroll_offset =
+                                self.telemetry_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::ContextPanel) => {
+                            self.context_scroll_offset =
+                                self.context_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                        }
+                        Some(SelectionPane::Input) | None => {}
                     }
                 }
-                MouseEventKind::ScrollDown => {
-                    if self.research_view.is_some()
-                        && self
-                            .research_view_area
-                            .contains((event.column, event.row).into())
-                    {
-                        self.scroll_research_view_by(-3);
-                    } else if self.output_view.is_some()
-                        && self
-                            .output_view_area
-                            .contains((event.column, event.row).into())
-                    {
-                        self.scroll_output_view_by(-3);
-                    } else if self.show_profile
-                        && self.profile_area.contains((event.column, event.row).into())
-                    {
-                        self.profile_scroll_offset = self.profile_scroll_offset.saturating_sub(3);
-                    } else if self.show_log
-                        && self.log_area.contains((event.column, event.row).into())
-                    {
-                        self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
-                    } else if self.show_tasks_panel
-                        && self.tasks_area.contains((event.column, event.row).into())
-                    {
-                        self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_sub(3);                    } else if self.show_memory
-                        && self.memory_area.contains((event.column, event.row).into())
-                    {
-                        self.memory_scroll_offset = self.memory_scroll_offset.saturating_sub(3);
-                    } else if self.show_telemetry
-                        && self.telemetry_area.contains((event.column, event.row).into())
-                    {
-                        self.telemetry_scroll_offset =
-                            self.telemetry_scroll_offset.saturating_sub(3);
-                    } else if self.show_context_panel
-                        && self.context_panel_area.contains((event.column, event.row).into())
-                    {
-                        self.context_scroll_offset = self.context_scroll_offset.saturating_sub(3);
-                    } else if self.message_area.contains((event.column, event.row).into()) {
-                        self.scroll_offset = self.scroll_offset.saturating_sub(3);
-                    }
-                }
-                  MouseEventKind::Down(MouseButton::Left) => {
+            }
+            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
+            MouseEventKind::Down(MouseButton::Left) => {
                 let pos = (event.column, event.row);
                 if self.agents_button_area.contains(pos.into()) {
                     if self.active_tasks.is_empty() && self.bg_tasks.is_empty() {
@@ -350,13 +368,13 @@ impl App {
                                                                                                                                                                           if let Ok(handle) = tokio::runtime::Handle::try_current() {
                                                                                                                                                                               let tm = self.session_processor.team_manager.get().cloned();
                                                                                                                                                                               let id = member.agent_id.clone();
-                                                                                                                                                                              let is_suspended = member.status == ragent_team::team::MemberStatus::Suspended;
+                                                                                                                                                                              let is_suspended = member.status == ragent_agent::team::MemberStatus::Suspended;
                                                                                                                                                                               handle.spawn(async move {
                                                                                                                                                                                   if let Some(tm) = tm {
                                                                                                                                                                                       if is_suspended {
-                                                                                                                                                                                          let _ = tm.resume_teammate(&id).await;
+                                                                                                                                                                                          let _ = tm.resume_teammate(&id).await;  // INTENTIONAL: detached teammate control; failure surfaces via team status
                                                                                                                                                                                       } else {
-                                                                                                                                                                                          let _ = tm.suspend_teammate(&id).await;
+                                                                                                                                                                                          let _ = tm.suspend_teammate(&id).await;  // INTENTIONAL: detached teammate control; failure surfaces via team status
                                                                                                                                                                                       }
                                                                                                                                                                                   }
                                                                                                                                                                               });
@@ -385,7 +403,7 @@ impl App {
                                                                                                                                                                   }
                                                                                                                                                               }                                      // Account for border line at row 0
                                       if absolute_row == 2 {
-                                          // Lead row clicked — unfocus any teammate
+                                          // Lead row clicked - unfocus any teammate
                                           self.focused_teammate = None;
                                           self.status = "focus: lead (you)".to_string();
                                           return;
@@ -511,7 +529,7 @@ impl App {
                                 // Accept the selection: this will navigate into directories
                                 // or insert a file path into the input. We do not auto-send
                                 // the message on mouse click; pressing Enter still sends.
-                                let _ = self.accept_file_menu_selection();
+                                let _ = self.accept_file_menu_selection();  // INTENTIONAL: acceptance flag, not a fallible error
                                 return;
                             }
                         } else {
@@ -797,13 +815,13 @@ impl App {
                 && self.session_processor.request_loop_interrupt(sid)
             {
                 self.status =
-                    "loop: interrupt requested — stopping after the current stage…".to_string();
+                    "loop: interrupt requested - stopping after the current stage...".to_string();
             } else {
-                self.status = "halting agent…".to_string();
+                self.status = "halting agent...".to_string();
             }
             self.push_log_no_agent(
                 LogLevel::Warn,
-                "User pressed Esc or Ctrl+X — halting agent".to_string(),
+                "User pressed Esc or Ctrl+X - halting agent".to_string(),
             );
         }
     }
@@ -821,7 +839,7 @@ impl App {
         // Dismiss the transient run-cost banner on any keypress (FR-012).
         // Non-character keys (Esc, arrows, Enter, modifier-only, etc.) are
         // consumed solely to clear the banner.  A plain printable character,
-        // however, is the user starting to type their next message — we clear
+        // however, is the user starting to type their next message - we clear
         // the banner but let the character fall through to normal input
         // processing so the first keystroke is not lost.
         if self.run_cost_banner.take().is_some() {
@@ -832,24 +850,29 @@ impl App {
                 && !key.modifiers.contains(KeyModifiers::ALT);
             // Alt+X (open the stop dialog) and every key while the stop
             // dialog is open fall through to normal processing instead of
-            // being consumed by the banner — the stop confirmation must
+            // being consumed by the banner - the stop confirmation must
             // never appear dead mid-run.
             let is_stop_confirm = self.pending_stop_confirm
                 || (matches!(key.code, KeyCode::Char('x'))
                     && key.modifiers.contains(KeyModifiers::ALT));
-            if !is_plain_char && !is_stop_confirm {
+            // The always-on quit keys (Ctrl+C/Ctrl+D) also fall through, so
+            // quitting works identically while the cost banner is showing
+            // (LOW-6).
+            if !is_plain_char && !is_stop_confirm && !input::is_global_quit_key(key) {
                 return;
             }
         }
-        // Config-save picker intercepts all keys while it is open.
-        if self.config_save_picker.is_some() {
+        // Config-save picker intercepts all keys while it is open - except the
+        // global quit keys, which must keep working from every screen (LOW-6).
+        if self.config_save_picker.is_some() && !input::is_global_quit_key(key) {
             self.handle_config_save_picker_key(key);
             self.assert_ui_invariants();
             self.debug_log_input_transition("key-config-save-picker", &before_input, before_cursor);
             return;
         }
-        // History picker intercepts all keys while it is open
-        if self.history_picker.is_some() {
+        // History picker intercepts all keys while it is open - except the
+        // global quit keys, which must keep working from every screen (LOW-6).
+        if self.history_picker.is_some() && !input::is_global_quit_key(key) {
             self.handle_history_picker_key(key);
             self.assert_ui_invariants();
             self.debug_log_input_transition("key-history-picker", &before_input, before_cursor);
@@ -964,7 +987,7 @@ impl App {
                             self.push_log_no_agent(
                                 LogLevel::Info,
                                 format!(
-                                    "→ {} (focused): {}",
+                                    "-> {} (focused): {}",
                                     member.name,
                                     &text[..text.len().min(60)]
                                 ),
@@ -975,11 +998,11 @@ impl App {
                     // Block sending if no provider/model is configured
                     if self.configured_provider.is_none() {
                         self.status =
-                            "⚠ No provider configured — use /provider to set up".to_string();
+                            "[!] No provider configured - use /provider to set up".to_string();
                         return;
                     }
                     if self.selected_model.is_none() {
-                        self.status = "⚠ No model selected — use /model to choose".to_string();
+                        self.status = "[!] No model selected - use /model to choose".to_string();
                         return;
                     }
                     // FR-002/FR-005/FR-012: while the primary agent is
@@ -1050,43 +1073,55 @@ impl App {
                     }
                 }
                 InputAction::ScrollUp => {
-                    self.scroll_offset = self.scroll_offset.saturating_add(3);
+                    self.scroll_offset = self.scroll_offset.saturating_add(SCROLL_STEP_LINES);
                 }
                 InputAction::ScrollDown => {
-                    self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                    self.scroll_offset = self.scroll_offset.saturating_sub(SCROLL_STEP_LINES);
                 }
                 InputAction::LogScrollUp => {
                     if self.show_log {
-                        self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
+                        self.log_scroll_offset =
+                            self.log_scroll_offset.saturating_add(SCROLL_STEP_LINES);
                     } else if self.show_profile {
-                        self.profile_scroll_offset = self.profile_scroll_offset.saturating_add(3);
+                        self.profile_scroll_offset =
+                            self.profile_scroll_offset.saturating_add(SCROLL_STEP_LINES);
                     } else if self.show_tasks_panel {
-                        self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_add(3);
+                        self.tasks_scroll_offset =
+                            self.tasks_scroll_offset.saturating_add(SCROLL_STEP_LINES);
                     } else if self.show_memory {
                         // Memory panel shares the LogScrollUp / LogScrollDown
                         // key bindings with the other side panels (FR-009).
-                        self.memory_scroll_offset = self.memory_scroll_offset.saturating_add(3);
+                        self.memory_scroll_offset =
+                            self.memory_scroll_offset.saturating_add(SCROLL_STEP_LINES);
                     } else if self.show_telemetry {
-                        self.telemetry_scroll_offset =
-                            self.telemetry_scroll_offset.saturating_add(3);
+                        self.telemetry_scroll_offset = self
+                            .telemetry_scroll_offset
+                            .saturating_add(SCROLL_STEP_LINES);
                     } else if self.show_context_panel {
-                        self.context_scroll_offset = self.context_scroll_offset.saturating_add(3);
+                        self.context_scroll_offset =
+                            self.context_scroll_offset.saturating_add(SCROLL_STEP_LINES);
                     }
                 }
                 InputAction::LogScrollDown => {
                     if self.show_log {
-                        self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
+                        self.log_scroll_offset =
+                            self.log_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
                     } else if self.show_profile {
-                        self.profile_scroll_offset = self.profile_scroll_offset.saturating_sub(3);
+                        self.profile_scroll_offset =
+                            self.profile_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
                     } else if self.show_tasks_panel {
-                        self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_sub(3);
+                        self.tasks_scroll_offset =
+                            self.tasks_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
                     } else if self.show_memory {
-                        self.memory_scroll_offset = self.memory_scroll_offset.saturating_sub(3);
+                        self.memory_scroll_offset =
+                            self.memory_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
                     } else if self.show_telemetry {
-                        self.telemetry_scroll_offset =
-                            self.telemetry_scroll_offset.saturating_sub(3);
+                        self.telemetry_scroll_offset = self
+                            .telemetry_scroll_offset
+                            .saturating_sub(SCROLL_STEP_LINES);
                     } else if self.show_context_panel {
-                        self.context_scroll_offset = self.context_scroll_offset.saturating_sub(3);
+                        self.context_scroll_offset =
+                            self.context_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
                     }
                 }
                 InputAction::ToggleLog => {
@@ -1164,7 +1199,7 @@ impl App {
                             );
                         }
                         Err(e) => {
-                            self.status = format!("⚠ failed to persist YOLO mode: {e}");
+                            self.status = format!("[!] failed to persist YOLO mode: {e}");
                             self.push_log_no_agent(
                                 LogLevel::Error,
                                 format!("YOLO persist failed: {e}"),
@@ -1176,7 +1211,7 @@ impl App {
                 InputAction::ToggleTasksPanel => {
                     // Toggle the TASKS side panel visibility (Alt+T). Implements
                     // FR-002 (toggle) and FR-003 (mutual exclusion of side
-                    // panels — only one of log/profile/tasks is visible at a
+                    // panels - only one of log/profile/tasks is visible at a
                     // time, matching the `/log` and `/profile` slash commands
                     // in app/slash.rs). On hide, any active Tasks-pane text
                     // selection or context menu is cleared.
@@ -1387,7 +1422,7 @@ impl App {
                             );
                         }
                         Err(e) => {
-                            self.status = format!("⚠ failed to persist edit log state: {e}");
+                            self.status = format!("[!] failed to persist edit log state: {e}");
                             self.push_log_no_agent(
                                 LogLevel::Error,
                                 format!("Edit log persist failed: {e}"),
@@ -1417,7 +1452,7 @@ impl App {
                             );
                         }
                         Err(e) => {
-                            self.status = format!("⚠ failed to persist GCF state: {e}");
+                            self.status = format!("[!] failed to persist GCF state: {e}");
                             self.push_log_no_agent(
                                 LogLevel::Error,
                                 format!("GCF persist failed: {e}"),
@@ -1682,11 +1717,11 @@ impl App {
                         let sid = offer.session_id.clone();
                         let processor = self.session_processor.clone();
                         let results = self.rollback_result.clone();
-                        self.status = "rolling back to pre-loop snapshot…".to_string();
+                        self.status = "rolling back to pre-loop snapshot...".to_string();
                         self.push_log_no_agent(
                             LogLevel::Info,
                             format!(
-                                "rollback accepted · restoring {}",
+                                "rollback accepted * restoring {}",
                                 crate::app::helpers::plural(offer.files.len() as u64, "file")
                             ),
                         );
@@ -1694,7 +1729,7 @@ impl App {
                             // The task only logs; the outcome is deposited in
                             // `rollback_result` for `poll_rollback_result` so
                             // the UI status cannot stay stuck at "rolling
-                            // back…" and a failed restore is visible in the
+                            // back..." and a failed restore is visible in the
                             // message window.
                             match processor.rollback_loop(&sid).await {
                                 Ok(outcome) => {
@@ -1731,13 +1766,13 @@ impl App {
                             processor.clear_loop_captures().await;
                         });
                         self.append_assistant_text(
-                            "Rollback declined — all changes made by the loop are kept.",
+                            "Rollback declined - all changes made by the loop are kept.",
                         );
                         self.push_log_no_agent(
                             LogLevel::Info,
                             "rollback declined; changes kept".to_string(),
                         );
-                        self.status = "rollback declined — changes kept".to_string();
+                        self.status = "rollback declined - changes kept".to_string();
                         self.needs_redraw = true;
                     }
                 }
@@ -1750,7 +1785,7 @@ impl App {
                 InputAction::CancelStopAgent => {
                     if self.pending_stop_confirm {
                         self.pending_stop_confirm = false;
-                        self.status = "stop cancelled — agent still running".to_string();
+                        self.status = "stop cancelled - agent still running".to_string();
                     }
                 }
                 // `Clear the input queue?` confirmation dialog (spec `inputqueue`
@@ -1784,7 +1819,7 @@ impl App {
                                 self.select_router_as_active();
                                 self.router_enabled = true;
                                 self.status =
-                                    "✓ Router cluster saved — Model Router active".to_string();
+                                    "[ok] Router cluster saved - Model Router active".to_string();
                                 self.provider_setup = None;
                             }
                             Err(e) => {
@@ -1817,10 +1852,10 @@ impl App {
                         if let Some(ref session_id) = self.session_id.clone() {
                             self.push_log_no_agent(
                                 LogLevel::Info,
-                                "plan rejected — re-delegating".to_string(),
+                                "plan rejected - re-delegating".to_string(),
                             );
                             self.append_assistant_text(
-                                "From: /plan\n🔄 **Plan rejected** — re-delegating to plan agent for revision.\n",
+                                "From: /plan\n[refresh] **Plan rejected** - re-delegating to plan agent for revision.\n",
                             );
                             self.execute_plan_delegation(
                                 session_id,

@@ -1,4 +1,4 @@
-//! `team_cleanup` — Remove a team directory (requires all teammates stopped).
+//! `team_cleanup` - Remove a team directory (requires all teammates stopped).
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -85,7 +85,7 @@ impl Tool for TeamCleanupTool {
             let mut store = TeamStore::load(&team_dir)?;
             let sid = store.config.lead_session_id.clone();
             store.config.status = TeamStatus::Disbanded;
-            store.save().ok(); // Ignore errors — we're about to delete.
+            store.save().ok(); // Ignore errors - we're about to delete.
             sid
         };
 

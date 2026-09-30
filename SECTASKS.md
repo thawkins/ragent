@@ -53,7 +53,7 @@ consolidated here and grouped into milestones and tasks.
 | MS-02 | Host & sandbox escape (High)           | All 25 high findings fixed or formally risk-accepted with rationale       | T-007 .. T-022            |
 | MS-03 | Network & secret hardening (Medium)    | All 54 medium findings fixed or triaged                                   | T-023 .. T-046            |
 | MS-04 | Defence in depth (Low)                 | All 33 low findings fixed or triaged                                      | T-059 .. T-066            |
-| MS-05 | Prevent recurrence                     | Shared guards in place; CI gates enforce them                             | T-063 .. T-067            |
+| MS-05 | Prevent recurrence                     | Shared guards in place; CI gates enforce them                             | T-067 .. T-071            |
 
 ---
 
@@ -443,6 +443,67 @@ and CI fails a build that reintroduces the classes.
 | T-070 | Add CI gates: a `cargo test` suite for the new guards, a check that every file tool calls a containment helper, and a `check-` script asserting no production `.unwrap()`/`expect()` was added on a security-relevant path. |
 | T-071 | Record the accepted-risk register (findings deliberately not fixed) in this file with rationale and review date. |
 
+### MS-05 status (complete)
+
+**T-067 - shared guards.** `crates/ragent-types/src/guard.rs` now owns the single
+implementation of every guard shape the earlier milestones re-derived:
+`reject_option_like`, `is_safe_operand`, `validate_identifier`,
+`validate_relative_component`, `contained_join`, `clamp_retry_after`, and
+`cap_read`, with `MAX_IDENTIFIER_LEN` and `MAX_RETRY_AFTER` as the shared
+constants. The module is re-exported from the `ragent-types` root and as
+`ragent_tools_core::guard` for the tools crates. Migrated call sites:
+`ragent-tools-vcs::git::reject_option_like` (all ~20 VCS call sites),
+`ragent-plugins::add::is_safe_git_argument`, and
+`ragent-bench::data::contained_join`. Regression suite:
+`crates/ragent-types/tests/test_shared_guards.rs` (15 tests).
+
+**T-068 - git-invocation guard.** Every VCS git path already inserts `--` before
+positional arguments and rejects a leading `-`; the rule itself now lives in
+`ragent_types::guard` and is shared with the plugin `git+` parser. The
+duplication gate (`scripts/check-vcs-duplication.sh`) fails a build that
+re-derives the leading-dash check or drops the delegation.
+
+**T-069 - one redaction implementation.** `ragent-agent`, `ragent-storage`, and
+`ragent-tools-core` re-export `ragent_types::sanitize` rather than holding a
+second registry, and every disclosure surface (`GET /config`, telemetry
+attributes, log lines, SSE payloads, tool output) calls into it. `Event` no
+longer derives `Debug`: a hand-written impl renders through `DebugProxy`, which
+reports credential-bearing fields (`CopilotDeviceFlowComplete.token`,
+`CopilotDeviceFlowStartResult.device_code`) as presence flags and then applies
+the shared `redact_secrets` pass to the whole rendering, so a
+`tracing::debug!("{event:?}")` can no longer print an OAuth credential.
+Regression suite: `crates/ragent-types/tests/test_unified_redaction.rs`
+(4 tests).
+
+**T-070 - CI gates.** Four script gates, each with a `--self-test` that proves it
+fails on a seeded violation, wired into `.github/workflows/ci.yml` (job
+`security-guards`) and `pre-flight.sh`:
+
+| Gate | Script / command | Asserts |
+| ---- | ---------------- | ------- |
+| Redaction tests | `cargo test -p ragent-types --test test_unified_redaction` | one registry, masked `Event` `Debug` |
+| File-tool containment | `scripts/check-file-tool-containment.sh` | every registered file tool calls a `check_path_within_*` helper |
+| Panic-free production paths | `scripts/check-security-unwraps.sh` | no file exceeds its recorded `.unwrap()`/`.expect()` baseline |
+| One guard per rule | `scripts/check-shared-guards.sh` | no crate re-defines a shared guard or a second secret registry |
+| VCS git-argument rule | `scripts/check-vcs-duplication.sh` | the leading-dash git check is not re-derived |
+
+The shared-guard and redaction suites also run through the workspace test job
+(`cargo test -p ragent-types --test test_shared_guards --test
+test_unified_redaction`).
+
+The panic-free gate is a baseline gate: `scripts/security-unwrap-baseline.txt`
+records the current per-file count of panicking calls (362 across 90 files) and
+the gate fails any file that exceeds it. An intentional call can be exempted
+with a same-line `// no-panic-ok: <reason>` comment.
+
+**T-071 - accepted-risk register.** The register below now records the
+grandfathered sites instead of claiming an empty list.
+
+Verification at the time of writing: `cargo fmt --all -- --check` clean,
+`cargo check --workspace --all-targets` clean, `cargo clippy --workspace
+--all-targets` clean, all four script gates green with their self-tests, and
+`cargo test --workspace` green (10,154 tests passed, 0 failed).
+
 ---
 
 ## Finding → Task index
@@ -571,5 +632,16 @@ and CI fails a build that reintroduces the classes.
 
 ## Accepted-risk register
 
-Empty. Every finding above is currently planned for remediation. Record any
-deferred item here with a rationale, compensating control, and review date.
+Findings that are deliberately not fixed, with the rationale, the compensating
+control that keeps the class reachable-but-bounded, and the date to review the
+decision. An entry here is a decision, not an omission: anything not listed has
+been remediated.
+
+**Register last reviewed: 2026-09-28** (MS-05 T-071). Next review: 2027-03-28
+(six months), or on any change to the listed compensating control.
+
+| # | Item | Finding class | Rationale | Compensating control | Review |
+| - | ---- | ------------- | --------- | -------------------- | ------ |
+| A-1 | Panicking `.unwrap()`/`.expect()` grandfathered on production paths | SEC-ragent-types-003/005, SEC-ragent-llm-006 and peers | 362 call sites across 90 files. Each is on a path that was already audited and judged unreachable, and rewriting all of them is a behavioural change far larger than the risk it removes. The risk that matters is a *new* one. | `scripts/check-security-unwraps.sh` records the per-file count in `scripts/security-unwrap-baseline.txt` and fails any file that exceeds it. A deliberate new call must carry a same-line `// no-panic-ok: <reason>` comment, which makes it reviewable. | 2027-03-28 |
+| A-2 | `ragent-bench` and `ragent-tools-vcs` keep a crate-local guard name | SEC-ragent-bench-004, SEC-ragent-tools-vcs-001/002 | Renaming `contained_join` / `reject_option_like` at every call site would touch ~20 files for no behavioural gain. The rule itself is shared, which is what MS-05 asked for. | Both functions are thin adapters that call `ragent_types::guard` in their body. `scripts/check-shared-guards.py` allowlists the two files *only while the delegation call is present*, and `scripts/check-vcs-duplication.sh` fails if the leading-dash check is re-derived. | 2027-03-28 |
+| A-3 | `browser`/`mf_screenshot` remain non-functional in the Rust runtime | SEC-tools-extended-001 (partially) | The integrated runtime has no headless browser engine; the navigation guard is enforced at the tool boundary but the tool itself cannot run. | The `browser` `open` action validates the scheme and applies the SSRF host check before any navigation, and `mf_screenshot` returns an explicit error recommending `mf_fetch`. | 2027-03-28 |

@@ -40,9 +40,9 @@ impl AttachmentInfo {
 /// Result of classifying a prompt.
 #[derive(Debug, Clone)]
 pub struct ClassificationResult {
-    /// Individual dimension scores (0.0–1.0), indexed by dimension number (0–14).
+    /// Individual dimension scores (0.0-1.0), indexed by dimension number (0-14).
     pub dimension_scores: [f64; 15],
-    /// Composite weighted score (0.0–1.0).
+    /// Composite weighted score (0.0-1.0).
     pub composite_score: f64,
     /// Selected routing tier.
     pub tier: Tier,
@@ -233,8 +233,8 @@ impl PromptClassifier {
         // Normalise by active weights (sparse average).
         let mut composite = weighted_sum / active_weight_sum;
 
-        // Dimension-density boost: more active dimensions → higher score.
-        // 1-2 active dimensions → no boost; 3+ → gradual boost up to 15%.
+        // Dimension-density boost: more active dimensions -> higher score.
+        // 1-2 active dimensions -> no boost; 3+ -> gradual boost up to 15%.
         let density_boost = if active_count <= 2 {
             1.0
         } else {
@@ -263,10 +263,10 @@ impl PromptClassifier {
     // Dimension Scorers
     // ─────────────────────────────────────────────────────────────────────
 
-    /// Dimension 1: Token count — length of the message.
+    /// Dimension 1: Token count - length of the message.
     ///
-    /// Short prompts (<50 chars) → low score; very long prompts (>5000 chars)
-    /// → high score. Uses character-count buckets as a proxy for token count.
+    /// Short prompts (<50 chars) -> low score; very long prompts (>5000 chars)
+    /// -> high score. Uses character-count buckets as a proxy for token count.
     fn score_token_count(prompt: &str) -> f64 {
         let len = prompt.len();
         match len {
@@ -280,7 +280,7 @@ impl PromptClassifier {
         }
     }
 
-    /// Dimension 2: Vocabulary complexity — ratio of long/unique words.
+    /// Dimension 2: Vocabulary complexity - ratio of long/unique words.
     ///
     /// Measures the proportion of words with 8+ characters and the
     /// type-token ratio (unique words / total words). Short prompts
@@ -316,7 +316,7 @@ impl PromptClassifier {
         (raw * length_penalty).clamp(0.0, 1.0)
     }
 
-    /// Dimension 3: Syntax complexity — depth of nested clauses and conditionals.
+    /// Dimension 3: Syntax complexity - depth of nested clauses and conditionals.
     ///
     /// Counts commas, semicolons, parentheses, and conditional keywords as
     /// proxies for syntactic complexity.
@@ -472,7 +472,7 @@ impl PromptClassifier {
         (domain_hits as f64 / total_domains as f64).clamp(0.0, 1.0)
     }
 
-    /// Dimension 4: Domain specificity — presence of specialised terminology.
+    /// Dimension 4: Domain specificity - presence of specialised terminology.
     ///
     /// Checks for keywords from medical, legal, financial, engineering,
     /// scientific, and software engineering domains.
@@ -503,7 +503,7 @@ impl PromptClassifier {
         (count / 4.0).min(1.0)
     }
 
-    /// Dimension 5: Ambiguity — open-endedness of the request.
+    /// Dimension 5: Ambiguity - open-endedness of the request.
     pub fn score_ambiguity(prompt: &str) -> f64 {
         Self::score_ambiguity_lower(&prompt.to_lowercase())
     }
@@ -539,7 +539,7 @@ impl PromptClassifier {
         pronoun_density.mul_add(3.0, history_factor).clamp(0.0, 1.0)
     }
 
-    /// Dimension 6: Context dependency — reliance on prior conversation.
+    /// Dimension 6: Context dependency - reliance on prior conversation.
     pub fn score_context_dependency(prompt: &str, history: &str) -> f64 {
         Self::score_context_dependency_lower(&prompt.to_lowercase(), &history.to_lowercase())
     }
@@ -572,7 +572,7 @@ impl PromptClassifier {
         (count / 2.5).min(1.0)
     }
 
-    /// Dimension 7: Reasoning depth — number of logical inference steps required.
+    /// Dimension 7: Reasoning depth - number of logical inference steps required.
     pub fn score_reasoning_depth(prompt: &str) -> f64 {
         Self::score_reasoning_depth_lower(&prompt.to_lowercase())
     }
@@ -601,7 +601,7 @@ impl PromptClassifier {
         (count / 3.0).min(1.0)
     }
 
-    /// Dimension 8: Creativity level — degree of original generation needed.
+    /// Dimension 8: Creativity level - degree of original generation needed.
     pub fn score_creativity_level(prompt: &str) -> f64 {
         Self::score_creativity_level_lower(&prompt.to_lowercase())
     }
@@ -630,7 +630,7 @@ impl PromptClassifier {
         (count / 3.0).min(1.0)
     }
 
-    /// Dimension 9: Emotional complexity — nuance in tone or sentiment.
+    /// Dimension 9: Emotional complexity - nuance in tone or sentiment.
     pub fn score_emotional_complexity(prompt: &str) -> f64 {
         Self::score_emotional_complexity_lower(&prompt.to_lowercase())
     }
@@ -664,7 +664,7 @@ impl PromptClassifier {
         (count / 3.0).min(1.0)
     }
 
-    /// Dimension 10: Multimodality — references to images, files, or non-text content.
+    /// Dimension 10: Multimodality - references to images, files, or non-text content.
     pub fn score_multimodality(prompt: &str) -> f64 {
         Self::score_multimodality_lower(&prompt.to_lowercase())
     }
@@ -673,7 +673,7 @@ impl PromptClassifier {
     /// pre-lowered for keyword search).
     fn score_instruction_complexity(prompt: &str, lower: &str) -> f64 {
         let numbered = regex_count(r"(?m)^\s*\d+[\.\)]", prompt);
-        let bullets = regex_count(r"(?m)^\s*[-•*]\s", prompt);
+        let bullets = regex_count(r"(?m)^\s*[-**]\s", prompt);
         let constraint_markers = [
             "must",
             "should",
@@ -727,7 +727,7 @@ impl PromptClassifier {
         (count / 3.0).min(1.0)
     }
 
-    /// Dimension 12: Knowledge recency — need for up-to-date information.
+    /// Dimension 12: Knowledge recency - need for up-to-date information.
     pub fn score_knowledge_recency(prompt: &str) -> f64 {
         Self::score_knowledge_recency_lower(&prompt.to_lowercase())
     }
@@ -814,7 +814,23 @@ impl PromptClassifier {
         let latex_score = (latex_count / 2.0).min(1.0);
 
         let eq_markers = [
-            "∫", "∑", "∏", "√", "π", "∞", "∀", "∃", "⇒", "⇔", "≤", "≥", "≠", "∈", "⊂", "∪", "∩",
+            "integral",
+            "sum",
+            "prod",
+            "sqrt",
+            "pi",
+            "infinity",
+            "forall",
+            "exists",
+            "=>",
+            "<=>",
+            "<=",
+            ">=",
+            "!=",
+            "in",
+            "subset",
+            "union",
+            "intersect",
         ];
         let eq_count = count_keywords_lower(lower, &eq_markers) as f64;
         let eq_score = (eq_count / 2.0).min(1.0);
@@ -843,12 +859,12 @@ impl PromptClassifier {
             .clamp(0.0, 1.0)
     }
 
-    /// Dimension 14: Mathematical complexity — formal mathematics, proofs, calculations.
+    /// Dimension 14: Mathematical complexity - formal mathematics, proofs, calculations.
     pub fn score_mathematical_complexity(prompt: &str) -> f64 {
         Self::score_mathematical_complexity_lower(&prompt.to_lowercase())
     }
 
-    /// Dimension 15: Image attachment — whether the prompt contains actual
+    /// Dimension 15: Image attachment - whether the prompt contains actual
     /// image or video attachments that require a vision-capable model.
     ///
     /// Unlike dimension 10 (`multimodality`), which detects *textual references*
@@ -858,10 +874,10 @@ impl PromptClassifier {
     /// `Capabilities::vision == true`.
     ///
     /// Scoring:
-    /// - 0 images, 0 videos → 0.0
-    /// - 1 image → 0.5
-    /// - 2+ images → 1.0
-    /// - Any video → 1.0
+    /// - 0 images, 0 videos -> 0.0
+    /// - 1 image -> 0.5
+    /// - 2+ images -> 1.0
+    /// - Any video -> 1.0
     fn score_image_attachment(attachments: &AttachmentInfo) -> f64 {
         if attachments.video_count > 0 {
             return 1.0;
@@ -873,7 +889,7 @@ impl PromptClassifier {
         }
     }
 
-    /// Dimension 15: Image attachment — public convenience wrapper.
+    /// Dimension 15: Image attachment - public convenience wrapper.
     pub fn score_image_attachment_pub(attachments: &AttachmentInfo) -> f64 {
         Self::score_image_attachment(attachments)
     }

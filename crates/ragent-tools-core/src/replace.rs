@@ -39,9 +39,9 @@
 //! [`find_replacement_cascade`] runs the matchers as a progressive fallback
 //! chain:
 //!
-//! 1. **Exact** — strict byte-for-byte, unique match required.
-//! 2. **Flexible** — whitespace-collapsed matching (as above).
-//! 3. **Indent-normalised** — per-line comparison with leading whitespace
+//! 1. **Exact** - strict byte-for-byte, unique match required.
+//! 2. **Flexible** - whitespace-collapsed matching (as above).
+//! 3. **Indent-normalised** - per-line comparison with leading whitespace
 //!    stripped; the replacement re-applies the line-by-line indentation found
 //!    in the file, so a needle composed with invented indentation still
 //!    produces correctly-indented output.
@@ -133,12 +133,12 @@ pub fn decode_escapes(raw: &str) -> String {
 ///
 /// Matching runs in two lanes:
 ///
-/// 1. **Exact lane** — if the (escape-decoded) needle occurs exactly once
+/// 1. **Exact lane** - if the (escape-decoded) needle occurs exactly once
 ///    byte-for-byte, that match wins and behaviour is identical to
 ///    [`find_exact_replacement_range`]. If it occurs zero times, the general
 ///    lane runs; if it occurs more than once, the general lane must agree on
 ///    the same occurrence or the edit is rejected as ambiguous.
-/// 2. **General lane** — whitespace-flexible scan. Every run of whitespace in
+/// 2. **General lane** - whitespace-flexible scan. Every run of whitespace in
 ///    the decoded needle matches a non-empty run of whitespace in the content
 ///    (spaces, tabs, newlines, CRs, form feeds, vertical tabs collapsed), and
 ///    non-whitespace characters must match exactly.
@@ -152,7 +152,7 @@ pub fn decode_escapes(raw: &str) -> String {
 /// - **Escape sequences**: All standard escapes decoded before matching
 ///
 /// Returns `(start, end, new_str)` on success, where `[start, end)` is the
-/// byte range **in the original content** that matched — its length may differ
+/// byte range **in the original content** that matched - its length may differ
 /// from the needle's length due to whitespace collapsing.
 ///
 /// # Errors
@@ -177,9 +177,10 @@ pub fn find_flexible_replacement_range(
     } else {
         2 + exact_iter.count()
     };
-    if exact_count == 1 {
-        let (start, _) = first_exact.unwrap();
-        return Ok((start, start + decoded.len(), new_str.to_string()));
+    if let Some((start, _)) = first_exact {
+        if second_exact.is_none() {
+            return Ok((start, start + decoded.len(), new_str.to_string()));
+        }
     }
 
     // ── Lane 2: whitespace-flexible general scan ──────────────────────────
@@ -242,7 +243,7 @@ pub fn find_flexible_replacement_range(
             while p < pat_folded.len() {
                 let (pc, is_run, pat_run_newline) = pat_folded[p];
                 if is_run {
-                    // A folded whitespace run must consume ≥1 whitespace chars.
+                    // A folded whitespace run must consume >=1 whitespace chars.
                     let start_h = h;
                     while h < hay.len() && hay[h].is_whitespace() {
                         h += 1;
@@ -376,7 +377,7 @@ pub fn format_match_failure(diag: &FindDiag, path: &std::path::Path) -> String {
         FindDiagKind::NotFound => format!(
             "old_string not found in {}. Matching is byte-for-byte exact: \
              indentation, whitespace, and line endings must match precisely. \
-             Re-read the file and include 3–5 lines of context around the \
+             Re-read the file and include 3-5 lines of context around the \
              change point.",
             path.display(),
         ),
@@ -469,7 +470,7 @@ pub enum CascadeMatch {
 /// Find the indented block in `content` whose per-line, leading-whitespace-
 /// stripped form equals the stripped lines of `needle`.
 ///
-/// Returns `(start, end, start_line, end_line)` — byte range in `content` and
+/// Returns `(start, end, start_line, end_line)` - byte range in `content` and
 /// the inclusive line index range that matched. Blank needle lines are
 /// skipped when comparing, mirroring the "blank lines carry no indentation"
 /// intuition of the tool documentation.
@@ -538,7 +539,7 @@ fn indent_reapply(
             let cl_trimmed = cl_body.trim();
             if !cl_trimmed.is_empty() {
                 // The needle claimed this line is blank but the file line is
-                // not — indentation transfer would be misleading.
+                // not - indentation transfer would be misleading.
                 return None;
             }
             out.push_str(nl);
@@ -575,7 +576,7 @@ fn indent_reapply(
     //
     // The comparison is CRLF-aware: a CRLF final line leaves a lone '\r' as
     // the last byte of `out`, which the plain ends_with('\n') checks cannot
-    // see — strip it before comparing and truncate the "\r\n" pair when the
+    // see - strip it before comparing and truncate the "\r\n" pair when the
     // caller's `new_str` carries no trailing newline.
     let ends_with_newline = out.ends_with("\r\n") || out.ends_with('\n');
     if new_str.ends_with('\n') && !ends_with_newline {
@@ -590,7 +591,7 @@ fn indent_reapply(
     Some(out)
 }
 
-/// Run the exact → flexible → indent-normalised cascade.
+/// Run the exact -> flexible -> indent-normalised cascade.
 ///
 /// The first lane producing exactly one match wins. If every lane fails, the
 /// *best* failure is reported: a multiple-match beat (lower lane wins over
@@ -623,7 +624,7 @@ pub fn find_replacement_cascade(content: &str, needle: &str, new_str: &str) -> C
     // ── Lane 2: flexible (whitespace-collapsed) ───────────────────────────
     // Run with an empty replacement so the returned byte range is the raw
     // matched span; substitute the caller's `new_str` on success. The CRLF
-    // restoration must be applied here too — the call above routes through
+    // restoration must be applied here too - the call above routes through
     // the flexible matcher with an empty replacement, so its internal
     // restoration is a no-op for the caller's `new_str`.
     match find_flexible_replacement_range(content, needle, "") {
@@ -680,7 +681,7 @@ pub fn find_replacement_cascade(content: &str, needle: &str, new_str: &str) -> C
 /// (non-blank, trim_start-normalised) lines of `needle`.
 ///
 /// Returns `Some((first_line_1based, line_count, matched, total, snippet))`
-/// when at least `matched / total ≥ 0.75`; otherwise `None`. The snippet is
+/// when at least `matched / total >= 0.75`; otherwise `None`. The snippet is
 /// the raw text of that window, capped at 8 lines for display.
 #[must_use]
 pub fn nearest_window(content: &str, needle: &str) -> Option<(usize, usize, usize, usize, String)> {
@@ -707,12 +708,12 @@ pub fn nearest_window(content: &str, needle: &str) -> Option<(usize, usize, usiz
     }
     let Some((start_idx, matched)) = best else {
         // No windows could be scored (content shorter than one window) or the
-        // near-miss quality is below the 75% threshold — do not hint at
+        // near-miss quality is below the 75% threshold - do not hint at
         // unrelated file text the caller cannot act on.
         return None;
     };
     if matched * 4 < total * 3 {
-        return None; // below 75 % — not a near-miss, do not hint
+        return None; // below 75 % - not a near-miss, do not hint
     }
     let snippet: String = content_lines
         .iter()
@@ -724,7 +725,7 @@ pub fn nearest_window(content: &str, needle: &str) -> Option<(usize, usize, usiz
     Some((start_idx + 1, window, matched, total, snippet))
 }
 
-/// Format the "old_string not found … near-miss at line N" hint for a failed
+/// Format the "old_string not found ... near-miss at line N" hint for a failed
 /// match, using [`nearest_window`] to locate the most similar block.
 ///
 /// `prefix` is the leading message: the path (and edit index for

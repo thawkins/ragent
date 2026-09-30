@@ -1,26 +1,13 @@
-//! GitHub issue tools — list, get, create, comment, and close issues.
+//! GitHub issue tools - list, get, create, comment, and close issues.
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use crate::github::GitHubClient;
+use super::helpers::{detect_repo, make_client};
+use crate::limits::{DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, NOTES_PER_PAGE};
+use crate::vocab::normalize_issue_state;
 
 use super::{Tool, ToolContext, ToolOutput};
-
-/// Returns the authenticated `GitHubClient` or a human-readable error.
-fn make_client() -> Result<GitHubClient> {
-    GitHubClient::new().context("GitHub not authenticated. Run /github login to authenticate.")
-}
-
-/// Resolve owner/repo from the working directory or return an error.
-fn detect_repo(ctx: &ToolContext) -> Result<(String, String)> {
-    GitHubClient::detect_repo(&ctx.working_dir).ok_or_else(|| {
-        anyhow::anyhow!(
-            "Could not detect GitHub repository from git remote. \
-             Ensure you're in a git repo with a GitHub remote."
-        )
-    })
-}
 
 // ---------------------------------------------------------------------------
 // 1. GithubListIssuesTool
@@ -38,10 +25,12 @@ impl Tool for GithubListIssuesTool {
     fn description(&self) -> &'static str {
         "List GitHub issues in the repository detected from the current working directory. \
          No required parameters. 'state' (enum 'open', 'closed', 'all', default 'open') filters by issue state; \
+         both 'open' and GitLab's 'opened' spelling are accepted. \
          'labels' (string) is a comma-separated list of label names to filter by; \
          'limit' (integer, default 20, max 100) caps the number of issues returned. \
          Requires a configured GitHub authentication (see /github login). \
-         Common gotcha: this only works when the working directory is inside a git repo with a GitHub remote; labels must already exist in the repository."
+         Common gotcha: this only works when the working directory is inside a git repo with a GitHub remote; labels must already exist in the repository. \
+         Cross-provider note: GitHub calls the item id 'number' where GitLab uses 'iid'."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -52,7 +41,7 @@ impl Tool for GithubListIssuesTool {
                 "state": {
                     "type": "string",
                     "enum": ["open", "closed", "all"],
-                    "description": "Filter by issue state"
+                    "description": "Filter by issue state (GitLab's 'opened' is also accepted)"
                 },
                 "labels": {
                     "type": "string",
@@ -74,8 +63,11 @@ impl Tool for GithubListIssuesTool {
         let client = make_client()?;
         let (owner, repo) = detect_repo(ctx)?;
 
-        let state = input["state"].as_str().unwrap_or("open");
-        let limit = input["limit"].as_u64().unwrap_or(20).min(100);
+        let state = normalize_issue_state(input["state"].as_str().unwrap_or("open"));
+        let limit = input["limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_PAGE_LIMIT)
+            .min(MAX_PAGE_LIMIT);
 
         let mut path = format!("/repos/{owner}/{repo}/issues?state={state}&per_page={limit}");
         if let Some(labels) = input["labels"].as_str()
@@ -166,7 +158,9 @@ impl Tool for GithubGetIssueTool {
             .get(&format!("/repos/{owner}/{repo}/issues/{number}"))
             .await?;
         let comments_val = client
-            .get(&format!("/repos/{owner}/{repo}/issues/{number}/comments"))
+            .get(&format!(
+                "/repos/{owner}/{repo}/issues/{number}/comments?per_page={NOTES_PER_PAGE}"
+            ))
             .await?;
 
         let title = issue["title"].as_str().unwrap_or("(no title)");
@@ -202,12 +196,17 @@ impl Tool for GithubGetIssueTool {
         md.push_str(&format!("\n## Body\n\n{body}\n"));
 
         if let Some(comments) = comments_val.as_array() {
-            let shown = comments.iter().take(10);
+            let notes_cap = NOTES_PER_PAGE as usize;
+            let shown = comments.iter().take(notes_cap);
             let total = comments.len();
             if total > 0 {
                 md.push_str(&format!(
                     "\n## Comments ({total}{})\n",
-                    if total > 10 { ", showing first 10" } else { "" }
+                    if total > notes_cap {
+                        ", showing first 10"
+                    } else {
+                        ""
+                    }
                 ));
                 for comment in shown {
                     let commenter = comment["user"]["login"].as_str().unwrap_or("?");
@@ -471,7 +470,7 @@ impl Tool for GithubCloseIssueTool {
 /// Percent-encode a query-parameter value (FUNC-063).
 ///
 /// Delegates to the shared byte-wise encoder so non-ASCII labels encode as
-/// UTF-8 (e.g. `é` -> `%C3%A9`) rather than as a single wrong `%XX`.
+/// UTF-8 (e.g. `e` -> `%C3%A9`) rather than as a single wrong `%XX`.
 fn urlencoded(s: &str) -> String {
     crate::percent::encode_component(s)
 }

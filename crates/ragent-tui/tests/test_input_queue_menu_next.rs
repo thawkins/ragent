@@ -256,7 +256,7 @@ async fn test_next_row_defers_while_compaction_owns_the_turn() {
         !app.queue_next_pending,
         "FR-030: a compaction window refuses (no boundary to defer to)"
     );
-    assert_eq!(app.status, "queue: next deferred — compaction in progress");
+    assert_eq!(app.status, "queue: next deferred - compaction in progress");
 }
 
 #[tokio::test]
@@ -329,7 +329,7 @@ async fn test_next_row_with_empty_queue_reports_nothing_to_run() {
         0,
         "an empty queue has nothing to dispatch"
     );
-    assert_eq!(app.status, "queue: nothing to run — the queue is empty");
+    assert_eq!(app.status, "queue: nothing to run - the queue is empty");
 }
 
 #[tokio::test]

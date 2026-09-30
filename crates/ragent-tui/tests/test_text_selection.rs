@@ -10,6 +10,7 @@ use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::{Terminal, backend::TestBackend};
 
+use ragent_agent::team::{TeamConfig, TeamMember};
 use ragent_agent::{
     agent,
     event::EventBus,
@@ -20,7 +21,6 @@ use ragent_agent::{
     storage::Storage,
     tool,
 };
-use ragent_team::team::{TeamConfig, TeamMember};
 use ragent_tui::App;
 use ragent_tui::app::{
     ContextAction, ContextMenuState, OutputViewState, OutputViewTarget, ScreenMode, SelectionPane,

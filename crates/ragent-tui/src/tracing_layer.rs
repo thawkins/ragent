@@ -19,10 +19,10 @@ pub struct TuiLogRecord {
     pub message: String,
 }
 
-/// Receiving end of the tracing → TUI channel.
+/// Receiving end of the tracing -> TUI channel.
 pub type TuiLogReceiver = mpsc::Receiver<TuiLogRecord>;
 
-/// Sending end of the tracing → TUI channel.
+/// Sending end of the tracing -> TUI channel.
 type TuiLogSender = mpsc::SyncSender<TuiLogRecord>;
 
 /// Create a matched (sender, receiver) pair for the TUI tracing layer.
@@ -98,14 +98,14 @@ where
             format!("[{}] {}", target, visitor.message)
         };
 
-        // Append endpoint info if present — this is how we show the full
+        // Append endpoint info if present - this is how we show the full
         // Azure AI Foundry URL in the TUI log panel.
         if let Some(endpoint) = visitor.endpoint {
-            message.push_str(&format!(" → {}", endpoint));
+            message.push_str(&format!(" -> {}", endpoint));
         }
 
-        // Non-blocking send — drop the record if the channel is full rather
+        // Non-blocking send - drop the record if the channel is full rather
         // than stalling the async runtime.
-        let _ = self.tx.try_send(TuiLogRecord { level, message });
+        let _ = self.tx.try_send(TuiLogRecord { level, message }); // INTENTIONAL: channel send on a closed receiver is benign
     }
 }

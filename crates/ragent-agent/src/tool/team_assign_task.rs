@@ -1,4 +1,4 @@
-//! `team_assign_task` — Lead assigns a specific task to a specific teammate.
+//! `team_assign_task` - Lead assigns a specific task to a specific teammate.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -75,7 +75,7 @@ impl Tool for TeamAssignTaskTool {
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
-        // Resolve name → agent ID.
+        // Resolve name -> agent ID.
         let agent_id = super::team_message::resolve_agent_id(&team_dir, to)?;
 
         // Verify the agent exists in the team config and is not dead.
@@ -106,13 +106,13 @@ impl Tool for TeamAssignTaskTool {
         // M4-T2: notify the assigned teammate via their mailbox so they pick
         // up the task without having to poll. This is a best-effort delivery:
         // a failure here does not roll back the assignment (the task is
-        // already InProgress on disk) — we record the notification outcome
+        // already InProgress on disk) - we record the notification outcome
         // in the tool output so the lead has visibility.
         let notification = match Mailbox::open(&team_dir, &agent_id) {
             Ok(mailbox) => {
                 let content = format!(
                     "Task '{}' has been assigned to you by the lead.\nTitle: {}\n\
-                     Call `team_task_claim` is not needed — the task is already InProgress and \
+                     Call `team_task_claim` is not needed - the task is already InProgress and \
                      assigned to you. Use `team_task_complete` when done.",
                     task.id, task.title
                 );

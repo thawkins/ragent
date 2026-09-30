@@ -684,7 +684,7 @@ async fn test_router_setup_empty_state_when_no_providers() {
     assert!(app.provider_setup.is_none());
     assert_eq!(
         app.status,
-        "[warn] No concrete providers — configure one first"
+        "[warn] No concrete providers - configure one first"
     );
 }
 

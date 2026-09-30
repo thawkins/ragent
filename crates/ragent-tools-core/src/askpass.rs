@@ -28,7 +28,7 @@
 //! 5. [`AskPassBroker::stop`] cancels the watcher and removes temp files once
 //!    the command finishes.
 //!
-//! On non-POSIX systems (Windows) this module is inert — [`AskPassBroker`]
+//! On non-POSIX systems (Windows) this module is inert - [`AskPassBroker`]
 //! is never constructed and sudo is not expected to be present.
 
 use std::collections::HashSet;
@@ -98,7 +98,7 @@ impl AskPassBroker {
         let helper_path = base.join(format!("ragent_askpass_{stamp}.sh"));
         if let Err(e) = std::fs::write(&helper_path, HELPER_BODY) {
             tracing::warn!(error = %e, path = %helper_path.display(), "askpass: failed to write helper");
-            let _ = std::fs::remove_dir_all(&request_dir);
+            let _ = std::fs::remove_dir_all(&request_dir); // INTENTIONAL: best-effort temp cleanup
             return None;
         }
 
@@ -109,8 +109,8 @@ impl AskPassBroker {
                 std::fs::set_permissions(&helper_path, std::fs::Permissions::from_mode(0o700))
             {
                 tracing::warn!(error = %e, "askpass: failed to chmod helper");
-                let _ = std::fs::remove_file(&helper_path);
-                let _ = std::fs::remove_dir_all(&request_dir);
+                let _ = std::fs::remove_file(&helper_path); // INTENTIONAL: best-effort temp cleanup
+                let _ = std::fs::remove_dir_all(&request_dir); // INTENTIONAL: best-effort temp cleanup
                 return None;
             }
         }
@@ -161,14 +161,8 @@ impl AskPassBroker {
         if let Some(handle) = self.watcher {
             handle.abort();
         }
-        let _ = std::fs::remove_file(&self.helper_path);
-        let _ = std::fs::remove_dir_all(&self.request_dir);
-    }
-
-    /// Absolute path to the request directory (mainly useful for logging).
-    #[allow(dead_code)] // kept for test diagnostics; used by the inline askpass tests
-    pub(crate) fn request_dir(&self) -> &Path {
-        &self.request_dir
+        let _ = std::fs::remove_file(&self.helper_path); // INTENTIONAL: best-effort temp cleanup
+        let _ = std::fs::remove_dir_all(&self.request_dir); // INTENTIONAL: best-effort temp cleanup
     }
 }
 
@@ -277,7 +271,7 @@ async fn publish_question_and_wait(
                         if r.is_empty() || r == DISMISS_MARKER {
                             write_cancel(&response_path);
                         } else {
-                            let _ = std::fs::write(&response_path, r.as_bytes());
+                            let _ = std::fs::write(&response_path, r.as_bytes()); // INTENTIONAL: best-effort response write
                         }
                         return;
                     }
@@ -297,7 +291,7 @@ async fn publish_question_and_wait(
 /// Write an empty response file so the helper prints nothing and exits
 /// non-zero (sudo then reports a clean authentication failure).
 fn write_cancel(response_path: &Path) {
-    let _ = std::fs::write(response_path, b"");
+    let _ = std::fs::write(response_path, b""); // INTENTIONAL: best-effort temp cleanup
 }
 
 // ── Temp directory helpers ──────────────────────────────────────────────────
@@ -342,7 +336,7 @@ const fn is_windows() -> bool {
 /// (sudo consumes it as the password); otherwise the helper exits non-zero so
 /// sudo reports an authentication failure instead of hanging on the tty.
 const HELPER_BODY: &str = r#"#!/bin/sh
-# ragent sudo askpass helper — bridges sudo credential requests to ragent's
+# ragent sudo askpass helper - bridges sudo credential requests to ragent's
 # question dialog via a file-based IPC channel in $RAGENT_ASKPASS_DIR.
 #
 # Invoked by sudo with the prompt text as $1.
@@ -352,7 +346,7 @@ set -u
 PROMPT="${1:-sudo password:}"
 DIR="${RAGENT_ASKPASS_DIR:-}"
 if [ -z "$DIR" ] || [ ! -d "$DIR" ]; then
-    # No IPC channel — fail rather than touch the tty.
+    # No IPC channel - fail rather than touch the tty.
     exit 1
 fi
 
@@ -370,7 +364,7 @@ I=0
 while [ ! -f "$RESP" ]; do
     I=$((I + 1))
     if [ "$I" -gt 1200 ]; then
-        # Timed out — clean up and fail.
+        # Timed out - clean up and fail.
         rm -f "$REQ"
         exit 1
     fi

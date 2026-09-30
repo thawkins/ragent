@@ -128,6 +128,27 @@ fn plugin_skill_dirs_resolve_relative_and_refuse_escape() {
 }
 
 #[test]
+fn plugin_skill_dirs_refuse_backslash_and_windows_prefix_paths() {
+    // ANTIPAT M14: path containment uses the shared guard predicate, so a
+    // backslash separator or a Windows drive prefix is rejected just like an
+    // absolute POSIX path.
+    let root = Path::new("/plugins/mongodb");
+    let resolved = plugin_skill_dirs(
+        root,
+        &[
+            "sub\\dir".to_string(),
+            "C:/windows".to_string(),
+            "nested/./deep".to_string(),
+        ],
+    );
+    assert_eq!(
+        resolved,
+        vec![PathBuf::from("/plugins/mongodb/nested/deep")],
+        "backslash and drive-prefix paths are dropped; `.` is normalised away"
+    );
+}
+
+#[test]
 fn plugin_skill_names_lists_skill_subdirectories_only() {
     let tree = TempTree::new("skill-names");
     let plugin = stage_plugin(&tree.0.join("src"));

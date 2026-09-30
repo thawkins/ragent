@@ -198,9 +198,9 @@ enum Commands {
     },
 }
 
-/// CLI dispatcher for the flattened `ragent new …` form: rebuilds the
+/// CLI dispatcher for the flattened `ragent new ...` form: rebuilds the
 /// `/new` token list from the parsed [`cli::ScaffoldArgs`] and reuses the
-/// `ragent new scaffold …` handler, keeping both spellings on one path.
+/// `ragent new scaffold ...` handler, keeping both spellings on one path.
 fn dispatch_new_command(scaffold: cli::ScaffoldArgs) -> Result<()> {
     cli::handle_new_command(cli::NewCommands::Scaffold(scaffold))
 }
@@ -264,7 +264,7 @@ enum MemoryCommands {
 
 /// Return the global-state directory for ragent (`~/.config/ragent/`).
 ///
-/// All ragent global state — databases, logs, history, tokens — lives under
+/// All ragent global state - databases, logs, history, tokens - lives under
 /// this single root. Supersedes the legacy `~/.local/share/ragent/` location.
 fn data_dir() -> PathBuf {
     ragent_config::user_dirs::global_state_dir()
@@ -277,7 +277,7 @@ fn print_banner() {
         println!("{line}");
     }
     println!(
-        "  v{}  —  Rust AI coding agent\n",
+        "  v{}  -  Rust AI coding agent\n",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -291,24 +291,30 @@ async fn async_main() -> Result<()> {
     // Install the panic hook first so panics during startup are also captured.
     panic_hook::install();
 
-    // Stamp the crash marker before anything else can die: an abort (stack
-    // overflow) or SIGKILL leaves the marker as "running", which the next
-    // start reports. A clean return overwrites it with "clean exit".
     let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if let Err(e) = crash_dump::write_record(&working_dir, "running") {
-        eprintln!("warning: failed to write crash marker: {e}");
-    }
+
+    // Read the PREVIOUS marker FIRST. `write_record` truncates and replaces the
+    // marker with this process's pid, so checking afterwards could never see the
+    // stale record (its pid would always be this live process) and the warning
+    // below was unreachable (ANTIPAT A-01).
     match crash_dump::previous_unclean_exit(&working_dir) {
         Ok(Some(prev)) => {
             eprintln!(
                 "warning: previous ragent session (pid {}, started {}) exited without unwinding \
-                 — check log/panics/last-crash.json and other panic reports",
+                 - check log/panics/last-crash.json and other panic reports",
                 prev.pid, prev.updated_at
             );
             eprintln!("         {}", prev.core_dump_hint);
         }
         Ok(None) => {}
         Err(e) => eprintln!("warning: could not read previous crash marker: {e}"),
+    }
+
+    // Stamp the crash marker before anything else can die: an abort (stack
+    // overflow) or SIGKILL leaves the marker as "running", which the next
+    // start reports. A clean return overwrites it with "clean exit".
+    if let Err(e) = crash_dump::write_record(&working_dir, "running") {
+        eprintln!("warning: failed to write crash marker: {e}");
     }
 
     let mut startup = StartupTimings::new();
@@ -337,7 +343,7 @@ async fn async_main() -> Result<()> {
         // Surface the fallback: a typo'd --log-level would otherwise be
         // silently downgraded to `warn` with no hint to the user.
         eprintln!(
-            "warning: invalid log level '{}' — falling back to 'warn'",
+            "warning: invalid log level '{}' - falling back to 'warn'",
             cli.log_level
         );
         EnvFilter::new("warn")
@@ -486,7 +492,7 @@ async fn async_main() -> Result<()> {
     // startup or schema changes.
     //
     // Open a *separate* Storage connection for the warmup so the background
-    // FTS rebuild does not hold the main thread's `Mutex<Connection>` —
+    // FTS rebuild does not hold the main thread's `Mutex<Connection>` -
     // which would block `get_setting` and other startup queries for the
     // entire duration of the rebuild (10+ seconds on large histories).
     let db_path_warm = db_path.clone();
@@ -671,7 +677,7 @@ async fn async_main() -> Result<()> {
             Arc::new(TelemetrySubsystem::disabled())
         }
     };
-    // The guard shares the live subsystem via `Arc` — with the same handle
+    // The guard shares the live subsystem via `Arc` - with the same handle
     // also wired into the session processor below, the shared-instance guard
     // flushes the actual provider rather than a disabled clone.
     let _telemetry_guard = ShutdownGuard::new(Arc::clone(&telemetry));
@@ -734,7 +740,7 @@ async fn async_main() -> Result<()> {
         let extraction_engine = Arc::new(ragent_agent::memory::ExtractionEngine::new(
             auto_extract_config,
         ));
-        let _ = session_processor.extraction_engine.set(extraction_engine);
+        let _ = session_processor.extraction_engine.set(extraction_engine); // INTENTIONAL: OnceLock set race is benign
     }
     // Create AgentManager and wire it into the processor (breaks circular dep via OnceLock)
     let agent_manager = Arc::new(ragent_agent::task::AgentManager::new(
@@ -743,7 +749,7 @@ async fn async_main() -> Result<()> {
         max_background_agents,
         background_agent_timeout,
     ));
-    let _ = session_processor.agent_manager.set(agent_manager);
+    let _ = session_processor.agent_manager.set(agent_manager); // INTENTIONAL: OnceLock set race is benign
     tracing::debug!(max_background_agents, "Agent manager initialized");
 
     // Wire the background task service into the processor (M3).
@@ -751,7 +757,7 @@ async fn async_main() -> Result<()> {
         Arc::clone(&storage),
         event_bus.clone(),
     ));
-    let _ = session_processor.bg_service.set(bg_service);
+    let _ = session_processor.bg_service.set(bg_service); // INTENTIONAL: OnceLock set race is benign
     tracing::debug!("Background task service initialized");
     startup.record("Agent mgr & bg service", t0.elapsed());
 
@@ -839,7 +845,7 @@ async fn async_main() -> Result<()> {
     // Initialize spec manager for all modes (TUI, serve, run, etc.)
     let t0 = Instant::now();
     let specs_root = std::env::current_dir().unwrap_or_default().join("specs");
-    let _ = session_processor
+    let _ = session_processor // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
         .spec_manager
         .set(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
     startup.record("Spec manager init", t0.elapsed());
@@ -861,7 +867,7 @@ async fn async_main() -> Result<()> {
     // The handle is set unconditionally; recording is gated at each call site
     // by `ragent_config::activity_log::is_enabled()` so `/alog off` suppresses
     // writes without unwiring the handle. A failure to open the log is
-    // non-fatal — the agent loop simply skips recording (best-effort).
+    // non-fatal - the agent loop simply skips recording (best-effort).
     //
     // The open is off-loaded to a background thread: it opens a *separate*
     // SQLite database (`activity_log.db`) and runs its schema migration, so
@@ -1396,7 +1402,7 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
                 ) else {
                     eprintln!(
                         "ragent spec govcreate: [err] no model configured \
-                         — pass --model provider/model or set one via /model in the TUI"
+                         - pass --model provider/model or set one via /model in the TUI"
                     );
                     std::process::exit(2);
                 };
@@ -1433,10 +1439,18 @@ fn main() -> Result<()> {
     // A normal return (including an error propagated out of `async_main`)
     // clears the crash marker so the next start does not report a phantom
     // abort. Process-wide state only; failure to mark is not worth failing on.
-    let _ = crate::crash_dump::write_record(&working_dir, "clean exit");
+    let _ = crate::crash_dump::write_record(&working_dir, "clean exit"); // INTENTIONAL: best-effort crash-marker cleanup on a normal exit
     // Give leftover blocking tasks 2 seconds, then abandon (not abort) them
     // and return: outstanding blocking tasks finish in the background while
     // the process exits normally.
     runtime.shutdown_timeout(std::time::Duration::from_secs(2));
+    // ANTIPAT A-04/I-05: a CLI handler's typed exit request becomes the single
+    // process exit here, *after* the clean-exit marker and the bounded runtime
+    // shutdown have run. Handlers no longer call `process::exit` directly.
+    if let Err(e) = &result
+        && let Some(exit) = e.downcast_ref::<cli::CliExit>()
+    {
+        std::process::exit(exit.code);
+    }
     result
 }

@@ -5,7 +5,7 @@
 //! Visibility from modifiers: public, protected, private, package-private.
 
 use super::{LanguageParser, ParsedFile};
-use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
+use crate::types::{ImportEntry, Symbol, SymbolKind, Visibility};
 use anyhow::{Context, Result};
 use tree_sitter::{Node, Parser};
 
@@ -37,13 +37,7 @@ impl LanguageParser for JavaParser {
             .parse(source, None)
             .context("tree-sitter parse returned None")?;
 
-        let mut ctx = Ctx {
-            source,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            references: Vec::new(),
-            next_id: 0,
-        };
+        let mut ctx = Ctx::new(source);
 
         walk(&mut ctx, tree.root_node(), None, &[]);
 
@@ -56,28 +50,16 @@ impl LanguageParser for JavaParser {
     }
 }
 
-struct Ctx<'a> {
-    source: &'a [u8],
-    symbols: Vec<Symbol>,
-    imports: Vec<ImportEntry>,
-    references: Vec<SymbolRef>,
-    next_id: i64,
-}
-
-impl Ctx<'_> {
-    const fn alloc_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-    fn text(&self, n: Node) -> &str {
-        n.utf8_text(self.source).unwrap_or("")
-    }
-}
+/// Parser-local alias of the shared extraction context.
+type Ctx<'a> = super::ctx::Ctx<'a>;
 
 // ── Walk ────────────────────────────────────────────────────────────────────
 
 fn walk(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
+    let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
+        return;
+    };
+
     match node.kind() {
         "class_declaration" => extract_class(ctx, node, parent, scope),
         "interface_declaration" => extract_interface(ctx, node, parent, scope),
@@ -489,8 +471,7 @@ fn extract_method_sig(ctx: &Ctx, node: Node, name: &str) -> String {
 }
 
 fn field_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {
-    node.child_by_field_name(field)
-        .map(|n| ctx.text(n).to_string())
+    super::util::field_text(ctx.source, node, field)
 }
 
 /// Build a qualified name from the current scope and a local name.
@@ -502,13 +483,11 @@ fn build_qname(scope: &[String], name: &str) -> String {
 }
 
 fn ext_scope(scope: &[String], name: &str) -> Vec<String> {
-    let mut s = scope.to_vec();
-    s.push(name.to_string());
-    s
+    super::util::extend_scope(scope, name)
 }
 
 fn hash_node(ctx: &Ctx, node: Node) -> String {
-    crate::scanner::hash_content(ctx.text(node).as_bytes())
+    super::util::node_hash(ctx.source, node)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

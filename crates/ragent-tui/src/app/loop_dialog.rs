@@ -289,9 +289,9 @@ pub struct LoopOverrides {
 /// Parse one-shot `/loop` flags out of a whitespace-split token list.
 ///
 /// Recognised flags (with ` ` or `=` value forms):
-/// - `--max-steps <n>` — step-budget override
-/// - `--cost_limit <n>` / `--cost-limit <n>` — token-cost override
-/// - `--timeout <n>` — checkpoint-prompt timeout override (seconds)
+/// - `--max-steps <n>` - step-budget override
+/// - `--cost_limit <n>` / `--cost-limit <n>` - token-cost override
+/// - `--timeout <n>` - checkpoint-prompt timeout override (seconds)
 ///
 /// Flag tokens (and their values) are removed from the token list; the
 /// remaining tokens keep their order so the caller can take the first as
@@ -552,7 +552,7 @@ See docs/howtos/loopprogramming.md for worked examples.",
 }
 
 /// Resolve the configured `loop` section once, falling back to defaults when
-/// no config can be loaded. The dialog open → confirm → dispatch sequence
+/// no config can be loaded. The dialog open -> confirm -> dispatch sequence
 /// previously re-loaded the config at each step; the M-025 cache makes each
 /// call cheap, but `build_spec_from_state` still needs the same value the
 /// dialog was seeded with, so both read through this one helper.
@@ -639,4 +639,5 @@ impl App {
 }
 
 #[cfg(test)]
+#[path = "../../tests/inline/loop_dialog_tests.rs"]
 mod loop_dialog_tests;

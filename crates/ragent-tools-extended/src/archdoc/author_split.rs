@@ -2,8 +2,8 @@
 //! files (SPEC.md / PLAN.md / TESTPLAN.md) that the `/spec govcreate`
 //! authoring prompt demands (T-013, FR-013).
 //!
-//! The authoring prompt asks for markdown headed `1. …SPEC.md`,
-//! `2. …PLAN.md`, `3. …TESTPLAN.md`. This module owns the splitting algorithm
+//! The authoring prompt asks for markdown headed `1. ...SPEC.md`,
+//! `2. ...PLAN.md`, `3. ...TESTPLAN.md`. This module owns the splitting algorithm
 //! shared by the TUI slash surface and the `ragent spec govcreate` CLI parity
 //! path so both surfaces produce byte-identical sections.
 

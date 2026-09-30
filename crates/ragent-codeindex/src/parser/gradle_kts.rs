@@ -40,13 +40,7 @@ impl LanguageParser for GradleKtsParser {
         let tree = Self::parse_tree(source)?;
         let root = tree.root_node();
 
-        let mut ctx = Ctx {
-            source,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            references: Vec::new(),
-            next_id: 0,
-        };
+        let mut ctx = Ctx::new(source);
 
         walk(&mut ctx, root, None, &[]);
 
@@ -62,30 +56,17 @@ impl LanguageParser for GradleKtsParser {
 // ── Extraction context ──────────────────────────────────────────────────────
 
 /// Mutable context threaded through recursive extraction.
-struct Ctx<'a> {
-    source: &'a [u8],
-    symbols: Vec<Symbol>,
-    imports: Vec<ImportEntry>,
-    references: Vec<SymbolRef>,
-    next_id: i64,
-}
-
-impl Ctx<'_> {
-    const fn alloc_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
-    fn text(&self, node: Node) -> &str {
-        node.utf8_text(self.source).unwrap_or("")
-    }
-}
+/// Parser-local alias of the shared extraction context.
+type Ctx<'a> = super::ctx::Ctx<'a>;
 
 // ── Recursive walk ──────────────────────────────────────────────────────────
 
 /// Walk a tree-sitter node, extracting Kotlin/Gradle KTS symbols.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
+    let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
+        return;
+    };
+
     match node.kind() {
         "class_declaration" => extract_class(ctx, node, parent_id, scope),
         "object_declaration" => extract_object(ctx, node, parent_id, scope),
@@ -147,7 +128,7 @@ fn extract_class(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
     }
 }
 
-// ── Object declaration ───────────────────────────────���─────────────────────
+// ── Object declaration ────────────────────────────────────────────────────
 
 /// Extract a Kotlin object declaration.
 fn extract_object(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -187,7 +168,7 @@ fn extract_object(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[St
     }
 }
 
-// ── Companion object ───��────────────────────────────────────────────────────
+// ── Companion object ───────────────────────────────────────────────────────
 
 /// Extract a Kotlin companion object.
 fn extract_companion(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -221,7 +202,7 @@ fn extract_companion(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &
     }
 }
 
-// ── Function declaration ─────────��──────────────────────────────────────────
+// ── Function declaration ───────────────────────────────────────────────────
 
 /// Extract a Kotlin function declaration.
 ///
@@ -440,19 +421,12 @@ fn extract_call(ctx: &mut Ctx, node: Node) {
 
 /// Get the text of a named field child from a tree-sitter node.
 fn field_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {
-    let child = node.child_by_field_name(field)?;
-    Some(ctx.text(child).to_string())
+    super::util::field_text(ctx.source, node, field)
 }
 
 /// Get the text of the first child node matching `kind`.
 fn first_child_by_kind(ctx: &Ctx, node: Node, kind: &str) -> Option<String> {
-    let cursor = &mut node.walk();
-    for child in node.children(cursor) {
-        if child.kind() == kind {
-            return Some(ctx.text(child).to_string());
-        }
-    }
-    None
+    super::util::first_child_by_kind(ctx.source, node, kind)
 }
 
 /// Extract modifier keywords from a modifiers child.
@@ -550,15 +524,12 @@ fn build_qname(scope: &[String], name: &str) -> String {
 
 /// Extend the scope with one more level.
 fn ext_scope(scope: &[String], name: &str) -> Vec<String> {
-    let mut v = scope.to_vec();
-    v.push(name.to_string());
-    v
+    super::util::extend_scope(scope, name)
 }
 
-/// Compute a blake3 hash of the node's text for change detection.
+/// Content hash of the node's text for change detection.
 fn hash_node(ctx: &Ctx, node: Node) -> String {
-    let text = ctx.text(node);
-    blake3::hash(text.as_bytes()).to_hex().to_string()
+    super::util::node_hash(ctx.source, node)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

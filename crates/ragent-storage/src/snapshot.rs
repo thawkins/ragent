@@ -49,7 +49,7 @@ pub struct IncrementalSnapshot {
     pub session_id: String,
     /// Message that triggered this snapshot.
     pub message_id: String,
-    /// Only the files that changed vs the base: path → unified diff text.
+    /// Only the files that changed vs the base: path -> unified diff text.
     pub diffs: HashMap<PathBuf, String>,
     /// Files added since the base (new files, stored as full content).
     pub added: HashMap<PathBuf, Vec<u8>>,
@@ -85,7 +85,7 @@ impl IncrementalSnapshot {
         // Apply text diffs, consuming the diff map.
         for (path, diff_text) in self.diffs {
             if diff_text.is_empty() {
-                // Binary file or empty diff — carry base forward unchanged
+                // Binary file or empty diff - carry base forward unchanged
                 continue;
             }
             let base_bytes = files.get(&path).map(std::vec::Vec::as_slice).unwrap_or(b"");
@@ -162,7 +162,7 @@ pub fn take_snapshot(session_id: &str, message_id: &str, files: &[PathBuf]) -> R
 ///
 /// let files = vec![PathBuf::from("/tmp/example.txt")];
 /// let snap = take_snapshot("session-1", "msg-1", &files).unwrap();
-/// // … later, restore the captured file contents
+/// // ... later, restore the captured file contents
 /// restore_snapshot(&snap).unwrap();
 /// ```
 pub fn restore_snapshot(snapshot: &Snapshot) -> Result<()> {
@@ -227,10 +227,10 @@ pub fn incremental_save(
                 added.insert(path.clone(), current_bytes);
             }
             Some(base_bytes) if base_bytes == &current_bytes => {
-                // Unchanged — skip
+                // Unchanged - skip
             }
             Some(base_bytes) => {
-                // Changed — try to produce a unified diff for text files
+                // Changed - try to produce a unified diff for text files
                 let base_str = std::str::from_utf8(base_bytes);
                 let current_str = std::str::from_utf8(&current_bytes);
                 match (base_str, current_str) {
@@ -239,7 +239,7 @@ pub fn incremental_save(
                         diffs.insert(path.clone(), diff);
                     }
                     _ => {
-                        // Binary file — store full content as "added"
+                        // Binary file - store full content as "added"
                         added.insert(path.clone(), current_bytes);
                     }
                 }
@@ -283,7 +283,7 @@ fn make_unified_diff(old: &str, new: &str) -> String {
 ///
 /// This is a simplified line-based patch that handles the `+`/`-`/` ` prefix
 /// format produced by [`make_unified_diff`]. It does not attempt to handle
-/// hunk headers — changes are applied in the order they appear.
+/// hunk headers - changes are applied in the order they appear.
 fn apply_unified_diff(base: &str, diff: &str) -> Result<String> {
     // Fast path: if diff is empty return base unchanged
     if diff.trim().is_empty() {
@@ -311,19 +311,19 @@ fn apply_unified_diff(base: &str, diff: &str) -> Result<String> {
         };
         match tag {
             " "
-                // Context line — output base line and advance
+                // Context line - output base line and advance
                 if base_idx < base_lines.len() => {
                     result.push_str(base_lines[base_idx]);
                     result.push('\n');
                     base_idx += 1;
                 }
             "-"
-                // Removed line — skip the matching base line
+                // Removed line - skip the matching base line
                 if base_idx < base_lines.len() => {
                     base_idx += 1;
                 }
             "+" => {
-                // Added line — emit without consuming base
+                // Added line - emit without consuming base
                 result.push_str(content);
                 result.push('\n');
             }

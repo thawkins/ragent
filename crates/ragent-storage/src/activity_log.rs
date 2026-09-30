@@ -3,17 +3,17 @@
 //! [`ActivityLog`] is a SQLite-backed, append-only store of [`ActivityEvent`]
 //! records. It implements the persistence half of the event log:
 //!
-//! - **FR-001** — [`ActivityLog::append`] persists an event before it is
+//! - **FR-001** - [`ActivityLog::append`] persists an event before it is
 //!   projected into any derived state.
-//! - **FR-002** — the store assigns each event a monotonically increasing
+//! - **FR-002** - the store assigns each event a monotonically increasing
 //!   per-run sequence number and stores the event's immutable [`EventId`].
 //!   A [`UNIQUE`] constraint on `(run_id, seq)` rejects any attempt to reuse a
 //!   sequence number; rows are never updated or deleted (the schema exposes
 //!   no mutation or deletion API).
-//! - **FR-017** — if storage is unavailable during an append, the operation
+//! - **FR-017** - if storage is unavailable during an append, the operation
 //!   returns [`Err`] and the caller is expected to fail the producing
 //!   operation without advancing derived state.
-//! - **NFR-001** — a single append is one `INSERT` inside a short transaction,
+//! - **NFR-001** - a single append is one `INSERT` inside a short transaction,
 //!   targeting a p99 below 10 ms on local storage.
 //!
 //! The store is intentionally self-contained: it owns its own
@@ -26,6 +26,17 @@
 //! [`ActivityLog::read_run_upto`]) return events ordered by sequence number
 //! for use by the projection/replay engine (T-011) and the JSON Lines export
 //! (T-020).
+//!
+//! # Error-style asymmetry with `Storage` (intentional, C-5)
+//!
+//! This store returns the typed [`AppendError`] enum, whereas
+//! [`Storage`](crate::storage::Storage) surfaces bare `anyhow` errors. The
+//! append-only log rejects appends for *semantic* reasons callers must
+//! distinguish (duplicate seq, out-of-order append, duplicate/empty event id,
+//! interrupted run - FR-002/FR-010), so those need typed variants; the CRUD
+//! store's failures are uniformly infrastructure errors that callers never
+//! match on, so `anyhow` is sufficient. Callers should not expect the two
+//! stores to present errors uniformly.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -57,6 +68,42 @@ pub struct ActivityLog {
     #[allow(dead_code)]
     rebuilding: Mutex<HashSet<String>>,
 }
+
+/// The canonical `INSERT INTO activity_events` statement.
+///
+/// Every append path (direct, transactional, and rebuilding) shares this one
+/// statement so the column list cannot drift (see `ANTIPAT.md` M3.7).
+const INSERT_EVENT_SQL: &str = "INSERT INTO activity_events \
+     (run_id, seq, id, schema_version, timestamp, kind) \
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+
+/// Select a single event by `(run_id, seq)`.
+const SQL_SELECT_RUN_SEQ: &str = "SELECT run_id, seq, id, schema_version, timestamp, kind \
+     FROM activity_events WHERE run_id = ?1 AND seq = ?2";
+
+/// Select a single event by immutable event id.
+const SQL_SELECT_BY_ID: &str = "SELECT run_id, seq, id, schema_version, timestamp, kind \
+     FROM activity_events WHERE id = ?1";
+
+/// Select every event for a run up to (and including) a sequence.
+const SQL_SELECT_RUN_UPTO: &str = "SELECT run_id, seq, id, schema_version, timestamp, kind \
+     FROM activity_events WHERE run_id = ?1 AND seq <= ?2 ORDER BY seq ASC";
+
+/// Select every event for a run.
+const SQL_SELECT_RUN: &str = "SELECT run_id, seq, id, schema_version, timestamp, kind \
+     FROM activity_events WHERE run_id = ?1 ORDER BY seq ASC";
+
+/// Select the most recent event of a kind for a run.
+const SQL_SELECT_KIND_LATEST: &str = "SELECT run_id, seq, id, schema_version, timestamp, kind \
+     FROM activity_events WHERE run_id = ?1 AND kind LIKE ?2 ORDER BY seq DESC LIMIT 1";
+
+/// SQLite `busy_timeout` in milliseconds for the activity-log connection
+/// (ANTIPAT D-8).
+///
+/// Shorter than the main store's `BUSY_TIMEOUT_MS` (30 s) because the append
+/// path is brief and event-level: a longer wait would stall the caller, and a
+/// transient lock here is better surfaced quickly than blocked on.
+const ACTIVITY_BUSY_TIMEOUT_MS: i64 = 5_000;
 
 /// Error returned by [`ActivityLog::append`] when an event is rejected because
 /// its sequence number is not the next one expected for its run, or because
@@ -175,7 +222,7 @@ impl ActivityLog {
         crate::storage::restrict_file_permissions(path);
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        conn.pragma_update(None, "busy_timeout", 5000)?;
+        conn.pragma_update(None, "busy_timeout", ACTIVITY_BUSY_TIMEOUT_MS)?;
         let log = Self {
             conn: Mutex::new(conn),
             rebuilding: Mutex::new(HashSet::new()),
@@ -265,9 +312,7 @@ impl ActivityLog {
         let kind_json =
             serde_json::to_string(&kind).context("Failed to serialise lifecycle event")?;
         conn.execute(
-            "INSERT INTO activity_events
-                (run_id, seq, id, schema_version, timestamp, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            INSERT_EVENT_SQL,
             params![
                 run_id.as_str(),
                 seq as i64,
@@ -327,12 +372,12 @@ impl ActivityLog {
     ///
     /// # Errors
     ///
-    /// - [`AppendError::EmptyEventId`] — the event has no event id (FR-002).
-    /// - [`AppendError::DuplicateEventId`] — an event with this id is already
+    /// - [`AppendError::EmptyEventId`] - the event has no event id (FR-002).
+    /// - [`AppendError::DuplicateEventId`] - an event with this id is already
     ///   committed (FR-002).
-    /// - [`AppendError::OutOfOrder`] / [`AppendError::DuplicateSeq`] — the
+    /// - [`AppendError::OutOfOrder`] / [`AppendError::DuplicateSeq`] - the
     ///   sequence number violates monotonic append-only semantics (FR-002).
-    /// - [`AppendError::Storage`] — the underlying store is unavailable
+    /// - [`AppendError::Storage`] - the underlying store is unavailable
     ///   (FR-017); the caller must fail the producing operation without
     ///   advancing derived state.
     pub fn append(&self, event: &ActivityEvent) -> std::result::Result<ActivityEvent, AppendError> {
@@ -343,16 +388,23 @@ impl ActivityLog {
                 seq: event.seq,
             });
         }
-        let conn = self.lock()?;
+        let mut conn = self.lock()?;
+        // C-2: IMMEDIATE transaction so the read-next-seq + insert is atomic and
+        // matches `append_new`/`append_new_at_locked`. A DEFERRED transaction
+        // would let a second handle read the same MAX(seq) and race at INSERT
+        // time, surfacing an untyped Storage error instead of DuplicateSeq.
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| AppendError::Storage(anyhow::anyhow!("begin tx: {e}")))?;
         // FR-006: reject appends to interrupted runs (before a resume).
-        if Self::is_interrupted_locked(&conn, &event.run_id)? {
+        if Self::is_interrupted_locked(&tx, &event.run_id)? {
             return Err(AppendError::RunInterrupted {
                 run_id: event.run_id.clone(),
             });
         }
         // FR-002: the event id must be globally unique; an event id that is
         // already committed is an integrity violation, not a silent reuse.
-        let existing: Option<String> = conn
+        let existing: Option<String> = tx
             .query_row(
                 "SELECT id FROM activity_events WHERE id = ?1",
                 params![event.id.as_str()],
@@ -365,26 +417,32 @@ impl ActivityLog {
             // is rejected, and the rejected mutation is recorded as a separate
             // audit event.
             Self::append_mutation_rejected_locked(
-                &conn,
+                &tx,
                 &event.run_id,
                 event.seq,
                 format!("append reusing committed event id {}", event.id.as_str()),
             );
+            // Commit before surfacing the typed rejection so the audit event
+            // persists (a bare `return` would roll the transaction back).
+            tx.commit()
+                .map_err(|e| AppendError::Storage(anyhow::anyhow!("commit: {e}")))?;
             return Err(AppendError::DuplicateEventId {
                 id: event.id.clone(),
             });
         }
-        let expected = Self::next_seq_locked(&conn, &event.run_id)?;
+        let expected = Self::next_seq_locked(&tx, &event.run_id)?;
         if event.seq < expected {
             // FR-010: a mutation of a committed event (overwriting its seq)
             // is rejected, and the rejected mutation is recorded as a
             // separate audit event.
             Self::append_mutation_rejected_locked(
-                &conn,
+                &tx,
                 &event.run_id,
                 event.seq,
                 format!("append overwriting committed seq {}", event.seq),
             );
+            tx.commit()
+                .map_err(|e| AppendError::Storage(anyhow::anyhow!("commit: {e}")))?;
             return Err(AppendError::DuplicateSeq {
                 run_id: event.run_id.clone(),
                 seq: event.seq,
@@ -400,10 +458,8 @@ impl ActivityLog {
         let kind_json =
             serde_json::to_string(&event.kind).context("Failed to serialise event kind")?;
         let ts = event.timestamp.to_rfc3339();
-        conn.execute(
-            "INSERT INTO activity_events
-                (run_id, seq, id, schema_version, timestamp, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        tx.execute(
+            INSERT_EVENT_SQL,
             params![
                 event.run_id.as_str(),
                 event.seq as i64,
@@ -413,7 +469,20 @@ impl ActivityLog {
                 kind_json,
             ],
         )
-        .map_err(|e| AppendError::Storage(anyhow::anyhow!("insert failed: {e}")))?;
+        .map_err(|e| {
+            if e.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) {
+                // A UNIQUE violation on (run_id, seq) means a concurrent
+                // appender won the race; surface it as the typed error.
+                AppendError::DuplicateSeq {
+                    run_id: event.run_id.clone(),
+                    seq: event.seq,
+                }
+            } else {
+                AppendError::Storage(anyhow::anyhow!("insert failed: {e}"))
+            }
+        })?;
+        tx.commit()
+            .map_err(|e| AppendError::Storage(anyhow::anyhow!("commit: {e}")))?;
         Ok(event.clone())
     }
 
@@ -461,9 +530,7 @@ impl ActivityLog {
             .context("Failed to serialise event kind")
             .map_err(AppendError::Storage)?;
         tx.execute(
-            "INSERT INTO activity_events
-                (run_id, seq, id, schema_version, timestamp, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            INSERT_EVENT_SQL,
             params![
                 event.run_id.as_str(),
                 event.seq as i64,
@@ -532,9 +599,7 @@ impl ActivityLog {
             .context("Failed to serialise event kind")
             .map_err(AppendError::Storage)?;
         tx.execute(
-            "INSERT INTO activity_events
-                (run_id, seq, id, schema_version, timestamp, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            INSERT_EVENT_SQL,
             params![
                 event.run_id.as_str(),
                 event.seq as i64,
@@ -572,8 +637,8 @@ impl ActivityLog {
         self.read_run_range(run_id, None)
     }
 
-    /// Records a model-message event (FR-001) — a message produced or received
-    /// by the model — appending it to the run's event log before it is
+    /// Records a model-message event (FR-001) - a message produced or received
+    /// by the model - appending it to the run's event log before it is
     /// projected into any derived state.
     ///
     /// `role` is the message author (`"user"`, `"assistant"`, etc.),
@@ -603,7 +668,7 @@ impl ActivityLog {
         )
     }
 
-    /// Records a tool-call event (FR-004) — the invocation of a tool —
+    /// Records a tool-call event (FR-004) - the invocation of a tool -
     /// appending it to the run's event log before the tool executes.
     ///
     /// `tool_call_id` is the shared identifier that links this invocation to
@@ -632,7 +697,7 @@ impl ActivityLog {
         )
     }
 
-    /// Records a tool-result event (FR-004) — the completion of a tool call —
+    /// Records a tool-result event (FR-004) - the completion of a tool call -
     /// appending it to the run's event log before the next model invocation
     /// reads the result.
     ///
@@ -711,8 +776,8 @@ impl ActivityLog {
         Ok((call, result))
     }
 
-    /// Records a permission-decision event (FR-005) — a grant or deny decision
-    /// made for a tool that crosses a sandbox boundary — appending it to the
+    /// Records a permission-decision event (FR-005) - a grant or deny decision
+    /// made for a tool that crosses a sandbox boundary - appending it to the
     /// run's event log before the tool is allowed (or refused) to proceed.
     ///
     /// `tool` is the tool the decision applies to, `principal` is who made the
@@ -785,7 +850,7 @@ impl ActivityLog {
         )
     }
 
-    /// Records an interruption termination event (FR-003) — the run was
+    /// Records an interruption termination event (FR-003) - the run was
     /// interrupted by a crash, process exit, or explicit abort.
     ///
     /// Convenience wrapper for
@@ -805,7 +870,7 @@ impl ActivityLog {
         )
     }
 
-    /// Records a checkpoint event (FR-008) — a named, durable marker in the
+    /// Records a checkpoint event (FR-008) - a named, durable marker in the
     /// run's event log used as a rollback/resume target.
     ///
     /// `name` is the operator-assigned or auto-generated checkpoint name. The
@@ -865,10 +930,10 @@ impl ActivityLog {
     /// Derives the current status of `run_id` from its event log (FR-015).
     ///
     /// The status is a projection of the append-only log:
-    /// - [`RunStatus::Active`] — the run has no termination event yet.
-    /// - [`RunStatus::Completed`] — the last termination event has reason
+    /// - [`RunStatus::Active`] - the run has no termination event yet.
+    /// - [`RunStatus::Completed`] - the last termination event has reason
     ///   [`TerminationReason::Completed`].
-    /// - [`RunStatus::Interrupted`] — the last termination event has reason
+    /// - [`RunStatus::Interrupted`] - the last termination event has reason
     ///   [`TerminationReason::Interrupted`] or [`TerminationReason::Aborted`].
     ///
     /// # Errors
@@ -1086,7 +1151,7 @@ impl ActivityLog {
     /// event exists.
     ///
     /// Because committed rows are never mutated or deleted, the returned
-    /// event — including its immutable [`EventId`] — is identical to what was
+    /// event - including its immutable [`EventId`] - is identical to what was
     /// appended. This is the read-back path used to verify FR-002's "immutable
     /// event identifier" guarantee.
     ///
@@ -1098,9 +1163,7 @@ impl ActivityLog {
         let conn = self.lock()?;
         let event: Option<ActivityEvent> = conn
             .query_row(
-                "SELECT run_id, seq, id, schema_version, timestamp, kind
-                 FROM activity_events
-                 WHERE run_id = ?1 AND seq = ?2",
+                SQL_SELECT_RUN_SEQ,
                 params![run_id.as_str(), seq as i64],
                 row_to_event,
             )
@@ -1122,13 +1185,7 @@ impl ActivityLog {
     pub fn find_by_id(&self, id: &EventId) -> Result<Option<ActivityEvent>> {
         let conn = self.lock()?;
         let event: Option<ActivityEvent> = conn
-            .query_row(
-                "SELECT run_id, seq, id, schema_version, timestamp, kind
-                 FROM activity_events
-                 WHERE id = ?1",
-                params![id.as_str()],
-                row_to_event,
-            )
+            .query_row(SQL_SELECT_BY_ID, params![id.as_str()], row_to_event)
             .optional()?;
         Ok(event)
     }
@@ -1185,9 +1242,7 @@ impl ActivityLog {
                 let kind_json =
                     serde_json::to_string(&event.kind).context("Failed to serialise event kind")?;
                 tx.execute(
-                    "INSERT INTO activity_events
-                        (run_id, seq, id, schema_version, timestamp, kind)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    INSERT_EVENT_SQL,
                     params![
                         new_run_id.as_str(),
                         event.seq as i64,
@@ -1355,7 +1410,7 @@ impl ActivityLog {
 
     /// Attempts to delete the committed event at `(run_id, seq)` (FR-010).
     ///
-    /// The store is append-only, so the deletion is **always rejected** — no
+    /// The store is append-only, so the deletion is **always rejected** - no
     /// row is ever removed. If the target event is committed, a
     /// [`EventKind::MutationRejected`] audit event is recorded in the log
     /// before the error is returned. If the target does not exist, the error
@@ -1364,7 +1419,7 @@ impl ActivityLog {
     ///
     /// # Errors
     ///
-    /// Always returns [`AppendError::MutationRejected`] — the store is
+    /// Always returns [`AppendError::MutationRejected`] - the store is
     /// append-only and never deletes committed events (FR-010).
     pub fn try_delete_event(
         &self,
@@ -1400,14 +1455,14 @@ impl ActivityLog {
     /// Attempts to overwrite the committed event at `(run_id, seq)` with
     /// `new_kind` (FR-010).
     ///
-    /// The store is append-only, so the mutation is **always rejected** — no
+    /// The store is append-only, so the mutation is **always rejected** - no
     /// row is ever updated. If the target event is committed, a
     /// [`EventKind::MutationRejected`] audit event is recorded in the log
     /// before the error is returned.
     ///
     /// # Errors
     ///
-    /// Always returns [`AppendError::MutationRejected`] — the store is
+    /// Always returns [`AppendError::MutationRejected`] - the store is
     /// append-only and never mutates committed events (FR-010).
     pub fn try_update_event(
         &self,
@@ -1456,7 +1511,7 @@ impl ActivityLog {
     ///
     /// Events after `target_seq` are **preserved in the log** for audit
     /// (FR-007) but ignored for the returned projection. The log is never
-    /// mutated or truncated — rollback is a read-only projection rebuild.
+    /// mutated or truncated - rollback is a read-only projection rebuild.
     ///
     /// # Errors
     ///
@@ -1490,7 +1545,7 @@ impl ActivityLog {
     /// unavailable (FR-017).
     pub fn rollback_to_checkpoint(&self, run_id: &RunId, name: &str) -> Result<RollbackResult> {
         // Read the log once and locate the checkpoint in memory; the previous
-        // shape (find_checkpoint → read_run → rollback_to_seq) deserialised
+        // shape (find_checkpoint -> read_run -> rollback_to_seq) deserialised
         // the full event log three times per rollback.
         let conn = self.lock()?;
         let events = Self::read_run_range_locked(&conn, run_id, None)?;
@@ -1555,9 +1610,7 @@ impl ActivityLog {
         let resumed_kind_json =
             serde_json::to_string(&resumed_kind).context("Failed to serialise resumed event")?;
         conn.execute(
-            "INSERT INTO activity_events
-                (run_id, seq, id, schema_version, timestamp, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            INSERT_EVENT_SQL,
             params![
                 run_id.as_str(),
                 resumed_seq as i64,
@@ -1586,19 +1639,9 @@ impl ActivityLog {
         // PERF-071: hoist the two static SQL bodies instead of building a
         // `String` (and re-preparing a distinct statement) on every read.
         let mut stmt = if upto.is_some() {
-            conn.prepare_cached(
-                "SELECT run_id, seq, id, schema_version, timestamp, kind
-                 FROM activity_events
-                 WHERE run_id = ?1 AND seq <= ?2
-                 ORDER BY seq ASC",
-            )?
+            conn.prepare_cached(SQL_SELECT_RUN_UPTO)?
         } else {
-            conn.prepare_cached(
-                "SELECT run_id, seq, id, schema_version, timestamp, kind
-                 FROM activity_events
-                 WHERE run_id = ?1
-                 ORDER BY seq ASC",
-            )?
+            conn.prepare_cached(SQL_SELECT_RUN)?
         };
         let rows = if let Some(seq) = upto {
             stmt.query_map(params![run_id.as_str(), seq as i64], row_to_event)
@@ -1638,9 +1681,7 @@ impl ActivityLog {
             let kind_json =
                 serde_json::to_string(&kind).context("Failed to serialise audit event")?;
             conn.execute(
-                "INSERT INTO activity_events
-                    (run_id, seq, id, schema_version, timestamp, kind)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                INSERT_EVENT_SQL,
                 params![
                     run_id.as_str(),
                     seq as i64,
@@ -1703,13 +1744,7 @@ fn find_event_locked(
     // serialised `EventKind` JSON opens with `{"kind":"tool_call",...}`.
     // An empty `lookup` matches any event of that kind (used for the status
     // query which only needs the kind, not a specific payload value).
-    let mut stmt = conn.prepare_cached(
-        "SELECT run_id, seq, id, schema_version, timestamp, kind
-         FROM activity_events
-         WHERE run_id = ?1 AND kind LIKE ?2
-         ORDER BY seq DESC
-         LIMIT 1",
-    )?;
+    let mut stmt = conn.prepare_cached(SQL_SELECT_KIND_LATEST)?;
     let like = if lookup.is_empty() {
         format!("%{kind_tag}%")
     } else {

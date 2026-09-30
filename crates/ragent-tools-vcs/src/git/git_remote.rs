@@ -1,4 +1,4 @@
-//! `git_remote` — Manage and inspect remotes.
+//! `git_remote` - Manage and inspect remotes.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -68,6 +68,10 @@ impl Tool for GitRemoteTool {
                     name.ok_or_else(|| anyhow::anyhow!("Remote name is required for 'add'"))?;
                 let remote_url =
                     url.ok_or_else(|| anyhow::anyhow!("Remote URL is required for 'add'"))?;
+                // SEC-ragent-tools-vcs-00x (ANTIPAT A-1): both operands are
+                // LLM-supplied and reach git argv positionally.
+                crate::git::reject_option_like(remote_name, "name")?;
+                crate::git::reject_option_like(remote_url, "url")?;
                 let (out, err) = crate::git::run_git_async(
                     vec![
                         "remote".to_string(),
@@ -83,6 +87,7 @@ impl Tool for GitRemoteTool {
             "remove" => {
                 let remote_name =
                     name.ok_or_else(|| anyhow::anyhow!("Remote name is required for 'remove'"))?;
+                crate::git::reject_option_like(remote_name, "name")?;
                 let (out, err) = crate::git::run_git_async(
                     vec![
                         "remote".to_string(),
@@ -99,6 +104,8 @@ impl Tool for GitRemoteTool {
                     name.ok_or_else(|| anyhow::anyhow!("Remote name is required for 'set-url'"))?;
                 let remote_url =
                     url.ok_or_else(|| anyhow::anyhow!("Remote URL is required for 'set-url'"))?;
+                crate::git::reject_option_like(remote_name, "name")?;
+                crate::git::reject_option_like(remote_url, "url")?;
                 let (out, err) = crate::git::run_git_async(
                     vec![
                         "remote".to_string(),

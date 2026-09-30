@@ -63,7 +63,7 @@ impl Tool for SpecSearchTool {
         } else {
             for result in &results {
                 lines.push(format!(
-                    "## {} — {} (score: {})",
+                    "## {} - {} (score: {})",
                     result.spec.id, result.spec.title, result.score
                 ));
                 lines.push(format!("Status: {}", result.spec.status.as_str()));

@@ -1,7 +1,7 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.121</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.122</p>
         <p style="font-size: 1.1em;">
           <strong>Date:</strong> 2026-09-26
       </p>
@@ -438,7 +438,6 @@ graph TB
         G[ragent-server]
         H[ragent-specs]
         I[ragent-storage]
-        J[ragent-team]
         K[ragent-tools-core]
         L[ragent-tools-extended]
         M[ragent-tools-vcs]
@@ -489,8 +488,7 @@ graph TB
 | `ragent-tools-core` | File, shell, search, and utility tools | ~4,100 |
 | `ragent-tools-extended` | Memory, code index, office/PDF, web tools | ~4,300 |
 | `ragent-tools-vcs` | GitHub and GitLab tool surface | ~5,200 |
-| `ragent-agent` | Session processor, agent resolution, tool registry, memory, MCP | ~12,500 |
-| `ragent-team` | Team runtime, shared tasks, mailbox messaging | ~3,900 |
+| `ragent-agent` | Session processor, agent resolution, tool registry, memory, MCP; team runtime + 20 team tools (former `ragent-team` shim folded in) | ~12,500 |
 | `ragent-codeindex` | Tree-sitter parsing, SQLite/Tantivy index, file watcher | ~4,000 |
 | `ragent-server` | Axum HTTP routes and SSE streaming | ~2,400 |
 | `ragent-tui` | Ratatui terminal interface | ~8,900 |
@@ -511,7 +509,6 @@ graph TD
     TE[ragent-tools-extended]
     TV[ragent-tools-vcs]
     A[ragent-agent]
-    TM[ragent-team]
     CI[ragent-codeindex]
     SV[ragent-server]
     TU[ragent-tui]
@@ -542,8 +539,6 @@ graph TD
     TV --> A
     A --> TU
     A --> SV
-    A --> TM
-    TM --> A
     CI --> A
     SP --> A
     RS --> A
@@ -1233,6 +1228,181 @@ split**, or an **owner-only file mode**.
 | `redacted_event_debug` / SSE device-code masking | `ragent-server::sse` | credential-bearing events expose presence-only fields on the SSE stream and a redacted rendering for log sites |
 | `target_is_allowed` | `ragent-tools-extended::channels` | config-supplied outbound base URLs (Telegram, Gmail, finance providers) are SSRF-checked; an explicitly configured loopback target is permitted, everything else private is refused |
 | `CrawlFetcher` SSRF contract | `ragent-tools-extended::masterfetch::crawl` | the SSRF obligation is stated on the trait and validated at the `mf_crawl` tool boundary |
+
+### 4.6e Shared Guards and Recurrence Prevention (SECTASKS MS-05)
+
+Every mitigation from 4.6a-4.6d is one of a small number of guard *shapes*. MS-05
+gives each shape a single implementation so a new call site cannot silently
+weaken it, and adds CI gates that fail a build which reintroduces a class.
+
+**`ragent_types::guard`** (re-exported from the crate root, and as
+`ragent_tools_core::guard` for the tools crates) owns:
+
+| Helper | Enforces |
+|--------|----------|
+| `reject_option_like(value, label)` | non-empty and no leading `-`, so a `git` operand cannot be parsed as an option |
+| `is_safe_operand(value)` | the predicate form: `[A-Za-z0-9._/-]+` and no leading `-` |
+| `validate_identifier(value, label)` | `^[A-Za-z0-9._-]+$`, at most `MAX_IDENTIFIER_LEN` (64) bytes, no `.`/`..`/separators |
+| `validate_relative_component(value, label)` | relative, no `\`, no `..`, no Windows drive or UNC prefix |
+| `contained_join(root, relative, label)` | the above plus a canonicalised-root check that catches a symlink escape |
+| `clamp_retry_after(hint)` | the 1 s floor and `MAX_RETRY_AFTER` (30 s) ceiling on a server-supplied delay |
+| `cap_read(bytes, max)` | a UTF-8-boundary-safe prefix of a buffered read |
+
+Call-site-preserving adapters delegate to it:
+`ragent-tools-vcs::git::reject_option_like`,
+`ragent-plugins::add::is_safe_git_argument`, and
+`ragent-bench::data::contained_join`. Regression suite:
+`crates/ragent-types/tests/test_shared_guards.rs`.
+
+**One redaction implementation.** `ragent-agent`, `ragent-storage`, and
+`ragent-tools-core` re-export `ragent_types::sanitize` instead of holding a
+second secret registry, so a credential registered anywhere is masked
+everywhere: `GET /config`, telemetry attributes, log lines, SSE payloads, and
+tool output all call the same `redact_secrets`.
+
+`Event` no longer derives `Debug`. Its hand-written impl renders through an
+internal `DebugProxy` that reports credential-bearing fields
+(`CopilotDeviceFlowComplete.token`, `CopilotDeviceFlowStartResult.device_code`)
+as presence flags and then pipes the whole rendering through `redact_secrets`,
+so `tracing::debug!("{event:?}")` cannot print an OAuth credential. Regression
+suite: `crates/ragent-types/tests/test_unified_redaction.rs`.
+
+**CI gates** (job `security-guards` in `.github/workflows/ci.yml`, and
+`pre-flight.sh`). Each gate has a `--self-test` that seeds a violation and
+asserts the gate fails it:
+
+| Gate | Command | Fails when |
+|------|---------|-----------|
+| Redaction tests | `cargo test -p ragent-types --test test_unified_redaction` | a second registry or a leaking `Event` `Debug` appears |
+| File-tool containment | `scripts/check-file-tool-containment.sh` | a registered file tool no longer calls the `allowed_roots`-aware `check_path_within_allowed_roots_cached` helper (a working-dir-only `check_path_within_root_cached` call no longer passes; see 4.6f) |
+| Panic-free production paths | `scripts/check-security-unwraps.sh` | a file exceeds its `.unwrap()`/`.expect()` baseline in `scripts/security-unwrap-baseline.txt` |
+| One guard per rule | `scripts/check-shared-guards.sh` | a crate re-defines a shared guard or a second secret registry |
+| Git-argument guard | `scripts/check-vcs-duplication.sh` | the leading-dash check is re-derived or the shared delegation is dropped |
+
+The panic-free gate is a **baseline** gate: the 362 pre-existing panicking calls
+across 90 files are recorded per file and grandfathered, so the gate is
+enforceable today while still rejecting every *new* occurrence. An intentional
+call is exempted with a same-line `// no-panic-ok: <reason>` comment, which makes
+it visible in review. The grandfathered set is an accepted-risk entry in
+`SECTASKS.md`.
+
+### 4.6f M0 Critical Defects and Security Holes (ANTIPAT M0)
+
+The first milestone of the workspace-wide anti-pattern remediation plan
+(`ANTIPAT.md`) closes the two shipping defects and the highest-severity
+containment gaps found by the 18-crate audit.
+
+**Two shipping defects.**
+
+- **Crash-marker ordering.** `async_main` now reads
+  `crash_dump::previous_unclean_exit` *before* stamping the new `running`
+  marker. Previously the marker was overwritten first, so its pid always
+  matched the live process and the "previous session exited without unwinding"
+  warning was unreachable (ANTIPAT A-01).
+- **Search-retry shift overflow.** `WebGatherer::with_search_max_retries` clamps
+  its argument to `MAX_SEARCH_RETRIES` (10) and the backoff uses
+  `checked_shl` capped by `MAX_SEARCH_RETRY_DELAY_MS` (60 s). A CLI-supplied
+  `--search-max-retries >= 64` previously panicked on `1u64 << 64`, and values
+  in the 40-63 range slept for days (ANTIPAT F-02).
+
+**Containment and argument-injection guards.**
+
+| Guard | Where it lives | What it rejects |
+|-------|----------------|-----------------|
+| `git::reject_option_like` on every operand | `ragent-tools-vcs::git` | `git_checkout` branch/source, every `git_cherry_pick` commit, every `git_add` path, and `git_remote` name/url — all 18 git tools now reject a leading-dash operand |
+| `GitHubClient::validate_repo_segment` | `ragent-tools-vcs::github` | an `owner`/`repo` that is not `[A-Za-z0-9._~-]+`, so it cannot escape the request path |
+| `resolve_url` for `fetch_readme` | `ragent-tools-vcs::github` | a hardcoded `api.github.com`, which previously ignored a configured GitHub Enterprise `base_url` and sent the Bearer token to the public origin |
+| `check_path_within_allowed_roots_cached` in every file tool | `ragent-tools-core` | `diff_files`, `file_info`, `glob`, `open`, and `apply_patch` previously checked `working_dir` only, so a whitelisted `allowed_roots` entry was rejected for the same path every other tool accepted (FUNC-068, ANTIPAT F-06) |
+| `refuse_non_public_target` on the Discord sink | `ragent-tools-extended::channels` | a config-supplied `channels.discord.webhook_url` pointing at a private, link-local, or metadata host (its Telegram sibling already had the check) |
+| `masterfetch::http::read_body_capped` / `read_bytes_capped` | `ragent-tools-extended` | an unbounded response body from finance/search/robots/gmail/channels/youtube reads (16 MiB ceiling; 512 KiB for small text bodies) |
+| `write_govcreate_spec` target-folder containment | `ragent-specs::commands` | a `target-folder` that climbs out of the invoking root, checked lexically *before* any directory is created (ANTIPAT H-1) |
+| `merged_dir_lists_for` / `builtin_only_dir_lists` | `ragent-config::dir_lists` | a config-load failure that previously returned an empty denylist, silently dropping the mandatory built-in system-directory protection (ANTIPAT H-3) |
+| plugin `content_digest` | `ragent-plugins::add` | an install with no integrity record: a SHA-256 over the staged tree is recorded in the store ledger, so a substituted archive or checkout is detectable |
+| aggregate archive cap (`MAX_EXTRACTED_BYTES`) | `ragent-plugins::add` | a decompression bomb made of many just-under-the-per-entry-cap entries |
+| symlink refusal in `copy_dir_recursive` | `ragent-plugins::add` | a symlink inside a source directory, previously dereferenced and copied into the store |
+| `read_body_capped` on every provider error path | `ragent-llm` | an unbounded 4xx/5xx error body (16 provider sites); malformed SSE frames in five parsers are now logged rather than silently dropped (FUNC-032 parity) |
+
+**Redaction and file permissions.**
+
+- `Config` no longer derives `Debug`; a hand-written impl renders a JSON form
+  routed through `ragent_types::sanitize::redact_secrets`, so an API key,
+  GitLab token, bot token, webhook URL, or client secret cannot be printed
+  (ANTIPAT H-2).
+- Crash markers, panic reports, and the stderr spool are created owner-only
+  (`0o600`), and the `/bug-report` dump is written `0o600` too. The crash
+  record's argv is redacted before serialisation, because
+  `ragent auth openai sk-...` would otherwise persist a live credential to a
+  world-readable file (ANTIPAT A-02/A-03, MEDIUM-3).
+
+**Silent-failure fixes.**
+
+- Storage: the memory access-count bump logs its failure; the four
+  `conversation_stats` counts propagate instead of `unwrap_or(0)`; a legacy
+  nonce that cannot be converted now errors instead of decrypting under an
+  all-zero key (ANTIPAT D-1/D-2/D-4).
+- Server: ~23 HTTP 500 responses route through `internal_error_response`, so a
+  SQLite or filesystem error string is no longer returned to a caller; the
+  `store_memory` fetch-after-write propagates its failure instead of answering
+  `201` with an empty body (ANTIPAT F-H3/F-H2).
+- Agent: a sub-agent report that cannot be persisted to
+  `log/subagents/<task-id>.md` now warns with the task id and target directory,
+  instead of silently reporting `output_file: None`.
+- Telemetry: `ToolRecorder`, `SessionRecorder`, `CoordinatorRecorder`, and
+  `CompressionRecorder` honour the FR-027 per-metric toggles, and
+  `InstrumentRegistry::noop()` builds from an explicit locally-owned provider
+  rather than the process-global one, so a disabled subsystem cannot export
+  (ANTIPAT HIGH-4/HIGH-5).
+
+**Regression suites.** `crates/ragent-research/tests/test_search_retry_clamp.rs`,
+`crates/ragent-tools-vcs/tests/test_ms0_git_arg_guards.rs`,
+`crates/ragent-config/tests/test_ms0_config_guards.rs`,
+`crates/ragent-plugins/tests/test_add.rs`,
+`crates/ragent-specs/tests/test_govcreate_authoring.rs`,
+`crates/ragent-tools-extended/tests/test_channels.rs`, and
+`crates/ragent-telemetry/tests/test_metric_toggles.rs` (all wired into the
+`ms0-regression` CI job).
+
+### 4.6g Standards Conformance: Tests, Docs, Unwraps (ANTIPAT M2)
+
+The second milestone of `ANTIPAT.md` closes the test-location, module-docblock,
+and production-`unwrap` debt found by the 18-crate audit.
+
+**Inline-test gate (M2.17).** `scripts/check-inline-tests.sh` is now a wrapper
+over `scripts/check_inline_tests.py`, which distinguishes the two `#[cfg(test)]`
+shapes:
+
+| Shape | Verdict |
+|-------|---------|
+| `#[cfg(test)] #[path = ".../tests/inline/<name>.rs"] mod x;` | allowed (external body) |
+| `#[cfg(test)] mod x { ... }` | rejected (inline body) |
+
+The scanner covers `crates/*/src` **and** root `src/` (the old guard scanned
+neither the root tree nor the `#[path]` distinction), keeps a shrink-only
+baseline of `0`, and ships a `--self-test` that proves an inline body fails the
+gate while a `#[path]` hook passes. It runs in the `security-guards` CI job and
+in `pre-flight.sh`.
+
+**Test relocation.** The sole remaining genuine inline body
+(`ragent-tui/src/app/loop_dialog/loop_dialog_tests.rs`) moved under
+`tests/inline/`. Five `ragent-agent` modules that had shared a single
+`mod_tests.rs` now each own a per-module `*_mod_tests.rs` restored from history.
+
+**Production unwraps.** The nine `FtsIndex::from_index` schema lookups use a
+`resolve(name)?` helper; the five per-provider tool-cache `.expect` calls collapse
+into one `push_tool` helper that logs and skips on failure; `apply_patch`,
+`replace`, and `read` no longer panic on their production paths; and the TUI
+`/spec`/`/team`/`/triggers` handlers use `let Some(..) = .. else`. Remaining
+constant-regex `expect`/`unwrap` sites carry `// INVARIANT:` or `no-panic-ok`
+markers.
+
+**Docs.** `error.rs`/`spec.rs`/`router_client.rs` gained `//!` headers, the stale
+"populated by later tasks / T-00x" comments left `graph/mod.rs`, and
+`ragent-codeindex`, `ragent-bench`, `ragent-specs`, and `ragent-research` build
+with zero rustdoc warnings.
+
+**Vocabulary.** `sanitise_fts_query` was renamed to `sanitize_fts_query`, and
+`AGENTS-RUST.md` now documents the CLI presentation-surface exception to the
+`println!`/`eprintln!` tracing rule.
 
 ### 4.7 YOLO Mode
 
@@ -3230,6 +3400,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.122 | 2026-09-30 | Security and anti-pattern remediation sweep, folding in the staged working tree on top of `6cf0b60f` (MS-04). `ANTIPAT.md` M0 (the two shipping defects - crash-marker ordering and search-retry shift overflow - plus the highest-severity containment holes) and M2-M7 complete: `ragent-team` shim crate deleted (17 -> 16 workspace crates), major dependency bumps (`rmcp` 3.5, `rusqlite` 0.40, `ratatui` 0.30, ...), and `SECTASKS.md` MS-05 "prevent recurrence" - new `ragent_types::guard` (re-exported as `ragent_tools_core::guard`) owns `reject_option_like`, `is_safe_operand`, `validate_identifier`, `validate_relative_component`, `contained_join`, `clamp_retry_after` and `cap_read`; `ragent-agent`/`ragent-storage`/`ragent-tools-core` re-export `ragent_types::sanitize` so there is one secret registry and one redaction chokepoint (`Event` no longer derives `Debug`); the `security-guards` CI job runs `check-file-tool-containment.sh`, `check-security-unwraps.sh`, `check-shared-guards.sh` and `check-vcs-duplication.sh` (each with a `--self-test`); `SECTASKS.md` records the accepted-risk register (T-071). `SPEC.md` §4.6a-§4.6e document the guards and call sites. Earlier commits on the tree: MS-03 network/secret hardening (`da83d927`) and MS-04 defence in depth (`6cf0b60f`). Verification: `cargo check --workspace`, `cargo clippy --all-targets`, `cargo fmt --all -- --check`, `cargo audit` clean; workspace test suite green. |
 | v1.0.121 | 2026-09-27 | Introspection and MCP hygiene release. New read-only, hardwired auto-approve tools `tool_info` (JSON dump of the tool registry: name, description, parameters schema, permission category, source family, hidden state, MCP server/tool provenance) and `commands_info` (JSON catalog of every slash command — built-in TUI set from a drift-tested static mirror plus plugin-contributed commands resolved live) take the registry from 169 to 171 tools; the TUI `/tools` report and `tool_info` now share one source classifier built on `Tool::mcp_wrapper_info`. MCP lifecycle: `McpClient::connect` sweeps orphaned stdio server processes before spawning (a process counts as an orphan only when re-parented to init — `/proc/<pid>/stat` field 4 — so a live sibling ragent's server is never killed, fixing cross-instance `Transport closed`), and `shutdown` kills the whole spawned process group (`process_group(0)` + `killpg`) so no `npx`/`node` children survive exit. Fixes: post-loop rollback removes the capture from `active_loop_captures` only after the restore fully completes (a failed restore stays pending for retry — CI flake `test_rollback_accept_restores_snapshot`); OpenSkills discovery covers `~/.agents/skills/` and `.agents/skills/`; the Claude store's self-describing `*-lsp` stubs (e.g. `rust-analyzer-lsp`) install by materialising the marketplace document's inline `lspServers` manifest into `.claude-plugin/plugin.json` (recorded under `sha256(origin-url + bytes)`, never overwriting an existing manifest); plugins shipping a conventional `skills/` directory without a `skills` manifest section now bridge those skills. A `/simplify all` pass over the 50-file changed set: scoped-block lock release in `ToolRegistry::remove_all`, single SHA-256 + no JSON round-trip in the store provider, shared `merge_scanned_skills` in the plugins manifests, awaited (no nested `block_in_place`/`block_on`) `/mcp connect|disconnect|discover` arms, and validation-before-ledger in `set_mcp_server_enabled`. Verification: `cargo check --workspace --all-targets`, full `ragent-agent`/`ragent-plugins`/`ragent-tui` test suites, `cargo fmt --all -- --check`, `cargo audit` all green. |
 | v1.0.119 | 2026-09-26 | User headline "mcp fixes": a sessionful Streamable-HTTP MCP server (the MongoDB MCP server) now reports its tools — `HttpMcpClient::initialize` negotiates the session, replays the returned `mcp-session-id`, advertises `text/event-stream`, and unwraps SSE frames, and `McpClient::adopt_connected` adopts an already-running server through that client; the HTTP client is built lazily so it no longer panics outside a Tokio runtime. The TUI startup MCP report awaits the shared client lock with a `MCP_STARTUP_GRACE = 3s` connect wait, `/plugins list` resolves live MCP tool counts via `run_control_command`, and `/plugins list --mcp` sorts server ids for a deterministic contributions block. A `/simplify all` pass over v1.0.116–v1.0.118 fixed the `/swarm status` progress-bar overflow, the `/spawn` pending-marker race, `/plugins <non-list> --mcp` handling, swarm unblock persistence, and `/alog` error propagation. Rust-hygiene sweep green: `cargo check --workspace --all-targets`, `cargo check --tests --workspace`, `cargo test --workspace`, dead-code lint and reason checks, `cargo clippy --workspace --all-targets`, `cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`. |
 | v1.0.118 | 2026-09-25 | Durable, global MCP server enable/disable state: whether an MCP server is started is now a persisted choice (`<global state dir>/mcp_state.json`, a shared `McpEnableLedger`) rather than an implicit effect of being listed in `ragent.json`. A server id absent from the ledger is enabled; `mcp.<id>.disabled: true` always wins; a disabled server is registered with `McpStatus::Disabled` and no child process is spawned. `/mcp connect <id>` enables and connects live (registering tools immediately) and `/mcp disconnect <id>` disables and disconnects live, both persisting globally; `McpToolWrapper::execute` refuses a disabled server's tools. `/mcp` lists plugin-contributed servers (built from the merged `plugin_mcp_servers` set) with `enabled yes/no` and `tools: N`; `/plugins list` gains `MCP` / `MCP Tools` columns and an `mcp [...]` contributions line (`?` when a count is unknown, never `0`), and `/plugins list --mcp` keeps the full per-server tool inventory with registry names. Plugin `mcpServers` entries (inline or the Claude `"mcpServers": "./mcp.json"` file reference) are bridged as `<plugin-id>.<server>` and connected by default. `/tools` now lists visibility-disabled tools (`Visible Tools (N total, M disabled)` + a `Disabled by visibility` section) via the new `ToolRegistry::hidden_definitions()` / `hidden()`, and the slash-output extractor keeps every fenced block. A `/simplify` code-quality pass follows (dead `plugin_contributed_mcp_servers` and `McpEnableLedger::enabled_servers` removed, `McpEnableLedger::to_map` added, single config load in `set_mcp_server_enabled`, `impl Display for McpStatus`). |
@@ -3355,7 +3526,7 @@ All documentation markdown files are located in `docs/` except for these root fi
 - `@<path>` include directive for instruction files — `AGENTS.md`/`CLAUDE.md`/`.ragent.md`/`INSTRUCTIONS.md` can pull in other markdown files with `@path/to/file.md` (or a quoted form for paths with spaces). The `@` must appear in the first column of the line (no leading whitespace); a leading `@@` is an escape sequence that collapses to a single literal `@`. Directives are expanded transitively before the content is loaded into the system prompt; paths resolve relative to the containing file's directory. Cycle detection (visited-path set) and a depth cap (`MAX_INCLUDE_DEPTH = 16`) prevent infinite loops; absolute paths and `../` escapes outside the working dir / global ragent data dir are rejected with an inline marker comment; missing/unreadable files emit a marker comment rather than failing.
 - COMMSPLAN team subsystem hardening (M1–M4)
   - M1: Advisory-lock-protected file stores (`*.json.lock` + UUID temp files) for `Mailbox`, `TaskStore`, and `TeamStore`
-  - M2: Single-source team implementation — team runtime (7 modules) and 20 team tools are native to `ragent-agent`; `ragent-team` is a thin re-export shim. CI guard `scripts/check-team-duplication.sh`
+  - M2: Single-source team implementation — team runtime (7 modules) and 20 team tools are native to `ragent-agent`; `ragent-team` was a thin re-export shim, **folded into `ragent-agent` in v1.0.121 (ANTIPAT M7.8)**. CI guard `scripts/check-team-duplication.sh`
   - M3: `team_wait` liveness fixes, `team_idle` publishes `TeammateIdle`, unified shutdown path with `immediate` parameter
   - M4: Mailbox peek/ack at-least-once semantics, `team_assign_task` notifications, `team_broadcast` per-recipient results, `team_message` recipient validation, `team_read_messages` snake_case schema
 - Unified whitespace-tolerant replacement matcher — `edit`, `multiedit`, and `memory_replace` now share `ragent_tools_core::replace`, tolerating CRLF, trailing/leading whitespace, collapsed whitespace, blank-line edges, and final-newline mismatches

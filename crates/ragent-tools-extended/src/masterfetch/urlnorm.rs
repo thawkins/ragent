@@ -6,12 +6,12 @@
 //! URL into a canonical form suitable for use as a cache key and for crawl /
 //! search-result deduplication. The normalisation steps are:
 //!
-//! 1. **Lowercase the host** — e.g. `Example.COM` → `example.com`.
-//! 2. **Strip default ports** — `:80` for `http`, `:443` for `https`.
-//! 3. **Remove trailing slashes on non-root paths** — `/path/` → `/path`,
+//! 1. **Lowercase the host** - e.g. `Example.COM` -> `example.com`.
+//! 2. **Strip default ports** - `:80` for `http`, `:443` for `https`.
+//! 3. **Remove trailing slashes on non-root paths** - `/path/` -> `/path`,
 //!    but `/` is preserved.
-//! 4. **Strip tracking query parameters** — any parameter whose key begins
-//!    with `utm` (covering `utm_source`, `utm_medium`, `utm_campaign`, …)
+//! 4. **Strip tracking query parameters** - any parameter whose key begins
+//!    with `utm` (covering `utm_source`, `utm_medium`, `utm_campaign`, ...)
 //!    as well as `fbclid`, `gclid`, `ref`, `_ga`, `mc_cid`, and `mc_eid`.
 //!
 //! The [`url`] crate already lowercases the scheme and host and strips default
@@ -53,9 +53,9 @@ pub enum UrlNormError {
 /// Performs the following transformations (FR-027):
 ///
 /// - Lowercases the scheme and host (handled by the `url` crate on parse).
-/// - Strips default ports (`:80` for `http`, `:443` for `https` — handled by
+/// - Strips default ports (`:80` for `http`, `:443` for `https` - handled by
 ///   the `url` crate on parse).
-/// - Removes trailing slashes on non-root paths (e.g. `/path/` → `/path`).
+/// - Removes trailing slashes on non-root paths (e.g. `/path/` -> `/path`).
 /// - Strips tracking query parameters (`utm_*`, `fbclid`, `gclid`, `ref`,
 ///   `_ga`, `mc_cid`, `mc_eid`).
 ///
@@ -87,10 +87,10 @@ pub enum UrlNormError {
 pub fn normalise_url(raw: &str) -> Result<String, UrlNormError> {
     let mut url = Url::parse(raw).map_err(|e| UrlNormError::Parse(e.to_string()))?;
 
-    // Step 1 — strip trailing slashes on non-root paths.
+    // Step 1 - strip trailing slashes on non-root paths.
     strip_trailing_slash(&mut url);
 
-    // Step 2 — strip tracking query parameters.
+    // Step 2 - strip tracking query parameters.
     strip_tracking_params(&mut url);
 
     Ok(url.to_string())
@@ -136,9 +136,9 @@ pub fn dedup_urls(urls: &[&str]) -> Vec<String> {
 
 /// Remove trailing slashes from the URL path, preserving the root path `/`.
 ///
-/// `/path/` → `/path`
-/// `/` → `/`  (unchanged)
-/// `` (empty) → `/`  (unchanged, the url crate already normalises this to `/`)
+/// `/path/` -> `/path`
+/// `/` -> `/`  (unchanged)
+/// `` (empty) -> `/`  (unchanged, the url crate already normalises this to `/`)
 fn strip_trailing_slash(url: &mut Url) {
     let path = url.path().to_owned();
     // Only strip if the path is longer than "/" and ends with '/'.

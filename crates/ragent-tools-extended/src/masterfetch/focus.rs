@@ -24,7 +24,7 @@
 //! ## Block splitting
 //!
 //! Markdown is split into blocks separated by blank lines. A block is a
-//! heading, paragraph, table, or list — kept verbatim with order preserved.
+//! heading, paragraph, table, or list - kept verbatim with order preserved.
 //!
 //! ## Heading preservation
 //!
@@ -46,7 +46,7 @@
 //! - The text has one or fewer blocks.
 //! - The query yields no usable terms (all tokens shorter than 2 chars).
 //!
-//! All public functions are pure — no network I/O — enabling unit tests
+//! All public functions are pure - no network I/O - enabling unit tests
 //! without live pages (NFR-003).
 //!
 //! # Examples
@@ -160,10 +160,10 @@ impl Default for FocusParams {
 /// ```
 /// use ragent_tools_extended::masterfetch::focus::focus_content;
 ///
-/// // Empty query → no-op.
+/// // Empty query -> no-op.
 /// assert_eq!(focus_content("some text", ""), "some text");
 ///
-/// // Single block → no-op.
+/// // Single block -> no-op.
 /// assert_eq!(focus_content("only one block", "query"), "only one block");
 /// ```
 #[must_use]

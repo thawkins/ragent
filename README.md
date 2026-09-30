@@ -420,7 +420,7 @@ Docs and examples:
 
 ## Architecture
 
-The project is a Cargo workspace built from 17 focused crates:
+The project is a Cargo workspace built from 16 focused crates:
 
 | Crate                     | Purpose                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -434,7 +434,6 @@ The project is a Cargo workspace built from 17 focused crates:
 | `ragent-server`         | Axum HTTP routes and SSE streaming                                                                                                                                                                |
 | `ragent-specs`          | Spec lifecycle management: discovery, validation, status transitions, review, archival, JTBD analysis                                                                                          |
 | `ragent-storage`        | SQLite-backed storage, snapshots, encrypted credentials                                                                                                                                           |
-| `ragent-team`           | Team coordination runtime and team tools                                                                                                                                                          |
 | `ragent-telemetry`      | OpenTelemetry instrumentation and OTLP export                                                                                                                                                     |
 | `ragent-tools-core`     | Core shell/file/search tools                                                                                                                                                                      |
 | `ragent-tools-extended` | Extended document/web/memory/codeindex/plot tools                                                                                                                                                      |
@@ -489,12 +488,29 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.120** — The core architecture, tool system (171 tools across 25 categories), TUI,
+**v1.0.122** — The core architecture, tool system (171 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
+
+- **Version 1.0.122 — security and anti-pattern remediation sweep** — the
+  `ANTIPAT.md` milestones M0 and M2-M7 landed (standards conformance, shared-helper
+  de-duplication, silent-error suppression, vocabulary unification, structural
+  debt, and dependency/tooling hygiene): major dependency bumps (`rmcp` 3.5,
+  `rusqlite` 0.40, `ratatui` 0.30, ...), the retired `ragent-team` shim crate
+  deleted (**17 -> 16 crates**), and the `SECTASKS.md` MS-05 guards consolidated
+  into the new `ragent_types::guard` with a single `ragent_types::sanitize`
+  redaction chokepoint and four `security-guards` CI gates. Only `ANTIPAT.md`
+  M1 (ASCII conformance sweep) remains open.
+
+- **Version 1.0.121** — `tool_info` and `commands_info` (read-only, auto-approved)
+  return a JSON dump of the tool registry and the slash-command catalog
+  (169 -> 171 tools); MCP startup sweeps orphaned stdio servers and shutdown
+  tears down the whole process group; the post-loop rollback capture is removed
+  only after a successful restore; OpenSkills `.agents` discovery and Claude
+  store `*-lsp` stub installs; plus a `/simplify all` pass.
 
 - **Introspection + marketplace fixes (v1.0.120)** — two new read-only tools,
   `tool_info` and `commands_info`, expose a JSON dump of the tool registry and

@@ -1,4 +1,4 @@
-//! `git_cherry_pick` — Apply changes from specific commits.
+//! `git_cherry_pick` - Apply changes from specific commits.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -63,6 +63,9 @@ impl Tool for GitCherryPickTool {
 
         for c in commits {
             if let Some(hash) = c.as_str() {
+                // SEC-ragent-tools-vcs-00x (ANTIPAT A-1): a commit operand that
+                // begins with `-` would be parsed by git as an option.
+                crate::git::reject_option_like(hash, "commits[]")?;
                 args.push(hash.to_string());
             }
         }

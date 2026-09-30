@@ -3,11 +3,11 @@
 //! Codebase indexing and structured search for the ragent AI assistant.
 //!
 //! This crate provides:
-//! - **File scanning** — gitignore-aware directory walking with content hashing
-//! - **Symbol extraction** — tree-sitter–based parsing of source code into structured symbols
-//! - **Index storage** — SQLite-backed persistent store for files, symbols, and references
-//! - **Full-text search** — tantivy-backed full-text search over symbols and documentation
-//! - **Background indexing** — file watcher with debounced, batched re-indexing
+//! - **File scanning** - gitignore-aware directory walking with content hashing
+//! - **Symbol extraction** - tree-sitter-based parsing of source code into structured symbols
+//! - **Index storage** - SQLite-backed persistent store for files, symbols, and references
+//! - **Full-text search** - tantivy-backed full-text search over symbols and documentation
+//! - **Background indexing** - file watcher with debounced, batched re-indexing
 //!
 //! ## Quick Start
 //!
@@ -28,13 +28,13 @@
 //!
 //! ## Modules
 //!
-//! - [`types`] — Core data types: `SymbolKind`, `FileEntry`, `Symbol`, etc.
-//! - [`scanner`] — File discovery, hashing, and language detection
-//! - [`store`] — `SQLite` index storage with incremental update support
-//! - [`parser`] — Tree-sitter parsing and symbol extraction
-//! - [`search`] — Full-text search index backed by tantivy
-//! - [`watcher`] — Filesystem event watcher
-//! - [`worker`] — Background indexing worker with debounce and batching
+//! - [`types`] - Core data types: `SymbolKind`, `FileEntry`, `Symbol`, etc.
+//! - [`scanner`] - File discovery, hashing, and language detection
+//! - [`store`] - `SQLite` index storage with incremental update support
+//! - [`parser`] - Tree-sitter parsing and symbol extraction
+//! - [`search`] - Full-text search index backed by tantivy
+//! - [`watcher`] - Filesystem event watcher
+//! - [`worker`] - Background indexing worker with debounce and batching
 
 /// Core data types shared across the indexing pipeline.
 pub mod types;
@@ -45,7 +45,7 @@ pub mod scanner;
 /// SQLite-backed index storage for files and symbols.
 pub mod store;
 
-/// Tree-sitter–based source code parsing and symbol extraction.
+/// Tree-sitter-based source code parsing and symbol extraction.
 pub mod parser;
 
 /// Full-text search index backed by tantivy.
@@ -74,9 +74,16 @@ use store::IndexStore;
 use tracing::{debug, warn};
 use tree_cache::TreeCache;
 use types::{
-    CodeIndexConfig, DepDirection, FileEntry, GraphStatus, IndexResult, IndexStats, ScannedFile,
-    SearchQuery, Symbol, SymbolFilter, SymbolRef,
+    CodeIndexConfig, DEFAULT_SEARCH_LIMIT, DepDirection, FileEntry, GraphStatus, IndexResult,
+    IndexStats, ScannedFile, SearchQuery, Symbol, SymbolFilter, SymbolRef,
 };
+
+/// Over-fetch factor applied to the FTS query limit before post-FTS filtering.
+///
+/// Kind/language/file-pattern filters run after FTS, so fetch more candidates
+/// than the requested limit and then truncate (ANTIPAT M5.3 / audit 3.3).
+const FTS_OVERFETCH_FACTOR: usize = 2;
+
 /// The main entry point for the code index system.
 ///
 /// Owns the `SQLite` store, tantivy FTS index, tree cache, and parser registry.
@@ -166,9 +173,16 @@ impl CodeIndex {
     }
 
     /// Access the FTS index directly (for testing only).
+    ///
+    /// Test-only accessor: it recovers a poisoned lock (unlike the fallible
+    /// [`Self::fts_guard`]) so a test that deliberately poisons the mutex can
+    /// still observe the underlying state. Production callers must use
+    /// [`Self::fts_guard`].
     #[doc(hidden)]
     pub fn fts_for_test(&self) -> std::sync::MutexGuard<'_, FtsIndex> {
-        self.fts_guard()
+        self.fts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Try to acquire the store mutex (for testing concurrency behaviour).
@@ -198,20 +212,38 @@ impl CodeIndex {
 
     /// Lock the store, recovering a poisoned guard so a panicking thread
     /// during indexing cannot cascade panics into every subsequent user call.
+    ///
+    /// Poisoned-lock policy (ANTIPAT M5.3 / audit 3.1): the index guards
+    /// **recover** a poisoned lock rather than failing closed. The index is
+    /// append-oriented - a panic mid-write can leave a partially updated row,
+    /// but the store is a SQLite database whose own transactions keep it
+    /// consistent, and the FTS index is re-derivable from SQLite via
+    /// [`Self::ensure_fts_sync`]. Failing every subsequent read with a poison
+    /// error would be worse than continuing on the last consistent state, so
+    /// recovery is the deliberate choice for all three guards.
     fn store_guard(&self) -> std::sync::MutexGuard<'_, IndexStore> {
         self.store
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Lock the FTS index, recovering a poisoned guard (see [`Self::store_guard`]).
+    /// Lock the FTS index, recovering a poisoned guard.
+    ///
+    /// Uses the same recovery policy as [`Self::store_guard`] (see that method
+    /// for the rationale); the FTS index is rebuildable from SQLite, so a stale
+    /// in-memory state from a poisoned write is recoverable rather than fatal.
     fn fts_guard(&self) -> std::sync::MutexGuard<'_, FtsIndex> {
         self.fts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Lock the tree cache, recovering a poisoned guard (see [`Self::store_guard`]).
+    /// Lock the tree cache, recovering a poisoned guard.
+    ///
+    /// The tree cache is a pure in-memory parse cache: every entry is
+    /// reconstructible from disk, so a poisoned guard has no persistent effect
+    /// and recovery is strictly safer than propagating the poison (ANTIPAT
+    /// M5.3 / audit 3.1).
     fn tree_cache_guard(&self) -> std::sync::MutexGuard<'_, TreeCache> {
         self.tree_cache
             .lock()
@@ -223,7 +255,7 @@ impl CodeIndex {
     /// Search the index using full-text search combined with structured filters.
     pub fn search(&self, query: &SearchQuery) -> Result<Vec<SearchResult>> {
         let limit = if query.max_results == 0 {
-            20
+            DEFAULT_SEARCH_LIMIT
         } else {
             query.max_results
         };
@@ -243,7 +275,7 @@ impl CodeIndex {
                 limit = limit,
                 "CodeIndex search"
             );
-            let results = fts.search(&query.query, limit * 2)?;
+            let results = fts.search(&query.query, limit * FTS_OVERFETCH_FACTOR)?;
             debug!(
                 raw_results = results.len(),
                 "CodeIndex FTS results before filtering"
@@ -276,14 +308,14 @@ impl CodeIndex {
         Ok(results)
     }
 
-    /// Non-blocking variant of [`search()`].
+    /// Non-blocking variant of [`Self::search()`].
     ///
     /// Returns `None` if either the FTS or the `SQLite` store lock is currently
     /// held by a background re-index. Callers should retry briefly or fall
     /// back to a simpler search tool rather than blocking the agent loop.
     pub fn try_search(&self, query: &SearchQuery) -> Result<Option<Vec<SearchResult>>> {
         let limit = if query.max_results == 0 {
-            20
+            DEFAULT_SEARCH_LIMIT
         } else {
             query.max_results
         };
@@ -292,7 +324,7 @@ impl CodeIndex {
             Ok(g) => g,
             Err(_) => return Ok(None),
         };
-        let mut results = fts.search(&query.query, limit * 2)?;
+        let mut results = fts.search(&query.query, limit * FTS_OVERFETCH_FACTOR)?;
         drop(fts);
 
         if let Some(ref kind) = query.kind {
@@ -335,7 +367,7 @@ impl CodeIndex {
         store.query_symbols(filter)
     }
 
-    /// Non-blocking variant of [`symbols()`].
+    /// Non-blocking variant of [`Self::symbols()`].
     ///
     /// Returns `None` if the `SQLite` store lock is currently held (e.g. by a
     /// background reindex). Callers should retry briefly or fall back to
@@ -357,7 +389,7 @@ impl CodeIndex {
         store.find_references_limited(symbol_name, limit)
     }
 
-    /// Non-blocking variant of [`references()`].
+    /// Non-blocking variant of [`Self::references()`].
     ///
     /// Returns `None` if the `SQLite` store lock is currently held.
     pub fn try_references(
@@ -378,7 +410,7 @@ impl CodeIndex {
         dependencies_impl(&store, path, direction)
     }
 
-    /// Non-blocking variant of [`dependencies()`].
+    /// Non-blocking variant of [`Self::dependencies()`].
     ///
     /// Returns `None` if the `SQLite` store lock is currently held.
     pub fn try_dependencies(
@@ -429,7 +461,7 @@ impl CodeIndex {
         Ok(stats)
     }
 
-    /// Non-blocking variant of [`status()`].
+    /// Non-blocking variant of [`Self::status()`].
     ///
     /// Returns `None` if the store or FTS lock is currently held (e.g. by
     /// a background reindex).  This is intended for UI status-bar polling
@@ -461,6 +493,12 @@ impl CodeIndex {
         }
 
         if self.config.index_dir.exists() {
+            // ANTIPAT M6.4 (audit 4.5): accepted trade-off. `index_size_cached`
+            // runs the recursive `dir_size` walk while holding the
+            // `cached_index_size` mutex (see its own doc comment). The walk is
+            // bounded to `index_dir` and gated to one run per invalidation, and
+            // restructuring the walk out of the guard would add a lock-ordering
+            // hazard for no measurable gain, so it is left as-is deliberately.
             stats.index_size_bytes = self.index_size_cached();
         }
 
@@ -510,7 +548,7 @@ impl CodeIndex {
         graph.godnodes(n)
     }
 
-    /// Non-blocking variant of [`godnodes()`] (FR-017).
+    /// Non-blocking variant of [`Self::godnodes()`] (FR-017).
     ///
     /// Returns `None` if the `SQLite` store lock is currently held (e.g. by
     /// a background reindex).  Callers should retry briefly or return a
@@ -535,7 +573,7 @@ impl CodeIndex {
         graph.path(from, to)
     }
 
-    /// Non-blocking variant of [`path()`] (FR-017).
+    /// Non-blocking variant of [`Self::path()`] (FR-017).
     ///
     /// Returns `Ok(None)` if the `SQLite` store lock is currently held (e.g. by
     /// a background reindex).  Returns `Ok(Some(None))` if the lock was
@@ -562,7 +600,7 @@ impl CodeIndex {
         graph.explain(name)
     }
 
-    /// Non-blocking variant of [`explain()`] (FR-017).
+    /// Non-blocking variant of [`Self::explain()`] (FR-017).
     ///
     /// Returns `Ok(None)` if the `SQLite` store lock is currently held (e.g. by
     /// a background reindex).  Returns `Ok(Some(None))` if the lock was acquired
@@ -589,7 +627,7 @@ impl CodeIndex {
         graph.communities()
     }
 
-    /// Non-blocking variant of [`communities()`] (FR-017).
+    /// Non-blocking variant of [`Self::communities()`] (FR-017).
     ///
     /// Returns `Ok(None)` if the `SQLite` store lock is currently held (e.g. by
     /// a background reindex).  Returns `Ok(Some(vec))` when the lock was
@@ -612,7 +650,7 @@ impl CodeIndex {
     /// [`graph::BuildResult`] with edge counts distinguishing `EXTRACTED` from
     /// `INFERRED`.  Blocks until the store lock is acquired.
     ///
-    /// The store lock is held only for two brief windows — a read snapshot of
+    /// The store lock is held only for two brief windows - a read snapshot of
     /// the derivation inputs and the final single-transaction persist.  The
     /// CPU-heavy derivation runs with **no** locks held, so FTS search and
     /// the other store readers stay available while the graph builds (FR-026).
@@ -627,9 +665,9 @@ impl CodeIndex {
     /// Build (or rebuild) the semantic edge graph restricted to symbols from a
     /// single language (FR-018).
     ///
-    /// Like [`build_graph()`] but only derives edges for files whose detected
+    /// Like [`Self::build_graph()`] but only derives edges for files whose detected
     /// language matches `language`.  Useful for per-language subgraph analysis.
-    /// Lock behaviour matches [`build_graph()`]: brief load + brief persist,
+    /// Lock behaviour matches [`Self::build_graph()`]: brief load + brief persist,
     /// derivation runs lock-free (FR-026).
     pub fn build_graph_for_language(&self, language: &str) -> Result<graph::BuildResult> {
         self.build_graph_inner(Some(language))
@@ -652,14 +690,14 @@ impl CodeIndex {
     /// [`Self::build_graph_for_language`], and the graph phase of
     /// [`Self::full_reindex`].
     ///
-    /// Lock discipline (FR-026): the store mutex is taken twice, briefly —
+    /// Lock discipline (FR-026): the store mutex is taken twice, briefly -
     /// once to snapshot the derivation inputs (read-only) and once to persist
     /// the derived edges in a single transaction.  The CPU-heavy derivation
     /// runs with no locks held, so FTS search and the other store readers
     /// stay available for the whole build.  Does not touch `graph_busy`; the
     /// caller owns that flag.
     fn graph_build_phased(&self, language: Option<&str>) -> Result<graph::BuildResult> {
-        // Phase 1: brief store lock — snapshot the derivation inputs.
+        // Phase 1: brief store lock - snapshot the derivation inputs.
         let inputs = {
             let store = self.store_guard();
             graph::edges::load_graph_inputs(&store)?
@@ -675,7 +713,7 @@ impl CodeIndex {
             ),
             None => graph::edges::derive_edges_from_inputs(&inputs, Some(&self.graph_done)),
         };
-        // Phase 3: brief store lock — persist in one transaction.
+        // Phase 3: brief store lock - persist in one transaction.
         let store = self.store_guard();
         graph::edges::persist_edges(&store, &edges)
     }
@@ -726,7 +764,7 @@ impl CodeIndex {
         store.edge_count()
     }
 
-    /// Shared implementation backing both [`graph_status()`] (blocking, `?`
+    /// Shared implementation backing both [`Self::graph_status()`] (blocking, `?`
     /// propagation) and [`try_graph_status()`] (non-blocking, error-to-None).
     fn graph_status_from_store(store: &crate::store::IndexStore) -> Result<GraphStatus> {
         Ok(GraphStatus {
@@ -754,7 +792,7 @@ impl CodeIndex {
         Self::graph_status_from_store(&store)
     }
 
-    /// Non-blocking variant of [`graph_status()`] (FR-017).
+    /// Non-blocking variant of [`Self::graph_status()`] (FR-017).
     ///
     /// Returns `None` if the `SQLite` store lock is currently held (e.g. by a
     /// background reindex or graph build) so callers can report a busy state
@@ -1004,7 +1042,7 @@ impl CodeIndex {
                     // stale symbols persist. A transient parse failure (e.g.
                     // a truncated read while an editor is writing the file)
                     // must not become permanent staleness, so restore the
-                    // previous hash — the next event for this content will
+                    // previous hash - the next event for this content will
                     // re-parse and self-heal.
                     if let Some(prev) = &previous_hash {
                         let store = self.store_guard();
@@ -1041,7 +1079,7 @@ impl CodeIndex {
 
             let file_symbols = store.get_file_symbols(file_id)?;
             // Dedup current + stale symbol ids using a HashSet to avoid the
-            // O(n) `contains` scan per element (O(n²) overall).
+            // O(n) `contains` scan per element (O(n^2) overall).
             let mut symbol_ids: Vec<i64> = file_symbols.iter().map(|s| s.id).collect();
             let mut seen: std::collections::HashSet<i64> = symbol_ids.iter().copied().collect();
             for old_id in &old_symbol_ids {
@@ -1492,7 +1530,7 @@ pub fn start_watching(
 ///
 /// `Imports` resolves the file's own import list; `Dependents` uses a single
 /// SQL join (`list_dependent_paths`) instead of loading the whole file table
-/// to build an `id → path` map (H-004).
+/// to build an `id -> path` map (H-004).
 fn dependencies_impl(
     store: &std::sync::MutexGuard<'_, crate::store::IndexStore>,
     path: &str,

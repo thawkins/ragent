@@ -1,4 +1,4 @@
-//! `memory_store` / `memory_recall` / `memory_forget` — Structured memory tools.
+//! `memory_store` / `memory_recall` / `memory_forget` - Structured memory tools.
 //!
 //! These tools provide access to the SQLite-backed structured memory store
 //! with categories, tags, and confidence scoring. Unlike the file-based
@@ -32,7 +32,7 @@ impl Tool for MemoryStoreTool {
              Categories: fact, pattern, preference, insight, error, workflow. REQUIRED \
              parameters: 'content' (string, the memory content) and 'category' (string, one \
              of fact/pattern/preference/insight/error/workflow). Optional: 'tags' (array of \
-             strings), 'confidence' (number 0.0–1.0, default 0.7), and 'source' (string). \
+             strings), 'confidence' (number 0.0-1.0, default 0.7), and 'source' (string). \
              Stored memories can be searched with memory_recall and deleted with memory_forget. \
              Common gotcha: confidence must be between 0.0 and 1.0."
     }
@@ -43,7 +43,7 @@ impl Tool for MemoryStoreTool {
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "The memory content — a fact, pattern, insight, etc. (required)"
+                    "description": "The memory content - a fact, pattern, insight, etc. (required)"
                 },
                 "category": {
                     "type": "string",
@@ -57,7 +57,7 @@ impl Tool for MemoryStoreTool {
                 },
                 "confidence": {
                     "type": "number",
-                    "description": "Confidence score 0.0–1.0 (default: 0.7)"
+                    "description": "Confidence score 0.0-1.0 (default: 0.7)"
                 },
                 "source": {
                     "type": "string",
@@ -165,7 +165,7 @@ impl Tool for MemoryRecallTool {
              tag, and confidence filters. REQUIRED parameter: 'query' (string, \
              space-separated terms, all must match). Optional: 'categories' (array of \
              allowed category strings), 'tags' (array, all must match), 'limit' (integer, \
-             default 5), and 'min_confidence' (number 0.0–1.0, default 0.5). Returns the most \
+             default 5), and 'min_confidence' (number 0.0-1.0, default 0.5). Returns the most \
              relevant results; access counts are incremented. Common gotcha: keyword \
              terms are combined with AND, so broadening a search may require fewer terms."
     }
@@ -194,7 +194,7 @@ impl Tool for MemoryRecallTool {
                 },
                 "min_confidence": {
                     "type": "number",
-                    "description": "Minimum confidence threshold 0.0–1.0 (default: 0.5)"
+                    "description": "Minimum confidence threshold 0.0-1.0 (default: 0.5)"
                 }
             },
             "required": ["query"],
@@ -314,7 +314,7 @@ impl Tool for MemoryForgetTool {
     fn description(&self) -> &'static str {
         "Delete structured memories by ID or by filter criteria. At least one \
              criterion is required as a safety measure: 'id' (integer), 'older_than_days' \
-             (integer), 'max_confidence' (number 0.0–1.0), 'category' (string), or 'tags' \
+             (integer), 'max_confidence' (number 0.0-1.0), 'category' (string), or 'tags' \
              (array of strings). Returns the count of deleted memories. Common gotcha: \
              calls with no criteria fail; be explicit about which memories to remove."
     }

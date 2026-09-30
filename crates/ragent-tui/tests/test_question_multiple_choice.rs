@@ -145,8 +145,8 @@ async fn test_multiple_choice_question_shows_selected_option() {
 
     let text = render_app_to_string(&mut app);
 
-    // First option should have the selection indicator (▶).
-    assert!(text.contains("▶ A"));
+    // First option should have the selection indicator (>).
+    assert!(text.contains("> A"));
 }
 
 #[tokio::test]
@@ -172,7 +172,7 @@ async fn test_multiple_choice_selection_navigates_down() {
     let text = render_app_to_string(&mut app);
 
     // Second option should now be selected.
-    assert!(text.contains("▶ second"));
+    assert!(text.contains("> second"));
 }
 
 #[tokio::test]

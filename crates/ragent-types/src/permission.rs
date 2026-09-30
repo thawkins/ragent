@@ -2,7 +2,7 @@
 //!
 //! The full permission checking system (`Permission`, `PermissionAction`,
 //! `PermissionRule`, `PermissionRequest`, `PermissionChecker`) lives in
-//! `ragent-config::permission` — see `REMPLAN.md` M1 / T1.2 for the
+//! `ragent-config::permission` - see `REMPLAN.md` M1 / T1.2 for the
 //! consolidation history.  Only [`PermissionDecision`] remains here because
 //! the `Event::PermissionReplied` variant (defined in
 //! [`crate::event::Event`]) references it, and `ragent-types` must not depend

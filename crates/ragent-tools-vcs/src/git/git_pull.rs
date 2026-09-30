@@ -1,4 +1,4 @@
-//! `git_pull` — Fetch and integrate remote changes.
+//! `git_pull` - Fetch and integrate remote changes.
 
 use anyhow::Result;
 use serde_json::{Value, json};

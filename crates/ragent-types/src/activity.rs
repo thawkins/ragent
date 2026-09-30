@@ -3,8 +3,8 @@
 //! This module defines the **durable execution facts** recorded by the
 //! activity logging subsystem (see the `maka` spec, SPEC.md). An
 //! [`ActivityEvent`] is an immutable, self-describing record of a single
-//! execution fact — a model message, a tool call, a tool result, a permission
-//! decision, a checkpoint, or a termination — appended to a run's append-only
+//! execution fact - a model message, a tool call, a tool result, a permission
+//! decision, a checkpoint, or a termination - appended to a run's append-only
 //! event log before it is projected into any user-facing or derived state
 //! (FR-001).
 //!
@@ -363,7 +363,7 @@ pub struct ProjectedCheckpoint {
 /// would see after replaying events up to a chosen point. It is computed by
 /// [`Projection::replay`] (or [`Projection::replay_upto`] for a partial
 /// replay up to a rollback/resume target). All fields are derived from the
-/// append-only event log — the projection holds no independent truth.
+/// append-only event log - the projection holds no independent truth.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Projection {
     /// Model messages in replay order.
@@ -518,7 +518,7 @@ impl Projection {
     /// a resume (FR-013: "continue execution from the event following the last
     /// committed sequence number").
     ///
-    /// This is `last_seq + 1` — the next event to append after resuming.
+    /// This is `last_seq + 1` - the next event to append after resuming.
     #[must_use]
     pub fn resume_from_seq(&self) -> u64 {
         self.last_seq + 1
@@ -535,7 +535,7 @@ impl Projection {
         self.status == RunStatus::Interrupted
     }
 
-    /// Returns tool calls that have no matching result event — the calls that
+    /// Returns tool calls that have no matching result event - the calls that
     /// were in-flight when the run was interrupted (FR-013).
     ///
     /// On resume, these are the tool calls whose results need to be obtained
@@ -574,7 +574,7 @@ impl Projection {
     /// When the operator enables context pruning, `keep_last` specifies how
     /// many of the most recent tool results to keep; older tool results are
     /// omitted from the returned slice. The full [`Projection`] (with all tool
-    /// results) is unchanged — pruning affects only what is sent to the model,
+    /// results) is unchanged - pruning affects only what is sent to the model,
     /// not the events in the log (which are never deleted, per FR-015).
     ///
     /// Pass `usize::MAX` (or any value >= `tool_results.len()`) to keep all
@@ -620,7 +620,7 @@ pub struct ResumeResult {
 /// (FR-011).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConsistencyError {
-    /// A gap in the sequence numbers (e.g. 0, 1, 3 — missing 2).
+    /// A gap in the sequence numbers (e.g. 0, 1, 3 - missing 2).
     #[error("sequence gap: expected {expected}, found {found}")]
     SeqGap {
         /// The expected sequence number.

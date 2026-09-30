@@ -249,7 +249,7 @@ fn body_excerpt_respects_max_chars_and_counts_ellipsis() {
         excerpt.chars().count()
     );
     assert!(
-        excerpt.ends_with('…'),
+        excerpt.ends_with("..."),
         "truncated excerpt should end with ellipsis"
     );
 }

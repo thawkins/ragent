@@ -102,7 +102,7 @@ impl SearchBudget {
 /// single research run.
 ///
 /// Keyed on the normalized (lowercased, whitespace-collapsed) query text.
-/// A concurrent miss does not block or reserve — two researchers decomposing
+/// A concurrent miss does not block or reserve - two researchers decomposing
 /// to the same query at the same instant may both pay for it once; any later
 /// identical query hits the cache.
 #[derive(Debug)]

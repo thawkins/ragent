@@ -26,14 +26,14 @@ pub mod permission;
 /// session (spec `plugins` FR-030).
 pub mod plugin;
 pub mod reference;
-/// Process resource limits — bounded concurrency for child process spawns
+/// Process resource limits - bounded concurrency for child process spawns
 /// and tool execution.
 ///
 /// Re-exported from `ragent_types::resource` (DUPPLAN.md Milestone E).
 /// Previously duplicated as a local `resource.rs` file; now a single source of
 /// truth lives in `ragent_types::resource`.
 pub use ragent_types::resource;
-/// Stateful loop cron mode — cross-run state and triage inbox tag protocol
+/// Stateful loop cron mode - cross-run state and triage inbox tag protocol
 /// (spec `piegap` FR-004, T-005).
 pub mod loop_state;
 /// Input sanitization and secret redaction utilities.

@@ -1,9 +1,9 @@
 //! Pluggable transport adapters for remote agent communication (Task 5.1).
 //!
 //! Provides:
-//! - [`RemoteAgentDescriptor`] — metadata for a remote agent (URL + capabilities).
-//! - [`HttpRouter`] — [`Router`] impl that dispatches to remote agents via HTTP POST.
-//! - [`RouterComposite`] — tries an ordered list of routers in sequence, returning
+//! - [`RemoteAgentDescriptor`] - metadata for a remote agent (URL + capabilities).
+//! - [`HttpRouter`] - [`Router`] impl that dispatches to remote agents via HTTP POST.
+//! - [`RouterComposite`] - tries an ordered list of routers in sequence, returning
 //!   the first success.  Typical use: in-process first, HTTP fallback.
 
 use std::collections::HashMap;
@@ -56,11 +56,11 @@ struct RemoteAgentResponse {
 /// ```json
 /// POST <endpoint_url>
 /// Content-Type: application/json
-/// { "job_id": "…", "payload": "…" }
+/// { "job_id": "...", "payload": "..." }
 /// ```
 /// and respond with:
 /// ```json
-/// { "result": "…" }
+/// { "result": "..." }
 /// ```
 #[derive(Clone)]
 pub struct HttpRouter {

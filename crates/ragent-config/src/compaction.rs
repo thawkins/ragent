@@ -55,7 +55,7 @@ pub struct CompactionConfig {
     /// overflow errors trigger emergency compaction. Default: `true`.
     pub auto: bool,
     /// Fraction of the context window at which to trigger compaction
-    /// (0.0–1.0). Default: `0.7` (70 %).
+    /// (0.0-1.0). Default: `0.7` (70 %).
     ///
     /// When set (e.g. `0.8` = 80%), compaction fires once the effective request
     /// token count reaches `context_window * threshold`. When `None`, the
@@ -68,7 +68,7 @@ pub struct CompactionConfig {
     pub threshold: Option<f64>,
     /// Token buffer reserved for the model's response and safety margin.
     ///
-    /// Expressed as a fraction of the context window (0.0–1.0). When
+    /// Expressed as a fraction of the context window (0.0-1.0). When
     /// `threshold` is `None`, compaction triggers when estimated request
     /// tokens exceed `context_window - max(output_tokens,
     /// context_window * buffer)`. Default: `0.10` (10 %).
@@ -85,7 +85,7 @@ pub struct CompactionConfig {
     pub model: Option<CompactionModelRef>,
     /// Maximum tokens to request for the compaction summary output.
     ///
-    /// Default: `1500`. Generation time is the dominant compaction cost —
+    /// Default: `1500`. Generation time is the dominant compaction cost -
     /// halving this budget roughly halves worst-case latency. The structured
     /// summary template (Objective / Details / Work State / Next Move /
     /// Relevant Files) fits comfortably in ~1500 tokens.
@@ -155,7 +155,7 @@ impl CompactionConfig {
 #[serde(default)]
 pub struct KeepConfig {
     /// Fraction of the context window reserved verbatim for recent turns
-    /// (0.0–1.0). Default: `0.20` (20 %).
+    /// (0.0-1.0). Default: `0.20` (20 %).
     pub tokens: Option<f64>,
 }
 

@@ -28,7 +28,7 @@ fn test_spec_branch_name_with_underscores() {
 #[test]
 fn test_create_spec_branch_not_a_repo() {
     let tmp = TempDir::new().expect("tempdir");
-    // No git init — should return NotARepo.
+    // No git init - should return NotARepo.
     let result = create_spec_branch("test-spec", tmp.path());
     assert_eq!(result, BranchResult::NotARepo);
 }

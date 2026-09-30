@@ -1,23 +1,23 @@
-//! Gmail tool (`gmail`) — JCODEPLAN M7 (T-060).
+//! Gmail tool (`gmail`) - JCODEPLAN M7 (T-060).
 //!
 //! Search, read, draft, and send mail through the Gmail REST API v1. OAuth2
 //! tokens are managed via an injectable [`TokenStore`] backend; the default
 //! file-backed store keeps them in the `provider_auth` table of the ragent
 //! `SQLite` database using the same machine-local encryption as provider
-//! credentials — never in `ragent.json`.
+//! credentials - never in `ragent.json`.
 //!
 //! # Authentication model
 //!
 //! The tool supports two ways to become authenticated:
 //!
-//! 1. **Access token directly** — `gmail action="auth" access_token="ya29...."`.
-//! 2. **Refresh token flow** — provide a refresh token obtained from the
+//! 1. **Access token directly** - `gmail action="auth" access_token="ya29...."`.
+//! 2. **Refresh token flow** - provide a refresh token obtained from the
 //!    Google OAuth2 playground (scope `https://mail.google.com/`):
 //!    `gmail action="auth" refresh_token="..." client_id="..." client_secret="..."`.
 //!    The tool exchanges it for short-lived access tokens automatically when
 //!    needed. Client credentials are read, in precedence order: auth-time
-//!    arguments → stored credentials → `gmail.client_id` /
-//!    `gmail.client_secret` in `ragent.json` → the `GMAIL_CLIENT_ID` /
+//!    arguments -> stored credentials -> `gmail.client_id` /
+//!    `gmail.client_secret` in `ragent.json` -> the `GMAIL_CLIENT_ID` /
 //!    `GMAIL_CLIENT_SECRET` environment variables.
 //!
 //! # Actions
@@ -44,7 +44,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -53,7 +52,6 @@ pub const GMAIL_TOOL_NAME: &str = "gmail";
 
 const DEFAULT_API_BASE: &str = "https://gmail.googleapis.com";
 const DEFAULT_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_SEARCH_RESULTS: u64 = 100;
 const DEFAULT_SEARCH_RESULTS: u64 = 10;
 const MAX_BODY_SNIPPET: usize = 4000;
@@ -258,8 +256,8 @@ impl GmailTool {
 
     /// Resolve Gmail configuration (endpoint overrides + client credentials).
     ///
-    /// Precedence: stored auth-time credentials → `ragent.json` `gmail.*`
-    /// fields (with `env:` indirection) → `GMAIL_CLIENT_ID` /
+    /// Precedence: stored auth-time credentials -> `ragent.json` `gmail.*`
+    /// fields (with `env:` indirection) -> `GMAIL_CLIENT_ID` /
     /// `GMAIL_CLIENT_SECRET` environment variables.
     pub fn resolved_config(ctx: &ToolContext, tokens: &GmailTokens) -> GmailResolvedConfig {
         let mut resolved = GmailResolvedConfig {
@@ -313,9 +311,11 @@ impl GmailTool {
     }
 
     fn client() -> Result<reqwest::Client> {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-            .build()
+        // ANTIPAT M5.9 / 3.2: reuse the shared client singleton (connection
+        // pool + TLS session cache) instead of building a fresh client per
+        // API request and per token refresh.
+        crate::masterfetch::http::shared_client()
+            .cloned()
             .context("Failed to build HTTP client")
     }
 
@@ -363,13 +363,25 @@ impl GmailTool {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+            // ANTIPAT 4.1: bound the error body.
+            let body = crate::masterfetch::http::read_body_capped(
+                resp,
+                crate::masterfetch::http::MAX_SMALL_BODY_BYTES,
+            )
+            .await
+            .unwrap_or_default();
             bail!("Gmail token refresh failed (HTTP {status}): {body}");
         }
-        let refreshed: TokenRefreshResponse = resp
-            .json()
-            .await
-            .context("Invalid token refresh response")?;
+        // ANTIPAT M5.9 / 3.5: bound the response body before parsing.
+        let text = crate::masterfetch::http::read_body_capped_lossy(
+            resp,
+            crate::masterfetch::http::MAX_SMALL_BODY_BYTES,
+        )
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("Invalid token refresh response")?;
+        let refreshed: TokenRefreshResponse =
+            serde_json::from_str(&text).context("Invalid token refresh response")?;
         tokens.access_token = Some(refreshed.access_token.clone());
         // Persist the new access token alongside the refresh token.
         self.store.save(tokens)?;
@@ -406,13 +418,27 @@ impl GmailTool {
             }
             if !resp.status().is_success() {
                 let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
+                // ANTIPAT 4.1: bound the error body.
+                let body = crate::masterfetch::http::read_body_capped(
+                    resp,
+                    crate::masterfetch::http::MAX_SMALL_BODY_BYTES,
+                )
+                .await
+                .unwrap_or_default();
                 bail!("Gmail API error (HTTP {status}): {body}");
             }
             if resp.status() == reqwest::StatusCode::NO_CONTENT {
                 return Ok(Value::Null);
             }
-            return resp.json().await.context("Invalid Gmail API response");
+            // ANTIPAT M5.9 / 3.5: bound the response body before parsing.
+            let text = crate::masterfetch::http::read_body_capped_lossy(
+                resp,
+                crate::masterfetch::http::MAX_RESPONSE_BODY_BYTES,
+            )
+            .await
+            .map_err(anyhow::Error::msg)
+            .context("Invalid Gmail API response")?;
+            return serde_json::from_str(&text).context("Invalid Gmail API response");
         }
         // The loop above always returns within its two iterations; fall through
         // to an error rather than panicking (FUNC-043).
@@ -499,7 +525,7 @@ impl GmailTool {
             if cut == 0 {
                 cut = s.len().min(max);
             }
-            format!("{}… (truncated)", &s[..cut])
+            format!("{}... (truncated)", &s[..cut])
         }
     }
 
@@ -695,7 +721,7 @@ impl Tool for GmailTool {
                     })
                 }
                 Err(e) => Ok(ToolOutput {
-                    content: format!("gmail: UNAVAILABLE — credential store unreachable: {e}"),
+                    content: format!("gmail: UNAVAILABLE - credential store unreachable: {e}"),
                     metadata: Some(json!({
                         "authenticated": false,
                         "next_action": "Ensure the ragent data directory is writable."

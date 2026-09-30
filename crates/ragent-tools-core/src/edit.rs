@@ -14,31 +14,31 @@
 //!
 //! # Operations (FR-006)
 //!
-//! - **Update**: `old_string` non-empty, `new_string` non-empty → replace the
+//! - **Update**: `old_string` non-empty, `new_string` non-empty -> replace the
 //!   unique match.
-//! - **Delete**: `old_string` non-empty, `new_string` empty → remove the
+//! - **Delete**: `old_string` non-empty, `new_string` empty -> remove the
 //!   matched text.
-//! - **Create**: `old_string` empty and the file does not exist → write
+//! - **Create**: `old_string` empty and the file does not exist -> write
 //!   `new_string` to a new file. Rejected if the file already exists.
 //!
-//! # Matching (editplan P2 — fallback cascade)
+//! # Matching (editplan P2 - fallback cascade)
 //!
 //! When `collapse_whitespace` is false (the default) the matcher runs the
 //! progressive fallback cascade in [`super::replace::find_replacement_cascade`]:
 //!
-//! 1. **Exact** — `old_string` must match exactly once, byte-for-byte.
-//! 2. **Flexible** — when exact matching fails with not-found, every run of
+//! 1. **Exact** - `old_string` must match exactly once, byte-for-byte.
+//! 2. **Flexible** - when exact matching fails with not-found, every run of
 //!    whitespace in the needle is matched against any non-empty run of
 //!    whitespace in the file. A unique match wins. Runs may only fold across
 //!    a line boundary when both the needle run and the matched file run
 //!    contain a newline (FR-045), so the flexible lane can never join or
 //!    split lines.
-//! 3. **Indent-normalised** — when both lanes above fail, per-line comparison
+//! 3. **Indent-normalised** - when both lanes above fail, per-line comparison
 //!    with leading whitespace stripped; the replacement re-applies the file's
 //!    own indentation.
 //!
 //! When `collapse_whitespace` is true, only the flexible lane runs (this is
-//! the opt-in mode). `new_string` is inserted verbatim — never re-indented
+//! the opt-in mode). `new_string` is inserted verbatim - never re-indented
 //! or line-ending-normalised, except by the explicit indent-reapplication
 //! rule of the indent-normalised fallback lane.
 //!
@@ -78,9 +78,7 @@ use super::replace::{
     CascadeFail, CascadeMatch, FindError, MatchLane, disambiguation_hint,
     find_flexible_replacement_range, find_replacement_cascade, format_match_failure, length_note,
 };
-use super::{
-    Tool, ToolContext, ToolOutput, check_path_within_any_root, check_path_within_root_cached,
-};
+use super::{Tool, ToolContext, ToolOutput, check_path_within_allowed_roots_cached};
 
 /// Minimum lines of context to show before and after the edited region in the
 /// result snippet (FR-008).
@@ -93,7 +91,7 @@ const SNIPPET_CONTEXT_LINES: usize = 4;
 /// treated as errors to prevent ambiguous edits. Supports create, update, and
 /// delete operations via empty `old_string` / `new_string` (FR-006).
 ///
-/// `#[allow(dead_code)]` — the type is registered and used by the lib target,
+/// `#[allow(dead_code)]` - the type is registered and used by the lib target,
 /// but it is never directly constructed by the external integration test target
 /// that re-imports this source via `#[path]`.
 #[allow(dead_code)]
@@ -241,15 +239,15 @@ impl Tool for EditTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
-        // C-002: edits must stay inside the allowed roots.
-        // Use configured allowed_roots if available, otherwise fall back to working_dir.
-        if ctx.allowed_roots.is_empty() {
-            check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
-        } else {
-            let root_refs: Vec<&std::path::Path> =
-                ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
-            check_path_within_any_root(&path, &root_refs)?;
-        }
+        // C-002 / FUNC-068 (ANTIPAT F-06): edits must stay inside the allowed
+        // roots. The helper falls back to `working_dir` when `allowed_roots` is
+        // empty, so the two branches below are equivalent to the old form.
+        check_path_within_allowed_roots_cached(
+            &path,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
 
         // Acquire file lock to serialize concurrent edits to the same file.
         let _lock = super::file_lock::lock_file(&path).await;
@@ -278,7 +276,7 @@ impl Tool for EditTool {
             );
         }
 
-        // ── Read the file ────────���────────────────────────────────────────────
+        // ── Read the file ────────────────────────────────────────────────────
         // F-5: read bytes and validate UTF-8 explicitly so an encoding
         // failure gets a precise, corrective message (the blanket
         // "file may not exist" context buried the actual cause and sent the
@@ -325,14 +323,14 @@ impl Tool for EditTool {
                 },
             );
             bail!(
-                "{}. The session's read timestamp has been refreshed — \
+                "{}. The session's read timestamp has been refreshed - \
                  re-issue the edit against the live content (the file on \
                  disk is the new baseline).",
                 e
             );
         }
 
-        // ── Replacement (editplan P2: exact → flexible → indent-normalised) ──
+        // ── Replacement (editplan P2: exact -> flexible -> indent-normalised) ──
         let (lane, start, end, new_str) = if collapse_whitespace {
             // Collapse-whitespace opt-in: run only the flexible lane.
             match find_flexible_replacement_range(&content, old_string, new_string) {
@@ -510,7 +508,7 @@ impl Tool for EditTool {
         // the read baseline (P1.2) so the next edit sees the post-write content.
         record_edit_timestamp(&path, ctx);
 
-        // ── Build the result snippet (FR-008) ───────────────���─────────────────
+        // ── Build the result snippet (FR-008) ────────────────────────────────
         let snippet = build_snippet(&new_content, start, start + new_str.len());
 
         // `old_string` may be the user-provided text; report the replaced byte span size.
@@ -567,7 +565,7 @@ impl Tool for EditTool {
 /// missing file and a non-UTF-8 file; the edit tools need the model to know
 /// the difference (a missing path vs an encoding problem).
 ///
-/// `#[allow(dead_code)]` — used by the lib build (run_edit) but not by the
+/// `#[allow(dead_code)]` - used by the lib build (run_edit) but not by the
 /// test target that re-imports this source via `#[path]`.
 #[allow(dead_code)]
 async fn read_utf8_file(path: &Path) -> anyhow::Result<String> {
@@ -588,7 +586,7 @@ async fn read_utf8_file(path: &Path) -> anyhow::Result<String> {
 
 /// a snippet of the created content.
 ///
-/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// `#[allow(dead_code)]` - used by the lib build but not by the test target that
 /// re-imports this source via `#[path]`.
 #[allow(dead_code)]
 async fn create_file(
@@ -748,4 +746,4 @@ pub fn byte_offset_to_line(content: &str, offset: usize) -> usize {
     line
 }
 
-// ── Unit tests ─────────────────────────────────────────────────────────��─────
+// ── Unit tests ──────────────────────────────────────────────────────────────

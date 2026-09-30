@@ -364,7 +364,7 @@ pub fn read_xlsx(
         }
         "text" => {
             let mut output =
-                format!("Sheet: {sheet_name} ({num_rows} rows × {num_cols} columns)\n\n");
+                format!("Sheet: {sheet_name} ({num_rows} rows x {num_cols} columns)\n\n");
             for row in &rows_data {
                 output.push_str(&row.join("\t"));
                 output.push('\n');
@@ -373,7 +373,7 @@ pub fn read_xlsx(
         }
         _ => {
             let mut output =
-                format!("Sheet: {sheet_name} ({num_rows} rows × {num_cols} columns)\n\n");
+                format!("Sheet: {sheet_name} ({num_rows} rows x {num_cols} columns)\n\n");
             if rows_data.is_empty() {
                 output.push_str("(empty)");
                 return Ok(output);

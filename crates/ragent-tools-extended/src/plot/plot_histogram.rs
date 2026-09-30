@@ -1,4 +1,4 @@
-//! `plot_histogram` tool — render a histogram on the message window.
+//! `plot_histogram` tool - render a histogram on the message window.
 
 use anyhow::Result;
 use ratatui_plt::prelude::{Axis, Color};
@@ -43,7 +43,7 @@ impl Tool for PlotHistogramTool {
     }
 
     fn description(&self) -> &'static str {
-        "Render a histogram on the message window. Required: 'data' — an array \
+        "Render a histogram on the message window. Required: 'data' - an array \
          of numbers. Optional: 'bins' (default 20), 'range' ([min, max]), \
          'norm' ('count'|'density'|'probability'), 'color', 'title', \
          'x_label', 'y_label', 'width', 'height', 'cumulative'."

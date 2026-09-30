@@ -189,9 +189,19 @@ impl StoreIndexFetcher for FixtureStoreFetcher {
 /// under `assets/plugins/fixtures/` (so the installed-colour path has data), and
 /// one that omits every optional field (so the tolerant parse path is exercised).
 /// The sources are absolute URLs, matching the spec's store-index format.
+///
+/// The JSON bodies are named constants ([`DEFAULT_CODEX_INDEX_JSON`] /
+/// [`DEFAULT_CLAUDE_INDEX_JSON`]) rather than inline literals (ANTIPAT L14), so
+/// the exact fixture bytes are visible in one place.
 fn default_fixture_bytes(kind: StoreKind) -> Vec<u8> {
     match kind {
-        StoreKind::Codex => br#"{
+        StoreKind::Codex => DEFAULT_CODEX_INDEX_JSON.as_bytes().to_vec(),
+        StoreKind::Claude => DEFAULT_CLAUDE_INDEX_JSON.as_bytes().to_vec(),
+    }
+}
+
+/// The fixture store-index JSON served for the Codex default endpoint.
+const DEFAULT_CODEX_INDEX_JSON: &str = r#"{
   "store": "codex",
   "plugins": [
     {
@@ -209,9 +219,10 @@ fn default_fixture_bytes(kind: StoreKind) -> Vec<u8> {
       "source": "https://example.org/codex-time.zip"
     }
   ]
-}"#
-        .to_vec(),
-        StoreKind::Claude => br#"{
+}"#;
+
+/// The fixture store-index JSON served for the Claude default endpoint.
+const DEFAULT_CLAUDE_INDEX_JSON: &str = r#"{
   "store": "claude",
   "plugins": [
     {
@@ -230,7 +241,4 @@ fn default_fixture_bytes(kind: StoreKind) -> Vec<u8> {
       "source": "https://example.org/claude-time.zip"
     }
   ]
-}"#
-        .to_vec(),
-    }
-}
+}"#;

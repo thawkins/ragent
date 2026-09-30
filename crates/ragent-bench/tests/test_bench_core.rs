@@ -521,7 +521,7 @@ fn test_humaneval_executes_rust_native_tests() {
     });
     fs::write(&cases_path, format!("{case}\n")).expect("write rust humaneval case");
     let cases_bytes = fs::read(&cases_path).expect("read rust humaneval case bytes");
-    let cases_sha = format!("{:x}", Sha256::digest(&cases_bytes));
+    let cases_sha = hex::encode(Sha256::digest(&cases_bytes));
 
     let manifest_path = data_root.join("manifest.json");
     let manifest = serde_json::json!({
@@ -699,7 +699,7 @@ fn test_run_target_executes_mbpp_rust_native_harness() {
     });
     fs::write(&cases_path, format!("{case}\n")).expect("write rust mbpp case");
     let cases_bytes = fs::read(&cases_path).expect("read rust mbpp case bytes");
-    let cases_sha = format!("{:x}", Sha256::digest(&cases_bytes));
+    let cases_sha = hex::encode(Sha256::digest(&cases_bytes));
 
     let manifest_path = data_root.join("manifest.json");
     let manifest = serde_json::json!({

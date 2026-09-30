@@ -1,6 +1,6 @@
 //! Scaffold summary report (FR-011).
 //!
-//! Pure formatting — no I/O. Aggregates what happened during a scaffold run
+//! Pure formatting - no I/O. Aggregates what happened during a scaffold run
 //! into the text the `/new` foreground flow prints when scaffolding completes
 //! fully or partially:
 //!

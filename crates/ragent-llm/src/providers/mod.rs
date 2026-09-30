@@ -14,6 +14,7 @@ pub mod gemini;
 pub mod generic_openai;
 pub mod http_client;
 pub mod huggingface;
+pub mod media;
 pub mod mock_llm_client;
 pub mod ollama;
 pub mod ollama_cloud;
@@ -86,7 +87,7 @@ pub struct UsageInfo {
     /// Human-readable plan or tier label (e.g. `"Pro"`, `"Free"`, `"Business"`).
     /// `None` if the provider does not expose plan information.
     pub plan: Option<String>,
-    /// Usage as a percentage of the plan's quota (0.0–100.0).
+    /// Usage as a percentage of the plan's quota (0.0-100.0).
     /// `None` if the provider cannot determine quota usage.
     pub percent: Option<f32>,
 }

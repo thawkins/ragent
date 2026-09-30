@@ -4,8 +4,8 @@
 //! that server is actually started is a separate, user-owned switch. It is
 //! persisted in a global ledger (`<global state dir>/mcp_state.json`) rather
 //! than in the project config so a server disabled once stays disabled in every
-//! project, and so a plugin-contributed server — which has no entry in
-//! `ragent.json` at all — can still be turned off.
+//! project, and so a plugin-contributed server - which has no entry in
+//! `ragent.json` at all - can still be turned off.
 //!
 //! Semantics:
 //! - A server id **absent** from the ledger is enabled. This is what makes "a
@@ -62,6 +62,7 @@ impl McpEnableLedger {
                     error = %error,
                     "MCP enable-state ledger is corrupt; renaming aside and starting fresh"
                 );
+                // INTENTIONAL: best-effort quarantine of a corrupt state file
                 let _ = std::fs::rename(path, path.with_extension("json.corrupt"));
                 Self::default()
             }

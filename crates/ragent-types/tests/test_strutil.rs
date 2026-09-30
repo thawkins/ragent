@@ -12,17 +12,18 @@ fn test_truncate_chars_noop() {
 
 #[test]
 fn test_truncate_chars_ascii() {
-    assert_eq!(truncate_chars("hello world", 5), "hello…");
+    assert_eq!(truncate_chars("hello world", 5), "he...");
 }
 
 #[test]
 fn test_truncate_chars_multibyte() {
-    assert_eq!(truncate_chars("café résumé", 5), "café …");
+    // Budget now includes the 3-char ellipsis: 5 chars -> 2 head + "..."
+    assert_eq!(truncate_chars("café résumé", 5), "ca...");
 }
 
 #[test]
 fn test_truncate_chars_en_dash() {
-    assert_eq!(truncate_chars("A – B C", 4), "A – …");
+    assert_eq!(truncate_chars("A – B C", 4), "A...");
 }
 
 #[test]
@@ -32,18 +33,18 @@ fn test_truncate_bytes_noop() {
 
 #[test]
 fn test_truncate_bytes_ascii() {
-    assert_eq!(truncate_bytes("hello world", 3), "hel…");
+    assert_eq!(truncate_bytes("hello world", 3), "hel...");
 }
 
 #[test]
 fn test_truncate_bytes_boundary_adjustment() {
-    assert_eq!(truncate_bytes("café", 3), "caf…");
+    assert_eq!(truncate_bytes("café", 3), "caf...");
 }
 
 #[test]
 fn test_truncate_bytes_en_dash() {
     let result = truncate_bytes("A – B", 2);
-    assert!(result.ends_with('…'));
+    assert!(result.ends_with("..."));
     assert!(result.starts_with('A'));
 }
 
@@ -55,5 +56,7 @@ fn test_truncate_bytes_em_dash_at_400_boundary() {
     let prefix = "a".repeat(398);
     let input = format!("{prefix}\u{2014}more text after");
     let result = truncate_bytes(&input, 400);
-    assert_eq!(result, format!("{prefix}…"));
+    // The 3-byte em dash at bytes 398..401 is cut; the suffix is the ASCII
+    // ellipsis (M1 switched the marker away from U+2014).
+    assert_eq!(result, format!("{prefix}..."));
 }

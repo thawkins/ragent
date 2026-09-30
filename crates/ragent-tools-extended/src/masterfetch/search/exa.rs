@@ -14,15 +14,15 @@
 //! The [`build_request_body`] helper maps the shared [`SearchOptions`] to
 //! the Exa JSON body (implemented in T-004):
 //!
-//! - `query` — the search query verbatim, truncated to Exa's 2000-character
+//! - `query` - the search query verbatim, truncated to Exa's 2000-character
 //!   limit.
-//! - `numResults` — `opts.per_engine_results` clamped to 1–100.
-//! - `includeDomains` — populated from `opts.site` when non-empty.
-//! - `excludeDomains` — populated from `opts.exclude_sites` when non-empty.
-//! - `startPublishedDate` — derived from `opts.freshness` as an ISO 8601
+//! - `numResults` - `opts.per_engine_results` clamped to 1-100.
+//! - `includeDomains` - populated from `opts.site` when non-empty.
+//! - `excludeDomains` - populated from `opts.exclude_sites` when non-empty.
+//! - `startPublishedDate` - derived from `opts.freshness` as an ISO 8601
 //!   date.
-//! - `contents.highlights` — set to `true` to retrieve relevant excerpts.
-//! - `type` — set to `"auto"` (the default search method).
+//! - `contents.highlights` - set to `true` to retrieve relevant excerpts.
+//! - `type` - set to `"auto"` (the default search method).
 //!
 //! # Response parsing
 //!
@@ -80,8 +80,8 @@ pub const MAX_SNIPPET_CHARS: usize = 200;
 ///
 /// # Requirements
 ///
-/// - **FR-001** — Exa backend that plugs into the `SearchEngine` trait.
-/// - **FR-006** — the API key is never logged in plain text; `masked_key`
+/// - **FR-001** - Exa backend that plugs into the `SearchEngine` trait.
+/// - **FR-006** - the API key is never logged in plain text; `masked_key`
 ///   exposes only the first two and last two characters.
 #[derive(Debug, Clone)]
 pub struct ExaEngine {
@@ -226,20 +226,20 @@ impl SearchEngine for ExaEngine {
 }
 
 // ---------------------------------------------------------------------------
-// Request builder (pure, testable) — T-004
+// Request builder (pure, testable) - T-004
 // ---------------------------------------------------------------------------
 
 /// Build the Exa JSON request body from a query and [`SearchOptions`].
 ///
 /// The returned [`serde_json::Value`] contains:
 ///
-/// - `query` — trimmed to Exa's 2000-character limit.
-/// - `numResults` — clamped to 1–100.
-/// - `type` — `"auto"` (the default search method).
-/// - `includeDomains` — from `opts.site` when non-empty.
-/// - `excludeDomains` — from `opts.exclude_sites` when non-empty.
-/// - `startPublishedDate` — from `opts.freshness` when not `Any`.
-/// - `contents.highlights` — `true` to retrieve relevant excerpts.
+/// - `query` - trimmed to Exa's 2000-character limit.
+/// - `numResults` - clamped to 1-100.
+/// - `type` - `"auto"` (the default search method).
+/// - `includeDomains` - from `opts.site` when non-empty.
+/// - `excludeDomains` - from `opts.exclude_sites` when non-empty.
+/// - `startPublishedDate` - from `opts.freshness` when not `Any`.
+/// - `contents.highlights` - `true` to retrieve relevant excerpts.
 #[must_use]
 pub fn build_request_body(query: &str, opts: &SearchOptions) -> serde_json::Value {
     use serde_json::json;
@@ -288,7 +288,7 @@ pub fn truncate_query(query: &str) -> String {
 /// date minus the freshness window, or `None` when freshness is `Any`
 /// (no date filter applied).
 ///
-/// This is the Exa equivalent of a "date range" helper — Exa only supports
+/// This is the Exa equivalent of a "date range" helper - Exa only supports
 /// `startPublishedDate` (not an explicit end date), so the range is
 /// implicitly `[startPublishedDate, now]`.
 #[must_use]
@@ -333,7 +333,7 @@ pub fn date_string(secs: i64) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Response parser (pure, testable) — T-005
+// Response parser (pure, testable) - T-005
 // ---------------------------------------------------------------------------
 
 /// Parse the Exa JSON response into a list of [`RawResult`]s.
@@ -341,7 +341,7 @@ pub fn date_string(secs: i64) -> String {
 /// Expects the response to contain a `results` array where each item has
 /// `title`, `url`, `score`, `publishedDate`, `author`, and `highlights[]`.
 /// Results are emitted with `source` set to `"exa"` and snippets built from
-/// highlights joined by ` … `, truncated to ~200 characters. If no highlights
+/// highlights joined by ` ... `, truncated to ~200 characters. If no highlights
 /// are present, the snippet is built from `publishedDate` and `author`
 /// metadata.
 #[must_use]
@@ -406,7 +406,7 @@ fn build_snippet(item: &serde_json::Value) -> String {
             .filter_map(|h| h.as_str().map(String::from))
             .collect();
         if !joined.is_empty() {
-            return truncate_snippet(&joined.join(" … "));
+            return truncate_snippet(&joined.join(" ... "));
         }
     }
 

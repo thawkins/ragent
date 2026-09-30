@@ -193,7 +193,7 @@ impl SpecIo {
     /// need to clone an entire [`Spec`] when only `spec_md` has changed.
     ///
     /// Only writes REVIEW.md / FEEDBACK.md if the corresponding content is
-    /// non-empty, matching [`write_spec`] semantics.
+    /// non-empty, matching [`write_spec`](crate::io::SpecIo::write_spec) semantics.
     pub async fn write_spec_fields(
         specs_root: &Path,
         spec_id: &SpecId,
@@ -331,10 +331,7 @@ impl SpecIo {
                 id: task.id,
                 title: task.title,
                 description: String::new(),
-                linked_requirements: if task.requirement.is_empty()
-                    || task.requirement == "—"
-                    || task.requirement == "-"
-                {
+                linked_requirements: if task.requirement.is_empty() || task.requirement == "-" {
                     Vec::new()
                 } else {
                     // The parser preserves the raw cell (which may list several

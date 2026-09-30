@@ -7,10 +7,10 @@
 //!
 //! # Requirements
 //!
-//! - **FR-025** — shared `reqwest::Client` with `User-Agent`
+//! - **FR-025** - shared `reqwest::Client` with `User-Agent`
 //!   `ragent/{version} (masterfetch)`, configurable timeout (default 30 s),
 //!   redirect policy (max 5), and gzip/deflate support.
-//! - **NFR-002** — reuses the workspace `reqwest` dependency; no new crates.
+//! - **NFR-002** - reuses the workspace `reqwest` dependency; no new crates.
 //!
 //! # Usage
 //!
@@ -55,9 +55,9 @@ pub enum HttpError {
 /// The client is configured with:
 ///
 /// - `User-Agent: ragent/{version} (masterfetch)` (see [`USER_AGENT`])
-/// - `timeout` — the supplied request timeout
-/// - `redirect::Policy::limited(MAX_REDIRECTS)` — follows up to 5 redirects
-/// - `gzip(true)` and `deflate(true)` — automatic decompression
+/// - `timeout` - the supplied request timeout
+/// - `redirect::Policy::limited(MAX_REDIRECTS)` - follows up to 5 redirects
+/// - `gzip(true)` and `deflate(true)` - automatic decompression
 ///
 /// # Errors
 ///
@@ -116,7 +116,7 @@ pub fn build_default_client() -> Result<reqwest::Client, HttpError> {
 /// # Errors
 ///
 /// Returns [`HttpError::Build`] if the initial construction fails. The error
-/// is **not** cached — a subsequent call will retry the build.
+/// is **not** cached - a subsequent call will retry the build.
 ///
 /// # Examples
 ///
@@ -138,11 +138,113 @@ pub fn shared_client() -> Result<&'static reqwest::Client, HttpError> {
     let client = build_default_client()?;
     // OnceLock::get_or_init cannot return a reference to a fallibly-built
     // value, so we manually insert and then borrow. Racing callers may build
-    // a duplicate client, but only the first inserted is retained — the
+    // a duplicate client, but only the first inserted is retained - the
     // others are dropped. This is acceptable: the extra build is cheap and
     // happens at most once per concurrent first-call race.
-    let _ = CLIENT.set(client);
+    let _ = CLIENT.set(client); // INTENTIONAL: OnceLock set race is benign
     Ok(CLIENT
         .get()
         .expect("client was just set or is present from a racing caller"))
+}
+
+/// Maximum bytes buffered from an upstream response body (ANTIPAT 4.1).
+///
+/// The shared masterfetch client transparently decompresses gzip/deflate, so a
+/// hostile or buggy upstream can return an arbitrarily large body (or a
+/// decompression bomb). Every response body read in this crate must be capped;
+/// 16 MiB is far more than any JSON API page, RSS feed, or robots.txt needs.
+pub const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+/// Maximum bytes buffered from a small text response (robots.txt, error bodies).
+///
+/// A robots.txt is a few kilobytes in the worst realistic case, so 512 KiB is
+/// already a generous ceiling (ANTIPAT 4.1).
+pub const MAX_SMALL_BODY_BYTES: usize = 512 * 1024;
+
+/// Read a response body into a string, capped at `limit` bytes.
+///
+/// Returns `Ok(body)` (possibly truncated) or `Err` when the transport fails,
+/// so callers keep their existing error handling instead of a silent
+/// `unwrap_or_default()`. Replaces the uncapped `response.text().await` calls
+/// flagged by ANTIPAT 4.1.
+///
+/// # Errors
+///
+/// Returns the underlying [`reqwest::Error`] when the body cannot be read.
+pub async fn read_body_capped(
+    response: reqwest::Response,
+    limit: usize,
+) -> Result<String, reqwest::Error> {
+    let body = response.text().await?;
+    Ok(truncate_body(&body, limit))
+}
+
+/// Truncate `body` to at most `limit` bytes on a UTF-8 character boundary.
+///
+/// Appends an omission marker when truncation occurs so a caller can see the
+/// response was clipped.
+#[must_use]
+pub fn truncate_body(body: &str, limit: usize) -> String {
+    if body.len() <= limit {
+        return body.to_string();
+    }
+    let mut end = limit;
+    while end > 0 && !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = String::with_capacity(end + 32);
+    out.push_str(&body[..end]);
+    out.push_str("\n[... response body truncated ...]");
+    out
+}
+
+/// Stream a response into memory, stopping at `limit` bytes.
+///
+/// SEC-tools-extended-006 (SECTASKS T-033) / ANTIPAT 4.1: the size budget is
+/// applied per chunk, so a decompression bomb cannot be buffered in full first.
+///
+/// # Errors
+///
+/// Returns the transport error message when the body cannot be read.
+pub async fn read_bytes_capped(
+    response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
+    let mut stream = response;
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        match stream.chunk().await {
+            Ok(Some(chunk)) => {
+                if buf.len() + chunk.len() > limit {
+                    let room = limit.saturating_sub(buf.len());
+                    buf.extend_from_slice(&chunk[..room]);
+                    buf.extend_from_slice(b"\n[truncated at the size cap]\n");
+                    break;
+                }
+                buf.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(buf)
+}
+
+/// Stream a response body into a lossy UTF-8 string, stopping at `limit` bytes.
+///
+/// This is the streaming counterpart of [`read_body_capped`]: the size budget
+/// is applied per chunk (so a decompression bomb cannot be buffered in full),
+/// and the result is decoded lossily so non-UTF-8 bytes do not fail the read.
+/// It replaces the private `read_body_capped` loop that previously lived in
+/// `masterfetch::tools::crawl_tool` (ANTIPAT M5.9 / 3.6).
+///
+/// # Errors
+///
+/// Returns the transport error message when the body cannot be read.
+pub async fn read_body_capped_lossy(
+    response: reqwest::Response,
+    limit: usize,
+) -> Result<String, String> {
+    let bytes = read_bytes_capped(response, limit).await?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }

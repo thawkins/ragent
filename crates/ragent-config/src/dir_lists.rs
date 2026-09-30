@@ -25,14 +25,10 @@ use globset::{GlobSet, GlobSetBuilder};
 
 /// Built-in allowlist: directory patterns that are automatically allowed without prompting.
 ///
-/// These patterns are always considered safe for file operations and do not require
-/// user confirmation. Empty by default, but can be extended with commonly safe patterns.
-pub const BUILTIN_ALLOWLIST: &[&str] = &[
-    // Currently empty - can be extended with safe patterns like:
-    // "target/**",    // Build artifacts
-    // ".git/**",      // Git internals
-    // "node_modules/**", // Dependencies
-];
+/// Always empty: no directory is auto-approved out of the box (the user opts in
+/// via the config `dirs.allowlist`). Kept as a named constant so callers that
+/// display the effective lists have a stable hook.
+pub const BUILTIN_ALLOWLIST: &[&str] = &[];
 
 /// Built-in denylist: directory patterns that are automatically denied without prompting.
 ///
@@ -165,43 +161,60 @@ fn compile_patterns(patterns: &[String]) -> GlobSet {
 
 // ── Initialisation ────────────────────────────────────────────────────────────
 
+/// Merge a config's `dirs` lists with the built-in denylist.
+///
+/// SEC-ragent-config-006 (SECTASKS T-061): `BUILTIN_DENYLIST` was only ever
+/// handed to the TUI for *display*; the enforced compiled denylist was seeded
+/// purely from `cfg.dirs.denylist`, so the advertised system-directory
+/// protection was inert. The built-ins are merged into the enforced list
+/// (de-duplicated, built-ins first) on every path, including the config-error
+/// path (ANTIPAT H-3).
+#[must_use]
+pub fn merged_dir_lists_for(cfg: &crate::Config) -> DirLists {
+    let allowlist = cfg.dirs.allowlist.clone();
+    let mut denylist = cfg.dirs.denylist.clone();
+    let allowed_roots = cfg.dirs.allowed_roots.clone();
+
+    for pattern in BUILTIN_DENYLIST {
+        let pattern = (*pattern).to_string();
+        if !denylist.contains(&pattern) {
+            denylist.push(pattern);
+        }
+    }
+
+    DirLists {
+        allowlist,
+        denylist,
+        allowed_roots,
+    }
+}
+
+/// The enforced lists when no config could be read: built-ins only (H-3).
+#[must_use]
+pub fn builtin_only_dir_lists() -> DirLists {
+    DirLists {
+        allowlist: Vec::new(),
+        denylist: BUILTIN_DENYLIST.iter().map(|p| (*p).to_string()).collect(),
+        allowed_roots: Vec::new(),
+    }
+}
+
 /// Load the directory lists from the merged global + project config.
 ///
 /// Call this once at startup. Subsequent loads (e.g. after `/reload`) replace
 /// the in-memory state.
 pub fn load_from_config() {
     let lists = match crate::config::Config::load() {
-        Ok(cfg) => {
-            let mut allowlist = Vec::new();
-            let mut denylist = Vec::new();
-            let mut allowed_roots = Vec::new();
-
-            // Use the new dedicated dirs field from config
-            allowlist.extend(cfg.dirs.allowlist);
-            denylist.extend(cfg.dirs.denylist);
-            allowed_roots.extend(cfg.dirs.allowed_roots);
-
-            // SEC-ragent-config-006 (SECTASKS T-061): `BUILTIN_DENYLIST` was
-            // only ever handed to the TUI for *display*; the enforced compiled
-            // denylist was seeded purely from `cfg.dirs.denylist`, so the
-            // advertised system-directory protection was inert. Merge the
-            // built-ins into the enforced list (de-duplicated, built-ins first).
-            for pattern in BUILTIN_DENYLIST {
-                let pattern = (*pattern).to_string();
-                if !denylist.contains(&pattern) {
-                    denylist.push(pattern);
-                }
-            }
-
-            DirLists {
-                allowlist,
-                denylist,
-                allowed_roots,
-            }
-        }
+        Ok(cfg) => merged_dir_lists_for(&cfg),
         Err(e) => {
+            // H-3 (ANTIPAT): a config load failure must NOT silently disable the
+            // mandatory denylist. Previously the error path returned
+            // `DirLists::default()` (empty allow/deny/roots), so the built-in
+            // system-directory protection was dropped entirely (fail-open).
+            // Seed the enforced denylist from the built-ins so protection is
+            // never weaker than the built-in floor.
             tracing::warn!("dir_lists: failed to load config: {e}");
-            DirLists::default()
+            builtin_only_dir_lists()
         }
     };
 
@@ -227,60 +240,93 @@ pub fn load_from_config() {
 // ── Read accessors ────────────────────────────────────────────────────────────
 
 /// Returns a snapshot of the current allowlist.
+///
+/// A poisoned lock is logged at `warn!` before falling back to an empty list,
+/// matching the `bash_lists` accessors so a lock-poisoning bug is diagnosable
+/// rather than silent (ANTIPAT M-5).
 #[must_use]
 pub fn get_allowlist() -> Vec<String> {
-    global()
-        .read()
-        .map(|g| g.allowlist.clone())
-        .unwrap_or_default()
+    match global().read() {
+        Ok(g) => g.allowlist.clone(),
+        Err(_) => {
+            tracing::warn!("dir_lists: allowlist lock poisoned; returning empty list");
+            Vec::new()
+        }
+    }
 }
 
 /// Returns a snapshot of the current denylist.
+///
+/// A poisoned lock is logged at `warn!` (ANTIPAT M-5).
 #[must_use]
 pub fn get_denylist() -> Vec<String> {
-    global()
-        .read()
-        .map(|g| g.denylist.clone())
-        .unwrap_or_default()
+    match global().read() {
+        Ok(g) => g.denylist.clone(),
+        Err(_) => {
+            tracing::warn!("dir_lists: denylist lock poisoned; returning empty list");
+            Vec::new()
+        }
+    }
 }
 
 /// Returns a snapshot of the current allowed_roots.
+///
+/// A poisoned lock is logged at `warn!` (ANTIPAT M-5).
 #[must_use]
 pub fn get_allowed_roots() -> Vec<String> {
-    global()
-        .read()
-        .map(|g| g.allowed_roots.clone())
-        .unwrap_or_default()
+    match global().read() {
+        Ok(g) => g.allowed_roots.clone(),
+        Err(_) => {
+            tracing::warn!("dir_lists: allowed_roots lock poisoned; returning empty list");
+            Vec::new()
+        }
+    }
 }
 
 /// Returns the compiled allowlist for efficient matching.
 ///
 /// The returned `Arc<GlobSet>` is cheap to clone and avoids recompiling
-/// patterns on every permission check.
+/// patterns on every permission check. A poisoned lock is logged at `warn!`
+/// before falling back to an empty set (ANTIPAT M-5).
 #[must_use]
 pub fn get_compiled_allowlist() -> Arc<GlobSet> {
-    compiled_allowlist()
-        .read()
-        .map_or_else(|_| Arc::new(GlobSet::empty()), |g| Arc::new(g.clone()))
+    match compiled_allowlist().read() {
+        Ok(g) => Arc::new(g.clone()),
+        Err(_) => {
+            tracing::warn!("dir_lists: compiled allowlist lock poisoned; returning empty set");
+            Arc::new(GlobSet::empty())
+        }
+    }
 }
 
 /// Returns the compiled denylist for efficient matching.
 ///
 /// The returned `Arc<GlobSet>` is cheap to clone and avoids recompiling
-/// patterns on every permission check.
+/// patterns on every permission check. A poisoned lock is logged at `warn!`
+/// before falling back to an empty set (ANTIPAT M-5).
 #[must_use]
 pub fn get_compiled_denylist() -> Arc<GlobSet> {
-    compiled_denylist()
-        .read()
-        .map_or_else(|_| Arc::new(GlobSet::empty()), |g| Arc::new(g.clone()))
+    match compiled_denylist().read() {
+        Ok(g) => Arc::new(g.clone()),
+        Err(_) => {
+            tracing::warn!("dir_lists: compiled denylist lock poisoned; returning empty set");
+            Arc::new(GlobSet::empty())
+        }
+    }
 }
 
 /// Invalidate both compiled caches so the next call re-reads the in-memory
 /// source patterns.  Call this after mutating the allowlist or denylist.
 pub fn invalidate_compiled_caches() {
-    // Recompile from the current in-memory pattern lists.
-    let _ = recompile_allowlist();
-    let _ = recompile_denylist();
+    // Recompile from the current in-memory pattern lists. A poisoned lock is
+    // the only failure mode; log it so a permanently stale glob cache is
+    // diagnosable rather than invisible.
+    if let Err(e) = recompile_allowlist() {
+        tracing::warn!(error = %e, "allowlist recompile failed");
+    }
+    if let Err(e) = recompile_denylist() {
+        tracing::warn!(error = %e, "denylist recompile failed");
+    }
 }
 
 // ── Write accessors ───────────────────────────────────────────────────────────
@@ -298,10 +344,8 @@ impl Scope {
     fn config_path(self) -> Result<PathBuf> {
         match self {
             Self::Project => Ok(PathBuf::from(".ragent").join("ragent.json")),
-            Self::Global => {
-                let dir = dirs::config_dir().context("Cannot determine global config directory")?;
-                Ok(dir.join("ragent").join("ragent.json"))
-            }
+            Self::Global => crate::Config::global_config_path()
+                .context("Cannot determine global config directory"),
         }
     }
 }

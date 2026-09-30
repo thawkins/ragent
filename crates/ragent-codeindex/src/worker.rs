@@ -103,7 +103,7 @@ impl SharedStats {
 /// Collects and deduplicates events into an actionable batch.
 #[derive(Debug)]
 pub struct EventBatch {
-    /// Files to (re-)index — keeps only the latest event per path.
+    /// Files to (re-)index - keeps only the latest event per path.
     pub to_index: HashSet<PathBuf>,
     /// Files to remove from the index.
     pub to_remove: HashSet<PathBuf>,
@@ -279,7 +279,7 @@ impl Drop for IndexWorkerHandle {
     }
 }
 
-/// Main worker loop — runs on a dedicated thread.
+/// Main worker loop - runs on a dedicated thread.
 fn worker_loop(
     index: Arc<CodeIndex>,
     event_rx: mpsc::Receiver<WatchEvent>,
@@ -371,7 +371,7 @@ fn worker_loop(
                     last_event_time = None;
                 }
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => { /* idle — check below */ }
+            Err(mpsc::RecvTimeoutError::Timeout) => { /* idle - check below */ }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 debug!("event channel disconnected, worker stopping");
                 if !batch.is_empty() {

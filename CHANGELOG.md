@@ -2,7 +2,409 @@
 
 ## [Unreleased]
 
+## [1.0.122] - 2026-09-30
+
+Security and anti-pattern remediation sweep. This release folds in the staged
+working tree on top of `6cf0b60f` (MS-04): the `ANTIPAT.md` anti-pattern
+remediation plan (`M0` plus `M2`-`M7`), the `SECTASKS.md` security remediation
+programme through `MS-05`, and the accompanying documentation refresh. Highlights
+below; per-milestone detail follows in the sections beneath.
+
 ### Security
+
+- **Milestone M0 of `ANTIPAT.md` complete - the two shipping defects and the
+  highest-severity containment holes from the 18-crate anti-pattern audit.**
+  `ANTIPAT.md` is the consolidated roll-up of 17 per-crate `explore` audits plus
+  the workspace-root binary; M0 is its priority-0/1 set.
+  - **Crash marker ordering (A-01).** `src/main.rs` stamped the `running` marker
+    *before* reading it, so the record's pid always matched the live process and
+    the "previous session exited without unwinding" warning could never fire.
+    `previous_unclean_exit` is now read first.
+  - **Search-retry shift overflow (F-02).** `--search-max-retries` was stored
+    unclamped and the backoff computed `1u64 << (attempt - 1)`, which panicked
+    for a value >= 64 (and slept for days for 40-63).
+    `WebGatherer::with_search_max_retries` now clamps to `MAX_SEARCH_RETRIES`
+    (10), the shift is `checked_shl`, and a single delay is capped at
+    `MAX_SEARCH_RETRY_DELAY_MS` (60 s).
+  - **Git argument injection (A-1).** `git_checkout`, `git_cherry_pick`,
+    `git_add`, and `git_remote` pushed LLM operands straight into `git` argv
+    with no `reject_option_like` guard. All four (and thus all 18 git tools) now
+    validate every option-position operand.
+  - **GitHub hardcoded origin (A-2).** `fetch_readme` built its URL from a
+    literal `https://api.github.com`, bypassing a configured GitHub Enterprise
+    `base_url` and attaching the Bearer token to the public origin; it now uses
+    `resolve_url` like every other verb, and `owner`/`repo` are validated as
+    path segments.
+  - **File-tool containment (F-06/F-07).** `diff_files`, `file_info`, `glob`,
+    `open`, and `apply_patch` checked `working_dir` only, so a whitelisted
+    `allowed_roots` entry was rejected for the same path every other tool
+    accepted. All five (and `read`, `edit`, `grep`, `list`, `patch`) now route
+    through `check_path_within_allowed_roots_cached`, and
+    `scripts/check-file-tool-containment.sh` was tightened to demand that exact
+    helper (its `--self-test` now seeds both an uncontained tool and a
+    working-dir-only tool).
+  - **SSRF on the Discord sink (3.1).** `send_discord` had no public-target
+    check while its Telegram sibling did, so a config could point it at an
+    internal service; it now calls `refuse_non_public_target`.
+  - **Unbounded response bodies (4.1).** Ten sites (finance providers, search
+    engines, robots.txt, Gmail, Discord, YouTube captions) read whole response
+    bodies with no cap, behind a client that transparently decompresses. A
+    shared `masterfetch::http::read_body_capped` / `read_bytes_capped` now
+    bounds every one (16 MiB for API/JSON, 512 KiB for small text).
+  - **Plugin install integrity (H2/M17/M18).** Installs had no integrity record;
+    a SHA-256 over the staged tree is now recorded in the store ledger. The
+    decompression cap is aggregate (`MAX_EXTRACTED_BYTES`) rather than
+    per-entry, and `copy_dir_recursive` refuses a symlink instead of
+    dereferencing it into the store.
+  - **Spec target-folder traversal (H-1).** `write_govcreate_spec` joined an
+    unvalidated `target_folder` into a `create_dir_all` plus three writes.
+    Containment is now lexical (so it works for a path that does not exist yet)
+    and runs before any filesystem mutation, with a canonical re-check when the
+    path does exist.
+  - **Config fail-open denylist + Debug secrets (H-2/H-3).** A config-load
+    failure returned an empty `DirLists`, silently dropping the mandatory
+    built-in system-directory denylist; the built-ins are now always enforced.
+    `Config` no longer derives `Debug` (it printed plaintext API keys, tokens,
+    and webhook URLs); a hand-written impl routes the rendering through
+    `redact_secrets`.
+  - **LLM error bodies + dropped SSE frames (3.1/3.3).** Sixteen provider error
+    paths used `response.text()` uncapped; all now use `read_body_capped`.
+    Five SSE parsers silently dropped a malformed frame (`Err(_) => continue`)
+    that can carry tool-call deltas; each now logs it, matching the FUNC-032
+    behaviour of the sibling parsers.
+  - **World-readable crash artifacts (A-02/A-03).** Crash markers, panic
+    reports, and the stderr spool were created at the process umask (0644);
+    all are now `0o600`, and the crash record's argv is redacted before it is
+    written. The `/bug-report` dump is `0o600` too.
+  - **Server error disclosure (F-H3/F-H2).** ~23 HTTP 500 responses returned raw
+    internal error strings; all now route through `internal_error_response`,
+    which logs the detail and answers a generic body. The `store_memory`
+    fetch-after-write propagates its failure instead of answering `201` with an
+    empty body.
+  - **Storage silent drops (D-1/D-2/D-4).** The memory access-count bump logs
+    its failure, the four `conversation_stats` counts propagate instead of
+    `unwrap_or(0)`, and an unconvertible legacy nonce errors instead of
+    decrypting under an all-zero key.
+  - **Sub-agent report loss.** A report that cannot be written to
+    `log/subagents/<task-id>.md` now warns with the task id and directory rather
+    than silently reporting `output_file: None`.
+  - **Telemetry toggles (HIGH-4/HIGH-5).** `ToolRecorder`, `SessionRecorder`,
+    `CoordinatorRecorder`, and `CompressionRecorder` ignored the FR-027
+    per-metric toggles; all now gate each metric. `InstrumentRegistry::noop()`
+    builds from an explicit locally-owned provider rather than the process-global
+    meter provider, so a disabled subsystem cannot export.
+  - Regression suites added:
+    `ragent-research/tests/test_search_retry_clamp.rs`,
+    `ragent-tools-vcs/tests/test_ms0_git_arg_guards.rs`,
+    `ragent-config/tests/test_ms0_config_guards.rs`,
+    additional cover in `ragent-plugins/tests/test_add.rs`,
+    `ragent-specs/tests/test_govcreate_authoring.rs`,
+    `ragent-tools-extended/tests/test_channels.rs`, and
+    `ragent-telemetry/tests/test_metric_toggles.rs`. A new `ms0-regression` CI
+    job runs them.
+
+### Changed
+
+- **Milestone M7 of `ANTIPAT.md` - dependency and tooling hygiene.** The
+  dependency graph has no reachable vulnerable or discontinued crate, the lint
+  configuration matches the stated rules, the retired `ragent-team` shim crate
+  is gone, and every guard that M7.7/M7.9 flagged as misleading now enforces
+  what its comment claims.
+  - **Advisory ignores cleaned + enforced (M7.1/M7.5).** Stale
+    RUSTSEC-2026-0002 (`lru` stacked-borrows) and RUSTSEC-2026-0235 (`rkyv` via
+    `spreadsheet-ods`; `rkyv` is no longer in the lockfile) entries were dropped
+    from `deny.toml` and `.cargo/audit.toml` respectively, and each list was
+    verified against its own tool's output (`cargo deny check` and `cargo
+    audit`; they are not byte-identical because the tools resolve different
+    feature graphs). `deny.toml` now sets `[advisories] unsound = "all"`, so the
+    remaining RUSTSEC-2026-0253 (`lru` 0.16.4, pinned by tantivy 0.26; ragent
+    never calls `LruCache::pop()`) is a real, checked suppression instead of an
+    `advisory-not-detected` warning.
+  - **Major dependency bumps (M7.4).** `rmcp` 1.8 -> 3.5, `rusqlite` 0.32 ->
+    0.40, `similar` 2.7 -> 3.2, `dirs` 6 -> 7, `sha2` 0.10 -> 0.11, `base64`
+    0.22 -> 0.23, `printpdf` 0.9 -> 0.12, and `ratatui` 0.29 -> 0.30.
+  - **ratatui 0.30 wrap parity (M7.4).** `wrap_line_styled`, the crate-local
+    port of ratatui's `WordWrapper` that owns the message-cache scroll geometry,
+    was realigned with the 0.30 upstream: the whitespace-only blank-row tail
+    only fires when `trim` is set, and `Span::styled_graphemes` now drops every
+    control-containing grapheme (tabs included), not just `"\n"`. The
+    `test_message_pinned_scroll` parity test pins the cache row count to
+    `Paragraph::line_count` across tabs, CJK, emoji, NBSP, and long words.
+  - **Retired the `ragent-team` shim (M7.8).** The 59-line pure re-export crate
+    over `ragent-agent` is deleted; `ragent-tui` already depended on
+    `ragent-agent` directly. The team runtime and its 20 tools keep their single
+    home in `ragent-agent`, and `check-team-duplication.sh` (plus the
+    `structure_types` `#[path]` guard) now fail if the crate is reintroduced.
+  - **Guard repairs (M7.7/M7.9).** `scripts/check_inline_tests.py` scans the
+    root `src/` tree as well as `crates/*/src` (R-01), so the root-binary blind
+    spot is closed; `check-file-tool-containment.sh` demands the
+    `allowed_roots`-aware helper and its self-test fails a working-dir-only call
+    (F-07); `check-vcs-duplication.sh` covers the intra-crate GitHub/GitLab
+    helper duplication it previously only described (M7.9); and
+    `check-team-duplication.sh` was rewritten to assert the shipped post-M3
+    layout and is wired into `ci.yml` and `pre-flight.sh`.
+  - **Lint config honesty + package metadata (M7.6).** The dead
+    `unwrap_used = "allow"` line is replaced with a documented rationale: the
+    rule is enforced by `check-security-unwraps.sh` (panicking unwrap/expect
+    baseline with the in-place `// no-panic-ok:` exemption) and
+    `check-silent-errors.sh`, not by clippy, because a deny-level lint would
+    flag every test `.unwrap()`. Root `[package]` gained `keywords` and
+    `categories`.
+
+- **Milestone M2 of `ANTIPAT.md` complete - standards conformance for tests,
+  module docs, and production unwraps across the workspace.** M2 is the
+  test-location / docblock / production-`unwrap` set from the 18-crate
+  anti-pattern audit.
+  - **Inline-test gate rewritten (M2.17).** The old `check-inline-tests.sh`
+    counted the substring `mod tests`, which matched the idiomatic
+    `#[cfg(test)] #[path = ".../tests/inline/<name>.rs"] mod x;` external hooks
+    (forcing an inflated 129-file baseline) and never scanned the root `src/`
+    tree at all. It is replaced by `scripts/check_inline_tests.py`: the scanner
+    flags only a genuine inline `mod x { ... }` body with no `#[path]` attribute,
+    covers `crates/*/src` **and** root `src/`, keeps a shrink-only baseline of 0,
+    and ships a `--self-test` that proves an inline body fails while a `#[path]`
+    hook passes. Wired into `ci.yml` (self-test + check) and `pre-flight.sh`.
+  - **Test-body relocation completed.** The one remaining genuine inline body
+    (`ragent-tui/src/app/loop_dialog/loop_dialog_tests.rs`, which referenced a
+    sibling file without a `#[path]` marker) moved to `tests/inline/`. Five
+    `ragent-agent` modules (`goal`, `orchestrator`, `task`, `perf`, `template`)
+    had shared one `mod_tests.rs` that only satisfied `template`'s imports; the
+    removed bodies were restored from git history into per-module
+    `*_mod_tests.rs` files, and `truncate_str` assertions realigned to the ASCII
+    `...` marker.
+  - **Production unwraps removed (M2.9/M2.11/M2.12/M2.13/M2.15).** Nine
+    `FtsIndex::from_index` schema lookups now use a `resolve(name)?` helper; five
+    per-provider `.expect("serialise ...")` in `tool_cache.rs` collapse into one
+    `push_tool` helper that logs and skips on (impossible) failure; `apply_patch`,
+    `replace`, and `read` lost their production `expect`/`unwrap`; and the TUI
+    `/spec`/`/team`/`/triggers` handlers use `let Some(..) = .. else` instead of
+    guard-then-`unwrap`. Every remaining infallible constant-regex `expect`/
+    `unwrap` carries a `// INVARIANT:` comment or a `no-panic-ok` marker.
+  - **Docs (M2.4/M2.7/M2.9/M2.11).** `error.rs`/`spec.rs` gained `//!` headers,
+    `router_client.rs` gained a module docblock, `graph/mod.rs` lost its stale
+    "populated by later tasks / T-00x" comments, `file_count` gained `///`, and
+    the broken intra-doc links in `ragent-bench`, `ragent-codeindex`,
+    `ragent-specs`, and `ragent-research` are all resolved (those four crates now
+    build with zero rustdoc warnings).
+  - **Vocabulary (M2.14).** `sanitise_fts_query` renamed to
+    `sanitize_fts_query` to match the `sanitize` spelling used everywhere else.
+  - **Logging policy (M2.16).** `AGENTS-RUST.md` now documents the CLI
+    presentation-surface exception for `println!`/`eprintln!` in the root binary.
+
+- **Milestone M3 of `ANTIPAT.md` complete - de-duplication of shared helpers.**
+  M3 is the "each duplicated family has exactly one implementation" set. Where a
+  byte-identical copy had many call sites, the local version now delegates to the
+  shared one so the logic exists once.
+  - **Cross-crate primitives (M3.1/M3.2/M3.3/M3.18).** `ragent-agent/src/id.rs`
+    is now a re-export of `ragent_types::id`; the agent-internal truncation
+    helpers now use `ragent_types::strutil` (`truncate_bytes_no_ellipsis`), so the
+    two private nine-line `truncate` copies in `conversation_search.rs` and
+    `session_search.rs` are gone.
+  - **Code index parser layer (M3.4/M3.5).** `parser/util.rs` owns
+    `extend_scope`, `node_hash` (always via `scanner::hash_content` - the six
+    raw-`blake3` copies are deleted), `node_text`, `field_text`,
+    `first_child_by_kind`, and `find_child`; the ten per-parser
+    `build_qname`/`ext_scope`/`hash_node` copies delegate to it. A new
+    `parser/ctx.rs` owns the shared `Ctx<'a>` accumulator (`new`/`alloc_id`/
+    `text`), and the twelve per-parser `Ctx`/`ExtractionContext`/`ExtractCtx`
+    struct definitions became type aliases.
+  - **Provider helpers (M3.6).** New `providers/media.rs` owns the data-URI
+    parsers that `anthropic.rs` and `bedrock.rs` had duplicated byte-for-byte.
+    (The OpenAI/Anthropic SSE state machines are left separate: the OpenRouter
+    copy interleaves `reasoning` handling and differs in malformed-frame and
+    empty-stream semantics, so folding them would change behaviour.)
+  - **Storage (M3.7).** `activity_log.rs` gained `INSERT_EVENT_SQL` and the
+    `SQL_SELECT_*` constants (seven INSERT and five SELECT copies removed);
+    `storage.rs` gained `SQL_MEMORY_COLUMNS` and routes all six memory reads
+    through the existing `memory_row_from_sql` mapper (four inline closures
+    deleted).
+  - **Extended tools (M3.8).** The search engines share
+    `engine::{truncate_snippet, truncate_snippet_bytes, truncate_query_to,
+    mask_api_key, engine_http_client}` (the OpenAlex/Wikipedia re-implementations
+    are gone); `ragent_types::html` gained `html_to_plain_text`/`decode_entities`
+    for the browser module; a new `docio.rs` owns `truncate_output_with_suffix` +
+    `MAX_OUTPUT_BYTES` for the Office/`LibreOffice` families; `task_status_icon`
+    is defined once.
+  - **VCS tools (M3.9).** New `github/helpers.rs` and `gitlab/helpers.rs` own
+    `make_client`/`detect_repo`/`detect_project`/`detect`; the six
+    `github_*`/`gitlab_*` tool modules import them.
+  - **Root CLI (M3.10).** `ragent_research::provider_calls_suffix` is now the one
+    provider-summary renderer for both the CLI and TUI; `src/plugins.rs` renders
+    its help from `ragent_plugins::render_help` instead of a hand-copied table,
+    which had drifted (it was missing the `list --mcp` row).
+  - **Plugins (M3.11).** `error.rs` owns `with_plugin`;
+    `runtime::js_string_literal` delegates to `tool_adapter::js_literal`; the
+    doubled `eval_json` doc comment and duplicated table-format string are
+    removed.
+  - **Server (M3.12).** `routes::serialize_response` is shared; `routes/memory.rs`
+    imports it rather than re-defining it.
+  - **Telemetry (M3.13).** `subsystem.rs` gained `validate_endpoint` and a single
+    `build_provider(config, Option<reader>)`; `new()` now goes through
+    `build_enabled_provider` so the reader/handle wiring is defined once. The
+    duplicated endpoint checks and the duplicated provider rebuild are gone.
+  - **Redaction (M3.14).** `sse::redacted_event_debug` is a thin delegate to
+    `Event`'s hand-written `Debug` (the credential-shape knowledge lives once in
+    `ragent-types`); `PluginMcpServer` now has a hand-written `Debug` that
+    redacts the `env`/`headers` values.
+  - **TUI (M3.15).** `app/helpers.rs::open_owner_only(path, truncate)` owns the
+    `0o600` create-and-tighten boilerplate previously copied into the log spool,
+    session export, and bug-report writers.
+  - **Bench (M3.16).** `suites::evaluate_suite_samples` and
+    `suites::run_fixture_commands` own the shared per-sample evaluator loop and
+    native-command harness; `humaneval.rs`/`mbpp.rs` call them and use
+    `pass_at_1`/`count_passed_failed` instead of re-deriving the metrics.
+  - **Specs (M3.17).** The duplicated `// -- Feedback helpers --` banner in
+    `commands.rs` and the dead `// -- Tests --` banner in `id_scanner.rs` are
+    removed.
+
+- **Milestone M4 of `ANTIPAT.md` complete - silent error suppression.** M4 is
+  the "every `let _ =` on a fallible call and every `unwrap_or*` that masks an
+  error is logged or justified" set. Genuine drops now log the cause; the
+  remaining best-effort idioms carry a `// INTENTIONAL: <reason>` marker, and a
+  new shrink-only gate blocks any growth.
+  - **Typed CLI exit (M4.11 / A-04 / I-05).** `src/cli.rs` handlers no longer
+    call `std::process::exit` (30 sites) inside `Result`-returning code; they
+    return a typed `cli::CliExit`. `main` performs the single exit *after* the
+    clean-exit crash marker and the bounded `runtime.shutdown_timeout`, so
+    neither is skipped. The taxonomy is fixed: usage/validation = 2, runtime
+    failure = 1. The panic hook's deliberate `eprintln!` is now documented
+    (A-05).
+  - **Logged drops.** `ragent-tools-core` logs a failed `restrict_to_owner` on
+    the secret-bearing bash scratch files and a failed `glob` walk;
+    `ragent-tools-vcs` logs a recursive tree-fetch failure at `debug!`;
+    `ragent-tools-extended` logs a failed `mf_fetch` cache-write join and an
+    edit-log directory creation; `ragent-plugins` logs a failed
+    `register_tool`/`register_command` handler stash; `ragent-codeindex` logs a
+    failed graph-transaction `ROLLBACK`; `ragent-telemetry` logs a failed
+    Prometheus scrape socket write/flush; `ragent-config` logs a failed
+    compiled-glob recompile. `masterfetch`'s `robots.rs` `let _ = ..?` was
+    rewritten as an explicit validation `if`.
+  - **Annotated best-effort drops.** The remaining infallible / best-effort
+    idioms (writes to a `String`, channel sends, process teardown, temp-file
+    cleanup, terminal teardown, best-effort persistence whose in-memory state is
+    authoritative, parameter-stability bindings) carry a same-line
+    `// INTENTIONAL: <reason>` marker so the drop is explicit rather than silent.
+  - **New gate (M4.14).** `scripts/check-silent-errors.sh` +
+    `scripts/check_silent_errors.py` record the current masked-site count per
+    file in `scripts/silent-error-baseline.txt` (shrink-only), fail when any file
+    exceeds its baseline, and ship a `--self-test` that proves a seeded drop
+    fails. Wired into `ci.yml` and `pre-flight.sh`.
+
+- **Milestone M5 of `ANTIPAT.md` complete - inconsistency and vocabulary
+  unification.** M5 is the "one name and one accepted value set per concept,
+  one error mapping per provider, one policy per cross-cutting concern" set,
+  spanning 13 crates.
+  - **VCS vocabulary (M5.1).** New `ragent-tools-vcs::limits`
+    (`DEFAULT_PAGE_LIMIT`/`MAX_PAGE_LIMIT`/`NOTES_PER_PAGE`) and `::vocab`
+    (`normalize_issue_state`/`normalize_gitlab_state`/
+    `normalize_gitlab_issue_state`). Both `open` and `opened` are accepted on
+    every state-bearing tool and translated to each provider's native value
+    (`merged` mapped where supported); `git_log`'s limit is now bounded; a
+    GitHub 403 is treated as a rate limit only when `x-ratelimit-remaining: 0`
+    and otherwise as permission-denied (matching GitLab); missing-config
+    strings are one canonical constant per provider; GitHub comments/reviews
+    fetches carry `per_page` to match GitLab; the Actions-vs-Pipelines
+    asymmetry is documented; `status_icon` emoji became ASCII tokens.
+  - **Telemetry vocabulary (M5.2).** Instrument emit sites use the `names::*`
+    constants; the two unwritten fields are reconciled; `attr_session` is
+    `#[doc(hidden)]` with the cross-crate-wiring rationale documented and its
+    contract pinned by `tests/test_attr_session.rs`; stale `// -- Tests --`
+    banners removed; `MIN_CRED_PART_LEN`/`MIN_B64_RUN_LEN`/`TOKENS_PER_MILLION`/
+    `HTTP_READ_BUF` named.
+  - **Codeindex policy (M5.3/M5.13).** A single poisoned-lock policy per guard
+    (recover for the `CodeIndex` guards, fail-closed-to-`Result` for
+    `search::with_writer`), documented; the last two raw `blake3::hash` sites
+    route through `util::node_hash`; magic numbers named
+    (`MAVEN_TAG_SNIPPET_LEN`/`DEFAULT_SEARCH_LIMIT`/`FTS_OVERFETCH_FACTOR`/
+    `REPORT_TOP_GOD_NODES`); parser naming unified on
+    `Ctx`/`text()`/`build_qname`/`extend_scope`/`hash_node`; broken intra-doc
+    links fixed and stale task-scaffolding comments removed.
+  - **Config consistency (M5.4).** An explicit `impl Default for Config`
+    matches the serde defaults, so the `load_uncached` patch is gone;
+    `dir_lists` warns on a poisoned lock like `bash_lists`; every config-path
+    site routes through `Config::global_config_path()`; the `merge_project`
+    doc/code denylist policy is aligned; duplicated default-`true` helpers
+    collapsed; a failed `current_dir()` warns and skips caching.
+  - **Plugin dialect consistency (M5.5).** Codex/Claude `version` handling made
+    consistent, both permission shapes normalised into one model, `UNSUP_SKILLS`
+    emitted by the Codex path too, one `guard`-backed identifier/relative-path
+    predicate shared by `add.rs`/`manifest.rs`/`bridge.rs`, `IoError` preserving
+    the source chain, and hook timeouts read from explicit
+    `timeout_secs`/`timeout_ms` fields.
+  - **LLM provider consistency (M5.6).** Billed chat/completion POSTs are never
+    auto-retried (the double-billing paths in `azure_foundry` and
+    `openai_responses` removed); `DEFAULT_STREAM_TIMEOUT_SECS` named and
+    reconciled with the per-chunk idle budget; every provider registers its key
+    with `sanitize::register_secret`; all SSE parsers use one `data:` line form.
+  - **Storage consistency (M5.7).** One dynamic-SQL parameter-indexing
+    convention (the `?NOW` trick removed); `ActivityLog::append` is now
+    transactional and maps conflicts to `DuplicateSeq`; the remaining
+    multi-statement writers are transactional; the pure-read memory searches use
+    the read-only connection.
+  - **Research output consistency (M5.8).** `--url-cloak` applied on every output
+    path; engine classification drives both the exclusion set and the
+    scholarly/encyclopedia predicates from one table; numeric CLI flags report an
+    invalid value instead of silently defaulting.
+  - **Tools-extended consistency (M5.9).** Shared HTTP client reused across
+    `channels`/`gmail`/`finance`/`browser`/search engines; one
+    `DEFAULT_TIMEOUT_SECS`; finance throttling honours the configured interval;
+    one generic capped-body helper bounds every read; the
+    `mf_search.max_results` default is a named constant.
+  - **TUI / specs / server consistency (M5.10-M5.12).** Unified quit handling and
+    named caps in the TUI; ASCII status markers in `ragent-specs`; and in
+    `ragent-server` a `200`-with-body research delete (no more `204` + body),
+    standardised error casing, a logged SSE serialization fallback, shared
+    rate-limiting middleware, and a hoisted `constant_time_eq` with a test.
+
+- **Milestone M6 of `ANTIPAT.md` complete - structural / complexity debt, and
+  the bounding of previously-unbounded collections.** M6 decomposes the audited
+  hot paths, moves blocking work off the async path, and gives every
+  process-lifetime collection a named cap with eviction. All numeric changes are
+  naming-only (behaviour preserved) unless a bound was explicitly added.
+  - **TUI structure + spool writer (M6.1/M6.9).** `handle_mouse_event`'s region
+    dispatch is factored behind `SCROLL_STEP_LINES` and helpers; the trivial
+    `block_in_place`/nested-`block_on` command handlers were converted to
+    `async` and the remainder carry a `// reason:` note; `FROM_CMD_PREFIX` +
+    `from_cmd()` builder added; a shared help-render helper added; the
+    duplicated spool writer now shares `open_log_spool`/`log_level_str`; and
+    the `/bug-report` dump writes `0o600` via `open_owner_only`.
+  - **tools-core bounds (M6.2).** `read` output is capped at
+    `MAX_READ_OUTPUT_CHARS` (200,000) with an omission marker; the `list` walk
+    runs under `spawn_blocking` and the `exists()`/`is_dir()` probes in
+    `move_file`/`rm` are async; `BashTool::execute` calls
+    `validate_shell_command` once (the duplicated security ladder is gone);
+    `glob` uses `entry.file_type()` (no symlink follow) bounded by
+    `MAX_WALK_DEPTH`; dead-code `#[allow]` sites carry `// reason:`.
+  - **tools-extended bounds (M6.3).** The local-embedding path no longer builds
+    a nested Tokio runtime and its model download is capped; untrusted-array
+    `Vec::with_capacity` in the plot tools and search/graph code is dropped or
+    capped with named `MAX_*`; `mf_crawl` clamps `crawl_urls` with
+    `MAX_CRAWL_URLS` (1000); the search and finance caches are size-bounded.
+  - **codeindex bounds (M6.4).** `MAX_GRAPH_LOAD_ROWS` (1,000,000) bounds every
+    graph-derivation loader; `MAX_IMPL_CANDIDATES` (32) bounds
+    `derive_impl_edges`; an RAII `TreeDepthGuard` + `MAX_TREE_DEPTH` (512)
+    bounds all 12 parser tree walks; `IndexStore::rollback_transaction()`
+    replaces the raw-`conn` ROLLBACK sites and `conn` is now private.
+  - **server hardening (M6.5).** `CorsLayer::permissive()` replaced with an
+    explicit origin allowlist; `MAX_SSE_CONNECTIONS` (64) caps `/events`;
+    request body limit + timeout layers added; the SSE serialization fallback
+    logs; rate-limit / visualisation / channel / related-research literals are
+    named constants.
+  - **agent caches (M6.6).** `PROMPT_CONTEXT_CACHE` (cap 64, TTL + evict-oldest)
+    and `ENTRY_TOKENS` (cap 4096, clear-before-insert) are hard-bounded.
+  - **types (M6.7).** `MAX_SECRET_REGISTRY_ENTRIES` (1024) caps the global
+    secret registry (longest-first preserved) and `seed_secrets` de-duplicates;
+    `Debug for Event` avoids the double allocation for non-credential variants;
+    the dead duplicate `is_absolute` block and unreachable `RootDir` arm removed.
+  - **plugins (M6.8).** Download chunk size, redirect-hop limit, sandbox stack
+    size, SHA-256 hex length, and the marketplace-document cap are named
+    constants; the marketplace registry is a bounded FIFO.
+  - **Magic-number sweeps (M6.10).** Named constants added in `ragent-research`,
+    `ragent-storage`, `ragent-config`, `ragent-bench`, and `ragent-specs`
+    (regexes hoisted to `LazyLock` statics); a `DEFAULT_CONTEXT_WINDOW`
+    fallback wired in `ragent-llm`.
+
+### Added
 
 - **Milestone MS-01 of `SECTASKS.md` complete — all five Critical findings from
   the per-crate security audit are remediated, each with a regression test.**
@@ -166,6 +568,62 @@
 
 ### Added
 
+- **Milestone MS-05 of `SECTASKS.md` complete - "prevent recurrence": each guard
+  shape from the earlier milestones now has a single implementation, and CI
+  fails a build that reintroduces the class.**
+  - **Shared guards (T-067/T-068)** - new `ragent_types::guard` owns
+    `reject_option_like`, `is_safe_operand`, `validate_identifier`,
+    `validate_relative_component`, `contained_join`, `clamp_retry_after`, and
+    `cap_read`, plus `MAX_IDENTIFIER_LEN`/`MAX_RETRY_AFTER`. It is re-exported
+    from the `ragent-types` root and as `ragent_tools_core::guard` for the tools
+    crates. `ragent-tools-vcs::git::reject_option_like`,
+    `ragent-plugins::add::is_safe_git_argument`, and
+    `ragent-bench::data::contained_join` are now thin adapters over it, so the
+    rule has one home while every existing call site keeps its name. Regression
+    suite: `crates/ragent-types/tests/test_shared_guards.rs` (15 tests,
+    including a symlink-escape and a split-UTF-8-boundary case).
+  - **One redaction implementation (T-069)** - `ragent-agent`,
+    `ragent-storage`, and `ragent-tools-core` re-export
+    `ragent_types::sanitize` instead of holding a second secret registry, so a
+    credential registered anywhere is masked on every surface (`GET /config`,
+    telemetry attributes, logs, SSE, tool output). `Event` no longer derives
+    `Debug`: a hand-written impl renders through an internal `DebugProxy` that
+    reports `CopilotDeviceFlowComplete.token` and
+    `CopilotDeviceFlowStartResult.device_code` as presence flags and then
+    applies `redact_secrets` to the whole rendering, so
+    `tracing::debug!("{event:?}")` cannot print an OAuth credential.
+    Regression suite:
+    `crates/ragent-types/tests/test_unified_redaction.rs` (4 tests).
+  - **CI gates (T-070)** - new job `security-guards` in
+    `.github/workflows/ci.yml` (also wired into `pre-flight.sh`).
+    `scripts/check-file-tool-containment.sh` fails if a registered file tool
+    stops calling a `check_path_within_*` helper;
+    `scripts/check-security-unwraps.sh` fails if any production file exceeds its
+    recorded `.unwrap()`/`.expect()` baseline
+    (`scripts/security-unwrap-baseline.txt`); `scripts/check-shared-guards.sh`
+    fails if a crate re-defines a shared guard or a second secret registry; and
+    `scripts/check-vcs-duplication.sh` additionally fails if the
+    leading-dash git check is re-derived. Every gate ships a `--self-test`
+    that seeds a violation and asserts the gate rejects it. The two regression
+    suites also run in the workspace test job via
+    `cargo test -p ragent-types --test test_shared_guards --test
+    test_unified_redaction`.
+  - **Accepted-risk register (T-071)** - `SECTASKS.md` now records the three
+    deliberate non-fixes (the 362 grandfathered panicking calls, the two
+    call-site-preserving guard adapters, and the non-functional headless browser
+    tools) with rationale, compensating control, and a 2027-03-28 review date,
+    dated 2026-09-28.
+  - `SPEC.md` §4.6e documents the shared helpers, the unified redaction
+    chokepoint, and the gates.
+  - The registry-layer redaction case is a single test
+    (`test_registry_layer_redacts_and_cow_path_still_masks`) holding a private
+    mutex across the process-global secret registry, so a parallel
+    `cargo test --workspace` run cannot interleave registrations.
+  - Cleared the 8 pre-existing `clippy::redundant_pub_crate` warnings in
+    `ragent-research::document` and raised the inline-test baseline in
+    `scripts/check-inline-tests.sh` from 127 to 129 for the two inline blocks
+    added by the failure-capture work.
+
 - **Crash-dump capture for aborts that bypass the panic hook** — a stack
   overflow is not an unwinding panic: the Rust runtime prints
   `thread '...' has overflowed its stack` and calls `abort()`, so nothing
@@ -213,6 +671,95 @@
   `crates/ragent-tui/tests/test_output_view_live_steps.rs` (cache
   invalidation on counter advance, rendered tool-call rows, stable cache
   when nothing advanced).
+
+### Added
+
+- **Security and anti-pattern remediation sweep - `ANTIPAT.md` milestones M0
+  and M2-M7 complete.** The anti-pattern remediation plan (17 per-crate
+  `explore` audits plus the workspace-root binary) closed its standards,
+  de-duplication, silent-error, vocabulary and structural/debt milestones, plus
+  dependency and tooling hygiene. The only milestone left open is M1 (the
+  ASCII/non-ASCII conformance sweep).
+  - **M2 - standards conformance (tests and hygiene):** inline `#[cfg(test)]`
+    modules migrated into each crate's `tests/` directory, shared guards and the
+    poison-lock policy unified, and dead-code `#[allow]` sites annotated with a
+    `// reason:`.
+  - **M3 - shared-helper de-duplication:** truncation, qname/scope/hash,
+    SSE-parser, row-mapper and per-provider boilerplate collapsed onto single
+    implementations.
+  - **M4 - silent-error suppression:** `let _ =`, `unwrap_or_default` and
+    `unwrap_or(0/false)` sites handled or annotated so none is silently
+    discarded.
+  - **M5 - vocabulary unification:** one name, one value set and one policy per
+    concept across sibling crates (VCS `number`/`iid` and `open`/`opened`,
+    telemetry `attr_*`, config `is_default`/`is_empty`, poisoned-lock policy).
+  - **M6 - structural / complexity debt:** bounded process-lifetime caches,
+    capped untrusted-JSON collections, RAII tree-depth guards in the codeindex
+    parsers, and magic numbers hoisted to named constants.
+  - **M7 - dependency and tooling hygiene:** stale advisory ignores removed and
+    `deny.toml` set to `unsound = "all"` so the remaining `lru` 0.16.4
+    suppression is checked; `rmcp` 1.8 -> 3.5, `rusqlite` 0.32 -> 0.40, `similar`
+    2.7 -> 3.2, `dirs` 6 -> 7, `sha2` 0.10 -> 0.11, `base64` 0.22 -> 0.23,
+    `printpdf` 0.9 -> 0.12 and `ratatui` 0.29 -> 0.30 (with the wrap-port parity
+    fix) applied; the retired `ragent-team` re-export shim crate deleted
+    (**17 -> 16 workspace crates**); and `check-team-duplication.sh`,
+    `check-vcs-duplication.sh`, `check-inline-tests.sh` and
+    `check-file-tool-containment.sh` rewritten to enforce what their comments
+    claim, wired into `ci.yml` and `pre-flight.sh`.
+  - **MS-05 - recurrence prevention (`SECTASKS.md`):** new `ragent_types::guard`
+    owns `reject_option_like`, `is_safe_operand`, `validate_identifier`,
+    `validate_relative_component`, `contained_join`, `clamp_retry_after` and
+    `cap_read` (re-exported as `ragent_tools_core::guard`); `ragent-agent`,
+    `ragent-storage` and `ragent-tools-core` re-export `ragent_types::sanitize`
+    so there is one secret registry and one redaction chokepoint (`Event` no
+    longer derives `Debug`); the `security-guards` CI job runs
+    `check-file-tool-containment.sh`, `check-security-unwraps.sh`,
+    `check-shared-guards.sh` and `check-vcs-duplication.sh` (each with a
+    `--self-test`); and `SECTASKS.md` records the accepted-risk register (T-071).
+  - 941 files changed, +53,071 / -44,621. `cargo check`,
+    `cargo clippy --all-targets`, `cargo fmt --check` and `cargo audit` all
+    clean; full workspace test suite green (689 suites, 10,249 passed, 0
+    failed).
+
+### Changed
+
+- **`340c32cc` - Version 1.0.121 more fixes on mcp.** Incremental MCP fixes
+  carrying the v1.0.121 release; no additional tool or configuration surface.
+- **`14c25e1d` - Add the `research/` folder.** Reverts the `research/` entry in
+  `.gitignore` so the directory is tracked, and commits the 432 accumulated
+  research findings, indexes and output reports.
+- **`da83d927` - MS-03: network and secret hardening (`SECTASKS` T-025..T-058).**
+  The Medium-severity remediation set. Network egress: MCP HTTP response bodies
+  read under an 8 MiB cap; benchmark downloads carry a client timeout, a
+  streamed size cap, a pagination budget and manifest path containment; LLM
+  providers clamp `Retry-After` (30 s), cap the SSE accumulation buffer on every
+  streaming path and cap error-body reads; the GitHub tree walk and GitLab jobs
+  pagination carry request/entry budgets; `mf_fetch`/`mf_crawl` stream under
+  byte caps and `crawl_urls` is SSRF-checked at the tool boundary. Secrets: the
+  registry is seeded from every credential env var; bash output, CI log excerpts
+  and SSE tool-call arguments are redacted; the GitHub token attaches only to the
+  configured API origin; Gmail headers are CRLF-stripped and the provider-setup
+  dialog masks the API key and PAT. Plus DB/WAL/activity-log re-restriction to
+  0600, `http_request` refusing routing/credential headers, codeindex
+  exclusion-glob/FTS-symlink/walker-recursion guards, bounded spec
+  numbering/contradiction detection, mailbox caps and validated team hooks,
+  panic-free `CronSchedule`, a stderr-spool byte ceiling, `$( ... )`-aware
+  `split_bash_command`, and four pre-existing flaky tests stabilised.
+- **`6cf0b60f` - MS-04: defence in depth (`SECTASKS` T-059..T-066).** The 33
+  Low-severity findings, closed with the same guard shapes as MS-01..MS-03:
+  `--samples` clamped to `MAX_BENCH_SAMPLES` (100), streamed dataset downloads
+  under `MAX_DOWNLOAD_BYTES` with a HumanEvalPack pagination budget, only
+  `base_url_override` recorded in the shareable workbook/sidecar, and the GitHub
+  recursive tree walk given the GitLab request/entry budget. Containment:
+  benchmark manifest `case_file`/`relative_path` joins confined, plugin manifest
+  `entry`/`main`/`server.entry` and marketplace wrapper names validated as single
+  normal components, `resolve_memory_dir` rejecting unsafe agent names, and the
+  bash scratch directory falling back to a process-private 0700 directory.
+  Redaction: redacted JSON parse-diagnostic source lines, `BUILTIN_DENYLIST`
+  merged into the enforced denylist, fenced research source bodies neutralised
+  and gather-log URL credentials masked, permission replies bound to the awaiting
+  session, and credential-bearing events redacted on the SSE stream
+  (`redacted_event_debug` for log sites).
 
 ## [1.0.121] - 2026-09-27
 

@@ -642,7 +642,7 @@ async fn test_toolchain_list_absent_runtimes_do_not_truncate_report() {
         flat.contains("not installed") || flat.contains("installed"),
         "status column renders for absent and installed runtimes: {flat}"
     );
-    let absent_rows = flat.matches("format —").count();
+    let absent_rows = flat.matches("format -").count();
     assert!(
         absent_rows >= 20,
         "data-format rows survive the walk (>= 20, word-wrapped in the status column): {flat}"

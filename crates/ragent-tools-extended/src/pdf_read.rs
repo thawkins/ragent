@@ -167,7 +167,7 @@ pub fn read_pdf(
             serde_json::to_string_pretty(&result).context("Failed to serialize PDF content")
         }
         _ => {
-            // "text" format — plain text extraction
+            // "text" format - plain text extraction
             let pages = extract_pages_text(&bytes, total_pages, start_page, end_page)?;
             let mut output = String::new();
             for (page_num, text) in &pages {
@@ -230,7 +230,7 @@ fn extract_pages_text(
             result.push((
                 start,
                 format!(
-                    "[Pages {start}-{end} — per-page extraction unavailable, showing full document text]\n\n{full_text}"
+                    "[Pages {start}-{end} - per-page extraction unavailable, showing full document text]\n\n{full_text}"
                 ),
             ));
         }

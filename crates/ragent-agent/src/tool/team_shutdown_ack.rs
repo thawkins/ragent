@@ -1,4 +1,4 @@
-//! `team_shutdown_ack` — Teammate acknowledges a shutdown request.
+//! `team_shutdown_ack` - Teammate acknowledges a shutdown request.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -19,7 +19,7 @@ impl Tool for TeamShutdownAckTool {
         "Acknowledge a shutdown request from the team lead. REQUIRED parameter: \
              'team_name' (string). Call this after receiving a shutdown_request via \
              team_read_messages; the teammate session will terminate after this call. \
-             Common gotcha: this only marks the teammate as stopped — it does not free \
+             Common gotcha: this only marks the teammate as stopped - it does not free \
              the team directory; call team_cleanup after all members have acknowledged."
     }
 

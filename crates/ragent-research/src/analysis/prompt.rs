@@ -1,4 +1,4 @@
-//! Synthesis prompt construction — build the LLM prompt that asks for the
+//! Synthesis prompt construction - build the LLM prompt that asks for the
 //! six required sections (Executive Summary, Top 10 Implications, Findings,
 //! In-Project Cross-References, Open Questions).
 //!
@@ -9,9 +9,7 @@ use super::parser::truncate_body;
 use crate::run_config::OutputFormat;
 
 #[derive(Debug, Clone, Default)]
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub struct SynthesisPromptConfig {
+pub(crate) struct SynthesisPromptConfig {
     /// Optional audience/domain framing appended to the task preamble
     /// (FR-009 / Finding 12). `None` preserves the legacy preamble.
     #[allow(dead_code)] // reserved for T-008 persona/audience wiring; not yet read
@@ -46,7 +44,7 @@ pub struct SynthesisPromptConfig {
 /// (preamble, output-template, recency rule, few-shot, sources block) can be
 /// extended independently. The legacy free function is preserved as a thin
 /// wrapper that calls `SynthesisPromptBuilder::new(topic).sources(sources)
-/// .build()` so existing callers — including `LlmAnalysisEngine::analyze` —
+/// .build()` so existing callers - including `LlmAnalysisEngine::analyze` -
 /// are unchanged.
 ///
 /// ## Output stability
@@ -56,9 +54,7 @@ pub struct SynthesisPromptConfig {
 /// in to additional prompt sections via the config; they never alter the
 /// default output.
 #[derive(Debug, Clone)]
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub struct SynthesisPromptBuilder<'a> {
+pub(crate) struct SynthesisPromptBuilder<'a> {
     topic: &'a str,
     sources: &'a [SourceBody],
     config: SynthesisPromptConfig,
@@ -66,9 +62,7 @@ pub struct SynthesisPromptBuilder<'a> {
 
 impl<'a> SynthesisPromptBuilder<'a> {
     /// Begin building a synthesis prompt for `topic`.
-    // reason: only consumed inside this crate - `pub` here never escapes the crate.
-    #[allow(unreachable_pub)]
-    pub fn new(topic: &'a str) -> Self {
+    pub(crate) fn new(topic: &'a str) -> Self {
         Self {
             topic,
             sources: &[],
@@ -77,9 +71,7 @@ impl<'a> SynthesisPromptBuilder<'a> {
     }
 
     /// Attach the captured source corpus. Required before [`build`].
-    // reason: only consumed inside this crate - `pub` here never escapes the crate.
-    #[allow(unreachable_pub)]
-    pub const fn sources(mut self, sources: &'a [SourceBody]) -> Self {
+    pub(crate) const fn sources(mut self, sources: &'a [SourceBody]) -> Self {
         self.sources = sources;
         self
     }
@@ -87,25 +79,19 @@ impl<'a> SynthesisPromptBuilder<'a> {
     /// Attach the full prompt configuration (T-003..T-008 knobs).
     #[allow(dead_code)]
     // reserved for T-003..T-008 prompt configuration wiring
-    // reason: only consumed inside this crate - `pub` here never escapes the crate.
-    #[allow(unreachable_pub)]
-    pub fn config(mut self, config: SynthesisPromptConfig) -> Self {
+    pub(crate) fn config(mut self, config: SynthesisPromptConfig) -> Self {
         self.config = config;
         self
     }
 
     /// Set the output artifact for this prompt (FR-012).
-    // reason: only consumed inside this crate - `pub` here never escapes the crate.
-    #[allow(unreachable_pub)]
-    pub const fn output_format(mut self, fmt: OutputFormat) -> Self {
+    pub(crate) const fn output_format(mut self, fmt: OutputFormat) -> Self {
         self.config.output_format = Some(fmt);
         self
     }
 
     /// Set the research brief that guides the synthesis (FR-004 / T-004).
-    // reason: only consumed inside this crate - `pub` here never escapes the crate.
-    #[allow(unreachable_pub)]
-    pub fn brief(mut self, brief: Option<&'a str>) -> Self {
+    pub(crate) fn brief(mut self, brief: Option<&'a str>) -> Self {
         self.config.brief = brief.map(String::from);
         self
     }
@@ -113,16 +99,12 @@ impl<'a> SynthesisPromptBuilder<'a> {
     /// Borrow the active config immutably.
     #[allow(dead_code)]
     // reserved for T-003..T-008 prompt configuration wiring
-    // reason: only consumed inside this crate - `pub` here never escapes the crate.
-    #[allow(unreachable_pub)]
-    pub const fn cfg(&self) -> &SynthesisPromptConfig {
+    pub(crate) const fn cfg(&self) -> &SynthesisPromptConfig {
         &self.config
     }
 
     /// Produce the final prompt string.
-    // reason: only consumed inside this crate - `pub` here never escapes the crate.
-    #[allow(unreachable_pub)]
-    pub fn build(&self) -> String {
+    pub(crate) fn build(&self) -> String {
         let mut prompt = String::new();
         prompt.push_str(&render_preamble(self.topic, &self.config));
         if self.sources.is_empty() {
@@ -149,9 +131,7 @@ impl<'a> SynthesisPromptBuilder<'a> {
 /// the legacy opening of `build_synthesis_prompt`. When a research brief is
 /// supplied, the preamble includes it as the guiding mission statement
 /// (FR-004 / T-004).
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn render_preamble(topic: &str, config: &SynthesisPromptConfig) -> String {
+pub(crate) fn render_preamble(topic: &str, config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     if let Some(brief) = config.brief.as_deref().filter(|b| !b.is_empty()) {
         out.push_str("Research Brief (use this as your mission statement):\n\n");
@@ -177,9 +157,7 @@ pub fn render_preamble(topic: &str, config: &SynthesisPromptConfig) -> String {
 /// the model is still asked for the same raw sections so the parser remains
 /// unchanged, and an extra paragraph encourages results-oriented phrasing so
 /// the final `IMRaD` layout reads naturally in the `## Results` section.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
+pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     match config.output_format {
         Some(OutputFormat::ExecutiveSummary) => {
@@ -196,7 +174,7 @@ pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
                  Each finding must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
                  **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
                  **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation.\n\n\
-                 **Analysis:** Explain why the observation matters for the topic. This paragraph must be substantive — write more than 512 characters (several detailed sentences). Draw on specific evidence from the sources: cite concrete data points, quote relevant passages using `[#N]` references, compare or contrast with other findings, discuss causal mechanisms, weigh supporting and contradicting evidence, and explore the broader implications of the observation. When the sources provide enough detail, write a longer analysis covering multiple angles, limitations of the evidence, and connections to the broader topic. Every sentence should carry analytical weight — do not pad with filler or repetition.\n\n\
+                 **Analysis:** Explain why the observation matters for the topic. This paragraph must be substantive - write more than 512 characters (several detailed sentences). Draw on specific evidence from the sources: cite concrete data points, quote relevant passages using `[#N]` references, compare or contrast with other findings, discuss causal mechanisms, weigh supporting and contradicting evidence, and explore the broader implications of the observation. When the sources provide enough detail, write a longer analysis covering multiple angles, limitations of the evidence, and connections to the broader topic. Every sentence should carry analytical weight - do not pad with filler or repetition.\n\n\
                  **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, or write \"No direct dependencies.\"\n\n\
                  **Implication:** Summarize the practical consequence or follow-up action.\n\n\
                  Put each label on its own line, and separate every paragraph with a blank line.\n\n",
@@ -217,7 +195,7 @@ pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
                  Each finding must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
                  **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
                  **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation.\n\n\
-                 **Analysis:** Explain why the observation matters for the comparison. This paragraph must be substantive — write more than 512 characters (several detailed sentences). Draw on specific evidence from the sources: cite concrete data points, quote relevant passages using `[#N]` references, compare or contrast the entities being compared, discuss trade-offs and causal mechanisms, weigh supporting and contradicting evidence, and explore the broader implications of the observation for the comparison. When the sources provide enough detail, write a longer analysis covering multiple angles, limitations of the evidence, and connections to the broader topic. Every sentence should carry analytical weight — do not pad with filler or repetition.\n\n\
+                 **Analysis:** Explain why the observation matters for the comparison. This paragraph must be substantive - write more than 512 characters (several detailed sentences). Draw on specific evidence from the sources: cite concrete data points, quote relevant passages using `[#N]` references, compare or contrast the entities being compared, discuss trade-offs and causal mechanisms, weigh supporting and contradicting evidence, and explore the broader implications of the observation for the comparison. When the sources provide enough detail, write a longer analysis covering multiple angles, limitations of the evidence, and connections to the broader topic. Every sentence should carry analytical weight - do not pad with filler or repetition.\n\n\
                  **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, or write \"No direct dependencies.\"\n\n\
                  **Implication:** Summarize the practical consequence or follow-up action.\n\n\
                  Put each label on its own line, and separate every paragraph with a blank line.\n\n",
@@ -233,7 +211,7 @@ pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
                  Each entry must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
                  **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
                  **Observation:** State the concrete evidence or fact from the source, including at least one `[#N]` citation.\n\n\
-                 **Analysis:** Explain the source's contribution to the topic. This paragraph must be substantive — write more than 512 characters (several detailed sentences). Draw on specific evidence from the source: cite concrete data points, quote relevant passages using `[#N]` references, assess the source's methodology and credibility, discuss how it supports or contradicts other sources, and explore the broader implications of the source's contribution. When the source provides enough detail, write a longer analysis covering multiple angles, limitations of the evidence, and connections to the broader topic. Every sentence should carry analytical weight — do not pad with filler or repetition.\n\n\
+                 **Analysis:** Explain the source's contribution to the topic. This paragraph must be substantive - write more than 512 characters (several detailed sentences). Draw on specific evidence from the source: cite concrete data points, quote relevant passages using `[#N]` references, assess the source's methodology and credibility, discuss how it supports or contradicts other sources, and explore the broader implications of the source's contribution. When the source provides enough detail, write a longer analysis covering multiple angles, limitations of the evidence, and connections to the broader topic. Every sentence should carry analytical weight - do not pad with filler or repetition.\n\n\
                  **Cross-reference / Dependencies:** Name any other source or finding this one relates to, or write \"No direct dependencies.\"\n\n\
                  **Implication:** Summarize how this source should influence conclusions.\n\n\
                  Put each label on its own line, and separate every paragraph with a blank line.\n\n",
@@ -254,7 +232,7 @@ pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
                       **five markdown paragraphs** with these bold labels, in this order:\n\n\
                       **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
                       **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation. You may cite multiple sources in a finding if several support the same point.\n\n\
-                      **Analysis:** Explain why the observation matters for the topic and how it connects to the broader research question. This paragraph must be substantive — write more than 512 characters (several detailed sentences). Draw on specific evidence from the sources: cite concrete data points, quote relevant passages using `[#N]` references, compare or contrast with other findings, discuss causal mechanisms, weigh supporting and contradicting evidence, and explore the broader implications of the observation. When the sources provide enough detail, write a longer analysis covering multiple angles, limitations of the evidence, alternative interpretations, and connections to the broader research question. Every sentence should carry analytical weight — do not pad with filler or repetition.\n\n\
+                      **Analysis:** Explain why the observation matters for the topic and how it connects to the broader research question. This paragraph must be substantive - write more than 512 characters (several detailed sentences). Draw on specific evidence from the sources: cite concrete data points, quote relevant passages using `[#N]` references, compare or contrast with other findings, discuss causal mechanisms, weigh supporting and contradicting evidence, and explore the broader implications of the observation. When the sources provide enough detail, write a longer analysis covering multiple angles, limitations of the evidence, alternative interpretations, and connections to the broader research question. Every sentence should carry analytical weight - do not pad with filler or repetition.\n\n\
                       **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, contradicts, or is prerequisite to, using `Finding N` references. If there are no dependencies, write \"No direct dependencies.\"\n\n\
                       **Implication:** Summarize the practical consequence, open risk, or recommended follow-up action.\n\n\
                       Put each label on its own line, and separate every paragraph with a blank line. \
@@ -283,8 +261,8 @@ pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
         out.push_str(
             "In addition to the five required paragraphs above, every finding must end with a sixth paragraph labeled:\n\n\
             **Sources Cited / Date Spread:**\n\
-            List every `[#N]` citation used in the finding, then report the earliest and latest publication dates among those cited web sources (use the `Published` line in each source header below; write `undated` when a cited source has no publication date). When the `Author` line for a cited source is not `unknown`, include the author name in this paragraph as well. Add one sentence explaining how the date range — and the recency of the evidence — affects the finding's confidence, relevance, or conclusions. If every cited source is undated, say so explicitly and explain the implication.\n\n\
-            Example: `**Sources Cited / Date Spread:** [#3] [#7] — published 2024-01-05..2026-04-07; the finding relies on 2026 sources, so recency weighting increases confidence in current behavior.`\n\n"
+            List every `[#N]` citation used in the finding, then report the earliest and latest publication dates among those cited web sources (use the `Published` line in each source header below; write `undated` when a cited source has no publication date). When the `Author` line for a cited source is not `unknown`, include the author name in this paragraph as well. Add one sentence explaining how the date range - and the recency of the evidence - affects the finding's confidence, relevance, or conclusions. If every cited source is undated, say so explicitly and explain the implication.\n\n\
+            Example: `**Sources Cited / Date Spread:** [#3] [#7] - published 2024-01-05..2026-04-07; the finding relies on 2026 sources, so recency weighting increases confidence in current behavior.`\n\n"
         );
     }
     // T-004 (FR-004): recency-weighting rule. Gated on `config.recency_rule`
@@ -304,11 +282,11 @@ pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
          Output a numbered list `1.`..`10.` ordered by importance or practicality. Each entry must be one \
          or two sentences: state the consequence, why it matters for the topic, and (when relevant) \
          cite the finding or source `[#N]` that supports it. If fewer than 10 distinct implications are \
-         justified by the evidence, list only the justified ones — do not pad with speculation.\n\n",
+         justified by the evidence, list only the justified ones - do not pad with speculation.\n\n",
     );
     out.push_str("## In-Project Cross-References\n");
     out.push_str(
-                "A bullet list of relevant in-project files, formatted as `* `path` — note`. Only include files that are actually mentioned in the local sources.\n\n"
+                "A bullet list of relevant in-project files, formatted as `* `path` - note`. Only include files that are actually mentioned in the local sources.\n\n"
             );
     out.push_str("## Open Questions\n");
     out.push_str(
@@ -320,12 +298,12 @@ pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
         // FR-007 / T-006: when a `--template` is supplied, instruct the model
         // to populate the template's placeholder sections IN ADDITION to the
         // four/five required finding paragraphs. The template never replaces
-        // the structured synthesis requirements — it only adds extra sections
+        // the structured synthesis requirements - it only adds extra sections
         // or tone guidance. Keep this instruction short so it does not blow
         // up the context window when the template body is large; the full
         // template body is not echoed here (the caller wires it into the
         // document assembly separately).
-        let _ = template; // referenced for future expansion
+        let _ = template; // INTENTIONAL: referenced for future expansion
         out.push_str(
             "A research template with extra placeholder sections is in effect. \
             Populate every placeholder the template defines (for example \
@@ -346,7 +324,7 @@ pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
     // body; we render up to two to keep the context-window cost low.
     if !config.few_shot_examples.is_empty() {
         out.push_str(
-            "Few-shot exemplar findings (for format calibration only — do NOT \\
+            "Few-shot exemplar findings (for format calibration only - do NOT \\
             copy their content into your answer; derive findings from the \\
             supplied sources):\\n\\n",
         );
@@ -369,9 +347,7 @@ pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
 /// enables the **Sources Cited / Date Spread** paragraph, the caller passes
 /// `include_published = true` so each web source header gains a `Published`
 /// line the model can quote in its date-spread analysis.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn render_sources_block(sources: &[SourceBody], include_published: bool) -> String {
+pub(crate) fn render_sources_block(sources: &[SourceBody], include_published: bool) -> String {
     let mut out = String::new();
     out.push_str("---\n\n### Sources\n\n");
     for src in sources {
@@ -396,7 +372,7 @@ pub fn render_sources_block(sources: &[SourceBody], include_published: bool) -> 
             published = published_line,
             author = author_line,
             rel = if src.relevance.is_empty() {
-                "—".to_string()
+                "-".to_string()
             } else {
                 src.relevance.clone()
             },
@@ -412,9 +388,7 @@ pub fn render_sources_block(sources: &[SourceBody], include_published: bool) -> 
 
 /// Render the closing instruction line. With the default config this is
 /// byte-identical to the legacy final lines of `build_synthesis_prompt`.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn render_closing(_config: &SynthesisPromptConfig) -> String {
+pub(crate) fn render_closing(_config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     out.push_str(
         "\nNow produce only the six sections above: Executive Summary, Top 10 Implications, Findings, In-Project Cross-References, and Open Questions. Do not include a title or any other preamble. ",
@@ -424,7 +398,7 @@ pub fn render_closing(_config: &SynthesisPromptConfig) -> String {
     );
     out.push_str(
         "Cross-reference / Dependencies, Implication) after it. Feel free to add more labeled paragraphs if the sources support it. \
-         The **Analysis** paragraph in every finding must be substantive — write more than 512 characters, drawing on all available source data. \
+         The **Analysis** paragraph in every finding must be substantive - write more than 512 characters, drawing on all available source data. \
          When the sources are rich, write a longer analysis that covers multiple angles, evidence limitations, and connections to the broader topic.",
     );
     out
@@ -439,9 +413,7 @@ pub fn render_closing(_config: &SynthesisPromptConfig) -> String {
 /// that need the extended knobs (T-003..T-008) should use the builder directly.
 #[allow(dead_code)]
 // preserved for backward-compat byte-identical tests
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn build_synthesis_prompt(topic: &str, sources: &[SourceBody]) -> String {
+pub(crate) fn build_synthesis_prompt(topic: &str, sources: &[SourceBody]) -> String {
     SynthesisPromptBuilder::new(topic)
         .sources(sources)
         .output_format(OutputFormat::Report)

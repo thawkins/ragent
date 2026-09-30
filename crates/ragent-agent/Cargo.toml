@@ -13,6 +13,7 @@ doctest = false
 [dependencies]
 num_cpus = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
 fs2 = { workspace = true }
 tokio = { workspace = true }
 # Unix kill support for MCP stdio child teardown (`kill_stdio_child`).
@@ -38,7 +39,7 @@ regex = { workspace = true }
 base64 = { workspace = true }
 gcf = { workspace = true }
 rmcp = { workspace = true }
-serde_yaml = { workspace = true }
+serde_norway = { workspace = true }
 url = { workspace = true }
 readability-rs = { workspace = true }
 ignore = { workspace = true }
@@ -85,6 +86,9 @@ chrono = { workspace = true }
 [dev-dependencies]
 anyhow = { workspace = true }
 tempfile = "3.5"
+# Team runtime / coordination-tool integration tests (relocated from the
+# retired ragent-team crate in ANTIPAT M7.8) exercise BashTool/CommandCatalog.
+ragent-tools-core = { path = "../ragent-tools-core" }
 criterion = { version = "0.5", features = ["async_tokio"] }
 axum = { workspace = true }
 [[bench]]

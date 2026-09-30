@@ -26,7 +26,7 @@ pub const PROMPT_REPORT_MAX_CHARS: usize = 100_000;
 ///
 /// `models.rs` bypasses the research code-block extractor for messages with
 /// this prefix (their embedded AGENTS.md/README bodies carry bare ``` fences),
-/// so emitters must build their `From:` lines from this constant — a rename
+/// so emitters must build their `From:` lines from this constant - a rename
 /// in one place must not silently desynchronise the two.
 pub const REPORT_PREFIX: &str = "From: /prompt";
 
@@ -35,10 +35,10 @@ pub const REPORT_PREFIX: &str = "From: /prompt";
 /// Lists every subcommand with its arguments and a one-line description so
 /// the command surface is discoverable without reading documentation.
 pub fn render_help() -> String {
-    "## /prompt — Agent System Prompt Inspector\n\n\
+    "## /prompt - Agent System Prompt Inspector\n\n\
      Shows exactly what the LLM receives as its system prompt for an agent:\n\
      the assembled prompt body plus the effective `## Available Tools`\n\
-     reference. **Read-only** — no LLM call, no writes, no session mutation.\n\n\
+     reference. **Read-only** - no LLM call, no writes, no session mutation.\n\n\
      | Command | Description |\n\
      |---|---|\n\
      | `/prompt help` | Show this help page |\n\
@@ -196,7 +196,7 @@ pub fn apply_size_cap(report: &str) -> String {
 }
 /// Result of resolving an agent name for `/prompt` (FR-006 / FR-011).
 ///
-/// NOTE: the exact-case arm deliberately precedes the hidden filter — a
+/// NOTE: the exact-case arm deliberately precedes the hidden filter - a
 /// hidden built-in resolves by its exact name only (never case-insensitively,
 /// never offered in rosters or warnings). `roster_entries` docs therefore
 /// over-say "exactly": hidden exact-case names are also accepted.
@@ -263,7 +263,7 @@ pub fn available_agent_names(
 }
 
 /// Render the FR-011 miss warning: names the unmatched argument and lists the
-/// resolvable agent names. Returns `None` for a successful resolution — no
+/// resolvable agent names. Returns `None` for a successful resolution - no
 /// prompt content is ever included in the warning.
 pub fn render_miss_warning(res: &AgentResolution) -> Option<String> {
     let AgentResolution::Miss {
@@ -274,7 +274,7 @@ pub fn render_miss_warning(res: &AgentResolution) -> Option<String> {
         return None;
     };
     let mut out = format!(
-        "{}\n\n**Unknown agent `{requested}`** — no built-in or custom agent matches that name.\n\nAvailable agents:\n",
+        "{}\n\n**Unknown agent `{requested}`** - no built-in or custom agent matches that name.\n\nAvailable agents:\n",
         REPORT_PREFIX
     );
     for n in available {
@@ -308,7 +308,7 @@ pub fn render_usage_correction(token: &str, available: &[String]) -> String {
 ///
 /// Mirrors the assembler's own tool gate exactly
 /// (`ragent-agent/src/agent/mod.rs:2533-2536`): an agent is tool-free when
-/// `max_steps` is `Some(1)` or `Some(0)` — the assembler takes its early
+/// `max_steps` is `Some(1)` or `Some(0)` - the assembler takes its early
 /// return with no tool sections, and the session processor sends zero tools
 /// on the wire (`processor.rs:1719`, `max_steps <= 1`). `None` means the
 /// default unlimited budget (tools), not a tool-free agent.
@@ -319,7 +319,7 @@ pub fn is_tool_free_agent(agent: &AgentInfo) -> bool {
 /// Compose the effective tool surface for `/prompt` (FR-008), mirroring the
 /// `loop_steps.rs` filter order:
 ///
-/// 1. registry definitions (already exclude `tool_visibility`-hidden tools —
+/// 1. registry definitions (already exclude `tool_visibility`-hidden tools -
 ///    the TUI applies `config.effective_hidden_tools()` through
 ///    `ToolRegistry::set_hidden` before rendering, the same registry the
 ///    session loop reads),
@@ -330,7 +330,7 @@ pub fn is_tool_free_agent(agent: &AgentInfo) -> bool {
 /// Returns the filtered `ToolDefinition` list; an empty list means the
 /// tool-free path (FR-009 `(no tools)` header marker). A tool-free agent
 /// (`is_tool_free_agent`) is always reported as empty, regardless of what the
-/// registry holds — matching the wire surface the session processor builds.
+/// registry holds - matching the wire surface the session processor builds.
 pub fn effective_tool_defs(
     registry: &ragent_agent::tool::ToolRegistry,
     agent: &AgentInfo,

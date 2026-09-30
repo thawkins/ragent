@@ -54,7 +54,9 @@ pub mod store_seam;
 pub mod surface;
 pub mod tool_adapter;
 
-pub use add::{AddError, AddOutcome, GitSource, MAX_ARCHIVE_BYTES, add, parse_git_source};
+pub use add::{
+    AddError, AddOutcome, DOWNLOAD_TIMEOUT, GitSource, MAX_ARCHIVE_BYTES, add, parse_git_source,
+};
 pub use bridge::{
     PluginMcpContribution, plugin_agent_files, plugin_mcp_servers, plugin_skill_dirs,
     plugin_skill_names, scanned_plugin_agent_files, scanned_plugin_commands, scanned_plugin_hooks,
@@ -79,7 +81,7 @@ pub use descriptor::{
     CODEX_NESTED_MANIFEST, DialectMatch, GENERIC_MANIFEST_FILE, PluginDescriptor, PluginDialect,
     detect_dialect, recognise_dialect,
 };
-pub use error::PluginError;
+pub use error::{IoError, PluginError};
 pub use harness::{
     HarnessReport, HarnessStep, StepOutcome, TestArgError, parse_test_command, render_report,
     run_test_command, sample_for_schema, test_plugin,
@@ -94,14 +96,14 @@ pub use lifecycle::{
     UnloadedPlugin, build_gate,
 };
 pub use manifest::{
-    AGENTS_DIR, COMMANDS_DIR, CommandSource, HOOKS_DIR, HOOKS_FILE, HOST_API_VERSION,
-    ParsedManifest, PermissionRequest, PluginCommandDecl, PluginCommandDef, PluginHook,
-    PluginMcpServer, PluginToolDecl, SKILLS_DIR, UNSUP_AGENTS, UNSUP_DESKTOP_MOUNTS,
-    UNSUP_DESKTOP_WINDOW, UNSUP_EXEC, UNSUP_FS, UNSUP_HOOKS, UNSUP_LSP, UNSUP_MCP, UNSUP_SKILLS,
-    V1_CAPABILITIES, VersionMismatch, check_api_version, derive_id, extract_agent_decls,
-    extract_command_decls, extract_hooks, extract_mcp_servers, extract_skill_dirs,
-    parse_claude_manifest, parse_codex_manifest, parse_manifest, parse_plugin_dir,
-    read_plugin_hooks_file, scan_agent_dir, scan_command_dir, scan_skills_dir,
+    AGENTS_DIR, COMMANDS_DIR, CommandSource, DEFAULT_PLUGIN_VERSION, HOOKS_DIR, HOOKS_FILE,
+    HOST_API_VERSION, ParsedManifest, PermissionRequest, PluginCommandDecl, PluginCommandDef,
+    PluginHook, PluginMcpServer, PluginToolDecl, SKILLS_DIR, TIMEOUT_UNIT_THRESHOLD, UNSUP_AGENTS,
+    UNSUP_DESKTOP_MOUNTS, UNSUP_DESKTOP_WINDOW, UNSUP_EXEC, UNSUP_FS, UNSUP_HOOKS, UNSUP_LSP,
+    UNSUP_MCP, UNSUP_SKILLS, V1_CAPABILITIES, VersionMismatch, check_api_version, derive_id,
+    extract_agent_decls, extract_command_decls, extract_hooks, extract_mcp_servers,
+    extract_skill_dirs, parse_claude_manifest, parse_codex_manifest, parse_manifest,
+    parse_plugin_dir, read_plugin_hooks_file, scan_agent_dir, scan_command_dir, scan_skills_dir,
 };
 pub use remove::{RemoveError, RemoveOutcome, remove};
 pub use report::{add_error_report, add_report, remove_error_report, remove_report};

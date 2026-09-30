@@ -1,4 +1,4 @@
-//! `/spawn` — detached fire-and-forget background sub-agent launcher.
+//! `/spawn` - detached fire-and-forget background sub-agent launcher.
 //!
 //! Parses `/spawn <agent> <prompt...>`, validates `<agent>` against the
 //! built-in roster plus loaded custom agents (`app::prompt::resolve_agent`),
@@ -28,7 +28,7 @@ impl App {
 
         if args.is_empty() || matches!(args, "help" | "--help" | "-h") {
             self.append_assistant_text(
-                "From: /spawn help\n\n## /spawn — Detached background sub-agent\n\n\
+                "From: /spawn help\n\n## /spawn - Detached background sub-agent\n\n\
                  | Form | Description |\n\
                  |------|-------------|\n\
                  | `/spawn <agent> <prompt...>` | Spawn `<agent>` (built-in or custom) as a detached background sub-agent |\n\
@@ -45,7 +45,7 @@ impl App {
 
         let Some((agent_name, prompt)) = args.split_once(char::is_whitespace) else {
             self.append_assistant_text(
-                "From: /spawn\nUsage: `/spawn <agent> <prompt...>` — see `/spawn help`.",
+                "From: /spawn\nUsage: `/spawn <agent> <prompt...>` - see `/spawn help`.",
             );
             self.status = "spawn: usage".to_string();
             return;
@@ -55,7 +55,7 @@ impl App {
 
         if prompt.is_empty() {
             self.append_assistant_text(
-                "From: /spawn\nUsage: `/spawn <agent> <prompt...>` — the prompt must not be empty.",
+                "From: /spawn\nUsage: `/spawn <agent> <prompt...>` - the prompt must not be empty.",
             );
             self.status = "spawn: usage".to_string();
             return;
@@ -63,7 +63,7 @@ impl App {
 
         // Validate the agent name against built-ins + loaded custom agents.
         // `builtin_agents()` returns a static slice and `custom_agent_defs`
-        // is only borrowed — validation needs no clones at all.
+        // is only borrowed - validation needs no clones at all.
         let builtins = ragent_agent::agent::builtin_agents();
         let customs = self.custom_agent_defs.as_slice();
         match resolve_agent(agent_name, builtins, customs) {
@@ -77,7 +77,7 @@ impl App {
                 self.status = format!("spawn: unknown agent '{agent_name}'");
                 self.push_log_no_agent(
                     LogLevel::Warn,
-                    format!("spawn: unknown agent '{agent_name}' — available: {list}"),
+                    format!("spawn: unknown agent '{agent_name}' - available: {list}"),
                 );
                 self.append_assistant_text(&format!(
                     "From: /spawn\n## [warn] Unknown agent `{agent_name}`\n\n\
@@ -87,14 +87,14 @@ impl App {
             }
         }
 
-        // Only one pending launch at a time — the slot doubles as the
+        // Only one pending launch at a time - the slot doubles as the
         // "already waiting" guard (it is cleared by poll_spawn_result).
         let slot = {
             let mut guard =
                 crate::app::session_ops::recover_poisoned(self.spawn_result.lock(), "spawn_result");
             if guard.is_some() {
                 self.status =
-                    "[warn] spawn: another /spawn is still launching — wait for it".to_string();
+                    "[warn] spawn: another /spawn is still launching - wait for it".to_string();
                 return;
             }
             // Hold a marker so a second Enter in the same tick does not race
@@ -106,7 +106,7 @@ impl App {
 
         let Some(parent_sid) = self.session_id.clone() else {
             // The gate in `execute_slash_command_inner` already created a
-            // session; reaching here with none is a bug — fail visibly.
+            // session; reaching here with none is a bug - fail visibly.
             self.status = "[warn] spawn: no active session".to_string();
             return;
         };
@@ -167,7 +167,7 @@ impl App {
             }
         }
 
-        self.status = format!("[wait] spawn: launching {agent_label} …");
+        self.status = format!("[wait] spawn: launching {agent_label} ...");
         self.push_log_no_agent(
             LogLevel::Info,
             format!("spawn: launching detached {agent_label}"),
@@ -204,7 +204,7 @@ impl App {
                 ));
             }
             Err(msg) if msg.is_empty() => {
-                // Marker entry — the real outcome has not landed yet; leave
+                // Marker entry - the real outcome has not landed yet; leave
                 // the slot occupied so concurrent /spawn invocations stay
                 // serialised. Restore the marker ONLY if the slot is still
                 // empty: if the async launch task landed its outcome between

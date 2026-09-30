@@ -6,6 +6,17 @@
 //! profiler (see `AgentPerf` specification, FR-002).
 
 use ragent_agent::perf;
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
+/// The perf runtime state is process-global; serialise every test that
+/// toggles it so parallel test threads cannot race each other's state.
+fn perf_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let lock = LOCK.get_or_init(|| Mutex::new(()));
+    // A poisoned lock only means a previous test panicked while holding the
+    // state; taking it anyway keeps the remaining tests runnable.
+    lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[test]
 fn env_var_name_is_stable() {
@@ -14,6 +25,7 @@ fn env_var_name_is_stable() {
 
 #[test]
 fn default_state_is_profiling_disabled() {
+    let _guard = perf_guard();
     // Reset ALL state to ensure a clean baseline - previous tests may have left config values
     perf::set_profiling_override(None);
     // Make sure no leftover state from a previous test pollutes the lookup.
@@ -31,6 +43,7 @@ fn default_state_is_profiling_disabled() {
 
 #[test]
 fn config_toggle_round_trips() {
+    let _guard = perf_guard();
     perf::set_profiling_override(None);
     perf::set_profiling_from_config(true);
     assert!(perf::is_profiling_enabled());
@@ -45,6 +58,7 @@ fn config_toggle_round_trips() {
 
 #[test]
 fn runtime_override_takes_precedence() {
+    let _guard = perf_guard();
     perf::set_profiling_from_config(false);
     assert!(!perf::is_profiling_enabled());
     perf::set_profiling_override(Some(true));
@@ -57,6 +71,7 @@ fn runtime_override_takes_precedence() {
 
 #[test]
 fn master_switch_can_disable_entire_subsystem() {
+    let _guard = perf_guard();
     perf::set_master_enabled(false);
     assert!(!perf::agent_perf_enabled());
     perf::set_master_enabled(true);

@@ -27,6 +27,22 @@ fn cursor_byte_pos(s: &str, char_index: usize) -> usize {
         .unwrap_or(s.len())
 }
 
+/// Returns `true` when `key` is one of the always-on global quit keys:
+/// `Ctrl+C` (arm quit, or copy when a keyboard selection is active) or
+/// `Ctrl+D` (confirm quit).
+///
+/// The quit keys are handled before any modal interception so they work from
+/// every screen. `App::handle_key_event` intercepts a handful of overlays
+/// (the run-cost banner and the history/config-save pickers) *before*
+/// delegating to [`handle_key`]; it consults this predicate so a quit key
+/// falls through to the normal handler and behaves identically no matter which
+/// overlay is active (LOW-6). Keeping the classification in one place means the
+/// global handler and the pre-dialog guard cannot drift.
+pub fn is_global_quit_key(key: KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char('c') | KeyCode::Char('d'))
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
 /// A high-level action produced by interpreting a key event.
 #[derive(Debug)]
 pub enum InputAction {
@@ -113,13 +129,13 @@ pub enum InputAction {
     ApprovePlan,
     /// Reject the plan approval dialog (Enter when cursor_approve = false, or `r`/Esc).
     RejectPlan,
-    /// Toggle the plan approval dialog cursor left/right (←/→ arrow keys).
+    /// Toggle the plan approval dialog cursor left/right (<-/-> arrow keys).
     TogglePlanCursor,
     /// Cycle focus to the next teammate (Alt+Down).
     FocusNextTeammate,
     /// Cycle focus to the previous teammate (Alt+Up).
     FocusPrevTeammate,
-    /// Insert a literal newline at cursor (Shift+Enter — multiline input).
+    /// Insert a literal newline at cursor (Shift+Enter - multiline input).
     InsertNewline,
     /// Select all input text (Ctrl+A).
     SelectAll,
@@ -179,7 +195,7 @@ pub enum InputAction {
     ToggleEditLog,
     /// Toggle GCF tool-result encoding (Alt+G).
     ToggleGcf,
-    /// Open the queue-control menu overlay (Alt+Q) — spec `inputqueue` FR-021.
+    /// Open the queue-control menu overlay (Alt+Q) - spec `inputqueue` FR-021.
     OpenQueueMenu,
     /// Scroll the research markdown viewer up.
     ResearchViewPageUp,
@@ -223,14 +239,14 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
 
     // Always check for quit commands first, before any modal interception.
     // This ensures Ctrl+C (arm quit) and Ctrl+D (confirm quit) work globally.
-    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        // Copy if a keyboard selection is active; otherwise arm quit.
-        if app.kb_select_anchor.is_some() {
-            return Some(InputAction::CopyToClipboard);
+    if is_global_quit_key(key) {
+        if key.code == KeyCode::Char('c') {
+            // Copy if a keyboard selection is active; otherwise arm quit.
+            if app.kb_select_anchor.is_some() {
+                return Some(InputAction::CopyToClipboard);
+            }
+            return Some(InputAction::Quit);
         }
-        return Some(InputAction::Quit);
-    }
-    if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
         return Some(InputAction::ConfirmQuit);
     }
 
@@ -638,7 +654,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                     let raw = app.input.trim_end().to_string();
                     if let Some(entry) = menu.matches.get(menu.selected) {
                         let with_slash = format!("/{}", entry.trigger);
-                        // Raw input extends beyond the matched trigger with a space → use raw
+                        // Raw input extends beyond the matched trigger with a space -> use raw
                         if raw.starts_with(&with_slash)
                             && raw.len() > with_slash.len()
                             && raw.as_bytes().get(with_slash.len()) == Some(&b' ')
@@ -707,12 +723,12 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             KeyCode::Tab => {
                 // If the menu is showing a directory, Tab navigates into it;
                 // if it is a file, insert it and close the menu.
-                let _ = app.accept_file_menu_selection();
+                let _ = app.accept_file_menu_selection(); // INTENTIONAL: acceptance flag, not a fallible error
                 return None;
             }
             KeyCode::Enter => {
                 // Accept selection only. Sending is a separate Enter after menu closes.
-                let _ = app.accept_file_menu_selection();
+                let _ = app.accept_file_menu_selection(); // INTENTIONAL: acceptance flag, not a fallible error
                 return None;
             }
             KeyCode::Esc => {
@@ -935,12 +951,12 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             Some(InputAction::ToggleProfile)
         }
         // Alt+T toggles the TODO panel (placed before generic char-insert
-        // handling so the `t` is never inserted into the input buffer — NFR-002).
+        // handling so the `t` is never inserted into the input buffer - NFR-002).
         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleTasksPanel)
         }
         // Alt+M toggles the Memory side panel (placed before generic char-insert
-        // handling so the `m` is never inserted into the input buffer — NFR-002,
+        // handling so the `m` is never inserted into the input buffer - NFR-002,
         // FR-011).
         KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleMemory)
@@ -952,7 +968,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::Down if app.show_memory => Some(InputAction::MemoryCursorDown),
         // Open / delete the selected memory when the Memory panel is focused.
         // Alt+O toggles the Telemetry side panel (placed before generic char-insert
-        // handling so the `o` is never inserted into the input buffer — NFR-002).
+        // handling so the `o` is never inserted into the input buffer - NFR-002).
         KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleTelemetry)
         }
@@ -968,13 +984,13 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         }
         // Alt+G toggles GCF tool-result encoding (placed before generic
         // char-insert handling so the `g` is never inserted into the input
-        // buffer — NFR-002).
+        // buffer - NFR-002).
         KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleGcf)
         }
         // Alt+X opens the stop-agent confirmation dialog (only while a turn
-        // is running — placed before generic char-insert handling so the `x`
-        // is never inserted into the input buffer — NFR-002).
+        // is running - placed before generic char-insert handling so the `x`
+        // is never inserted into the input buffer - NFR-002).
         KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::ALT) => {
             if app.is_processing {
                 app.pending_stop_confirm = true;
@@ -1179,7 +1195,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                         {
                                             selected = idx;
                                         } else {
-                                            let _ = app
+                                            let _ = app  // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
                                                 .storage
                                                 .delete_setting("azure_resource_last_selection");
                                         }
@@ -1198,7 +1214,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         let providers = App::get_configured_providers_for_router(&app.storage);
                         if providers.is_empty() {
                             app.status =
-                                "[warn] No concrete providers — configure one first".to_string();
+                                "[warn] No concrete providers - configure one first".to_string();
                             app.push_log_no_agent(
                                 crate::app::LogLevel::Warn,
                                 "provider router: no concrete providers configured".to_string(),
@@ -1219,9 +1235,9 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     });
                     app.start_model_discovery(pid.to_string(), pname.to_string());
                 } else if pid == "ollama" {
-                    // Ollama doesn't require a key — store empty and mark configured
-                    let _ = app.storage.set_provider_auth(pid, "");
-                    let _ = app
+                    // Ollama doesn't require a key - store empty and mark configured
+                    let _ = app.storage.set_provider_auth(pid, ""); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
+                    let _ = app // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
                         .storage
                         .delete_setting(&format!("provider_{pid}_disabled"));
                     app.refresh_provider();
@@ -1244,7 +1260,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         Some(&db_lookup),
                     );
                     if let Some(ref tk) = token {
-                        // Token exchange is a network call — run it in a
+                        // Token exchange is a network call - run it in a
                         // background task so the UI thread never blocks
                         // (FR-002, FR-004).  Show the loading spinner while we
                         // wait for `CopilotTokenExchangeResult`.
@@ -1271,7 +1287,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                         {
                                             (true, Some(auth.base_url), None)
                                         } else {
-                                            // Azure-hosted Copilot endpoint — treat as
+                                            // Azure-hosted Copilot endpoint - treat as
                                             // needing device flow for proper setup.
                                             (false, None, None)
                                         }
@@ -1289,7 +1305,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             return;
                         }
                     }
-                    // No token or no runtime — start device flow
+                    // No token or no runtime - start device flow
                     start_copilot_device_flow_setup(app);
                 } else if pid == "azure_resource" {
                     // Azure Resource: load entries from azureresources.json
@@ -1316,7 +1332,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                     {
                                         selected = idx;
                                     } else {
-                                        let _ = app
+                                        let _ = app  // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
                                             .storage
                                             .delete_setting("azure_resource_last_selection");
                                     }
@@ -1336,7 +1352,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     let providers = App::get_configured_providers_for_router(&app.storage);
                     if providers.is_empty() {
                         app.status =
-                            "[warn] No concrete providers — configure one first".to_string();
+                            "[warn] No concrete providers - configure one first".to_string();
                         app.push_log_no_agent(
                             crate::app::LogLevel::Warn,
                             "provider router: no concrete providers configured".to_string(),
@@ -1463,7 +1479,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             return;
                         }
                     }
-                    let _ = app
+                    let _ = app // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
                         .storage
                         .delete_setting(&format!("provider_{provider_id}_disabled"));
                     app.refresh_provider();
@@ -1528,7 +1544,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 });
             }
             _ => {
-                // Keep showing the device flow pending UI — polling happens
+                // Keep showing the device flow pending UI - polling happens
                 // in a background task and completes via the appropriate
                 // device-flow completion event.
                 app.provider_setup = Some(ProviderSetupStep::DeviceFlowPending {
@@ -1851,7 +1867,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         .try_restore_provider_model(&prov_id, &prov_name)
                         .is_some()
                     {
-                        // Model was restored — show the Done confirmation.
+                        // Model was restored - show the Done confirmation.
                         app.provider_setup = Some(ProviderSetupStep::Done {
                             provider_name: prov_name,
                             model_name: app
@@ -1939,20 +1955,20 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 let (pid, pname) = PROVIDER_LIST[selected];
-                let _ = app.storage.delete_provider_auth(pid);
-                let _ = app
+                let _ = app.storage.delete_provider_auth(pid); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
+                let _ = app // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
                     .storage
                     .set_setting(&format!("provider_{pid}_disabled"), "true");
                 // Clear provider-specific settings
-                let _ = app
+                let _ = app // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
                     .storage
                     .delete_setting(&format!("provider_{pid}_last_model"));
                 if pid == "copilot" {
-                    let _ = app.storage.delete_setting("copilot_api_base");
+                    let _ = app.storage.delete_setting("copilot_api_base"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
                 } else if pid == "generic_openai" {
-                    let _ = app.storage.delete_setting("generic_openai_api_base");
+                    let _ = app.storage.delete_setting("generic_openai_api_base"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
                 } else if pid == "azure_foundry" {
-                    let _ = app.storage.delete_setting("azure_foundry_api_base");
+                    let _ = app.storage.delete_setting("azure_foundry_api_base"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
                 }
                 let is_active = app
                     .configured_provider
@@ -1963,14 +1979,14 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     app.selected_model = None;
                     app.selected_model_ctx_window = None;
                     app.selected_thinking_level = None;
-                    let _ = app.storage.delete_setting("selected_model");
-                    let _ = app.storage.delete_setting("selected_model_ctx_window");
-                    let _ = app.storage.delete_setting("thinking_level");
-                    let _ = app.storage.delete_setting("thinking_level_explicit");
+                    let _ = app.storage.delete_setting("selected_model"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
+                    let _ = app.storage.delete_setting("selected_model_ctx_window"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
+                    let _ = app.storage.delete_setting("thinking_level"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
+                    let _ = app.storage.delete_setting("thinking_level_explicit"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
                     app.provider_health
                         .store(0, std::sync::atomic::Ordering::Relaxed);
                 }
-                app.status = format!("[ok] Provider {} reset — credentials removed", pname);
+                app.status = format!("[ok] Provider {} reset - credentials removed", pname);
                 app.provider_setup = None;
             }
             _ => {
@@ -2562,7 +2578,7 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
                                         state.feedback = Some(msg);
                                     }
                                     Err(e) => {
-                                        state.feedback = Some(format!("✗ {e}"));
+                                        state.feedback = Some(format!("[x] {e}"));
                                     }
                                 }
                                 state.number_input.clear();
@@ -2573,7 +2589,7 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
                             if let Some(state) = app.mcp_discover.as_mut() {
                                 let count = state.servers.len();
                                 state.feedback =
-                                    Some(format!("✗ Invalid number — enter 1..{count}"));
+                                    Some(format!("[x] Invalid number - enter 1..{count}"));
                                 state.number_input.clear();
                                 state.number_cursor = 0;
                             }
@@ -2583,7 +2599,7 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
                 _ => {
                     if let Some(state) = app.mcp_discover.as_mut() {
                         let count = state.servers.len();
-                        state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                        state.feedback = Some(format!("[x] Invalid number - enter 1..{count}"));
                         state.number_input.clear();
                         state.number_cursor = 0;
                     }

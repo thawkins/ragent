@@ -7,7 +7,7 @@
 //!
 //! Update hunks are matched with **strict exact-byte matching**: the hunk
 //! context must occur exactly once, byte-for-byte, in the target file. There
-//! is no CRLF, trailing-whitespace, or indentation tolerance — this mirrors
+//! is no CRLF, trailing-whitespace, or indentation tolerance - this mirrors
 //! upstream Codex `apply_patch` behaviour (exact context matching).
 //!
 //! This tool complements the existing unified-diff `patch` tool by supporting
@@ -118,7 +118,14 @@ impl Tool for ApplyPatchTool {
         // Resolve all paths and validate root containment up-front.
         let mut ops = ops
             .into_iter()
-            .map(|op| op.resolve_paths(&base, &ctx.canonical_cache))
+            .map(|op| {
+                op.resolve_paths(
+                    &base,
+                    &ctx.working_dir,
+                    &ctx.allowed_roots,
+                    &ctx.canonical_cache,
+                )
+            })
             .collect::<Result<Vec<_>>>()
             .inspect_err(|e| {
                 log_edit_operation_ex(
@@ -282,9 +289,12 @@ impl Tool for ApplyPatchTool {
                     // Only write if there is no move, or if there are hunks.
                     // A bare update+move means the file is just renamed.
                     if !hunks.is_empty() {
-                        let content = file_contents
-                            .get(&op.path)
-                            .expect("validated update must have content");
+                        let content = file_contents.get(&op.path).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "internal error: validated update is missing content for {}",
+                                op.path.display()
+                            )
+                        })?;
                         if let Some(parent) = op.path.parent() {
                             tokio::fs::create_dir_all(parent).await.with_context(|| {
                                 format!("Failed to create directory: {}", parent.display())
@@ -335,15 +345,7 @@ enum OpKind {
 
 #[derive(Debug)]
 struct Hunk {
-    /// Unified-diff hunk header line (e.g. `@@ -1,5 +1,5 @@`). Currently
-    /// retained for diagnostics and future diff-format round-tripping.
-    #[allow(dead_code)]
-    header: String,
     lines: Vec<HunkLine>,
-    /// `true` when the hunk body included the end-of-file newline marker.
-    /// Used by future newline-preservation logic.
-    #[allow(dead_code)]
-    end_of_file: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -354,16 +356,24 @@ enum HunkLine {
 }
 
 impl PatchOp {
-    fn resolve_paths(self, base: &Path, cache: &super::CanonicalPathCache) -> Result<Self> {
+    fn resolve_paths(
+        self,
+        base: &Path,
+        working_dir: &Path,
+        allowed_roots: &[PathBuf],
+        cache: &super::CanonicalPathCache,
+    ) -> Result<Self> {
         let path = resolve_path(base, &self.path.to_string_lossy());
         let move_to = self
             .move_to
             .map(|p| resolve_path(base, &p.to_string_lossy()));
         // Validate canonical containment after resolution to prevent escaping
         // via parent-directory traversal before any file operation runs.
-        super::check_path_within_root_cached(&path, base, cache)?;
+        // FUNC-068 (ANTIPAT F-06): the check honours `allowed_roots`, not just
+        // the working directory, so a whitelisted root is accepted here too.
+        super::check_path_within_allowed_roots_cached(&path, working_dir, allowed_roots, cache)?;
         if let Some(ref mt) = move_to {
-            super::check_path_within_root_cached(mt, base, cache)?;
+            super::check_path_within_allowed_roots_cached(mt, working_dir, allowed_roots, cache)?;
         }
         Ok(Self {
             kind: self.kind,
@@ -502,12 +512,12 @@ fn strip_prefix(line: &str, prefix: char) -> Result<String> {
 }
 
 fn parse_hunk<'a>(lines: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>) -> Result<Hunk> {
-    let header_line = lines
+    // Consume and discard the `@@ ... @@` header line: hunk application matches
+    // on the body context, not the header offsets.
+    let _header_line = lines
         .next()
         .context("Unexpected end of patch at hunk header")?;
-    let header = header_line.trim_start_matches('@').trim().to_string();
     let mut hunk_lines = Vec::new();
-    let mut end_of_file = false;
 
     while let Some(peek) = lines.peek() {
         let peek_trim = peek.trim();
@@ -518,7 +528,8 @@ fn parse_hunk<'a>(lines: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>
             break;
         }
         if peek_trim.eq_ignore_ascii_case("*** End of File") {
-            end_of_file = true;
+            // The explicit end-of-file marker is consumed; newline-preservation
+            // handling it would drive is not implemented.
             lines.next();
             break;
         }
@@ -543,11 +554,7 @@ fn parse_hunk<'a>(lines: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>
         }
     }
 
-    Ok(Hunk {
-        header,
-        lines: hunk_lines,
-        end_of_file,
-    })
+    Ok(Hunk { lines: hunk_lines })
 }
 
 fn apply_update_hunks(content: &str, hunks: &[Hunk], path: &Path) -> Result<String> {
@@ -601,9 +608,9 @@ fn hunk_replacement(hunk: &Hunk) -> String {
 
 /// Build the `(old_str, new_str)` pair recorded in the edit log for one op.
 ///
-/// - **Add** → `( "", file content )`
-/// - **Delete** → `( file content, "" )`
-/// - **Update** → `( concatenated hunk context, concatenated hunk replacement )`
+/// - **Add** -> `( "", file content )`
+/// - **Delete** -> `( file content, "" )`
+/// - **Update** -> `( concatenated hunk context, concatenated hunk replacement )`
 fn op_log_strings(op: &PatchOp) -> (String, String) {
     match &op.kind {
         OpKind::Add { content } => (String::new(), content.clone()),

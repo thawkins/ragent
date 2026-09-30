@@ -4,8 +4,9 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
+use super::helpers::detect;
 use super::{Tool, ToolContext, ToolOutput};
-use crate::gitlab::client::GitLabClient;
+use crate::limits::{DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT};
 
 /// Maximum pages `gitlab_list_jobs` will follow (SEC-ragent-tools-vcs-007).
 const MAX_JOB_PAGES: u32 = 50;
@@ -13,38 +14,26 @@ const MAX_JOB_PAGES: u32 = 50;
 /// Maximum jobs `gitlab_list_jobs` will collect (SEC-ragent-tools-vcs-007).
 const MAX_JOB_ENTRIES: usize = 2_000;
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// -- helpers ------------------------------------------------------------------
 
 /// Create an authenticated client and detect the project path.
-fn detect(ctx: &ToolContext) -> Result<(GitLabClient, String)> {
-    let storage = ctx
-        .storage
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("Storage not available for GitLab client"))?;
-    let client = GitLabClient::new(storage)
-        .map_err(|_| anyhow::anyhow!("GitLab not configured. Run /gitlab setup."))?;
-    let project = GitLabClient::detect_project(&ctx.working_dir)
-        .ok_or_else(|| anyhow::anyhow!("Could not detect GitLab project from git remote."))?;
-    Ok((client, project))
-}
-
 /// Format a pipeline status with a visual indicator.
 fn status_icon(status: &str) -> &str {
     match status {
-        "success" | "passed" => "✅",
-        "failed" => "❌",
-        "running" => "🔄",
-        "pending" => "⏳",
-        "canceled" | "cancelled" => "🚫",
-        "skipped" => "⏭️",
-        "manual" => "👆",
-        "created" => "🆕",
-        "waiting_for_resource" => "⏳",
-        _ => "❓",
+        "success" | "passed" => "[ok]",
+        "failed" => "[x]",
+        "running" => "[refresh]",
+        "pending" => "[..]",
+        "canceled" | "cancelled" => "[blocked]",
+        "skipped" => "[>>]",
+        "manual" => "[point]",
+        "created" => "[new]",
+        "waiting_for_resource" => "[..]",
+        _ => "[?]",
     }
 }
 
-// ── GitlabListPipelinesTool ──────────────────────────────────────────────────
+// -- GitlabListPipelinesTool --------------------------------------------------
 
 /// Tool that lists pipelines in a GitLab project.
 pub struct GitlabListPipelinesTool;
@@ -96,7 +85,10 @@ impl Tool for GitlabListPipelinesTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let (client, project) = detect(ctx)?;
 
-        let limit = input["limit"].as_u64().unwrap_or(20).min(100);
+        let limit = input["limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_PAGE_LIMIT)
+            .min(MAX_PAGE_LIMIT);
         let mut path =
             format!("/projects/{project}/pipelines?per_page={limit}&order_by=id&sort=desc");
         if let Some(status) = input["status"].as_str() {
@@ -140,7 +132,7 @@ impl Tool for GitlabListPipelinesTool {
     }
 }
 
-// ── GitlabGetPipelineTool ────────────────────────────────────────────────────
+// -- GitlabGetPipelineTool ----------------------------------------------------
 
 /// Tool that retrieves details of a specific pipeline.
 pub struct GitlabGetPipelineTool;
@@ -221,7 +213,7 @@ impl Tool for GitlabGetPipelineTool {
     }
 }
 
-// ── GitlabListJobsTool ───────────────────────────────────────────────────────
+// -- GitlabListJobsTool -------------------------------------------------------
 
 /// Tool that lists jobs for a pipeline.
 pub struct GitlabListJobsTool;
@@ -275,7 +267,8 @@ impl Tool for GitlabListJobsTool {
         // FUNC-053: follow pagination so a pipeline with more than one page of
         // jobs (>100) is not silently truncated. FUNC-063: percent-encode the
         // scope value rather than interpolating it raw.
-        let mut base = format!("/projects/{project}/pipelines/{pipeline_id}/jobs?per_page=100");
+        let mut base =
+            format!("/projects/{project}/pipelines/{pipeline_id}/jobs?per_page={MAX_PAGE_LIMIT}");
         if let Some(scope) = input["scope"].as_str() {
             base.push_str(&format!(
                 "&scope[]={}",
@@ -341,7 +334,7 @@ impl Tool for GitlabListJobsTool {
                 .map_or_else(|| "-".to_string(), |d| format!("{d:.1}s"));
             let runner = job["runner"]["description"].as_str().unwrap_or("no runner");
             lines.push(format!(
-                "  {} [{stage}] {name} (id:{id}) — {status}, {duration}, runner:{runner}",
+                "  {} [{stage}] {name} (id:{id}) - {status}, {duration}, runner:{runner}",
                 status_icon(status)
             ));
         }
@@ -353,7 +346,7 @@ impl Tool for GitlabListJobsTool {
     }
 }
 
-// ── GitlabGetJobTool ─────────────────────────────────────────────────────────
+// -- GitlabGetJobTool ---------------------------------------------------------
 
 /// Tool that retrieves details of a specific job.
 pub struct GitlabGetJobTool;
@@ -453,7 +446,7 @@ impl Tool for GitlabGetJobTool {
     }
 }
 
-// ── GitlabGetJobLogTool ──────────────────────────────────────────────────────
+// -- GitlabGetJobLogTool ------------------------------------------------------
 
 /// Tool that downloads the log (trace) output of a job.
 pub struct GitlabGetJobLogTool;
@@ -495,14 +488,7 @@ impl Tool for GitlabGetJobLogTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let storage = ctx
-            .storage
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("Storage not available"))?;
-        let client_obj = GitLabClient::new(storage)
-            .map_err(|_| anyhow::anyhow!("GitLab not configured. Run /gitlab setup."))?;
-        let project = GitLabClient::detect_project(&ctx.working_dir)
-            .ok_or_else(|| anyhow::anyhow!("Could not detect GitLab project."))?;
+        let (client_obj, project) = detect(ctx)?;
 
         let job_id = input["job_id"].as_u64().context("job_id is required")?;
         let tail = input["tail"].as_u64().unwrap_or(200).min(2000) as usize;
@@ -555,7 +541,7 @@ impl Tool for GitlabGetJobLogTool {
     }
 }
 
-// ── GitlabRetryJobTool ───────────────────────────────────────────────────────
+// -- GitlabRetryJobTool -------------------------------------------------------
 
 /// Tool that retries a failed or cancelled job.
 pub struct GitlabRetryJobTool;
@@ -613,7 +599,7 @@ impl Tool for GitlabRetryJobTool {
     }
 }
 
-// ── GitlabCancelJobTool ──────────────────────────────────────────────────────
+// -- GitlabCancelJobTool ------------------------------------------------------
 
 /// Tool that cancels a running or pending job.
 pub struct GitlabCancelJobTool;
@@ -670,7 +656,7 @@ impl Tool for GitlabCancelJobTool {
     }
 }
 
-// ── GitlabRetryPipelineTool ──────────────────────────────────────────────────
+// -- GitlabRetryPipelineTool --------------------------------------------------
 
 /// Tool that retries all failed jobs in a pipeline.
 pub struct GitlabRetryPipelineTool;
@@ -728,7 +714,7 @@ impl Tool for GitlabRetryPipelineTool {
     }
 }
 
-// ── GitlabCancelPipelineTool ─────────────────────────────────────────────────
+// -- GitlabCancelPipelineTool -------------------------------------------------
 
 /// Tool that cancels all running/pending jobs in a pipeline.
 pub struct GitlabCancelPipelineTool;

@@ -24,6 +24,17 @@ use crate::path_util::resolve_path;
 
 /// Maximum number of cached file entries (each entry is an `Arc<String>`).
 const CACHE_MAX_ENTRIES: usize = 256;
+
+/// Cache capacity as a `NonZeroUsize`.
+///
+/// The literal above is a compile-time constant greater than zero; the
+/// fallback keeps this total for the reader cache even if the constant is
+/// ever edited to zero (a zero-capacity cache would panic on construction).
+const CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(CACHE_MAX_ENTRIES) {
+    Some(n) => n,
+    None => NonZeroUsize::MIN,
+};
+
 /// M-019: total-byte budget for the read cache. Files are evicted oldest-first
 /// once the combined size of cached contents exceeds this, so a burst of large
 /// files (logs, lockfiles, generated artifacts) cannot pin unbounded memory.
@@ -40,13 +51,7 @@ struct CacheKey(PathBuf, SystemTime);
 /// bounded).
 fn read_cache() -> &'static Mutex<LruCache<CacheKey, Arc<String>>> {
     static CACHE: OnceLock<Mutex<LruCache<CacheKey, Arc<String>>>> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        // `CACHE_MAX_ENTRIES` is a compile-time constant greater than zero, so
-        // the non-zero constructor cannot fail.
-        Mutex::new(LruCache::new(
-            NonZeroUsize::new(CACHE_MAX_ENTRIES).expect("CACHE_MAX_ENTRIES is a non-zero constant"),
-        ))
-    })
+    CACHE.get_or_init(|| Mutex::new(LruCache::new(CACHE_CAPACITY)))
 }
 
 /// Read a file, using the LRU cache when the mtime has not changed.
@@ -77,7 +82,7 @@ async fn cached_read(path: &Path) -> Result<(Arc<String>, SystemTime)> {
         }
     }
 
-    // Cache miss — read from disk
+    // Cache miss - read from disk
     let raw = tokio::fs::read_to_string(path).await.with_context(|| {
         format!(
             "Cannot read file '{}': file may not exist or is not accessible",
@@ -118,6 +123,14 @@ const LARGE_FILE_THRESHOLD: usize = 100;
 
 /// Number of initial lines to include when summarising a large file.
 const PREVIEW_LINES: usize = 100;
+
+/// Maximum number of characters a single `read` call may return.
+///
+/// A large file (or a very wide requested line range) is truncated at this
+/// budget so one tool result cannot flood the model's context with the whole
+/// file (ANTIPAT F-09). Truncated output carries an omission marker directing
+/// the caller at `start_line`/`num_lines` for a smaller range.
+const MAX_READ_OUTPUT_CHARS: usize = 200_000;
 
 /// Reads a file's contents and returns them with line numbers prefixed.
 ///
@@ -168,7 +181,7 @@ impl Tool for ReadTool {
                 "end_line": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "ADVANCED/LEGACY: 1-based absolute last line number to include. Prefer num_lines — it expresses the same intent without the absolute/count ambiguity that trips up most models. If both end_line and num_lines are provided, end_line takes precedence."
+                    "description": "ADVANCED/LEGACY: 1-based absolute last line number to include. Prefer num_lines - it expresses the same intent without the absolute/count ambiguity that trips up most models. If both end_line and num_lines are provided, end_line takes precedence."
                 }
             },
             "required": ["path"],
@@ -193,15 +206,15 @@ impl Tool for ReadTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
-        // C-002: reads must stay inside the allowed roots.
-        // Use configured allowed_roots if available, otherwise fall back to working_dir.
-        if ctx.allowed_roots.is_empty() {
-            super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
-        } else {
-            let root_refs: Vec<&std::path::Path> =
-                ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
-            super::check_path_within_any_root_cached(&path, &root_refs, &ctx.canonical_cache)?;
-        }
+        // C-002 / FUNC-068 (ANTIPAT F-06): reads must stay inside the allowed
+        // roots. The helper falls back to `working_dir` when `allowed_roots` is
+        // empty, so the two branches below are equivalent to the old form.
+        super::check_path_within_allowed_roots_cached(
+            &path,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
 
         if path.is_dir() {
             anyhow::bail!(
@@ -336,6 +349,10 @@ impl Tool for ReadTool {
             }
         };
 
+        // ANTIPAT F-09: bound the returned content so a huge file (or a very
+        // wide requested range) cannot flood the model's context in one call.
+        let (output, output_truncated) = cap_read_output(output, actual_start, actual_end);
+
         let lines_read = actual_end.saturating_sub(actual_start - 1);
 
         let mut meta = serde_json::json!({
@@ -350,6 +367,10 @@ impl Tool for ReadTool {
             meta["message"] = serde_json::json!(
                 "File is large. Only the first lines and a section map are shown. Use start_line + num_lines to read specific sections."
             );
+        }
+        if output_truncated {
+            meta["truncated"] = serde_json::json!(true);
+            meta["max_output_chars"] = serde_json::json!(MAX_READ_OUTPUT_CHARS);
         }
 
         Ok(ToolOutput {
@@ -395,6 +416,32 @@ fn format_lines(lines: &[&str], first_num: usize) -> String {
         .map(|(i, line)| format!("{:>4}  {}", first_num + i, line))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Cap formatted read output at [`MAX_READ_OUTPUT_CHARS`], appending an
+/// omission marker that points the caller at a smaller `start_line`/`num_lines`
+/// range (ANTIPAT F-09).
+///
+/// Returns the (possibly truncated) content and whether truncation occurred.
+/// The cut is clamped to a UTF-8 char boundary so the returned content is
+/// always valid UTF-8.
+fn cap_read_output(output: String, actual_start: usize, actual_end: usize) -> (String, bool) {
+    if output.len() <= MAX_READ_OUTPUT_CHARS {
+        return (output, false);
+    }
+
+    let mut cut = MAX_READ_OUTPUT_CHARS;
+    while cut > 0 && !output.is_char_boundary(cut) {
+        cut -= 1;
+    }
+
+    let mut truncated = output[..cut].to_string();
+    truncated.push_str(&format!(
+        "\n... [output truncated at {MAX_READ_OUTPUT_CHARS} characters; \
+         read a smaller range with start_line/num_lines (requested lines \
+         {actual_start}-{actual_end})] ..."
+    ));
+    (truncated, true)
 }
 
 // ── Section detection ────────────────────────────────────────────────
@@ -506,7 +553,7 @@ fn detect_markdown_sections(lines: &[&str]) -> Vec<(usize, String)> {
     markers
 }
 
-// NOTE: intentional duplication with `detect_go_sections` — see DUPPLAN.md
+// NOTE: intentional duplication with `detect_go_sections` - see DUPPLAN.md
 // Milestone J.  Same shape, different language grammar; generalising would
 // obscure intent.
 fn detect_python_sections(lines: &[&str]) -> Vec<(usize, String)> {

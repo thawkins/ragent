@@ -1,4 +1,4 @@
-//! `team_memory_read` — Read structured memories for a team.
+//! `team_memory_read` - Read structured memories for a team.
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -174,13 +174,5 @@ fn path_tag(path: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::path_tag;
-
-    #[test]
-    fn test_path_tag_normalisation() {
-        assert_eq!(path_tag("MEMORY.md"), "path-memory-md");
-        assert_eq!(path_tag("Notes / Decisions"), "path-notes-decisions");
-        assert_eq!(path_tag("--weird__path!!"), "path-weird-path");
-    }
-}
+#[path = "../tests/inline/team_memory_read_tests.rs"]
+mod tests;

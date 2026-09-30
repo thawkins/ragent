@@ -3,8 +3,8 @@
 //! This module wraps the [`lingua`] crate to derive the natural language of a
 //! fetched page's extracted text. The detected language name (e.g. `"English"`,
 //! `"French"`) is attached to [`super::PageMetadata::detected_language`] by
-//! `mf_fetch` so downstream consumers — notably the research system's
-//! `RESEARCH.md` References Index — can report the language of each web source.
+//! `mf_fetch` so downstream consumers - notably the research system's
+//! `RESEARCH.md` References Index - can report the language of each web source.
 //!
 //! The [`LanguageDetector`] is thread-safe and shared across all calls via a
 //! [`OnceLock`], so the 75-language model is loaded into memory only once per

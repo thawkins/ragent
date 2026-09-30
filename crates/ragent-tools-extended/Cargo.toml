@@ -39,8 +39,10 @@ readability-rs = { workspace = true }
 # avoids pulling in crossterm (we render off-screen to text only).
 ratatui-plt = { version = "0.0.2", default-features = false }
 # ratatui must match the version ratatui-plt pins (0.30); it is used here only
-# for the `Widget` bound + `Color` in the plot_* off-screen renderer. This is a
-# second, crate-local ratatui distinct from the workspace 0.29 used by ragent-tui.
+# for the `Widget` bound + `Color` in the plot_* off-screen renderer. The
+# workspace ratatui (0.30) is pinned to the same version by ratatui-plt, so this
+# is a crate-local declaration rather than a workspace inherit to keep the
+# requirement explicit; it is not a second, conflicting version.
 ratatui = "0.30"
 base64 = { workspace = true }
 

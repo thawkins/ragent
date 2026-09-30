@@ -1,4 +1,4 @@
-//! `team_spawn` — Spawn a named teammate session within an existing team.
+//! `team_spawn` - Spawn a named teammate session within an existing team.
 //!
 //! Full implementation requires `TeamManager` (M3). This stub validates
 //! parameters and returns an informative error until M3 is wired in.
@@ -28,7 +28,7 @@ impl Tool for TeamSpawnTool {
              to a SINGLE work item). Optional: 'task_id' (string) to pre-assign a task, \
              'model' (provider/model format) for a model override, and 'memory' (enum \
              user/project/none) for persistent memory scope. CRITICAL: spawn ONE teammate \
-             per independent work item — never assign a list of items to one teammate \
+             per independent work item - never assign a list of items to one teammate \
              (context overflow). After spawning all teammates in the same response turn, \
              call team_wait to block until they finish. Do NOT use wait_agents for teammates. \
              Common gotcha: wait_agents is for new_agent sub-agents, not team members."
@@ -52,7 +52,7 @@ impl Tool for TeamSpawnTool {
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Initial task prompt for the teammate. Must be scoped to a SINGLE work item — never list multiple items. Keep under ~500 words; reference files by path rather than pasting content. (required)"
+                    "description": "Initial task prompt for the teammate. Must be scoped to a SINGLE work item - never list multiple items. Keep under ~500 words; reference files by path rather than pasting content. (required)"
                 },
                 "task_id": {
                     "type": "string",
@@ -196,7 +196,7 @@ impl Tool for TeamSpawnTool {
 
             if !allowed {
                 return Err(anyhow::anyhow!(
-                    "Spawn for teammate '{}' denied by user — prompt appears to \
+                    "Spawn for teammate '{}' denied by user - prompt appears to \
                                contain multiple work items. Split into separate team_spawn calls.",
                     teammate_name,
                 ));
@@ -232,7 +232,7 @@ impl Tool for TeamSpawnTool {
                 content: format!(
                     "Teammate '{teammate_name}' queued for team '{team_name}' \
                      (agent_type: {agent_type}).\n\
-                     Note: TeamManager not yet initialised — teammate will be spawned \
+                     Note: TeamManager not yet initialised - teammate will be spawned \
                      when the session processor is upgraded to M3."
                 ),
                 metadata: Some(json!({
@@ -268,7 +268,7 @@ impl Tool for TeamSpawnTool {
             match task_store.pre_assign_task(task_id, &agent_id) {
                 Ok(_) => {
                     task_assignment_msg =
-                        format!("\n📋 Task '{task_id}' pre-assigned to this teammate.");
+                        format!("\n[notice] Task '{task_id}' pre-assigned to this teammate.");
                     tracing::info!(
                         agent_id = %agent_id,
                         task_id = %task_id,
@@ -284,7 +284,7 @@ impl Tool for TeamSpawnTool {
                         "Failed to pre-assign task to teammate"
                     );
                     task_assignment_msg =
-                        format!("\n⚠️ Failed to pre-assign task '{task_id}': {e}");
+                        format!("\n[!] Failed to pre-assign task '{task_id}': {e}");
                 }
             }
         }
@@ -314,7 +314,7 @@ impl Tool for TeamSpawnTool {
             content: format!(
                 "Teammate '{teammate_name}' spawned in team '{team_name}'.\nAgent ID: {agent_id}\n\
                            Model: {model_display}{task_assignment_msg}\n\
-                           ⏳ Teammate is now working. Call `team_wait` (not `wait_agents`) after all spawns \
+                           [..] Teammate is now working. Call `team_wait` (not `wait_agents`) after all spawns \
                            to block until teammates finish before the lead continues."
             ),
             metadata: MetadataBuilder::new()
@@ -334,7 +334,7 @@ impl Tool for TeamSpawnTool {
 /// Returns `true` only when there is strong structural evidence of 3+ numbered
 /// items (e.g. "1. ... 2. ... 3. ...") or 3+ bullet items (lines starting with
 /// "- " or "* "). Single connectives like "and" / "or" in prose do **not**
-/// trigger detection — those caused rampant false positives previously.
+/// trigger detection - those caused rampant false positives previously.
 fn detect_multi_item_list(prompt: &str) -> bool {
     // Count numbered list items: digits followed by a dot and a space at line start.
     let numbered_count = prompt

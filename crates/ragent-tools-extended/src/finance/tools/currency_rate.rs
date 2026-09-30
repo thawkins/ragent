@@ -1,4 +1,4 @@
-//! `currency_rate` tool — current exchange rate for a currency pair.
+//! `currency_rate` tool - current exchange rate for a currency pair.
 
 use crate::finance::default_provider;
 use crate::{Tool, ToolContext, ToolOutput};

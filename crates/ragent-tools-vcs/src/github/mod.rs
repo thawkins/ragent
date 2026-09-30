@@ -5,6 +5,7 @@ pub mod client;
 pub mod github_actions;
 pub mod github_issues;
 pub mod github_prs;
+pub(crate) mod helpers;
 
 pub use auth::{delete_token, device_flow_login, load_token, save_token};
 pub use client::{

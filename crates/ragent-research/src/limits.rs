@@ -12,7 +12,7 @@
 //!
 //! - [`crate::source::Source`] - supplies [`Source::relevance_rank`], the
 //!   existing 8..1 relevance vocabulary reused here.
-//! - [`crate::polarity::citation_re`] - the shared `[#N]` citation regex, so
+//! - `crate::polarity::citation_re` - the shared `[#N]` citation regex, so
 //!   the citation syntax stays consistent across the crate.
 
 use crate::source::Source;
@@ -24,6 +24,15 @@ pub const DEFAULT_MAX_CONCEPTS: usize = 5;
 
 /// Default maximum number of findings in a `/research create` report.
 pub const DEFAULT_MAX_FINDINGS: usize = 20;
+
+/// Number of leading characters shown as the `**Preview:**` block in the
+/// `--format source-bibliography` appendix (T-011).
+///
+/// Named here rather than inline in the renderer so the truncation cap sits
+/// alongside [`DEFAULT_MAX_CONCEPTS`] / [`DEFAULT_MAX_FINDINGS`] instead of
+/// being a magic number in `document.rs` (ANTIPAT F-15). The value follows the
+/// same "0 = unbounded" convention as the other caps; see [`effective_limit`].
+pub const BIBLIOGRAPHY_PREVIEW_CHARS: usize = 240;
 
 /// Relevance rank assigned to an entry with no recognized citation (FR-005).
 ///
@@ -40,6 +49,7 @@ pub const DEFAULT_ENTRY_RANK: u8 = 5;
 /// rewriter so the parse pattern stays identical across the crate.
 pub(crate) fn web_ref_re() -> &'static Regex {
     static WEB_REF_RE: OnceLock<Regex> = OnceLock::new();
+    // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
     WEB_REF_RE.get_or_init(|| Regex::new(r"\bweb-(\d+)\b").expect("valid web-ref regex"))
 }
 
@@ -48,14 +58,28 @@ pub(crate) fn web_ref_re() -> &'static Regex {
 ///
 /// Matches a leading run of digits followed by a delimiter (`.`, `)`, `:`,
 /// `-`, en dash, em dash) and trailing whitespace, so `3. Topic`,
-/// `12) Topic`, and `7 — Topic` all strip to `Topic`. Shared with
+/// `12) Topic`, and `7 - Topic` all strip to `Topic`. Shared with
 /// `cluster`'s heading renumbering so the parse pattern stays identical
 /// across the crate.
 pub(crate) fn num_prefix_re() -> &'static Regex {
     static NUM_PREFIX_RE: OnceLock<Regex> = OnceLock::new();
     NUM_PREFIX_RE.get_or_init(|| {
+        // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
         Regex::new(r"^\d+\s*[.):\-\u{2013}\u{2014}]\s*").expect("valid num-prefix regex")
     })
+}
+
+/// Resolve an output-limit value to an optional effective cap.
+///
+/// Every report limit in this crate (concepts, findings, and the bibliography
+/// preview) shares one convention: `0` means "unbounded" (FR-016) and resolves
+/// to `None`, while any positive value resolves to `Some(limit)`. Centralising
+/// the resolution keeps [`crate::analysis::cap_findings_to_limit`], the concept
+/// cap in [`crate::cluster`], and the bibliography preview from drifting apart
+/// (ANTIPAT F-15).
+#[must_use]
+pub fn effective_limit(limit: usize) -> Option<usize> {
+    (limit > 0).then_some(limit)
 }
 
 /// Extract the distinct, 1-based source indices cited by `body`.

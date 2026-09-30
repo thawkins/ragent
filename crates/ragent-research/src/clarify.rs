@@ -10,9 +10,10 @@ use std::sync::LazyLock;
 
 /// Concrete-identifier detector: years, `vN.N` versions, or "version N".
 ///
-/// Hoisted to a process-wide static (PERF-066) — this runs on every
+/// Hoisted to a process-wide static (PERF-066) - this runs on every
 /// `/research` clarification check.
 static CONCRETE_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
     Regex::new(r"\b(20\d{2}|19\d{2}|v\d+\.\d+|version \d+\.?d+)").expect("valid concrete-id regex")
 });
 
@@ -92,35 +93,5 @@ pub fn needs_clarification(topic: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn empty_topic_needs_clarification() {
-        assert!(needs_clarification("").is_some());
-    }
-
-    #[test]
-    fn short_topic_needs_clarification() {
-        let q = needs_clarification("rust").unwrap();
-        assert!(q.contains("narrow this down"));
-    }
-
-    #[test]
-    fn broad_phrase_needs_clarification() {
-        assert!(needs_clarification("research the inference market").is_some());
-        assert!(needs_clarification("tell me about Rust").is_some());
-    }
-
-    #[test]
-    fn specific_comparison_is_clear() {
-        assert!(
-            needs_clarification("Compare Fireworks AI and Together.ai for LLM inference").is_none()
-        );
-    }
-
-    #[test]
-    fn year_makes_topic_concrete() {
-        assert!(needs_clarification("Rust async runtimes in 2024").is_none());
-    }
-}
+#[path = "../tests/inline/clarify_tests.rs"]
+mod tests;

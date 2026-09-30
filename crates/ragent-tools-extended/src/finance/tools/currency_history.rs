@@ -1,4 +1,4 @@
-//! `currency_history` tool — historical exchange-rate bars.
+//! `currency_history` tool - historical exchange-rate bars.
 
 use crate::finance::default_provider;
 use crate::{Tool, ToolContext, ToolOutput};

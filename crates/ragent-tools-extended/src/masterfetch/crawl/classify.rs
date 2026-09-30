@@ -7,21 +7,21 @@
 //! [`classify_and_extract`] to determine the page type and extract content
 //! accordingly:
 //!
-//! - **Article / Docs** → main content via the readability → html2text → raw
+//! - **Article / Docs** -> main content via the readability -> html2text -> raw
 //!   text extraction chain ([`crate::masterfetch::extractor`]).
-//! - **List / Index** → a structured `* [title](url)` link list built from
+//! - **List / Index** -> a structured `* [title](url)` link list built from
 //!   classified outgoing links ([`crate::masterfetch::links`]).
-//! - **JS shell** → `content_ok = false` with an honest report; the raw
+//! - **JS shell** -> `content_ok = false` with an honest report; the raw
 //!   extraction output is included for diagnostics but the agent is told the
 //!   page is JS-rendered.
-//! - **Auth wall / Paywall** → `content_ok = false` with an honest report and a
+//! - **Auth wall / Paywall** -> `content_ok = false` with an honest report and a
 //!   `next_action` suggestion to switch sources.
-//! - **Redirect** → note the redirect; the extraction output from the redirect
+//! - **Redirect** -> note the redirect; the extraction output from the redirect
 //!   target is included if available.
-//! - **Other / Unknown** → fall back to the extractor chain output;
+//! - **Other / Unknown** -> fall back to the extractor chain output;
 //!   `content_ok` is `true` only when the extracted text is non-trivial.
 //!
-//! All functions are pure — no network I/O — enabling unit tests without live
+//! All functions are pure - no network I/O - enabling unit tests without live
 //! pages (NFR-003).
 //!
 //! # Design
@@ -32,9 +32,9 @@
 //! 2. Call [`envelope::detect_page_type`] with the HTML, URL, and extracted
 //!    text length to classify the page.
 //! 3. Based on the detected [`PageType`], potentially reformat the output:
-//!    - **List** → discard the extracted text and build a link list instead.
-//!    - **JS shell** → wrap the output in an honest "JS-rendered" report.
-//!    - **Auth wall / Paywall** → wrap in an honest access-restricted report.
+//!    - **List** -> discard the extracted text and build a link list instead.
+//!    - **JS shell** -> wrap the output in an honest "JS-rendered" report.
+//!    - **Auth wall / Paywall** -> wrap in an honest access-restricted report.
 //! 4. Compute a one-line summary appropriate to the page type.
 //! 5. Return a [`ClassifyResult`] carrying all signals.
 
@@ -138,18 +138,18 @@ pub struct ClassifyResult {
 ///
 /// # Arguments
 ///
-/// * `html` — the raw HTML response body.
-/// * `url` — the final URL (after redirects), used for page-type detection
+/// * `html` - the raw HTML response body.
+/// * `url` - the final URL (after redirects), used for page-type detection
 ///   and relative-link resolution.
-/// * `content_type` — the HTTP `Content-Type` header value. If it does not
+/// * `content_type` - the HTTP `Content-Type` header value. If it does not
 ///   contain `text/html` or `application/xhtml`, the body is treated as raw
 ///   content (no classification).
-/// * `opts` — classify-and-extract options.
+/// * `opts` - classify-and-extract options.
 ///
 /// # Returns
 ///
 /// A [`ClassifyResult`] with the page type, adapted content, and signals.
-/// This function never returns `Err` — it degrades gracefully, matching the
+/// This function never returns `Err` - it degrades gracefully, matching the
 /// extractor chain's behaviour.
 ///
 /// # Examples
@@ -178,7 +178,7 @@ pub fn classify_and_extract(
     content_type: &str,
     opts: &ClassifyOptions,
 ) -> ClassifyResult {
-    // Step 1 — run the extraction chain.
+    // Step 1 - run the extraction chain.
     let extract_result = match extract(html, url, content_type, &opts.extract) {
         Ok(r) => r,
         Err(_) => ExtractResult {
@@ -192,13 +192,13 @@ pub fn classify_and_extract(
 
     let text_len = extract_result.content.chars().count();
 
-    // Step 2 — classify the page type.
+    // Step 2 - classify the page type.
     let page_type = detect_page_type(html, url, text_len);
 
-    // Step 3 — extract metadata for summaries and link resolution.
+    // Step 3 - extract metadata for summaries and link resolution.
     let metadata = extract_metadata(html);
 
-    // Step 4 — adapt output based on page type.
+    // Step 4 - adapt output based on page type.
     let (content, content_ok, summary, link_count) = adapt_output(
         page_type,
         &extract_result.content,
@@ -241,29 +241,29 @@ fn adapt_output(
             let links = classify_links(html, url, metadata);
             let link_count = links.citations.len() + links.navigation.len();
             let content = format_link_list(&links, url, opts.max_links, metadata);
-            let summary = format!("List/index page — {link_count} links found");
+            let summary = format!("List/index page - {link_count} links found");
             (content, true, summary, link_count)
         }
         PageType::JsShell => {
             let content = format_js_shell_report(extracted_text);
-            let summary = "JavaScript-rendered page — no static content".to_string();
+            let summary = "JavaScript-rendered page - no static content".to_string();
             (content, false, summary, 0)
         }
         PageType::AuthWall => {
             let content = format_auth_wall_report(extracted_text);
-            let summary = "Login required — content behind authentication wall".to_string();
+            let summary = "Login required - content behind authentication wall".to_string();
             (content, false, summary, 0)
         }
         PageType::Paywall => {
             let content = format_paywall_report(extracted_text);
-            let summary = "Paywall restricted content — subscription required".to_string();
+            let summary = "Paywall restricted content - subscription required".to_string();
             (content, false, summary, 0)
         }
         PageType::Redirect => {
             // Keep the extracted content (from the redirect target) but note
             // the redirect in the summary.
             let content = extracted_text.to_string();
-            let summary = "Redirect page — content from redirect target".to_string();
+            let summary = "Redirect page - content from redirect target".to_string();
             let content_ok = extracted_text.chars().count() >= MIN_CONTENT_OK_CHARS;
             (content, content_ok, summary, 0)
         }
@@ -316,7 +316,7 @@ fn format_link_list(
 ) -> String {
     if max_links == 0 {
         let count = links.citations.len() + links.navigation.len();
-        return format!("({count} links found — listing suppressed)\n");
+        return format!("({count} links found - listing suppressed)\n");
     }
 
     let base_url = Url::parse(page_url).ok();
@@ -367,7 +367,7 @@ fn format_link_list(
 ///
 /// Returns the original `href` unchanged if resolution fails.
 fn resolve_url(href: &str, base: Option<&Url>) -> String {
-    // Already absolute — return as-is.
+    // Already absolute - return as-is.
     if href.starts_with("http://") || href.starts_with("https://") {
         return href.to_string();
     }
@@ -391,7 +391,7 @@ fn resolve_url(href: &str, base: Option<&Url>) -> String {
 /// with a clear notice that the page is JS-rendered.
 fn format_js_shell_report(extracted_text: &str) -> String {
     let mut out = String::new();
-    out.push_str("[JS-rendered page — no static content extracted]\n\n");
+    out.push_str("[JS-rendered page - no static content extracted]\n\n");
     if extracted_text.trim().is_empty() {
         out.push_str("(no text content found)");
     } else {
@@ -405,7 +405,7 @@ fn format_js_shell_report(extracted_text: &str) -> String {
 /// Format an honest report for an authentication-walled page.
 fn format_auth_wall_report(extracted_text: &str) -> String {
     let mut out = String::new();
-    out.push_str("[Authentication required — page content is behind a login wall]\n\n");
+    out.push_str("[Authentication required - page content is behind a login wall]\n\n");
     if extracted_text.trim().is_empty() {
         out.push_str("(no visible content)");
     } else {
@@ -419,7 +419,7 @@ fn format_auth_wall_report(extracted_text: &str) -> String {
 /// Format an honest report for a paywalled page.
 fn format_paywall_report(extracted_text: &str) -> String {
     let mut out = String::new();
-    out.push_str("[Paywall — content requires a subscription]\n\n");
+    out.push_str("[Paywall - content requires a subscription]\n\n");
     if extracted_text.trim().is_empty() {
         out.push_str("(no preview available)");
     } else {
@@ -472,14 +472,16 @@ fn build_summary(extracted_text: &str, metadata: &PageMetadata) -> String {
     truncate_summary(first_sentence.trim())
 }
 
-/// Truncate a string to [`MAX_SUMMARY_LEN`] characters, appending "…" if
+/// Truncate a string to [`MAX_SUMMARY_LEN`] characters, appending "..." if
 /// truncated.
 fn truncate_summary(s: &str) -> String {
     if s.chars().count() <= MAX_SUMMARY_LEN {
         return s.to_string();
     }
-    let truncated: String = s.chars().take(MAX_SUMMARY_LEN).collect();
-    format!("{truncated}…")
+    // Keep the result within `MAX_SUMMARY_LEN` including the 3-char ellipsis.
+    let head = MAX_SUMMARY_LEN.saturating_sub(3);
+    let truncated: String = s.chars().take(head).collect();
+    format!("{truncated}...")
 }
 
 // ---------------------------------------------------------------------------

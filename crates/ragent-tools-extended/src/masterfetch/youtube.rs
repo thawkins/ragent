@@ -58,15 +58,18 @@ pub async fn extract_transcript_from_watch_page(html: &str) -> Result<(String, S
 
     let client =
         http::shared_client().context("failed to build HTTP client for YouTube captions")?;
-    let captions_xml = client
-        .get(&caption_url)
-        .header("Accept-Language", "en-US,en")
-        .send()
-        .await
-        .with_context(|| format!("failed to fetch YouTube captions from {caption_url}"))?
-        .text()
-        .await
-        .with_context(|| format!("failed to read YouTube captions body from {caption_url}"))?;
+    // ANTIPAT 4.1: cap the caption body; a timedtext response is small.
+    let captions_xml = http::read_body_capped(
+        client
+            .get(&caption_url)
+            .header("Accept-Language", "en-US,en")
+            .send()
+            .await
+            .with_context(|| format!("failed to fetch YouTube captions from {caption_url}"))?,
+        http::MAX_SMALL_BODY_BYTES,
+    )
+    .await
+    .with_context(|| format!("failed to read YouTube captions body from {caption_url}"))?;
 
     caption_xml_to_transcript(&captions_xml, &caption_url).map(|transcript| (title, transcript))
 }
@@ -78,7 +81,7 @@ pub async fn extract_transcript_from_watch_page(html: &str) -> Result<(String, S
 /// YouTube's timedtext endpoint frequently answers with HTTP 200 and
 /// `content-length: 0` rather than a caption payload. An empty parsed
 /// transcript after a nominally successful fetch must not masquerade as
-/// "no captions available" — surface it as a distinct error so callers
+/// "no captions available" - surface it as a distinct error so callers
 /// can tell bot-gating from a video that genuinely has no captions.
 pub fn caption_xml_to_transcript(xml: &str, caption_url: &str) -> Result<String> {
     let transcript =
@@ -272,7 +275,7 @@ pub fn is_youtube_url(url: &str) -> bool {
 /// fallback when the player response is missing.
 #[must_use]
 pub fn fallback_title_from_html(html: &str) -> Option<String> {
-    /// Hoisted to a process-wide static (PERF-064) — compiled once.
+    /// Hoisted to a process-wide static (PERF-064) - compiled once.
     static TITLE_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"<title>(.*?)\s*-?\s*YouTube</title>")
             .expect("valid youtube title regex")

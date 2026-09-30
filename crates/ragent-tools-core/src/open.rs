@@ -61,7 +61,13 @@ impl Tool for OpenTool {
             .context("Missing required 'target' parameter")?;
         let action = input["action"].as_str().unwrap_or("open");
 
-        let (program, args) = build_command(target, action, &ctx.working_dir)?;
+        let (program, args) = build_command(
+            target,
+            action,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
 
         let status = Command::new(&program)
             .args(&args)
@@ -93,10 +99,16 @@ impl Tool for OpenTool {
 }
 
 /// Returns the program name and argument list for the given action.
+///
+/// `allowed_roots` and `cache` are the containment inputs used by the
+/// `open`/`reveal` actions (FUNC-068, ANTIPAT F-06); the `url` action ignores
+/// them.
 pub fn build_command(
     target: &str,
     action: &str,
     working_dir: &Path,
+    allowed_roots: &[std::path::PathBuf],
+    cache: &super::CanonicalPathCache,
 ) -> Result<(String, Vec<String>)> {
     match action {
         "url" => {
@@ -104,7 +116,7 @@ pub fn build_command(
             Ok(platform_open_command(target))
         }
         "reveal" => {
-            let path = resolve_target_path(target, working_dir)?;
+            let path = resolve_target_path(target, working_dir, allowed_roots, cache)?;
             let dir = if path.is_file() {
                 path.parent()
                     .map(|p| p.to_path_buf())
@@ -115,7 +127,7 @@ pub fn build_command(
             Ok(platform_open_command(&dir.to_string_lossy()))
         }
         "open" => {
-            let path = resolve_target_path(target, working_dir)?;
+            let path = resolve_target_path(target, working_dir, allowed_roots, cache)?;
             Ok(platform_open_command(&path.to_string_lossy()))
         }
         _ => {
@@ -125,10 +137,18 @@ pub fn build_command(
 }
 
 /// Resolve a target path relative to the working directory and validate that it
-/// does not escape the project root.
-fn resolve_target_path(target: &str, working_dir: &Path) -> Result<std::path::PathBuf> {
+/// does not escape the allowed roots.
+///
+/// FUNC-068 / ANTIPAT F-06: this previously checked `working_dir` alone, so
+/// `open` rejected a whitelisted root that every other file tool accepted.
+fn resolve_target_path(
+    target: &str,
+    working_dir: &Path,
+    allowed_roots: &[std::path::PathBuf],
+    cache: &super::CanonicalPathCache,
+) -> Result<std::path::PathBuf> {
     let path = super::path_util::resolve_path(working_dir, target);
-    super::check_path_within_root(&path, working_dir)?;
+    super::check_path_within_allowed_roots_cached(&path, working_dir, allowed_roots, cache)?;
     Ok(path)
 }
 

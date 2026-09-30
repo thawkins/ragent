@@ -124,7 +124,7 @@ pub fn get_clipboard_text_sync() -> Option<String> {
 pub fn set_clipboard_text(text: &str) {
     let text = text.to_owned();
     std::thread::spawn(move || {
-        let _ = set_clipboard_text_sync(&text);
+        let _ = set_clipboard_text_sync(&text); // INTENTIONAL: clipboard write is inherently best-effort
     });
 }
 
@@ -280,7 +280,7 @@ pub fn clipboard_image_to_temp(img_data: &ImageData<'_>) -> Result<PathBuf> {
     let height = img_data.height as u32;
     if width > MAX_CLIPBOARD_IMAGE_DIM || height > MAX_CLIPBOARD_IMAGE_DIM {
         anyhow::bail!(
-            "clipboard image dimensions too large ({width}×{height}, max {MAX_CLIPBOARD_IMAGE_DIM}×{MAX_CLIPBOARD_IMAGE_DIM})"
+            "clipboard image dimensions too large ({width}x{height}, max {MAX_CLIPBOARD_IMAGE_DIM}x{MAX_CLIPBOARD_IMAGE_DIM})"
         );
     }
 
@@ -317,7 +317,7 @@ pub fn clipboard_image_to_temp(img_data: &ImageData<'_>) -> Result<PathBuf> {
         .write_image(&img_data.bytes, width, height, ExtendedColorType::Rgba8)
         .map_err(|e| anyhow::anyhow!("failed to encode clipboard image: {e}"))?;
 
-    // Prevent auto-deletion — the caller owns the file lifecycle.
+    // Prevent auto-deletion - the caller owns the file lifecycle.
     let path = tmp_file
         .into_temp_path()
         .keep()

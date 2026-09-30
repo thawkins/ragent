@@ -68,7 +68,7 @@ impl Tool for SpecReadTool {
             .iter()
             .map(|r| {
                 format!(
-                    "- `{}` ({:?}) — {} {}",
+                    "- `{}` ({:?}) - {} {}",
                     r.id,
                     r.template,
                     r.text,
@@ -88,12 +88,16 @@ impl Tool for SpecReadTool {
                     format!(" [links: {}]", t.linked_requirements.join(", "))
                 };
                 format!(
-                    "- `{}` — {} ({}){}{}",
+                    "- `{}` - {} ({}){}{}",
                     t.id,
                     t.title,
                     t.status.as_str(),
                     reqs,
-                    if t.completed_at.is_some() { " ✓" } else { "" }
+                    if t.completed_at.is_some() {
+                        " [ok]"
+                    } else {
+                        ""
+                    }
                 )
             })
             .collect::<Vec<_>>()

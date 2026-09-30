@@ -1,4 +1,4 @@
-//! `/codeindex skillgen` — install the graphify skill into the global skills folder.
+//! `/codeindex skillgen` - install the graphify skill into the global skills folder.
 //!
 //! This module embeds the graphify skill artifacts (rendered from the
 //! `Graphify-Labs/graphify` repository, branch `v8`) and writes them to

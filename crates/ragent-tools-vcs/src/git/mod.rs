@@ -63,20 +63,16 @@ pub struct GitOutput {
 /// SEC-ragent-tools-vcs-001/002 (SECTASKS T-022): require `value` to be an
 /// option-free git operand.
 ///
+/// Thin adapter over the shared [`ragent_types::guard::reject_option_like`]
+/// (SECTASKS MS-05 T-067) so every VCS call site keeps its existing
+/// `crate::git::reject_option_like` path while the rule itself lives in one
+/// place.
+///
 /// # Errors
 ///
 /// Returns an error naming `label` when `value` is empty or begins with `-`.
 pub fn reject_option_like(value: &str, label: &str) -> Result<()> {
-    if value.is_empty() {
-        bail!("`{label}` must not be empty");
-    }
-    if value.starts_with('-') {
-        bail!(
-            "`{label}` value '{value}' is rejected: it would be parsed by git as \
-             an option rather than an operand"
-        );
-    }
-    Ok(())
+    ragent_types::guard::reject_option_like(value, label).map_err(anyhow::Error::msg)
 }
 
 /// SEC-ragent-tools-vcs-003 (SECTASKS T-022): confine a `git clone`
@@ -128,7 +124,7 @@ pub fn run_git_output(args: &[&str], cwd: &std::path::Path) -> Result<GitOutput>
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("failed to execute `git` — is git installed?")?;
+        .context("failed to execute `git` - is git installed?")?;
 
     let deadline = std::time::Instant::now() + GIT_TIMEOUT;
     loop {
@@ -136,8 +132,8 @@ pub fn run_git_output(args: &[&str], cwd: &std::path::Path) -> Result<GitOutput>
             Ok(Some(_status)) => break,
             Ok(None) => {
                 if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    let _ = child.kill(); // INTENTIONAL: process teardown is best-effort
+                    let _ = child.wait(); // INTENTIONAL: process teardown is best-effort
                     bail!(
                         "`git {}` timed out after {}s and was killed",
                         args.join(" "),

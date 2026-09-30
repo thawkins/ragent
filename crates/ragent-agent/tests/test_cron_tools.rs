@@ -108,7 +108,7 @@ async fn test_cron_add_creates_event() {
         .await
         .expect("add should succeed");
 
-    assert!(out.content.contains("✅"));
+    assert!(out.content.contains("[ok]"));
     assert!(out.content.contains("nightly"));
     assert!(out.content.contains("every 30m"));
 

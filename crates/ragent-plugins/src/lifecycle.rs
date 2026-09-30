@@ -6,7 +6,7 @@
 //! It composes the earlier layers:
 //!
 //! - discovery comes from [`crate::store::scan_dirs`] (manifest parse only,
-//!   no JavaScript — FR-023);
+//!   no JavaScript - FR-023);
 //! - enable/disable state and telemetry counters persist through the per-store
 //!   [`crate::store::StoreLedger`];
 //! - loading checks the declared host-API version (FR-019), checks out a fresh
@@ -48,7 +48,7 @@ use crate::store::{LifecycleState, ScannedPlugin, StoreDirs, StoreLedger, scan_d
 pub const DEFAULT_AUTO_UNLOAD_THRESHOLD: u64 = 3;
 
 /// A plugin currently tracked by the running session: descriptor, state, the
-/// captured host-API sink, and the live sandbox (when loaded — kept so T-010
+/// captured host-API sink, and the live sandbox (when loaded - kept so T-010
 /// tool dispatch can invoke the plugin's handlers).
 #[derive(Debug)]
 pub struct LoadedPlugin {
@@ -168,7 +168,7 @@ impl PluginManager {
     }
 
     /// Discover plugins in the configured stores (manifest parse only, no
-    /// execution — FR-023).
+    /// execution - FR-023).
     #[must_use]
     pub fn discover(&self) -> Vec<ScannedPlugin> {
         scan_dirs(self.dirs.clone())

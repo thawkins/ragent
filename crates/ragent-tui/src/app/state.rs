@@ -19,10 +19,10 @@ use ragent_agent::permission::PermissionRequest;
 use ragent_agent::provider::ProviderRegistry;
 use ragent_agent::session::processor::SessionProcessor;
 use ragent_agent::storage::Storage;
+use ragent_agent::team::{MemberStatus, SwarmState, TeamConfig, TeamMember};
 use ragent_agent::trigger::TriggerRuntime;
 use ragent_config::OtelProtocol;
 use ragent_plugins::{StoreEntry, StoreError, StoreIndex, StoreIndexFetcher, StoreKind};
-use ragent_team::team::{MemberStatus, SwarmState, TeamConfig, TeamMember};
 use serde::Serialize;
 
 use crate::app::session_ops::recover_poisoned;
@@ -35,7 +35,7 @@ use crate::theme::StatusHistory;
 /// 1. Opens (or creates) a sibling `.lock` file and acquires an exclusive
 ///    `flock` on it (a separate lock file avoids inode confusion caused by
 ///    the atomic rename below).
-/// 2. Reads the current JSON (missing/empty file → `{}`).
+/// 2. Reads the current JSON (missing/empty file -> `{}`).
 /// 3. Calls `updater` to mutate the parsed JSON value.
 /// 4. Writes the result to a unique temp file in the same directory, then
 ///    atomically renames it over the original so readers never see a partial
@@ -94,7 +94,7 @@ where
         tempfile::NamedTempFile::new_in(parent).map_err(|e| format!("create temp file: {e}"))?;
     std::fs::write(tmp.path(), &out).map_err(|e| format!("write temp file: {e}"))?;
     tmp.persist(config_path)
-        .map_err(|e| format!("rename temp → {}: {e}", config_path.display()))?;
+        .map_err(|e| format!("rename temp -> {}: {e}", config_path.display()))?;
 
     // The config is already persisted; the advisory lock releases on drop
     // anyway, so an unlock failure must not fail the (successful) update.
@@ -242,9 +242,9 @@ pub struct LlmStatsSummary {
 /// Snapshot of every context-window partition for the Context side panel.
 ///
 /// FR-012: `total_tokens` is the sum of the four top-level partitions the
-/// model actually receives (`system_prompt` — which itself includes the
+/// model actually receives (`system_prompt` - which itself includes the
 /// [`Self::skills_tokens`], [`Self::memory_tokens`] and
-/// [`Self::agents_md_tokens`] sub-breakdowns — plus tool catalog, tool
+/// [`Self::agents_md_tokens`] sub-breakdowns - plus tool catalog, tool
 /// metadata/wrapper overhead and the conversation history), so the sub-
 /// partitions are displayed as a breakdown and never added twice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -448,7 +448,7 @@ pub struct ModelDownloadState {
     pub provider_id: String,
     /// Model identifier being downloaded.
     pub model_id: String,
-    /// Current download progress (0.0–100.0).
+    /// Current download progress (0.0-100.0).
     pub percent: f32,
     /// When the download started (for elapsed time display).
     pub started_at: std::time::Instant,
@@ -539,7 +539,7 @@ pub enum ProviderSetupStep {
         /// Index of the highlighted thinking level.
         selected: usize,
     },
-    /// Setup complete — briefly confirm success.
+    /// Setup complete - briefly confirm success.
     Done {
         /// Provider that was just configured.
         provider_name: String,
@@ -729,7 +729,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "agents",
-        description: "List all agents — built-in and custom",
+        description: "List all agents - built-in and custom",
     },
     SlashCommandDef {
         trigger: "browse_refresh",
@@ -785,7 +785,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "history",
-        description: "Browse and re-use previous inputs; /history [filter] restricts to matching entries (↑/↓ to select, Enter to insert, c to copy to clipboard); /history help",
+        description: "Browse and re-use previous inputs; /history [filter] restricts to matching entries (^/v to select, Enter to insert, c to copy to clipboard); /history help",
     },
     SlashCommandDef {
         trigger: "inputdiag",
@@ -805,7 +805,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "perf",
-        description: "Alias for /profile — toggle the agent-loop perf panel (/perf on|off|help)",
+        description: "Alias for /profile - toggle the agent-loop perf panel (/perf on|off|help)",
     },
     SlashCommandDef {
         trigger: "llmstats",
@@ -897,7 +897,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "yolo",
-        description: "Toggle YOLO mode — bypass all command validation and tool restrictions (/yolo help)",
+        description: "Toggle YOLO mode - bypass all command validation and tool restrictions (/yolo help)",
     },
     SlashCommandDef {
         trigger: "spec",
@@ -1043,7 +1043,7 @@ pub struct SlashMenuEntry {
     pub is_skill: bool,
     /// Suggested completions for this command (e.g., team names, agent names).
     pub suggestions: Vec<String>,
-    /// Parameter hint shown after command (e.g., "<query>" or "[clear]").
+    /// Parameter hint shown after command (e.g., `<query>` or `[clear]`).
     pub parameter_hint: Option<String>,
 }
 /// State of the slash-command autocomplete menu.
@@ -1192,7 +1192,7 @@ pub struct TextSelection {
 }
 
 impl TextSelection {
-    /// Return `(start, end)` with start ≤ end in row-major order.
+    /// Return `(start, end)` with start <= end in row-major order.
     ///
     /// # Examples
     ///
@@ -1738,7 +1738,7 @@ pub struct App {
     /// Snapshot of the status value recorded in [`App::status_set_at`].
     ///
     /// The expiry only fires when the current status still matches this
-    /// snapshot — if anything else changed the status in the meantime the
+    /// snapshot - if anything else changed the status in the meantime the
     /// timer is silently cleared without overwriting the new status.
     pub status_snapshot: String,
     /// Queue of pending permission requests awaiting user resolution.
@@ -1761,7 +1761,7 @@ pub struct App {
     pub stream_in_bytes: u64,
     /// Bytes sent in the current LLM request payload (reset per request).
     pub stream_out_bytes: u64,
-    /// Latest quota usage percentage from provider rate-limit headers (0.0–100.0).
+    /// Latest quota usage percentage from provider rate-limit headers (0.0-100.0).
     /// `None` if the provider has not returned rate-limit information yet.
     pub quota_percent: Option<f32>,
     /// Active provider model-list loading state, if any (spinner popup).
@@ -2200,8 +2200,8 @@ pub struct App {
     /// against overlapping `/codeindex reindex` commands.
     pub code_index_reindex_spawned: bool,
     /// Completion result from an off-thread codeindex graph build or full
-    /// reindex: `(message, status)` on success — the rendered assistant text
-    /// plus the status-bar line — or the error text. Drained by
+    /// reindex: `(message, status)` on success - the rendered assistant text
+    /// plus the status-bar line - or the error text. Drained by
     /// `poll_codeindex_bg_result` on the UI thread. The tuple replaces an
     /// earlier `"\n\nSTATUS:"` string marker, which any message text
     /// containing that marker could corrupt.
@@ -2219,7 +2219,7 @@ pub struct App {
     /// of appending to the current one. Set by `MessageEnd` events to
     /// separate init-exchange output from the main response.
     pub force_new_message: bool,
-    /// Saved agent stack for returning from sub-agents (e.g. plan → general).
+    /// Saved agent stack for returning from sub-agents (e.g. plan -> general).
     pub agent_stack: Vec<AgentInfo>,
     /// Pending plan delegation: `(task, context)` set by `AgentSwitchRequested`,
     /// consumed by `MessageEnd` to auto-send the task to the plan agent.
@@ -2407,7 +2407,7 @@ pub struct App {
     /// [`App::newproj_progress_slug`](Self::newproj_progress_slug) is
     /// replaced in place so steps stream instead of stacking messages.
     pub newproj_progress_text: Option<String>,
-    /// First-line tag (`Scaffolding `slug`…`) of the active scaffold
+    /// First-line tag (`Scaffolding `slug`...`) of the active scaffold
     /// progress message (T-013). Used for the in-place message lookup.
     pub newproj_progress_slug: Option<String>,
     /// Pending `/new` scaffold outcome (T-013/FR-014): `Ok((FR-011 summary
@@ -2448,12 +2448,12 @@ pub struct App {
     /// pending capture, `Err(reason)` the restore failed (capture kept for
     /// retry). Drained by `poll_rollback_result` on the UI thread; the
     /// spawned task only logs, so this slot is what keeps the UI status from
-    /// being stuck at "rolling back…" forever.
+    /// being stuck at "rolling back..." forever.
     pub rollback_result: Arc<std::sync::Mutex<Option<Result<bool, String>>>>,
     /// Pending result from the async `/websearch test` engine diagnostic:
     /// the fully rendered result-table markdown. Deposited by the spawned
     /// test task and drained by `poll_websearch_test_result` on the UI
-    /// thread, so the "Starting Websearch test…" acknowledgement renders
+    /// thread, so the "Starting Websearch test..." acknowledgement renders
     /// immediately instead of after the whole network probe finishes.
     pub websearch_test_result: Arc<std::sync::Mutex<Option<String>>>,
     /// Whether input history has been modified since last save.
@@ -2562,7 +2562,7 @@ pub struct App {
     /// Cumulative time spent waiting for LLM responses during this processing cycle.
     pub llm_time_ms: u64,
 
-    // ── Plan approval (M2 Task 2.2) ��────────────────────────────────────────    /// When Some, the plan approval overlay is shown. Holds the plan text and
+    // ── Plan approval (M2 Task 2.2) ────────────────────────────────────────    /// When Some, the plan approval overlay is shown. Holds the plan text and
     /// the agent to restore on approval.
     pub plan_approval_pending: Option<PlanApprovalState>,
 
@@ -2600,7 +2600,7 @@ pub struct App {
     /// Paths of configuration files that were loaded at startup (displayed in message window).
     pub config_paths: Vec<std::path::PathBuf>,
 
-    // ── Router status (FR-044–FR-049) ────────────────────────────────────────
+    // ── Router status (FR-044-FR-049) ────────────────────────────────────────
     /// Whether the router provider is the active provider and routing is enabled.
     pub router_enabled: bool,
     /// The last tier selected by the router for the most recent request.
@@ -2809,11 +2809,11 @@ impl RoleMode {
     #[must_use]
     pub fn icon(&self) -> &str {
         match self {
-            Self::Architect => "🏛",
-            Self::Coder => "💻",
-            Self::Reviewer => "🔍",
-            Self::Debugger => "🐛",
-            Self::Tester => "🧪",
+            Self::Architect => "[court]",
+            Self::Coder => "[laptop]",
+            Self::Reviewer => "[search]",
+            Self::Debugger => "[bug]",
+            Self::Tester => "[test]",
         }
     }
 
@@ -2824,7 +2824,7 @@ impl RoleMode {
             Self::Architect => {
                 "You are in ARCHITECT mode. Focus exclusively on design, architecture, \
                  and high-level planning. Produce written plans and diagrams. \
-                 Do NOT modify any files — use only read-only tools (read, list, glob, grep, bash \
+                 Do NOT modify any files - use only read-only tools (read, list, glob, grep, bash \
                  for read-only commands). When you have produced a plan, summarise it clearly."
             }
             Self::Coder => {
@@ -2833,7 +2833,7 @@ impl RoleMode {
             }
             Self::Reviewer => {
                 "You are in REVIEWER mode. Review the code for correctness, security, performance, \
-                 and style. Do NOT modify files — read and report only. Provide specific, actionable \
+                 and style. Do NOT modify files - read and report only. Provide specific, actionable \
                  feedback with file and line references."
             }
             Self::Debugger => {
@@ -2874,31 +2874,31 @@ impl App {
     ///
     /// Returns an error if the history file cannot be read.
     pub fn load_history(&mut self) -> Result<(), std::io::Error> {
-        if let Some(ref path) = self.history_file_path {
-            if path.exists() {
-                let content = std::fs::read_to_string(path)?;
-                self.input_history.clear();
-                for line in content.lines() {
-                    if !line.is_empty() {
-                        // Unescape: `\n` → newline, `\\` → backslash.
-                        // Single-pass decode avoids the order-dependent
-                        // `replace` bug that corrupts inputs containing a
-                        // literal backslash followed by 'n'.
-                        let entry = unescape_history_line(line);
-                        self.input_history.push(entry);
-                    }
+        // Clone the path out of `self` so the immutable borrow ends before the
+        // mutable `trim_input_history` call below.
+        let Some(path) = self.history_file_path.clone() else {
+            return Ok(());
+        };
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            self.input_history.clear();
+            for line in content.lines() {
+                if !line.is_empty() {
+                    // Unescape: `\n` -> newline, `\\` -> backslash.
+                    // Single-pass decode avoids the order-dependent
+                    // `replace` bug that corrupts inputs containing a
+                    // literal backslash followed by 'n'.
+                    let entry = unescape_history_line(line);
+                    self.input_history.push(entry);
                 }
-                // Trim to 100 entries
-                if self.input_history.len() > 100 {
-                    self.input_history
-                        .drain(0..(self.input_history.len() - 100));
-                }
-                tracing::debug!(
-                    "Loaded {} history entries from {:?}",
-                    self.input_history.len(),
-                    path
-                );
             }
+            // Trim to the shared cap via the single helper.
+            self.trim_input_history();
+            tracing::debug!(
+                "Loaded {} history entries from {:?}",
+                self.input_history.len(),
+                path
+            );
         }
         Ok(())
     }
@@ -3000,28 +3000,32 @@ impl App {
             let id = &server.id;
             match &server.status {
                 ragent_agent::mcp::McpStatus::Connected => {
-                    let _ = write!(lines, "\n[mcp] Starting mcp server {id} ({transport})");
+                    let _ = write!(lines, "\n[mcp] Starting mcp server {id} ({transport})"); // INTENTIONAL: write to a String buffer is infallible
                     let _ = write!(
+                        // INTENTIONAL: write to a String buffer is infallible
                         lines,
                         "\n[mcp] Connected to mcp server {id} via {transport}"
                     );
                 }
                 ragent_agent::mcp::McpStatus::Disabled => {
                     let _ = write!(
+                        // INTENTIONAL: write to a String buffer is infallible
                         lines,
                         "\n[mcp] Skipping mcp server {id} ({transport}, disabled)"
                     );
                 }
                 ragent_agent::mcp::McpStatus::Failed { error } => {
-                    let _ = write!(lines, "\n[mcp] Starting mcp server {id} ({transport})");
+                    let _ = write!(lines, "\n[mcp] Starting mcp server {id} ({transport})"); // INTENTIONAL: write to a String buffer is infallible
                     let _ = write!(
+                        // INTENTIONAL: write to a String buffer is infallible
                         lines,
                         "\n[mcp] Failed to connect to mcp server {id} via {transport}: {error}"
                     );
                 }
                 ragent_agent::mcp::McpStatus::NeedsAuth => {
-                    let _ = write!(lines, "\n[mcp] Starting mcp server {id} ({transport})");
+                    let _ = write!(lines, "\n[mcp] Starting mcp server {id} ({transport})"); // INTENTIONAL: write to a String buffer is infallible
                     let _ = write!(
+                        // INTENTIONAL: write to a String buffer is infallible
                         lines,
                         "\n[mcp] mcp server {id} ({transport}) needs authentication"
                     );
@@ -3041,8 +3045,8 @@ impl App {
     /// The loop runs concurrently with startup: a server that is registered but
     /// not yet connected (status `Disabled`) or whose tools are not yet in the
     /// tool registry is still being set up, so this polls until every configured
-    /// server is terminal — connected with its tools registered, or
-    /// failed/needs-auth/disabled — or `timeout` expires.
+    /// server is terminal - connected with its tools registered, or
+    /// failed/needs-auth/disabled - or `timeout` expires.
     ///
     /// # Returns
     ///
@@ -3409,17 +3413,17 @@ impl App {
     /// Called after a slash command completes (synchronously or when an
     /// async slash-command poll produces its final status). Records the
     /// current status and the instant it was set so [`App::poll_status_expiry`]
-    /// can transition it to `"ready"` once the grace period elapses — but only
+    /// can transition it to `"ready"` once the grace period elapses - but only
     /// if nothing else changed the status in the meantime.
     ///      /// No-op for statuses that should persist: async-in-progress (`[wait]`)
     /// and error/warning (`[warn]`) states are left untouched.
     pub fn arm_status_expiry(&mut self) {
-        // Never auto-clear async-in-progress or error states — those need to
+        // Never auto-clear async-in-progress or error states - those need to
         // stay visible until their own completion handler updates them.
         if self.status.starts_with("[wait]") || self.status.starts_with("[warn]") {
             return;
         }
-        // "ready" is already the idle state — nothing to transition to.
+        // "ready" is already the idle state - nothing to transition to.
         if self.status.eq_ignore_ascii_case("ready") {
             return;
         }
@@ -3438,7 +3442,7 @@ impl App {
         let Some(set_at) = self.status_set_at else {
             return;
         };
-        // Clear the timer first — either we transition below, or the status
+        // Clear the timer first - either we transition below, or the status
         // changed and we no longer own it.
         self.status_set_at = None;
         let snapshot = std::mem::take(&mut self.status_snapshot);
@@ -3446,7 +3450,7 @@ impl App {
         if std::time::Instant::now().duration_since(set_at)
             < std::time::Duration::from_millis(STATUS_EXPIRY_MS)
         {
-            // Not enough time has passed — re-arm for the next poll.
+            // Not enough time has passed - re-arm for the next poll.
             self.status_set_at = Some(set_at);
             self.status_snapshot = snapshot;
             return;
@@ -3535,7 +3539,7 @@ impl App {
     /// or `SubagentComplete`, leaving the Agents button count stale (e.g. the
     /// intermittent "Agents" button shows no count with 18 concurrent agents).
     /// When the shared lag counter changes, this poll fetches a snapshot of
-    /// the registry's task map off-thread and adopts it on a later frame —
+    /// the registry's task map off-thread and adopts it on a later frame -
     /// the map is authoritative, so the merge repairs the event-driven
     /// divergence in both directions (missing entries re-added, ghosts of
     /// dropped completions removed).
@@ -3543,7 +3547,7 @@ impl App {
     /// Called from the TUI main loop each wake.
     ///
     /// Triggers:
-    /// - **Lag-triggered (immediate)**: the shared lag counter changed — a
+    /// - **Lag-triggered (immediate)**: the shared lag counter changed - a
     ///   burst was observed, reconcile immediately.
     /// - **Periodic (safety net)**: at least
     ///   [`AGENTS_RECONCILE_INTERVAL`] has elapsed since the last fetch.
@@ -3618,7 +3622,7 @@ impl App {
         let before = self.active_tasks.len();
         self.active_tasks.retain(|t| match registry.get(&t.id) {
             Some(entry) => entry.status == TaskStatus::Running,
-            None => true, // not registry-tracked (bench etc.) — keep
+            None => true, // not registry-tracked (bench etc.) - keep
         });
         let removed = before - self.active_tasks.len();
 
@@ -3706,10 +3710,17 @@ pub const QUEUE_MENU_ROW_SHOW: usize = 3;
 /// Number of rows the queue-control menu presents.
 pub const QUEUE_MENU_ROWS: usize = 4;
 
+/// Maximum number of entries retained in the input history.
+///
+/// Both the load path (`App::load_input_history`) and the append path
+/// (`App::add_to_history`) trim through the single `App::trim_input_history`
+/// helper so the two call sites cannot diverge (MEDIUM-4).
+pub const INPUT_HISTORY_MAX: usize = 100;
+
 /// Serialise history entries to a newline-separated string.
 ///
-/// Each entry has its backslashes escaped (`\` → `\\`) and embedded newlines
-/// escaped (`\n` → `\n` literal two-char sequence) so that multiline entries
+/// Each entry has its backslashes escaped (`\` -> `\\`) and embedded newlines
+/// escaped (`\n` -> `\n` literal two-char sequence) so that multiline entries
 /// survive a round-trip through the file format without being split.
 fn history_entries_to_string(entries: &[String]) -> String {
     entries
@@ -3722,11 +3733,11 @@ fn history_entries_to_string(entries: &[String]) -> String {
 /// Decode a single history line back to its original content.
 ///
 /// Reverses the encoding applied by [`history_entries_to_string`]:
-/// `\\` → `\` and `\n` (literal two-char) → newline.
+/// `\\` -> `\` and `\n` (literal two-char) -> newline.
 ///
 /// Uses a single-pass character scan instead of chained `replace` calls to
 /// avoid the order-dependent corruption that occurs when an entry contains a
-/// literal backslash followed by `n` (e.g. `\n` → `\\n` on encode, then
+/// literal backslash followed by `n` (e.g. `\n` -> `\\n` on encode, then
 /// `replace("\\n", "\n")` wrongly matches the second backslash on decode).
 fn unescape_history_line(line: &str) -> String {
     let mut result = String::with_capacity(line.len());

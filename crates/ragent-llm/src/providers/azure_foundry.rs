@@ -18,10 +18,15 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::llm::LlmClient;
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::provider::openai::OpenAiClient;
 use crate::{ModelInfo, Provider};
 
 const DEFAULT_AZURE_FOUNDRY_HOST: &str = "https://services.ai.azure.com";
+
+/// Fallback context window (tokens) reported for a discovered model that does
+/// not declare one (ANTIPAT M6.10: name the default so it is greppable).
+const DEFAULT_DISCOVERED_CONTEXT_WINDOW: usize = 128_000;
 
 /// Provider implementation for Microsoft Azure AI Foundry.
 pub struct AzureFoundryProvider;
@@ -71,6 +76,9 @@ impl Provider for AzureFoundryProvider {
         base_url: Option<&str>,
         options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
+        // ANTIPAT 3.6: register the credential with the shared redaction
+        // registry so any text passed through `redact_secrets` masks it.
+        ragent_types::sanitize::register_secret(api_key);
         let env_endpoint = std::env::var(Self::DEFAULT_ENV_ENDPOINT_KEY)
             .ok()
             .filter(|s| !s.trim().is_empty());
@@ -130,12 +138,13 @@ pub async fn discover_azure_foundry_models(
         .send()
         .await
         .inspect_err(|e| {
-            tracing::warn!(url = %url, error = %e, "Azure AI Foundry model discovery failed");
+            tracing::warn!(provider = "azure_foundry", url = %url, error = %e, "model discovery failed");
         })
         .with_context(|| format!("Failed to connect to Azure AI Foundry at {url}"))?;
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        // ANTIPAT 3.1/3.2: capped error-body read.
+        let body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
         bail!("Azure AI Foundry API returned status {status}: {body}");
     }
 
@@ -172,7 +181,7 @@ pub async fn discover_azure_foundry_models(
                         Vec::new()
                     },
                 },
-                context_window: 128_000,
+                context_window: DEFAULT_DISCOVERED_CONTEXT_WINDOW,
                 max_output: None,
                 request_multiplier: None,
                 thinking_config: None,
@@ -210,40 +219,35 @@ impl LlmClient for AzureFoundryClient {
         );
 
         tracing::info!(
+            provider = "azure_foundry",
             endpoint = %url,
             model = %request.model,
-            "[azure_foundry/{}] Sending chat request", request.model
+            "Sending chat request"
         );
 
+        // RETRY POLICY (ANTIPAT 3.4): a chat POST is a *billed* completion
+        // request, so it is sent exactly once. Automatically retrying it (as the
+        // previous `execute_with_retry(..., 4)` wrapper did) can double-bill the
+        // same completion. Only idempotent GETs may be retried, and any such
+        // retry must go through `http_client::execute_with_retry` so backoff is
+        // shared.
+        //
         // H2: reuse the inner OpenAI client's HTTP client (which itself is a
         // clone of the process-global cached streaming client) instead of
         // creating another streaming client inside the hot chat() path.
-        let client = self.inner.http_client().clone();
-        let api_key = self.api_key.clone();
+        let client = self.inner.http_client();
         let url_for_error = url.clone();
-        let response = crate::provider::http_client::execute_with_retry(
-            move || {
-                let client = client.clone();
-                let api_key = api_key.clone();
-                let url = url.clone();
-                let body = body_bytes.clone();
-                async move {
-                    client
-                        .post(&url)
-                        .header("api-key", api_key)
-                        .header("content-type", "application/json")
-                        .body(body)
-                        .send()
-                        .await
-                }
-            },
-            4,
-        )
-        .await
-        .inspect_err(|e| {
-            tracing::warn!(url = %url_for_error, error = %e, "Azure AI Foundry chat request failed after retries");
-        })
-        .with_context(|| format!("Failed to send request to Azure AI Foundry at {url_for_error}"))?;
+        let response = client
+            .post(&url)
+            .header("api-key", &self.api_key)
+            .header("content-type", "application/json")
+            .body(body_bytes)
+            .send()
+            .await
+            .inspect_err(|e| {
+                tracing::warn!(provider = "azure_foundry", url = %url_for_error, error = %e, "chat request failed");
+            })
+            .with_context(|| format!("Failed to send request to Azure AI Foundry at {url_for_error}"))?;
 
         // Reuse the OpenAI SSE stream parser since the response format is identical
         self.inner.parse_sse_stream(response).await

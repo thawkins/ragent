@@ -1,4 +1,4 @@
-//! `bash_reset` — Reset the persistent shell state for this session.
+//! `bash_reset` - Reset the persistent shell state for this session.
 //!
 //! Removes the saved environment/cwd state file so that the next `bash`
 //! command starts fresh from the agent's working directory.

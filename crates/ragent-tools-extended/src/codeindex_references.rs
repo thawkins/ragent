@@ -90,7 +90,7 @@ impl Tool for CodeIndexReferencesTool {
                 output.push_str(&format!("\n── {display_path} ──\n"));
             }
             output.push_str(&format!(
-                "  L{}:{} — {} ({})\n",
+                "  L{}:{} - {} ({})\n",
                 r.line, r.col, r.symbol_name, r.kind
             ));
         }

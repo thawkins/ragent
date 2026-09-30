@@ -22,7 +22,7 @@ type PendingToolUse = (usize, usize);
 ///
 /// PERF-037: pairing is done with a single `call_id -> (message, part)` index
 /// built as messages are appended, so the conversion is O(messages x parts)
-/// rather than O(messages^2) — the previous implementation scanned the whole
+/// rather than O(messages^2) - the previous implementation scanned the whole
 /// prior message list backwards for every `ToolResult`.
 pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec<Message> {
     let mut messages: Vec<Message> = Vec::new();

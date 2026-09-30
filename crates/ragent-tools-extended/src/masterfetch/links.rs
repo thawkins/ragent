@@ -5,21 +5,21 @@
 //! This module classifies the outgoing links on an HTML page into three
 //! categories:
 //!
-//! - **Citations** — links inside the main-content area (`<article>`,
+//! - **Citations** - links inside the main-content area (`<article>`,
 //!   `<main>`, `[role="main"]`).
-//! - **Navigation** — links inside navigation elements (`<nav>`,
+//! - **Navigation** - links inside navigation elements (`<nav>`,
 //!   `<header>`, `<footer>`, `<aside>`).
-//! - **External** — links pointing to a different domain than the page URL.
+//! - **External** - links pointing to a different domain than the page URL.
 //!
 //! A link may appear in multiple lists: a content-area link to another domain
 //! is both a citation and an external link.
 //!
-//! The module also computes a `primary_source` hint — the most likely
-//! authoritative source for the page's content — derived from the canonical
+//! The module also computes a `primary_source` hint - the most likely
+//! authoritative source for the page's content - derived from the canonical
 //! URL, JSON-LD metadata, or a citation pointing at a known primary host
 //! (e.g. `github.com`, `arxiv.org`, `doi.org`).
 //!
-//! All functions are pure — no network I/O — enabling unit tests without live
+//! All functions are pure - no network I/O - enabling unit tests without live
 //! pages (NFR-003).
 
 use super::PageMetadata;
@@ -102,16 +102,16 @@ const KNOWN_PRIMARY_HOSTS: &[&str] = &[
 ///
 /// # Arguments
 ///
-/// * `html` — the raw HTML response body.
-/// * `page_url` — the final URL of the page (after redirects), used to
+/// * `html` - the raw HTML response body.
+/// * `page_url` - the final URL of the page (after redirects), used to
 ///   determine the page's domain for external-link classification.
-/// * `metadata` — previously extracted page metadata, used to derive the
+/// * `metadata` - previously extracted page metadata, used to derive the
 ///   `primary_source` hint from the canonical URL.
 ///
 /// # Returns
 ///
 /// A [`ClassifiedLinks`] struct with deduplicated link lists and a
-/// `primary_source` hint. Never panics — malformed HTML produces empty lists.
+/// `primary_source` hint. Never panics - malformed HTML produces empty lists.
 ///
 /// # Example
 ///

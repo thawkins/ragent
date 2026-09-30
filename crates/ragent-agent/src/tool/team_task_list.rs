@@ -1,4 +1,4 @@
-//! `team_task_list` — Read all tasks and their status (read-only).
+//! `team_task_list` - Read all tasks and their status (read-only).
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -19,7 +19,7 @@ impl Tool for TeamTaskListTool {
         "List all tasks in the team's shared task list, including their status, \
              assignment, and dependencies. REQUIRED parameter: 'team_name' (string). Use \
              this to inspect the current workload before claiming, assigning, or creating \
-             new tasks. Common gotcha: this is read-only — use team_task_create, \
+             new tasks. Common gotcha: this is read-only - use team_task_create, \
              team_task_claim, and team_task_complete to modify tasks."
     }
 
@@ -62,10 +62,10 @@ impl Tool for TeamTaskListTool {
         let mut lines = vec![format!("Tasks for team '{team_name}':\n")];
         for task in &list.tasks {
             let status_icon = match task.status {
-                TaskStatus::Pending => "⬜",
-                TaskStatus::InProgress => "🔄",
-                TaskStatus::Completed => "✅",
-                TaskStatus::Cancelled => "❌",
+                TaskStatus::Pending => ".",
+                TaskStatus::InProgress => "[refresh]",
+                TaskStatus::Completed => "[ok]",
+                TaskStatus::Cancelled => "[x]",
             };
             let assignee = task.assigned_to.as_deref().unwrap_or("unassigned");
             let deps = if task.depends_on.is_empty() {
@@ -74,7 +74,7 @@ impl Tool for TeamTaskListTool {
                 format!(" [deps: {}]", task.depends_on.join(", "))
             };
             lines.push(format!(
-                "{status_icon} [{}] {} — {}{deps}",
+                "{status_icon} [{}] {} - {}{deps}",
                 task.id, task.title, assignee
             ));
             if !task.description.is_empty() {

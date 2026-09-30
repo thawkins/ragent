@@ -6,13 +6,13 @@
 //!
 //! This module provides two complementary mechanisms:
 //!
-//! 1. [`ShutdownGuard`] — an RAII guard that calls
+//! 1. [`ShutdownGuard`] - an RAII guard that calls
 //!    [`TelemetrySubsystem::flush`] and [`TelemetrySubsystem::shutdown`] on
 //!    `Drop`. This ensures metrics are flushed on **every** exit path:
 //!    normal return, early return, `?` propagation, and even panics. The
 //!    guard is the primary mechanism and requires no signal handler wiring.
 //!
-//! 2. [`flush_on_signal_arc`] — an async helper that spawns a background
+//! 2. [`flush_on_signal_arc`] - an async helper that spawns a background
 //!    task listening for SIGINT/SIGTERM (or Ctrl+C on Windows) and calls
 //!    [`TelemetrySubsystem::flush`] when a signal is received. This gives
 //!    the process a chance to flush **before** the main loop exits, so
@@ -30,7 +30,7 @@
 //! let config = OtelConfig::default(); // or from ragent.json
 //! let subsystem = Arc::new(TelemetrySubsystem::new(config).expect("telemetry subsystem"));
 //!
-//! // Install the guard — it will flush+shutdown on Drop.
+//! // Install the guard - it will flush+shutdown on Drop.
 //! let _guard = ShutdownGuard::new(Arc::clone(&subsystem));
 //!
 //! // ... run the agent loop ...
@@ -74,7 +74,7 @@ impl ShutdownGuard {
     ///
     /// The subsystem is shared behind an `Arc`: the guard keeps the live
     /// subsystem alive (and flushes *that* instance) even when other handles
-    /// to the same `Arc` are still in scope — which is the normal case when
+    /// to the same `Arc` are still in scope - which is the normal case when
     /// the subsystem is also handed to recorders/processors.
     #[must_use]
     pub fn new(subsystem: Arc<TelemetrySubsystem>) -> Self {
@@ -125,7 +125,7 @@ impl ShutdownGuard {
     #[must_use]
     pub fn into_inner(mut self) -> Arc<TelemetrySubsystem> {
         // Take the Arc out; `Option::take` leaves `None`, which makes the
-        // later `Drop` a no-op — no `ManuallyDrop` dance needed.
+        // later `Drop` a no-op - no `ManuallyDrop` dance needed.
         self.subsystem
             .take()
             .unwrap_or_else(|| Arc::new(TelemetrySubsystem::disabled()))
@@ -162,7 +162,7 @@ impl std::fmt::Debug for ShutdownGuard {
 /// Windows) and calls [`TelemetrySubsystem::flush`] when a signal is
 /// received (FR-019).
 ///
-/// This provides an **early** flush — before the main loop exits and before
+/// This provides an **early** flush - before the main loop exits and before
 /// the [`ShutdownGuard`] runs its `Drop`. The early flush ensures metrics
 /// are delivered even when the process is terminated forcefully (e.g.
 /// `kill -9` after the first SIGINT).
@@ -184,7 +184,7 @@ impl std::fmt::Debug for ShutdownGuard {
 ///
 /// Returns an error if the signal handler cannot be installed (e.g. the
 /// tokio runtime is not available). The signal listener itself never
-/// panics — if the signal stream ends, the task simply exits.
+/// panics - if the signal stream ends, the task simply exits.
 ///
 /// # Examples
 ///
@@ -274,5 +274,3 @@ pub fn flush_on_signal_arc(
 
     Ok(handle)
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────

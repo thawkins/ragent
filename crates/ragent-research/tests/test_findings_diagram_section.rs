@@ -96,9 +96,9 @@ fn assembled_document_contains_findings_relationship_diagram_section() {
     );
 
     // FR-004: one node per finding (F1, F2, F3) with number — headline labels.
-    assert!(assembled.body.contains("F1[\"1 — Root finding\"]"));
-    assert!(assembled.body.contains("F2[\"2 — Child finding\"]"));
-    assert!(assembled.body.contains("F3[\"3 — Sibling finding\"]"));
+    assert!(assembled.body.contains("F1[\"1 - Root finding\"]"));
+    assert!(assembled.body.contains("F2[\"2 - Child finding\"]"));
+    assert!(assembled.body.contains("F3[\"3 - Sibling finding\"]"));
 
     // FR-006: a directed edge exists for the "Builds on Finding 1" dependency.
     assert!(

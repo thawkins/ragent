@@ -3,11 +3,11 @@
 //!
 //! Two third-party manifest dialects are recognised:
 //!
-//! - **Codex** — a directory containing `codex-plugin.json`, a
+//! - **Codex** - a directory containing `codex-plugin.json`, a
 //!   `.codex-plugin/plugin.json` file (the shape the official `openai/plugins`
 //!   catalogue ships), or a `plugin.json` whose top-level body contains a
 //!   `"codex"` marker field.
-//! - **Claude** — a directory containing `claude-plugin.json`, or a
+//! - **Claude** - a directory containing `claude-plugin.json`, or a
 //!   `.claude-plugin/plugin.json` file.
 //!
 //! A directory carrying **both** nested dialect manifests
@@ -16,9 +16,9 @@
 //! manifest per host (for example `mongodb/agent-skills`). Such a directory is
 //! resolved deterministically to the **Claude** dialect, whose manifest supports
 //! every bridged contribution surface (skills, MCP servers, commands, agents,
-//! hooks). Any other both-match — mixed top-level `codex-plugin.json` /
+//! hooks). Any other both-match - mixed top-level `codex-plugin.json` /
 //! `claude-plugin.json`, or a Codex-marked `plugin.json` beside a Claude manifest
-//! — stays ambiguous and is rejected.
+//! - stays ambiguous and is rejected.
 //!
 //! Both dialects are normalised by later tasks (T-003) into the single
 //! [`PluginDescriptor`] model defined here. Manifest sections with no ragent
@@ -127,7 +127,7 @@ pub struct DialectMatch {
 ///
 /// `entries` are the directory's file and subdirectory names (a plain
 /// `read_dir` listing suffices; subdirectory names should be passed with a
-/// trailing path separator stripped, i.e. the plain entry name — subdirectory
+/// trailing path separator stripped, i.e. the plain entry name - subdirectory
 /// files such as `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`
 /// are supplied through `read_entry`). `read_entry` lazily returns the bytes of
 /// a named file, used to inspect `plugin.json`, `.codex-plugin/plugin.json`, and

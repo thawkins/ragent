@@ -19,8 +19,8 @@ use ratatui::{Terminal, backend::TestBackend};
 use ragent_agent::event::EventBus;
 use ragent_agent::message::{Message, MessagePart, Role};
 use ragent_agent::task::{TaskEntry, TaskStatus};
+use ragent_agent::team::{MemberStatus, TeamConfig, TeamMember};
 use ragent_agent::trigger::TriggerRuntime;
-use ragent_team::team::{MemberStatus, TeamConfig, TeamMember};
 
 use ragent_tui::layout::render_messages;
 use ragent_tui::layout_active_agents::render_active_agents_subpanel;

@@ -34,7 +34,7 @@ use ragent_agent::session::history::tool_result_content_for_llm;
 /// payloads pass through unchanged.
 #[test]
 fn test_wait_agents_short_result_passes_through_unchanged() {
-    let content = "2 task(s) completed:\n\n✅ **explore** (task explore-abcd):\nall good\n";
+    let content = "2 task(s) completed:\n\n[ok] **explore** (task explore-abcd):\nall good\n";
     let out = tool_result_content_for_llm("wait_agents", content, None);
     assert_eq!(out.as_ref(), content);
 }
@@ -57,7 +57,7 @@ fn test_wait_agents_long_result_diverts_to_batch_file() {
         );
         let file_path = format!("log/subagents/{task_id}.md");
         content.push_str(&format!(
-            "✅ **explore** (task {task_id}):\n{body}\n📄 Full report: {file_path}\n\n---\n\n"
+            "[ok] **explore** (task {task_id}):\n{body}\n[file] Full report: {file_path}\n\n---\n\n"
         ));
         results.push(json!({
             "task_id": task_id,
@@ -105,7 +105,7 @@ fn test_other_tools_still_truncated_at_12k() {
 /// The exempt path still passes small `list_agents` results through.
 #[test]
 fn test_list_agents_short_result_not_marked() {
-    let content = "task-id | explore | ✅ Completed | yes | 3s | found it |";
+    let content = "task-id | explore | [ok] Completed | yes | 3s | found it |";
     let out = tool_result_content_for_llm("list_agents", content, None);
     assert_eq!(out.as_ref(), content);
     assert!(!out.contains("batch"));

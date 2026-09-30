@@ -122,13 +122,13 @@ fn test_agents_button_area_fits_counted_label() {
 #[test]
 fn test_teams_button_counts_active_members() {
     let mut app = make_app();
-    app.active_team = Some(ragent_team::team::TeamConfig::new("alpha", "lead"));
-    let mut writer = ragent_team::team::TeamMember::new("writer", "tm-001", "general");
-    writer.status = ragent_team::team::MemberStatus::Working;
-    let mut helper = ragent_team::team::TeamMember::new("helper", "tm-002", "general");
-    helper.status = ragent_team::team::MemberStatus::Stopped;
-    let mut third = ragent_team::team::TeamMember::new("third", "tm-003", "general");
-    third.status = ragent_team::team::MemberStatus::Failed;
+    app.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
+    let mut writer = ragent_agent::team::TeamMember::new("writer", "tm-001", "general");
+    writer.status = ragent_agent::team::MemberStatus::Working;
+    let mut helper = ragent_agent::team::TeamMember::new("helper", "tm-002", "general");
+    helper.status = ragent_agent::team::MemberStatus::Stopped;
+    let mut third = ragent_agent::team::TeamMember::new("third", "tm-003", "general");
+    third.status = ragent_agent::team::MemberStatus::Failed;
     app.team_members.push(writer);
     app.team_members.push(helper);
     app.team_members.push(third);
@@ -139,8 +139,8 @@ fn test_teams_button_counts_active_members() {
 #[test]
 fn test_teams_button_spawning_members_counted() {
     let mut app = make_app();
-    app.active_team = Some(ragent_team::team::TeamConfig::new("alpha", "lead"));
-    app.team_members.push(ragent_team::team::TeamMember::new(
+    app.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
+    app.team_members.push(ragent_agent::team::TeamMember::new(
         "writer", "tm-001", "general",
     ));
     let text = render_button_bar(&mut app);

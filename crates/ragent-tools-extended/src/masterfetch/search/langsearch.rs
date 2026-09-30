@@ -13,12 +13,12 @@
 //! The [`build_request_body`] helper maps the shared [`SearchOptions`] to the
 //! LangSearch JSON body:
 //!
-//! - `query` — the search query verbatim.
-//! - `count` — `min(max_results, 10)`, clamped to the 1–10 range supported by
+//! - `query` - the search query verbatim.
+//! - `count` - `min(max_results, 10)`, clamped to the 1-10 range supported by
 //!   the LangSearch API.
-//! - `freshness` — mapped as `Day`→`oneDay`, `Week`→`oneWeek`,
-//!   `Month`→`oneMonth`, `Year`→`oneYear`, `Any`→`noLimit`.
-//! - `summary` — hard-coded to `true` so the API returns its generated summary
+//! - `freshness` - mapped as `Day`->`oneDay`, `Week`->`oneWeek`,
+//!   `Month`->`oneMonth`, `Year`->`oneYear`, `Any`->`noLimit`.
+//! - `summary` - hard-coded to `true` so the API returns its generated summary
 //!   field for each result.
 //!
 //! # Response parsing
@@ -71,9 +71,9 @@ pub const MIN_COUNT: usize = 1;
 ///
 /// # Requirements
 ///
-/// - **FR-001** — LangSearch backend that plugs into the `SearchEngine` trait.
-/// - **FR-003** — translate `SearchOptions` into the LangSearch JSON body.
-/// - **FR-011** — the API key is never logged.
+/// - **FR-001** - LangSearch backend that plugs into the `SearchEngine` trait.
+/// - **FR-003** - translate `SearchOptions` into the LangSearch JSON body.
+/// - **FR-011** - the API key is never logged.
 #[derive(Debug, Clone)]
 pub struct LangSearchEngine {
     /// LangSearch API key (`Authorization: Bearer {api_key}`).
@@ -204,9 +204,9 @@ impl SearchEngine for LangSearchEngine {
 /// The returned [`serde_json::Value`] contains:
 ///
 /// - `query`
-/// - `count` — clamped to 1–10
-/// - `freshness` — mapped from [`Freshness`]
-/// - `summary` — `true`
+/// - `count` - clamped to 1-10
+/// - `freshness` - mapped from [`Freshness`]
+/// - `summary` - `true`
 ///
 /// # Examples
 ///

@@ -244,7 +244,7 @@ impl BackgroundCommand {
             inner.cancelled = true;
             if let Some(child) = inner.child.as_mut() {
                 // `start_kill` sends the signal without awaiting.
-                let _ = child.start_kill();
+                let _ = child.start_kill(); // INTENTIONAL: process teardown is best-effort
             }
             // R-9: Wake the waiter task so it stops blocking on `child.wait()`
             // and can observe the killed process exiting.
@@ -370,7 +370,7 @@ impl BackgroundCommand {
             }
         });
 
-        let _ = tokio::join!(stdout_handle, stderr_handle);
+        let _ = tokio::join!(stdout_handle, stderr_handle); // INTENTIONAL: wait for both stream readers to finish
         debug!(%task_id, "Background command reader task finished");
     }
 
@@ -455,7 +455,7 @@ impl BackgroundCommand {
             } else {
                 // Drop the oldest `overflow` bytes. Using `drain(..overflow)`
                 // is O(overflow) and shifts the remainder once, whereas
-                // `replace_range` was O(buffer.len()) per call (O(n²) overall
+                // `replace_range` was O(buffer.len()) per call (O(n^2) overall
                 // when trimming repeatedly under a high-output command).
                 new_dropped = new_dropped.saturating_add(overflow);
                 buffer.drain(..overflow);
@@ -494,10 +494,10 @@ impl BackgroundCommand {
                         break status.ok();
                     }
                     // R-9: cancel() called start_kill() and notified us. Kill
-                    // if not already killed, then keep waiting — `child.wait()`
+                    // if not already killed, then keep waiting - `child.wait()`
                     // will return once the killed process exits.
                     _ = cancel_notify.notified() => {
-                        let _ = child.start_kill();
+                        let _ = child.start_kill();  // INTENTIONAL: process teardown is best-effort
                     }
                 }
             }

@@ -13,7 +13,7 @@ use ragent_specs::spec::TaskStatus;
 #[test]
 fn test_full_parse_and_order() {
     let md = r"
-# SpecImpl — Implementation Plan
+# SpecImpl - Implementation Plan
 
 ## Architecture
 
@@ -23,7 +23,7 @@ Some architecture text.
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |---|---|---|---|---|---|
-| T-001 | Define types | FR-003, FR-004 | S | Critical | — |
+| T-001 | Define types | FR-003, FR-004 | S | Critical | - |
 | T-002 | Build parser | FR-003, FR-004 | M | Critical | T-001 |
 | T-003 | DAG sort | FR-005, FR-006 | M | Critical | T-001 |
 | T-004 | Status column | FR-019 | M | High | T-002 |
@@ -32,7 +32,7 @@ Some architecture text.
 
 ## Task Details
 
-### T-001 — Define PlanTask Struct
+### T-001 - Define PlanTask Struct
 
 Details here.
 ";
@@ -80,7 +80,7 @@ fn test_resume_from_partial_completion() {
 
 | ID | Title | Requirement | Effort | Priority | Status | Dependencies |
 |---|---|---|---|---|---|---|
-| T-001 | Define types | FR-003 | S | Critical | completed | — |
+| T-001 | Define types | FR-003 | S | Critical | completed | - |
 | T-002 | Build parser | FR-004 | M | Critical | completed | T-001 |
 | T-003 | DAG sort | FR-005 | M | Critical | pending | T-001 |
 | T-004 | Status column | FR-019 | M | High | pending | T-002 |
@@ -97,7 +97,7 @@ fn test_resume_from_partial_completion() {
 
     // T-001 and T-002 are completed and skipped.
     // T-003, T-004 and T-005 remain in topological order even if some
-    // dependencies are still pending — the sequential driver will stop on any
+    // dependencies are still pending - the sequential driver will stop on any
     // blocked task before its dependents run.
     assert_eq!(resumed.len(), 3);
     let ids: Vec<&str> = resumed.iter().map(|&i| tasks[i].id.as_str()).collect();
@@ -134,7 +134,7 @@ fn test_dependency_range_schedules_verify_task_last() {
     );
     for n in 1..=14 {
         md.push_str(&format!(
-            "| T-{n:03} | Task {n} | FR-{n:03} | S | High | pending | — |\n"
+            "| T-{n:03} | Task {n} | FR-{n:03} | S | High | pending | - |\n"
         ));
     }
     md.push_str("| T-015 | Verify | NFR-002 | M | High | pending | T-001\u{2013}T-014 |\n");
@@ -163,7 +163,7 @@ fn test_dependency_range_dash_variants_and_commas() {
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |---|---|---|---|---|---|
-| T-001 | A | FR-001 | S | High | — |
+| T-001 | A | FR-001 | S | High | - |
 | T-002 | B | FR-002 | S | High | T-001 |
 | T-003 | C | FR-003 | S | High | T-001 |
 | T-004 | D | FR-004 | S | High | T-001–T-003, T-002 |
@@ -194,7 +194,7 @@ fn test_dependency_range_descending_and_malformed_pass_through() {
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |---|---|---|---|---|---|
-| T-001 | A | FR-001 | S | High | — |
+| T-001 | A | FR-001 | S | High | - |
 | T-002 | B | FR-002 | S | High | T-001 |
 | T-003 | C | FR-003 | S | High | T-005–T-002 |
 | T-004 | D | FR-004 | S | High | T-001, not-an-id |
@@ -219,7 +219,7 @@ fn test_dependency_range_word_forms() {
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |---|---|---|---|---|---|
-| T-001 | A | FR-001 | S | High | — |
+| T-001 | A | FR-001 | S | High | - |
 | T-002 | B | FR-002 | S | High | T-001 |
 | T-003 | C | FR-003 | S | High | T-001 through T-002 |
 | T-004 | D | FR-004 | S | High | T-002 to T-003 |
@@ -268,7 +268,7 @@ fn test_parse_impl_args_all_variants() {
 #[test]
 fn test_progress_and_completion_messages() {
     let progress = build_progress_update("MySpec", "T-001", 3, 12, Some("T-002"));
-    assert!(progress.contains("✅ T-001"));
+    assert!(progress.contains("[ok] T-001"));
     assert!(progress.contains("3/12"));
     assert!(progress.contains("Next: T-002"));
 
@@ -277,16 +277,16 @@ fn test_progress_and_completion_messages() {
     assert!(!progress_last.contains("Next"));
 
     let completion = build_completion_summary("MySpec", 12);
-    assert!(completion.contains("🎉"));
+    assert!(completion.contains("[done]"));
     assert!(completion.contains("implemented"));
 
     let cancel = build_cancellation_summary("MySpec", 5, 12);
-    assert!(cancel.contains("⚠️"));
+    assert!(cancel.contains("[!]"));
     assert!(cancel.contains("5/12"));
     assert!(cancel.contains("in_progress"));
 
     let blocked = build_blocked_summary("T-003", &["T-005".into(), "T-007".into()]);
-    assert!(blocked.contains("🚫"));
+    assert!(blocked.contains("[blocked]"));
     assert!(blocked.contains("T-003"));
     assert!(blocked.contains("T-005"));
 }
@@ -430,7 +430,7 @@ fn test_build_single_task_prompt_independent_of_dependencies() {
 
     let p1 = SpecImplRunner::build_single_task_prompt(&task_no_deps, "s", 1, 1);
     let p2 = SpecImplRunner::build_single_task_prompt(&task_with_deps, "s", 1, 1);
-    // The per-task prompt is identical regardless of dependencies — the
+    // The per-task prompt is identical regardless of dependencies - the
     // driver only guarantees the task's own deps are already completed by
     // the time it is dispatched.
     assert_eq!(p1, p2);
@@ -446,7 +446,7 @@ fn test_dependency_range_capped_at_max_expansion() {
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |---|---|---|---|---|---|
-| T-001 | A | FR-001 | S | High | — |
+| T-001 | A | FR-001 | S | High | - |
 | T-002 | B | FR-002 | S | High | T-001–T-99999999 |
 ";
     let tasks = PlanParser::parse(md).unwrap();

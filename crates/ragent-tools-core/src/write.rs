@@ -21,8 +21,8 @@ impl Tool for WriteTool {
     }
     fn description(&self) -> &'static str {
         "Write content to a file, creating parent directories if needed. \
-           Required parameters: `path` (string) — the destination file, and \
-           `content` (string) — the content to write. If the file already exists, \
+           Required parameters: `path` (string) - the destination file, and \
+           `content` (string) - the content to write. If the file already exists, \
            it is overwritten in full. To append without overwriting, use \
            `append_to_file`; to create only when the file does not exist, use \
            `create`. The path must stay within the agent's working-directory root."

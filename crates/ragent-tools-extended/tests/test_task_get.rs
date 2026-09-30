@@ -483,7 +483,7 @@ async fn test_task_get_completed_status() {
         "content: {}",
         out.content
     );
-    assert!(out.content.contains("✅"), "content: {}", out.content);
+    assert!(out.content.contains("[ok]"), "content: {}", out.content);
 }
 
 /// In-progress status should display correctly.
@@ -504,7 +504,11 @@ async fn test_task_get_in_progress_status() {
         "content: {}",
         out.content
     );
-    assert!(out.content.contains("🔄"), "content: {}", out.content);
+    assert!(
+        out.content.contains("[refresh]"),
+        "content: {}",
+        out.content
+    );
 }
 
 // ── Registry registration ───────────────────────────────────────────

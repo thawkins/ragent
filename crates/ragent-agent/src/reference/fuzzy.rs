@@ -109,7 +109,7 @@ pub fn collect_project_files(working_dir: &Path, max: usize) -> Vec<PathBuf> {
     walk_dir(working_dir, working_dir, &mut files, MAX_PROJECT_FILES);
 
     // Take the truncated subset for the caller before moving the full list
-    // into the cache.  This avoids cloning up to 10 000 PathBufs — we only
+    // into the cache.  This avoids cloning up to 10 000 PathBufs - we only
     // clone the `limit` items the caller actually needs.
     let result: Vec<PathBuf> = files.iter().take(limit).cloned().collect();
 

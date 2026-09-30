@@ -1,4 +1,4 @@
-//! `git_tag` — List, show, create, and delete tags.
+//! `git_tag` - List, show, create, and delete tags.
 
 use anyhow::Result;
 use serde_json::{Value, json};

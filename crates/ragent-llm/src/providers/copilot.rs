@@ -33,6 +33,7 @@ use std::sync::Mutex;
 use super::thinking::{reasoning_effort_from_request, reasoning_levels_from_supported_efforts};
 use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::event::FinishReason;
@@ -56,6 +57,10 @@ const COPILOT_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
 
 /// Safety margin (seconds) before considering a cached session token expired.
 const TOKEN_EXPIRY_BUFFER_SECS: i64 = 60;
+
+/// Fallback context window (tokens) for a Copilot model whose API entry does
+/// not declare `max_context_window_tokens` (ANTIPAT M6.10).
+const DEFAULT_CONTEXT_WINDOW: usize = 128_000;
 
 /// Premium request multipliers for GitHub Copilot models (paid plans).
 /// Source: https://docs.github.com/en/copilot/concepts/billing/copilot-requests
@@ -252,6 +257,11 @@ impl Provider for CopilotProvider {
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
         let auth = resolve_copilot_auth(api_key, base_url).await?;
+        // ANTIPAT 3.6: register the resolved session token (and the caller's
+        // token) with the shared redaction registry so any text passed through
+        // `redact_secrets` masks it.
+        ragent_types::sanitize::register_secret(api_key);
+        ragent_types::sanitize::register_secret(&auth.token);
         let url = auth.base_url.trim_end_matches('/').to_string();
         let client = CopilotClient {
             token: auth.token,
@@ -322,7 +332,7 @@ impl CopilotClient {
                     if content_parts.len() == 1
                         && content_parts[0].get("type").and_then(|t| t.as_str()) == Some("text")
                     {
-                        // Single plain-text part — collapse to a bare string for compatibility.
+                        // Single plain-text part - collapse to a bare string for compatibility.
                         content_parts[0]["text"].clone()
                     } else {
                         json!(content_parts)
@@ -425,8 +435,8 @@ impl LlmClient for CopilotClient {
     /// Sends a streaming chat completion request to GitHub Copilot.
     ///
     /// Adapts the URL path based on the base URL:
-    /// - GitHub Models API → `/chat/completions`
-    /// - Copilot individual/default API → `/chat/completions`
+    /// - GitHub Models API -> `/chat/completions`
+    /// - Copilot individual/default API -> `/chat/completions`
     async fn chat(
         &self,
         request: ChatRequest,
@@ -436,7 +446,9 @@ impl LlmClient for CopilotClient {
         let body = self.build_request_body(&request, &request.tools);
         let body_bytes = serde_json::to_vec(&body).context("serialise Copilot request body")?;
 
-        let timeout_secs = request.stream_timeout_secs.unwrap_or(600);
+        let timeout_secs = request
+            .stream_timeout_secs
+            .unwrap_or(super::http_client::DEFAULT_STREAM_TIMEOUT_SECS);
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
             self.http
@@ -457,20 +469,22 @@ impl LlmClient for CopilotClient {
         )
         .await
         .inspect_err(|e| {
-            tracing::warn!(url = %url, error = %e, "Copilot chat request timed out");
+            tracing::warn!(provider = "copilot", url = %url, error = %e, "chat request timed out");
         })
         .map_err(|_| {
             anyhow::anyhow!("HTTP 408: Copilot API request timed out after {timeout_secs}s")
         })?
         .inspect_err(|e| {
-            tracing::warn!(url = %url, error = %e, "Copilot chat request failed");
+            tracing::warn!(provider = "copilot", url = %url, error = %e, "chat request failed");
         })
         .with_context(|| format!("Failed to connect to GitHub Copilot API at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
-            let error_body = response.text().await.unwrap_or_default();
-            tracing::error!(url = %url, status = %status, body = %error_body, "Copilot chat error"); // Extract a clean message from the JSON error response if possible.
+            // ANTIPAT 3.1/3.2: capped error-body read.
+            let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
+            tracing::error!(provider = "copilot", url = %url, status = %status, body = %error_body, "chat error");
             // Prefix with "HTTP {code}: " so callers can classify transient vs permanent.
+            // Extract a clean message from the JSON error response if possible.
             let detail = parse_api_error_message(&error_body).unwrap_or_else(|| status.to_string());
             bail!("HTTP {}: {}", status.as_u16(), detail);
         }
@@ -513,7 +527,7 @@ impl LlmClient for CopilotClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "Copilot: stream stalled — no data received for {}s",
+                                "Copilot: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -557,7 +571,15 @@ impl LlmClient for CopilotClient {
 
                     let parsed: Value = match serde_json::from_str(data) {
                         Ok(v) => v,
-                        Err(_) => continue,
+                        Err(e) => {
+                            // FUNC-032 (ANTIPAT 3.3): log the dropped frame.
+                            tracing::warn!(
+                                error = %e,
+                                frame = %data,
+                                "Copilot: dropping malformed SSE data frame"
+                            );
+                            continue;
+                        }
                     };
 
                     // Usage info
@@ -716,8 +738,8 @@ pub fn is_pat_token(token: &str) -> bool {
 
 /// Resolves a Copilot-compatible GitHub token from all available sources.
 ///
-/// Priority: env var → IDE auto-discover → database.
-/// The `gh` CLI (`gh auth token`) is intentionally **not** consulted — that
+/// Priority: env var -> IDE auto-discover -> database.
+/// The `gh` CLI (`gh auth token`) is intentionally **not** consulted - that
 /// authentication path has been disabled.
 ///
 /// Returns `None` if no valid token is found.
@@ -749,7 +771,7 @@ pub fn resolve_copilot_github_token(
         return Some(token);
     }
     // 3. Database (if provided)
-    //    The `gh` CLI path was removed — only explicit credential sources
+    //    The `gh` CLI path was removed - only explicit credential sources
     //    (env var, IDE config, secure storage) are used.
     if let Some(lookup) = db_lookup
         && let Some(token) = lookup()
@@ -832,7 +854,8 @@ pub async fn start_copilot_device_flow() -> Result<DeviceFlowStart> {
         .context("Failed to start Copilot device flow")?;
 
     if !resp.status().is_success() {
-        let body = resp.text().await.unwrap_or_default();
+        // ANTIPAT 3.1/3.2: capped error-body read.
+        let body = read_body_capped(resp, MAX_ERROR_BODY_BYTES).await;
         bail!("Device flow initiation failed: {body}");
     }
 
@@ -849,9 +872,9 @@ pub async fn start_copilot_device_flow() -> Result<DeviceFlowStart> {
 ///
 /// # Returns
 ///
-/// - `Ok(Some(token))` — user authorised, token is ready
-/// - `Ok(None)` — user hasn't authorised yet, keep polling
-/// - `Err(...)` — the code expired, was denied, or a network error occurred
+/// - `Ok(Some(token))` - user authorised, token is ready
+/// - `Ok(None)` - user hasn't authorised yet, keep polling
+/// - `Err(...)` - the code expired, was denied, or a network error occurred
 ///
 /// # Examples
 ///
@@ -892,7 +915,7 @@ pub async fn poll_copilot_device_flow(device_code: &str) -> Result<Option<String
 
     let body: Value = resp.json().await.context("Failed to parse poll response")?;
 
-    // Success → token granted
+    // Success -> token granted
     if let Some(token) = body.get("access_token").and_then(|t| t.as_str()) {
         return Ok(Some(token.to_string()));
     }
@@ -964,7 +987,8 @@ async fn try_copilot_token_exchange(github_token: &str) -> Result<TokenExchangeR
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_body = response.text().await.unwrap_or_default();
+        // ANTIPAT 3.1/3.2: capped error-body read.
+        let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
         bail!("Copilot token exchange failed (HTTP {status}): {error_body}");
     }
 
@@ -1067,7 +1091,7 @@ pub async fn resolve_copilot_auth(
 }
 
 /// Tries to discover the plan-specific Copilot API base URL using the
-/// given token.  The `gh` CLI fallback was removed — only the primary
+/// given token.  The `gh` CLI fallback was removed - only the primary
 /// token is used for discovery.
 async fn discover_api_base_multi_source(primary_token: &str) -> Option<String> {
     discover_copilot_api_base(primary_token).await
@@ -1374,7 +1398,7 @@ fn plan_label_from_api_base(api_base: &str) -> String {
 /// After the first successful token exchange the plan-specific API base URL
 /// is cached in [`SESSION_TOKEN_CACHE`].  This function reads that cache
 /// synchronously and infers the plan from the hostname
-/// (e.g. `api.individual.githubcopilot.com` → `"Pro"`).  Returns `None`
+/// (e.g. `api.individual.githubcopilot.com` -> `"Pro"`).  Returns `None`
 /// before any session token has been exchanged.
 ///
 /// # Examples
@@ -1461,11 +1485,11 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
             let limits = caps.and_then(|c| c.limits.as_ref());
             let supports = caps.and_then(|c| c.supports.as_ref());
 
-            let context_window = limits.map_or(128_000, |l| {
+            let context_window = limits.map_or(DEFAULT_CONTEXT_WINDOW, |l| {
                 if l.max_context_window_tokens > 0 {
                     l.max_context_window_tokens
                 } else {
-                    128_000
+                    DEFAULT_CONTEXT_WINDOW
                 }
             });
             let max_output = limits.map(|l| l.max_output_tokens).filter(|&t| t > 0);
@@ -1530,355 +1554,5 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::llm::{ChatContent, ChatMessage, ChatRequest};
-    use std::sync::Arc;
-
-    #[test]
-    fn test_provider_defaults() {
-        let provider = CopilotProvider::new();
-        assert_eq!(provider.id(), "copilot");
-        assert_eq!(provider.name(), "GitHub Copilot");
-        assert!(
-            provider.default_models().is_empty(),
-            "Copilot default_models should be empty; models are discovered at runtime"
-        );
-    }
-
-    #[test]
-    #[allow(clippy::used_underscore_binding)]
-    fn test_with_custom_url() {
-        let provider = CopilotProvider::with_url("https://proxy.example.com/");
-        assert_eq!(provider._base_url, "https://proxy.example.com");
-    }
-
-    #[test]
-    fn test_models_are_free() {
-        let provider = CopilotProvider::new();
-        for m in provider.default_models() {
-            assert!(m.cost.input.abs() < f64::EPSILON);
-            assert!(m.cost.output.abs() < f64::EPSILON);
-        }
-    }
-
-    #[test]
-    fn test_format_request_multiplier_trims_trailing_zeroes() {
-        assert_eq!(format_request_multiplier(1.0), "1");
-        assert_eq!(format_request_multiplier(1.5), "1.5");
-        assert_eq!(format_request_multiplier(0.25), "0.25");
-    }
-
-    #[test]
-    fn test_request_multiplier_prefers_pricing_block() {
-        let entry = CopilotModelEntry {
-            id: "x".to_string(),
-            name: None,
-            model_picker_enabled: true,
-            vendor: None,
-            pricing: Some(CopilotModelPricing {
-                request_cost: Some(2.0),
-            }),
-            request_cost: Some(1.0),
-            request_cost_multiplier: None,
-            premium_request_multiplier: None,
-            multiplier: None,
-            supported_endpoints: None,
-            api: None,
-            capabilities: None,
-        };
-        assert_eq!(entry.request_multiplier(), Some(2.0));
-    }
-
-    #[test]
-    fn test_request_multiplier_ignores_invalid_values() {
-        let entry = CopilotModelEntry {
-            id: "x".to_string(),
-            name: None,
-            model_picker_enabled: true,
-            vendor: None,
-            pricing: None,
-            request_cost: Some(0.0),
-            request_cost_multiplier: Some(f64::NAN),
-            premium_request_multiplier: Some(-1.0),
-            multiplier: None,
-            supported_endpoints: None,
-            api: None,
-            capabilities: None,
-        };
-        assert_eq!(entry.request_multiplier(), None);
-    }
-
-    #[test]
-    fn test_supports_chat_completions_uses_endpoint_metadata() {
-        let entry = CopilotModelEntry {
-            id: "gpt-5.3-codex".to_string(),
-            name: None,
-            model_picker_enabled: true,
-            vendor: None,
-            pricing: None,
-            request_cost: None,
-            request_cost_multiplier: None,
-            premium_request_multiplier: None,
-            multiplier: None,
-            supported_endpoints: Some(vec!["/chat/completions".to_string()]),
-            api: None,
-            capabilities: None,
-        };
-        assert!(entry.supports_chat_completions());
-    }
-
-    #[test]
-    fn test_supports_chat_completions_filters_codex_without_metadata() {
-        let entry = CopilotModelEntry {
-            id: "gpt-5.3-codex".to_string(),
-            name: None,
-            model_picker_enabled: true,
-            vendor: None,
-            pricing: None,
-            request_cost: None,
-            request_cost_multiplier: None,
-            premium_request_multiplier: None,
-            multiplier: None,
-            supported_endpoints: None,
-            api: None,
-            capabilities: None,
-        };
-        assert!(!entry.supports_chat_completions());
-    }
-
-    #[test]
-    fn test_reasoning_effort_from_options_accepts_levels() {
-        let mk = |v: &str| {
-            let mut request = ChatRequest {
-                model: "o3-mini".to_string(),
-                messages: Arc::new(vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: ChatContent::Text("hello".to_string()),
-                }]),
-                tools: Arc::new(vec![]),
-                temperature: None,
-                top_p: None,
-                max_tokens: None,
-                system: None,
-                options: HashMap::new(),
-                session_id: None,
-                request_id: None,
-                stream_timeout_secs: None,
-                thinking: None,
-            };
-            request
-                .options
-                .insert("reasoning_effort".to_string(), json!(v));
-            request
-        };
-        assert_eq!(reasoning_effort_from_request(&mk("low")), Some("low"));
-        assert_eq!(reasoning_effort_from_request(&mk("medium")), Some("medium"));
-        assert_eq!(reasoning_effort_from_request(&mk("high")), Some("high"));
-    }
-
-    #[test]
-    fn test_reasoning_effort_from_options_alias_and_invalid() {
-        let mut alias = HashMap::new();
-        alias.insert("reasoning_level".to_string(), json!("HIGH"));
-        let alias_request = ChatRequest {
-            model: "o3-mini".to_string(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }]),
-            tools: Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            system: None,
-            options: alias,
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: None,
-        };
-        assert_eq!(reasoning_effort_from_request(&alias_request), Some("high"));
-
-        let mut invalid_options = HashMap::new();
-        invalid_options.insert("reasoning_effort".to_string(), json!("turbo"));
-        let invalid_request = ChatRequest {
-            model: "o3-mini".to_string(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }]),
-            tools: Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            system: None,
-            options: invalid_options,
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: None,
-        };
-        assert_eq!(reasoning_effort_from_request(&invalid_request), None);
-    }
-
-    #[test]
-    fn test_reasoning_effort_prefers_typed_thinking() {
-        let mut request = ChatRequest {
-            model: "o3-mini".to_string(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }]),
-            tools: Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            system: None,
-            options: HashMap::new(),
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: Some(ragent_types::ThinkingConfig::new(
-                ragent_types::ThinkingLevel::High,
-            )),
-        };
-        request
-            .options
-            .insert("reasoning_effort".to_string(), json!("low"));
-
-        assert_eq!(reasoning_effort_from_request(&request), Some("high"));
-    }
-
-    #[test]
-    fn test_build_request_body_applies_reasoning_effort() {
-        let client = CopilotClient {
-            token: "x".to_string(),
-            base_url: "https://api.githubcopilot.com".to_string(),
-            http: crate::provider::http_client::create_http_client(),
-        };
-        let mut options = HashMap::new();
-        options.insert("reasoning_effort".to_string(), json!("medium"));
-        let req = ChatRequest {
-            model: "o3-mini".to_string(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }]),
-            tools: Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            system: None,
-            options,
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: None,
-        };
-
-        let body = client.build_request_body(&req, &[]);
-        assert_eq!(body["reasoning_effort"], json!("medium"));
-    }
-
-    #[test]
-    fn test_build_request_body_thinking_disabled_fallback() {
-        let client = CopilotClient {
-            token: "x".to_string(),
-            base_url: "https://api.githubcopilot.com".to_string(),
-            http: crate::provider::http_client::create_http_client(),
-        };
-        let mut options = HashMap::new();
-        options.insert("thinking".to_string(), json!("disabled"));
-        let req = ChatRequest {
-            model: "gpt-4o".to_string(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }]),
-            tools: Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            system: None,
-            options,
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: None,
-        };
-
-        let body = client.build_request_body(&req, &[]);
-        assert_eq!(body["reasoning_effort"], json!("none"));
-    }
-
-    #[test]
-    fn test_build_request_body_reasoning_effort_overrides_thinking_toggle() {
-        let client = CopilotClient {
-            token: "x".to_string(),
-            base_url: "https://api.githubcopilot.com".to_string(),
-            http: crate::provider::http_client::create_http_client(),
-        };
-        let mut options = HashMap::new();
-        options.insert("reasoning_effort".to_string(), json!("high"));
-        options.insert("thinking".to_string(), json!("disabled"));
-        let req = ChatRequest {
-            model: "o3-mini".to_string(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }]),
-            tools: Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            system: None,
-            options,
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: None,
-        };
-
-        let body = client.build_request_body(&req, &[]);
-        assert_eq!(body["reasoning_effort"], json!("high"));
-    }
-
-    #[test]
-    fn test_copilot_premium_multiplier_table() {
-        // Included models (0x)
-        assert_eq!(copilot_premium_multiplier("gpt-4o"), Some(0.0));
-        assert_eq!(copilot_premium_multiplier("GPT-4o"), Some(0.0)); // case insensitive
-        assert_eq!(copilot_premium_multiplier("gpt-4.1"), Some(0.0));
-        assert_eq!(copilot_premium_multiplier("gpt-5-mini"), Some(0.0));
-
-        // Low-cost models (0.25x - 0.33x)
-        assert_eq!(copilot_premium_multiplier("claude-haiku-4.5"), Some(0.33));
-        assert_eq!(copilot_premium_multiplier("gemini-3-flash"), Some(0.33));
-        assert_eq!(copilot_premium_multiplier("grok-code-fast-1"), Some(0.25));
-
-        // Standard models (1x)
-        assert_eq!(copilot_premium_multiplier("claude-sonnet-4"), Some(1.0));
-        assert_eq!(copilot_premium_multiplier("gemini-2.5-pro"), Some(1.0));
-
-        // High-cost models (3x)
-        assert_eq!(copilot_premium_multiplier("claude-opus-4.5"), Some(3.0));
-        assert_eq!(copilot_premium_multiplier("claude-opus-4.6"), Some(3.0));
-
-        // Very high-cost models
-        assert_eq!(copilot_premium_multiplier("claude-opus-4.7"), Some(7.5));
-
-        // Fallback pattern matching
-        assert_eq!(
-            copilot_premium_multiplier("claude-3-sonnet-latest"),
-            Some(1.0)
-        ); // contains "sonnet"
-        assert_eq!(
-            copilot_premium_multiplier("claude-3-haiku-latest"),
-            Some(0.33)
-        ); // contains "haiku"
-
-        // Unknown models return None
-        assert_eq!(copilot_premium_multiplier("unknown-model"), None);
-    }
-}
+#[path = "../tests/inline/copilot_tests.rs"]
+mod tests;

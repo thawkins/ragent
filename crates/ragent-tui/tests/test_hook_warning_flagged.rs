@@ -79,7 +79,7 @@ async fn test_hook_warning_long_stderr_is_truncated_safely_in_status() {
     // The status toast must be truncated to keep the status bar readable.
     assert!(app.status.len() < long_reason.len() + 20);
     assert!(
-        app.status.ends_with('…'),
+        app.status.ends_with("..."),
         "status should truncate long reason with ellipsis, got: {}",
         app.status
     );

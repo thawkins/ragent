@@ -1,6 +1,6 @@
 //! Trigger system configuration (spec `piegap` FR-002, FR-003).
 //!
-//! Configuration for the dynamic trigger rule system — poll interval, feature
+//! Configuration for the dynamic trigger rule system - poll interval, feature
 //! gate, and maximum rules per session. Also defines the MCP notification
 //! injection mode (`inject_summary` / `inject_and_run`) used by the MCP
 //! notification push-event adapter (FR-003).
@@ -29,7 +29,7 @@ use std::time::Duration;
 pub struct TriggerConfig {
     /// Master feature gate for the trigger system. When `false`, all trigger
     /// functionality no-ops cleanly (FR-016). Default: `true`.
-    #[serde(default = "default_trigger_enabled")]
+    #[serde(default = "crate::config::default_true")]
     pub enabled: bool,
     /// Interval at which dynamic trigger rules poll their conditions.
     /// Default: 30 seconds (FR-002 "configurable interval").
@@ -44,7 +44,7 @@ pub struct TriggerConfig {
 impl Default for TriggerConfig {
     fn default() -> Self {
         Self {
-            enabled: default_trigger_enabled(),
+            enabled: crate::config::default_true(),
             poll_interval_secs: default_poll_interval_secs(),
             max_rules: default_max_rules(),
         }
@@ -64,14 +64,17 @@ impl TriggerConfig {
 
     /// Returns `true` when the config is at default values (nothing configured).
     pub fn is_empty(&self) -> bool {
-        self.enabled == default_trigger_enabled()
+        self.enabled == crate::config::default_true()
             && self.poll_interval_secs == default_poll_interval_secs()
             && self.max_rules == default_max_rules()
     }
-}
 
-fn default_trigger_enabled() -> bool {
-    true
+    /// Canonical name for "at defaults"; equivalent to
+    /// [`TriggerConfig::is_empty`] (ANTIPAT L-4).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.is_empty()
+    }
 }
 
 fn default_poll_interval_secs() -> u64 {

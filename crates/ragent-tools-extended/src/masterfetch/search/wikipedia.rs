@@ -6,7 +6,7 @@
 //! This module provides a [`WikipediaEngine`] that implements the
 //! [`SearchEngine`] trait by calling the [Wikipedia REST API](https://en.wikipedia.org/api/rest_v1/)
 //! page/summary endpoint. Wikipedia is a free, open encyclopedia and the REST
-//! API is **unauthenticated** — no API key is required. The backend is
+//! API is **unauthenticated** - no API key is required. The backend is
 //! therefore keyless, like `OpenAlex`.
 //!
 //! # Two-step query flow
@@ -15,10 +15,10 @@
 //! so the engine resolves the user's query to candidate page titles before
 //! fetching summaries:
 //!
-//! 1. **Title resolution** — a `GET` to the MediaWiki Action API
-//!    (`https://en.wikipedia.org/w/api.php?action=query&list=search&…`)
+//! 1. **Title resolution** - a `GET` to the MediaWiki Action API
+//!    (`https://en.wikipedia.org/w/api.php?action=query&list=search&...`)
 //!    returns the top-N matching page titles for the query.
-//! 2. **Summary fetch** — for each resolved title, a `GET` to
+//! 2. **Summary fetch** - for each resolved title, a `GET` to
 //!    `https://en.wikipedia.org/api/rest_v1/page/summary/{title}` returns the
 //!    page summary JSON (`title`, `extract`, `content_urls.desktop.page`,
 //!    optional `description`, optional `thumbnail.source`).
@@ -108,18 +108,18 @@ pub const MAX_QUERY_CHARS: usize = 1_000;
 /// Implements [`SearchEngine`] using a two-step flow: resolve the query to
 /// candidate page titles via the MediaWiki Action API, then fetch a
 /// page/summary for each title via the Wikipedia REST API. No API key is
-/// required — the backend is keyless and always-on (FR-003).
+/// required - the backend is keyless and always-on (FR-003).
 ///
 /// The HTTP client is injectable for testing; when `None`, the shared
 /// masterfetch client from [`crate::masterfetch::http`] is used.
 ///
 /// # Requirements
 ///
-/// - **FR-002** — Wikipedia backend that plugs into the `SearchEngine` trait.
-/// - **FR-009** — result fields (`source`, `url`, `snippet`) populated per
+/// - **FR-002** - Wikipedia backend that plugs into the `SearchEngine` trait.
+/// - **FR-009** - result fields (`source`, `url`, `snippet`) populated per
 ///   spec.
-/// - **NFR-001** — uses the shared HTTP client timeout.
-/// - **NFR-004** — no `unsafe` code, no `.unwrap()` on user-facing paths.
+/// - **NFR-001** - uses the shared HTTP client timeout.
+/// - **NFR-004** - no `unsafe` code, no `.unwrap()` on user-facing paths.
 #[derive(Debug, Clone)]
 pub struct WikipediaEngine {
     /// Optional injectable HTTP client (for testing).
@@ -144,11 +144,7 @@ impl WikipediaEngine {
 
     /// Return the HTTP client to use for this engine.
     fn get_client(&self) -> Result<reqwest::Client, String> {
-        if let Some(ref c) = self.client {
-            return Ok(c.clone());
-        }
-        crate::masterfetch::http::build_default_client()
-            .map_err(|e| format!("failed to build HTTP client: {e}"))
+        super::engine::engine_http_client(&self.client)
     }
 }
 
@@ -230,7 +226,13 @@ impl SearchEngine for WikipediaEngine {
             );
         }
 
-        let text = match response.text().await {
+        // ANTIPAT 4.1: bound the response body.
+        let text = match crate::masterfetch::http::read_body_capped(
+            response,
+            crate::masterfetch::http::MAX_RESPONSE_BODY_BYTES,
+        )
+        .await
+        {
             Ok(t) => t,
             Err(e) => {
                 return EngineReport::error(
@@ -330,14 +332,14 @@ impl SearchEngine for WikipediaEngine {
 /// Maps the shared [`SearchOptions`] to the Action API `list=search`
 /// parameters:
 ///
-/// - `action` — `query`
-/// - `list` — `search`
-/// - `srsearch` — the trimmed query, capped at [`MAX_QUERY_CHARS`] chars.
-/// - `srlimit` — `opts.max_results` clamped to 1–500 (FR-005).
-/// - `srprop` — `snippet` (so the search step returns a snippet for
+/// - `action` - `query`
+/// - `list` - `search`
+/// - `srsearch` - the trimmed query, capped at [`MAX_QUERY_CHARS`] chars.
+/// - `srlimit` - `opts.max_results` clamped to 1-500 (FR-005).
+/// - `srprop` - `snippet` (so the search step returns a snippet for
 ///   fallback).
-/// - `format` — `json`
-/// - `origin` — `*` (CORS header for cross-origin requests).
+/// - `format` - `json`
+/// - `origin` - `*` (CORS header for cross-origin requests).
 ///
 /// # Examples
 ///
@@ -377,7 +379,7 @@ pub fn build_search_request(query: &str, opts: &SearchOptions) -> (String, Vec<(
 /// Parse the MediaWiki Action API `list=search` JSON response into a list of
 /// candidate page titles.
 ///
-/// Expects the shape `{ "query": { "search": [ { "title": "…" }, … ] } }`.
+/// Expects the shape `{ "query": { "search": [ { "title": "..." }, ... ] } }`.
 /// Entries without a `title` field are skipped.
 ///
 /// # Examples
@@ -452,11 +454,11 @@ pub fn build_summary_url(title: &str) -> String {
 /// Expects the shape returned by `GET /page/summary/{title}`:
 /// ```json
 /// {
-///   "title": "…",
-///   "extract": "…",
-///   "description": "…",
-///   "content_urls": { "desktop": { "page": "https://…" } },
-///   "thumbnail": { "source": "https://…" }
+///   "title": "...",
+///   "extract": "...",
+///   "description": "...",
+///   "content_urls": { "desktop": { "page": "https://..." } },
+///   "thumbnail": { "source": "https://..." }
 /// }
 /// ```
 ///
@@ -506,7 +508,7 @@ pub fn parse_summary_response(value: &serde_json::Value) -> Option<RawResult> {
         return None;
     }
 
-    // URL: content_urls.desktop.page → constructed article URL (FR-009).
+    // URL: content_urls.desktop.page -> constructed article URL (FR-009).
     let url = value
         .get("content_urls")
         .and_then(|cu| cu.get("desktop"))
@@ -563,7 +565,7 @@ fn build_snippet(value: &serde_json::Value, extract: &str) -> String {
         parts.push(extract);
     }
 
-    let joined = parts.join(" — ");
+    let joined = parts.join(" - ");
     truncate_snippet(&joined)
 }
 
@@ -571,27 +573,14 @@ fn build_snippet(value: &serde_json::Value, extract: &str) -> String {
 /// respecting UTF-8 character boundaries and appending an ellipsis when
 /// truncated.
 fn truncate_snippet(snippet: &str) -> String {
-    if snippet.chars().count() <= MAX_SNIPPETTE_CHARS {
-        return snippet.to_string();
-    }
-    let end = snippet
-        .char_indices()
-        .map(|(i, _)| i)
-        .take_while(|&i| i <= MAX_SNIPPETTE_CHARS)
-        .last()
-        .unwrap_or(0);
-    format!("{}…", &snippet[..end])
+    super::engine::truncate_snippet_bytes(snippet, MAX_SNIPPETTE_CHARS)
 }
 
 /// Truncate a search query to [`MAX_QUERY_CHARS`] characters, respecting
 /// UTF-8 character boundaries.
 #[must_use]
 pub fn truncate_query(query: &str) -> String {
-    let trimmed = query.trim();
-    if trimmed.chars().count() <= MAX_QUERY_CHARS {
-        return trimmed.to_string();
-    }
-    trimmed.chars().take(MAX_QUERY_CHARS).collect()
+    super::engine::truncate_query_to(query.trim(), MAX_QUERY_CHARS)
 }
 
 /// Apply the `site` filter to resolved titles (FR-004).
@@ -626,7 +615,7 @@ fn url_host_matches(url: &str, domain: &str) -> bool {
 
 /// URL-encode a string for safe use in a URL path segment.
 ///
-/// Encodes everything except unreserved characters (`A–Z`, `a–z`, `0–9`,
+/// Encodes everything except unreserved characters (`A-Z`, `a-z`, `0-9`,
 /// `-`, `_`, `.`, `~`). Spaces become `%20` (not `+`) for path segments.
 fn url_encode_path(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
@@ -647,7 +636,7 @@ fn url_encode_path(input: &str) -> String {
 /// every fetch failed.
 ///
 /// FUNC-035: `Ok(Vec<RawResult>)` is returned when at least one fetch succeeded
-/// (possibly with zero parseable summaries — a legitimately empty result).
+/// (possibly with zero parseable summaries - a legitimately empty result).
 /// `Err(message)` is returned when there were failures and *no* successful
 /// fetch at all, so a fully dead engine is reported as an error rather than a
 /// silent zero-result success.
@@ -705,10 +694,13 @@ async fn fetch_summary(
         return Err(format!("summary HTTP {status}"));
     }
 
-    let text = response
-        .text()
-        .await
-        .map_err(|e| format!("failed to read response body: {e}"))?;
+    // ANTIPAT 4.1: bound the response body.
+    let text = crate::masterfetch::http::read_body_capped(
+        response,
+        crate::masterfetch::http::MAX_RESPONSE_BODY_BYTES,
+    )
+    .await
+    .map_err(|e| format!("failed to read response body: {e}"))?;
     let value: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("failed to parse response JSON: {e}"))?;
     Ok(parse_summary_response(&value))

@@ -1,4 +1,4 @@
-//! Cron scheduler tools — LLM-callable equivalents of the `/cron` slash commands.
+//! Cron scheduler tools - LLM-callable equivalents of the `/cron` slash commands.
 //!
 //! These tools give the model direct access to the cron scheduler so it can
 //! create, list, remove, enable, and disable scheduled agent runs without
@@ -6,11 +6,11 @@
 //!
 //! # Tools
 //!
-//! - `cron_add`     — create a new scheduled event
-//! - `cron_remove`  — delete an event by id
-//! - `cron_list`    — list all events
-//! - `cron_enable`  — enable an event
-//! - `cron_disable` — disable an event
+//! - `cron_add`     - create a new scheduled event
+//! - `cron_remove`  - delete an event by id
+//! - `cron_list`    - list all events
+//! - `cron_enable`  - enable an event
+//! - `cron_disable` - disable an event
 //!
 //! All tools read/write through [`ragent_storage::Storage`] via the
 //! [`ToolContext::storage`] handle, mirroring the storage methods used by the
@@ -119,7 +119,7 @@ impl Tool for CronAddTool {
         let schedule_raw = event.schedule_raw.clone();
         let next_due = event.next_due.to_rfc3339();
         let prompt_preview = if event.prompt.len() > 80 {
-            format!("{}…", &event.prompt[..80])
+            format!("{}...", &event.prompt[..80])
         } else {
             event.prompt.clone()
         };
@@ -129,7 +129,7 @@ impl Tool for CronAddTool {
             .context("cron_add storage task join error")??;
 
         let content = format!(
-            "✅ Scheduled event created.\n\n\
+            "[ok] Scheduled event created.\n\n\
              | Field | Value |\n|---|---|\n\
              | ID | `{id_clone}` |\n\
              | Agent | `{agent_clone}` |\n\
@@ -205,13 +205,16 @@ impl Tool for CronRemoveTool {
 
         if removed {
             Ok(ToolOutput {
-                content: format!("✅ Event `{}` removed.", input["id"].as_str().unwrap_or("")),
+                content: format!(
+                    "[ok] Event `{}` removed.",
+                    input["id"].as_str().unwrap_or("")
+                ),
                 metadata: Some(json!({ "id": input["id"], "removed": true })),
             })
         } else {
             Ok(ToolOutput {
                 content: format!(
-                    "⚠ Event `{}` not found.",
+                    "[!] Event `{}` not found.",
                     input["id"].as_str().unwrap_or("")
                 ),
                 metadata: Some(json!({ "id": input["id"], "removed": false })),
@@ -263,7 +266,7 @@ impl Tool for CronListTool {
 
         if rows.is_empty() {
             return Ok(ToolOutput {
-                content: "ℹ️  No scheduled events.".to_string(),
+                content: "[i]  No scheduled events.".to_string(),
                 metadata: Some(json!({ "count": 0 })),
             });
         }
@@ -277,11 +280,11 @@ impl Tool for CronListTool {
 
         for row in &rows {
             let prompt_preview = if row.prompt.len() > 40 {
-                format!("{}…", &row.prompt[..40])
+                format!("{}...", &row.prompt[..40])
             } else {
                 row.prompt.clone()
             };
-            let enabled_str = if row.enabled { "✓" } else { "✗" };
+            let enabled_str = if row.enabled { "[ok]" } else { "[x]" };
             lines.push(format!(
                 "| `{}` | `{}` | `{}` | {} | {} | \"{}\" |",
                 row.id, row.agent_type, row.schedule_raw, enabled_str, row.next_due, prompt_preview,
@@ -349,13 +352,16 @@ impl Tool for CronEnableTool {
 
         if updated {
             Ok(ToolOutput {
-                content: format!("✅ Event `{}` enabled.", input["id"].as_str().unwrap_or("")),
+                content: format!(
+                    "[ok] Event `{}` enabled.",
+                    input["id"].as_str().unwrap_or("")
+                ),
                 metadata: Some(json!({ "id": input["id"], "enabled": true })),
             })
         } else {
             Ok(ToolOutput {
                 content: format!(
-                    "⚠ Event `{}` not found.",
+                    "[!] Event `{}` not found.",
                     input["id"].as_str().unwrap_or("")
                 ),
                 metadata: Some(json!({ "id": input["id"], "enabled": false })),
@@ -417,7 +423,7 @@ impl Tool for CronDisableTool {
         if updated {
             Ok(ToolOutput {
                 content: format!(
-                    "⏸️  Event `{}` disabled.",
+                    "[||]  Event `{}` disabled.",
                     input["id"].as_str().unwrap_or("")
                 ),
                 metadata: Some(json!({ "id": input["id"], "enabled": false })),
@@ -425,7 +431,7 @@ impl Tool for CronDisableTool {
         } else {
             Ok(ToolOutput {
                 content: format!(
-                    "⚠ Event `{}` not found.",
+                    "[!] Event `{}` not found.",
                     input["id"].as_str().unwrap_or("")
                 ),
                 metadata: Some(json!({ "id": input["id"], "enabled": true })),

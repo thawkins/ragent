@@ -1,3 +1,6 @@
+//! Core spec data model: identifiers, statuses, requirements, tasks, and the
+//! `Spec`/`Plan` aggregates plus their validation helpers.
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -451,7 +454,7 @@ impl Spec {
             } else {
                 " (no linked tasks)".to_string()
             };
-            lines.push(format!("{} `{}` — {}{}", symbol, req.id, req.text, detail));
+            lines.push(format!("{} `{}` - {}{}", symbol, req.id, req.text, detail));
         }
 
         lines.push(String::new());
@@ -463,7 +466,7 @@ impl Spec {
                 format!("[{}]", task.linked_requirements.join(", "))
             };
             lines.push(format!(
-                "{} `{}` — {} ({}) {}",
+                "{} `{}` - {} ({}) {}",
                 task.status.symbol(),
                 task.id,
                 task.title,

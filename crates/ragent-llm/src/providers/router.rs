@@ -213,7 +213,7 @@ impl Provider for RouterProvider {
     /// Creates a [`RouterClient`] for routing chat requests.
     ///
     /// The `api_key` and `base_url` parameters are not used by the router
-    /// directly — authentication is delegated to the resolved downstream
+    /// directly - authentication is delegated to the resolved downstream
     /// provider. The `options` map may contain a `"router_config"` key with
     /// serialised [`RouterConfig`] to override the built-in defaults.
     ///

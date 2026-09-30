@@ -50,7 +50,7 @@ pub struct CustomAgentDef {
 /// `~/.config/ragent/agents/` (middle priority), then
 /// `[PROJECT]/.ragent/agents/` (highest priority). When the same agent `name`
 /// appears in several directories the definition from the higher-priority
-/// directory replaces the others — the closest directory wins.
+/// directory replaces the others - the closest directory wins.
 ///
 /// H-002: the result is cached per working directory and invalidated when the
 /// mtime of any discovery directory changes, so the per-turn prompt build
@@ -308,9 +308,9 @@ struct ProfileFrontmatter {
     model: Option<String>,
     /// Max agentic-loop iterations.
     max_steps: Option<u32>,
-    /// Sampling temperature (0.0–2.0).
+    /// Sampling temperature (0.0-2.0).
     temperature: Option<f32>,
-    /// Nucleus sampling (0.0–1.0).
+    /// Nucleus sampling (0.0-1.0).
     top_p: Option<f32>,
     /// Hide from user-visible agent picker.
     hidden: Option<bool>,
@@ -318,7 +318,7 @@ struct ProfileFrontmatter {
     memory: Option<String>,
     /// Default thinking configuration for this agent's requests.
     thinking: Option<ThinkingConfig>,
-    /// Permission rules — same schema as OASF `ragent/agent/v1`.
+    /// Permission rules - same schema as OASF `ragent/agent/v1`.
     permissions: Option<Vec<crate::agent::oasf::RagentPermissionRule>>,
     /// Skill names to preload.
     #[serde(default)]
@@ -356,7 +356,7 @@ fn load_agent_profile(path: &Path, is_project_local: bool) -> Result<CustomAgent
     // (YAML frontmatter) load unchanged (FR-032).
     let fm: ProfileFrontmatter = match serde_json::from_str(frontmatter) {
         Ok(fm) => fm,
-        Err(json_err) => serde_yaml::from_str(frontmatter).map_err(|yaml_err| {
+        Err(json_err) => serde_norway::from_str(frontmatter).map_err(|yaml_err| {
             format!("frontmatter parse error - JSON: {json_err}; YAML: {yaml_err}")
         })?,
     };

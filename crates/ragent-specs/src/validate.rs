@@ -147,7 +147,7 @@ static RE_INLINE_REQUIREMENT: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static RE_REQUIREMENT_HEADER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(#{2,3})\s+(FR|NFR)-(\d+)\s*[-–—]\s*(.*)$")
+    Regex::new(r"^(#{2,3})\s+(FR|NFR)-(\d+)\s*[---]\s*(.*)$")
         .expect("requirement header regex should compile")
 });
 
@@ -162,6 +162,26 @@ static RE_NEEDS_CLARIFICATION: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\[NEEDS CLARIFICATION:\s*(.+?)\]")
         .expect("needs-clarification regex should compile")
 });
+
+static RE_REQUIREMENT_NUMBER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(\D+)-(\d+)$").expect("requirement number regex should compile")
+});
+
+static RE_REQ_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(FR-\d+|NFR-\d+)").expect("requirement reference regex should compile")
+});
+
+/// Maximum length of an inline requirement's derived title before it is
+/// truncated (ANTIPAT L-3).
+///
+/// Titles derived from a plain-paragraph `FR-###.  The system shall ...` form
+/// are cut at this many characters (plus an ellipsis) so the parsed title stays
+/// a single readable line.
+const TITLE_PREVIEW_LEN: usize = 50;
+
+/// Character count kept when a title exceeds [`TITLE_PREVIEW_LEN`], leaving
+/// room for the trailing `...` inside the same budget.
+const TITLE_PREVIEW_TRUNCATED_LEN: usize = 47;
 
 /// Severity of a validation issue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -434,7 +454,7 @@ impl Report {
         let clarifications = self.clarification_count();
         if clarifications > 0 {
             lines.push(format!(
-                "Clarification markers: {clarifications} unresolved — see [Clarification] issues below"
+                "Clarification markers: {clarifications} unresolved - see [Clarification] issues below"
             ));
         }
 
@@ -460,7 +480,7 @@ impl Report {
                 .as_ref()
                 .map_or_else(String::new, |id| format!(" [{id}]"));
             lines.push(format!(
-                "  [{}] {} — {}{} (at {})",
+                "  [{}] {} - {}{} (at {})",
                 issue.severity, issue.category, issue.message, id, loc
             ));
         }
@@ -505,7 +525,7 @@ pub fn detect_ears_template(text: &str) -> Option<EarsTemplate> {
 /// A `[NEEDS CLARIFICATION: <question>]` marker found in a SPEC.md.
 ///
 /// Produced by [`detect_clarification_markers`]. The marker is not an error
-/// by itself — it signals an unresolved ambiguity that the author should
+/// by itself - it signals an unresolved ambiguity that the author should
 /// resolve before the spec can transition to `approved` (see FR-003).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClarificationMarker {
@@ -519,7 +539,7 @@ pub struct ClarificationMarker {
 ///
 /// Matching is case-insensitive. Each marker is returned with its 1-based
 /// line number and the captured question text. Markers are **not** reported
-/// as validation errors by this function — callers (e.g. T-008) decide
+/// as validation errors by this function - callers (e.g. T-008) decide
 /// whether to add them to the [`Report`].
 ///
 /// # Examples
@@ -554,13 +574,13 @@ static RE_VAGUE_TERMS: LazyLock<Regex> = LazyLock::new(|| {
         .expect("vague-terms regex should compile")
 });
 
-/// Regex matching potential acronyms: 2–6 consecutive uppercase ASCII letters.
+/// Regex matching potential acronyms: 2-6 consecutive uppercase ASCII letters.
 static RE_ACRONYM: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b([A-Z]{2,6})\b").expect("acronym regex should compile"));
 
-/// Regex matching acronym *definitions* — patterns like
+/// Regex matching acronym *definitions* - patterns like
 /// "Full Name (ACRONYM)", "ACRONYM (Full Name)",
-/// "ACRONYM — Full Name", or "ACRONYM: Full Name".
+/// "ACRONYM - Full Name", or "ACRONYM: Full Name".
 static RE_ACRONYM_DEFINED: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?:\(([A-Z]{2,6})\)|\b([A-Z]{2,6})\b\s*(?:\(|\u2014\u2014?|:))")
         .expect("acronym-definition regex should compile")
@@ -604,14 +624,14 @@ pub struct AmbiguityIssue {
 ///
 /// This function scans the EARS text of every parsed requirement for:
 ///
-/// - **Vague terms** — unmeasurable language like "fast", "scalable", or
+/// - **Vague terms** - unmeasurable language like "fast", "scalable", or
 ///   "user-friendly" that lacks acceptance criteria.
-/// - **Undefined acronyms** — uppercase abbreviations (2–6 letters) used in
+/// - **Undefined acronyms** - uppercase abbreviations (2-6 letters) used in
 ///   requirement text but never defined elsewhere in the spec via a
 ///   `Full Name (ACRONYM)` or `ACRONYM (Full Name)` pattern.
 ///
 /// Issues are returned as [`AmbiguityIssue`] entries. They are **not**
-/// automatically added to a [`Report`] — the caller (T-029) decides whether to
+/// automatically added to a [`Report`] - the caller (T-029) decides whether to
 /// incorporate them as warnings.
 ///
 /// # Examples
@@ -674,10 +694,10 @@ pub fn detect_ambiguity(content: &str) -> Vec<AmbiguityIssue> {
 /// Collect every acronym that appears in a definition pattern within `content`.
 ///
 /// Recognised definition patterns:
-/// - `Full Name (ACRONYM)` — captures the acronym inside parentheses.
-/// - `ACRONYM (Full Name)` — captures the acronym before the parenthetical.
-/// - `ACRONYM — Full Name` — captures the acronym before an em-dash.
-/// - `ACRONYM: Full Name` — captures the acronym before a colon.
+/// - `Full Name (ACRONYM)` - captures the acronym inside parentheses.
+/// - `ACRONYM (Full Name)` - captures the acronym before the parenthetical.
+/// - `ACRONYM - Full Name` - captures the acronym before an em-dash.
+/// - `ACRONYM: Full Name` - captures the acronym before a colon.
 fn collect_defined_acronyms(content: &str) -> Vec<String> {
     let mut defined = Vec::new();
     for caps in RE_ACRONYM_DEFINED.captures_iter(content) {
@@ -828,14 +848,14 @@ fn extract_action(ears_text: &str) -> Option<ParsedAction> {
 ///
 /// This function compares every pair of parsed requirements and checks for:
 ///
-/// - **Negation conflicts** — one requirement says "shall \<verb\> \<object\>"
+/// - **Negation conflicts** - one requirement says "shall \<verb\> \<object\>"
 ///   while another says "shall not \<verb\> \<object\>" for the same verb and
 ///   object.
-/// - **Opposite actions** — two requirements use antonymous verbs (e.g.
+/// - **Opposite actions** - two requirements use antonymous verbs (e.g.
 ///   "shall accept" vs "shall reject") with a similar object phrase.
 ///
 /// Issues are returned as [`ContradictionIssue`] entries. They are **not**
-/// automatically added to a [`Report`] — the caller (T-029) decides whether
+/// automatically added to a [`Report`] - the caller (T-029) decides whether
 /// to incorporate them as warnings.
 ///
 /// # Examples
@@ -946,7 +966,7 @@ pub fn detect_contradictions(content: &str) -> Vec<ContradictionIssue> {
                                 kind: ContradictionKind::OppositeAction,
                                 term: format!("{v1}/{v2}"),
                                 description: format!(
-                                    "{} uses \"shall {} {}\" but {} uses \"shall {} {}\" — \
+                                    "{} uses \"shall {} {}\" but {} uses \"shall {} {}\" - \
                                      these verbs are semantically opposite",
                                     req_a.id,
                                     act_a.verb,
@@ -991,7 +1011,7 @@ fn objects_overlap(a: &str, b: &str) -> bool {
 pub enum GapKind {
     /// The EARS text contains no numeric value or measurable quantity.
     NoMeasurableCriterion,
-    /// The requirement uses a copular verb ("shall be …") without specifying
+    /// The requirement uses a copular verb ("shall be ...") without specifying
     /// a testable state or observable outcome.
     VagueOutcome,
 }
@@ -1020,7 +1040,7 @@ pub struct GapIssue {
     pub suggestion: String,
 }
 
-/// Regex matching a digit (0–9) anywhere in the text.
+/// Regex matching a digit (0-9) anywhere in the text.
 static RE_DIGIT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\d").expect("digit regex should compile"));
 
@@ -1091,10 +1111,10 @@ const TESTABLE_VERBS: &[&str] = &[
 /// This function scans every parsed requirement's EARS text for signals that
 /// acceptance criteria may be missing:
 ///
-/// - **No measurable criterion** — the EARS text contains no digit (0–9),
+/// - **No measurable criterion** - the EARS text contains no digit (0-9),
 ///   implying there is no quantifiable threshold, count, time bound, or
 ///   percentage to verify against.
-/// - **Vague outcome** — the verb after "shall" is "be" (a copular verb),
+/// - **Vague outcome** - the verb after "shall" is "be" (a copular verb),
 ///   meaning the requirement describes a state rather than a testable action.
 ///   Only flagged when the requirement also lacks a digit.
 ///
@@ -1103,7 +1123,7 @@ const TESTABLE_VERBS: &[&str] = &[
 /// a numeric threshold, so `NoMeasurableCriterion` is not reported for them.
 ///
 /// Issues are returned as [`GapIssue`] entries. They are **not** automatically
-/// added to a [`Report`] — the caller (T-029) decides whether to incorporate
+/// added to a [`Report`] - the caller (T-029) decides whether to incorporate
 /// them as warnings.
 ///
 /// # Examples
@@ -1134,7 +1154,7 @@ pub fn detect_gaps(content: &str) -> Vec<GapIssue> {
         let has_digit = RE_DIGIT.is_match(ears);
         let action = extract_action(ears);
 
-        // Check for vague outcome: "shall be …" with no further testable action
+        // Check for vague outcome: "shall be ..." with no further testable action
         if let Some(act) = &action
             && act.verb == "be"
         {
@@ -1143,7 +1163,7 @@ pub fn detect_gaps(content: &str) -> Vec<GapIssue> {
                 line: req.ears_line,
                 kind: GapKind::VagueOutcome,
                 ears_text: ears.to_string(),
-                suggestion: "replace \"shall be …\" with a testable action \
+                suggestion: "replace \"shall be ...\" with a testable action \
                              (e.g. \"shall display\", \"shall return\") or add a \
                              measurable criterion"
                     .to_string(),
@@ -1151,7 +1171,7 @@ pub fn detect_gaps(content: &str) -> Vec<GapIssue> {
             continue;
         }
 
-        // Check for no measurable criterion — but only if the verb is not
+        // Check for no measurable criterion - but only if the verb is not
         // a recognised testable verb (those have implicit acceptance criteria).
         if !has_digit {
             let verb_is_testable = action
@@ -1234,8 +1254,11 @@ pub fn parse_requirements(content: &str) -> Vec<ParsedRequirement> {
             // Alternative format: "FR-###.  The system shall ..." as a plain paragraph.
             let id = format!("{}-{}", &caps[1], &caps[2]);
             let ears_text = caps[3].trim().to_string();
-            let title = if ears_text.len() > 50 {
-                format!("{ears_text:.47}...")
+            let title = if ears_text.len() > TITLE_PREVIEW_LEN {
+                format!(
+                    "{ears_text:.width$}...",
+                    width = TITLE_PREVIEW_TRUNCATED_LEN
+                )
             } else {
                 ears_text.clone()
             };
@@ -1281,11 +1304,11 @@ pub fn validate(spec: &Spec) -> Report {
 /// Validate a spec with SDD capability flags gating which checks run
 /// (FR-019).
 ///
-/// Core checks — structural sections, EARS syntax, and PLAN.md completeness —
+/// Core checks - structural sections, EARS syntax, and PLAN.md completeness -
 /// always run regardless of flags. SDD-specific checks are gated:
 ///
-/// - `flags.clarification_markers` → [`validate_clarifications`] (FR-002)
-/// - `flags.consistency_checks` → ambiguity, contradiction, and gap detection
+/// - `flags.clarification_markers` -> [`validate_clarifications`] (FR-002)
+/// - `flags.consistency_checks` -> ambiguity, contradiction, and gap detection
 ///   (FR-015)
 ///
 /// When a flag is `false`, the corresponding check is skipped entirely,
@@ -1294,7 +1317,7 @@ pub fn validate(spec: &Spec) -> Report {
 pub fn validate_with_flags(spec: &Spec, flags: &SddFlags) -> Report {
     let mut report = Report::new();
 
-    // Core checks — always run.
+    // Core checks - always run.
     validate_structure(spec, &mut report);
     validate_ears(spec, &mut report);
     validate_plan(spec, &mut report);
@@ -1430,7 +1453,7 @@ pub fn validate_ears(spec: &Spec, report: &mut Report) {
     // Check numbering gaps
     let mut fr_numbers: Vec<u32> = Vec::new();
     let mut nfr_numbers: Vec<u32> = Vec::new();
-    let re = Regex::new(r"^(\D+)-(\d+)$").unwrap();
+    let re = &*RE_REQUIREMENT_NUMBER;
     for req in &reqs {
         if let Some(caps) = re.captures(&req.id) {
             let prefix = &caps[1];
@@ -1559,7 +1582,7 @@ pub fn validate_plan(spec: &Spec, report: &mut Report) {
     let req_ids: Vec<String> = reqs.iter().map(|r| r.id.clone()).collect();
 
     // Check that each task references a valid requirement
-    let re = Regex::new(r"(FR-\d+|NFR-\d+)").unwrap();
+    let re = &*RE_REQ_REFERENCE;
     for line in spec.plan_md.lines() {
         for cap in re.find_iter(line) {
             let ref_id = cap.as_str();
@@ -1626,7 +1649,7 @@ pub fn validate_consistency(spec: &Spec, report: &mut Report) {
             Issue::new(
                 Severity::Warning,
                 Category::Ambiguity,
-                format!("{}: \"{}\" — {}", issue.kind, issue.term, issue.suggestion),
+                format!("{}: \"{}\" - {}", issue.kind, issue.term, issue.suggestion),
             )
             .with_line(issue.line)
             .with_id(id),
@@ -1669,7 +1692,7 @@ pub fn validate_consistency(spec: &Spec, report: &mut Report) {
 ///
 /// Parses the `## Phase -1 Gates` section from the PLAN.md and checks that
 /// all three required gates (Simplicity, Anti-Abstraction, Integration-First)
-/// are present and checked. Issues are reported as [`Severity::Warning`] —
+/// are present and checked. Issues are reported as [`Severity::Warning`] -
 /// they are advisory during validation. The actual transition blocking is
 /// handled separately (T-017).
 ///
@@ -1691,7 +1714,7 @@ pub fn validate_phase_minus_one_gates(spec: &Spec, report: &mut Report) {
         report.add(Issue::new(
             Severity::Warning,
             Category::PhaseMinusOneGate,
-            "PLAN.md missing '## Phase -1 Gates' section — required gates \
+            "PLAN.md missing '## Phase -1 Gates' section - required gates \
              (Simplicity, Anti-Abstraction, Integration-First) are not \
              documented (FR-008)",
         ));
@@ -1703,7 +1726,7 @@ pub fn validate_phase_minus_one_gates(spec: &Spec, report: &mut Report) {
             Severity::Warning,
             Category::PhaseMinusOneGate,
             format!(
-                "Phase -1 gate '{gate_name}' is unchecked — must be \
+                "Phase -1 gate '{gate_name}' is unchecked - must be \
                  acknowledged before implementation (FR-008)"
             ),
         ));

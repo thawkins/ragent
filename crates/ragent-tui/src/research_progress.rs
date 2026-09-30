@@ -47,11 +47,11 @@ impl StepStatus {
     /// Icon used in the rendered log list.
     pub fn icon(self) -> &'static str {
         match self {
-            Self::Started => "▶",
-            Self::Done => "✓",
+            Self::Started => ">",
+            Self::Done => "[ok]",
             Self::Error => "!",
-            Self::Excluded => "−",
-            Self::Skipped => "○",
+            Self::Excluded => "-",
+            Self::Skipped => "o",
         }
     }
 }
@@ -172,7 +172,7 @@ impl ResearchProgress {
             // detail text, so the clear predicate still matches (T-006/T-009).
             self.web_phase_deadline = None;
             detail = format!(
-                "**Web phase deadline reached** — {} source(s) captured before timeout; proceeding to synthesis",
+                "**Web phase deadline reached** - {} source(s) captured before timeout; proceeding to synthesis",
                 self.fetched_count
             );
         }
@@ -239,16 +239,16 @@ impl ResearchProgress {
     /// Render the tracker as a markdown log list for the message window.
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str(&format!("[research] Research Progress — `{}`\n", self.name));
+        out.push_str(&format!("[research] Research Progress - `{}`\n", self.name));
         out.push_str(&format!("Topic: {}\n", self.topic));
         if let Some(options) = &self.options {
             out.push_str(&format!("Options: {options}\n"));
         }
         out.push('\n');
-        let prefix_len = "  XX running  — ".chars().count();
+        let prefix_len = "  XX running  - ".chars().count();
         let continuation = " ".repeat(prefix_len);
         for step in &self.steps {
-            let prefix = format!("  {} {:<8} — ", step.status.icon(), step.phase);
+            let prefix = format!("  {} {:<8} - ", step.status.icon(), step.phase);
             let lines: Vec<&str> = step.detail.lines().collect();
             if lines.is_empty() {
                 out.push_str(&prefix);
@@ -268,7 +268,7 @@ impl ResearchProgress {
             && let Some(total) = self.total_sources
         {
             out.push('\n');
-            let mut line = format!("[ok] Complete — {total} source(s)");
+            let mut line = format!("[ok] Complete - {total} source(s)");
             let mut extras = Vec::new();
             if self.pdf_count > 0 {
                 extras.push(format!(
@@ -429,7 +429,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 SessionPhase::Web,
                 "captured",
                 format!(
-                    "captured {} — {}",
+                    "captured {} - {}",
                     sanitize_for_display(url),
                     sanitize_for_display(title)
                 ),
@@ -486,16 +486,16 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 let detail = match (outcome, detail) {
                     (SynthesizeOutcome::Llm, _) => "LLM analysis applied".to_string(),
                     (SynthesizeOutcome::FallbackEmpty, _) => {
-                        "LLM returned empty content — using mechanical fallback".to_string()
+                        "LLM returned empty content - using mechanical fallback".to_string()
                     }
                     (SynthesizeOutcome::FallbackError, Some(msg)) => {
-                        format!("LLM synthesis failed: {msg} — using mechanical fallback")
+                        format!("LLM synthesis failed: {msg} - using mechanical fallback")
                     }
                     (SynthesizeOutcome::FallbackError, None) => {
-                        "LLM synthesis failed — using mechanical fallback".to_string()
+                        "LLM synthesis failed - using mechanical fallback".to_string()
                     }
                     (SynthesizeOutcome::NoLlm, _) => {
-                        "no LLM engine configured — using mechanical fallback".to_string()
+                        "no LLM engine configured - using mechanical fallback".to_string()
                     }
                 };
                 (SessionPhase::Synthesize, "done", detail, None, 0, 0, 0)
@@ -683,7 +683,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 SessionPhase::Synthesize,
                 "done",
                 format!(
-                    "synthesis audit: {}/100 — {}",
+                    "synthesis audit: {}/100 - {}",
                     audit.overall_score, audit.recommendation
                 ),
                 None,
@@ -695,7 +695,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 SessionPhase::Synthesize,
                 "done",
                 format!(
-                    "corpus critic: {}/100 ({}) — {} issue(s), {} gap(s)",
+                    "corpus critic: {}/100 ({}) - {} issue(s), {} gap(s)",
                     report.score,
                     if report.passed { "pass" } else { "review" },
                     report.issues.len(),
@@ -724,7 +724,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 SessionPhase::Synthesize,
                 "done",
                 format!(
-                    "surgical patch: {} → {} ({} patch(es), {} applied)",
+                    "surgical patch: {} -> {} ({} patch(es), {} applied)",
                     result.score_before,
                     result.score_after,
                     result.patches.len(),
@@ -739,7 +739,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 SessionPhase::Synthesize,
                 if result.passed { "done" } else { "error" },
                 format!(
-                    "cite check: {} citation(s) checked — {} (gate {})",
+                    "cite check: {} citation(s) checked - {} (gate {})",
                     result.checked,
                     if result.passed {
                         "pass"
@@ -771,7 +771,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 SessionPhase::Synthesize,
                 if result.passed { "done" } else { "error" },
                 format!(
-                    "readability audit: {}/100 — {} issue(s), {} recommendation(s)",
+                    "readability audit: {}/100 - {} issue(s), {} recommendation(s)",
                     result.score,
                     result.issues.len(),
                     result.recommendations.len()
@@ -829,7 +829,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 "error",
                 match source {
                     Some(s) => format!(
-                        "source failed: {} — {}",
+                        "source failed: {} - {}",
                         sanitize_for_display(s),
                         sanitize_for_display(error)
                     ),
@@ -844,7 +844,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 SessionPhase::Synthesize,
                 "done",
                 match score {
-                    Some(s) => format!("critic: {s}/100 — {} gap(s)", gaps.len()),
+                    Some(s) => format!("critic: {s}/100 - {} gap(s)", gaps.len()),
                     None => format!("critic: {} gap(s)", gaps.len()),
                 },
                 None,
@@ -856,7 +856,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 SessionPhase::Synthesize,
                 if *passed { "done" } else { "error" },
                 format!(
-                    "verification: {} — {} issue(s)",
+                    "verification: {} - {} issue(s)",
                     if *passed { "pass" } else { "fail" },
                     issues.len()
                 ),
@@ -1115,301 +1115,8 @@ fn parse_phase(s: &str) -> Option<SessionPhase> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_encode_decode_roundtrip_queries_decomposed() {
-        let queries = vec![
-            "async rust ecosystem overview".into(),
-            "tokio vs async-std comparison".into(),
-        ];
-        let encoded = encode_progress_event(
-            "foo",
-            "bar",
-            &SessionEvent::QueriesDecomposed {
-                queries: queries.clone(),
-            },
-        );
-        let decoded = decode_progress_event(&encoded).expect("decode");
-        assert_eq!(decoded.phase, SessionPhase::Web);
-        assert_eq!(decoded.status, StepStatus::Done);
-        assert!(
-            decoded.detail.contains("decomposed into 2 queries"),
-            "detail should report actual count: {}",
-            decoded.detail
-        );
-        for q in &queries {
-            assert!(
-                decoded.detail.contains(q),
-                "detail should list each query: {}",
-                decoded.detail
-            );
-        }
-    }
-
-    #[test]
-    fn test_encode_decode_roundtrip_from_url_body_preview() {
-        let encoded = encode_progress_event(
-            "rust-async",
-            "async rust",
-            &SessionEvent::FromUrlBodyPreview {
-                url: "https://example.com/guide".into(),
-                body_preview: "Long-form article about Rust async/await idioms.".into(),
-            },
-        );
-        let decoded = decode_progress_event(&encoded).expect("decode");
-        assert_eq!(decoded.phase, SessionPhase::Setup);
-        assert_eq!(decoded.status, StepStatus::Done);
-        assert!(
-            decoded.detail.contains("https://example.com/guide"),
-            "detail should mention the URL: {}",
-            decoded.detail
-        );
-        assert!(
-            decoded
-                .detail
-                .contains("Long-form article about Rust async/await"),
-            "detail should include the body preview: {}",
-            decoded.detail
-        );
-    }
-
-    #[test]
-    fn test_encode_decode_roundtrip_phase() {
-        let encoded = encode_progress_event(
-            "rust-async",
-            "async rust",
-            &SessionEvent::Phase {
-                phase: SessionPhase::Web,
-            },
-        );
-        assert!(encoded.starts_with(PROGRESS_SENTINEL));
-        let decoded = decode_progress_event(&encoded).expect("decode");
-        assert_eq!(decoded.name, "rust-async");
-        assert_eq!(decoded.topic, "async rust");
-        assert_eq!(decoded.phase, SessionPhase::Web);
-        assert_eq!(decoded.status, StepStatus::Started);
-        assert_eq!(decoded.detail, "searching the web");
-    }
-
-    #[test]
-    fn test_encode_decode_roundtrip_done() {
-        let encoded = encode_progress_event(
-            "foo",
-            "bar",
-            &SessionEvent::Done {
-                total_sources: 7,
-                pdf_count: 2,
-                youtube_count: 1,
-                excluded_count: 0,
-            },
-        );
-        let decoded = decode_progress_event(&encoded).expect("decode");
-        assert_eq!(decoded.phase, SessionPhase::Finalize);
-        assert_eq!(decoded.status, StepStatus::Done);
-        assert_eq!(decoded.total_sources, Some(7));
-        assert_eq!(decoded.pdf_count, 2);
-        assert_eq!(decoded.youtube_count, 1);
-    }
-
-    #[test]
-    fn test_encode_decode_roundtrip_synthesize() {
-        let encoded = encode_progress_event(
-            "foo",
-            "bar",
-            &SessionEvent::Phase {
-                phase: SessionPhase::Synthesize,
-            },
-        );
-        let decoded = decode_progress_event(&encoded).expect("decode");
-        assert_eq!(decoded.phase, SessionPhase::Synthesize);
-    }
-
-    #[test]
-    fn test_synthesize_result_llm_outcome_renders_cleanly() {
-        let encoded = encode_progress_event(
-            "foo",
-            "bar",
-            &SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult {
-                outcome: SynthesizeOutcome::Llm,
-                detail: None,
-            }),
-        );
-        let decoded = decode_progress_event(&encoded).expect("decode");
-        assert_eq!(decoded.phase, SessionPhase::Synthesize);
-        assert_eq!(decoded.status, StepStatus::Done);
-        assert!(decoded.detail.contains("LLM analysis applied"));
-    }
-
-    #[test]
-    fn test_synthesize_result_fallback_error_includes_detail() {
-        let encoded = encode_progress_event(
-            "foo",
-            "bar",
-            &SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult {
-                outcome: SynthesizeOutcome::FallbackError,
-                detail: Some("provider returned 401".into()),
-            }),
-        );
-        let decoded = decode_progress_event(&encoded).expect("decode");
-        assert!(decoded.detail.contains("provider returned 401"));
-        assert!(decoded.detail.contains("mechanical fallback"));
-    }
-
-    #[test]
-    fn test_synthesize_result_no_llm_renders_cleanly() {
-        let encoded = encode_progress_event(
-            "foo",
-            "bar",
-            &SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult {
-                outcome: SynthesizeOutcome::NoLlm,
-                detail: None,
-            }),
-        );
-        let decoded = decode_progress_event(&encoded).expect("decode");
-        assert!(decoded.detail.contains("no LLM engine configured"));
-    }
-
-    #[test]
-    fn test_encode_decode_roundtrip_polish_and_readability_audit() {
-        let encoded = encode_progress_event(
-            "foo",
-            "bar",
-            &SessionEvent::Synthesis(SynthesisEvent::Polish {
-                result: ragent_research::PolishResult {
-                    changes: vec![ragent_research::PolishChange {
-                        field: "summary".into(),
-                        description: "normalized whitespace".into(),
-                    }],
-                    control_chars_removed: 1,
-                    whitespace_normalized: 2,
-                    empty_paragraphs_removed: 3,
-                    note: "Polished".into(),
-                },
-            }),
-        );
-        let decoded = decode_progress_event(&encoded).expect("decode");
-        assert_eq!(decoded.phase, SessionPhase::Synthesize);
-        assert_eq!(decoded.status, StepStatus::Done);
-        assert!(decoded.detail.contains("polish"));
-        assert!(decoded.detail.contains("1 control char"));
-
-        let encoded = encode_progress_event(
-            "foo",
-            "bar",
-            &SessionEvent::Synthesis(SynthesisEvent::ReadabilityAudit {
-                result: ragent_research::ReadabilityAudit {
-                    score: 85,
-                    passed: true,
-                    issues: vec!["issue".into()],
-                    recommendations: vec!["rec".into()],
-                    avg_finding_length: 400,
-                    missing_label_count: 0,
-                    long_paragraph_count: 0,
-                },
-            }),
-        );
-        let decoded = decode_progress_event(&encoded).expect("decode");
-        assert_eq!(decoded.phase, SessionPhase::Synthesize);
-        assert_eq!(decoded.status, StepStatus::Done);
-        assert!(decoded.detail.contains("readability audit"));
-        assert!(decoded.detail.contains("85/100"));
-    }
-
-    #[test]
-    fn test_decode_rejects_non_sentinel() {
-        assert!(decode_progress_event("ragent-research: {...}").is_none());
-        assert!(decode_progress_event("plain text").is_none());
-    }
-
-    #[test]
-    fn test_decode_rejects_malformed_payload() {
-        assert!(decode_progress_event(&format!("{PROGRESS_SENTINEL}not json")).is_none());
-        assert!(decode_progress_event(&format!("{PROGRESS_SENTINEL}{{}}")).is_none());
-    }
-
-    #[test]
-    fn test_encode_cluster_progress_event_roundtrip() {
-        let encoded = encode_cluster_progress_event(
-            "rust-async",
-            "async rust",
-            SessionPhase::Synthesize,
-            "started",
-            "sending concept-extraction prompt to gemini/gemini-2.0-flash…",
-        );
-        assert!(encoded.starts_with(PROGRESS_SENTINEL));
-        let decoded = decode_progress_event(&encoded).expect("decode cluster progress");
-        assert_eq!(decoded.name, "rust-async");
-        assert_eq!(decoded.topic, "async rust");
-        assert_eq!(decoded.phase, SessionPhase::Synthesize);
-        assert_eq!(decoded.status, StepStatus::Started);
-        assert!(decoded.detail.contains("concept-extraction prompt"));
-        assert!(decoded.total_sources.is_none());
-    }
-
-    #[test]
-    fn test_progress_apply_appends_then_completes() {
-        let mut p = ResearchProgress::new("n", "t");
-        p.apply(SessionPhase::Web, StepStatus::Started, "searching the web");
-        assert_eq!(p.steps.len(), 1);
-        assert_eq!(p.steps[0].status, StepStatus::Started);
-        p.apply(SessionPhase::Web, StepStatus::Done, "3 source(s) captured");
-        assert_eq!(p.steps.len(), 1, "done updates in place");
-        assert_eq!(p.steps[0].status, StepStatus::Done);
-        assert_eq!(p.steps[0].detail, "3 source(s) captured");
-    }
-
-    #[test]
-    fn test_progress_render_shows_log_list() {
-        let mut p = ResearchProgress::new("rust-async", "async rust");
-        p.apply(
-            SessionPhase::Setup,
-            StepStatus::Started,
-            "creating research item",
-        );
-        p.apply(
-            SessionPhase::Setup,
-            StepStatus::Done,
-            "creating research item",
-        );
-        p.apply(SessionPhase::Web, StepStatus::Started, "searching the web");
-        p.apply(SessionPhase::Web, StepStatus::Done, "3 source(s) captured");
-        p.finish(3, 0, 0, 0);
-        let rendered = p.render();
-        assert!(rendered.contains("[research] Research Progress"));
-        assert!(rendered.contains("✓ setup"));
-        assert!(rendered.contains("✓ web"));
-        assert!(rendered.contains("[ok] Complete — 3 source(s)"));
-        assert!(rendered.contains("/research open rust-async"));
-    }
-
-    #[test]
-    fn test_progress_render_indents_multiline_detail() {
-        let mut p = ResearchProgress::new("rust-async", "async rust");
-        p.apply(
-            SessionPhase::Web,
-            StepStatus::Done,
-            "decomposed into 3 queries:\n  - query one\n  - query two\n  - query three",
-        );
-        let rendered = p.render();
-        assert!(rendered.contains("decomposed into 3 queries:"));
-        assert!(rendered.contains("  - query one"));
-        assert!(rendered.contains("  - query two"));
-        assert!(rendered.contains("  - query three"));
-        // Continuation lines should be indented to align with the first detail column.
-        let lines: Vec<&str> = rendered.lines().collect();
-        let first_idx = lines
-            .iter()
-            .position(|l| l.contains("decomposed into 3 queries"))
-            .expect("first detail line");
-        assert!(
-            lines[first_idx + 1].starts_with("              "),
-            "continuation line should be indented: {}",
-            lines[first_idx + 1]
-        );
-    }
-}
+#[path = "../tests/inline/research_progress_tests.rs"]
+mod tests;
 
 #[test]
 fn test_failed_urls_rolled_into_totals_line() {
@@ -1418,7 +1125,7 @@ fn test_failed_urls_rolled_into_totals_line() {
     p.apply(
         SessionPhase::Web,
         StepStatus::Done,
-        "[ENGLISH] captured https://a.com — A",
+        "[ENGLISH] captured https://a.com - A",
     );
     p.apply(
         SessionPhase::Web,
@@ -1428,7 +1135,7 @@ fn test_failed_urls_rolled_into_totals_line() {
     p.apply(
         SessionPhase::Web,
         StepStatus::Done,
-        "[FRENCH] captured https://c.com — C",
+        "[FRENCH] captured https://c.com - C",
     );
     p.apply(
         SessionPhase::Web,
@@ -1459,7 +1166,7 @@ fn test_complete_message_replaces_totals_line() {
     p.apply(
         SessionPhase::Web,
         StepStatus::Done,
-        "[ENGLISH] captured https://a.com — A",
+        "[ENGLISH] captured https://a.com - A",
     );
     p.apply(
         SessionPhase::Web,
@@ -1478,7 +1185,7 @@ fn test_complete_message_replaces_totals_line() {
         "totals line should be replaced by the complete line:\n{rendered}"
     );
     assert!(
-        rendered.contains("[ok] Complete — 1 source(s)"),
+        rendered.contains("[ok] Complete - 1 source(s)"),
         "rendered output should show the final complete line:\n{rendered}"
     );
 }

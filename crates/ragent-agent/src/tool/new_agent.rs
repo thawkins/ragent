@@ -1,4 +1,4 @@
-//! The `new_agent` tool — spawns a sub-agent to perform a focused task.
+//! The `new_agent` tool - spawns a sub-agent to perform a focused task.
 //!
 //! Supports both synchronous (blocking) and background (non-blocking) modes.
 //! Background tasks publish [`Event::SubagentComplete`] when finished.
@@ -14,17 +14,17 @@ use super::{Tool, ToolContext, ToolOutput};
 /// Background tasks publish [`Event::SubagentComplete`] when finished.
 ///
 /// ## Parameters (TWO required)
-/// - `agent` (string, **REQUIRED**) — Agent name (e.g. `"explore"`, `"build"`,
-///   `"plan"`, `"general"`). Both `agent` AND `task` must be supplied —
-///   omitting either will fail with "Missing required parameter: …".
-/// - `task` (string, **REQUIRED**) — The prompt/instructions for the sub-agent.
+/// - `agent` (string, **REQUIRED**) - Agent name (e.g. `"explore"`, `"build"`,
+///   `"plan"`, `"general"`). Both `agent` AND `task` must be supplied -
+///   omitting either will fail with "Missing required parameter: ...".
+/// - `task` (string, **REQUIRED**) - The prompt/instructions for the sub-agent.
 ///   Be specific: include context, the exact question(s) to answer, and the
 ///   format you want for the answer. The sub-agent has no access to the
 ///   parent's history.
-/// - `background` (bool, optional) — If `true`, spawns in the background and
+/// - `background` (bool, optional) - If `true`, spawns in the background and
 ///   returns immediately with a task ID. Use this whenever you spawn more than
 ///   one task in the same response so they can run concurrently. Default: `false`.
-/// - `model` (string, optional) — Model override in `provider/model` or
+/// - `model` (string, optional) - Model override in `provider/model` or
 ///   `provider:model` format. Inherits the parent session's model when omitted.
 pub struct NewAgentTool;
 
@@ -38,13 +38,13 @@ impl Tool for NewAgentTool {
         "Spawn a sub-agent to perform a focused task. Supports synchronous (blocking) \
          and background (non-blocking) modes. Use agent names like 'explore', 'build', \
          'plan', or any custom agent. \n\n\
-         REQUIRED parameters (BOTH must be supplied — omitting either will fail):\n\
-         - `agent` (string) — the agent name to run\n\
-         - `task`  (string) — the prompt/instructions for the sub-agent\n\
+         REQUIRED parameters (BOTH must be supplied - omitting either will fail):\n\
+         - `agent` (string) - the agent name to run\n\
+         - `task`  (string) - the prompt/instructions for the sub-agent\n\
          \n\
          Optional:\n\
-         - `background` (bool, default false) — set to `true` to spawn in the background\n\
-         - `model` (string) — provider/model override, e.g. 'anthropic/claude-sonnet-4-20250514'\n\
+         - `background` (bool, default false) - set to `true` to spawn in the background\n\
+         - `model` (string) - provider/model override, e.g. 'anthropic/claude-sonnet-4-20250514'\n\
          \n\
          Example: new_agent(agent: \"explore\", task: \"Find all callers of X in src/\")"
     }
@@ -55,15 +55,15 @@ impl Tool for NewAgentTool {
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "REQUIRED. Name of the agent to run (e.g. 'explore', 'build', 'plan', 'general'). BOTH `agent` AND `task` must be supplied — calls with only one of them will fail."
+                    "description": "REQUIRED. Name of the agent to run (e.g. 'explore', 'build', 'plan', 'general'). BOTH `agent` AND `task` must be supplied - calls with only one of them will fail."
                 },
                 "task": {
                     "type": "string",
-                    "description": "REQUIRED. The task prompt / instructions for the sub-agent. Be specific — the sub-agent has no access to the parent's history, so include all necessary context, the exact question(s) to answer, and the format you want for the answer. BOTH `agent` AND `task` must be supplied — calls with only one of them will fail."
+                    "description": "REQUIRED. The task prompt / instructions for the sub-agent. Be specific - the sub-agent has no access to the parent's history, so include all necessary context, the exact question(s) to answer, and the format you want for the answer. BOTH `agent` AND `task` must be supplied - calls with only one of them will fail."
                 },
                 "background": {
                     "type": "boolean",
-                    "description": "If true, spawn in the background and return immediately — the agent runs concurrently. REQUIRED when spawning more than one task in the same response; background: false blocks all subsequent tool calls. Default: false (use only for a single task whose result you need immediately)."
+                    "description": "If true, spawn in the background and return immediately - the agent runs concurrently. REQUIRED when spawning more than one task in the same response; background: false blocks all subsequent tool calls. Default: false (use only for a single task whose result you need immediately)."
                 },
                 "detached": {
                     "type": "boolean",
@@ -232,84 +232,5 @@ impl Tool for NewAgentTool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::event::EventBus;
-    use crate::tool::TeamContext;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-
-    fn base_ctx() -> ToolContext {
-        ToolContext {
-            session_id: "session-1".to_string(),
-            working_dir: PathBuf::from("/tmp"),
-            event_bus: Arc::new(EventBus::new(16)),
-            storage: None,
-            agent_manager: None,
-            active_model: None,
-            provider_registry: None,
-            team_context: None,
-            team_manager: None,
-            code_index: None,
-            bg_service: None,
-            spec_manager: None,
-            active_spec_id: None,
-            config: None,
-            allowed_roots: Vec::new(),
-            tool_registry: ToolContext::default_tool_registry(),
-            cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
-            permission_checker: None,
-            read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
-        }
-    }
-    #[tokio::test]
-    async fn test_new_task_without_team_context_tries_to_spawn() {
-        let tool = NewAgentTool;
-        let ctx = base_ctx();
-        let err = tool
-            .execute(
-                json!({
-                    "agent": "explore",
-                    "task": "inspect the repository"
-                }),
-                &ctx,
-            )
-            .await
-            .expect_err("missing task manager should be the first failure");
-
-        assert!(
-            err.to_string()
-                .contains("AgentManager has not been initialised"),
-            "unexpected error: {err:#}"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_new_task_blocks_for_active_team_sessions() {
-        let tool = NewAgentTool;
-        let mut ctx = base_ctx();
-        ctx.team_context = Some(Arc::new(TeamContext {
-            team_name: "alpha".to_string(),
-            agent_id: "lead".to_string(),
-            is_lead: true,
-        }));
-
-        let output = tool
-            .execute(
-                json!({
-                    "agent": "explore",
-                    "task": "inspect the repository"
-                }),
-                &ctx,
-            )
-            .await
-            .expect("team-context guard should return a blocked result");
-
-        let metadata = output
-            .metadata
-            .expect("blocked result should include metadata");
-        assert_eq!(metadata["blocked"], true);
-        assert_eq!(metadata["reason"], "team_context_active");
-    }
-}
+#[path = "../tests/inline/new_agent_tests.rs"]
+mod tests;

@@ -1,7 +1,7 @@
 //! Single-line text input field with full editing support.
 //!
 //! Provides cursor movement, keyboard selection, clipboard cut/copy/paste,
-//! word navigation, and deletion — mirroring the behaviour of the main
+//! word navigation, and deletion - mirroring the behaviour of the main
 //! message input but in a self-contained, reusable struct.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

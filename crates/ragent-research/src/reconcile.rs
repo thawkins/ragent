@@ -1,14 +1,14 @@
 //! Cross-locus reconcile and source tensions (FR-005, T-009).
 //!
 //! This module is intentionally deterministic and LLM-free. It takes the
-//! [`LocusSet`](crate::locus::LocusSet) and
-//! [`ContradictionGraph`](crate::contradiction::ContradictionGraph) produced by
+//! [`LocusSet`] and
+//! [`ContradictionGraph`] produced by
 //! earlier full-tier steps and derives two higher-level views of the corpus:
 //!
-//! 1. **Cross-locus reconcile** — which sources support *multiple* research
+//! 1. **Cross-locus reconcile** - which sources support *multiple* research
 //!    dimensions at the same time, so the reader can see whether the same
 //!    evidence underlies different claims.
-//! 2. **Source tensions** — a combined view of direct contradictions, shallow
+//! 2. **Source tensions** - a combined view of direct contradictions, shallow
 //!    dimensions, and isolated evidence, so gaps and conflicts are visible
 //!    before synthesis.
 //!

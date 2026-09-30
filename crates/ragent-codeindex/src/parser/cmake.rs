@@ -44,13 +44,7 @@ impl LanguageParser for CmakeParser {
         let tree = Self::parse_tree(source)?;
         let root = tree.root_node();
 
-        let mut ctx = Ctx {
-            source,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            references: Vec::new(),
-            next_id: 0,
-        };
+        let mut ctx = Ctx::new(source);
 
         walk(&mut ctx, root, None);
 
@@ -63,33 +57,20 @@ impl LanguageParser for CmakeParser {
     }
 }
 
-// ── Extraction context ────��─────────────────────────────────────────────────
+// ── Extraction context ─────────────────────────────────────────────────────
 
 /// Mutable context threaded through recursive extraction.
-struct Ctx<'a> {
-    source: &'a [u8],
-    symbols: Vec<Symbol>,
-    imports: Vec<ImportEntry>,
-    references: Vec<SymbolRef>,
-    next_id: i64,
-}
-
-impl Ctx<'_> {
-    const fn alloc_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
-    fn text(&self, node: Node) -> &str {
-        node.utf8_text(self.source).unwrap_or("")
-    }
-}
+/// Parser-local alias of the shared extraction context.
+type Ctx<'a> = super::ctx::Ctx<'a>;
 
 // ── Recursive walk ──────────────────────────────────────────────────────────
 
 /// Walk a tree-sitter node, extracting `CMake` symbols.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
+    let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
+        return;
+    };
+
     match node.kind() {
         "function_def" => extract_function_def(ctx, node, parent_id),
         "macro_def" => extract_macro_def(ctx, node, parent_id),
@@ -107,7 +88,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── Function definition (`function(name …) … endfunction()`) ────────────────
+// ── Function definition (`function(name ...) ... endfunction()`) ────────────────
 
 /// Extract a `CMake` `function()` definition.
 ///
@@ -156,7 +137,7 @@ fn extract_function_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── Macro definition (`macro(name …) … endmacro()`) ─────────────────────────
+// ── Macro definition (`macro(name ...) ... endmacro()`) ─────────────────────────
 
 /// Extract a `CMake` `macro()` definition.
 fn extract_macro_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
@@ -201,7 +182,7 @@ fn extract_macro_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── Block definition (`block() … endblock()`) ───────────────────────────────
+// ── Block definition (`block() ... endblock()`) ───────────────────────────────
 
 /// Extract a `CMake` `block()` scope definition (`CMake` 3.25+).
 fn extract_block_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
@@ -394,8 +375,7 @@ fn extract_normal_command(ctx: &mut Ctx, node: Node, _parent_id: Option<i64>) {
 
 /// Find the first child of a node matching the given kind.
 fn find_child<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
-    let cursor = &mut node.walk();
-    node.children(cursor).find(|&child| child.kind() == kind)
+    super::util::find_child(node, kind)
 }
 
 /// Get the text of the first argument in a command's `argument_list`.
@@ -417,10 +397,12 @@ fn argument_list_text(ctx: &Ctx, cmd_node: Node) -> Option<String> {
     Some(ctx.text(args).to_string())
 }
 
-/// Compute a blake3 hash of the node's text for change detection.
+/// Content hash of the node's text for change detection.
+///
+/// Routes through [`super::util::node_hash`] so every parser hashes
+/// identically (ANTIPAT M5.3 / audit 3.2).
 fn hash_node(ctx: &Ctx, node: Node) -> String {
-    let text = ctx.text(node);
-    blake3::hash(text.as_bytes()).to_hex().to_string()
+    super::util::node_hash(ctx.source, node)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

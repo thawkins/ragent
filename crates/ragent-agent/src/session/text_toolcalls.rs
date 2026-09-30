@@ -50,7 +50,7 @@ const FUNCTION_CALLS_CLOSE: &str = "</function_calls>";
 /// Also reports the byte spans in `text` that produced the recovered calls so
 /// callers can blank the recovered markup from the conversation history
 /// (otherwise the model sees its own narration twice: once as text and once
-/// as the tool_use part). Only markup blocks carry spans — the bare-JSON
+/// as the tool_use part). Only markup blocks carry spans - the bare-JSON
 /// dialect consumes the whole response, which callers replace wholesale if
 /// they care.
 pub(crate) fn extract_text_tool_calls_with_spans(
@@ -137,7 +137,7 @@ fn parse_xml_tool_call(body: &str) -> Option<PendingToolCall> {
         .lines()
         .map(str::trim)
         .find(|line| line.starts_with("<function="))?;
-    // Name ends at the FIRST '>' after the prefix — a zero-parameter block
+    // Name ends at the FIRST '>' after the prefix - a zero-parameter block
     // (`<function=list_files></function>`) has the close tag on the same
     // line, so `strip_suffix('>')` would swallow it and corrupt the name
     // into "list_files></function".

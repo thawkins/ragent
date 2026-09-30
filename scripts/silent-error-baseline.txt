@@ -1,0 +1,30 @@
+# Silent error-suppression baseline (ANTIPAT M4).
+# Format: <path> <count>. Regenerate with:
+#   python3 scripts/check_silent_errors.py --update-baseline
+# The gate fails when a file exceeds its baseline or a file that had none
+# gains a masked site. Mark an intentional drop with a same-line
+# `// INTENTIONAL: <reason>` comment to keep it out of the count.
+
+crates/ragent-agent/src/mcp/mod.rs 2
+crates/ragent-agent/src/orchestrator/leader.rs 1
+crates/ragent-agent/src/research_adapter.rs 5
+crates/ragent-agent/src/session/loop_steps.rs 2
+crates/ragent-agent/src/session/processor.rs 1
+crates/ragent-agent/src/team/mailbox.rs 3
+crates/ragent-agent/src/team/manager.rs 2
+crates/ragent-agent/src/tool/structured_memory.rs 4
+crates/ragent-agent/src/tool/team_spawn.rs 1
+crates/ragent-agent/src/tool/team_task_claim.rs 2
+crates/ragent-agent/src/tool/team_task_complete.rs 2
+crates/ragent-agent/src/tool/team_task_create.rs 1
+crates/ragent-bench/src/model.rs 1
+crates/ragent-codeindex/src/graph/resolve.rs 4
+crates/ragent-llm/src/providers/huggingface.rs 1
+crates/ragent-llm/src/providers/mod.rs 2
+crates/ragent-llm/src/providers/router_client.rs 2
+crates/ragent-plugins/src/add.rs 2
+crates/ragent-tui/src/app/init.rs 1
+crates/ragent-tui/src/app/models.rs 1
+crates/ragent-tui/src/app/reverse.rs 2
+crates/ragent-tui/src/app/slash.rs 1
+src/main.rs 1

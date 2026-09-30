@@ -1,4 +1,4 @@
-//! Response parsing — extract structured `AnalysisResult` from LLM output,
+//! Response parsing - extract structured `AnalysisResult` from LLM output,
 //! validate citations and dates, detect malformed results, and provide
 //! mechanical fallback findings.
 //!
@@ -13,6 +13,7 @@ use std::sync::OnceLock;
 /// Cached citation-marker pattern (`[#12]`) shared by the citation validators.
 fn citation_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
+    // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
     RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"))
 }
 
@@ -20,24 +21,25 @@ fn citation_re() -> &'static Regex {
 /// completeness check.
 fn citation_bare_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
+    // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
     RE.get_or_init(|| Regex::new(r"\[#\d+\]").expect("valid citation regex"))
 }
 
 /// Cached ISO date pattern (`YYYY-MM-DD`) used by the date validator.
 fn date_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
+    // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
     RE.get_or_init(|| Regex::new(r"(\d{4}-\d{2}-\d{2})").expect("valid date regex"))
 }
 
 /// Cached `finding N` dependency pattern used by the reordering pass.
 fn finding_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
+    // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
     RE.get_or_init(|| Regex::new(r"(?i)\bfinding\s+(\d+)\b").expect("valid regex"))
 }
 
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn parse_analysis_response(text: &str) -> AnalysisResult {
+pub(crate) fn parse_analysis_response(text: &str) -> AnalysisResult {
     let mut result = AnalysisResult::default();
     let sections = split_sections(text);
     for (title, body) in sections {
@@ -79,9 +81,7 @@ pub fn parse_analysis_response(text: &str) -> AnalysisResult {
 /// [`AnalysisOutcome::Llm`]. Provider-level errors are surfaced by
 /// [`LlmAnalysisEngine::analyze_with_outcome`] as `Err`, which `session.rs`
 /// maps to [`crate::session::SynthesizeOutcome::FallbackError`].
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn parse_analysis_response_with_outcome(
+pub(crate) fn parse_analysis_response_with_outcome(
     text: &str,
     sources: &[SourceBody],
 ) -> (AnalysisResult, AnalysisOutcome) {
@@ -92,7 +92,7 @@ pub fn parse_analysis_response_with_outcome(
         let sanitized = strip_control_chars(text);
         let mut rescued = AnalysisResult::default();
         rescued.findings = mechanical_fallback_findings(&sanitized);
-        // Preserve the model's own summary when it parsed successfully —
+        // Preserve the model's own summary when it parsed successfully -
         // discarding a valid summary along with malformed findings loses
         // useful context. Only fall back to a diagnostic placeholder when
         // the summary is also empty.
@@ -120,7 +120,7 @@ pub fn parse_analysis_response_with_outcome(
                 tracing::warn!(warning = %w, "research: citation/date validation");
             }
         }
-        // Sanitize control characters from the clean parse too — the model
+        // Sanitize control characters from the clean parse too - the model
         // output may contain C0/C1 control chars that would corrupt the
         // rendered RESEARCH.md if left in place.
         for finding in &mut validated.findings {
@@ -154,7 +154,7 @@ pub fn parse_analysis_response_with_outcome(
 ///
 /// Mutates `findings` in place:
 /// - Out-of-range `[#N]` citations (N == 0 or N > `sources.len()`) are
-///   rewritten to `[#N?] (out of range — not in source list)`.
+///   rewritten to `[#N?] (out of range - not in source list)`.
 /// - Explicit publication dates in a **Sources Cited / Date Spread** paragraph
 ///   that do not match any cited source's `published_at` are rewritten to
 ///   `(unsupported date)`.
@@ -162,9 +162,7 @@ pub fn parse_analysis_response_with_outcome(
 /// Returns a list of human-readable warning strings (one per invalid claim)
 /// so the caller can log them. Findings that pass validation are left
 /// untouched.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn validate_citations_and_dates(
+pub(crate) fn validate_citations_and_dates(
     findings: &mut [String],
     sources: &[SourceBody],
 ) -> Vec<String> {
@@ -185,11 +183,12 @@ pub fn validate_citations_and_dates(
         let mut new_finding = String::with_capacity(finding.len());
         let mut last_end = 0;
         for cap in citation_re.captures_iter(finding) {
+            // INVARIANT: regex group 0 is always present; the call cannot fail at runtime.
             let m = cap.get(0).expect("full match");
             new_finding.push_str(&finding[last_end..m.start()]);
             let n: usize = cap[1].parse().unwrap_or(0);
             if n == 0 || n > sources.len() {
-                let replacement = format!("[#{n}?] (out of range — not in source list)");
+                let replacement = format!("[#{n}?] (out of range - not in source list)");
                 new_finding.push_str(&replacement);
                 warnings.push(format!(
                     "finding cites [#{n}] but only {} source(s) were captured",
@@ -210,6 +209,7 @@ pub fn validate_citations_and_dates(
             let mut validated_spread = String::with_capacity(spread.len());
             let mut last_end = 0;
             for cap in date_re.captures_iter(spread) {
+                // INVARIANT: regex group 0 is always present; the call cannot fail at runtime.
                 let m = cap.get(0).expect("full match");
                 validated_spread.push_str(&spread[last_end..m.start()]);
                 let claimed = &cap[1];
@@ -234,9 +234,7 @@ pub fn validate_citations_and_dates(
 /// Return `true` when `result` should be treated as a malformed LLM response
 /// (FR-005): empty findings, any finding missing one of the four required
 /// bold labels, or any finding that contains no `[#N]` citation.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn is_malformed_analysis_result(result: &AnalysisResult) -> bool {
+pub(crate) fn is_malformed_analysis_result(result: &AnalysisResult) -> bool {
     if result.findings.is_empty() {
         return true;
     }
@@ -266,7 +264,7 @@ pub fn is_malformed_analysis_result(result: &AnalysisResult) -> bool {
 /// **Non-empty guarantee (FR-011 / T-010):** this function ALWAYS returns at
 /// least one finding. When the raw response has no extractable candidate
 /// findings, a single placeholder finding is emitted whose **Observation**
-/// paragraph reads "(findings could not be structured — see below)" and
+/// paragraph reads "(findings could not be structured - see below)" and
 /// includes the raw model output in a fenced code block so the research
 /// item remains usable. Callers can rely on `findings.is_empty()` never
 /// being true for the returned `Vec`.
@@ -282,9 +280,7 @@ pub fn is_malformed_analysis_result(result: &AnalysisResult) -> bool {
 /// 4. If no candidate text could be extracted, return a single placeholder
 ///    finding that quotes the raw response (truncated) so the research item
 ///    remains usable.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn mechanical_fallback_findings(text: &str) -> Vec<String> {
+pub(crate) fn mechanical_fallback_findings(text: &str) -> Vec<String> {
     let candidates = extract_candidate_findings(text);
     let required = [
         "**Observation:**",
@@ -305,7 +301,7 @@ pub fn mechanical_fallback_findings(text: &str) -> Vec<String> {
     }
     if findings.is_empty() {
         // FR-011 / T-010: the model returned fewer than one valid finding.
-        // The fallback takes precedence — emit a single placeholder finding
+        // The fallback takes precedence - emit a single placeholder finding
         // so RESEARCH.md is never left with an empty Findings section. The
         // raw model output is preserved in a fenced code block for manual
         // review.
@@ -313,7 +309,7 @@ pub fn mechanical_fallback_findings(text: &str) -> Vec<String> {
         if raw.is_empty() {
             findings.push(
                 "**Headline:** Findings could not be structured\n\n\
-                 **Observation:** (findings could not be structured — see below)\n\n\
+                 **Observation:** (findings could not be structured - see below)\n\n\
                  (no model response was returned)\n\n\
                  **Analysis:** (missing)\n\n\
                  **Cross-reference / Dependencies:** No direct dependencies.\n\n\
@@ -325,10 +321,10 @@ pub fn mechanical_fallback_findings(text: &str) -> Vec<String> {
             let truncated = truncate_body(raw, 2000);
             findings.push(format!(
                 "**Headline:** Model response could not be parsed\n\n\
-                 **Observation:** (findings could not be structured — see below)\n\n\
+                 **Observation:** (findings could not be structured - see below)\n\n\
                  The raw model response (truncated) is preserved for manual review:\n\n\
                  ```text\n{truncated}\n```\n\n\
-                 **Analysis:** (extracted mechanically — the model output did not \
+                 **Analysis:** (extracted mechanically - the model output did not \
                  contain the four required labeled paragraphs)\n\n\
                  **Cross-reference / Dependencies:** No direct dependencies.\n\n\
                  **Implication:** Re-run `/research create` or refine the topic; \
@@ -355,7 +351,7 @@ fn extract_candidate_findings(text: &str) -> Vec<String> {
         if !items.is_empty() {
             return items;
         }
-        // `## Findings` present but no numbered items — fall through to
+        // `## Findings` present but no numbered items - fall through to
         // whole-response strategies.
     }
     // 2. Numbered items anywhere in the response.
@@ -405,12 +401,10 @@ fn split_sections(text: &str) -> Vec<(String, String)> {
 /// Parse a numbered markdown list (`1. ...`) into plain item strings.
 ///
 /// Handles the common LLM output patterns:
-/// * `1. First finding.` — number, dot, space, content on the same line
-/// * `1.` followed by blank line and paragraphs — number on its own line,
+/// * `1. First finding.` - number, dot, space, content on the same line
+/// * `1.` followed by blank line and paragraphs - number on its own line,
 ///   content starts on subsequent lines
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn parse_numbered_list(body: &str) -> Vec<String> {
+pub(crate) fn parse_numbered_list(body: &str) -> Vec<String> {
     let mut items = Vec::new();
     let mut current = String::new();
     for line in body.lines() {
@@ -460,9 +454,7 @@ pub fn parse_numbered_list(body: &str) -> Vec<String> {
 /// Cycles (e.g. Finding 2 depends on Finding 3 and Finding 3 depends on
 /// Finding 2) are broken by falling back to the original order for the involved
 /// items.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String> {
+pub(crate) fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String> {
     if findings.len() <= 1 {
         return findings.to_vec();
     }
@@ -546,6 +538,7 @@ pub fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String> {
             let mut out = String::with_capacity(text.len());
             let mut last_end = 0;
             for cap in finding_re.captures_iter(text) {
+                // INVARIANT: regex group 0 is always present; the call cannot fail at runtime.
                 let m = cap.get(0).expect("full match");
                 out.push_str(&text[last_end..m.start()]);
                 let old_num: usize = cap[1].parse().unwrap_or(0);
@@ -563,9 +556,7 @@ pub fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String> {
 }
 
 /// Parse a bullet list (`* ...` or `- ...`) into plain item strings.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn parse_bullet_list(body: &str) -> Vec<String> {
+pub(crate) fn parse_bullet_list(body: &str) -> Vec<String> {
     let mut items = Vec::new();
     let mut current = String::new();
     for line in body.lines() {
@@ -587,14 +578,12 @@ pub fn parse_bullet_list(body: &str) -> Vec<String> {
 }
 
 /// Parse cross-reference bullets into [`CrossReference`] structs. Expected
-/// format: `* `path` — note` or `* path — note`.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn parse_cross_reference_list(body: &str) -> Vec<CrossReference> {
+/// format: `* `path` - note` or `* path - note`.
+pub(crate) fn parse_cross_reference_list(body: &str) -> Vec<CrossReference> {
     let mut out = Vec::new();
     for item in parse_bullet_list(body) {
-        let (path, relevance) = if let Some(idx) = item.find(" — ") {
-            let split_at = idx + " — ".len();
+        let (path, relevance) = if let Some(idx) = item.find(" - ") {
+            let split_at = idx + " - ".len();
             (
                 item[..idx].trim().to_string(),
                 item[split_at..].trim().to_string(),
@@ -610,16 +599,14 @@ pub fn parse_cross_reference_list(body: &str) -> Vec<CrossReference> {
 
 /// Truncate a source body to a character budget so the prompt fits in common
 /// context windows. The limit is approximate and errs on the side of inclusion.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn truncate_body(body: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_body(body: &str, max_chars: usize) -> String {
     if body.chars().count() <= max_chars {
         return body.to_string();
     }
     let mut out = String::with_capacity(max_chars);
     for (count, ch) in body.chars().enumerate() {
         if count >= max_chars {
-            out.push_str("\n\n… (truncated for prompt size)");
+            out.push_str("\n\n... (truncated for prompt size)");
             break;
         }
         out.push(ch);

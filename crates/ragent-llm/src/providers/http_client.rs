@@ -29,7 +29,29 @@ const REQUEST_TIMEOUT_SECS: u64 = 120;
 /// over a minute before its first token) rely on the *initial* response not
 /// timing out here because this helper only guards each *subsequent* chunk once
 /// the stream is already producing data.
+///
+/// This guards the budget *between* already-flowing chunks. It is deliberately
+/// shorter than [`DEFAULT_STREAM_TIMEOUT_SECS`] (the first-byte budget): once a
+/// stream has started producing data, a long gap means a genuine stall, so a
+/// tight per-chunk guard surfaces it early. Before the first byte, the model
+/// may legitimately spend a long time thinking (especially reasoning models
+/// with large prompts), so the first-byte budget is the more generous
+/// [`DEFAULT_STREAM_TIMEOUT_SECS`].
 pub const STREAM_CHUNK_IDLE_TIMEOUT_SECS: u64 = 120;
+
+/// Default first-byte (whole-request) timeout for providers that wrap the chat
+/// POST in a `tokio::time::timeout` and let callers override it via
+/// `ChatRequest::stream_timeout_secs`.
+///
+/// This is the budget from sending the request until the first response byte
+/// arrives. It is intentionally larger than
+/// [`STREAM_CHUNK_IDLE_TIMEOUT_SECS`] because a reasoning model may think for
+/// several minutes before emitting its first token, whereas an inter-chunk gap
+/// of the same length would indicate a genuine mid-stream stall.
+///
+/// Used by copilot, ollama, ollama_cloud and openrouter; the remaining
+/// providers rely solely on the per-chunk guard above.
+pub const DEFAULT_STREAM_TIMEOUT_SECS: u64 = 600;
 
 /// Decode a stream chunk onto a growing `String`, buffering any incomplete
 /// trailing multibyte character so it can be completed by the next chunk.
@@ -43,7 +65,7 @@ pub const STREAM_CHUNK_IDLE_TIMEOUT_SECS: u64 = 120;
 /// `Utf8Error::error_len()` reports how many bytes after `valid_up_to` are a
 /// definitively bad sequence, which we flush lossily. `error_len() == None`
 /// means the tail is *incomplete* rather than invalid, so we keep it in
-/// `pending` and wait for more bytes — regardless of how long `pending` has
+/// `pending` and wait for more bytes - regardless of how long `pending` has
 /// grown. A pure length-based flush (e.g. `pending.len() >= 4`) can corrupt a
 /// valid character whose head was appended to a buffer that already contained
 /// garbage.
@@ -95,7 +117,7 @@ pub fn append_stream_chunk(out: &mut String, pending: &mut Vec<u8>, chunk: &[u8]
 /// accumulation `buffer`, consuming it in place.
 ///
 /// Unlike `buffer = buffer[pos + 1..].to_string()` (which re-allocates and
-/// copies the entire unconsumed remainder on every line — quadratic for long
+/// copies the entire unconsumed remainder on every line - quadratic for long
 /// streams), this drains the consumed prefix in place so the remaining bytes
 /// are reused without an allocation per line (C-003).
 ///
@@ -245,7 +267,7 @@ fn backoff_delay(attempt: u32) -> Duration {
 ///
 /// Retries on:
 /// - 5xx server errors
-/// - 429 Too Many Requests (rate limited) — respects `Retry-After` header
+/// - 429 Too Many Requests (rate limited) - respects `Retry-After` header
 /// - Connection errors
 /// - Timeout errors
 ///
@@ -343,10 +365,7 @@ where
                 // For other client errors, don't retry
                 if status.is_client_error() {
                     // FUNC-034: include a body-read failure in the diagnostic.
-                    let body = match response.text().await {
-                        Ok(body) => body,
-                        Err(e) => format!("<body read failed: {e}>"),
-                    };
+                    let body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
                     return Err(anyhow::anyhow!("HTTP {} (not retryable): {}", status, body));
                 }
 

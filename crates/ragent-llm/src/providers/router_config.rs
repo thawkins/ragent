@@ -1,7 +1,7 @@
 //! Configuration types for the Model Router virtual provider.
 //!
 //! Defines [`RouterConfig`], [`TierConfig`], [`WeightConfig`], and
-//! [`BoundaryConfig`] — the serialisable configuration model that lives in
+//! [`BoundaryConfig`] - the serialisable configuration model that lives in
 //! `ragent.json` under `provider.router`. All types implement `Default` with
 //! built-in defaults so the router functions without explicit configuration
 //! (FR-024).
@@ -35,13 +35,13 @@ pub struct TierConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Tier {
-    /// Simple prompts — short, low-complexity requests.
+    /// Simple prompts - short, low-complexity requests.
     Simple,
-    /// Medium prompts — moderate complexity, typical coding questions.
+    /// Medium prompts - moderate complexity, typical coding questions.
     Medium,
-    /// Complex prompts — advanced reasoning, multi-step tasks.
+    /// Complex prompts - advanced reasoning, multi-step tasks.
     Complex,
-    /// Reasoning prompts — deep analysis, proofs, mathematical reasoning.
+    /// Reasoning prompts - deep analysis, proofs, mathematical reasoning.
     Reasoning,
 }
 
@@ -188,7 +188,7 @@ impl WeightConfig {
         0.05
     }
 
-    /// Returns the weight for a dimension by its 0-based index (0–14).
+    /// Returns the weight for a dimension by its 0-based index (0-14).
     ///
     /// Returns `0.0` for an out-of-range index instead of panicking: the index
     /// can be derived from classifier output, so a malformed value must not
@@ -214,7 +214,7 @@ impl WeightConfig {
         }
     }
 
-    /// Returns the dimension name by its 0-based index (0–14).
+    /// Returns the dimension name by its 0-based index (0-14).
     ///
     /// Returns `"unknown"` for an out-of-range index instead of panicking
     /// (FUNC-005).
@@ -312,13 +312,13 @@ impl Default for WeightConfig {
 /// four tiers: SIMPLE, MEDIUM, COMPLEX, and REASONING.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoundaryConfig {
-    /// SIMPLE → MEDIUM boundary (default 0.25).
+    /// SIMPLE -> MEDIUM boundary (default 0.25).
     #[serde(default = "BoundaryConfig::default_simple_medium")]
     pub simple_medium: f64,
-    /// MEDIUM → COMPLEX boundary (default 0.50).
+    /// MEDIUM -> COMPLEX boundary (default 0.50).
     #[serde(default = "BoundaryConfig::default_medium_complex")]
     pub medium_complex: f64,
-    /// COMPLEX → REASONING boundary (default 0.75).
+    /// COMPLEX -> REASONING boundary (default 0.75).
     #[serde(default = "BoundaryConfig::default_complex_reasoning")]
     pub complex_reasoning: f64,
 }

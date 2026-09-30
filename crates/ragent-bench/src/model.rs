@@ -198,7 +198,7 @@ impl BenchModelRunner for LiveBenchModelRunner {
         let options = options.clone();
         // SEC-ragent-bench-006 (SECTASKS T-059): `options.samples` is a plain
         // `usize` from the CLI with no upper bound, used both as a
-        // `Vec::with_capacity` argument and as the loop bound — each sample is
+        // `Vec::with_capacity` argument and as the loop bound - each sample is
         // a full streaming LLM request. Clamp it once, before the runtime is
         // built, so the cap applies to both the pre-allocation and the loop.
         let sample_count = options.samples.clamp(1, MAX_BENCH_SAMPLES);
@@ -583,74 +583,5 @@ fn extract_benchmark_error_status_code(message: &str) -> Option<u16> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        BENCH_TRANSIENT_MAX_BACKOFF_SECS, BENCH_TRANSIENT_MAX_ELAPSED_SECS, benchmark_retry_delay,
-        extract_benchmark_error_status_code, format_retry_exhausted_error,
-        is_permanent_benchmark_api_error,
-    };
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn test_extract_benchmark_error_status_code_reads_http_style_messages() {
-        assert_eq!(
-            extract_benchmark_error_status_code("Ollama Cloud API error (503 Service Unavailable)"),
-            Some(503)
-        );
-        assert_eq!(
-            extract_benchmark_error_status_code("HTTP 429 Too Many Requests"),
-            Some(429)
-        );
-    }
-
-    #[test]
-    fn test_is_permanent_benchmark_api_error_ignores_retryable_statuses() {
-        assert!(!is_permanent_benchmark_api_error(
-            "OpenAI API error (429 Too Many Requests): rate limited"
-        ));
-        assert!(!is_permanent_benchmark_api_error(
-            "Ollama Cloud API error (503 Service Unavailable): server overloaded"
-        ));
-    }
-
-    #[test]
-    fn test_benchmark_retry_delay_grows_and_caps_for_retryable_errors() {
-        let started = Instant::now();
-        assert_eq!(
-            benchmark_retry_delay("HTTP 503 Service Unavailable", 0, started),
-            Some(Duration::from_secs(2))
-        );
-        assert_eq!(
-            benchmark_retry_delay("HTTP 503 Service Unavailable", 3, started),
-            Some(Duration::from_secs(16))
-        );
-        assert_eq!(
-            benchmark_retry_delay("HTTP 503 Service Unavailable", 6, started),
-            Some(Duration::from_secs(BENCH_TRANSIENT_MAX_BACKOFF_SECS))
-        );
-    }
-
-    #[test]
-    fn test_benchmark_retry_delay_stops_after_budget_is_spent() {
-        let started = Instant::now()
-            .checked_sub(Duration::from_secs(BENCH_TRANSIENT_MAX_ELAPSED_SECS))
-            .unwrap();
-        assert_eq!(
-            benchmark_retry_delay("HTTP 503 Service Unavailable", 0, started),
-            None
-        );
-        assert_eq!(
-            benchmark_retry_delay("HTTP 400 Bad Request", 0, Instant::now()),
-            None
-        );
-    }
-
-    #[test]
-    fn test_format_retry_exhausted_error_reports_attempts_and_elapsed_time() {
-        let started = Instant::now().checked_sub(Duration::from_secs(9)).unwrap();
-        let message = format_retry_exhausted_error("HTTP 503 Service Unavailable", 5, started);
-        assert!(message.contains("503"));
-        assert!(message.contains("5 attempt(s)"));
-        assert!(message.contains("over 9s") || message.contains("over 10s"));
-    }
-}
+#[path = "../tests/inline/model_tests.rs"]
+mod tests;

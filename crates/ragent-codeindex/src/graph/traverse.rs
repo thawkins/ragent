@@ -244,7 +244,7 @@ fn edge_to_connection(
 /// Why this exists: `query_symbols` does a case-insensitive leading-fragment
 /// match ordered by name, so for `SessionProcessor` it returned the
 /// `CachedSessionProcessor` trait and for `EventBus` the `Default for EventBus`
-/// impl — both near-zero-edge nodes that made `codeindex_path` report
+/// impl - both near-zero-edge nodes that made `codeindex_path` report
 /// "No path found" for well-connected symbols.
 fn resolution_rank(sym: &crate::types::Symbol) -> (u8, i64) {
     let kind_rank: u8 = match sym.kind {
@@ -307,7 +307,7 @@ fn find_symbol(store: &IndexStore, name: &str) -> Result<Option<crate::types::Sy
 /// Look up a symbol's name by its ID.
 ///
 /// H-003: uses a single keyed `SELECT name FROM symbols WHERE id = ?` instead
-/// of loading *all* symbols and linearly searching (which was O(N) per call —
+/// of loading *all* symbols and linearly searching (which was O(N) per call -
 /// quadratic when reconstructing a path or explaining a symbol with many
 /// connections).
 fn symbol_name(store: &IndexStore, sym_id: i64) -> Result<Option<String>> {

@@ -205,7 +205,7 @@ fn test_cycle_error_message_format() {
     assert!(msg.contains("cycle"), "msg: {msg}");
     assert!(msg.contains('b'), "msg: {msg}");
     assert!(msg.contains('a'), "msg: {msg}");
-    assert!(msg.contains("→"), "msg: {msg}");
+    assert!(msg.contains("->"), "msg: {msg}");
 }
 
 /// The error message for a self-loop mentions the task ID.

@@ -17,6 +17,7 @@ use std::sync::RwLock;
 
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::provider::http_client;
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::provider::thinking::{full_reasoning_levels, openrouter_reasoning_payload_from_request};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -409,8 +410,8 @@ fn openrouter_model_to_info(entry: OpenRouterModelEntry) -> Option<ModelInfo> {
 
 /// OpenRouter chat client constructed by [`OpenRouterProvider::create_client`].
 ///
-/// FR-025: the chat POST path must use a single `.send()` per request — no
-/// `execute_with_retry` wrapper — because automatically retrying a chat POST
+/// FR-025: the chat POST path must use a single `.send()` per request - no
+/// `execute_with_retry` wrapper - because automatically retrying a chat POST
 /// can double-bill. Only the discovery GET (spec task T-003) is ever
 /// retry-eligible.
 pub struct OpenRouterClient {
@@ -660,7 +661,7 @@ impl OpenRouterClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "OpenRouter: stream stalled — no data received for {}s",
+                                "OpenRouter: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -883,8 +884,12 @@ impl LlmClient for OpenRouterClient {
             "OpenRouter chat request"
         );
 
-        // FR-016: first-byte timeout defaults to 600 s (mirrors Ollama Cloud).
-        let first_byte_timeout = request.stream_timeout_secs.unwrap_or(600);
+        // ANTIPAT 3.5: first-byte timeout defaults to the shared
+        // `DEFAULT_STREAM_TIMEOUT_SECS` (mirrors Ollama Cloud); the per-chunk
+        // idle guard is separate (`STREAM_CHUNK_IDLE_TIMEOUT_SECS`).
+        let first_byte_timeout = request
+            .stream_timeout_secs
+            .unwrap_or(http_client::DEFAULT_STREAM_TIMEOUT_SECS);
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(first_byte_timeout),
             self.http
@@ -896,19 +901,21 @@ impl LlmClient for OpenRouterClient {
         )
         .await
         .inspect_err(|e| {
-            tracing::warn!(url = %url, error = %e, "OpenRouter chat request timed out");
+            tracing::warn!(provider = "openrouter", url = %url, error = %e, "chat request timed out");
         })
         .map_err(|_| {
             anyhow::anyhow!("OpenRouter: initial response timed out after {first_byte_timeout}s")
         })?
         .inspect_err(|e| {
-            tracing::warn!(url = %url, error = %e, "OpenRouter chat request failed");
+            tracing::warn!(provider = "openrouter", url = %url, error = %e, "chat request failed");
         })
         .with_context(|| format!("Failed to connect to OpenRouter at {url}"))?;
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_body = response.text().await.unwrap_or_default();
+            // ANTIPAT 3.1/3.2: capped error-body read (replaces the local
+            // MAX_ERR_LEN truncation).
+            let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
             const MAX_ERR_LEN: usize = 4096;
             // Clamp to a char boundary: slicing at a raw byte offset panics when
             // it lands inside a multibyte UTF-8 character (FUNC-001).
@@ -922,11 +929,12 @@ impl LlmClient for OpenRouterClient {
                 error_body
             };
             tracing::warn!(
+                provider = "openrouter",
                 url = %url,
                 model = %request.model,
                 status = %status,
                 error = %error_body,
-                "OpenRouter API error"
+                "API error"
             );
             bail!("OpenRouter API error ({status}): {error_body}");
         }

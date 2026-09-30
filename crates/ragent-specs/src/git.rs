@@ -59,8 +59,8 @@ pub fn spec_branch_name(specname: &str) -> String {
 ///   [`BranchResult::Failed`] with the stderr output.
 ///
 /// # Arguments
-/// * `specname` — The spec identifier (used to derive the branch name).
-/// * `working_dir` — The directory in which to run git commands (typically
+/// * `specname` - The spec identifier (used to derive the branch name).
+/// * `working_dir` - The directory in which to run git commands (typically
 ///   the project root).
 ///
 /// # Returns

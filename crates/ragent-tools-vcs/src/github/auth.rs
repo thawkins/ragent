@@ -52,7 +52,7 @@ fn read_cached_token(path: &Path) -> Option<String> {
 ///
 /// Priority (see `ragent_config::github`): the `GITHUB_TOKEN` environment
 /// variable wins outright; otherwise the cached stored-file token is used
-/// unless it is a GitHub App token (`ghu_`/`ghs_`) — those cannot create
+/// unless it is a GitHub App token (`ghu_`/`ghs_`) - those cannot create
 /// repositories, so the `gh auth token` credential is preferred when the CLI
 /// is authenticated, falling back to the stored token when it is not.
 #[must_use]
@@ -85,7 +85,7 @@ pub fn save_token(token: &str) -> Result<()> {
     write_private_file(&tmp_path, token)?;
     std::fs::rename(&tmp_path, &path).inspect_err(|_| {
         // Best-effort cleanup so a failed rename does not leave the temp file.
-        let _ = std::fs::remove_file(&tmp_path);
+        let _ = std::fs::remove_file(&tmp_path); // INTENTIONAL: best-effort temp cleanup
     })?;
 
     // Invalidate the mtime-keyed read cache so the new token is visible even
@@ -214,7 +214,7 @@ pub async fn poll_device_flow(client_id: &str, state: &DeviceFlowState) -> Resul
     match error {
         "authorization_pending" => Ok(None),
         "slow_down" => Ok(None),
-        "expired_token" => bail!("Device flow token expired — please try /github login again"),
+        "expired_token" => bail!("Device flow token expired - please try /github login again"),
         "access_denied" => bail!("GitHub authorization was denied"),
         other => bail!("Device flow error: {other}"),
     }
@@ -236,7 +236,7 @@ where
 
     loop {
         if std::time::Instant::now() > deadline {
-            bail!("Device flow timed out — please try /github login again");
+            bail!("Device flow timed out - please try /github login again");
         }
         tokio::time::sleep(interval).await;
 

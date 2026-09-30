@@ -217,11 +217,11 @@ impl Tool for OfficeWriteTool {
 ///    `[{ "type": "heading", "text": "Title", "level": 1 }, ...]`
 ///
 /// Each element in the array is normalised to a set of paragraphs:
-/// - `{type: "paragraph", text}` / `{text, style: "Normal"}` → plain paragraph
-/// - `{type: "heading", text, level}` / `{heading, level}` / `{text, style: "HeadingN"}` → heading
-/// - `{type: "bullet_list", items: [...]}` → one bullet paragraph per item
-/// - `{type: "ordered_list", items: [...]}` → one numbered paragraph per item
-/// - `{type: "code_block", text}` → code-styled paragraph
+/// - `{type: "paragraph", text}` / `{text, style: "Normal"}` -> plain paragraph
+/// - `{type: "heading", text, level}` / `{heading, level}` / `{text, style: "HeadingN"}` -> heading
+/// - `{type: "bullet_list", items: [...]}` -> one bullet paragraph per item
+/// - `{type: "ordered_list", items: [...]}` -> one numbered paragraph per item
+/// - `{type: "code_block", text}` -> code-styled paragraph
 fn write_docx(path: &Path, content: &Value) -> Result<()> {
     use docx_rust::document::Paragraph;
     use docx_rust::formatting::{CharacterProperty, ParagraphProperty};
@@ -317,7 +317,7 @@ fn write_docx(path: &Path, content: &Value) -> Result<()> {
                 });
             }
             _ => {
-                // "paragraph" or unknown — also handles legacy {heading, level} without "type"
+                // "paragraph" or unknown - also handles legacy {heading, level} without "type"
                 if elem["heading"].as_str().is_some() || elem["level"].as_u64().is_some() {
                     let heading_text = elem["heading"]
                         .as_str()
@@ -477,7 +477,7 @@ fn extract_slides(content: &Value) -> Result<Vec<Value>> {
         return Ok(arr.clone());
     }
 
-    // 2. Content is a JSON string — parse and recurse
+    // 2. Content is a JSON string - parse and recurse
     if let Some(s) = content.as_str()
         && let Ok(parsed) = serde_json::from_str::<Value>(s)
     {
@@ -490,7 +490,7 @@ fn extract_slides(content: &Value) -> Result<Vec<Value>> {
             return Ok(arr.clone());
         }
 
-        // 4. Single-key wrapper — look inside
+        // 4. Single-key wrapper - look inside
         if obj.len() == 1 {
             let inner = obj.values().next().unwrap();
             if let Ok(slides) = extract_slides(inner) {
@@ -552,7 +552,7 @@ fn flatten_pptx_elements(arr: &[Value]) -> String {
                             .as_str()
                             .unwrap_or_else(|| li["text"].as_str().unwrap_or(""));
                         if !text.is_empty() {
-                            lines.push(format!("• {text}"));
+                            lines.push(format!("* {text}"));
                         }
                     }
                 }

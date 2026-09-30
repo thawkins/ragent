@@ -3,8 +3,8 @@
 //! These functions are separated from `YahooFinanceProvider` so they can be
 //! unit-tested without making network calls. They cover:
 //!
-//! - interval and period string → `yfinance_rs` enum mapping,
-//! - `paft` money/quantity decimal → `f64`/`u64` conversion,
+//! - interval and period string -> `yfinance_rs` enum mapping,
+//! - `paft` money/quantity decimal -> `f64`/`u64` conversion,
 //! - percent-change calculation,
 //! - Yahoo error classification and mapping to `FinanceError`.
 

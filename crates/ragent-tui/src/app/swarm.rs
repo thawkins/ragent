@@ -1,6 +1,6 @@
 //! Swarm decomposition handling for the TUI.
 
-use ragent_team::team::{self, MemberStatus};
+use ragent_agent::team::{self, MemberStatus};
 
 // State types from app/state.rs
 use crate::app::state::{App, LogLevel};
@@ -21,7 +21,7 @@ impl App {
     /// its task store cannot be read. Shared by the status, unblock,
     /// completion, and finalize paths so the load-by-name + open + read chain
     /// lives in one place.
-    fn load_swarm_tasks(&self, team_name: &str) -> Option<ragent_team::team::task::TaskList> {
+    fn load_swarm_tasks(&self, team_name: &str) -> Option<ragent_agent::team::task::TaskList> {
         let working_dir = self.swarm_working_dir();
         let store = team::TeamStore::load_by_name(team_name, &working_dir).ok()?;
         let ts = team::TaskStore::open(&store.dir).ok()?;
@@ -29,7 +29,7 @@ impl App {
     }
 
     pub(crate) fn execute_swarm_decomposition(&mut self, decomposition: team::SwarmDecomposition) {
-        use ragent_team::team::{SwarmState, TaskStore, TeamStore, task::Task};
+        use ragent_agent::team::{SwarmState, TaskStore, TeamStore, task::Task};
 
         let task_count = decomposition.tasks.len();
         if task_count == 0 {
@@ -77,30 +77,30 @@ impl App {
 
                 // Build display table
                 let mut output = format!(
-                    "From: /swarm\n## 🐝 Swarm Created: {team_name}\n\n\
+                    "From: /swarm\n## [bee] Swarm Created: {team_name}\n\n\
                                       **{task_count} subtasks** decomposed and seeded.\n\n\
                                       | ID | Title | Agent Type | Dependencies |\n\
                                       |----|-------|------------|--------------|\n"
                 );
                 for st in &decomposition.tasks {
                     let deps = if st.depends_on.is_empty() {
-                        "—".to_string()
+                        "-".to_string()
                     } else {
                         st.depends_on.join(", ")
                     };
                     let agent = st
                         .agent_type
                         .as_deref()
-                        .unwrap_or(ragent_team::team::DEFAULT_AGENT_TYPE);
+                        .unwrap_or(ragent_agent::team::DEFAULT_AGENT_TYPE);
                     output.push_str(&format!(
                         "| {} | {} | {} | {} |\n",
                         st.id, st.title, agent, deps
                     ));
                 }
-                output.push_str("\nSpawning teammates…\n");
+                output.push_str("\nSpawning teammates...\n");
                 self.append_assistant_text(&output);
 
-                // Record swarm state (prompt is blank for now — it was consumed in the slash command)
+                // Record swarm state (prompt is blank for now - it was consumed in the slash command)
                 let swarm_prompt = String::new();
                 let default_agent_type = self
                     .swarm_state
@@ -139,7 +139,7 @@ impl App {
             let agent_type = subtask
                 .agent_type
                 .as_deref()
-                .unwrap_or(ragent_team::team::DEFAULT_AGENT_TYPE)
+                .unwrap_or(ragent_agent::team::DEFAULT_AGENT_TYPE)
                 .to_string();
 
             // Parse per-subtask model override
@@ -170,11 +170,11 @@ impl App {
                 You are part of a swarm team. Complete this specific task.\n\n\
                 IMPORTANT: Your VERY FIRST action must be a tool call. \
                 Call `team_read_messages` with team_name set to the team name from your context. \
-                Do NOT respond with text first — call the tool immediately.\n\n\
+                Do NOT respond with text first - call the tool immediately.\n\n\
                 After reading messages, do the work described above using tool calls \
                 (glob, read, bash, etc.). \
                 When done, call `team_task_complete` to mark task \"{}\" as completed.\
-                Focus only on your assigned task — other teammates are handling other parts.",
+                Focus only on your assigned task - other teammates are handling other parts.",
                 subtask.title, subtask.id, subtask.title, subtask.description, subtask.id
             );
 
@@ -220,13 +220,13 @@ impl App {
             self.push_log_no_agent(
                 LogLevel::Info,
                 format!(
-                    "🐝 Swarm teammate: {} ({}) — {} ({} agent)",
+                    "[bee] Swarm teammate: {} ({}) - {} ({} agent)",
                     teammate_name, subtask.id, status_label, agent_type
                 ),
             );
         }
 
-        // Trigger reconcile — the manager picks up Spawning members and spawns them.
+        // Trigger reconcile - the manager picks up Spawning members and spawns them.
         // Blocked members are skipped by reconcile (they aren't MemberStatus::Spawning).
         if let Some(manager) = self.session_processor.team_manager.get() {
             manager.clone().reconcile_spawning_members();
@@ -244,7 +244,7 @@ impl App {
             .filter(|t| t.depends_on.is_empty())
             .count();
         let blocked = decomposition.tasks.len() - ready;
-        self.status = format!("🐝 swarm: {ready} spawning, {blocked} blocked");
+        self.status = format!("[bee] swarm: {ready} spawning, {blocked} blocked");
     }
 
     pub(crate) fn handle_swarm_status(&mut self) {
@@ -255,7 +255,10 @@ impl App {
             return;
         };
 
-        let mut output = format!("From: /swarm status\n## 🐝 Swarm: {}\n\n", swarm.team_name);
+        let mut output = format!(
+            "From: /swarm status\n## [bee] Swarm: {}\n\n",
+            swarm.team_name
+        );
 
         // Load tasks from disk for current status
         let tasks = self.load_swarm_tasks(&swarm.team_name);
@@ -304,9 +307,9 @@ impl App {
                     team::TaskStatus::Pending => "[wait]",
                     team::TaskStatus::Cancelled => "[err]",
                 };
-                let assigned = task.assigned_to.as_deref().unwrap_or("—");
+                let assigned = task.assigned_to.as_deref().unwrap_or("-");
                 let deps = if task.depends_on.is_empty() {
-                    "—".to_string()
+                    "-".to_string()
                 } else {
                     task.depends_on.join(", ")
                 };
@@ -318,12 +321,12 @@ impl App {
         } else {
             for st in &swarm.decomposition.tasks {
                 let deps = if st.depends_on.is_empty() {
-                    "—".to_string()
+                    "-".to_string()
                 } else {
                     st.depends_on.join(", ")
                 };
                 output.push_str(&format!(
-                    "| {} | {} | [wait] | — | {} |\n",
+                    "| {} | {} | [wait] | - | {} |\n",
                     st.id, st.title, deps
                 ));
             }
@@ -332,19 +335,19 @@ impl App {
         // Teammate status
         output.push_str("\n**Teammates:**\n");
         if self.team_members.is_empty() {
-            output.push_str("  (spawning…)\n");
+            output.push_str("  (spawning...)\n");
         } else {
             for m in &self.team_members {
                 let status = format!("{:?}", m.status).to_lowercase();
                 output.push_str(&format!(
-                    "  • {} — {} ({} agent)\n",
+                    "  * {} - {} ({} agent)\n",
                     m.name, status, m.agent_type
                 ));
             }
         }
 
         if completed == total && total > 0 {
-            output.push_str("\n🎉 **All tasks complete!** Use `/swarm cancel` to clean up.\n");
+            output.push_str("\n[done] **All tasks complete!** Use `/swarm cancel` to clean up.\n");
         }
         self.append_assistant_text(&output);
     }
@@ -363,7 +366,7 @@ impl App {
             .await;
 
         self.append_assistant_text(&format!(
-            "From: /swarm cancel\n## 🐝 Swarm Cancelled\n\n\
+            "From: /swarm cancel\n## [bee] Swarm Cancelled\n\n\
             Swarm **{team_name}** has been shut down.\n"
         ));
         self.status = "swarm: cancelled".to_string();
@@ -465,7 +468,7 @@ impl App {
             return;
         }
 
-        // Transition unblocked members from Blocked → Spawning
+        // Transition unblocked members from Blocked -> Spawning
         for (member_name, agent_id, task_id) in &unblocked {
             // Update local state
             if let Some(m) = self
@@ -481,7 +484,7 @@ impl App {
                     m.status = MemberStatus::Spawning;
                 }
                 // A failed save leaves the persisted member stuck at Blocked
-                // while the in-memory copy moved on — surface it so the swarm
+                // while the in-memory copy moved on - surface it so the swarm
                 // is not left silently inconsistent.
                 if let Err(e) = store.save() {
                     tracing::warn!(error = %e, agent_id, "failed to persist unblocked swarm member");
@@ -496,7 +499,7 @@ impl App {
             self.push_log_no_agent(
                 LogLevel::Info,
                 format!(
-                    "🔓 Unblocking {} ({}) — deps [{}] all in {:?}",
+                    "[unlocked] Unblocking {} ({}) - deps [{}] all in {:?}",
                     member_name, task_id, dep_info, all_completed
                 ),
             );
@@ -508,12 +511,12 @@ impl App {
         let remaining_blocked = blocked_members.len() - unblocked.len();
         if remaining_blocked > 0 {
             self.status = format!(
-                "🐝 swarm: {} unblocked, {} still blocked",
+                "[bee] swarm: {} unblocked, {} still blocked",
                 unblocked.len(),
                 remaining_blocked
             );
         } else {
-            self.status = format!("🐝 swarm: all teammates spawned");
+            self.status = format!("[bee] swarm: all teammates spawned");
         }
         self.needs_redraw = true;
     }
@@ -535,7 +538,7 @@ impl App {
 
         let working_dir = self.swarm_working_dir();
 
-        // Check member status — if all non-lead members are terminal (idle/failed/stopped),
+        // Check member status - if all non-lead members are terminal (idle/failed/stopped),
         // the swarm is effectively done regardless of task store state.
         let members: Vec<_> = self
             .team_members
@@ -575,7 +578,7 @@ impl App {
         let tasks = self.load_swarm_tasks(&team_name);
 
         let Some(ref tl) = tasks else {
-            // No task store — fall back to member-only check
+            // No task store - fall back to member-only check
             if all_members_terminal {
                 self.finalize_swarm_completion(&team_name, 0, 0, 0);
             }
@@ -608,7 +611,7 @@ impl App {
         if completed + cancelled >= total {
             self.finalize_swarm_completion(&team_name, total, completed, cancelled);
         } else if all_members_terminal {
-            // Members done but tasks not all completed — report partial completion
+            // Members done but tasks not all completed - report partial completion
             self.finalize_swarm_completion(
                 &team_name,
                 total,
@@ -626,7 +629,7 @@ impl App {
         cancelled: usize,
     ) {
         let mut output = format!(
-            "From: /swarm\n## 🎉 Swarm Complete: {team_name}\n\n\
+            "From: /swarm\n## [done] Swarm Complete: {team_name}\n\n\
             All **{total}** subtasks have finished ({completed} completed, {cancelled} failed/cancelled).\n\n"
         );
 
@@ -649,10 +652,10 @@ impl App {
         output.push_str("Use `/swarm cancel` to clean up the ephemeral team.\n");
 
         self.append_assistant_text(&output);
-        self.status = format!("🎉 swarm complete: {team_name}");
+        self.status = format!("[done] swarm complete: {team_name}");
         self.push_log_no_agent(
             LogLevel::Info,
-            format!("Swarm complete: {team_name} — {completed}/{total} tasks done"),
+            format!("Swarm complete: {team_name} - {completed}/{total} tasks done"),
         );
 
         if let Some(ref mut s) = self.swarm_state {

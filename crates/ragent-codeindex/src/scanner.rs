@@ -70,7 +70,7 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
             }
         };
 
-        // Skip directories themselves — we only want files.
+        // Skip directories themselves - we only want files.
         if entry.file_type().is_none_or(|ft| !ft.is_file()) {
             continue;
         }

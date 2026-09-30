@@ -31,7 +31,7 @@ tree-sitter-cmake = "0.7"
 tree-sitter-groovy = "0.1"
 tree-sitter-kotlin-ng = "1"
 tree-sitter-xml = "0.7"
-tantivy = "0.22"
+tantivy = "0.26"
 notify = "7.0"
 lru = { workspace = true }
 

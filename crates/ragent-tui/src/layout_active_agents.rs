@@ -1,4 +1,4 @@
-//! Active-agents subpanel — shown at the bottom of the log panel.
+//! Active-agents subpanel - shown at the bottom of the log panel.
 //!
 //! Displays the primary agent and all spawned sub-agents in a tree, with
 //! each row showing: agent name, type (primary/background/foreground),
@@ -73,15 +73,15 @@ fn build_task_rows_with_buttons<'a>(
 
         let (dot_color, name_color, status_badge) = match task.status {
             TaskStatus::Running => (Color::Yellow, Color::Yellow, ""),
-            TaskStatus::Suspended => (Color::DarkGray, Color::DarkGray, " ⏸"),
-            TaskStatus::Terminating => (Color::Red, Color::Red, " …"),
+            TaskStatus::Suspended => (Color::DarkGray, Color::DarkGray, " [||]"),
+            TaskStatus::Terminating => (Color::Red, Color::Red, " ..."),
             _ => (Color::Cyan, Color::Cyan, ""),
         };
 
         let btn_char = if task.status == TaskStatus::Suspended {
-            "▷"
+            ">"
         } else {
-            "⏹"
+            "[stop]"
         };
         let btn_fg = if task.status == TaskStatus::Suspended {
             Color::Green
@@ -92,7 +92,7 @@ fn build_task_rows_with_buttons<'a>(
         let kill_style = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
 
         let mut spans = vec![
-            Span::styled("◦ ", Style::default().fg(dot_color)),
+            Span::styled("o ", Style::default().fg(dot_color)),
             Span::styled(format!("{:<10} ", tid), Style::default().fg(colors::HINT)),
             Span::styled(
                 format!("{:<28}", agent_label),
@@ -127,10 +127,10 @@ fn build_task_rows_with_buttons<'a>(
             spans.push(Span::styled("  ", Style::default()));
             spans.push(Span::styled(btn_char, btn_style));
             spans.push(Span::styled("  ", Style::default()));
-            spans.push(Span::styled("✕", kill_style));
+            spans.push(Span::styled("[x]", kill_style));
 
             // Compute x positions from cumulative column widths.
-            // Pre-button fixed columns: "◦ "(2) + id(11) + name(28)
+            // Pre-button fixed columns: "o "(2) + id(11) + name(28)
             //   + type(9) + elapsed(9) + steps(7) = 66.
             // Status badge adds 2-3 display cols; buttons follow.
             // Use generous click areas that work regardless of badge.
@@ -209,7 +209,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     lines.push(Line::from(vec![Span::styled(
         format!(
             "  {:<10} {:<28}{:<8} {:>8} {:>7}  {:>3} {:>3}",
-            "id", "name", "type", "elapsed", "steps", "▷⏹", "✕"
+            "id", "name", "type", "elapsed", "steps", ">[stop]", "[x]"
         ),
         Style::default()
             .fg(colors::HINT)
@@ -218,7 +218,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
 
     // ── primary agent ─────────────────────────────────────────────────────
     let mut primary_spans = vec![
-        Span::styled("● ", Style::default().fg(Color::Green)),
+        Span::styled("* ", Style::default().fg(Color::Green)),
         Span::styled(
             format!("{:<10} ", "lead"),
             Style::default().fg(colors::HINT),
@@ -297,7 +297,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
                 }
             };
             let mut spans = vec![
-                Span::styled("◦ ", Style::default().fg(dot_color)),
+                Span::styled("o ", Style::default().fg(dot_color)),
                 Span::styled(format!("{:<10} ", tid), Style::default().fg(colors::HINT)),
                 Span::styled(
                     format!("{:<28}", command_label),
@@ -315,14 +315,14 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
             if !is_terminal {
                 spans.push(Span::styled("  ", Style::default()));
                 spans.push(Span::styled(
-                    "⏹",
+                    "[stop]",
                     Style::default()
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
                 ));
                 spans.push(Span::styled("  ", Style::default()));
                 spans.push(Span::styled(
-                    "✕",
+                    "[x]",
                     Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                 ));
 

@@ -60,7 +60,7 @@ struct SkillFrontmatter {
     /// Subagent type when `context` is `fork`.
     agent: Option<String>,
     /// Hooks scoped to this skill's lifecycle (raw YAML, stored as JSON).
-    hooks: Option<serde_yaml::Value>,
+    hooks: Option<serde_norway::Value>,
     /// License information (Anthropic Agent Skills spec).
     license: Option<String>,
     /// Environment compatibility notes (Anthropic Agent Skills spec).
@@ -108,10 +108,10 @@ impl AllowedTools {
 ///
 /// # Arguments
 ///
-/// * `content` — Raw text content of the `SKILL.md` file.
-/// * `source_path` — Absolute path to the `SKILL.md` file (for metadata).
-/// * `dir_name` — Name of the skill directory (used as fallback name).
-/// * `scope` — The scope from which this skill was discovered.
+/// * `content` - Raw text content of the `SKILL.md` file.
+/// * `source_path` - Absolute path to the `SKILL.md` file (for metadata).
+/// * `dir_name` - Name of the skill directory (used as fallback name).
+/// * `scope` - The scope from which this skill was discovered.
 ///
 /// # Errors
 ///
@@ -172,7 +172,7 @@ pub(crate) fn parse_skill_md_inner(
 ) -> anyhow::Result<SkillInfo> {
     let (frontmatter_str, body) = split_frontmatter(content)?;
 
-    let frontmatter: SkillFrontmatter = serde_yaml::from_str(frontmatter_str)
+    let frontmatter: SkillFrontmatter = serde_norway::from_str(frontmatter_str)
         .map_err(|e| anyhow::anyhow!("Failed to parse SKILL.md frontmatter: {e}"))?;
 
     let skill_dir = source_path.parent().unwrap_or(Path::new("")).to_path_buf();
@@ -292,8 +292,8 @@ fn validate_skill_name(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Convert a `serde_yaml::Value` to a `serde_json::Value`.
-fn yaml_to_json(yaml: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
+/// Convert a `serde_norway::Value` to a `serde_json::Value`.
+fn yaml_to_json(yaml: &serde_norway::Value) -> anyhow::Result<serde_json::Value> {
     // Round-trip through string serialization for correctness
     let json_str = serde_json::to_string(&yaml)?;
     let json_val: serde_json::Value = serde_json::from_str(&json_str)?;
@@ -302,7 +302,7 @@ fn yaml_to_json(yaml: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
 
 /// Discover skills from standard locations and optional extra directories.
 ///
-/// Scans in order (lowest → highest priority):
+/// Scans in order (lowest -> highest priority):
 ///
 /// 1. `OpenSkills` global: `~/.agent/skills/*/SKILL.md`, `~/.agents/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`
 /// 2. Personal: `~/.ragent/skills/*/SKILL.md`

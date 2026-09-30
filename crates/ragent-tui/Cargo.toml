@@ -13,7 +13,6 @@ chrono = { workspace = true }
 [dependencies]
 ragent-agent = { path = "../ragent-agent" }
 ragent-bench = { path = "../ragent-bench" }
-ragent-team = { path = "../ragent-team" }
 ragent-config = { path = "../ragent-config" }
 ragent-types = { path = "../ragent-types" }
 ragent-storage = { path = "../ragent-storage" }

@@ -83,7 +83,7 @@ impl CompletionSink {
 /// `has_done_in_memory`, `cleanup`) had to acquire all three locks in
 /// sequence, creating a multi-lock acquisition convoy under concurrent
 /// access. Consolidating them under a single [`Mutex`] eliminates the
-/// convoy — each operation acquires exactly one lock.
+/// convoy - each operation acquires exactly one lock.
 struct BgState {
     /// In-memory command handles keyed by task id.
     tasks: HashMap<String, BackgroundCommand>,
@@ -109,7 +109,7 @@ impl BackgroundTaskService {
     /// across a panicking lock holder may be mid-mutation; the background task
     /// surface treats read-then-write sequences as best-effort and logs the
     /// poison once per recovery rather than cascading panics through callers
-    /// (FUNC-043 remediation — previously `.expect("... poisoned")`).
+    /// (FUNC-043 remediation - previously `.expect("... poisoned")`).
     fn lock_state(&self) -> std::sync::MutexGuard<'_, BgState> {
         self.state
             .lock()
@@ -368,7 +368,7 @@ impl BackgroundTaskService {
     ///
     /// In addition to the explicit completion queue (fed by `flush_task`), this
     /// also scans the in-memory command handles for any task that has finished
-    /// but whose completion record has not yet been queued — this closes the
+    /// but whose completion record has not yet been queued - this closes the
     /// race between `wait()` returning (`done == true`) and `flush_task`
     /// recording the completion.
     pub async fn drain_completed(&self, session_id: &str) -> Vec<CompletedBgTask> {

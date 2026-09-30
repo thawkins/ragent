@@ -123,20 +123,20 @@ fn git_config_value(root: &Path, key: &str) -> Option<String> {
 /// the subsequent commit fails with git's own actionable diagnostics.
 fn ensure_commit_identity(root: &Path) {
     if git_config_value(root, "user.name").is_none() {
-        let _ = Command::new("git")
+        let _ = Command::new("git") // INTENTIONAL: best-effort config write; a failure surfaces at commit time
             .args(["config", "user.name", "ragent-scaffold"])
             .current_dir(root)
             .output();
     }
     if git_config_value(root, "user.email").is_none() {
-        let _ = Command::new("git")
+        let _ = Command::new("git") // INTENTIONAL: best-effort config write; a failure surfaces at commit time
             .args(["config", "user.email", "ragent@localhost"])
             .current_dir(root)
             .output();
     }
 }
 
-/// True when git refused to commit because there was nothing staged — an
+/// True when git refused to commit because there was nothing staged - an
 /// expected clean-tree outcome, not a failure.
 fn is_nothing_to_commit(message: &str) -> bool {
     [

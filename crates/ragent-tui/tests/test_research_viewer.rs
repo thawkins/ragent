@@ -77,7 +77,7 @@ fn test_markdown_to_lists_renders_bullet() {
     let lines = markdown_to_lines_testable(md, &base, 80);
     let rendered: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
     assert!(
-        rendered.iter().any(|l| l.contains("• first")),
+        rendered.iter().any(|l| l.contains("* first")),
         "expected bullet list, got: {rendered:?}"
     );
 }

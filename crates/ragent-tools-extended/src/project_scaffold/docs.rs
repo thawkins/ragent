@@ -3,18 +3,18 @@
 //! Renders the documentation layer every `/new` scaffold receives on top of
 //! the code and workspace artifacts:
 //!
-//! - `README.md` — project title (directory name), one-paragraph description,
+//! - `README.md` - project title (directory name), one-paragraph description,
 //!   and language/app-type-specific build-and-run instructions;
-//! - `QUICKSTART.md` — a minimal get-running guide: prerequisites, the exact
+//! - `QUICKSTART.md` - a minimal get-running guide: prerequisites, the exact
 //!   build-and-run command, and the expected first output;
-//! - `STATS.md` — initial project statistics: generation timestamp (UTC),
+//! - `STATS.md` - initial project statistics: generation timestamp (UTC),
 //!   language, app type, stack (or none), generated-file count, and the
 //!   ragent version that produced the scaffold;
-//! - `docs/` — a documentation folder, materialised via a `docs/README.md`
+//! - `docs/` - a documentation folder, materialised via a `docs/README.md`
 //!   placeholder so the existing file emitter creates it.
 //!
 //! NFR-002 (template consistency): every build/run instruction is rendered
-//! from the same [`LanguageRecipe`] data that produces the code artifacts —
+//! from the same [`LanguageRecipe`] data that produces the code artifacts -
 //! the run command, the test command, and the entrypoint path all come from
 //! the recipe, so the documentation can never drift from the generated
 //! project.

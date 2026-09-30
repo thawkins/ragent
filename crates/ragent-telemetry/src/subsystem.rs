@@ -1,4 +1,4 @@
-//! The telemetry subsystem — owner of the meter provider and exporter lifecycle.
+//! The telemetry subsystem - owner of the meter provider and exporter lifecycle.
 //!
 //! [`TelemetrySubsystem`] is the single handle that the rest of ragent
 //! interacts with. It encapsulates whether telemetry is enabled or disabled
@@ -8,8 +8,8 @@
 //!
 //! # No-op fallback (NFR-002)
 //!
-//! When telemetry is disabled — either via configuration or because the
-//! `telemetry` Cargo feature is off — the subsystem uses the OpenTelemetry
+//! When telemetry is disabled - either via configuration or because the
+//! `telemetry` Cargo feature is off - the subsystem uses the OpenTelemetry
 //! `NoopMeterProvider`. All instrument calls (`.add()`, `.record()`) are
 //! cheap no-ops with zero network traffic (FR-022, FR-032).
 
@@ -21,7 +21,7 @@ use ragent_config::OtelConfig;
 /// Whether the subsystem is actively exporting or running as a no-op.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TelemetryState {
-    /// Telemetry is disabled — a no-op meter provider is in use (FR-022, NFR-002).
+    /// Telemetry is disabled - a no-op meter provider is in use (FR-022, NFR-002).
     Disabled,
     /// Telemetry is enabled and the live meter provider is active (FR-021).
     Enabled,
@@ -75,17 +75,6 @@ struct RuntimeState {
     /// cap never accumulated process-wide.
     #[cfg(feature = "telemetry")]
     cardinality: std::sync::Arc<crate::cardinality::CardinalityCache>,
-    /// The [`SharedManualReader`] used by the optional Prometheus endpoint
-    /// (FR-028). `None` when `telemetry.otel.internal_port` is `None` or
-    /// telemetry is disabled. Held so the subsystem can extract the
-    /// reader handle for the HTTP server task.
-    ///
-    /// `#[allow(dead_code)]` — the field is written during reconfigure and
-    /// read by future Prometheus route setup; current instrumentation only
-    /// stores the handle via [`prometheus_handle`].
-    #[cfg(feature = "telemetry")]
-    #[allow(dead_code)]
-    prometheus_reader: Option<crate::prometheus::SharedManualReader>,
     /// The join handle for the Prometheus HTTP server task (FR-028).
     /// `None` when no `internal_port` is configured. The handle is for the
     /// outer task that resolves to the inner server handle (or a bind
@@ -107,13 +96,12 @@ impl RuntimeState {
             config,
             provider: None,
             cardinality,
-            prometheus_reader: None,
             prometheus_handle: None,
         }
     }
 
     /// Construct a disabled runtime state with the given config
-    /// (feature-off variant — no provider fields exist).
+    /// (feature-off variant - no provider fields exist).
     #[cfg(not(feature = "telemetry"))]
     fn disabled(config: OtelConfig) -> Self {
         Self {
@@ -161,39 +149,13 @@ impl TelemetrySubsystem {
         if config.enabled {
             #[cfg(feature = "telemetry")]
             {
-                let provider = build_provider(&config)?;
-
-                // Optional Prometheus text endpoint (FR-028).
-                // When `internal_port` is `Some(port)`, build a SharedManualReader
-                // registered alongside the OTLP PeriodicReader, and spawn
-                // an HTTP server that renders the snapshot on `/metrics`.
-                let prometheus_reader: Option<crate::prometheus::SharedManualReader> =
-                    if config.internal_port.is_some() {
-                        Some(crate::prometheus::SharedManualReader::new())
-                    } else {
-                        None
-                    };
-
-                // Rebuild the provider with the Prometheus reader attached
-                // if we have one. `build_provider` already built one with
-                // just the PeriodicReader; we rebuild with both readers.
-                let provider = if let Some(reader) = &prometheus_reader {
-                    build_provider_with_prometheus(&config, reader.clone())?
-                } else {
-                    provider
-                };
-
-                // Spawn the HTTP server if a port is configured. `serve` is
-                // async, so spawn it as a background task on the caller's
-                // tokio runtime and store the outer JoinHandle for later
-                // abort on shutdown/reconfigure.
-                let prometheus_handle = if let Some(port) = config.internal_port {
-                    prometheus_reader
-                        .as_ref()
-                        .map(|reader| tokio::spawn(crate::prometheus::serve(reader.handle(), port)))
-                } else {
-                    None
-                };
+                // Shared construction path (also used by `reconfigure`): builds
+                // the provider, the (optional) Prometheus reader, and the
+                // spawned scrape-server handle (see `ANTIPAT.md` M3.13). The
+                // reader is consumed by `build_provider`; only the handle is
+                // retained on `RuntimeState`.
+                let (provider, _prometheus_reader, prometheus_handle) =
+                    build_enabled_provider(&config)?;
 
                 let cardinality = std::sync::Arc::new(crate::cardinality::CardinalityCache::new(
                     config.cardinality_limit,
@@ -204,7 +166,6 @@ impl TelemetrySubsystem {
                         config,
                         provider: Some(std::sync::Arc::new(provider)),
                         cardinality,
-                        prometheus_reader,
                         prometheus_handle,
                     }),
                 })
@@ -245,7 +206,6 @@ impl TelemetrySubsystem {
                 config,
                 provider: Some(std::sync::Arc::new(provider)),
                 cardinality,
-                prometheus_reader: None,
                 prometheus_handle: None,
             }),
         }
@@ -305,7 +265,7 @@ impl TelemetrySubsystem {
     ///
     /// When telemetry is enabled and the `telemetry` feature is active,
     /// returns `Some(InstrumentRegistry)` with live instruments. When
-    /// disabled, returns `None` — callers should use a no-op registry
+    /// disabled, returns `None` - callers should use a no-op registry
     /// instead (FR-022, NFR-002).
     ///
     /// The registry is configured with the cardinality limit (FR-035) and
@@ -368,10 +328,9 @@ impl TelemetrySubsystem {
                 handle.abort();
             }
             guard.prometheus_handle = None;
-            guard.prometheus_reader = None;
             if let Some(provider) = guard.provider.take() {
                 // `SdkMeterProvider::shutdown` takes `&self`; call it through
-                // the Arc. Errors are logged but non-fatal — the provider is
+                // the Arc. Errors are logged but non-fatal - the provider is
                 // being discarded regardless.
                 if let Err(e) = provider.shutdown() {
                     tracing::warn!(error = %e, "OTEL meter provider shutdown during reconfigure");
@@ -384,15 +343,14 @@ impl TelemetrySubsystem {
             #[cfg(feature = "telemetry")]
             {
                 match build_enabled_provider(&config) {
-                    Ok((provider, prometheus_reader, prometheus_handle)) => {
+                    Ok((provider, _prometheus_reader, prometheus_handle)) => {
                         guard.state = TelemetryState::Enabled;
                         guard.config = config;
                         guard.provider = Some(std::sync::Arc::new(provider));
-                        guard.prometheus_reader = prometheus_reader;
                         guard.prometheus_handle = prometheus_handle;
                     }
                     Err(e) => {
-                        // Building the new provider failed — leave the
+                        // Building the new provider failed - leave the
                         // subsystem disabled so the agent loop never runs
                         // with a half-initialised provider.
                         tracing::warn!(error = %e, "reconfigure: provider build failed; leaving telemetry disabled");
@@ -443,7 +401,7 @@ impl TelemetrySubsystem {
     /// [`OtelConfig::export_timeout_seconds`]). If the endpoint is
     /// unreachable or slow, the export fails with an error rather than
     /// blocking indefinitely. That error is logged at `warn` level and
-    /// returned here — the caller **must not** propagate it in a way that
+    /// returned here - the caller **must not** propagate it in a way that
     /// would crash the agent loop. The [`ShutdownGuard`] and signal handler
     /// both swallow such errors for this reason.
     ///
@@ -533,15 +491,13 @@ use opentelemetry_sdk::Resource;
 #[cfg(feature = "telemetry")]
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 
-/// Build the live `SdkMeterProvider` from the config (FR-021).
+/// Validate the configured OTLP endpoint (FR-021).
 ///
-/// Wires an OTLP/HTTP exporter into a periodic reader with the configured
-/// export interval, attaches resource attributes, and builds the provider.
+/// The endpoint must be non-empty and start with `http://` or `https://`.
+/// Shared by both provider-construction paths so the contract is defined once
+/// (see `ANTIPAT.md` M3.13).
 #[cfg(feature = "telemetry")]
-fn build_provider(config: &OtelConfig) -> Result<SdkMeterProvider> {
-    use std::time::Duration;
-
-    // Validate endpoint.
+fn validate_endpoint(config: &OtelConfig) -> Result<()> {
     if config.endpoint.is_empty() {
         return Err(crate::TelemetryError::InvalidEndpoint(
             "endpoint is empty".to_string(),
@@ -553,6 +509,23 @@ fn build_provider(config: &OtelConfig) -> Result<SdkMeterProvider> {
             config.endpoint
         )));
     }
+    Ok(())
+}
+
+/// Build the live `SdkMeterProvider` from the config (FR-021).
+///
+/// Wires an OTLP/HTTP exporter into a periodic reader with the configured
+/// export interval, attaches resource attributes, and builds the provider.
+/// When `prometheus_reader` is `Some`, the same provider also serves the
+/// Prometheus scrape path (FR-028).
+#[cfg(feature = "telemetry")]
+fn build_provider(
+    config: &OtelConfig,
+    prometheus_reader: Option<crate::prometheus::SharedManualReader>,
+) -> Result<SdkMeterProvider> {
+    use std::time::Duration;
+
+    validate_endpoint(config)?;
 
     // Build the OTLP metric exporter (HTTP/protobuf by default, gRPC if configured).
     let exporter = build_metric_exporter(config)?;
@@ -566,56 +539,14 @@ fn build_provider(config: &OtelConfig) -> Result<SdkMeterProvider> {
     // Build the resource with service.name, service.version, and custom attributes (FR-004).
     let resource = build_resource(config);
 
-    let provider = SdkMeterProvider::builder()
+    let mut builder = SdkMeterProvider::builder()
         .with_resource(resource)
-        .with_reader(reader)
-        .build();
-
-    Ok(provider)
-}
-
-/// Build a live `SdkMeterProvider` with both the OTLP `PeriodicReader` and
-/// a Prometheus `ManualReader` attached (FR-028).
-///
-/// This mirrors [`build_provider`] but adds the given `prometheus_reader`
-/// so the same `SdkMeterProvider` serves both export paths. Recording is
-/// unaffected — the OTLP exporter batches on a timer, while the
-/// Prometheus endpoint collects on-demand when a scraper hits `/metrics`.
-#[cfg(feature = "telemetry")]
-fn build_provider_with_prometheus(
-    config: &OtelConfig,
-    prometheus_reader: crate::prometheus::SharedManualReader,
-) -> Result<SdkMeterProvider> {
-    use std::time::Duration;
-
-    // Validate endpoint.
-    if config.endpoint.is_empty() {
-        return Err(crate::TelemetryError::InvalidEndpoint(
-            "endpoint is empty".to_string(),
-        ));
-    }
-    if !config.endpoint.starts_with("http://") && !config.endpoint.starts_with("https://") {
-        return Err(crate::TelemetryError::InvalidEndpoint(format!(
-            "endpoint must be HTTP or HTTPS URL: {}",
-            config.endpoint
-        )));
+        .with_reader(reader);
+    if let Some(prometheus_reader) = prometheus_reader {
+        builder = builder.with_reader(prometheus_reader);
     }
 
-    let exporter = build_metric_exporter(config)?;
-    let interval = Duration::from_secs(config.export_interval_seconds.max(1));
-    let periodic = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
-        .with_interval(interval)
-        .build();
-
-    let resource = build_resource(config);
-
-    let provider = SdkMeterProvider::builder()
-        .with_resource(resource)
-        .with_reader(periodic)
-        .with_reader(prometheus_reader)
-        .build();
-
-    Ok(provider)
+    Ok(builder.build())
 }
 
 /// Build the live provider plus optional Prometheus reader/handle from a
@@ -635,8 +566,6 @@ fn build_enabled_provider(
     Option<crate::prometheus::SharedManualReader>,
     Option<tokio::task::JoinHandle<std::io::Result<tokio::task::JoinHandle<()>>>>,
 )> {
-    let provider = build_provider(config)?;
-
     let prometheus_reader: Option<crate::prometheus::SharedManualReader> =
         if config.internal_port.is_some() {
             Some(crate::prometheus::SharedManualReader::new())
@@ -644,11 +573,7 @@ fn build_enabled_provider(
             None
         };
 
-    let provider = if let Some(reader) = &prometheus_reader {
-        build_provider_with_prometheus(config, reader.clone())?
-    } else {
-        provider
-    };
+    let provider = build_provider(config, prometheus_reader.clone())?;
 
     let prometheus_handle = if let Some(port) = config.internal_port {
         prometheus_reader
@@ -757,12 +682,12 @@ fn ensure_grpc_endpoint_is_encrypted(
 /// The following static resource attributes are attached to all exported
 /// metrics:
 ///
-/// - `service.name` — from `config.service_name` (default `"ragent"`)
-/// - `service.version` — from `CARGO_PKG_VERSION` at compile time
-/// - `host.name` — best-effort system hostname lookup (FR-004)
+/// - `service.name` - from `config.service_name` (default `"ragent"`)
+/// - `service.version` - from `CARGO_PKG_VERSION` at compile time
+/// - `host.name` - best-effort system hostname lookup (FR-004)
 ///
 /// Custom resource attributes from `config.resource_attributes` are merged
-/// in (FR-026). The dynamic `session.id` is **not** a resource attribute —
+/// in (FR-026). The dynamic `session.id` is **not** a resource attribute -
 /// it changes per session and is attached as a metric attribute via
 /// [`InstrumentRegistry::attr_session`] (FR-025).
 ///

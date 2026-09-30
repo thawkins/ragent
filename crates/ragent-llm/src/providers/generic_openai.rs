@@ -66,6 +66,9 @@ impl Provider for GenericOpenAiProvider {
         base_url: Option<&str>,
         options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
+        // ANTIPAT 3.6: register the credential with the shared redaction
+        // registry so any text passed through `redact_secrets` masks it.
+        ragent_types::sanitize::register_secret(api_key);
         let env_endpoint = std::env::var(Self::DEFAULT_ENV_ENDPOINT_KEY)
             .ok()
             .filter(|s| !s.trim().is_empty());

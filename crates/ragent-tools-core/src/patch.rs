@@ -2,7 +2,7 @@
 //!
 //! Provides [`PatchTool`], which accepts a unified diff string (as produced by
 //! `diff -u` or `git diff`) and applies it to the target file(s). All hunks
-//! are validated before any files are written — if any hunk fails to match,
+//! are validated before any files are written - if any hunk fails to match,
 //! no files are modified.
 
 use anyhow::{Context, Result, bail};
@@ -25,7 +25,7 @@ impl Tool for PatchTool {
         "Apply a unified diff patch to one or more files. Required parameter: \
            `patch` (string) in unified diff format (as produced by `diff -u` or \
            `git diff`). Optional: `path` (string) to override the target file \
-           path for single-file patches, and `fuzz` (integer, default 0) — the \
+           path for single-file patches, and `fuzz` (integer, default 0) - the \
            number of context lines that may be dropped from the top/bottom of \
            each hunk when matching. All hunks are validated before any files are \
            written; if any hunk fails, nothing is applied."
@@ -89,22 +89,16 @@ impl Tool for PatchTool {
                 resolve_path(&ctx.working_dir, &fp.path)
             };
 
-            // C-002: patches must stay inside the allowed roots.
-            if ctx.allowed_roots.is_empty() {
-                super::check_path_within_root_cached(
-                    &target,
-                    &ctx.working_dir,
-                    &ctx.canonical_cache,
-                )?;
-            } else {
-                let root_refs: Vec<&std::path::Path> =
-                    ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
-                super::check_path_within_any_root_cached(
-                    &target,
-                    &root_refs,
-                    &ctx.canonical_cache,
-                )?;
-            }
+            // C-002 / FUNC-068 (ANTIPAT F-06): patches must stay inside the
+            // allowed roots. The helper falls back to `working_dir` when
+            // `allowed_roots` is empty, so the two branches below are
+            // equivalent to the old form.
+            super::check_path_within_allowed_roots_cached(
+                &target,
+                &ctx.working_dir,
+                &ctx.allowed_roots,
+                &ctx.canonical_cache,
+            )?;
 
             let content = tokio::fs::read_to_string(&target)
                 .await
@@ -272,7 +266,7 @@ fn parse_hunk(lines: &[&str]) -> Result<(Hunk, usize)> {
             old_lines.push(hl.clone());
             new_lines.push(hl);
         } else if line.starts_with('\\') {
-            // "\ No newline at end of file" — skip
+            // "\ No newline at end of file" - skip
         } else {
             // Treat bare line as context (some diffs omit the leading space)
             let hl = HunkLine::Context(line.to_string());

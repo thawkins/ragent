@@ -42,14 +42,14 @@ impl SpecTemplate {
             s.push_str("This spec was informed by the following research items:\n\n");
             for name in research_names {
                 s.push_str(&format!(
-                    "- [`{name}`](../research/{name}/RESEARCH.md) — see the captured references for context.\n",
+                    "- [`{name}`](../research/{name}/RESEARCH.md) - see the captured references for context.\n",
                 ));
             }
             s.push('\n');
             s
         };
         let checklist_section = if include_checklist {
-            "\n## Quality Checklist\n\nSelf-review before transitioning to `approved`:\n\n- [ ] Every functional and non-functional requirement uses valid EARS notation.\n- [ ] Each requirement is independently testable with a clear pass/fail criterion.\n- [ ] All features requested by the user are captured — no missing requirements.\n- [ ] No speculative features or gold-plating are included beyond the stated scope.\n- [ ] All `[NEEDS CLARIFICATION]` markers have been resolved or removed.\n\n"
+            "\n## Quality Checklist\n\nSelf-review before transitioning to `approved`:\n\n- [ ] Every functional and non-functional requirement uses valid EARS notation.\n- [ ] Each requirement is independently testable with a clear pass/fail criterion.\n- [ ] All features requested by the user are captured - no missing requirements.\n- [ ] No speculative features or gold-plating are included beyond the stated scope.\n- [ ] All `[NEEDS CLARIFICATION]` markers have been resolved or removed.\n\n"
                 .to_string()
         } else {
             String::new()
@@ -92,25 +92,25 @@ impl SpecTemplate {
 
 ## Functional Requirements
 
-### FR-001 — [Requirement Title]
+### FR-001 - [Requirement Title]
 
 `The <SYSTEM NAME> shall <SYSTEM RESPONSE>.`
 
 [Additional context, if needed.]
 
-### FR-002 — [Requirement Title]
+### FR-002 - [Requirement Title]
 
 `When <TRIGGER>, the <SYSTEM NAME> shall <SYSTEM RESPONSE>.`
 
-### FR-003 — [Requirement Title]
+### FR-003 - [Requirement Title]
 
 `While <PRECONDITION>, the <SYSTEM NAME> shall <SYSTEM RESPONSE>.`
 
-### FR-004 — [Requirement Title]
+### FR-004 - [Requirement Title]
 
 `Where <FEATURE> is included, the <SYSTEM NAME> shall <SYSTEM RESPONSE>.`
 
-### FR-005 — [Requirement Title]
+### FR-005 - [Requirement Title]
 
 `If <TRIGGER>, the <SYSTEM NAME> shall <SYSTEM RESPONSE>.`
 
@@ -118,7 +118,7 @@ impl SpecTemplate {
 
 ## Non-Functional Requirements
 
-### NFR-001 — [Requirement Title]
+### NFR-001 - [Requirement Title]
 
 `The <SYSTEM NAME> shall <SYSTEM RESPONSE>.`
 
@@ -184,8 +184,8 @@ impl PlanTemplate {
     /// self-review checklist covering requirement traceability, testability,
     /// and absence of speculative tasks is embedded.
     ///
-    /// The `## File Creation Order` section is always included — it documents
-    /// the test-first ordering (contracts → tests → source) that the
+    /// The `## File Creation Order` section is always included - it documents
+    /// the test-first ordering (contracts -> tests -> source) that the
     /// implementation runner checks advisory (FR-014).
     #[must_use]
     pub fn generate_with_checklist(id: &SpecId, title: &str, include_checklist: bool) -> String {
@@ -228,7 +228,7 @@ spec_id: {id}
 
 | ID | Title | Requirement | Effort | Priority | Status | Dependencies |
 |----|-------|-------------|--------|----------|--------|--------------|
-| T-001 | [Title] | FR-001 | S | Critical | Pending | — |
+| T-001 | [Title] | FR-001 | S | Critical | Pending | - |
 ---
 
 ## File Creation Order
@@ -237,13 +237,13 @@ Tasks should create files in the following order to maintain test-first
 discipline. The implementation runner emits an advisory warning if tasks
 violate this ordering (FR-014).
 
-1. **Contracts** — API specs, schema definitions, and interface descriptions
+1. **Contracts** - API specs, schema definitions, and interface descriptions
    in `contracts/` before any tests or source files.
-2. **Contract tests** — tests that validate contract conformance.
-3. **Integration tests** — tests that verify cross-component interactions.
-4. **End-to-end (e2e) tests** — tests that validate full user-facing flows.
-5. **Unit tests** — tests for individual functions and modules.
-6. **Source files** — implementation code that satisfies the tests above.
+2. **Contract tests** - tests that validate contract conformance.
+3. **Integration tests** - tests that verify cross-component interactions.
+4. **End-to-end (e2e) tests** - tests that validate full user-facing flows.
+5. **Unit tests** - tests for individual functions and modules.
+6. **Source files** - implementation code that satisfies the tests above.
 
 ---
 
@@ -295,7 +295,7 @@ inform the next plan regeneration.
 
 ---
 
-*Notes in this file are advisory — they are surfaced during `/spec plan`
+*Notes in this file are advisory - they are surfaced during `/spec plan`
 regeneration but do not block validation or status transitions.*
 ",
             title = title,

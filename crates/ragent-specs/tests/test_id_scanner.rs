@@ -50,7 +50,7 @@ fn test_highest_nfr_empty() {
 
 #[test]
 fn test_mixed_prefixes() {
-    // FR and NFR in the same file — each scanner only finds its own prefix
+    // FR and NFR in the same file - each scanner only finds its own prefix
     let md = "FR-003 and NFR-002";
     assert_eq!(highest_fr(md), 3);
     assert_eq!(highest_nfr(md), 2);
@@ -104,7 +104,7 @@ fn test_highest_task_in_full_plan() {
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
 |---|---|---|---|---|---|
-| T-001 | Define types | FR-003 | S | Critical | — |
+| T-001 | Define types | FR-003 | S | Critical | - |
 | T-002 | Build parser | FR-004 | M | High | T-001 |
 | T-010 | Add tests | FR-005 | M | High | T-002 |
 ";

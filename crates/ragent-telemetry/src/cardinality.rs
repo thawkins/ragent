@@ -10,7 +10,7 @@
 //!
 //! The cache is `Arc`-shared across all clones of an [`InstrumentRegistry`]
 //! so that cardinality is tracked globally per metric, not per recorder
-//! clone. The internal state is protected by an [`RwLock`] — reads (checking
+//! clone. The internal state is protected by an [`RwLock`] - reads (checking
 //! if a signature is already seen) take a read lock, writes (inserting a new
 //! signature) take a write lock. In the common case (signature already
 //! seen), only a read lock is needed.
@@ -20,7 +20,7 @@
 //! The signature of an attribute set is the concatenation of the `KeyValue`
 //! values in order, separated by `|`. This is deterministic because the
 //! recorders always build attribute slices in the same order. The keys are
-//! not included in the signature because they are constant per metric — only
+//! not included in the signature because they are constant per metric - only
 //! the values vary.
 
 #[cfg(feature = "telemetry")]
@@ -80,7 +80,7 @@ impl CardinalityCache {
     /// with [`UNKNOWN_BUCKET`] ("unknown") so that excess combinations
     /// collapse into a single bucket.
     ///
-    /// When `attrs` is empty (no attributes), this is a no-op — the
+    /// When `attrs` is empty (no attributes), this is a no-op - the
     /// metric has no cardinality to cap.
     #[must_use]
     pub fn resolve(&self, metric_name: &str, attrs: &[KeyValue]) -> Vec<KeyValue> {
@@ -105,14 +105,14 @@ impl CardinalityCache {
             .collect();
         let attrs = sanitised.as_slice();
 
-        // Fast path: no attributes → no cardinality to cap.
+        // Fast path: no attributes -> no cardinality to cap.
         if attrs.is_empty() {
             return Vec::new();
         }
 
         let signature = make_signature(attrs);
 
-        // Try read lock first — common case is that the signature is already seen.
+        // Try read lock first - common case is that the signature is already seen.
         {
             if let Ok(seen) = self.seen.read()
                 && let Some(set) = seen.get(metric_name)
@@ -122,7 +122,7 @@ impl CardinalityCache {
             }
         }
 
-        // Need to insert — take write lock.
+        // Need to insert - take write lock.
         if let Ok(mut seen) = self.seen.write() {
             let set = seen.entry(metric_name.to_string()).or_default();
 
@@ -136,7 +136,7 @@ impl CardinalityCache {
                 set.insert(signature);
                 attrs.to_vec()
             } else {
-                // Limit exceeded — collapse to unknown bucket.
+                // Limit exceeded - collapse to unknown bucket.
                 attrs
                     .iter()
                     .map(|kv| KeyValue::new(kv.key.clone(), UNKNOWN_BUCKET.to_string()))
@@ -181,7 +181,7 @@ impl Default for CardinalityCache {
 impl Clone for CardinalityCache {
     fn clone(&self) -> Self {
         // Clone the inner state so that each InstrumentRegistry clone
-        // shares the same cardinality tracking. Actually — we want all
+        // shares the same cardinality tracking. Actually - we want all
         // clones to share the SAME state, so we use Arc externally.
         // This Clone impl is only used if someone explicitly clones the
         // cache (not the normal path). It creates a snapshot copy.
@@ -196,7 +196,7 @@ impl Clone for CardinalityCache {
 /// Build a deterministic signature string from an ordered slice of `KeyValue`s.
 ///
 /// Only the values are included, not the keys, because the keys are constant
-/// per metric — only the values vary. Values are joined with `|`.
+/// per metric - only the values vary. Values are joined with `|`.
 #[cfg(feature = "telemetry")]
 fn make_signature(attrs: &[KeyValue]) -> String {
     let mut parts: Vec<String> = Vec::with_capacity(attrs.len());
@@ -210,7 +210,7 @@ fn make_signature(attrs: &[KeyValue]) -> String {
 
 /// No-op cardinality cache used when the `telemetry` Cargo feature is off.
 ///
-/// All methods are zero-cost no-ops — when the feature is off, no
+/// All methods are zero-cost no-ops - when the feature is off, no
 /// `InstrumentRegistry` exists, so this type is never instantiated in
 /// practice. It exists only to keep the module compilable.
 #[cfg(not(feature = "telemetry"))]
@@ -229,187 +229,9 @@ impl CardinalityCache {
 // ── Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(all(test, feature = "telemetry"))]
-mod tests {
-    use super::*;
-    use opentelemetry::KeyValue;
-
-    #[test]
-    fn test_empty_attrs_returns_empty() {
-        let cache = CardinalityCache::new(1000);
-        let result = cache.resolve("ragent.llm.requests", &[]);
-        assert_eq!(result, Vec::<opentelemetry::KeyValue>::new());
-    }
-
-    #[test]
-    fn test_new_combination_registered() {
-        let cache = CardinalityCache::new(1000);
-        let attrs = vec![
-            KeyValue::new("model", "gpt-4"),
-            KeyValue::new("provider", "openai"),
-        ];
-        let result = cache.resolve("ragent.llm.requests", &attrs);
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].value.to_string(), "gpt-4");
-        assert_eq!(result[1].value.to_string(), "openai");
-        assert_eq!(cache.distinct_count("ragent.llm.requests"), 1);
-    }
-
-    #[test]
-    fn test_seen_combination_returned_unchanged() {
-        let cache = CardinalityCache::new(1000);
-        let attrs = vec![
-            KeyValue::new("model", "gpt-4"),
-            KeyValue::new("provider", "openai"),
-        ];
-
-        // First call registers the combination.
-        let r1 = cache.resolve("ragent.llm.requests", &attrs);
-        // Second call should return the same attrs (already seen).
-        let r2 = cache.resolve("ragent.llm.requests", &attrs);
-
-        assert_eq!(r1, r2);
-        assert_eq!(cache.distinct_count("ragent.llm.requests"), 1);
-    }
-
-    #[test]
-    fn test_different_combinations_tracked_separately() {
-        let cache = CardinalityCache::new(1000);
-
-        let attrs1 = vec![
-            KeyValue::new("model", "gpt-4"),
-            KeyValue::new("provider", "openai"),
-        ];
-        let attrs2 = vec![
-            KeyValue::new("model", "claude-3"),
-            KeyValue::new("provider", "anthropic"),
-        ];
-
-        let _ = cache.resolve("ragent.llm.requests", &attrs1);
-        let _ = cache.resolve("ragent.llm.requests", &attrs2);
-
-        assert_eq!(cache.distinct_count("ragent.llm.requests"), 2);
-    }
-
-    #[test]
-    fn test_overflow_collapses_to_unknown() {
-        let cache = CardinalityCache::new(3);
-
-        // Register 3 distinct combinations (fills the limit).
-        for i in 0..3 {
-            let attrs = vec![KeyValue::new("model", format!("model-{i}"))];
-            let result = cache.resolve("ragent.llm.requests", &attrs);
-            assert_eq!(
-                result[0].value.to_string(),
-                format!("model-{i}"),
-                "combination {i} should be registered, not collapsed"
-            );
-        }
-
-        assert_eq!(cache.distinct_count("ragent.llm.requests"), 3);
-
-        // 4th combination should collapse to "unknown".
-        let attrs4 = vec![KeyValue::new("model", "model-overflow")];
-        let result = cache.resolve("ragent.llm.requests", &attrs4);
-        assert_eq!(
-            result[0].value.to_string(),
-            "unknown",
-            "overflow combination should collapse to unknown"
-        );
-
-        // The distinct count should NOT increase (unknown is not tracked as new).
-        assert_eq!(
-            cache.distinct_count("ragent.llm.requests"),
-            3,
-            "unknown bucket should not increase distinct count"
-        );
-    }
-
-    #[test]
-    fn test_existing_combination_after_overflow_still_returned_unchanged() {
-        let cache = CardinalityCache::new(2);
-
-        let attrs1 = vec![KeyValue::new("model", "model-a")];
-        let attrs2 = vec![KeyValue::new("model", "model-b")];
-        let attrs_overflow = vec![KeyValue::new("model", "model-c")];
-
-        let _ = cache.resolve("ragent.llm.requests", &attrs1);
-        let _ = cache.resolve("ragent.llm.requests", &attrs2);
-
-        // This one overflows.
-        let _ = cache.resolve("ragent.llm.requests", &attrs_overflow);
-
-        // Going back to an already-seen combination should still return it
-        // unchanged (not collapsed to unknown).
-        let result = cache.resolve("ragent.llm.requests", &attrs1);
-        assert_eq!(
-            result[0].value.to_string(),
-            "model-a",
-            "previously-seen combination should not be collapsed"
-        );
-    }
-
-    #[test]
-    fn test_different_metrics_tracked_independently() {
-        let cache = CardinalityCache::new(2);
-
-        let attrs = vec![KeyValue::new("model", "gpt-4")];
-
-        let _ = cache.resolve("ragent.llm.requests", &attrs);
-        let _ = cache.resolve("ragent.tool.invocations", &attrs);
-
-        // Each metric has its own count.
-        assert_eq!(cache.distinct_count("ragent.llm.requests"), 1);
-        assert_eq!(cache.distinct_count("ragent.tool.invocations"), 1);
-        assert_eq!(cache.distinct_count("ragent.sessions.total"), 0);
-    }
-
-    #[test]
-    fn test_multi_attribute_overflow_replaces_all_values() {
-        let cache = CardinalityCache::new(1);
-
-        let attrs1 = vec![
-            KeyValue::new("model", "gpt-4"),
-            KeyValue::new("provider", "openai"),
-        ];
-        let _ = cache.resolve("ragent.llm.requests", &attrs1);
-
-        // Second combination with 2 attributes should overflow both.
-        let attrs2 = vec![
-            KeyValue::new("model", "claude-3"),
-            KeyValue::new("provider", "anthropic"),
-        ];
-        let result = cache.resolve("ragent.llm.requests", &attrs2);
-
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].value.to_string(), "unknown");
-        assert_eq!(result[1].value.to_string(), "unknown");
-    }
-
-    #[test]
-    fn test_default_limit_is_1000() {
-        let cache = CardinalityCache::default();
-        assert_eq!(cache.limit(), 1000);
-    }
-
-    #[test]
-    fn test_limit_zero_collapses_immediately() {
-        // A limit of 0 means even the first combination overflows.
-        let cache = CardinalityCache::new(0);
-        let attrs = vec![KeyValue::new("model", "gpt-4")];
-        let result = cache.resolve("ragent.llm.requests", &attrs);
-        assert_eq!(result[0].value.to_string(), "unknown");
-        assert_eq!(cache.distinct_count("ragent.llm.requests"), 0);
-    }
-}
+#[path = "../tests/inline/cardinality_tests.rs"]
+mod tests;
 
 #[cfg(all(test, not(feature = "telemetry")))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_noop_cardinality_cache() {
-        let cache = CardinalityCache::new(1000);
-        // No-op — just verify it doesn't panic.
-        let _ = cache;
-    }
-}
+#[path = "../tests/inline/cardinality_tests.rs"]
+mod tests;

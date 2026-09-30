@@ -32,7 +32,7 @@
 //! from; a git source without the `#<key>` suffix, or a key that was never
 //! registered in this process, installs exactly as before.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 use sha2::Digest;
@@ -43,6 +43,19 @@ pub const INLINE_MANIFEST_KEY_SEP: char = '@';
 
 /// The filename an inline manifest is materialised into.
 pub const MATERIALIZED_MANIFEST_REL: &str = ".claude-plugin/plugin.json";
+
+/// Lowercase hex length of a SHA-256 digest (ANTIPAT L12).
+const SHA256_HEX_LEN: usize = 64;
+
+/// Maximum number of marketplace documents retained in the process-global
+/// registry (ANTIPAT L7).
+///
+/// The registry only needs the documents whose inline manifests are still
+/// pending an install in this process; a long run that parses many store
+/// indexes would otherwise grow it without bound. Once the cap is reached the
+/// oldest-inserted key (FIFO, `HashMap` plus insertion order) is evicted so a
+/// live document is never displaced by a fresh one.
+const MAX_MARKETPLACE_DOCUMENTS: usize = 64;
 
 /// Marketplace fields that are never part of the materialised manifest.
 ///
@@ -55,14 +68,50 @@ const LISTING_ONLY_FIELDS: &[&str] = &[
 ];
 
 /// The recorded marketplace documents, keyed by [`document_key`].
-fn registry() -> &'static Mutex<HashMap<String, String>> {
-    static REGISTRY: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+///
+/// Insertion order is tracked separately so the registry can evict the oldest
+/// document once [`MAX_MARKETPLACE_DOCUMENTS`] is reached (ANTIPAT L7).
+struct DocumentRegistry {
+    by_key: HashMap<String, String>,
+    insertion_order: VecDeque<String>,
+}
+
+impl DocumentRegistry {
+    /// Store `body` under `key`, evicting the oldest document when the cap is
+    /// reached. Re-recording an existing key refreshes its body in place
+    /// without growing the registry.
+    fn insert(&mut self, key: String, body: String) {
+        if self.by_key.insert(key.clone(), body).is_none() {
+            self.insertion_order.push_back(key);
+        }
+        while self.insertion_order.len() > MAX_MARKETPLACE_DOCUMENTS {
+            if let Some(oldest) = self.insertion_order.pop_front() {
+                self.by_key.remove(&oldest);
+            }
+        }
+    }
+
+    /// The body recorded under `key`, when present.
+    fn get(&self, key: &str) -> Option<&String> {
+        self.by_key.get(key)
+    }
+}
+
+/// The process-global marketplace-document registry, keyed by
+/// [`document_key`].
+fn registry() -> &'static Mutex<DocumentRegistry> {
+    static REGISTRY: OnceLock<Mutex<DocumentRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        Mutex::new(DocumentRegistry {
+            by_key: HashMap::new(),
+            insertion_order: VecDeque::new(),
+        })
+    })
 }
 
 /// Recover from a poisoned registry lock, mirroring the TUI's
 /// `recover_poisoned` discipline: the install pipeline must not panic.
-fn lock_registry() -> std::sync::MutexGuard<'static, HashMap<String, String>> {
+fn lock_registry() -> std::sync::MutexGuard<'static, DocumentRegistry> {
     registry().lock().unwrap_or_else(|p| p.into_inner())
 }
 
@@ -74,7 +123,7 @@ pub fn document_key(origin: &str, bytes: &[u8]) -> String {
     hasher.update(origin.as_bytes());
     hasher.update(b"\n");
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 /// Record a marketplace document (`origin` URL + raw bytes) so a later
@@ -94,7 +143,7 @@ pub fn record_document(origin: &str, bytes: &[u8]) -> String {
 /// stub) rather than a plain listing pointing at a real plugin on disk.
 ///
 /// These are the hosting-config sections Claude Code hosts consume straight
-/// from the marketplace document — the shape of the `*-lsp` stubs. A plain
+/// from the marketplace document - the shape of the `*-lsp` stubs. A plain
 /// `description` does NOT qualify: most real plugin entries carry one, and
 /// materialising a manifest for those would shadow the real manifest in the
 /// clone.
@@ -108,7 +157,7 @@ const INLINE_CONTENT_SECTIONS: &[&str] = &["lspServers", "lsp_servers", "monitor
 /// section ([`INLINE_CONTENT_SECTIONS`], e.g. `lspServers`), with the
 /// listing-only fields stripped. Returns `None` for a name the document does
 /// not list, an entry with no inline content, or a document that cannot be
-/// parsed — the install then proceeds without materialisation, so a plain
+/// parsed - the install then proceeds without materialisation, so a plain
 /// listing entry still finds the real manifest in its clone.
 #[must_use]
 pub fn inline_manifest_for(document: &str, name: &str) -> Option<String> {
@@ -117,7 +166,7 @@ pub fn inline_manifest_for(document: &str, name: &str) -> Option<String> {
 }
 
 /// The [`serde_json::Value`] form of [`inline_manifest_for`] for callers that
-/// already hold a parsed document — avoids a serialise/re-parse round trip.
+/// already hold a parsed document - avoids a serialise/re-parse round trip.
 #[must_use]
 pub fn inline_manifest_in(root: &serde_json::Value, name: &str) -> Option<String> {
     let plugins = match root {
@@ -176,7 +225,7 @@ pub fn split_manifest_key(source: &str) -> (&str, Option<&str>) {
     let Some((head, tail)) = source.rsplit_once(INLINE_MANIFEST_KEY_SEP) else {
         return (source, None);
     };
-    let is_key = tail.len() == 64
+    let is_key = tail.len() == SHA256_HEX_LEN
         && tail
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));

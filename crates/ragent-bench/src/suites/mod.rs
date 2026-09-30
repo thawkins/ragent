@@ -186,23 +186,127 @@ pub(crate) fn bench_temp_root() -> std::io::Result<PathBuf> {
     Ok(root)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::strip_code_fences;
+/// Run a case's `execution_commands` sequence in `run_root`, returning the
+/// final command's `(stdout, stderr)` on success.
+///
+/// Each command is run through `timeout` using the per-index timeout, with
+/// `__FILENAME__` substituted and the program validated by
+/// [`crate::exec_guard::validate_fixture_command`]. HumanEval and MBPP shared
+/// near-identical copies of this loop (see `ANTIPAT.md` M3.16).
+///
+/// # Errors
+///
+/// Returns the suite-labelled failure message when a command exits non-zero,
+/// when the command list is empty, or when the process cannot be launched.
+pub(crate) fn run_fixture_commands(
+    case: &BenchCaseFixture,
+    run_root: &std::path::Path,
+    file_name: &str,
+    label: &str,
+) -> Result<(String, String), String> {
+    let mut last_stdout = String::new();
+    let mut last_stderr = String::new();
+    for (index, command_parts) in case.execution_commands.iter().enumerate() {
+        let timeout_secs = case
+            .execution_timeouts_secs
+            .get(index)
+            .copied()
+            .unwrap_or(crate::exec_guard::FIXTURE_DEFAULT_TIMEOUT_SECS);
+        let rendered_parts = command_parts
+            .iter()
+            .map(|part| part.replace("__FILENAME__", file_name))
+            .collect::<Vec<_>>();
+        // SEC-ragent-bench-001 (SECTASKS T-009): the fixture supplies the
+        // program; it must be an allowlisted toolchain binary.
+        crate::exec_guard::validate_fixture_command(&rendered_parts)?;
+        let Some(program) = rendered_parts.first() else {
+            return Err(format!("{label} command list was empty"));
+        };
+        let output = std::process::Command::new("timeout")
+            .arg(format!("{timeout_secs}s"))
+            .arg(program)
+            .args(rendered_parts.iter().skip(1))
+            .current_dir(run_root)
+            .output()
+            .map_err(|error| format!("launch {label} command `{program}`: {error}"))?;
+        last_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        last_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if !output.status.success() {
+            let detail = [last_stderr.trim(), last_stdout.trim()]
+                .into_iter()
+                .find(|part| !part.is_empty())
+                .unwrap_or("command failed");
+            return Err(format!(
+                "{label} command `{}` failed: {}",
+                rendered_parts.join(" "),
+                detail
+            ));
+        }
+    }
+    Ok((last_stdout, last_stderr))
+}
 
-    #[test]
-    fn test_strip_code_fences_removes_bare_language_prefix() {
-        assert_eq!(
-            strip_code_fences("rust\npub fn answer() -> i32 {\n    42\n}"),
-            "pub fn answer() -> i32 {\n    42\n}"
-        );
+/// Evaluate every generated sample with `run_sample`, returning the shared
+/// [`BenchCaseEvaluation`] shape.
+///
+/// HumanEval and MBPP both ran an identical per-sample loop (count passes,
+/// record the first pass's response, keep the first error); this is that loop,
+/// parameterised on the runner and on the suite-specific notes/error text
+/// (see `ANTIPAT.md` M3.16).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn evaluate_suite_samples(
+    generation: &BenchGenerationResult,
+    fallback: String,
+    run_sample: impl Fn(&str) -> Result<(), String>,
+    passed_notes: impl Fn(usize) -> String,
+    failed_notes: impl Fn() -> String,
+    error_code: &str,
+) -> BenchCaseEvaluation {
+    let mut passed_count = 0usize;
+    let mut first_sample_passed = false;
+    let mut first_error = None;
+    let mut selected_response = fallback;
+
+    for (idx, sample) in generation.samples.iter().enumerate() {
+        match run_sample(&sample.text) {
+            Ok(()) => {
+                passed_count += 1;
+                if idx == 0 {
+                    first_sample_passed = true;
+                }
+                if passed_count == 1 {
+                    selected_response = sample.text.clone();
+                }
+            }
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
     }
 
-    #[test]
-    fn test_strip_code_fences_removes_fenced_language_prefix() {
-        assert_eq!(
-            strip_code_fences("```rust\npub fn answer() -> i32 {\n    42\n}\n```"),
-            "pub fn answer() -> i32 {\n    42\n}"
-        );
+    let passed = passed_count > 0;
+    BenchCaseEvaluation {
+        status: if passed { "passed" } else { "failed" }.to_string(),
+        score: Some(if passed { 1.0 } else { 0.0 }),
+        selected_response,
+        exact_match_count: passed_count,
+        first_sample_exact_match: first_sample_passed,
+        notes: if passed {
+            passed_notes(passed_count)
+        } else {
+            failed_notes()
+        },
+        error_code: if passed {
+            None
+        } else {
+            Some(error_code.to_string())
+        },
+        error_message: if passed { None } else { first_error },
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/inline/mod_tests.rs"]
+mod tests;

@@ -235,9 +235,9 @@ pub const DESTRUCTIVE_TOOLS: &[&str] = &[
 ];
 
 /// Destructive git tool names (T-010). The destructive variants are keyed
-/// on the request flags carried in the resource string — `git_push` only
+/// on the request flags carried in the resource string - `git_push` only
 /// with `--force`, `git_reset` only for hard modes, `git_stash` only for
-/// drop/clear — so read-only git workflows are not blocked.
+/// drop/clear - so read-only git workflows are not blocked.
 pub const DESTRUCTIVE_GIT_TOOLS: &[&str] = &[
     "git_push",
     "git_reset",
@@ -359,7 +359,7 @@ pub(crate) fn bash_has_destructive_command(command: &str) -> bool {
 pub(crate) fn checkpoint_reason(tool_name: &str, resource: &str) -> String {
     format!(
         "checkpoint denied: destructive action '{tool_name}' on '{resource}' was \
-         not approved — a human-approval checkpoint protects destructive \
+         not approved - a human-approval checkpoint protects destructive \
          actions (file deletion, config writes, dependency installation, \
          destructive git) for this loop. Continue without performing the \
          destructive action, or ask the user to approve it manually."
@@ -493,12 +493,12 @@ pub(crate) const SKILL_ALWAYS_ALLOWED_TOOLS: &[&str] = &[
 /// `auto_approve` distinguishes the plain auto-approve flag from a loop
 /// destructive-action checkpoint (FR-015, FR-024, T-010):
 ///
-/// - `Some(true)` — the plain `--yes`/autopilot auto-approval path: prompts
+/// - `Some(true)` - the plain `--yes`/autopilot auto-approval path: prompts
 ///   are answered automatically and `Allow` is returned without prompting.
-/// - `Some(false)` — interactive mode: a `Deny` verdict denies without
+/// - `Some(false)` - interactive mode: a `Deny` verdict denies without
 ///   prompting and an `Ask` verdict prompts the user with the standard
 ///   120-second timeout.
-/// - `None` — a loop run with checkpoints enabled: `checkpoint_forced` is
+/// - `None` - a loop run with checkpoints enabled: `checkpoint_forced` is
 ///   `true` for destructive calls and forces the human-approval prompt
 ///   with the reply window controlled by `checkpoint_timeout_secs`, even
 ///   under allow rules and in auto-approve mode.
@@ -567,7 +567,7 @@ pub async fn check_permission_with_prompt(
         }
     }
 
-    // Check PermissionChecker (in-memory rule lookup — no I/O).
+    // Check PermissionChecker (in-memory rule lookup - no I/O).
     let action = {
         let c = checker.read();
         c.check(permission, resource)
@@ -576,7 +576,7 @@ pub async fn check_permission_with_prompt(
     match action {
         PermissionAction::Allow | PermissionAction::Deny => {
             // FR-015 (T-010): a forced destructive-action checkpoint
-            // overrides an allow verdict — the call goes to a human
+            // overrides an allow verdict - the call goes to a human
             // checkpoint prompt even when a rule would auto-approve it
             // (FR-024: the permission layer is always in the path).
             if checkpoint_forced && action == PermissionAction::Allow {
@@ -591,7 +591,7 @@ pub async fn check_permission_with_prompt(
                 )
                 .await;
             }
-            // Explicit policy decision — no prompt needed, no I/O performed.
+            // Explicit policy decision - no prompt needed, no I/O performed.
             Ok(action)
         }
         PermissionAction::Ask => {
@@ -601,11 +601,11 @@ pub async fn check_permission_with_prompt(
             //
             // FR-004/FR-017: because the in-memory checks above already
             // short-circuited, the canonicalise syscall fires only when no
-            // rule exists for the resource — i.e. on the first access to a
+            // rule exists for the resource - i.e. on the first access to a
             // new file, not on every call.
             //
             // FR-015 (T-010): with a forced destructive-action checkpoint the
-            // auto-grant is skipped — an allow rule never auto-approves a
+            // auto-grant is skipped - an allow rule never auto-approves a
             // destructive call; the request goes to a human checkpoint
             // prompt whose timeout counts as denial (FR-024).
             if !checkpoint_forced && (permission == "file:read" || permission == "read") {
@@ -718,7 +718,7 @@ fn record_tool_call(tracker: &mut RepeatTracker, key: u64) -> u32 {
 ///
 /// - subagent / auto-approve (`--yes`) / YOLO runs **fail closed**: the call
 ///   is denied with a corrective observation instead of prompting (an
-///   unattended prompt would stall the run — the v1.0.91 lesson);
+///   unattended prompt would stall the run - the v1.0.91 lesson);
 /// - interactive primary runs raise a `PermissionRequested` prompt and wait
 ///   for the user's `PermissionReplied` up to `timeout_secs`; timeout counts
 ///   as denial (FR-015 semantics).

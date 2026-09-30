@@ -49,7 +49,7 @@ fn clean_title_strips_leading_cookie_banner() {
         out.chars().count()
     );
     assert!(!out.to_lowercase().contains("we use essential cookies"));
-    assert!(out.ends_with('…'));
+    assert!(out.ends_with("..."));
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn clean_title_truncates_long_title_at_word_boundary() {
         "got {} chars: {out}",
         out.chars().count()
     );
-    assert!(out.ends_with('…'));
+    assert!(out.ends_with("..."));
     assert!(!out.ends_with("… "));
 }
 

@@ -57,7 +57,7 @@ impl TaskStatus {
 /// `#[serde(deny_unknown_fields)]` rejects unknown fields on manual edits so
 /// typos are surfaced instead of silently ignored (M5-T3).
 ///
-/// M6-T3: `completed_by` makes task completion idempotent — a second
+/// M6-T3: `completed_by` makes task completion idempotent - a second
 /// completion by a *different* agent is rejected, while the same agent
 /// repeating a completion it already owns returns success without mutation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,7 +97,7 @@ impl Task {
     /// Returns `Ok(())` if the task is well-formed, or an error describing the
     /// first violation. Checks:
     /// - `id` is non-empty.
-    /// - `assigned_to`, when set, is a plausible agent ID (`"lead"` or `tm-…`).
+    /// - `assigned_to`, when set, is a plausible agent ID (`"lead"` or `tm-...`).
     /// - `depends_on` does not contain the task's own id.
     pub fn validate(&self) -> Result<()> {
         if self.id.is_empty() {
@@ -109,7 +109,7 @@ impl Task {
             && !owner.starts_with("tm-")
         {
             return Err(anyhow!(
-                "task {} assigned_to '{owner}' is not a valid agent id (expected 'lead' or 'tm-…')",
+                "task {} assigned_to '{owner}' is not a valid agent id (expected 'lead' or 'tm-...')",
                 self.id
             ));
         }
@@ -216,7 +216,7 @@ impl TaskList {
     /// PERF-026: returns a `HashSet<String>` (not a `Vec`) so the caller's
     /// `is_claimable` dependency check is O(1) per dependency instead of a
     /// linear scan. Previously this rebuilt a `Vec<String>` on every
-    /// `is_claimable` / `next_claimable` call, yielding O(T²) complexity for a
+    /// `is_claimable` / `next_claimable` call, yielding O(T^2) complexity for a
     /// full `next_claimable` scan over T tasks.
     pub fn completed_ids(&self) -> std::collections::HashSet<String> {
         self.tasks
@@ -510,7 +510,7 @@ impl TaskStore {
         if task.status != TaskStatus::Pending {
             drop(lock);
             return Err(anyhow!(
-                "task '{task_id}' cannot be claimed (status: {:?}) — only Pending tasks can be claimed",
+                "task '{task_id}' cannot be claimed (status: {:?}) - only Pending tasks can be claimed",
                 task.status
             ));
         }
@@ -518,7 +518,7 @@ impl TaskStore {
         if !task.is_claimable(&done) {
             drop(lock);
             return Err(anyhow!(
-                "task '{task_id}' cannot be claimed — unsatisfied dependencies: {:?}",
+                "task '{task_id}' cannot be claimed - unsatisfied dependencies: {:?}",
                 task.depends_on
             ));
         }
@@ -538,8 +538,8 @@ impl TaskStore {
     /// become claimable on the next `claim_next` call).
     ///
     /// M6-T3: completion is idempotent. If the task is already `Completed`:
-    /// - by the same `agent_id` → return the task unchanged (no-op success).
-    /// - by a different agent → reject with an error.
+    /// - by the same `agent_id` -> return the task unchanged (no-op success).
+    /// - by a different agent -> reject with an error.
     pub fn complete(&self, task_id: &str, agent_id: &str) -> Result<Task> {
         let lock = self.acquire_lock(true)?;
 
@@ -571,7 +571,7 @@ impl TaskStore {
         if task.status == TaskStatus::Completed {
             let owner = task.completed_by.as_deref().unwrap_or("unknown");
             if owner == agent_id {
-                // Same agent re-completing — no-op success.
+                // Same agent re-completing - no-op success.
                 let already = task.clone();
                 drop(lock);
                 return Ok(already);
@@ -611,7 +611,7 @@ impl TaskStore {
     /// Add a new task to the list (acquires an exclusive lock).
     ///
     /// M8-T4: the previous doc comment incorrectly claimed this method does
-    /// **not** acquire a lock. It does — `acquire_lock(true)` is called at
+    /// **not** acquire a lock. It does - `acquire_lock(true)` is called at
     /// the top, and the lock is held for the duration of the
     /// read-modify-write cycle via `write_locked`. This is the same
     /// race-free pattern used by all other mutating `TaskStore` methods.

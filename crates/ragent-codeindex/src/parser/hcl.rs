@@ -5,11 +5,11 @@
 //! Terraform configuration files (`.tf` / `.tfvars`).
 //!
 //! Terraform files use HCL (`HashiCorp` Configuration Language). The tree-sitter
-//! HCL grammar produces a `body` → `block` / `attribute` tree. Each `block`
+//! HCL grammar produces a `body` -> `block` / `attribute` tree. Each `block`
 //! has the form:
 //!
 //! ```text
-//! <identifier> <string_lit|identifier> … <block_start> <body>? <block_end>
+//! <identifier> <string_lit|identifier> ... <block_start> <body>? <block_end>
 //! ```
 //!
 //! The first `identifier` child is the block type (e.g. `resource`, `data`,
@@ -18,7 +18,7 @@
 //! nodes.
 
 use super::{LanguageParser, ParsedFile};
-use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
+use crate::types::{Symbol, SymbolKind, Visibility};
 use anyhow::{Context, Result};
 use tree_sitter::Node;
 
@@ -50,13 +50,7 @@ impl LanguageParser for HclParser {
         let tree = Self::parse_tree(source)?;
         let root = tree.root_node();
 
-        let mut ctx = Ctx {
-            source,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            references: Vec::new(),
-            next_id: 0,
-        };
+        let mut ctx = Ctx::new(source);
 
         walk(&mut ctx, root, None, &[]);
 
@@ -72,25 +66,8 @@ impl LanguageParser for HclParser {
 // ── Extraction context ──────────────────────────────────────────────────────
 
 /// Mutable context threaded through recursive extraction.
-struct Ctx<'a> {
-    source: &'a [u8],
-    symbols: Vec<Symbol>,
-    imports: Vec<ImportEntry>,
-    references: Vec<SymbolRef>,
-    next_id: i64,
-}
-
-impl Ctx<'_> {
-    const fn alloc_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
-    fn text(&self, node: Node) -> &str {
-        node.utf8_text(self.source).unwrap_or("")
-    }
-}
+/// Parser-local alias of the shared extraction context.
+type Ctx<'a> = super::ctx::Ctx<'a>;
 
 // ── HCL block types and their mapping to SymbolKinds ────────────────────────
 
@@ -118,6 +95,10 @@ fn block_kind(block_type: &str) -> SymbolKind {
 
 /// Walk a tree-sitter node, extracting HCL/Terraform symbols.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
+    let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
+        return;
+    };
+
     match node.kind() {
         "block" => extract_block(ctx, node, parent_id, scope),
         "attribute" => extract_attribute(ctx, node, parent_id, scope),
@@ -137,7 +118,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
 /// HCL block structure in tree-sitter:
 ///
 /// ```text
-/// block → identifier (string_lit|identifier)* block_start body? block_end
+/// block -> identifier (string_lit|identifier)* block_start body? block_end
 /// ```
 ///
 /// The first `identifier` is the block type. Subsequent `string_lit` and
@@ -167,7 +148,7 @@ fn extract_block(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
                 // Additional identifier labels (rare but valid in HCL).
                 labels.push(ctx.text(*child).to_string());
             } else {
-                // This is the block type — skip.
+                // This is the block type - skip.
                 seen_type = true;
             }
         } else if child.kind() == "string_lit" {
@@ -179,7 +160,7 @@ fn extract_block(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
     }
 
     // Build the display name.
-    // e.g. resource "aws_instance" "web" → resource.aws_instance.web
+    // e.g. resource "aws_instance" "web" -> resource.aws_instance.web
     let name = if labels.is_empty() {
         block_type.clone()
     } else {
@@ -289,13 +270,7 @@ fn is_inside_locals_block(node: Node, source: &[u8]) -> bool {
 
 /// Get the text of the first child node matching `kind`.
 fn first_child_by_kind(ctx: &Ctx, node: Node, kind: &str) -> Option<String> {
-    let cursor = &mut node.walk();
-    for child in node.children(cursor) {
-        if child.kind() == kind {
-            return Some(ctx.text(child).to_string());
-        }
-    }
-    None
+    super::util::first_child_by_kind(ctx.source, node, kind)
 }
 
 /// Build a qualified name from the current scope and a local name.
@@ -308,15 +283,12 @@ fn build_qname(scope: &[String], name: &str) -> String {
 
 /// Extend the scope with one more level.
 fn ext_scope(scope: &[String], name: &str) -> Vec<String> {
-    let mut v = scope.to_vec();
-    v.push(name.to_string());
-    v
+    super::util::extend_scope(scope, name)
 }
 
-/// Compute a blake3 hash of the node's text for change detection.
+/// Content hash of the node's text for change detection.
 fn hash_node(ctx: &Ctx, node: Node) -> String {
-    let text = ctx.text(node);
-    blake3::hash(text.as_bytes()).to_hex().to_string()
+    super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ────────────────────────────────────────────���──────────────────────
+// ── Tests ──────────────────────────────────────────────────────────────────

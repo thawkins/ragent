@@ -7,8 +7,8 @@ use crate::data::BenchCaseFixture;
 use crate::model::BenchGenerationResult;
 use crate::suites::{
     BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter, accuracy_metric,
-    bench_temp_root, best_exact_or_similarity_sample, exact_match_count, first_sample_exact_match,
-    skipped_metric, strip_code_fences,
+    bench_temp_root, best_exact_or_similarity_sample, count_passed_failed, exact_match_count,
+    first_sample_exact_match, skipped_metric, strip_code_fences,
 };
 
 pub(super) static ADAPTER: MbppAdapter = MbppAdapter;
@@ -85,14 +85,7 @@ impl BenchSuiteAdapter for MbppAdapter {
             )];
         }
 
-        let passed = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "passed")
-            .count();
-        let failed = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "failed")
-            .count();
+        let (passed, failed) = count_passed_failed(evaluations);
         vec![accuracy_metric(
             "accuracy",
             passed,
@@ -109,55 +102,19 @@ fn evaluate_mbpp_python_tests(
     test_code: &str,
 ) -> BenchCaseEvaluation {
     let fallback = best_exact_or_similarity_sample(generation, &case.reference);
-    let mut passed_count = 0usize;
-    let mut first_sample_passed = false;
-    let mut first_error = None;
-    let mut selected_response = fallback.0;
-
-    for (idx, sample) in generation.samples.iter().enumerate() {
-        match run_mbpp_python_assertions(&sample.text, test_code) {
-            Ok(()) => {
-                passed_count += 1;
-                if idx == 0 {
-                    first_sample_passed = true;
-                }
-                if passed_count == 1 {
-                    selected_response = sample.text.clone();
-                }
-            }
-            Err(error) => {
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
-            }
-        }
-    }
-
-    let passed = passed_count > 0;
-    BenchCaseEvaluation {
-        status: if passed { "passed" } else { "failed" }.to_string(),
-        score: Some(if passed { 1.0 } else { 0.0 }),
-        selected_response,
-        exact_match_count: passed_count,
-        first_sample_exact_match: first_sample_passed,
-        notes: if passed {
+    let total = generation.samples.len();
+    crate::suites::evaluate_suite_samples(
+        generation,
+        fallback.0,
+        |text| run_mbpp_python_assertions(text, test_code),
+        |passed_count| {
             format!(
-                "MBPP bundled assertions passed for {passed_count}/{} generated sample(s).",
-                generation.samples.len()
-            )
-        } else {
-            format!(
-                "MBPP bundled assertions failed for all {} generated sample(s).",
-                generation.samples.len()
+                "MBPP bundled assertions passed for {passed_count}/{total} generated sample(s)."
             )
         },
-        error_code: if passed {
-            None
-        } else {
-            Some("assertion_failed".to_string())
-        },
-        error_message: if passed { None } else { first_error },
-    }
+        || format!("MBPP bundled assertions failed for all {total} generated sample(s)."),
+        "assertion_failed",
+    )
 }
 
 fn evaluate_mbpp_native(
@@ -166,57 +123,20 @@ fn evaluate_mbpp_native(
     test_code: &str,
 ) -> BenchCaseEvaluation {
     let fallback = best_exact_or_similarity_sample(generation, &case.reference);
-    let mut passed_count = 0usize;
-    let mut first_sample_passed = false;
-    let mut first_error = None;
-    let mut selected_response = fallback.0;
-
-    for (idx, sample) in generation.samples.iter().enumerate() {
-        match run_mbpp_native_harness(case, &sample.text, test_code) {
-            Ok(()) => {
-                passed_count += 1;
-                if idx == 0 {
-                    first_sample_passed = true;
-                }
-                if passed_count == 1 {
-                    selected_response = sample.text.clone();
-                }
-            }
-            Err(error) => {
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
-            }
-        }
-    }
-
-    let passed = passed_count > 0;
-    BenchCaseEvaluation {
-        status: if passed { "passed" } else { "failed" }.to_string(),
-        score: Some(if passed { 1.0 } else { 0.0 }),
-        selected_response,
-        exact_match_count: passed_count,
-        first_sample_exact_match: first_sample_passed,
-        notes: if passed {
+    let total = generation.samples.len();
+    let label = mbpp_language_label(&case.language);
+    crate::suites::evaluate_suite_samples(
+        generation,
+        fallback.0,
+        |text| run_mbpp_native_harness(case, text, test_code),
+        |passed_count| {
             format!(
-                "MBPP native {} harness passed for {passed_count}/{} generated sample(s).",
-                mbpp_language_label(&case.language),
-                generation.samples.len()
-            )
-        } else {
-            format!(
-                "MBPP native {} harness failed for all {} generated sample(s).",
-                mbpp_language_label(&case.language),
-                generation.samples.len()
+                "MBPP native {label} harness passed for {passed_count}/{total} generated sample(s)."
             )
         },
-        error_code: if passed {
-            None
-        } else {
-            Some("assertion_failed".to_string())
-        },
-        error_message: if passed { None } else { first_error },
-    }
+        || format!("MBPP native {label} harness failed for all {total} generated sample(s)."),
+        "assertion_failed",
+    )
 }
 
 fn run_mbpp_python_assertions(sample: &str, test_code: &str) -> Result<(), String> {
@@ -231,7 +151,10 @@ fn run_mbpp_python_assertions(sample: &str, test_code: &str) -> Result<(), Strin
         "def _timeout_handler(signum, frame):".to_string(),
         "    raise TimeoutError('MBPP execution timed out')".to_string(),
         "signal.signal(signal.SIGALRM, _timeout_handler)".to_string(),
-        "signal.alarm(10)".to_string(),
+        format!(
+            "signal.alarm({})",
+            crate::exec_guard::FIXTURE_DEFAULT_TIMEOUT_SECS
+        ),
         "namespace = {}".to_string(),
         format!("candidate_source = {candidate_literal}"),
         format!("test_source = {tests_literal}"),
@@ -255,7 +178,7 @@ fn run_mbpp_python_assertions(sample: &str, test_code: &str) -> Result<(), Strin
         .arg(&script_path)
         .output()
         .map_err(|error| format!("launch python3: {error}"))?;
-    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(&script_path); // INTENTIONAL: best-effort temp cleanup
     if output.status.success() {
         return Ok(());
     }
@@ -297,51 +220,13 @@ fn run_mbpp_native_harness(
             )
         })?;
 
-        let mut last_stdout = String::new();
-        let mut last_stderr = String::new();
-        for (index, command_parts) in case.execution_commands.iter().enumerate() {
-            let timeout_secs = case
-                .execution_timeouts_secs
-                .get(index)
-                .copied()
-                .unwrap_or(10);
-            let rendered_parts = command_parts
-                .iter()
-                .map(|part| part.replace("__FILENAME__", &source_name))
-                .collect::<Vec<_>>();
-            // SEC-ragent-bench-001 (SECTASKS T-009): the fixture supplies the
-            // program, so it must be an allowlisted toolchain binary - never an
-            // absolute path or a shell interpreter.
-            crate::exec_guard::validate_fixture_command(&rendered_parts)?;
-            let Some(program) = rendered_parts.first() else {
-                return Err("native MBPP command list was empty".to_string());
-            };
-            let output = Command::new("timeout")
-                .arg(format!("{timeout_secs}s"))
-                .arg(program)
-                .args(rendered_parts.iter().skip(1))
-                .current_dir(&run_root)
-                .output()
-                .map_err(|error| format!("launch native MBPP command `{program}`: {error}"))?;
-            last_stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            last_stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            if !output.status.success() {
-                let detail = [last_stderr.trim(), last_stdout.trim()]
-                    .into_iter()
-                    .find(|part| !part.is_empty())
-                    .unwrap_or("native MBPP command failed");
-                return Err(format!(
-                    "native MBPP command `{}` failed: {}",
-                    rendered_parts.join(" "),
-                    detail
-                ));
-            }
-        }
+        let (last_stdout, last_stderr) =
+            crate::suites::run_fixture_commands(case, &run_root, &source_name, "native MBPP")?;
 
         verify_native_mbpp_output(&last_stdout, &last_stderr)
     })();
 
-    let _ = std::fs::remove_dir_all(&run_root);
+    let _ = std::fs::remove_dir_all(&run_root); // INTENTIONAL: best-effort temp cleanup
     result
 }
 

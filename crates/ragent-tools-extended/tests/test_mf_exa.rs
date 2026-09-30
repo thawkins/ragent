@@ -304,7 +304,7 @@ fn test_parse_response_json_highlights_joined() {
     assert_eq!(results.len(), 1);
     assert!(results[0].snippet.contains("first highlight"));
     assert!(results[0].snippet.contains("second highlight"));
-    assert!(results[0].snippet.contains("…"));
+    assert!(results[0].snippet.contains("..."));
 }
 
 #[test]
@@ -390,7 +390,7 @@ fn test_parse_response_json_snippet_truncation() {
     assert_eq!(results.len(), 1);
     let snippet_len = results[0].snippet.chars().count();
     assert!(snippet_len <= 201); // 200 chars + ellipsis
-    assert!(results[0].snippet.ends_with('…'));
+    assert!(results[0].snippet.ends_with("..."));
 }
 
 #[test]
@@ -576,19 +576,16 @@ fn test_truncate_snippet_exact_limit_unchanged() {
 fn test_truncate_snippet_long_truncated_with_ellipsis() {
     let long = "a".repeat(MAX_SNIPPET_CHARS + 50);
     let truncated = truncate_snippet(&long);
-    assert_eq!(truncated.chars().count(), MAX_SNIPPET_CHARS + 1); // +1 for ellipsis
-    assert!(truncated.ends_with('…'));
+    assert_eq!(truncated.chars().count(), MAX_SNIPPET_CHARS);
+    assert!(truncated.ends_with("..."));
 }
 
 #[test]
 fn test_truncate_snippet_one_over_limit() {
     let input = "a".repeat(MAX_SNIPPET_CHARS + 1);
     let truncated = truncate_snippet(&input);
-    assert!(truncated.ends_with('…'));
-    assert_eq!(
-        truncated.chars().count(),
-        MAX_SNIPPET_CHARS + 1 // content chars + ellipsis
-    );
+    assert!(truncated.ends_with("..."));
+    assert_eq!(truncated.chars().count(), MAX_SNIPPET_CHARS);
 }
 
 #[test]
@@ -602,10 +599,10 @@ fn test_truncate_snippet_unicode_boundaries() {
     let t = truncate_snippet(&s);
     // Should not panic on char boundary
     assert!(t.is_char_boundary(t.len()));
-    assert!(t.ends_with('…'));
+    assert!(t.ends_with("..."));
     // Each emoji is 1 char, so truncated content should be MAX_SNIPPET_CHARS chars
     // plus the ellipsis
-    assert_eq!(t.chars().count(), MAX_SNIPPET_CHARS + 1);
+    assert_eq!(t.chars().count(), MAX_SNIPPET_CHARS);
 }
 
 #[test]

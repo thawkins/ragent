@@ -1,4 +1,4 @@
-//! `git_status` — Show working tree status.
+//! `git_status` - Show working tree status.
 
 use anyhow::Result;
 use serde_json::{Value, json};

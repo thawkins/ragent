@@ -1,4 +1,4 @@
-//! `git_add` — Stage files for commit.
+//! `git_add` - Stage files for commit.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -65,6 +65,10 @@ impl Tool for GitAddTool {
             }
             for p in paths {
                 if let Some(s) = p.as_str() {
+                    // SEC-ragent-tools-vcs-00x (ANTIPAT A-1): an LLM-supplied
+                    // path beginning with `-` would be parsed by git as an
+                    // option rather than a pathspec.
+                    crate::git::reject_option_like(s, "paths[]")?;
                     args.push(s.to_string());
                 }
             }

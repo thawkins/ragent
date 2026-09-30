@@ -1,4 +1,4 @@
-//! `team_shutdown_teammate` — Lead requests graceful or immediate shutdown of a teammate.
+//! `team_shutdown_teammate` - Lead requests graceful or immediate shutdown of a teammate.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -36,7 +36,7 @@ impl Tool for TeamShutdownTeammateTool {
              shutdown_request to the teammate's mailbox; the teammate calls team_shutdown_ack \
              to confirm before terminating. Optional: 'reason' (string) and 'immediate' (boolean, \
              default false). Pass immediate: true to cancel the agent loop immediately and \
-             mark the teammate Stopped without waiting for an ack — use only for hung or \
+             mark the teammate Stopped without waiting for an ack - use only for hung or \
              unresponsive teammates. Common gotcha: graceful shutdown requires the teammate \
              to process its mailbox and ack; immediate bypasses that handshake."
     }

@@ -142,7 +142,7 @@ pub enum SpecCommand {
     /// Append a production feedback note to `specs/<spec-id>/FEEDBACK.md`
     /// (FR-017).
     ///
-    /// The note is advisory — it is surfaced during `/spec plan` regeneration
+    /// The note is advisory - it is surfaced during `/spec plan` regeneration
     /// but does not block validation or status transitions.
     Feedback {
         /// Spec identifier (directory name under `specs/`).
@@ -178,7 +178,7 @@ pub enum SpecCommand {
     /// Reverse-engineer a public repository into a synthetic creation prompt
     /// (FR-001, FR-011, FR-013).
     ///
-    /// Produced by [`parse_reverse`] from a `reverse <repo> [flags]` tail. The
+    /// Produced by `parse_reverse` from a `reverse <repo> [flags]` tail. The
     /// TUI feeds these validated values straight to the reverse handler, so the
     /// fetch-and-generate path stays in one place.
     Reverse {
@@ -566,6 +566,14 @@ const USAGE_SUBCOMMANDS: &[&str] = &[
     "reverse",
 ];
 
+/// Maximum length of a feedback note before it is truncated in the append log
+/// line (ANTIPAT L-3).
+const NOTE_LOG_PREVIEW_LEN: usize = 80;
+
+/// Character count kept when a feedback note exceeds [`NOTE_LOG_PREVIEW_LEN`],
+/// leaving room for the trailing `...` inside the same budget.
+const NOTE_LOG_TRUNCATED_LEN: usize = 77;
+
 impl SpecCommand {
     /// Parse a `/spec` argument string into a command.
     ///
@@ -844,7 +852,7 @@ impl SpecCommand {
     ///
     /// Usage errors are represented as `Unknown(<subcommand>)` where the
     /// subcommand is one that exists but was given missing arguments; the
-    /// accepted names come from [`USAGE_SUBCOMMANDS`] so they cannot drift
+    /// accepted names come from `USAGE_SUBCOMMANDS` so they cannot drift
     /// from the subcommands parsed above. A `/spec govcreate` invocation that
     /// parsed but failed validation (bad spec ID or bad `/new` flags) is also a
     /// usage error, reported as [`SpecCommand::GovCreateUsage`], and a
@@ -882,7 +890,7 @@ impl SpecCommand {
                     | `/spec impl <spec-id> [--task <ID>] [--dry-run]` | required `spec-id`, optional flags | Implement a spec by executing its PLAN.md tasks in dependency order. Use `--task` to run a single task, `--dry-run` to preview the plan. Alias: `/spec implement`. |\n\
                     | `/spec jtbd <spec-id> [--force] [--agent <name>]` | required `spec-id`, optional `--force` and `--agent` | Perform a Jobs-To-Be-Done analysis of `specs/<spec-id>/SPEC.md` and write `specs/<spec-id>/JTBD.md`. Use `--force` to overwrite an existing file, `--agent <name>` to dispatch to a specific agent. |\n\
                     | `/spec update <spec-id>` | required `spec-id` | Re-read the existing `SPEC.md` and regenerate `PLAN.md` and `TESTPLAN.md` from its current content. |\n\
-                    | `/spec specify <specname> <feature description> [--from-research <name>]` | required `specname` + `feature description`, optional `--from-research` | Generate `specs/<specname>/SPEC.md` only (EARS spec with requirements and `[NEEDS CLARIFICATION]` markers). Does NOT generate PLAN.md — use `/spec plan` after clarification. When `sdd.branch_per_spec` is enabled, also creates a `spec/<specname>` git branch. `--from-research` links the spec to a research artifact via YAML frontmatter. |\n\
+                    | `/spec specify <specname> <feature description> [--from-research <name>]` | required `specname` + `feature description`, optional `--from-research` | Generate `specs/<specname>/SPEC.md` only (EARS spec with requirements and `[NEEDS CLARIFICATION]` markers). Does NOT generate PLAN.md - use `/spec plan` after clarification. When `sdd.branch_per_spec` is enabled, also creates a `spec/<specname>` git branch. `--from-research` links the spec to a research artifact via YAML frontmatter. |\n\
                     | `/spec plan <spec-id> <tech-context>` | required `spec-id` + `tech-context` | Generate (or regenerate) `specs/<spec-id>/PLAN.md` from the existing `SPEC.md` using the provided technology context as guidance. Coexists with `/spec update` which regenerates from an edited `SPEC.md` without tech context. |\n\
                     | `/spec tasks <spec-id>` | required `spec-id` | Generate `specs/<spec-id>/TASKS.md` containing an ordered task list derived from the existing `PLAN.md`, plus `specs/<spec-id>/quickstart.md` with key validation scenarios derived from `SPEC.md`. |\n\
                     | `/spec feedback <spec-id> <note>` | required `spec-id` + `note` | Append a production feedback note to `specs/<spec-id>/FEEDBACK.md`. Notes are advisory and surfaced during `/spec plan` regeneration. |\n\
@@ -893,7 +901,7 @@ impl SpecCommand {
     pub fn build_create_status(specname: &str) -> String {
         format!(
             "spec: writing specs/{specname}/SPEC.md + specs/{specname}/PLAN.md + \
-             specs/{specname}/TESTPLAN.md…"
+             specs/{specname}/TESTPLAN.md..."
         )
     }
 
@@ -901,13 +909,13 @@ impl SpecCommand {
     #[must_use]
     pub fn build_create_message(specname: &str) -> String {
         format!(
-            "From: /spec\n📝 **Generating specification and plan…**\n\n\
+            "From: /spec\n[note] **Generating specification and plan...**\n\n\
              Creating spec directory `specs/{specname}` with:\n\
-             - `specs/{specname}/SPEC.md` — EARS requirements specification\n\
-             - `specs/{specname}/PLAN.md` — implementation plan with tasks\n\
-             - `specs/{specname}/TESTPLAN.md` — manual test plan with test cases\n\n\
+             - `specs/{specname}/SPEC.md` - EARS requirements specification\n\
+             - `specs/{specname}/PLAN.md` - implementation plan with tasks\n\
+             - `specs/{specname}/TESTPLAN.md` - manual test plan with test cases\n\n\
              This may take a few moments.\n\
-             ⚠️ **Tip:** After creation, you can validate with `/spec validate {specname}`."
+             [!] **Tip:** After creation, you can validate with `/spec validate {specname}`."
         )
     }
 
@@ -915,7 +923,7 @@ impl SpecCommand {
     #[must_use]
     pub fn build_create_log(specname: &str, feature: &str) -> String {
         format!(
-            "Creating spec '{specname}' for feature: {feature} → specs/{specname}/SPEC.md, \
+            "Creating spec '{specname}' for feature: {feature} -> specs/{specname}/SPEC.md, \
              specs/{specname}/PLAN.md, specs/{specname}/TESTPLAN.md"
         )
     }
@@ -943,11 +951,11 @@ impl SpecCommand {
           
                          Write the following files:
           
-                         1. `specs/{specname}/SPEC.md` — A requirements specification using EARS notation:
+                         1. `specs/{specname}/SPEC.md` - A requirements specification using EARS notation:
                             - Use at least one of each EARS template: ubiquitous, event-driven, state-driven, optional, unwanted
                             - Number requirements as FR-001, FR-002, etc.
                             - Include a '## Requirements' section
-                            - Start with YAML frontmatter containing `status: draft`{research_frontmatter}{research_section}                          2. `specs/{specname}/PLAN.md` — An implementation plan with:
+                            - Start with YAML frontmatter containing `status: draft`{research_frontmatter}{research_section}                          2. `specs/{specname}/PLAN.md` - An implementation plan with:
                               - A '## Tasks' section with a markdown table
                               - Columns: ID, Title, Requirement, Effort, Priority, Status, Dependencies
                               - Task IDs as T-001, T-002, etc.
@@ -956,10 +964,10 @@ impl SpecCommand {
                               - Priority values: Critical, High, Medium, Low
                               - Status values: Pending (set all new tasks to Pending)
           
-                         3. `specs/{specname}/TESTPLAN.md` — A **manual** test plan (human-readable, not automated test code):
+                         3. `specs/{specname}/TESTPLAN.md` - A **manual** test plan (human-readable, not automated test code):
                             - Start with YAML frontmatter containing `status: draft`
                             - A `## Test Cases` section with one or more manual test cases
-                            - Each test case has an ID (`TC-001`, `TC-002`, …), a title, preconditions, step-by-step instructions, test data to enter, and expected results
+                            - Each test case has an ID (`TC-001`, `TC-002`, ...), a title, preconditions, step-by-step instructions, test data to enter, and expected results
                             - When the feature involves user-interface navigation, enumerate every UI navigation step (keys pressed, menus opened, dialogs interacted with) and the exact data to enter into each field
                             - You MAY include a `## Prerequisites` section listing environment setup, provider configuration, or sample files needed before the manual tests can be executed
                             - You MAY include a `## Cleanup` section describing teardown steps to run after the manual tests complete
@@ -969,21 +977,21 @@ impl SpecCommand {
         )
     }
 
-    // ── Specify helpers (FR-001) ──────────────────────────────────────────
+    // -- Specify helpers (FR-001) --
 
     /// Build the user-facing status string for a specify operation.
     #[must_use]
     pub fn build_specify_status(specname: &str) -> String {
-        format!("spec: writing specs/{specname}/SPEC.md…")
+        format!("spec: writing specs/{specname}/SPEC.md...")
     }
 
     /// Build the assistant message shown when a specify operation starts.
     #[must_use]
     pub fn build_specify_message(specname: &str) -> String {
         format!(
-            "From: /spec specify\n📝 **Generating specification…**\n\n\
+            "From: /spec specify\n[note] **Generating specification...**\n\n\
        Creating spec directory `specs/{specname}` with:\n\
-       - `specs/{specname}/SPEC.md` — EARS requirements specification\n\n\
+       - `specs/{specname}/SPEC.md` - EARS requirements specification\n\n\
        No PLAN.md is generated at this stage. After reviewing and resolving \
        any `[NEEDS CLARIFICATION]` markers, use `/spec plan {specname} \
        <tech-context>` to generate the implementation plan.\n\n\
@@ -995,14 +1003,14 @@ impl SpecCommand {
     #[must_use]
     pub fn build_specify_log(specname: &str, feature: &str) -> String {
         format!(
-            "Specifying '{specname}' for feature: {feature} → specs/{specname}/SPEC.md (no PLAN.md)"
+            "Specifying '{specname}' for feature: {feature} -> specs/{specname}/SPEC.md (no PLAN.md)"
         )
     }
 
     /// Build the prompt sent to the explore agent for SPEC.md-only generation.
     ///
     /// Unlike `build_create_prompt`, this prompt instructs the agent to write
-    /// **only** `SPEC.md` — no `PLAN.md` or `TESTPLAN.md`. It also directs the
+    /// **only** `SPEC.md` - no `PLAN.md` or `TESTPLAN.md`. It also directs the
     /// agent to insert `[NEEDS CLARIFICATION: <question>]` markers wherever a
     /// requirement is ambiguous, matching FR-002.
     ///
@@ -1027,7 +1035,7 @@ impl SpecCommand {
 
 Write the following file:
 
-1. `specs/{specname}/SPEC.md` — A requirements specification using EARS notation:
+1. `specs/{specname}/SPEC.md` - A requirements specification using EARS notation:
    - Use at least one of each EARS template: ubiquitous, event-driven, state-driven, optional, unwanted
    - Number requirements as FR-001, FR-002, etc.
    - Include a '## Requirements' section
@@ -1040,7 +1048,7 @@ Use the `write` tool to create the file. Ensure the spec is clear, testable, and
         )
     }
 
-    // ── Branch helpers (FR-009) ────────────────────────────────────────────
+    // -- Branch helpers (FR-009) --
 
     /// Build the user-facing message for a branch-creation result.
     ///
@@ -1052,18 +1060,18 @@ Use the `write` tool to create the file. Ensure the spec is clear, testable, and
         match result {
             BranchResult::Created { branch_name } => {
                 format!(
-                    "🌿 **Git branch created:** `{branch_name}` — spec work is now \
+                    "[branch] **Git branch created:** `{branch_name}` - spec work is now \
                      isolated on this branch."
                 )
             }
             BranchResult::NotARepo => {
-                "ℹ️ Not a git repository — skipping branch creation.".to_string()
+                "[i] Not a git repository - skipping branch creation.".to_string()
             }
             BranchResult::AlreadyExists { branch_name } => {
-                format!("ℹ️ Branch `{branch_name}` already exists — reusing existing branch.")
+                format!("[i] Branch `{branch_name}` already exists - reusing existing branch.")
             }
             BranchResult::Failed { msg } => {
-                format!("⚠️ Could not create git branch: {msg}")
+                format!("[!] Could not create git branch: {msg}")
             }
         }
     }
@@ -1077,7 +1085,7 @@ Use the `write` tool to create the file. Ensure the spec is clear, testable, and
                 format!("Created git branch '{branch_name}' for spec '{specname}'")
             }
             BranchResult::NotARepo => {
-                format!("No git repo found — skipped branch creation for spec '{specname}'")
+                format!("No git repo found - skipped branch creation for spec '{specname}'")
             }
             BranchResult::AlreadyExists { branch_name } => {
                 format!("Branch '{branch_name}' already exists for spec '{specname}'")
@@ -1088,7 +1096,7 @@ Use the `write` tool to create the file. Ensure the spec is clear, testable, and
         }
     }
 
-    // ── Research linking helpers (FR-010) ────────────────────────────────────
+    // -- Research linking helpers (FR-010) --
 
     /// Build the YAML frontmatter instruction for linking a research artifact.
     ///
@@ -1128,12 +1136,12 @@ Use the `write` tool to create the file. Ensure the spec is clear, testable, and
         }
     }
 
-    // ── Plan helpers (FR-004) ───────────────────────────────────────────────
+    // -- Plan helpers (FR-004) --
 
     /// Build the user-facing status string for a plan generation operation.
     #[must_use]
     pub fn build_plan_status(spec_id: &str) -> String {
-        format!("spec: writing specs/{spec_id}/PLAN.md…")
+        format!("spec: writing specs/{spec_id}/PLAN.md...")
     }
 
     /// Build the assistant message shown when a plan generation starts.
@@ -1177,7 +1185,7 @@ Use the `write` tool to create the file. Ensure the spec is clear, testable, and
             ""
         };
         format!(
-            "From: /spec plan\n📋 **Generating implementation plan…**\n\n\
+            "From: /spec plan\n[notice] **Generating implementation plan...**\n\n\
              Reading `specs/{spec_id}/SPEC.md` and generating `specs/{spec_id}/PLAN.md` \
              using the provided technology context:\n\
              > {tech_context}\n\n\
@@ -1192,7 +1200,7 @@ Use the `write` tool to create the file. Ensure the spec is clear, testable, and
     pub fn build_plan_log(spec_id: &str, tech_context: &str) -> String {
         format!(
             "Generating PLAN.md for spec '{spec_id}' from SPEC.md + tech context: \
-             {tech_context} → specs/{spec_id}/PLAN.md"
+             {tech_context} -> specs/{spec_id}/PLAN.md"
         )
     }
 
@@ -1215,15 +1223,15 @@ Use the `write` tool to create the file. Ensure the spec is clear, testable, and
     ///
     /// # Arguments
     ///
-    /// * `spec_id` — The spec identifier (directory name under `specs/`).
-    /// * `tech_context` — Free-text technology context guiding plan decisions.
-    /// * `spec_md` — The current `SPEC.md` content.
-    /// * `plan_md` — The current `PLAN.md` content (may be empty if none exists).
-    /// * `data_model_enabled` — When `true`, append a data-model.md generation
+    /// * `spec_id` - The spec identifier (directory name under `specs/`).
+    /// * `tech_context` - Free-text technology context guiding plan decisions.
+    /// * `spec_md` - The current `SPEC.md` content.
+    /// * `plan_md` - The current `PLAN.md` content (may be empty if none exists).
+    /// * `data_model_enabled` - When `true`, append a data-model.md generation
     ///   instruction to the prompt (gated by `sdd.data_model` config flag).
-    /// * `contracts_enabled` — When `true`, append a contracts/ directory
+    /// * `contracts_enabled` - When `true`, append a contracts/ directory
     ///   generation instruction to the prompt (gated by `sdd.contracts` flag).
-    /// * `feedback_md` — Production feedback notes from `FEEDBACK.md`. When
+    /// * `feedback_md` - Production feedback notes from `FEEDBACK.md`. When
     ///   non-empty, the notes are included in the prompt and the agent is
     ///   instructed to address them in the regenerated plan (FR-017).
     #[must_use]
@@ -1295,7 +1303,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
         )
     }
 
-    // ── Data-model helpers (FR-011, T-021) ───────────────────────────────────
+    // -- Data-model helpers (FR-011, T-021) --
 
     /// Build the prompt instruction for optional `data-model.md` generation.
     ///
@@ -1307,7 +1315,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
     ///
     /// # Arguments
     ///
-    /// * `spec_id` — The spec identifier (directory name under `specs/`).
+    /// * `spec_id` - The spec identifier (directory name under `specs/`).
     #[must_use]
     pub fn build_data_model_instruction(spec_id: &str) -> String {
         format!(
@@ -1323,7 +1331,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
         )
     }
 
-    // ── Contracts helpers (FR-012, T-022) ────────────────────────────────────
+    // -- Contracts helpers (FR-012, T-022) --
 
     /// Build the prompt instruction for optional `contracts/` directory
     /// generation.
@@ -1336,7 +1344,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
     ///
     /// # Arguments
     ///
-    /// * `spec_id` — The spec identifier (directory name under `specs/`).
+    /// * `spec_id` - The spec identifier (directory name under `specs/`).
     #[must_use]
     pub fn build_contracts_instruction(spec_id: &str) -> String {
         format!(
@@ -1354,7 +1362,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
         )
     }
 
-    // ── Feedback surfacing helpers (FR-017, T-033) ───────────────────────────
+    // -- Feedback surfacing helpers (FR-017, T-033) --
 
     /// Build the prompt instruction for surfacing production feedback notes
     /// during plan regeneration.
@@ -1367,8 +1375,8 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
     ///
     /// # Arguments
     ///
-    /// * `spec_id` — The spec identifier (directory name under `specs/`).
-    /// * `feedback_md` — The contents of `FEEDBACK.md` (production metrics,
+    /// * `spec_id` - The spec identifier (directory name under `specs/`).
+    /// * `feedback_md` - The contents of `FEEDBACK.md` (production metrics,
     ///   incident reports, user feedback notes).
     #[must_use]
     pub fn build_feedback_instruction(spec_id: &str, feedback_md: &str) -> String {
@@ -1382,24 +1390,24 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
         )
     }
 
-    // ── Tasks helpers (FR-005, T-006, FR-013, T-023) ───────────────────────
+    // -- Tasks helpers (FR-005, T-006, FR-013, T-023) --
 
     /// Build the user-facing status string for a tasks extraction operation.
     #[must_use]
     pub fn build_tasks_status(spec_id: &str) -> String {
-        format!("spec: extracting specs/{spec_id}/TASKS.md from PLAN.md…")
+        format!("spec: extracting specs/{spec_id}/TASKS.md from PLAN.md...")
     }
 
     /// Build the assistant message shown when a tasks extraction starts.
     #[must_use]
     pub fn build_tasks_message(spec_id: &str) -> String {
         format!(
-            "From: /spec tasks\n📋 **Extracting task list…**\n\n\
+            "From: /spec tasks\n[notice] **Extracting task list...**\n\n\
              Reading `specs/{spec_id}/PLAN.md` and generating a standalone \
              `specs/{spec_id}/TASKS.md` with the ordered task table. \
              Also generating `specs/{spec_id}/quickstart.md` with key \
              validation scenarios from `SPEC.md`.\n\n\
-             This is a deterministic extraction — no LLM call required."
+             This is a deterministic extraction - no LLM call required."
         )
     }
 
@@ -1407,7 +1415,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
     #[must_use]
     pub fn build_tasks_log(spec_id: &str) -> String {
         format!(
-            "Extracting TASKS.md for spec '{spec_id}' from PLAN.md → \
+            "Extracting TASKS.md for spec '{spec_id}' from PLAN.md -> \
              specs/{spec_id}/TASKS.md"
         )
     }
@@ -1417,7 +1425,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
     #[must_use]
     pub fn build_tasks_completion_message(spec_id: &str, task_count: usize) -> String {
         format!(
-            "From: /spec tasks\n✅ **TASKS.md + quickstart.md generated** — \
+            "From: /spec tasks\n[ok] **TASKS.md + quickstart.md generated** - \
              `specs/{spec_id}/TASKS.md` contains {task_count} task(s) \
              extracted from `PLAN.md`. `specs/{spec_id}/quickstart.md` \
              contains key validation scenarios derived from `SPEC.md`."
@@ -1447,15 +1455,15 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
 
     /// Generate the standalone `TASKS.md` content from a PLAN.md's task table.
     ///
-    /// Parses the `## Tasks` section from `plan_md` using [`PlanParser`] and
+    /// Parses the `## Tasks` section from `plan_md` using [`PlanParser`](crate::plan_parser::PlanParser) and
     /// formats the parsed tasks into a standalone markdown file with a header,
     /// the task table, and a footer noting the source.
     ///
     /// # Arguments
     ///
-    /// * `spec_id` — The spec identifier (directory name under `specs/`).
-    /// * `title` — The spec title (extracted from SPEC.md H1).
-    /// * `plan_md` — The raw `PLAN.md` content.
+    /// * `spec_id` - The spec identifier (directory name under `specs/`).
+    /// * `title` - The spec title (extracted from SPEC.md H1).
+    /// * `plan_md` - The raw `PLAN.md` content.
     ///
     /// # Returns
     ///
@@ -1466,7 +1474,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
     ///
     /// # Errors
     ///
-    /// Returns [`SpecError::PlanParse`] when the `## Tasks` table exists but
+    /// Returns [`SpecError::PlanParse`](crate::error::SpecError::PlanParse) when the `## Tasks` table exists but
     /// cannot be parsed.
     pub fn build_tasks_md(
         spec_id: &str,
@@ -1478,7 +1486,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
             Err(e) => {
                 // `parse` returns an error both for "zero rows in a present
                 // table" and for a genuinely absent section. Only the latter is
-                // "no tasks" — surface the former so a malformed PLAN.md is not
+                // "no tasks" - surface the former so a malformed PLAN.md is not
                 // silently treated as having no tasks (FUNC-024).
                 if plan_md.contains("## Tasks") || plan_md.contains("### Tasks") {
                     return Err(e);
@@ -1520,15 +1528,15 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
     /// scenarios derived from the spec's acceptance criteria (FR-013, T-023).
     ///
     /// Parses the requirements from `spec_md` using
-    /// [`validate::parse_requirements`] and formats each requirement into a
+    /// `validate::parse_requirements` and formats each requirement into a
     /// concise smoke-test scenario. The output is a standalone markdown file
     /// intended for quick validation, distinct from the full `TESTPLAN.md`.
     ///
     /// # Arguments
     ///
-    /// * `spec_id` — The spec identifier (directory name under `specs/`).
-    /// * `title` — The spec title (extracted from SPEC.md H1).
-    /// * `spec_md` — The raw `SPEC.md` content containing the requirements.
+    /// * `spec_id` - The spec identifier (directory name under `specs/`).
+    /// * `title` - The spec title (extracted from SPEC.md H1).
+    /// * `spec_md` - The raw `SPEC.md` content containing the requirements.
     ///
     /// # Returns
     ///
@@ -1577,19 +1585,19 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
         Some(md)
     }
 
-    // ── Add helpers ────────────────────────────────────────────────────────
+    // -- Add helpers --
 
     /// Build the user-facing status string for an add operation.
     #[must_use]
     pub fn build_add_status(spec_id: &str) -> String {
-        format!("spec: updating specs/{spec_id}/SPEC.md + specs/{spec_id}/PLAN.md…")
+        format!("spec: updating specs/{spec_id}/SPEC.md + specs/{spec_id}/PLAN.md...")
     }
 
     /// Build the assistant message shown when an incremental spec update starts.
     #[must_use]
     pub fn build_add_message(spec_id: &str, feature: &str) -> String {
         format!(
-            "From: /spec add\n📝 **Adding requirements to spec…**\n\n\
+            "From: /spec add\n[note] **Adding requirements to spec...**\n\n\
                    Updating spec `specs/{spec_id}/` with new feature:\n\
                    > {feature}\n\n\
                    - Reading existing `SPEC.md` and `PLAN.md`\n\
@@ -1610,18 +1618,18 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
     /// The prompt instructs the LLM to use the `read` and `edit` tools directly
     /// to insert new requirements into `SPEC.md` and new task rows into
     /// `PLAN.md`.  This matches the architecture of `/spec create` and
-    /// `/spec update` — the LLM writes files via tools, eliminating the need
+    /// `/spec update` - the LLM writes files via tools, eliminating the need
     /// for fragile post-processing of delimited text blocks.
     ///
     /// # Arguments
     ///
-    /// * `spec_id` — The spec identifier (e.g. `"my-feature"`).
-    /// * `feature` — The free-text feature description for the new requirements.
-    /// * `spec_md` — The current `SPEC.md` content (included for context).
-    /// * `plan_md` — The current `PLAN.md` content (included for context).
-    /// * `next_fr` — The next available `FR-NNN` number.
-    /// * `next_nfr` — The next available `NFR-NNN` number.
-    /// * `next_task` — The next available `T-NNN` number.
+    /// * `spec_id` - The spec identifier (e.g. `"my-feature"`).
+    /// * `feature` - The free-text feature description for the new requirements.
+    /// * `spec_md` - The current `SPEC.md` content (included for context).
+    /// * `plan_md` - The current `PLAN.md` content (included for context).
+    /// * `next_fr` - The next available `FR-NNN` number.
+    /// * `next_nfr` - The next available `NFR-NNN` number.
+    /// * `next_task` - The next available `T-NNN` number.
     #[must_use]
     pub fn build_add_prompt(
         spec_id: &str,
@@ -1650,17 +1658,17 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
 **Steps:**
 
 1. Read `specs/{spec_id}/SPEC.md` using the `read` tool.
-2. Use the `edit` tool to insert new requirement blocks into `specs/{spec_id}/SPEC.md`. Insert them immediately before the `## Non-Functional Requirements` heading (or at the end of the file if no NFR section exists). Each requirement should use EARS notation with the correct FR-NNN or NFR-NNN IDs. Use at least one EARS template type. Do not modify any existing content — only insert new blocks.
+2. Use the `edit` tool to insert new requirement blocks into `specs/{spec_id}/SPEC.md`. Insert them immediately before the `## Non-Functional Requirements` heading (or at the end of the file if no NFR section exists). Each requirement should use EARS notation with the correct FR-NNN or NFR-NNN IDs. Use at least one EARS template type. Do not modify any existing content - only insert new blocks.
 
 3. Read `specs/{spec_id}/PLAN.md` using the `read` tool.
 4. Use the `edit` tool to insert new task table rows into `specs/{spec_id}/PLAN.md`. Append them after the last existing row in the task table. Use the same markdown table format as the existing rows. Columns: | ID | Title | Requirement | Effort | Priority | Status | Dependencies |. Link each task to the new requirement IDs. Effort: S, M, L. Priority: Critical, High, Medium, Low. Status: Pending.
 5. If you add task detail subsections, use the `edit` tool to append them after the existing task details in `specs/{spec_id}/PLAN.md`.
 
-**Existing SPEC.md content (for reference — use the `read` and `edit` tools to modify the actual file):**
+**Existing SPEC.md content (for reference - use the `read` and `edit` tools to modify the actual file):**
 
 {spec_md}
 
-**Existing PLAN.md content (for reference — use the `read` and `edit` tools to modify the actual file):**
+**Existing PLAN.md content (for reference - use the `read` and `edit` tools to modify the actual file):**
 
 {plan_md}
 
@@ -1668,7 +1676,7 @@ Use the `read` and `edit` tools to make all changes directly to the files. Ensur
         )
     }
 
-    // ── JTBD helpers ───────────────────────────────────────────────────────
+    // -- JTBD helpers --
 
     /// Build the user-facing status string for a JTBD analysis operation.
     #[must_use]
@@ -1680,7 +1688,7 @@ Use the `read` and `edit` tools to make all changes directly to the files. Ensur
     #[must_use]
     pub fn build_jtbd_message(spec_id: &str) -> String {
         format!(
-            "From: /spec jtbd\n📋 **Performing JTBD analysis…**\n\n\
+            "From: /spec jtbd\n[notice] **Performing JTBD analysis...**\n\n\
              Analyzing `specs/{spec_id}/SPEC.md` to extract Jobs-To-Be-Done.\n\n\
              - Reading the spec's overview and numbered requirements\n\
              - Identifying functional, emotional, and social jobs\n\
@@ -1694,18 +1702,18 @@ Use the `read` and `edit` tools to make all changes directly to the files. Ensur
     ///
     /// # Arguments
     ///
-    /// * `spec_id` — The spec identifier being analyzed.
-    /// * `force` — Whether `--force` was supplied (overwrite existing file).
-    /// * `agent` — Optional override agent name, if `--agent` was supplied.
+    /// * `spec_id` - The spec identifier being analyzed.
+    /// * `force` - Whether `--force` was supplied (overwrite existing file).
+    /// * `agent` - Optional override agent name, if `--agent` was supplied.
     #[must_use]
     pub fn build_jtbd_log(spec_id: &str, force: bool, agent: Option<&str>) -> String {
         let force_tag = if force { " --force" } else { "" };
         match agent {
             Some(a) => format!(
-                "JTBD analysis for spec '{spec_id}'{force_tag} --agent {a} → specs/{spec_id}/JTBD.md"
+                "JTBD analysis for spec '{spec_id}'{force_tag} --agent {a} -> specs/{spec_id}/JTBD.md"
             ),
             None => {
-                format!("JTBD analysis for spec '{spec_id}'{force_tag} → specs/{spec_id}/JTBD.md")
+                format!("JTBD analysis for spec '{spec_id}'{force_tag} -> specs/{spec_id}/JTBD.md")
             }
         }
     }
@@ -1718,7 +1726,7 @@ Use the `read` and `edit` tools to make all changes directly to the files. Ensur
     ///
     /// # Arguments
     ///
-    /// * `spec_id` — The spec identifier (directory name under `specs/`).
+    /// * `spec_id` - The spec identifier (directory name under `specs/`).
     #[must_use]
     pub fn build_jtbd_prompt(spec_id: &str) -> String {
         format!(
@@ -1734,14 +1742,14 @@ Write your analysis to `specs/{spec_id}/JTBD.md` using the `write` tool. The doc
 
 2. A **`## Overview`** section summarising the spec in one or two sentences.
 
-3. A **`## Jobs`** section. For each job, use a `### Job N — <short title>` heading and include:
+3. A **`## Jobs`** section. For each job, use a `### Job N - <short title>` heading and include:
 
-   - **Job statement** — expressed using the grammar:
+   - **Job statement** - expressed using the grammar:
      *"When <situation>, I want to <motivation>, so I can <expected outcome>."*
-   - **Job type** — one of: *functional*, *emotional*, or *social*.
-   - **Performer** — who is hiring the product (the spec's primary user).
-   - **Related requirements** — list every `FR-NNN` and/or `NFR-NNN` identifier from `SPEC.md` that this job traces to. If no requirement traces to the job, write *untraced* explicitly so coverage gaps are visible.
-   - **Success signals** — one or more observable indicators that the job is being fulfilled.
+   - **Job type** - one of: *functional*, *emotional*, or *social*.
+   - **Performer** - who is hiring the product (the spec's primary user).
+   - **Related requirements** - list every `FR-NNN` and/or `NFR-NNN` identifier from `SPEC.md` that this job traces to. If no requirement traces to the job, write *untraced* explicitly so coverage gaps are visible.
+   - **Success signals** - one or more observable indicators that the job is being fulfilled.
 
 4. A **`## Out-of-Scope Jobs`** section listing jobs explicitly rejected or deferred (if any).
 
@@ -1751,22 +1759,22 @@ Use the `write` tool to create `specs/{spec_id}/JTBD.md`. Ensure the markdown is
         )
     }
 
-    // ── Update helpers ─────────────────────────────────────────────────────
+    // -- Update helpers --
 
     /// Build the user-facing status string for an update operation.
     #[must_use]
     pub fn build_update_status(spec_id: &str) -> String {
-        format!("spec: updating specs/{spec_id}/PLAN.md + specs/{spec_id}/TESTPLAN.md…")
+        format!("spec: updating specs/{spec_id}/PLAN.md + specs/{spec_id}/TESTPLAN.md...")
     }
 
     /// Build the assistant message shown when a spec update starts.
     #[must_use]
     pub fn build_update_message(spec_id: &str) -> String {
         format!(
-            "From: /spec update\n🔄 **Regenerating plan and test plan…**\n\n\
+            "From: /spec update\n[refresh] **Regenerating plan and test plan...**\n\n\
              Re-reading `specs/{spec_id}/SPEC.md` and regenerating:\n\
-             - `specs/{spec_id}/PLAN.md` — implementation plan with tasks\n\
-             - `specs/{spec_id}/TESTPLAN.md` — manual test plan with test cases\n\n\
+             - `specs/{spec_id}/PLAN.md` - implementation plan with tasks\n\
+             - `specs/{spec_id}/TESTPLAN.md` - manual test plan with test cases\n\n\
              The `SPEC.md` file will not be modified.\n\
              This may take a few moments."
         )
@@ -1788,8 +1796,8 @@ Use the `write` tool to create `specs/{spec_id}/JTBD.md`. Ensure the markdown is
     ///
     /// # Arguments
     ///
-    /// * `spec_id` — The spec identifier (directory name under `specs/`).
-    /// * `plan_md` — The current `PLAN.md` content, used for status preservation.
+    /// * `spec_id` - The spec identifier (directory name under `specs/`).
+    /// * `plan_md` - The current `PLAN.md` content, used for status preservation.
     #[must_use]
     pub fn build_update_prompt(spec_id: &str, plan_md: &str) -> String {
         format!(
@@ -1804,7 +1812,7 @@ Read `specs/{spec_id}/SPEC.md` using the `read` tool first. If the file is large
 
 Then write the following files using the `write` tool:
 
-1. `specs/{spec_id}/PLAN.md` — An implementation plan with:
+1. `specs/{spec_id}/PLAN.md` - An implementation plan with:
      - A `## Tasks` section with a markdown table.
      - Columns: ID, Title, Requirement, Effort, Priority, Status, Dependencies.
      - Task IDs as T-001, T-002, etc.
@@ -1814,13 +1822,13 @@ Then write the following files using the `write` tool:
      - Status values: Pending for all new tasks.
      - Preserve the status of any existing task IDs that remain unchanged.
 
-2. `specs/{spec_id}/TESTPLAN.md` — A **manual** test plan (human-readable, not automated test code):
+2. `specs/{spec_id}/TESTPLAN.md` - A **manual** test plan (human-readable, not automated test code):
    - YAML frontmatter with `status: draft`.
    - A `## Test Cases` section with manual test cases.
-   - Each test case has an ID (`TC-001`, `TC-002`, …), a title, preconditions, step-by-step instructions, test data to enter, and expected results.
+   - Each test case has an ID (`TC-001`, `TC-002`, ...), a title, preconditions, step-by-step instructions, test data to enter, and expected results.
    - Do NOT include automated test code, `#[test]` functions, or references to `cargo test`.
 
-**Existing PLAN.md content (for reference — preserve task statuses where IDs are unchanged):**
+**Existing PLAN.md content (for reference - preserve task statuses where IDs are unchanged):**
 
 {plan_md}
 
@@ -1828,7 +1836,7 @@ Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan a
         )
     }
 
-    // ── govcreate helpers (FR-003, FR-018, NFR-005) ──────────────────────────
+    // -- govcreate helpers (FR-003, FR-018, NFR-005) --
 
     /// Build the `/spec govcreate` usage block (FR-003, NFR-005).
     ///
@@ -1969,7 +1977,7 @@ Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan a
     /// Mirrors the [`SpecCommand::build_create_prompt`] file-list contract
     /// (a `SPEC.md` EARS spec with `status: draft` frontmatter, a `PLAN.md`
     /// task table, and a `TESTPLAN.md` of manual cases) but anchors the
-    /// generated content in the extracted [`ArchitectureStructure`] and
+    /// generated content in the extracted `ArchitectureStructure` and
     /// targets `<target-folder>/specs/<specid>/` instead of the workspace
     /// `specs/` root. The prompt embeds the FR-018 invocation frontmatter so
     /// the SPEC.md the agent writes records the exact invocation.
@@ -2009,7 +2017,7 @@ Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan a
 
 Write the following files:
 
-1. `{target_folder}/specs/{spec_id}/SPEC.md` — A requirements specification using EARS notation:
+1. `{target_folder}/specs/{spec_id}/SPEC.md` - A requirements specification using EARS notation:
    - Use at least one of each EARS template: ubiquitous, event-driven, state-driven, optional, unwanted
    - Number requirements as FR-001, FR-002, etc.
    - Derive the requirements and component descriptions from the extracted architecture structure above
@@ -2017,7 +2025,7 @@ Write the following files:
 {frontmatter_block}
    - Include a `## Requirements` section after the frontmatter
 
-2. `{target_folder}/specs/{spec_id}/PLAN.md` — An implementation plan with:
+2. `{target_folder}/specs/{spec_id}/PLAN.md` - An implementation plan with:
    - A '## Tasks' section with a markdown table
    - Columns: ID, Title, Requirement, Effort, Priority, Status, Dependencies
    - Task IDs as T-001, T-002, etc., one task per extracted component at minimum
@@ -2026,7 +2034,7 @@ Write the following files:
    - Priority values: Critical, High, Medium, Low
    - Status values: Pending (set all new tasks to Pending)
 
-3. `{target_folder}/specs/{spec_id}/TESTPLAN.md` — A **manual** test plan (human-readable, not automated test code):
+3. `{target_folder}/specs/{spec_id}/TESTPLAN.md` - A **manual** test plan (human-readable, not automated test code):
    - Start with YAML frontmatter containing `status: draft`
    - A `## Test Cases` section with one or more manual test cases exercising the extracted components and interfaces
    - Each test case has an ID (`TC-001`, `TC-002`, ...), a title, preconditions, step-by-step instructions, test data to enter, and expected results
@@ -2039,7 +2047,7 @@ Use the `write` tool to create all three files. Ensure the spec is clear, testab
         )
     }
 
-    /// Render an [`ArchitectureStructure`] as a compact markdown digest for
+    /// Render an `ArchitectureStructure` as a compact markdown digest for
     /// embedding in the govcreate authoring prompt (FR-008).
     ///
     /// Empty sections are omitted; an entirely empty structure renders a
@@ -2133,15 +2141,22 @@ Use the `write` tool to create all three files. Ensure the spec is clear, testab
     /// produce it. An existing spec directory is refused unless `force` is
     /// set (FR-017); the refusal reports the existing path so the caller can
     /// surface the exact cause. All three files are written atomically
-    /// (temp file, sync, rename) via [`SpecIo::atomic_write`].
+    /// (temp file, sync, rename) via [`SpecIo::atomic_write`](crate::io::SpecIo::atomic_write).
+    ///
+    /// `target_folder` and `invoking_root` are LLM/user-supplied: the folder is
+    /// resolved against `invoking_root` and refused when it escapes it, so a
+    /// `../../..` target cannot turn this create+write into an arbitrary-write
+    /// primitive (SEC-ragent-specs-00x / ANTIPAT H-1).
     ///
     /// # Errors
     ///
-    /// Returns [`SpecError::Validation`] when an existing spec directory is
-    /// present without `--force`, naming the conflicting path, and
-    /// [`SpecError::Io`] on any filesystem failure.
+    /// Returns [`SpecError::Validation`](crate::error::SpecError::Validation) when the target folder escapes the
+    /// invoking root or an existing spec directory is present without
+    /// `--force`, naming the conflicting path, and [`SpecError::Io`](crate::error::SpecError::Io) on any
+    /// filesystem failure.
     pub async fn write_govcreate_spec(
         target_folder: &std::path::Path,
+        invoking_root: &std::path::Path,
         spec_id: &str,
         spec_md: &str,
         plan_md: &str,
@@ -2158,7 +2173,47 @@ Use the `write` tool to create all three files. Ensure the spec is clear, testab
             .ok_or_else(|| SpecError::InvalidSpecId(spec_id.to_string()))?;
         let spec_id = validated.dir_name();
 
-        let spec_dir = target_folder.join("specs").join(spec_id);
+        // ANTIPAT H-1: the target folder reached a create + write, so it is
+        // contained to the invoking root before any filesystem mutation.
+        //
+        // The check is purely lexical (no `canonicalize`), so it works for a
+        // folder that does not exist yet *and* for an absolute path that runs
+        // outside the root. It runs BEFORE `exists()`/`canonicalize()`/
+        // `create_dir_all()`, so an escaping path is refused with a validation
+        // error rather than a raw `Permission denied` from the OS - and nothing
+        // is ever created outside the root.
+        let root_canonical = invoking_root
+            .canonicalize()
+            .map_err(|e| SpecError::Io(std::io::Error::other(e)))?;
+        let candidate: std::path::PathBuf = if target_folder.is_absolute() {
+            target_folder.to_path_buf()
+        } else {
+            invoking_root.join(target_folder)
+        };
+        if !lexically_within(&candidate, &root_canonical) {
+            return Err(SpecError::Validation(format!(
+                "target folder {} escapes the invoking root {} (ANTIPAT H-1)",
+                target_folder.display(),
+                invoking_root.display()
+            )));
+        }
+
+        // A target that already exists is additionally canonicalised and
+        // re-checked, so a symlink cannot smuggle the write out of the root.
+        if candidate.exists() {
+            let resolved = candidate
+                .canonicalize()
+                .map_err(|e| SpecError::Io(std::io::Error::other(e)))?;
+            if !resolved.starts_with(&root_canonical) {
+                return Err(SpecError::Validation(format!(
+                    "target folder {} escapes the invoking root {} (ANTIPAT H-1)",
+                    resolved.display(),
+                    root_canonical.display()
+                )));
+            }
+        }
+
+        let spec_dir = candidate.join("specs").join(spec_id);
         let spec_dir_exists = spec_dir.is_dir();
 
         // FR-017: refuse an existing spec without --force. The pure T-003
@@ -2182,24 +2237,22 @@ Use the `write` tool to create all three files. Ensure the spec is clear, testab
         Ok(spec_dir)
     }
 
-    // ── Feedback helpers (FR-017, T-032) ─────────────────────────────────────
-
-    // ── Feedback helpers (FR-017, T-032) ─────────────────────────────────────
+    // -- Feedback helpers (FR-017, T-032) --
 
     /// Build the user-facing status string for a feedback append operation.
     #[must_use]
     pub fn build_feedback_status(spec_id: &str) -> String {
-        format!("spec: appending feedback to specs/{spec_id}/FEEDBACK.md…")
+        format!("spec: appending feedback to specs/{spec_id}/FEEDBACK.md...")
     }
 
     /// Build the assistant message shown when a feedback note is appended.
     #[must_use]
     pub fn build_feedback_message(spec_id: &str, note: &str) -> String {
         format!(
-            "From: /spec feedback\n📝 **Feedback note appended** to \
+            "From: /spec feedback\n[note] **Feedback note appended** to \
              `specs/{spec_id}/FEEDBACK.md`.\n\n\
              > {note}\n\n\
-             This note is advisory — it will be surfaced during the next \
+             This note is advisory - it will be surfaced during the next \
              `/spec plan` regeneration but does not block validation or \
              status transitions."
         )
@@ -2209,11 +2262,14 @@ Use the `write` tool to create all three files. Ensure the spec is clear, testab
     #[must_use]
     pub fn build_feedback_log(spec_id: &str, note: &str) -> String {
         // Truncate very long notes in the log for readability, stopping at a
-        // character boundary (a raw byte slice panics when byte 80 falls
-        // inside a multi-byte character such as an em-dash).
-        let preview: String = if note.len() > 80 {
-            let cut = note.char_indices().nth(80).map_or(note.len(), |(i, _)| i);
-            format!("{}\u{2026}", &note[..cut])
+        // character boundary (a raw byte slice panics when the cut byte falls
+        // inside a multi-byte character).
+        let preview: String = if note.len() > NOTE_LOG_PREVIEW_LEN {
+            let cut = note
+                .char_indices()
+                .nth(NOTE_LOG_TRUNCATED_LEN)
+                .map_or(note.len(), |(i, _)| i);
+            format!("{}...", &note[..cut])
         } else {
             note.to_string()
         };
@@ -2236,7 +2292,7 @@ Use the `write` tool to create all three files. Ensure the spec is clear, testab
     /// Append a feedback note to existing `FEEDBACK.md` content.
     ///
     /// If `existing` is empty, a new file is generated from
-    /// [`FeedbackTemplate::generate`] using `title` as the spec title, and the
+    /// [`FeedbackTemplate::generate`](crate::templates::FeedbackTemplate::generate) using `title` as the spec title, and the
     /// note is inserted as the first real row (replacing the placeholder row).
     ///
     /// If `existing` already has content, the new row is inserted before the
@@ -2259,7 +2315,7 @@ Use the `write` tool to create all three files. Ensure the spec is clear, testab
             let before_trimmed = before.trim_end();
             format!("{before_trimmed}\n{row}\n{after}")
         } else {
-            // No separator found — just append.
+            // No separator found - just append.
             let trimmed = existing.trim_end();
             format!("{trimmed}\n{row}\n")
         }
@@ -2325,4 +2381,43 @@ fn date_from_days_since_epoch(days: i64) -> String {
     let y = if m <= 2 { y + 1 } else { y };
 
     format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Whether `candidate` resolves inside `root` using only lexical components.
+///
+/// Used by [`SpecCommand::write_govcreate_spec`] to contain an LLM/user-supplied
+/// target folder to the invoking root (ANTIPAT H-1). Unlike `canonicalize`,
+/// this works for a path that does not exist yet and never returns a raw
+/// permission error for an escaping absolute path: a `..` that climbs above
+/// `root` is refused outright.
+///
+/// Both paths are compared component-by-component after `.` segments are
+/// dropped; `..` pops one component, and popping past the root fails.
+#[must_use]
+fn lexically_within(candidate: &std::path::Path, root: &std::path::Path) -> bool {
+    fn normalise(path: &std::path::Path) -> Option<Vec<std::ffi::OsString>> {
+        let mut parts: Vec<std::ffi::OsString> = Vec::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::Normal(name) => parts.push(name.to_os_string()),
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    parts.pop()?;
+                }
+                std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                    parts.clear();
+                }
+            }
+        }
+        Some(parts)
+    }
+
+    let Some(root_parts) = normalise(root) else {
+        return false;
+    };
+    let Some(candidate_parts) = normalise(candidate) else {
+        return false;
+    };
+    candidate_parts.len() >= root_parts.len()
+        && candidate_parts[..root_parts.len()] == root_parts[..]
 }

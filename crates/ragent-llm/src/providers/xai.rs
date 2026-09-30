@@ -177,8 +177,8 @@ pub fn xai_default_models(provider_id: &str) -> Vec<ModelInfo> {
 /// Resolves a model ID or alias to its canonical xAI model ID.
 ///
 /// Handles:
-/// - Vendor suffix stripping (`grok-3@xai` → `grok-3`)
-/// - Short alias expansion (`grok3` → `grok-3`)
+/// - Vendor suffix stripping (`grok-3@xai` -> `grok-3`)
+/// - Short alias expansion (`grok3` -> `grok-3`)
 ///
 /// Returns the resolved model ID unchanged if no alias or suffix applies.
 #[must_use]
@@ -268,6 +268,9 @@ impl Provider for XaiProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
+        // ANTIPAT 3.6: register the credential with the shared redaction
+        // registry so any text passed through `redact_secrets` masks it.
+        ragent_types::sanitize::register_secret(api_key);
         let env_endpoint = std::env::var(XAI_API_BASE_ENV)
             .ok()
             .filter(|s| !s.trim().is_empty());

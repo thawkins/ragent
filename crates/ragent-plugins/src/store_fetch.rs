@@ -30,6 +30,13 @@ use std::time::Duration;
 use crate::store_index::{StoreEndpoint, StoreEndpointError, StoreEntry, StoreKind};
 use crate::store_provider::provider_for;
 
+/// Read/write chunk size for streaming a store index into memory (ANTIPAT L9).
+const STREAM_CHUNK_BYTES: usize = 65_536;
+
+/// Maximum `https`-only redirect hops followed before a fetch is refused
+/// (ANTIPAT L13; FR-024).
+const MAX_REDIRECT_HOPS: usize = 5;
+
 /// Wall-clock timeout and body-size ceiling for one store-index fetch.
 ///
 /// Populated from `plugins.stores` configuration (`timeout_ms`,
@@ -240,7 +247,7 @@ pub fn fetch_bytes(endpoint: &StoreEndpoint, limits: &FetchLimits) -> Result<Vec
 /// [`std::io::Cursor`]; [`fetch_bytes`] passes the HTTP response as the reader.
 pub fn read_capped(mut reader: impl std::io::Read, max_bytes: u64) -> Result<Vec<u8>, StoreError> {
     let mut bytes = Vec::new();
-    let mut chunk = vec![0_u8; 65536];
+    let mut chunk = vec![0_u8; STREAM_CHUNK_BYTES];
     loop {
         let read = reader.read(&mut chunk).map_err(|e| StoreError::Network {
             detail: e.to_string(),
@@ -269,7 +276,7 @@ pub(crate) fn https_only_redirects() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(|attempt| {
         if attempt.url().scheme() != "https" {
             attempt.stop()
-        } else if attempt.previous().len() >= 5 {
+        } else if attempt.previous().len() >= MAX_REDIRECT_HOPS {
             attempt.error("too many redirects")
         } else {
             attempt.follow()

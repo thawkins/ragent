@@ -1,4 +1,4 @@
-//! Codebase index god-nodes tool — top-N most-connected symbols (FR-014).
+//! Codebase index god-nodes tool - top-N most-connected symbols (FR-014).
 //!
 //! Returns the highest-degree symbols in the semantic code graph, useful for
 //! identifying hub functions, central types, and architectural bottleneck

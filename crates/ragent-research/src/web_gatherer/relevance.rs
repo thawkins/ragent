@@ -1,14 +1,14 @@
-//! Relevance scoring — compute a deterministic relevance label for a captured
+//! Relevance scoring - compute a deterministic relevance label for a captured
 //! web source based on the search query, title, snippet, and URL.
 //!
 //! These helpers were previously inline in `web_gatherer.rs`.
 
 use std::borrow::Cow;
 
+// reason: retained for the `tests/` integration suite; the lib itself scores
+// through `contains_term` with precomputed variants.
 #[allow(dead_code)]
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn compute_relevance_label(
+pub(crate) fn compute_relevance_label(
     query: &str,
     title: &str,
     snippet: &str,
@@ -50,7 +50,7 @@ impl PreparedQuery {
 
     /// Compute the relevance label for a candidate and whether it is retained.
     ///
-    /// Equivalent to [`compute_relevance_label`] for the query this was built
+    /// Equivalent to `compute_relevance_label` for the query this was built
     /// from, but without the per-candidate query normalisation.
     #[must_use]
     pub fn label(&self, title: &str, snippet: &str, url: &str) -> (String, bool) {
@@ -85,27 +85,27 @@ impl PreparedQuery {
         let ratio = hits as f64 / self.terms.len() as f64;
 
         let label = if !title.is_empty() && title_lc.as_ref() == self.lower.as_str() {
-            "Very high — exact title match"
+            "Very high - exact title match"
         } else if ratio >= 0.75 && title_hits > 0 && snippet_hits > 0 {
-            "High — title + snippet match query"
+            "High - title + snippet match query"
         } else if ratio >= 0.6 && title_hits > 0 {
-            "High — title matches query"
+            "High - title matches query"
         } else if ratio >= 0.6 && snippet_hits > 0 {
-            "Medium-high — snippet matches query"
+            "Medium-high - snippet matches query"
         } else if ratio >= 0.25 && title_hits >= 2 {
             // Title-signal rescue: decomposed sub-queries are often verbose
-            // ("how to write goals and configure AI agent loops" — 6 terms), so
+            // ("how to write goals and configure AI agent loops" - 6 terms), so
             // an on-topic title like "Designing agentic loops" only matches 2 of
             // them (ratio 0.33) and would fall below the Medium floor. Two or
             // more distinct query terms in the *title* is a strong topical
             // signal on its own; retain it.
-            "Medium — multiple title terms match query"
+            "Medium - multiple title terms match query"
         } else if ratio >= 0.35 {
-            "Medium — partial query match"
+            "Medium - partial query match"
         } else if ratio >= 0.2 {
-            "Low — weak query match"
+            "Low - weak query match"
         } else {
-            "Very low — no clear query match"
+            "Very low - no clear query match"
         };
 
         let retained = !label.starts_with("Low") && !label.starts_with("Very low");
@@ -118,7 +118,7 @@ impl PreparedQuery {
 ///
 /// The gate compares the lowercased text against the original rather than
 /// testing `char::is_uppercase`: `is_uppercase` is `false` for titlecase code
-/// points (e.g. `'ǅ'`) that `to_lowercase` still changes, which would otherwise
+/// points (e.g. `'D'`) that `to_lowercase` still changes, which would otherwise
 /// leave such titles un-normalised and miss an exact-title match.
 fn lowercase_cow(s: &str) -> Cow<'_, str> {
     let lowered = s.to_lowercase();
@@ -142,8 +142,7 @@ fn lowercase_cow(s: &str) -> Cow<'_, str> {
 // reason: retained for the `tests/` integration suite; the lib itself scores
 // through `contains_term` with precomputed variants.
 #[allow(dead_code)]
-#[allow(unreachable_pub)]
-pub fn term_matches(term: &str, hay: &str) -> bool {
+pub(crate) fn term_matches(term: &str, hay: &str) -> bool {
     contains_term(term, &morph_variants(term), hay)
 }
 
@@ -220,9 +219,7 @@ fn morph_variants(term: &str) -> Vec<String> {
 ///
 /// This is intentionally exposed at module scope so benchmarks and unit tests
 /// can measure it in isolation (Milestone B-003).
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn normalize_query_terms(query: &str) -> Vec<String> {
+pub(crate) fn normalize_query_terms(query: &str) -> Vec<String> {
     let query_lc = query.to_lowercase();
     query_lc
         .split_whitespace()

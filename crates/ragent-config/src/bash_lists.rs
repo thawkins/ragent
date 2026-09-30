@@ -134,10 +134,8 @@ impl Scope {
     fn config_path(self) -> Result<PathBuf> {
         match self {
             Self::Project => Ok(PathBuf::from(".ragent").join("ragent.json")),
-            Self::Global => {
-                let dir = dirs::config_dir().context("Cannot determine global config directory")?;
-                Ok(dir.join("ragent").join("ragent.json"))
-            }
+            Self::Global => crate::Config::global_config_path()
+                .context("Cannot determine global config directory"),
         }
     }
 }

@@ -1,4 +1,4 @@
-//! `mf_crawl` tool — best-first same-domain crawl with content-adaptive
+//! `mf_crawl` tool - best-first same-domain crawl with content-adaptive
 //! extraction.
 //!
 //! Implements FR-011, FR-012, FR-013, FR-014, FR-022, FR-025, FR-026, FR-028.
@@ -131,7 +131,7 @@ impl Tool for MfCrawlTool {
             anyhow::bail!("Missing required 'url' parameter");
         }
 
-        // Step 1 — SSRF validation.
+        // Step 1 - SSRF validation.
         if let Err(e) = validate_url(url) {
             return Ok(ToolOutput {
                 content: format!(
@@ -152,7 +152,7 @@ impl Tool for MfCrawlTool {
             });
         }
 
-        // Step 2 — Build crawl config from parameters.
+        // Step 2 - Build crawl config from parameters.
         let max_pages = input["max_pages"].as_u64().unwrap_or(10) as usize;
         let max_depth = input["max_depth"].as_u64().unwrap_or(2) as usize;
         let max_total_chars = input["max_total_chars"].as_u64().unwrap_or(200_000) as usize;
@@ -188,6 +188,7 @@ impl Tool for MfCrawlTool {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|v| v.as_str().map(String::from))
+                    .take(MAX_CRAWL_URLS)
                     .collect()
             })
             .unwrap_or_default();
@@ -235,12 +236,12 @@ impl Tool for MfCrawlTool {
             respect_robots,
         };
 
-        // Step 3 — Create the HTTP fetcher and run the crawl.
+        // Step 3 - Create the HTTP fetcher and run the crawl.
         let fetcher = HttpCrawlFetcher::new(respect_robots);
         let orchestrator = CrawlOrchestrator::new(config);
         let result = orchestrator.crawl(url, &fetcher).await;
 
-        // Step 4 — Format the result.
+        // Step 4 - Format the result.
         let content = format_crawl_report(url, &result);
         let metadata = build_metadata(url, &result);
 
@@ -288,36 +289,20 @@ impl HttpCrawlFetcher {
 /// far above any legitimate page and bounds the per-page memory footprint.
 const MAX_CRAWL_PAGE_BYTES: usize = 4 * 1024 * 1024;
 
-/// Read a response body, stopping at `limit` bytes.
+/// Hard ceiling on the number of selective-crawl URLs accepted from a caller
+/// (ANTIPAT 4.6).
 ///
-/// SEC-tools-extended-006 (SECTASKS T-033): streams the response so the size
-/// budget is applied while reading rather than after the whole body is in
-/// memory.
-async fn read_body_capped(response: reqwest::Response, limit: usize) -> Result<String, String> {
-    let mut stream = response;
-    let mut buf: Vec<u8> = Vec::new();
-    loop {
-        match stream.chunk().await {
-            Ok(Some(chunk)) => {
-                if buf.len() + chunk.len() > limit {
-                    let room = limit.saturating_sub(buf.len());
-                    buf.extend_from_slice(&chunk[..room]);
-                    buf.extend_from_slice(b"\n[truncated at the crawl size cap]\n");
-                    break;
-                }
-                buf.extend_from_slice(&chunk);
-            }
-            Ok(None) => break,
-            Err(e) => return Err(e.to_string()),
-        }
-    }
-    Ok(String::from_utf8_lossy(&buf).into_owned())
-}
+/// Selective mode (`crawl_urls`) otherwise iterates an unbounded, caller-set
+/// array (only `max_pages` limits how many are *fetched*, not how many are
+/// accepted or validated). 1000 is far above any legitimate second-phase crawl
+/// - the default `max_pages` is 10 - while bounding both the accepted input and
+///   the per-run work.
+const MAX_CRAWL_URLS: usize = 1000;
 
 #[async_trait::async_trait]
 impl CrawlFetcher for HttpCrawlFetcher {
     async fn fetch_page(&self, url: &str) -> Option<FetchedPage> {
-        // SSRF validation (defence in depth — the start URL was already
+        // SSRF validation (defence in depth - the start URL was already
         // validated, but discovered links should also be checked).
         if let Err(e) = validate_url(url) {
             tracing::warn!(url = url, error = %e, "crawl: skipping URL that failed SSRF validation");
@@ -384,13 +369,16 @@ impl CrawlFetcher for HttpCrawlFetcher {
             );
             return None;
         }
-        let body = match read_body_capped(response, MAX_CRAWL_PAGE_BYTES).await {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::warn!(url = url, error = %e, "crawl: failed to read body");
-                return None;
-            }
-        };
+        let body =
+            match crate::masterfetch::http::read_body_capped_lossy(response, MAX_CRAWL_PAGE_BYTES)
+                .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(url = url, error = %e, "crawl: failed to read body");
+                    return None;
+                }
+            };
 
         // Classify and extract content.
         let classify_result =

@@ -37,15 +37,15 @@ impl CompetitiveProfile {
 ///
 /// The returned block contains:
 ///
-/// 1. `## Comparison Criteria` — explicit axes detected for the comparison.
-/// 2. `## Comparison Table` — a Markdown table with one row per entity and
+/// 1. `## Comparison Criteria` - explicit axes detected for the comparison.
+/// 2. `## Comparison Table` - a Markdown table with one row per entity and
 ///    one column per criterion plus a `Profile` column.
-/// 3. `## Entity Profiles` — one subsection per entity with the full compressed
+/// 3. `## Entity Profiles` - one subsection per entity with the full compressed
 ///    researcher summary.
 ///
 /// The table cells are extracted heuristically from each profile summary by
 /// scanning for the criterion keyword; when no evidence is found the cell
-/// renders `—`.
+/// renders `-`.
 #[must_use]
 pub fn build_comparison_table_body(
     entities: &[CompetitiveEntity],
@@ -62,7 +62,7 @@ pub fn build_comparison_table_body(
     body.push_str("## Comparison Criteria\n\n");
     if criteria.is_empty() {
         body.push_str(
-            "_(no explicit comparison criteria were detected — the comparison is general)_\n\n",
+            "_(no explicit comparison criteria were detected - the comparison is general)_\n\n",
         );
     } else {
         for criterion in criteria {
@@ -109,7 +109,7 @@ pub fn build_comparison_table_body(
             let cell = profile
                 .and_then(|p| prepared_by_entity.get(p.entity.as_str()))
                 .map(|prepared| criterion_cell(prepared, criterion))
-                .unwrap_or_else(|| "—".to_string());
+                .unwrap_or_else(|| "-".to_string());
             body.push(' ');
             body.push_str(&escape_pipe(&cell));
             body.push_str(" |");
@@ -117,7 +117,7 @@ pub fn build_comparison_table_body(
         let profile_summary = profile
             .filter(|p| !p.summary.trim().is_empty())
             .map(|p| compact_profile_summary(&p.summary))
-            .unwrap_or_else(|| "—".to_string());
+            .unwrap_or_else(|| "-".to_string());
         body.push(' ');
         body.push_str(&escape_pipe(&profile_summary));
         body.push_str(" |\n");
@@ -198,7 +198,7 @@ fn prepare_summary(summary: &str) -> PreparedSummary {
 /// ellipsis when the text was cut.
 fn truncate_cell(s: &str, max: usize) -> String {
     if s.len() > max {
-        format!("{}…", s[..s.floor_char_boundary(max)].trim_end())
+        format!("{}...", s[..s.floor_char_boundary(max)].trim_end())
     } else {
         s.to_string()
     }
@@ -208,13 +208,13 @@ fn truncate_cell(s: &str, max: usize) -> String {
 ///
 /// The heuristic searches for the criterion keyword and returns the sentence
 /// or phrase that contains it, truncated to keep table cells readable. When
-/// the criterion is not mentioned, returns `"—"`.
+/// the criterion is not mentioned, returns `"-"`.
 fn criterion_cell(prepared: &PreparedSummary, criterion: &str) -> String {
     if prepared.body.is_empty() {
         // Every line was researcher boilerplate or a heading: there is no
         // profile content to quote, and falling back to the raw summary
         // would put mission-brief prose in the cell.
-        return "—".to_string();
+        return "-".to_string();
     }
     let lower_criterion = criterion.to_lowercase();
     let keyword = lower_criterion
@@ -223,7 +223,7 @@ fn criterion_cell(prepared: &PreparedSummary, criterion: &str) -> String {
         .unwrap_or(&lower_criterion);
 
     let Some(idx) = prepared.lower.find(keyword) else {
-        return "—".to_string();
+        return "-".to_string();
     };
 
     // The end-of-sentence scan begins AFTER the keyword so a criterion
@@ -246,20 +246,20 @@ fn criterion_cell(prepared: &PreparedSummary, criterion: &str) -> String {
         truncate_cell(prepared.body[start..end].trim(), 120)
     } else {
         // A character changed byte length under `to_lowercase` (e.g. U+0130),
-        // so the lowercased offsets cannot be mapped back — degrade to the
+        // so the lowercased offsets cannot be mapped back - degrade to the
         // first content line containing the keyword instead of risking a
         // mid-character slice panic.
         let line = prepared
             .body
             .lines()
             .find(|l| l.to_lowercase().contains(keyword))
-            .unwrap_or("—");
+            .unwrap_or("-");
         truncate_cell(line.trim(), 120)
     }
 }
 
 /// Return a compact one-line profile summary for the table's Profile column.
-/// Heading-style lines (e.g. the researcher header `# Researcher …`) and
+/// Heading-style lines (e.g. the researcher header `# Researcher ...`) and
 /// mission-brief boilerplate lines are skipped so the cell shows actual
 /// profile content.
 fn compact_profile_summary(summary: &str) -> String {
@@ -311,138 +311,5 @@ fn escape_markdown(s: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn entity(name: &str) -> CompetitiveEntity {
-        CompetitiveEntity {
-            name: name.to_string(),
-            category: None,
-        }
-    }
-
-    #[test]
-    fn empty_entities_yields_empty_body() {
-        let body = build_comparison_table_body(&[], &["pricing".into()], &[]);
-        assert_eq!(body, "");
-    }
-
-    #[test]
-    fn table_includes_entities_and_criteria() {
-        let entities = vec![entity("Groq"), entity("Fireworks AI")];
-        let criteria = vec!["pricing".to_string(), "speed/latency".to_string()];
-        let profiles = vec![
-            CompetitiveProfile::new(
-                &entities[0],
-                "Groq offers aggressive per-token pricing and very low latency.",
-            ),
-            CompetitiveProfile::new(
-                &entities[1],
-                "Fireworks AI emphasizes batch pricing and throughput over raw latency.",
-            ),
-        ];
-        let body = build_comparison_table_body(&entities, &criteria, &profiles);
-        assert!(body.contains("## Comparison Criteria"));
-        assert!(body.contains("## Comparison Table"));
-        assert!(body.contains("## Entity Profiles"));
-        assert!(body.contains("| Groq |"));
-        assert!(body.contains("| Fireworks AI |"));
-        assert!(body.contains(" pricing |"));
-        assert!(body.contains(" speed/latency |"));
-    }
-
-    #[test]
-    fn missing_criterion_renders_dash() {
-        let entities = vec![entity("A")];
-        let criteria = vec!["security".to_string()];
-        let profiles = vec![CompetitiveProfile::new(
-            &entities[0],
-            "A is fast and cheap.",
-        )];
-        let body = build_comparison_table_body(&entities, &criteria, &profiles);
-        assert!(body.contains("| — |"));
-    }
-
-    #[test]
-    fn compact_profile_summary_skips_researcher_header() {
-        let summary = "# Researcher researcher-2: Research Together.ai for 'topic'\n\n\
-                       Together AI competes on catalog breadth and workflow depth.";
-        let cell = compact_profile_summary(summary);
-        assert!(cell.starts_with("Together AI competes"));
-        assert!(!cell.contains("Researcher"));
-    }
-
-    #[test]
-    fn criterion_cell_skips_researcher_header() {
-        let summary = "# Researcher researcher-3: Research Groq for 'topic'\n\n\
-                       Groq delivers the fastest LLM inference via custom silicon.";
-        let prepared = prepare_summary(summary);
-        let cell = criterion_cell(&prepared, "LLM inference");
-        assert!(cell.contains("fastest LLM inference"));
-        assert!(!cell.contains("Researcher"));
-    }
-
-    #[test]
-    fn dotted_criterion_does_not_truncate_mid_keyword() {
-        // The end-of-sentence scan must not stop at the '.' inside the
-        // matched keyword itself.
-        let entities = vec![entity("Acme")];
-        let criteria = vec!["Node.js support".to_string()];
-        let profiles = vec![CompetitiveProfile::new(
-            &entities[0],
-            "Acme ships first-class Node.js support with a native SDK.",
-        )];
-        let body = build_comparison_table_body(&entities, &criteria, &profiles);
-        assert!(body.contains("Node.js support with a native SDK"), "{body}");
-    }
-
-    #[test]
-    fn length_changing_lowercase_does_not_panic() {
-        // U+0130 (İ) lowercases to a 3-byte sequence, shifting every later
-        // byte offset between the lowercased probe text and the original
-        // summary; the non-ASCII keyword can then land mid-character in the
-        // original. Must degrade gracefully instead of panicking.
-        let entities = vec![entity("Test")];
-        let criteria = vec!["Ω".to_string()];
-        let profiles = vec![CompetitiveProfile::new(&entities[0], "İΩ pricing cheap.")];
-        let body = build_comparison_table_body(&entities, &criteria, &profiles);
-        assert!(
-            body.contains("Ω pricing cheap.") || body.contains("| — |"),
-            "{body}"
-        );
-    }
-
-    #[test]
-    fn entity_profile_preserves_newlines_and_drops_researcher_header() {
-        let entities = vec![entity("Groq")];
-        let criteria = vec!["speed".to_string()];
-        let summary = "# Researcher researcher-3: Research Groq for 'topic'\n\n\
-                       ## Summary\n\nGroq is the fastest open-model inference provider.\n\n\
-                       ## Findings\n\n- LPU silicon delivers 750 tok/s on Llama 3 8B.";
-        let profiles = vec![CompetitiveProfile::new(&entities[0], summary)];
-        let body = build_comparison_table_body(&entities, &criteria, &profiles);
-        let idx = body.find("## Entity Profiles").expect("profiles section");
-        let section = &body[idx..];
-        assert!(!section.contains("Researcher"), "{section}");
-        assert!(
-            section.contains("#### Summary\n\nGroq is the fastest"),
-            "{section}"
-        );
-        assert!(
-            section.contains("#### Findings\n\n- LPU silicon delivers"),
-            "{section}"
-        );
-    }
-
-    #[test]
-    fn entity_profile_empty_summary_renders_placeholder() {
-        let entities = vec![entity("Groq")];
-        let profiles = vec![CompetitiveProfile::new(&entities[0], "")];
-        let body = build_comparison_table_body(&entities, &["speed".to_string()], &profiles);
-        assert!(body.contains("_(no researcher summary available for this entity)_"));
-        assert!(
-            body.contains("| — |"),
-            "empty profile cell must render an em dash"
-        );
-    }
-}
+#[path = "../tests/inline/comparison_tests.rs"]
+mod tests;

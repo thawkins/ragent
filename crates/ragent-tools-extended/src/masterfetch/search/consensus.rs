@@ -3,9 +3,9 @@
 //! Implements **FR-008**, **FR-009**, and **NFR-003** (T-015).
 //!
 //! This module merges results from multiple keyless search backends
-//! (OpenAlex, Wikipedia, …), deduplicates by normalised URL, boosts results
+//! (OpenAlex, Wikipedia, ...), deduplicates by normalised URL, boosts results
 //! that appear across multiple engines (cross-engine consensus), assigns a
-//! normalised relevance score (0.0–1.0), derives a coarse `fetch_relevance`
+//! normalised relevance score (0.0-1.0), derives a coarse `fetch_relevance`
 //! tier (`high` / `med` / `low`), mines related queries from titles and
 //! snippets, and computes a `fetch_hint` for the agent.
 //!
@@ -13,7 +13,7 @@
 //!
 //! When the same URL is returned by multiple engines, its relevance score is
 //! boosted. The boost is proportional to the number of *distinct* engines
-//! that returned it — two engines returning the same URL is a stronger trust
+//! that returned it - two engines returning the same URL is a stronger trust
 //! signal than one engine returning it at position 1.
 //!
 //! # Relevance scoring
@@ -22,16 +22,16 @@
 //! engine (higher rank = higher score, using a decay function). The final
 //! score combines:
 //!
-//! 1. **Best rank score** — the highest positional score across all engines
+//! 1. **Best rank score** - the highest positional score across all engines
 //!    that returned this URL.
-//! 2. **Consensus boost** — `+0.15` per additional engine beyond the first.
-//! 3. **Normalisation** — clamped to `[0.0, 1.0]`.
+//! 2. **Consensus boost** - `+0.15` per additional engine beyond the first.
+//! 3. **Normalisation** - clamped to `[0.0, 1.0]`.
 //!
 //! # `fetch_relevance` tier
 //!
-//! - `high` — score ≥ 0.6
-//! - `med`  — score ≥ 0.3 and < 0.6
-//! - `low`  — score < 0.3
+//! - `high` - score >= 0.6
+//! - `med`  - score >= 0.3 and < 0.6
+//! - `low`  - score < 0.3
 //!
 //! # `related_queries` mining
 //!
@@ -44,13 +44,13 @@
 //! A short string advising the agent whether to fetch the result's full
 //! content:
 //!
-//! - `"high relevance — fetch recommended"` — score ≥ 0.6
-//! - `"medium relevance — fetch if relevant"` — score 0.3–0.6
-//! - `"low relevance — skip unless needed"` — score < 0.3
+//! - `"high relevance - fetch recommended"` - score >= 0.6
+//! - `"medium relevance - fetch if relevant"` - score 0.3-0.6
+//! - `"low relevance - skip unless needed"` - score < 0.3
 //!
 //! # Testability (NFR-003)
 //!
-//! The merge and ranking functions are pure — they take `[EngineReport]` or
+//! The merge and ranking functions are pure - they take `[EngineReport]` or
 //! `[RawResult]` and return [`ConsensusResult`] without any network I/O.
 //!
 //! # Examples
@@ -193,8 +193,8 @@ pub struct MergeOutput {
 ///
 /// # Arguments
 ///
-/// - `reports` — the [`EngineReport`]s from all queried backends.
-/// - `query` — the original search query (used for related-query mining and
+/// - `reports` - the [`EngineReport`]s from all queried backends.
+/// - `query` - the original search query (used for related-query mining and
 ///   to exclude query terms from related queries).
 ///
 /// # Returns
@@ -320,7 +320,7 @@ struct GroupEntry {
 /// Group raw results by their normalised URL, preserving each entry's rank
 /// position within its own engine's result list.
 ///
-/// Returns a map from normalised URL → list of group entries.
+/// Returns a map from normalised URL -> list of group entries.
 fn group_by_url(reports: &[EngineReport]) -> HashMap<String, Vec<GroupEntry>> {
     let mut groups: HashMap<String, Vec<GroupEntry>> = HashMap::default();
     for report in reports {
@@ -342,7 +342,7 @@ fn group_by_url(reports: &[EngineReport]) -> HashMap<String, Vec<GroupEntry>> {
 ///   relevance score (`RawResult.score`, e.g. OpenAlex's `relevance_score`),
 ///   that engine-provided score is used directly. Otherwise a positional
 ///   rank score is derived from the entry's rank within its own engine's
-///   result list (never from the flattened cross-engine list — an engine
+///   result list (never from the flattened cross-engine list - an engine
 ///   returning many results must not bury later engines' entries).
 /// - Consensus boost: +0.15 per additional engine beyond the first.
 fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) -> ScoredResult {
@@ -366,7 +366,7 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
     // Consensus boost.
     let consensus_boost = (engine_count.saturating_sub(1)) as f64 * CONSENSUS_BOOST_PER_ENGINE;
 
-    // Final score (unclamped — may exceed 1.0 for strong consensus).
+    // Final score (unclamped - may exceed 1.0 for strong consensus).
     // Clamping to [0, 1] happens after sorting, in the ConsensusResult.
     let score = best_entry_score + consensus_boost;
 
@@ -374,7 +374,7 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
     let first = entries.first().expect("group must have at least one entry");
 
     // Build source string: comma-separated engine names (sorted for
-    // deterministic output — HashSet iteration order is random).
+    // deterministic output - HashSet iteration order is random).
     let mut engine_names: Vec<&str> = distinct_engines.iter().copied().collect();
     engine_names.sort_unstable();
     let source = engine_names.join(", ");
@@ -401,11 +401,11 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
 /// still contribute meaningfully to the consensus score.
 ///
 /// Examples:
-/// - Rank 0 → 1.0
-/// - Rank 1 → ~0.87
-/// - Rank 5 → ~0.57
-/// - Rank 10 → ~0.40
-/// - Rank 20 → ~0.25
+/// - Rank 0 -> 1.0
+/// - Rank 1 -> ~0.87
+/// - Rank 5 -> ~0.57
+/// - Rank 10 -> ~0.40
+/// - Rank 20 -> ~0.25
 fn rank_score(rank: usize) -> f64 {
     1.0 / (rank as f64).mul_add(0.15, 1.0)
 }
@@ -424,11 +424,11 @@ fn tier_from_score(score: f64) -> &'static str {
 /// Derive the `fetch_hint` from a score.
 fn hint_from_score(score: f64) -> &'static str {
     if score >= HIGH_TIER_THRESHOLD {
-        "high relevance — fetch recommended"
+        "high relevance - fetch recommended"
     } else if score >= MED_TIER_THRESHOLD {
-        "medium relevance — fetch if relevant"
+        "medium relevance - fetch if relevant"
     } else {
-        "low relevance — skip unless needed"
+        "low relevance - skip unless needed"
     }
 }
 
@@ -442,7 +442,7 @@ fn hint_from_score(score: f64) -> &'static str {
 /// that appear across multiple results. Terms are ranked by frequency and
 /// truncated to [`MAX_RELATED_QUERIES`].
 ///
-/// This is a pure function — no network I/O.
+/// This is a pure function - no network I/O.
 #[must_use]
 pub fn mine_related_queries(results: &[RawResult], query: &str) -> Vec<String> {
     // Tokenise the query to exclude its terms from related queries.

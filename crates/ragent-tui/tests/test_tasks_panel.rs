@@ -521,8 +521,8 @@ fn test_tasks_panel_active_form_subline() {
         "should show active_form text; got:\n{text}"
     );
     assert!(
-        text.contains("→"),
-        "should show → arrow prefix for active_form sub-line; got:\n{text}"
+        text.contains("->"),
+        "should show -> arrow prefix for active_form sub-line; got:\n{text}"
     );
 }
 
@@ -576,7 +576,7 @@ fn test_tasks_panel_no_active_form_no_subline() {
 
     let text = render_app_to_string(&mut app, 120, 40);
     assert!(
-        !text.contains("→"),
+        !text.contains("->"),
         "should not show → when active_form is None; got:\n{text}"
     );
 }
@@ -603,7 +603,7 @@ fn test_tasks_panel_empty_active_form_no_subline() {
 
     let text = render_app_to_string(&mut app, 120, 40);
     assert!(
-        !text.contains("→"),
+        !text.contains("->"),
         "should not show → when active_form is empty; got:\n{text}"
     );
 }

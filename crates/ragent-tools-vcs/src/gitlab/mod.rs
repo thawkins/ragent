@@ -5,6 +5,7 @@ pub mod client;
 pub mod gitlab_issues;
 pub mod gitlab_mrs;
 pub mod gitlab_pipelines;
+pub(crate) mod helpers;
 
 pub use auth::{
     GitLabConfig, delete_config, delete_token, load_config, load_token, load_token_checked,

@@ -15,28 +15,28 @@
 //!
 //! - **Allow-by-default**: if `robots.txt` is unreachable, returns `404`, or
 //!   fails to parse, the URL is allowed. This matches Hound and the RFC's
-//!   "no robots.txt → allow all" stance.
+//!   "no robots.txt -> allow all" stance.
 //! - **Path matching**: simple prefix matching with wildcard `*` and `$`
 //!   end-of-path anchor support (the two special characters defined by
-//!   RFC 9309 § 2.2.2). No regex engine is used.
+//!   RFC 9309 S. 2.2.2). No regex engine is used.
 //! - **Most-specific group wins**: rules are evaluated from the most specific
 //!   matching user-agent group to the least specific (`*`).
 //! - **Allow overrides Disallow**: when both an `Allow` and `Disallow` rule
 //!   match a path, the longer (more specific) pattern wins, per RFC 9309
-//!   § 2.2.2.
+//!   S. 2.2.2.
 //!
-//! # Design — pure vs. network
+//! # Design - pure vs. network
 //!
 //! To satisfy NFR-003 (testability without network), the module separates pure
 //! parsing from network I/O:
 //!
-//! - [`RobotsRules`] — the parsed, in-memory representation of a `robots.txt`
+//! - [`RobotsRules`] - the parsed, in-memory representation of a `robots.txt`
 //!   file. Fully testable without any network call.
-//! - [`parse_robots_txt`] — a pure function that parses raw `robots.txt` text
+//! - [`parse_robots_txt`] - a pure function that parses raw `robots.txt` text
 //!   into [`RobotsRules`]. Has no side effects and no I/O.
-//! - [`RobotsCache`] — a per-domain cache with TTL, holding parsed rules and
+//! - [`RobotsCache`] - a per-domain cache with TTL, holding parsed rules and
 //!   their fetch timestamp. Pure in-memory, testable with injected rules.
-//! - [`RobotsChecker`] — the orchestrator that fetches `robots.txt` over HTTP,
+//! - [`RobotsChecker`] - the orchestrator that fetches `robots.txt` over HTTP,
 //!   parses it, caches it, and answers `is_allowed` queries. The network fetch
 //!   is the only I/O; tests that exercise it are gated with `#[ignore]`.
 //!
@@ -102,18 +102,18 @@ pub enum RobotsError {
     #[error("URL has no host")]
     NoHost,
     /// The URL uses a scheme other than `http` or `https`.
-    #[error("Unsupported scheme: '{0}' — only http and https are allowed")]
+    #[error("Unsupported scheme: '{0}' - only http and https are allowed")]
     UnsupportedScheme(String),
 }
 
 // ---------------------------------------------------------------------------
-// RobotsRules — parsed robots.txt (pure, no I/O)
+// RobotsRules - parsed robots.txt (pure, no I/O)
 // ---------------------------------------------------------------------------
 
 /// A single path rule from a `robots.txt` `Allow` or `Disallow` directive.
 ///
 /// The `pattern` is matched against the URL path (and query string if present
-/// in the rule) using RFC 9309 § 2.2.2 wildcard matching: `*` matches any
+/// in the rule) using RFC 9309 S. 2.2.2 wildcard matching: `*` matches any
 /// sequence of characters and `$` anchors the end of the path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PathRule {
@@ -127,7 +127,7 @@ struct PathRule {
 ///
 /// Each group begins with one or more `User-agent:` lines and is followed by
 /// `Allow:` / `Disallow:` lines. Multiple consecutive `User-agent:` lines
-/// share the same rule block (RFC 9309 § 2.2.1).
+/// share the same rule block (RFC 9309 S. 2.2.1).
 #[derive(Debug, Clone, Default)]
 struct RuleGroup {
     /// User-agent strings this group applies to (lowercased).
@@ -143,7 +143,7 @@ struct RuleGroup {
 /// flag indicating whether the file was empty / absent (which means
 /// allow-all).
 ///
-/// This struct is pure — it has no I/O and can be freely constructed and
+/// This struct is pure - it has no I/O and can be freely constructed and
 /// tested in isolation (NFR-003).
 #[derive(Debug, Clone, Default)]
 pub struct RobotsRules {
@@ -161,7 +161,7 @@ impl RobotsRules {
     /// Check whether `user_agent` is allowed to fetch `path` according to
     /// these rules.
     ///
-    /// # Algorithm (RFC 9309 § 2.2.2)
+    /// # Algorithm (RFC 9309 S. 2.2.2)
     ///
     /// 1. Find the most specific group matching `user_agent`. Specificity:
     ///    an exact (case-insensitive) match beats `*`. If no exact match
@@ -173,9 +173,9 @@ impl RobotsRules {
     ///
     /// # Arguments
     ///
-    /// - `user_agent` — the bot's user-agent token (e.g. `"MyBot"`). Use `"*"`
+    /// - `user_agent` - the bot's user-agent token (e.g. `"MyBot"`). Use `"*"`
     ///   to check against the wildcard group.
-    /// - `path` — the URL path (and optionally query) to check, e.g.
+    /// - `path` - the URL path (and optionally query) to check, e.g.
     ///   `/private/page.html`.
     ///
     /// # Returns
@@ -194,7 +194,7 @@ impl RobotsRules {
     /// ```
     #[must_use]
     pub fn is_allowed(&self, user_agent: &str, path: &str) -> bool {
-        // Empty rules → allow all (RFC 9309: no robots.txt = allow).
+        // Empty rules -> allow all (RFC 9309: no robots.txt = allow).
         if self.is_empty {
             return true;
         }
@@ -203,13 +203,13 @@ impl RobotsRules {
         let group = self.find_group(&ua_lower);
 
         let Some(group) = group else {
-            // No matching group → allow.
+            // No matching group -> allow.
             return true;
         };
 
         // Evaluate rules: find the most specific matching rule.
         // Specificity = pattern length (longer = more specific).
-        // Ties broken by Allow winning over Disallow (RFC 9309 § 2.2.2).
+        // Ties broken by Allow winning over Disallow (RFC 9309 S. 2.2.2).
         let mut best_match: Option<(&PathRule, usize)> = None;
 
         for rule in &group.rules {
@@ -228,7 +228,7 @@ impl RobotsRules {
 
         match best_match {
             Some((rule, _)) => rule.allow,
-            None => true, // No rule matched → allow.
+            None => true, // No rule matched -> allow.
         }
     }
 
@@ -289,7 +289,7 @@ impl RobotsRules {
 }
 
 // ---------------------------------------------------------------------------
-// parse_robots_txt — pure parser (no I/O, NFR-003)
+// parse_robots_txt - pure parser (no I/O, NFR-003)
 // ---------------------------------------------------------------------------
 
 /// Parse raw `robots.txt` text into [`RobotsRules`].
@@ -297,15 +297,15 @@ impl RobotsRules {
 /// This is a pure function with no side effects and no I/O (NFR-003). It
 /// handles:
 ///
-/// - `User-agent:` lines (grouping consecutive UA lines, RFC 9309 § 2.2.1)
+/// - `User-agent:` lines (grouping consecutive UA lines, RFC 9309 S. 2.2.1)
 /// - `Disallow:` and `Allow:` path rules
 /// - `Crawl-delay:` directives
 /// - Comments (`#` to end of line)
 /// - Case-insensitive directive names
-/// - Empty / whitespace-only files (→ allow-all rules)
+/// - Empty / whitespace-only files (-> allow-all rules)
 /// - Leading/trailing whitespace on values
 ///
-/// Unrecognised directives are silently ignored (per RFC 9309 § 2.2.5).
+/// Unrecognised directives are silently ignored (per RFC 9309 S. 2.2.5).
 ///
 /// # Examples
 ///
@@ -350,7 +350,7 @@ pub fn parse_robots_txt(raw: &str) -> RobotsRules {
                 rules: std::mem::take(rules),
             });
         } else if !rules.is_empty() {
-            // Rules with no preceding User-agent line → attach to `*`.
+            // Rules with no preceding User-agent line -> attach to `*`.
             groups.push(RuleGroup {
                 user_agents: vec!["*".to_string()],
                 rules: std::mem::take(rules),
@@ -373,7 +373,7 @@ pub fn parse_robots_txt(raw: &str) -> RobotsRules {
 
         // Split into directive and value on the first `:`.
         let Some((directive, value)) = line.split_once(':') else {
-            // No colon → ignore the line.
+            // No colon -> ignore the line.
             continue;
         };
 
@@ -385,7 +385,7 @@ pub fn parse_robots_txt(raw: &str) -> RobotsRules {
                 // If the previous group already has directives (rules or
                 // crawl-delay), a new User-agent line starts a new group.
                 // Consecutive User-agent lines (before any directives) share
-                // the same group (RFC 9309 § 2.2.1).
+                // the same group (RFC 9309 S. 2.2.1).
                 if current_group_started {
                     flush(
                         &mut current_agents,
@@ -398,7 +398,7 @@ pub fn parse_robots_txt(raw: &str) -> RobotsRules {
                 have_directives = true;
             }
             "disallow" => {
-                // An empty Disallow value means "allow all" — we record it
+                // An empty Disallow value means "allow all" - we record it
                 // as an empty pattern that matches nothing (per RFC 9309).
                 if value.is_empty() {
                     // Empty Disallow = no restriction. Record as an Allow
@@ -462,15 +462,15 @@ pub fn parse_robots_txt(raw: &str) -> RobotsRules {
 }
 
 // ---------------------------------------------------------------------------
-// Path matching (RFC 9309 § 2.2.2)
+// Path matching (RFC 9309 S. 2.2.2)
 // ---------------------------------------------------------------------------
 
 /// Check whether `path` matches a robots.txt `pattern`.
 ///
 /// Supports the two special characters defined by RFC 9309:
 ///
-/// - `*` — matches any sequence of zero or more characters.
-/// - `$` — when it appears at the end of the pattern, anchors the match to
+/// - `*` - matches any sequence of zero or more characters.
+/// - `$` - when it appears at the end of the pattern, anchors the match to
 ///   the end of the path. Without `$`, the pattern is a prefix match.
 ///
 /// An empty pattern matches nothing (used for "empty Disallow = allow all").
@@ -491,7 +491,7 @@ pub fn path_matches(pattern: &str, path: &str) -> bool {
         return false;
     }
 
-    // Optimisation: no wildcards → simple prefix match (common case).
+    // Optimisation: no wildcards -> simple prefix match (common case).
     if !pattern.contains('*') && !pattern.contains('$') {
         return path.starts_with(pattern);
     }
@@ -545,7 +545,7 @@ fn wildcard_match(pattern: &str, path: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// RobotsCache — per-domain cache with TTL (FR-028)
+// RobotsCache - per-domain cache with TTL (FR-028)
 // ---------------------------------------------------------------------------
 
 /// A cached entry holding parsed rules and the time they were fetched.
@@ -576,7 +576,7 @@ struct CacheEntry {
 /// let rules = RobotsRules::default();
 /// cache.insert("example.com", rules.clone());
 ///
-/// // Fresh entry → returns the rules.
+/// // Fresh entry -> returns the rules.
 /// assert!(cache.get("example.com").is_some());
 ///
 /// // Simulate expiry.
@@ -603,7 +603,7 @@ impl RobotsCache {
     ///
     /// # Arguments
     ///
-    /// - `domain` — the domain (host) to look up. Case is normalised
+    /// - `domain` - the domain (host) to look up. Case is normalised
     ///   internally.
     #[must_use]
     pub fn get(&self, domain: &str) -> Option<&RobotsRules> {
@@ -773,7 +773,9 @@ pub fn extract_path(url: &str) -> Result<String, RobotsError> {
         return Err(RobotsError::UnsupportedScheme(scheme.to_string()));
     }
 
-    let _ = parsed.host_str().ok_or(RobotsError::NoHost)?;
+    if parsed.host_str().is_none() {
+        return Err(RobotsError::NoHost);
+    }
 
     let path = parsed.path();
     let query = parsed.query();
@@ -793,7 +795,7 @@ pub fn extract_path(url: &str) -> Result<String, RobotsError> {
 }
 
 // ---------------------------------------------------------------------------
-// RobotsChecker — fetch + parse + cache orchestrator
+// RobotsChecker - fetch + parse + cache orchestrator
 // ---------------------------------------------------------------------------
 
 /// Orchestrates `robots.txt` fetching, parsing, caching, and `is_allowed`
@@ -806,7 +808,7 @@ pub fn extract_path(url: &str) -> Result<String, RobotsError> {
 ///
 /// **Allow-by-default**: if the fetch fails (network error, non-200 status,
 /// parse error), the URL is allowed. This matches Hound's behaviour and
-/// RFC 9309's "no robots.txt → allow all" stance.
+/// RFC 9309's "no robots.txt -> allow all" stance.
 ///
 /// # Examples
 ///
@@ -835,7 +837,7 @@ impl RobotsChecker {
     ///
     /// The HTTP client is lazily built from [`crate::masterfetch::http::build_default_client`].
     /// If the client cannot be built, the checker operates in allow-by-default
-    /// mode (all fetches fail → all URLs allowed).
+    /// mode (all fetches fail -> all URLs allowed).
     #[must_use]
     pub fn new() -> Self {
         let client = crate::masterfetch::http::build_default_client().ok();
@@ -862,7 +864,7 @@ impl RobotsChecker {
     /// let mut cache = RobotsCache::new();
     /// cache.insert("example.com", parse_robots_txt("User-agent: *\nDisallow: /private/\n"));
     /// let checker = RobotsChecker::with_cache(cache);
-    /// // No network call — answered from cache.
+    /// // No network call - answered from cache.
     /// ```
     #[must_use]
     pub fn with_cache(cache: RobotsCache) -> Self {
@@ -893,7 +895,7 @@ impl RobotsChecker {
     ///
     /// Returns [`RobotsError`] only for invalid URLs (parse failure, no host,
     /// unsupported scheme). Network and parse failures of `robots.txt` itself
-    /// do **not** produce errors — they result in `true` (allow).
+    /// do **not** produce errors - they result in `true` (allow).
     ///
     /// # Examples
     ///
@@ -924,13 +926,13 @@ impl RobotsChecker {
             }
         }
 
-        // Cache miss — fetch robots.txt, preserving scheme, host and port.
+        // Cache miss - fetch robots.txt, preserving scheme, host and port.
         let mut robots_url = parsed;
         robots_url.set_path("/robots.txt");
         robots_url.set_query(None);
         let rules = self.fetch_robots_txt(&domain, robots_url.as_str()).await;
 
-        // Cache the result (even if fetch failed → cache empty rules to
+        // Cache the result (even if fetch failed -> cache empty rules to
         // avoid refetching within TTL).
         {
             let mut cache = self
@@ -948,10 +950,10 @@ impl RobotsChecker {
     /// Returns empty (allow-all) rules on any failure (allow-by-default).
     async fn fetch_robots_txt(&self, domain: &str, robots_url: &str) -> RobotsRules {
         let Some(client) = &self.client else {
-            // No HTTP client → allow by default.
+            // No HTTP client -> allow by default.
             tracing::debug!(
                 domain,
-                "no HTTP client available for robots.txt fetch — allowing by default"
+                "no HTTP client available for robots.txt fetch - allowing by default"
             );
             return RobotsRules::default();
         };
@@ -970,7 +972,7 @@ impl RobotsChecker {
                 tracing::debug!(
                     domain,
                     error = %e,
-                    "robots.txt fetch failed — allowing by default"
+                    "robots.txt fetch failed - allowing by default"
                 );
                 return RobotsRules::default();
             }
@@ -981,19 +983,26 @@ impl RobotsChecker {
             tracing::debug!(
                 domain,
                 status = status.as_u16(),
-                "robots.txt returned non-200 — allowing by default"
+                "robots.txt returned non-200 - allowing by default"
             );
-            // 404 or other error → no robots.txt → allow all.
+            // 404 or other error -> no robots.txt -> allow all.
             return RobotsRules::default();
         }
 
-        let body = match response.text().await {
+        // ANTIPAT 4.1: a robots.txt is small; a 512 KiB cap is ample and
+        // prevents an unbounded read from a hostile origin.
+        let body = match crate::masterfetch::http::read_body_capped(
+            response,
+            crate::masterfetch::http::MAX_SMALL_BODY_BYTES,
+        )
+        .await
+        {
             Ok(t) => t,
             Err(e) => {
                 tracing::debug!(
                     domain,
                     error = %e,
-                    "failed to read robots.txt body — allowing by default"
+                    "failed to read robots.txt body - allowing by default"
                 );
                 return RobotsRules::default();
             }

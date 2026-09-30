@@ -7,7 +7,7 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-// ── Regex patterns ────────────────────────────────────────────────────────
+// -- Regex patterns --
 
 static RE_FR_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bFR-(\d+)\b").expect("FR-ID regex should compile"));
@@ -18,7 +18,7 @@ static RE_NFR_ID: LazyLock<Regex> =
 static RE_TASK_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\bT-(\d+)\b").expect("T-ID regex should compile"));
 
-// ── Public API ───────────────────────────────────────────────────────────
+// -- Public API --
 
 /// Find the highest numeric ID for a given prefix pattern in a markdown string.
 ///
@@ -156,5 +156,3 @@ fn extract_ids(text: &str, re: &regex::Regex, prefix: &str) -> Vec<String> {
     ids.dedup();
     ids
 }
-
-// ── Tests ────────────────────────────────────────────────────────────────

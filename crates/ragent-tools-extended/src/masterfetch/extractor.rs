@@ -5,27 +5,27 @@
 //! This module ports Hound's `extractor.py` content-extraction chain, adapted
 //! to ragent's existing extraction crates. The chain is:
 //!
-//! 1. **`readability-rs`** (primary) — extracts the main article text,
+//! 1. **`readability-rs`** (primary) - extracts the main article text,
 //!    stripping navigation, ads, and page chrome. Used when the page looks
-//!    like an article and the extracted text is ≥ [`MIN_READABILITY_CHARS`]
+//!    like an article and the extracted text is >= [`MIN_READABILITY_CHARS`]
 //!    characters.
-//! 2. **`html2text`** (fallback) — converts the full HTML to formatted plain
+//! 2. **`html2text`** (fallback) - converts the full HTML to formatted plain
 //!    text. Used when readability fails or produces very short output (list
 //!    pages, tables, JS shells). The vendored crate (`vendor/html2text`)
 //!    patches a debug-mode subtraction overflow in the word wrapper, but is
 //!    still best-effort and may panic on adversarial input.
-//! 3. **Raw text** (last resort) — strips all HTML tags with
+//! 3. **Raw text** (last resort) - strips all HTML tags with
 //!    [`ragent_types::html::strip_tags`]. Used when `html2text` errors or is
 //!    skipped.
 //!
 //! Additional features:
 //!
-//! - **`css_selector` narrowing** — when provided, the HTML is narrowed to
+//! - **`css_selector` narrowing** - when provided, the HTML is narrowed to
 //!   the first element matching the selector *before* extraction. Supports
 //!   tag, `.class`, `#id`, and compound forms (`article.main`, `div#content`).
 //!   Implemented without the `scraper` crate (not a workspace dependency) using
 //!   a lightweight HTML walker.
-//! - **`format` parameter** — `markdown` (default, runs the full chain),
+//! - **`format` parameter** - `markdown` (default, runs the full chain),
 //!   `html` (cleaned HTML with noise tags stripped), `text` (all tags
 //!   stripped), `raw` (body returned unchanged).
 //!
@@ -58,7 +58,7 @@ const TEXT_WIDTH: usize = 120;
 /// Controls how the extracted content is rendered. See FR-002.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFormat {
-    /// Extracted content as plain text via the readability → html2text → raw
+    /// Extracted content as plain text via the readability -> html2text -> raw
     /// chain (default).
     #[default]
     Markdown,
@@ -194,8 +194,8 @@ pub struct ExtractResult {
 
 /// Errors that can occur during content extraction.
 ///
-/// Extraction is designed to degrade gracefully — the chain falls through to
-/// raw text rather than erroring — so most errors are internal diagnostics
+/// Extraction is designed to degrade gracefully - the chain falls through to
+/// raw text rather than erroring - so most errors are internal diagnostics
 /// that surface in [`ExtractMethod`] rather than as `Err` variants. The
 /// `InvalidSelector` variant is returned when a CSS selector cannot be
 /// parsed.
@@ -217,18 +217,18 @@ pub enum ExtractError {
 ///
 /// # Arguments
 ///
-/// * `html` — the raw HTML response body.
-/// * `url` — the final URL (after redirects), used by readability for
+/// * `html` - the raw HTML response body.
+/// * `url` - the final URL (after redirects), used by readability for
 ///   relative-link resolution.
-/// * `content_type` — the HTTP `Content-Type` header value. If it does not
+/// * `content_type` - the HTTP `Content-Type` header value. If it does not
 ///   contain `text/html` or `application/xhtml`, the body is returned as-is
 ///   (raw) regardless of the `format` parameter.
-/// * `opts` — extraction options (format, `css_selector`, `max_content_chars`).
+/// * `opts` - extraction options (format, `css_selector`, `max_content_chars`).
 ///
 /// # Returns
 ///
 /// An [`ExtractResult`] containing the extracted content and diagnostic
-/// metadata. This function never returns `Err` for extraction failures — it
+/// metadata. This function never returns `Err` for extraction failures - it
 /// degrades gracefully through the chain. The only `Err` case is
 /// [`ExtractError::InvalidSelector`].
 ///
@@ -313,10 +313,10 @@ pub fn extract(
 }
 
 // ---------------------------------------------------------------------------
-// Markdown extraction chain (readability → html2text → raw text)
+// Markdown extraction chain (readability -> html2text -> raw text)
 // ---------------------------------------------------------------------------
 
-/// Run the readability → html2text → raw text chain and return the best
+/// Run the readability -> html2text -> raw text chain and return the best
 /// result.
 ///
 /// The chain is wrapped in a top-level [`std::panic::catch_unwind`] so that a
@@ -436,9 +436,9 @@ fn extract_readability(html: &str, url: &str) -> Option<(String, String)> {
 /// Convert HTML to formatted text using `html2text`.
 ///
 /// The conversion runs on a dedicated OS thread (not a Tokio worker) so that
-/// if `html2text` panics — it has a history of panicking on real-world HTML
+/// if `html2text` panics - it has a history of panicking on real-world HTML
 /// (e.g. mdBook-generated pages, and a subtraction overflow in `flush_word`)
-/// — the panic is confined to that thread and never unwinds through the
+///   the panic is confined to that thread and never unwinds through the
 /// async runtime's task machinery.
 ///
 /// Returns `None` if the call errors or the thread panics.
@@ -485,7 +485,7 @@ pub(crate) fn run_html2text_isolated(html: String) -> Result<String, String> {
 ///
 /// Supports tag name, class, and id in compound form (e.g. `div.main`,
 /// `article#content`, `.post-body`). Does not support descendant or child
-/// combinators — the selector matches the *first* element whose tag/class/id
+/// combinators - the selector matches the *first* element whose tag/class/id
 /// all match.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ParsedSelector {
@@ -574,7 +574,7 @@ fn set_selector_part(result: &mut ParsedSelector, mode: SelectorMode, value: &st
 /// Narrow HTML to the inner content of the first element matching `selector`.
 ///
 /// Returns the full HTML unchanged if no matching element is found (graceful
-/// degradation — better to return full content than nothing).
+/// degradation - better to return full content than nothing).
 fn narrow_by_selector(html: &str, selector: &str) -> Result<String, ExtractError> {
     let parsed = parse_selector(selector)?;
     let narrowed = extract_element_inner(html, &parsed);
@@ -592,7 +592,7 @@ fn narrow_by_selector(html: &str, selector: &str) -> Result<String, ExtractError
 /// Walk the HTML and extract the inner content of the first element matching
 /// the selector.
 ///
-/// This is a lightweight tag-walking parser — not a full DOM. It tracks
+/// This is a lightweight tag-walking parser - not a full DOM. It tracks
 /// opening and closing tags at the matching depth to extract everything
 /// between the first matching opening tag and its corresponding closing tag.
 fn extract_element_inner(html: &str, selector: &ParsedSelector) -> String {
@@ -711,7 +711,7 @@ pub(crate) struct HtmlAttr {
 /// Tokenize HTML into a sequence of [`HtmlToken`]s.
 ///
 /// This is a minimal tokenizer sufficient for CSS selector matching and noise
-/// tag stripping. It does not build a full DOM — it produces a flat sequence
+/// tag stripping. It does not build a full DOM - it produces a flat sequence
 /// of opening tags, closing tags, self-closing tags, and text nodes.
 pub(crate) fn tokenize_tags(html: &str) -> Vec<HtmlToken<'_>> {
     let mut tokens = Vec::new();
@@ -737,7 +737,7 @@ pub(crate) fn tokenize_tags(html: &str) -> Vec<HtmlToken<'_>> {
                 pos = end + 1;
                 text_start = pos;
             } else {
-                // No closing '>' — treat the rest as text.
+                // No closing '>' - treat the rest as text.
                 break;
             }
         } else {
@@ -836,7 +836,7 @@ fn parse_tag(content: &str) -> Option<HtmlToken<'_>> {
 /// Return a `&'a str` referencing the original slice that matches `value`.
 ///
 /// We need the token to borrow from the input HTML, but we've computed a
-/// lowercased name. We search the original tag-name slice for a match — since
+/// lowercased name. We search the original tag-name slice for a match - since
 /// tag names are ASCII, the lowercased version will appear in the original if
 /// it was already lowercase, or we fall back to a case-insensitive search.
 fn leak_str<'a>(value: &str, original: &'a str) -> &'a str {

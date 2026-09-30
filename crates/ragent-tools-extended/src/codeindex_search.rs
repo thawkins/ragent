@@ -32,7 +32,7 @@ impl Tool for CodeIndexSearchTool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query — symbol name, keyword, or phrase to find in the codebase"
+                    "description": "Search query - symbol name, keyword, or phrase to find in the codebase"
                 },
                 "kind": {
                     "type": "string",
@@ -109,7 +109,7 @@ impl Tool for CodeIndexSearchTool {
         let mut output = String::new();
         for (i, r) in results.iter().enumerate() {
             output.push_str(&format!(
-                "{}. {} `{}` — {}:{}\n",
+                "{}. {} `{}` - {}:{}\n",
                 i + 1,
                 r.kind,
                 r.symbol_name,

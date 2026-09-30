@@ -25,9 +25,9 @@
 //! Compaction fires when the *effective* request token count exceeds a
 //! threshold. Two trigger models are supported:
 //!
-//! * **Percentage (recommended)** — when `CompactionConfig::threshold` is set
+//! * **Percentage (recommended)** - when `CompactionConfig::threshold` is set
 //!   (e.g. `0.8` for 80%), the threshold is `context_window * threshold`.
-//! * **Buffer** — when `threshold` is `None`, the threshold is
+//! * **Buffer** - when `threshold` is `None`, the threshold is
 //!   `context_window - max(output_tokens, context_window * buffer_fraction)`.
 //!
 //! The effective count prefers the provider-reported `input_tokens` from the
@@ -169,9 +169,9 @@ pub fn estimate_tool_tokens(tools: &[ToolDefinition]) -> usize {
 ///
 /// # Arguments
 ///
-/// * `system` — optional system prompt text.
-/// * `messages` — provider-facing chat history.
-/// * `tools` — tool definitions included in the request.
+/// * `system` - optional system prompt text.
+/// * `messages` - provider-facing chat history.
+/// * `tools` - tool definitions included in the request.
 #[must_use]
 pub fn estimate_request_tokens(
     system: Option<&str>,
@@ -200,7 +200,7 @@ pub fn estimate_chat_request_tokens(request: &ChatRequest) -> usize {
 /// The pre-send compaction check runs once per agent-loop step, but the
 /// provider-reported input-token figure is unavailable on the first step of a
 /// turn, so the local estimate re-sums the entire history plus every tool
-/// definition on every step — O(history) per step and O(history^2) over a
+/// definition on every step - O(history) per step and O(history^2) over a
 /// session. This tracker memoises the estimated cost of each provider-facing
 /// message by its position and folds in the system prompt and tool definitions,
 /// so a step that appends one message recomputes only that message.
@@ -364,7 +364,7 @@ pub fn effective_request_tokens(estimated_tokens: usize, last_reported_input_tok
 /// Compute the compaction threshold (FR-003) with a 70 % usage floor.
 ///
 /// When `config.threshold` is set (a fraction such as `0.8` for 80%), the
-/// threshold is `context_window * threshold` — the user-configured trigger
+/// threshold is `context_window * threshold` - the user-configured trigger
 /// point. Otherwise it falls back to the buffer-based model
 /// `context_window - max(output_tokens, context_window * buffer_fraction)`,
 /// saturating at zero so a tiny context window never produces an underflow.
@@ -403,12 +403,12 @@ pub fn compaction_threshold(
 ///
 /// # Arguments
 ///
-/// * `config` — compaction configuration (supplies `buffer_fraction`).
-/// * `estimated_tokens` — local [`estimate_request_tokens`] result.
-/// * `last_reported_input_tokens` — provider-reported `input_tokens` from the
+/// * `config` - compaction configuration (supplies `buffer_fraction`).
+/// * `estimated_tokens` - local [`estimate_request_tokens`] result.
+/// * `last_reported_input_tokens` - provider-reported `input_tokens` from the
 ///   previous turn, or `0` if unavailable.
-/// * `context_window` — the model's context window in tokens.
-/// * `output_tokens` — max output tokens for the request (the
+/// * `context_window` - the model's context window in tokens.
+/// * `output_tokens` - max output tokens for the request (the
 ///   `max_tokens` / `output` limit).
 #[must_use]
 pub fn evaluate_trigger(
@@ -435,8 +435,8 @@ pub fn evaluate_trigger(
 
 /// Publish the compaction-started event for a session (FR-003).
 ///
-/// Emits [`Event::CompressionStarted`] — the existing compaction-lifecycle
-/// carrier event — with the supplied reason (`"auto"` for pre-send triggers,
+/// Emits [`Event::CompressionStarted`] - the existing compaction-lifecycle
+/// carrier event - with the supplied reason (`"auto"` for pre-send triggers,
 /// `"overflow"` for emergency triggers). The summarisation pipeline itself is
 /// invoked by the compaction runner (later task); this helper only signals that
 /// compaction has begun so the TUI, SSE stream, and telemetry can react.

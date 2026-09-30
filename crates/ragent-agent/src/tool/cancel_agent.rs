@@ -1,4 +1,4 @@
-//! The `cancel_agent` tool — cancels a running background sub-agent task.
+//! The `cancel_agent` tool - cancels a running background sub-agent task.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -22,7 +22,7 @@ impl Tool for CancelAgentTool {
         "Cancel a running background sub-agent task that was spawned with background: true. \
              REQUIRED parameter: 'task_id' (string, the unique task identifier returned by \
              new_agent when background mode was used). The task must belong to the current \
-             session. Common gotcha: do not use this tool for team tasks — inside a team, \
+             session. Common gotcha: do not use this tool for team tasks - inside a team, \
              use team tools such as team_shutdown_teammate instead."
     }
     fn parameters_schema(&self) -> Value {

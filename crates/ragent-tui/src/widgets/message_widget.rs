@@ -14,8 +14,9 @@ use ratatui::{
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 use ragent_types::sanitize_terminal::sanitize_terminal;
 
-/// Sentinel prefix used to identify agent-notice chat bubbles.
-const AGENT_NOTICE_PREFIX: &str = "📋 Agent Notice";
+/// Sentinel prefix used to identify agent-notice chat bubbles (ANTIPAT M1:
+/// ASCII marker `[notice]` plus the plain-text label).
+const AGENT_NOTICE_PREFIX: &str = "Agent Notice";
 
 /// Static run of spaces used to indent continuation lines of a text part.
 ///
@@ -25,11 +26,19 @@ const AGENT_NOTICE_PREFIX: &str = "📋 Agent Notice";
 pub(crate) const INDENT_SPACES: &str = "                ";
 
 /// Returns true if the text is an agent-notice bubble.
+///
+/// The bubble text is emitted by the event handler as
+/// `[notice] Agent Notice\n...`; strip the leading `[notice]` tag and match the
+/// plain-text label at the start of any line.
 pub(crate) fn is_agent_notice(text: &str) -> bool {
-    text.trim_start().starts_with(AGENT_NOTICE_PREFIX)
+    text.lines().any(|line| {
+        let line = line.trim_start();
+        let line = line.strip_prefix("[notice]").map_or(line, str::trim_start);
+        line.starts_with(AGENT_NOTICE_PREFIX)
+    })
 }
 
-/// Parse a `[red]…[/red]` span marker into a red-styled [`Line`], or `None`
+/// Parse a `[red]...[/red]` span marker into a red-styled [`Line`], or `None`
 /// when the line has no complete marker pair.
 ///
 /// Slash-command output (e.g. the `/tools` list of disabled tools) uses
@@ -150,7 +159,7 @@ fn summarize_tool_args(input: &serde_json::Value, max_str_len: usize) -> String 
     parts.join(", ")
 }
 
-/// Capitalize the first letter of a tool name for display (e.g., "read" → "Read").
+/// Capitalize the first letter of a tool name for display (e.g., "read" -> "Read").
 /// Capitalise the first letter of a tool name, leaving the rest unchanged.
 pub fn capitalize_tool_name(name: &str) -> String {
     let mut chars = name.chars();
@@ -204,7 +213,7 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 /// Tool categories with their associated emoji icons:
 /// - 📄 File Operations: read, write, create, edit, patch, rm, multiedit
 /// - 📁 Directory Operations: list, make_directory/mkdir
-/// - ℹ️  File Info: file_info
+/// - [i]️  File Info: file_info
 /// - 🔍 Search Operations: search, grep, glob
 /// - ⚡ Execution: bash, calculator
 /// - 🌐 Network: webfetch, websearch, http_request
@@ -377,7 +386,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
 
         // ═══════════════════════════════════════════════════════════════════
-        // ℹ️ FILE INFO
+        // [i]️ FILE INFO
         // ═══════════════════════════════════════════════════════════════════
         "file_info" => {
             let path = get_relative_path(&["path"]);
@@ -670,7 +679,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
 
         // ═══════════════════════════════════════════════════════════════════
         // 📋 TASK MANAGEMENT
-        // ═══════════════════════════════════════════════════════════��═══════
+        // ═══════════════════════════════════════════════════════════════════
         "task_create" => {
             let subject = get_str(&["subject"]).unwrap_or_default();
             format!("📋 +{}", trunc120(&subject))
@@ -697,7 +706,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("📋 filter: {}", status)
         }
         // ═══════════════════════════════════════════════════════════════════
-        // ���� SUB-AGENT
+        // SUB-AGENT
         // ═══════════════════════════════════════════════════════════════════
         "new_agent" => {
             let agent = input.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
@@ -1508,7 +1517,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("🏁 {}", trunc120(first_line))
         }
 
-        // ���══════════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════
         // DEFAULT: Unknown tools
         // ═══════════════════════════════════════════════════════════════════
         _ => {
@@ -1936,7 +1945,7 @@ pub fn tool_result_summary(
         }
         "make_directory" | "mkdir" => Some("directory created".to_string()),
         // ═══════════════════════════════════════════════════════════════════
-        // ℹ️ FILE INFO
+        // [i]️ FILE INFO
         // ═══════════════════════════════════════════════════════════════════
         "file_info" => {
             let kind = out.get("kind").and_then(|v| v.as_str()).unwrap_or("file");
@@ -2967,7 +2976,7 @@ pub fn tool_result_summary(
 
         // ═══════════════════════════════════════════════════════════════════
         // 🌐 MASTERFETCH
-        // ��══════════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════
         "mf_fetch" => {
             let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("?");
             let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -3096,7 +3105,7 @@ pub fn tool_result_summary(
 
         // ═══════════════════════════════════════════════════════════════════
         // 📧 GMAIL
-        // ════════════���══════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════
         "gmail" => {
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
             match action {
@@ -3375,7 +3384,7 @@ impl<'a> MessageWidget<'a> {
                     // boundary before it reaches the terminal.
                     let sanitised_text = sanitize_terminal(text);
                     for (i, line) in sanitised_text.as_ref().lines().enumerate() {
-                        // A `[red]…[/red]` span marker (e.g. a tool disabled by
+                        // A `[red]...[/red]` span marker (e.g. a tool disabled by
                         // a visibility switch in `/tools`) renders red and
                         // takes precedence over the plain-raw path below.
                         if let Some(styled) = parse_red_marker(line) {
@@ -3394,7 +3403,7 @@ impl<'a> MessageWidget<'a> {
                         }
                         if i == 0 {
                             // Blank line before the "You:" prompt for visual
-                            // separation — but not when this is the very
+                            // separation - but not when this is the very
                             // first rendered line of the transcript (a
                             // leading blank row would push everything down).
                             if self.message.role == Role::User && !lines.is_empty() {

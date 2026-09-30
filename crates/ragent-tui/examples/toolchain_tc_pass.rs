@@ -84,7 +84,7 @@ async fn run() {
         && f.contains("Runtime")
         && f.contains("Status")
         && f.contains("Version")
-        && f.matches("format —").count() >= 20
+        && f.matches("format -").count() >= 20
         && f.contains("installed")
         && f.contains("not installed")
         && app.status == "toolchain: list";
@@ -261,7 +261,7 @@ async fn run() {
     let ok = rows2 == 50
         && f2.contains("not installed")
         && f2.contains("installed")
-        && f2.matches("format —").count() >= 20
+        && f2.matches("format -").count() >= 20
         && app.status == "toolchain: list";
     report(
         "TC-011 absent runtimes continue report (50 rows, both statuses, data-format rows survive)",

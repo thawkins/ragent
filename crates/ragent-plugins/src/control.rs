@@ -8,7 +8,7 @@
 //! - [`render_list`] renders one row per discovered plugin (id, name, version,
 //!   dialect, state, contributed tool/command/skill/agent/hook names and
 //!   counts), a summary line, any unsupported-capability notices (FR-025), and
-//!   — in verbose mode — the per-plugin telemetry counters (FR-009, FR-022). It
+//!   in verbose mode - the per-plugin telemetry counters (FR-009, FR-022). It
 //!   scans manifests only and executes no plugin code (FR-023).
 //! - [`run_control_command`] parses the raw argument text, drives
 //!   [`PluginSession::enable`] / [`PluginSession::disable`] (which update the
@@ -49,7 +49,7 @@ pub enum ControlCommand {
     },
 }
 
-/// Why a control subcommand could not be parsed (malformed arguments — reported
+/// Why a control subcommand could not be parsed (malformed arguments - reported
 /// as an `[err]` row that changes no state, per the SPEC error policy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlArgError {
@@ -186,7 +186,7 @@ struct Row {
     /// *unprefixed* declared server name (e.g. `mongodb`) as well as by the
     /// bridged id (`<plugin-id>.<server>`). Populated from the session's MCP
     /// client when the caller supplies live counts; a server absent from the map
-    /// renders as `?` — unknown, not zero.
+    /// renders as `?` - unknown, not zero.
     mcp_tool_counts: BTreeMap<String, usize>,
     unsupported: Vec<String>,
     error: Option<String>,
@@ -244,7 +244,7 @@ pub fn render_list(manager: &PluginManager, verbose: bool) -> String {
 ///
 /// `mcp_tool_counts` maps a bridged MCP server id (`<plugin-id>.<server>`) to
 /// the number of tools that server currently advertises. A server absent from
-/// the map renders as `?` — unknown, not zero, so a discovery-only render is
+/// the map renders as `?` - unknown, not zero, so a discovery-only render is
 /// never mistaken for a server that contributed nothing. The counts come from
 /// the surface's live MCP client and can never be derived from the manifest
 /// (which declares servers, not their tools).
@@ -497,9 +497,20 @@ const W_HOOKS: usize = 5;
 const W_MCP: usize = 3;
 const W_MCP_TOOLS: usize = 9;
 
+/// Expands to the 12-column plugin-table row format literal.
+///
+/// Shared by [`table_header`] and [`table_row`] so the column widths cannot
+/// drift apart (see `ANTIPAT.md` M3.11). A macro (not a `const`) is required
+/// because `format!` only accepts a string literal as its format argument.
+macro_rules! plugin_row_fmt {
+    () => {
+        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>wt$} | {:>wc$} | {:>ws$} | {:>wa$} | {:>wh$} | {:>wm$} | {:>wmt$} |"
+    };
+}
+
 fn table_header() -> String {
     format!(
-        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>wt$} | {:>wc$} | {:>ws$} | {:>wa$} | {:>wh$} | {:>wm$} | {:>wmt$} |",
+        plugin_row_fmt!(),
         "ID",
         "Name",
         "Version",
@@ -549,7 +560,7 @@ fn table_separator() -> String {
 fn table_row(row: &Row) -> String {
     let (mcp_servers, mcp_tools) = row.mcp_cell();
     format!(
-        "| {:<w_id$} | {:<w_name$} | {:<w_ver$} | {:<w_dia$} | {:<w_state$} | {:>wt$} | {:>wc$} | {:>ws$} | {:>wa$} | {:>wh$} | {:>wm$} | {:>wmt$} |",
+        plugin_row_fmt!(),
         truncate(&row.id, W_ID),
         truncate(&row.name, W_NAME),
         truncate(&row.version, W_VERSION),

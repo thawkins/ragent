@@ -1,26 +1,26 @@
-//! `agent_complete` — Signal that the current autonomous task is complete.
+//! `agent_complete` - Signal that the current autonomous task is complete.
 //!
 //! Used by agents in autopilot mode to indicate that a task has finished
 //! and to provide a human-readable summary. The TUI displays the summary
 //! and exits autopilot mode.
 //!
-//! ## ⚠️ DO NOT CONFUSE WITH `team_task_complete`
+//! ## [!] DO NOT CONFUSE WITH `team_task_complete`
 //!
 //! These two tools have similar names but VERY different purposes and
 //! parameter signatures:
 //!
 //! | Tool | Purpose | Required parameters |
 //! |------|---------|---------------------|
-//! | `agent_complete`     | Signal the **current autonomous task** is done — ends the session loop. | `summary` (string) |
+//! | `agent_complete`     | Signal the **current autonomous task** is done - ends the session loop. | `summary` (string) |
 //! | `team_task_complete` | Mark a **team task** as completed (used inside a team session). | `team_name` (string), `task_id` (string) |
 //!
-//! `team_task_complete` takes `task_id` and `team_name` — NOT `summary`.
-//! `agent_complete` takes `summary` — NOT `task_id` or `team_name`.
+//! `team_task_complete` takes `task_id` and `team_name` - NOT `summary`.
+//! `agent_complete` takes `summary` - NOT `task_id` or `team_name`.
 //!
 //! Common mistakes to avoid:
 //! - Calling `agent_complete` with `task_id=...` (use `team_task_complete` if you have a team task).
 //! - Calling `agent_complete` with a `result` or `output` key (the only field is `summary`).
-//! - Calling `agent_complete` to "submit" a result mid-task — it **ends the loop**; only call it when the
+//! - Calling `agent_complete` to "submit" a result mid-task - it **ends the loop**; only call it when the
 //!   requested work is genuinely complete (e.g. files written, tests passing).
 
 use anyhow::{Context, Result};
@@ -37,7 +37,7 @@ use super::{Tool, ToolContext, ToolOutput};
 /// `summary` to the user and stop the autonomous loop.
 ///
 /// ## Required parameter
-/// - `summary` (string) — a concise summary of what was accomplished.
+/// - `summary` (string) - a concise summary of what was accomplished.
 ///
 /// This tool takes ONLY a `summary`. It does NOT take `task_id`, `team_name`,
 /// `result`, or any other key. If you are inside a team session and have a
@@ -80,7 +80,7 @@ impl Tool for AgentCompleteTool {
                 "summary": {
                     "type": "string",
                     "description": "REQUIRED. A concise summary of what was accomplished. \
-                                   This is the ONLY parameter this tool accepts — do not pass \
+                                   This is the ONLY parameter this tool accepts - do not pass \
                                    `task_id`, `team_name`, `result`, or any other key. \
                                    If you are marking a team task complete, use `team_task_complete` instead."
                 }
@@ -107,7 +107,7 @@ impl Tool for AgentCompleteTool {
         });
 
         Ok(ToolOutput {
-            content: format!("✅ Task complete.\n\n{summary}"),
+            content: format!("[ok] Task complete.\n\n{summary}"),
             metadata: Some(json!({
                 "agent_complete": true,
                 "summary": summary

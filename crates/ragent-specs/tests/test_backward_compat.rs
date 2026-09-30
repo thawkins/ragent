@@ -22,10 +22,10 @@ A legacy spec for backward-compatibility testing.\n\n\
 ## Scope & Objectives\n\n\
 Verify that existing specs work without new artifacts.\n\n\
 ## Functional Requirements\n\n\
-### FR-001 — Core Feature\n\n\
+### FR-001 - Core Feature\n\n\
 `The system shall provide a core feature.`\n\n\
 ## Non-Functional Requirements\n\n\
-### NFR-001 — Performance\n\n\
+### NFR-001 - Performance\n\n\
 `The system shall respond within 500 milliseconds.`\n\n\
 ## Constraints & Assumptions\n\n\
 No new artifacts are required.\n";
@@ -44,7 +44,7 @@ async fn create_legacy_spec(root: &std::path::Path, id: &str) -> std::path::Path
     let dir = SpecIo::create_spec_dir(root, &spec_id, LEGACY_SPEC_MD, LEGACY_PLAN_MD)
         .await
         .unwrap();
-    // Verify no new artifacts exist — only SPEC.md and PLAN.md.
+    // Verify no new artifacts exist - only SPEC.md and PLAN.md.
     assert!(dir.join("SPEC.md").is_file(), "SPEC.md must exist");
     assert!(dir.join("PLAN.md").is_file(), "PLAN.md must exist");
     assert!(
@@ -127,7 +127,7 @@ fn test_legacy_spec_validates_with_sdd_disabled_no_sdd_issues() {
 #[test]
 fn test_legacy_spec_validates_with_sdd_enabled_no_errors() {
     // Even with all SDD flags enabled, a legacy spec should not produce
-    // *errors* — only warnings for missing optional artifacts.
+    // *errors* - only warnings for missing optional artifacts.
     let id = SpecId::new("legacy").unwrap();
     let mut spec = Spec::new(id, "legacy");
     spec.spec_md = LEGACY_SPEC_MD.to_string();
@@ -248,7 +248,7 @@ async fn test_legacy_spec_transition_to_in_progress_not_blocked() {
         .unwrap();
     assert_eq!(spec.status, SpecStatus::Approved);
 
-    // This must succeed — no Phase -1 gates to block it.
+    // This must succeed - no Phase -1 gates to block it.
     mgr.transition_with_flags(&mut spec, SpecStatus::InProgress, "tester", &flags)
         .await
         .unwrap();

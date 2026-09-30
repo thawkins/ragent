@@ -1,4 +1,4 @@
-//! `team_message` — Send a direct message to one team member.
+//! `team_message` - Send a direct message to one team member.
 //!
 //! M4-T4: validates the recipient exists and is not `Stopped` / `Failed`
 //! before pushing, so messages to dead teammates are rejected up front
@@ -144,7 +144,7 @@ pub(crate) fn resolve_agent_id(team_dir: &std::path::Path, name_or_id: &str) -> 
     if name_or_id == "lead" {
         return Ok(name_or_id.to_string());
     }
-    // M8-T5: validate `tm-…` IDs against the actual member list.
+    // M8-T5: validate `tm-...` IDs against the actual member list.
     if name_or_id.starts_with("tm-") {
         let store = TeamStore::load(team_dir)?;
         if let Some(m) = store.config.member_by_id(name_or_id) {

@@ -1,4 +1,4 @@
-//! `git_branch` — List branches.
+//! `git_branch` - List branches.
 
 use anyhow::Result;
 use serde_json::{Value, json};

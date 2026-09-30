@@ -7,7 +7,7 @@
 //! [`PluginDescriptor::unsupported_capabilities`] (FR-025).
 //!
 //! A manifest that declares no JavaScript entry point (`entry`, `main`, or
-//! `server.entry`) is a non-JS plugin — a skill-only or MCP-only package, the
+//! `server.entry`) is a non-JS plugin - a skill-only or MCP-only package, the
 //! shape the official Claude marketplace ships. Such a plugin parses with
 //! `entry = None`, installs, lists, and loads inertly.
 //!
@@ -34,6 +34,8 @@
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+
+use ragent_tools_core::guard::{validate_identifier, validate_relative_component};
 
 use crate::descriptor::{DialectMatch, PluginDescriptor, PluginDialect, detect_dialect};
 use crate::error::PluginError;
@@ -75,6 +77,16 @@ pub const UNSUP_LSP: &str = "claude lsp servers";
 
 /// The host-API version this ragent build presents to plugin code (FR-019).
 pub const HOST_API_VERSION: u32 = 1;
+
+/// Magnitude threshold for the unit-less Claude `timeout` hook field
+/// (ANTIPAT M16, L11).
+///
+/// The dialect's named fields are always honoured first: `timeout_secs` /
+/// `timeout_seconds` are seconds and `timeout_ms` / `timeout_millis` are
+/// milliseconds. Only the bare `timeout` field carries no unit, so it is read
+/// with this documented fallback - a value at or above the threshold is taken
+/// as milliseconds, below it as seconds.
+pub const TIMEOUT_UNIT_THRESHOLD: u64 = 1000;
 
 /// Host-API version mismatch between a plugin manifest and this ragent build
 /// (FR-019): the plugin declares an API version newer than the host.
@@ -232,13 +244,72 @@ pub const HOOKS_FILE: &str = "hooks.json";
 /// tools behave by default per A5).
 pub type PermissionRequest = String;
 
+/// Plugin version applied when a manifest declares none (ANTIPAT M11).
+///
+/// Both dialects parse `version` as an `Option<String>` and fall back to this
+/// value, so the same manifest is parsed with the same required-ness whichever
+/// dialect it is authored in.
+pub const DEFAULT_PLUGIN_VERSION: &str = "0.0.0";
+
+/// Normalise one permission grant (either dialect) into the single
+/// [`PermissionRequest`] model (ANTIPAT M12).
+///
+/// The value is trimmed and lowercased, and any whitespace run becomes a single
+/// `.` separator so a human phrasing such as `"Network Outbound"` and the Codex
+/// dotted form `"network.outbound"` converge. An empty or separator-only value
+/// yields `None` so a malformed entry contributes nothing.
+fn normalise_permission_grant(grant: &str) -> Option<String> {
+    let joined = grant
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(".")
+        .to_ascii_lowercase();
+    let trimmed = joined.trim_matches('.').to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+/// The Codex entry point for permissions: `CodexPermissions.network` grants,
+/// dotted into the shared [`PermissionRequest`] model (ANTIPAT M12).
+///
+/// `"outbound"` -> `"network.outbound"`; a grant that already carries a dot is
+/// normalised rather than double-prefixed.
+fn normalise_codex_network(network: Vec<String>) -> Vec<PermissionRequest> {
+    network
+        .into_iter()
+        .filter_map(|grant| {
+            let normalised = normalise_permission_grant(&grant)?;
+            if normalised.starts_with("network.") {
+                Some(normalised)
+            } else {
+                Some(format!("network.{normalised}"))
+            }
+        })
+        .collect()
+}
+
+/// The Claude entry point for permissions: the flat `permissions` list,
+/// normalised into the same [`PermissionRequest`] model (ANTIPAT M12).
+fn normalise_claude_permissions(permissions: Vec<String>) -> Vec<PermissionRequest> {
+    permissions
+        .into_iter()
+        .filter_map(|grant| normalise_permission_grant(&grant))
+        .collect()
+}
+
 /// Raw Codex-dialect manifest shape. Unknown fields are ignored; dialect
 /// recognition has already consumed the `"codex"` marker by the time these
 /// bytes reach this parser.
 #[derive(Debug, Deserialize)]
 struct CodexManifest {
     name: String,
-    version: String,
+    /// Declared version; absent defaults to [`DEFAULT_PLUGIN_VERSION`], matching
+    /// the Claude dialect (ANTIPAT M11).
+    #[serde(default)]
+    version: Option<String>,
     /// Entry point relative to the plugin root. `None` for a non-JS
     /// (skill-only / MCP-only) plugin, which still installs, lists, and loads
     /// inertly.
@@ -284,6 +355,9 @@ struct CodexPermissions {
 #[derive(Debug, Deserialize)]
 struct ClaudeManifest {
     name: String,
+    /// Declared version; absent defaults to [`DEFAULT_PLUGIN_VERSION`], matching
+    /// the Codex dialect (ANTIPAT M11).
+    #[serde(default)]
     version: Option<String>,
     /// Entry point under `entry`, `main`, or Claude Desktop's `server.entry`.
     /// Absent (all three) means a non-JS plugin with `entry = None`.
@@ -355,7 +429,7 @@ pub const V1_CAPABILITIES: &[&str] = &[
 /// external MCP-config file resolved relative to the plugin root (the Claude
 /// marketplace `"mcpServers": "./mcp.json"` shape); see
 /// [`extract_mcp_servers`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PluginMcpServer {
     /// Server id (key under `mcpServers`). Prefixed with the plugin id by the
     /// bridge so two plugins cannot collide on a server name.
@@ -372,6 +446,26 @@ pub struct PluginMcpServer {
     pub headers: std::collections::BTreeMap<String, String>,
     /// Transport name declared by the entry (`stdio` default, `sse`, `http`).
     pub transport: String,
+}
+
+/// Hand-written `Debug` for [`PluginMcpServer`].
+///
+/// `env` and `headers` carry credential material (API keys, bearer tokens), so
+/// the derived `Debug` would leak them into every `tracing::debug!("{server:?}")`
+/// (see `ANTIPAT.md` M3.14). The values are replaced with presence flags and
+/// key names only.
+impl std::fmt::Debug for PluginMcpServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginMcpServer")
+            .field("id", &self.id)
+            .field("command", &self.command)
+            .field("args", &self.args)
+            .field("env_keys", &self.env.keys().collect::<Vec<_>>())
+            .field("url", &self.url)
+            .field("header_keys", &self.headers.keys().collect::<Vec<_>>())
+            .field("transport", &self.transport)
+            .finish()
+    }
 }
 
 /// The outcome of parsing a manifest: the descriptor plus the contributions
@@ -481,22 +575,14 @@ pub fn derive_id(name: &str) -> String {
 /// `/` or `\`, no `..`, not absolute. Anything else (including an empty or
 /// whitespace-only id) returns `None` so the caller falls back to the
 /// sanitised [`derive_id`] shape.
+///
+/// Delegates to the shared [`ragent_tools_core::guard::validate_identifier`]
+/// predicate (ANTIPAT M14) so the identifier rule has one home; the same
+/// predicate backs `add.rs::confined_dest_dir`.
 #[must_use]
 fn sanitize_declared_id(id: &str) -> Option<String> {
     let trimmed = id.trim();
-    let path = Path::new(trimmed);
-    let mut components = path.components();
-    let is_single_normal = matches!(components.next(), Some(std::path::Component::Normal(_)))
-        && components.next().is_none();
-    if !is_single_normal || trimmed.contains('\\') {
-        return None;
-    }
-    if !trimmed
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-    {
-        return None;
-    }
+    validate_identifier(trimmed, "plugin id").ok()?;
     Some(trimmed.to_string())
 }
 
@@ -505,7 +591,7 @@ fn sanitize_declared_id(id: &str) -> Option<String> {
 ///
 /// Accepts an array of strings (each naming a prompt-command markdown file, its
 /// stem becoming the command name) or an array of objects. An object without a
-/// `file` field is an inline (JavaScript) command — the shape ragent has always
+/// `file` field is an inline (JavaScript) command - the shape ragent has always
 /// dispatched into `globalThis.__ragent_commands[name]`; an object carrying a
 /// `file` is a prompt command whose prompt is read from that markdown file
 /// (resolved relative to the plugin root, with `commands/` applied to a
@@ -700,7 +786,7 @@ fn parse_command_markdown(content: &str) -> (String, String) {
 ///
 /// Accepts a single string or an array of strings; any other shape contributes
 /// nothing and is reported by the caller as unsupported. Directory existence is
-/// not checked here — the bridge resolves and validates paths against the
+/// not checked here - the bridge resolves and validates paths against the
 /// plugin root.
 #[must_use]
 pub fn extract_skill_dirs(raw: Option<&serde_json::Value>) -> Vec<String> {
@@ -752,7 +838,7 @@ pub fn scan_agent_dir(root: &Path) -> Vec<String> {
 /// entry, so a plugin using the Claude marketplace's default layout (a
 /// `skills/` root with `SKILL.md` subdirectories) contributes its skills even
 /// when the manifest declares no `skills` section. Existence of per-skill
-/// `SKILL.md` files is not checked here — that is the bridge's job.
+/// `SKILL.md` files is not checked here - that is the bridge's job.
 #[must_use]
 pub fn scan_skills_dir(root: &Path) -> Vec<String> {
     if root.join(SKILLS_DIR).is_dir() {
@@ -978,15 +1064,38 @@ fn hook_command(obj: &serde_json::Map<String, serde_json::Value>) -> Option<Stri
         .map(str::to_string)
 }
 
-/// A hook entry's optional timeout in seconds: `timeout_secs`, or the Claude
-/// `timeout` field. A value in milliseconds is normalised to whole seconds.
+/// A hook entry's optional timeout in seconds.
+///
+/// Explicitly-unit fields are preferred and never guessed at (ANTIPAT M16):
+/// `timeout_secs` / `timeout_seconds` are whole seconds; `timeout_ms` /
+/// `timeout_millis` are milliseconds, converted with truncating division.
+/// Only the bare Claude `timeout` field carries no unit, so it falls back to
+/// the documented magnitude heuristic bounded by [`TIMEOUT_UNIT_THRESHOLD`].
 fn hook_timeout(obj: &serde_json::Map<String, serde_json::Value>) -> Option<u64> {
-    if let Some(secs) = obj.get("timeout_secs").and_then(serde_json::Value::as_u64) {
-        return Some(secs);
+    const SECOND_FIELDS: [&str; 2] = ["timeout_secs", "timeout_seconds"];
+    const MILLIS_FIELDS: [&str; 2] = ["timeout_ms", "timeout_millis"];
+    for field in SECOND_FIELDS {
+        if let Some(secs) = obj.get(field).and_then(serde_json::Value::as_u64) {
+            return Some(secs);
+        }
     }
+    for field in MILLIS_FIELDS {
+        if let Some(millis) = obj.get(field).and_then(serde_json::Value::as_u64) {
+            return Some(millis / TIMEOUT_UNIT_THRESHOLD);
+        }
+    }
+    // Unit-less fallback (Claude `timeout`): values at or above the threshold
+    // are read as milliseconds, below it as seconds. A genuine >=1000-second
+    // timeout must use an explicit `timeout_secs` field to avoid this guess.
     obj.get("timeout")
         .and_then(serde_json::Value::as_u64)
-        .map(|value| if value >= 1000 { value / 1000 } else { value })
+        .map(|value| {
+            if value >= TIMEOUT_UNIT_THRESHOLD {
+                value / TIMEOUT_UNIT_THRESHOLD
+            } else {
+                value
+            }
+        })
 }
 
 /// List the `.md`/`.json` files directly under `root/<dir>`, as plugin-relative
@@ -1077,7 +1186,7 @@ pub fn map_mcp_server_entry(key: &str, value: &serde_json::Value) -> Option<Plug
 ///
 /// Only a JSON object of server entries yields bridged servers. A top-level
 /// string (the external-file shape) yields no inline servers and no unbridged
-/// count — the bridge resolves it through [`ParsedManifest::raw_mcp`]. Any
+/// count - the bridge resolves it through [`ParsedManifest::raw_mcp`]. Any
 /// other top-level shape (array, number, bool) is counted as one unbridged
 /// section so the caller keeps an FR-025 unsupported label, and an object entry
 /// that is not a server object is counted individually.
@@ -1129,9 +1238,10 @@ pub fn parse_codex_manifest(
     let mut requested_permissions = Vec::new();
     let mut unsupported = Vec::new();
     if let Some(permissions) = raw.permissions {
+        // ANTIPAT M12: normalise the Codex network grants through the same
+        // `PermissionRequest` model the Claude dialect uses.
         if let Some(network) = permissions.network {
-            requested_permissions
-                .extend(network.into_iter().map(|grant| format!("network.{grant}")));
+            requested_permissions.extend(normalise_codex_network(network));
         }
         if permissions.fs.is_some() {
             unsupported.push(UNSUP_FS.to_string());
@@ -1146,6 +1256,12 @@ pub fn parse_codex_manifest(
     // marketplace's default layout) contributes it (FR-029).
     let mut skills = extract_skill_dirs(raw.skills.as_ref());
     merge_scanned_skills(&mut skills, root);
+    // ANTIPAT M13: the Claude parser already flags a present-but-unbridgeable
+    // `skills` section; apply the same check here so a Codex manifest is not
+    // silently under-reported.
+    if raw.skills.is_some() && skills.is_empty() {
+        unsupported.push(UNSUP_SKILLS.to_string());
+    }
     let (mcp_servers, unbridged_mcp) = extract_mcp_servers(raw.mcp_servers.as_ref());
     if unbridged_mcp > 0 {
         unsupported.push(UNSUP_MCP.to_string());
@@ -1153,7 +1269,7 @@ pub fn parse_codex_manifest(
     // FR-031: declared commands are inline or file-backed prompt commands.
     let commands = extract_command_decls(raw.commands.as_ref(), root);
 
-    // FR-032: agent profiles — declared in the manifest and/or present under
+    // FR-032: agent profiles - declared in the manifest and/or present under
     // `agents/`. Both sets are merged (manifest first) and de-duplicated.
     let mut agents = extract_agent_decls(raw.agents.as_ref());
     for rel in scan_agent_dir(root) {
@@ -1169,7 +1285,7 @@ pub fn parse_codex_manifest(
     // SEC-ragent-plugins-002: a manifest id becomes a directory name in the
     // store (`<store>/<id>`), so anything that is not a single safe path
     // component is refused rather than honoured. A rejected id falls back to
-    // the sanitised `derive_id` — the same shape a manifest with no id gets.
+    // the sanitised `derive_id` - the same shape a manifest with no id gets.
     let id = raw
         .id
         .as_deref()
@@ -1187,7 +1303,11 @@ pub fn parse_codex_manifest(
         descriptor: PluginDescriptor {
             id,
             name: raw.name,
-            version: raw.version,
+            // ANTIPAT M11: both dialects treat `version` as optional and share
+            // the same `"0.0.0"` default.
+            version: raw
+                .version
+                .unwrap_or_else(|| DEFAULT_PLUGIN_VERSION.to_string()),
             dialect: PluginDialect::Codex,
             entry,
             requested_permissions,
@@ -1302,7 +1422,7 @@ pub fn parse_claude_manifest(
     // SEC-ragent-plugins-002: a manifest id becomes a directory name in the
     // store (`<store>/<id>`), so anything that is not a single safe path
     // component is refused rather than honoured. A rejected id falls back to
-    // the sanitised `derive_id` — the same shape a manifest with no id gets.
+    // the sanitised `derive_id` - the same shape a manifest with no id gets.
     let id = raw
         .id
         .as_deref()
@@ -1320,10 +1440,17 @@ pub fn parse_claude_manifest(
         descriptor: PluginDescriptor {
             id,
             name: raw.name,
-            version: raw.version.unwrap_or_else(|| "0.0.0".to_string()),
+            // ANTIPAT M11: shared optional-version default with the Codex parser.
+            version: raw
+                .version
+                .unwrap_or_else(|| DEFAULT_PLUGIN_VERSION.to_string()),
             dialect: PluginDialect::Claude,
             entry,
-            requested_permissions: raw.permissions.unwrap_or_default(),
+            // ANTIPAT M12: normalise the Claude list through the same
+            // `PermissionRequest` model the Codex dialect uses.
+            requested_permissions: normalise_claude_permissions(
+                raw.permissions.unwrap_or_default(),
+            ),
             api_version: raw.api_version.unwrap_or(HOST_API_VERSION),
             unsupported_capabilities: unsupported,
             manifest_path,
@@ -1381,17 +1508,12 @@ fn resolve_entry(
 /// Rejects absolute paths, any `..`/root/prefix component, and a blank
 /// declaration. Used for manifest-declared entry points
 /// (SEC-ragent-plugins-006).
+///
+/// Delegates to the shared [`ragent_tools_core::guard::validate_relative_component`]
+/// predicate (ANTIPAT M14); the same predicate backs `bridge.rs::resolve_within`,
+/// so both resolve the concept "contained relative path" with one rule.
 fn is_contained_relative_path(declared: &str) -> bool {
-    let path = std::path::Path::new(declared);
-    if declared.trim().is_empty() || path.is_absolute() {
-        return false;
-    }
-    path.components().all(|component| {
-        matches!(
-            component,
-            std::path::Component::Normal(_) | std::path::Component::CurDir
-        )
-    })
+    validate_relative_component(declared, "entry").is_ok()
 }
 
 /// Parse the manifest named by a [`DialectMatch`], dispatching on dialect

@@ -1,4 +1,4 @@
-//! `git_merge` — Merge branches.
+//! `git_merge` - Merge branches.
 
 use anyhow::Result;
 use serde_json::{Value, json};

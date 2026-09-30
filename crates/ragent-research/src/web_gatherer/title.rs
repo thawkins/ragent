@@ -1,4 +1,4 @@
-//! Title cleaning — strip nav chrome, markdown links, and noise from captured
+//! Title cleaning - strip nav chrome, markdown links, and noise from captured
 //! web-source titles before they are stored on `Source::Web`.
 //!
 //! These helpers were previously inline free functions in `web_gatherer.rs`.
@@ -10,9 +10,7 @@
 /// title and frequently contain nav chrome ("Skip to main content") or consent
 /// banners ("We use essential cookies to make our site work..."); see
 /// [`clean_web_source_title`].
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub const MAX_WEB_SOURCE_TITLE_CHARS: usize = 120;
+pub(crate) const MAX_WEB_SOURCE_TITLE_CHARS: usize = 120;
 
 /// Leading phrases that mark a captured title as page chrome rather than
 /// article content. When the cleaned title starts with one of these it is
@@ -39,7 +37,7 @@ const TITLE_NOISE_PHRASES: &[&str] = &[
 /// Clean a page title captured from a fetch or search hit before it is stored
 /// on a [`Source::Web`], so the title shown in the References Index and the
 /// per-finding `**Sources:**` bullets is short and meaningful rather than nav
-/// chrome or a consent banner. This is a pure code transform — no LLM.
+/// chrome or a consent banner. This is a pure code transform - no LLM.
 ///
 /// Steps:
 /// 1. Strip markdown reference-link (`[text][n]`) and inline-link
@@ -53,9 +51,7 @@ const TITLE_NOISE_PHRASES: &[&str] = &[
 ///    empty/noise, return the raw fallback so the title is never blank.
 #[must_use]
 #[allow(dead_code)]
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn clean_web_source_title(primary: &str, fallback: &str) -> String {
+pub(crate) fn clean_web_source_title(primary: &str, fallback: &str) -> String {
     let cleaned = clean_title_text(primary);
     if !cleaned.is_empty() {
         return cleaned;
@@ -64,16 +60,14 @@ pub fn clean_web_source_title(primary: &str, fallback: &str) -> String {
     if !cleaned_fallback.is_empty() {
         return cleaned_fallback;
     }
-    // Both reduced to nothing — surface a non-empty raw value so the
+    // Both reduced to nothing - surface a non-empty raw value so the
     // References Index never shows a blank title cell.
     fallback.trim().to_string()
 }
 
 /// Strip markdown link syntax, leading nav/consent noise, collapse whitespace,
 /// and truncate to [`MAX_WEB_SOURCE_TITLE_CHARS`] at a word boundary.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn clean_title_text(s: &str) -> String {
+pub(crate) fn clean_title_text(s: &str) -> String {
     let stripped = strip_markdown_link_text(s);
     let stripped = strip_leading_noise(&stripped);
     let collapsed = collapse_title_ws(&stripped);
@@ -85,6 +79,7 @@ pub fn clean_title_text(s: &str) -> String {
 fn strip_markdown_link_text(s: &str) -> String {
     static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         // Match `[text]` immediately followed by either `[...]` or `(...)`.
+        // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
         regex::Regex::new(r"\[([^\]]*)\](?:\[[^\]]*\]|\([^)]*\))").expect("title link regex")
     });
     RE.replace_all(s, "$1").into_owned()
@@ -101,7 +96,7 @@ fn strip_leading_noise(s: &str) -> String {
             // Map the matched prefix length back to the original slice so we
             // keep the original casing of the remainder.
             let kept = &trimmed[phrase.len()..];
-            let after = kept.trim_start_matches([' ', ',', ':', '|', '-', '—', '·']);
+            let after = kept.trim_start_matches([' ', ',', ':', '|', '-', '-', '*']);
             return after.trim().to_string();
         }
     }
@@ -116,14 +111,12 @@ fn collapse_title_ws(s: &str) -> String {
 /// Truncate `s` to at most `max_chars` Unicode scalar values, cutting at the
 /// last whitespace boundary at or before the limit so words are not split. An
 /// ellipsis is appended when truncation occurs.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn truncate_title_words(s: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_title_words(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         return s.to_string();
     }
-    // Reserve two chars for the " …" suffix when possible.
-    let budget = max_chars.saturating_sub(2);
+    // Reserve three chars for the "..." suffix when possible.
+    let budget = max_chars.saturating_sub(3);
     let mut end_byte = 0usize;
     let mut last_space_byte = 0usize;
     for (i, (byte_idx, ch)) in s.char_indices().enumerate() {
@@ -145,7 +138,7 @@ pub fn truncate_title_words(s: &str, max_chars: usize) -> String {
     // boundary; end_byte is a char-end boundary by construction).
     let mut out = s[..cut_byte].trim_end().to_string();
     if !out.is_empty() {
-        out.push('…');
+        out.push_str("...");
     }
     out
 }

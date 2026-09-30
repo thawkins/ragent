@@ -38,7 +38,7 @@ fn generate_spec_md(n_fr: usize, n_nfr: usize) -> String {
         } else {
             format!("`The system shall validate input parameter {i} before processing.`")
         };
-        md.push_str(&format!("### {id} — Requirement {i}\n\n{ears}\n\n"));
+        md.push_str(&format!("### {id} - Requirement {i}\n\n{ears}\n\n"));
     }
 
     // Non-Functional Requirements
@@ -54,7 +54,7 @@ fn generate_spec_md(n_fr: usize, n_nfr: usize) -> String {
             }
         };
         md.push_str(&format!(
-            "### {id} — Non-Functional Requirement {i}\n\n{ears}\n\n"
+            "### {id} - Non-Functional Requirement {i}\n\n{ears}\n\n"
         ));
     }
 
@@ -81,9 +81,9 @@ fn generate_plan_md(n_tasks: usize) -> String {
 
     // Phase -1 Gates section (all checked)
     md.push_str("\n## Phase -1 Gates\n\n");
-    md.push_str("- [x] Simplicity — The design uses the minimum code necessary.\n");
-    md.push_str("- [x] Anti-Abstraction — No speculative abstractions are introduced.\n");
-    md.push_str("- [x] Integration-First — The feature integrates with existing systems.\n");
+    md.push_str("- [x] Simplicity - The design uses the minimum code necessary.\n");
+    md.push_str("- [x] Anti-Abstraction - No speculative abstractions are introduced.\n");
+    md.push_str("- [x] Integration-First - The feature integrates with existing systems.\n");
 
     md
 }
@@ -102,7 +102,7 @@ fn build_benchmark_spec() -> Spec {
 fn test_validate_50_requirements_under_500ms_all_enabled() {
     let spec = build_benchmark_spec();
 
-    // Warm-up call — ensures any lazy initialization is accounted for.
+    // Warm-up call - ensures any lazy initialization is accounted for.
     let _ = validate_with_flags(&spec, &SddFlags::all_enabled());
 
     // Measured run with all SDD checks enabled (clarification, consistency,

@@ -1,4 +1,4 @@
-//! The `wait_agents` tool — blocks until one or more background sub-agent tasks complete.
+//! The `wait_agents` tool - blocks until one or more background sub-agent tasks complete.
 //!
 //! Subscribes to [`Event::SubagentComplete`] on the session event bus and also
 //! periodically re-scans the [`AgentManager`] task map.  This belt-and-suspenders
@@ -55,7 +55,7 @@ async fn collect_completed_tasks(
 ///   If omitted, waits for **all** currently running background tasks AND
 ///   collects the full results of any background tasks that already
 ///   completed for this session.  (The tool is safe to call after the
-///   sub-agents have finished — the wait is then instant.)
+///   sub-agents have finished - the wait is then instant.)
 /// - `timeout_secs` (number, optional): Maximum seconds to wait. Default: 300.
 pub struct WaitAgentsTool;
 
@@ -74,14 +74,14 @@ impl Tool for WaitAgentsTool {
                  tasks, or 'timeout_secs' (number, default 300). Returns full results for \
                  all awaited tasks (and any tasks that already completed). Every completed \
                  agent's FULL untruncated report is also written to a durable file at \
-                 log/subagents/<task-id>.md — its path appears in this tool's output and \
+                 log/subagents/<task-id>.md - its path appears in this tool's output and \
                  metadata as output_file; if the combined report text is cut by the generic \
                  ~12k context truncation, recover the omitted findings with the `read` tool \
                  against that file (the metadata \"results\" array also mirrors every \
                  agent's complete output). Use this tool instead of polling with \
                  list_agents; omitting task_ids waits for ALL running background tasks. \
                  Common gotcha: this tool is for new_agent sub-agents spawned with \
-                 background: true, NOT for team members — for teams, always use team_wait."
+                 background: true, NOT for team members - for teams, always use team_wait."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -174,7 +174,7 @@ impl Tool for WaitAgentsTool {
         }
 
         // Collect results for tasks that already completed before we subscribed.
-        let mut results: HashMap<String, (String, bool)> = HashMap::new(); // id → (text, success)
+        let mut results: HashMap<String, (String, bool)> = HashMap::new(); // id -> (text, success)
         for task in &all_tasks {
             if waiting_for.contains(&task.id) && task.status != TaskStatus::Running {
                 let text = task
@@ -247,7 +247,7 @@ impl Tool for WaitAgentsTool {
                                 results.insert(task_id, (text, success));
                             }
                             Ok(_) => {
-                                // Unrelated event — keep waiting.
+                                // Unrelated event - keep waiting.
                             }
                             Err(broadcast::error::RecvError::Lagged(n)) => {
                                 tracing::warn!(
@@ -313,7 +313,7 @@ impl Tool for WaitAgentsTool {
 
         if timed_out {
             output.push_str(&format!(
-                "⚠️  Timed out after {timeout_secs}s. \
+                "[!]  Timed out after {timeout_secs}s. \
                  {} task(s) still running: {}\n\n",
                 waiting_for.len(),
                 waiting_for
@@ -333,7 +333,7 @@ impl Tool for WaitAgentsTool {
             let task = all_tasks.iter().find(|t| &t.id == task_id);
             let agent_name = task.map_or("unknown", |t| t.agent_name.as_str());
 
-            let icon = if *success { "✅" } else { "❌" };
+            let icon = if *success { "[ok]" } else { "[x]" };
             let short_id: String = task_id.chars().take(8).collect();
 
             // Report integrity: sub-agent tasks track whether the final
@@ -344,7 +344,7 @@ impl Tool for WaitAgentsTool {
                 task.map_or(crate::task::ReportStatus::Complete, |t| t.report_status);
             let report_label = report_status.as_str();
 
-            // Full per-agent output in metadata — survives the generic
+            // Full per-agent output in metadata - survives the generic
             // 12k tool-result truncation applied to `content` by
             // `tool_result_content_for_llm`, so the model can recover the
             // complete report even when the printed content is cut.
@@ -369,19 +369,19 @@ impl Tool for WaitAgentsTool {
             ));
             if let Some(ref file_path) = output_file_str {
                 output.push_str(&format!(
-                    "\n📄 Full report: {file_path} (read this file if the text above was truncated)\n"
+                    "\n[file] Full report: {file_path} (read this file if the text above was truncated)\n"
                 ));
             }
             if report_status != crate::task::ReportStatus::Complete {
                 let note = match report_status {
                     crate::task::ReportStatus::Continued => {
-                        "✅ Report was truncated by the provider; the missing tail was \
+                        "[ok] Report was truncated by the provider; the missing tail was \
                          regenerated by the automatic continuation retry."
                     }
                     crate::task::ReportStatus::Truncated => {
-                        "⚠️  Report is TRUNCATED: the provider cut the reply off before it \
+                        "[!]  Report is TRUNCATED: the provider cut the reply off before it \
                          finished and the continuation retry could not recover it. Treat \
-                         this report as incomplete — re-run the task with a narrower scope \
+                         this report as incomplete - re-run the task with a narrower scope \
                          or a model with a larger output window if you need the full text."
                     }
                     crate::task::ReportStatus::Complete => "",

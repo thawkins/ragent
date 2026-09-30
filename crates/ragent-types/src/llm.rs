@@ -6,7 +6,7 @@
 //!
 //! The streaming client trait (`LlmClient`) and provider implementations
 //! live in `ragent-llm`; `ragent-llm::llm` re-exports the types defined here
-//! so existing `use ragent_llm::llm::{…}` sites continue to resolve (see
+//! so existing `use ragent_llm::llm::{...}` sites continue to resolve (see
 //! `REMPLAN.md` M1 / T1.3 for the consolidation history).
 //!
 //! `ragent-types` owns these primitives because they are referenced by the
@@ -73,9 +73,9 @@ pub enum StreamEvent {
     },
     /// Rate-limit / quota information from response headers.
     RateLimit {
-        /// Percentage of request quota consumed (0.0–100.0), if known.
+        /// Percentage of request quota consumed (0.0-100.0), if known.
         requests_used_pct: Option<f32>,
-        /// Percentage of token quota consumed (0.0–100.0), if known.
+        /// Percentage of token quota consumed (0.0-100.0), if known.
         tokens_used_pct: Option<f32>,
     },
     /// An error reported by the provider.
@@ -111,8 +111,8 @@ pub struct ChatRequest {
     pub max_tokens: Option<u32>,
     /// Optional system prompt prepended to the conversation.
     ///
-    /// Held as `Arc<str>` (PERF-006) so the system prompt — which can run
-    /// 5,000–20,000 characters — is built once per `process_user_message`
+    /// Held as `Arc<str>` (PERF-006) so the system prompt - which can run
+    /// 5,000-20,000 characters - is built once per `process_user_message`
     /// and cheaply `Arc::clone`d on every step and every retry attempt
     /// instead of being deep-cloned as a `String`.  The on-wire JSON
     /// format is unchanged (still a plain string) thanks to
@@ -128,7 +128,7 @@ pub struct ChatRequest {
     /// Unique request ID for this specific API call (for provider-side request tracking).
     #[serde(skip)]
     pub request_id: Option<String>,
-    /// Stream timeout in seconds — how long to wait for data before considering
+    /// Stream timeout in seconds - how long to wait for data before considering
     /// the stream stalled.  Set from `StreamConfig.timeout_secs`.
     #[serde(skip)]
     pub stream_timeout_secs: Option<u64>,
@@ -230,7 +230,7 @@ mod arc_str_serde {
 }
 
 /// Serde adapter for `Option<Arc<str>>` (PERF-006). On the wire this is a
-/// plain nullable string — `null` or a JSON string — identical to the
+/// plain nullable string - `null` or a JSON string - identical to the
 /// legacy `Option<String>` representation. In memory the `Some` variant
 /// carries an `Arc<str>` so the system prompt can be shared across
 /// retry attempts without deep cloning.

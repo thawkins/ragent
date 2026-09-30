@@ -103,7 +103,7 @@ impl Tool for PdfWriteTool {
                                     },
                                     "image_path": {
                                         "type": "string",
-                                        "description": "Path to image file — PNG or JPEG (for image type)"
+                                        "description": "Path to image file - PNG or JPEG (for image type)"
                                     },
                                     "width_mm": {
                                         "type": "number",
@@ -610,7 +610,7 @@ fn truncate_cell(text: &str, col_width_mm: f32) -> String {
         while end > 0 && !text.is_char_boundary(end) {
             end -= 1;
         }
-        format!("{}…", &text[..end])
+        format!("{}...", &text[..end])
     } else {
         text.chars().take(max_chars).collect()
     }

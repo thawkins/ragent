@@ -1,4 +1,4 @@
-//! `team_wait` — block the lead agent until all (or specific) teammates become idle.
+//! `team_wait` - block the lead agent until all (or specific) teammates become idle.
 //!
 //! Subscribes to [`Event::TeammateIdle`] on the event bus so there is no polling.
 //! Returns a summary of each teammate's final status once all are idle,
@@ -72,7 +72,7 @@ impl Tool for TeamWaitTool {
 
         let working_dir = ctx.working_dir.clone();
 
-        // Resolve team name — use provided value or infer from on-disk teams.
+        // Resolve team name - use provided value or infer from on-disk teams.
         let team_name: Option<String> = input
             .get("team_name")
             .and_then(|v| v.as_str())
@@ -287,13 +287,13 @@ impl Tool for TeamWaitTool {
         let mut output = String::new();
         if timed_out {
             output.push_str(&format!(
-                "⚠️ Timed out after {timeout_secs}s. {} teammate(s) still working: {}\n\n",
+                "[!] Timed out after {timeout_secs}s. {} teammate(s) still working: {}\n\n",
                 waiting_for.len(),
                 waiting_for.iter().cloned().collect::<Vec<_>>().join(", ")
             ));
         } else {
             output.push_str(&format!(
-                "✅ All awaited teammates in team '{resolved_team_name}' are now idle.\n\n"
+                "[ok] All awaited teammates in team '{resolved_team_name}' are now idle.\n\n"
             ));
         }
         output.push_str(&summary);
@@ -316,19 +316,19 @@ fn summarise_store(members: &[TeamMember]) -> String {
     let mut out = String::from("## Teammate status\n\n");
     for m in members {
         let status_icon = match m.status {
-            MemberStatus::Idle => "💤",
-            MemberStatus::Working => "⚙️",
-            MemberStatus::Spawning => "🟡",
-            MemberStatus::Blocked => "🔒",
-            MemberStatus::Suspended => "⏸️",
-            MemberStatus::Failed => "❌",
-            MemberStatus::PlanPending => "📋",
-            MemberStatus::ShuttingDown => "🔄",
-            MemberStatus::Stopped => "⏹️",
+            MemberStatus::Idle => "[sleep]",
+            MemberStatus::Working => "[cfg]",
+            MemberStatus::Spawning => "[yellow]",
+            MemberStatus::Blocked => "[locked]",
+            MemberStatus::Suspended => "[||]",
+            MemberStatus::Failed => "[x]",
+            MemberStatus::PlanPending => "[notice]",
+            MemberStatus::ShuttingDown => "[refresh]",
+            MemberStatus::Stopped => "[stop]",
         };
         let status_str = m.status.as_str();
         out.push_str(&format!(
-            "- {} **{}** ({}) — {}\n",
+            "- {} **{}** ({}) - {}\n",
             status_icon, m.name, m.agent_id, status_str
         ));
     }

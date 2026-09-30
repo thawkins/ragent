@@ -1,4 +1,4 @@
-//! Default (mechanical) content generation — produces a summary, findings,
+//! Default (mechanical) content generation - produces a summary, findings,
 //! open questions, and cross-references when no LLM analysis engine is
 //! available.
 //!
@@ -17,6 +17,7 @@ use std::sync::OnceLock;
 fn implication_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
+        // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
         Regex::new(r"(?i)\*\*Implication:\*\*\s*([^\n]+)").expect("valid implication regex")
     })
 }
@@ -45,9 +46,7 @@ fn append_top_three_list(out: &mut String, header: &str, items: &[impl AsRef<str
 
 /// Build a mechanical summary string listing how many sources of each kind
 /// were captured, plus the top-3 titles/paths/spec-ids.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn default_summary(sources: &[Source], topic: &str) -> String {
+pub(crate) fn default_summary(sources: &[Source], topic: &str) -> String {
     let web = sources
         .iter()
         .filter(|s| matches!(s, Source::Web { .. }))
@@ -109,7 +108,7 @@ pub fn default_summary(sources: &[Source], topic: &str) -> String {
     append_top_three_list(&mut out, "**Prior specs cross-referenced:**", &spec_ids);
 
     out.push_str(
-        "\n\n_No LLM analysis was applied to these sources — the section above is a mechanical digest. Re-run with a configured model for a synthesized analysis._",
+        "\n\n_No LLM analysis was applied to these sources - the section above is a mechanical digest. Re-run with a configured model for a synthesized analysis._",
     );
     out
 }
@@ -135,9 +134,7 @@ fn finding_template(
 
 /// Build per-source findings (one per web/local/spec source) when no LLM
 /// analysis engine is available.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
+pub(crate) fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
     let mut out = Vec::new();
     let web: Vec<&Source> = sources
         .iter()
@@ -190,7 +187,7 @@ pub fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
                  The web source **{label}** from <{url}> contributes an external perspective that may confirm, contradict, or extend what the local codebase reveals. \
                  Because this is a publicly available source, its authority and recency should be weighed against any in-project evidence: a web source that \
                  predates a recent code change may describe stale behavior, while a freshly published source may capture the current state more accurately. \
-                 The excerpt captured from the source — \"{excerpt}\" — is a snapshot at fetch time and may not reflect subsequent edits; treat it as a point-in-time \
+                 The excerpt captured from the source - \"{excerpt}\" - is a snapshot at fetch time and may not reflect subsequent edits; treat it as a point-in-time \
                  observation rather than a permanent truth. When {web_count} web source(s) were gathered, this finding should be read alongside the others \
                  to identify areas of agreement and disagreement, and to triangulate the most reliable account. If no in-project file corroborates this \
                  web source, the finding should be treated as background context only and flagged as an open question for follow-up verification.",
@@ -255,12 +252,12 @@ pub fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
                 "This in-project evidence shows how '{topic}' touches the current codebase and is the strongest signal of immediate relevance. \
                  The file `{path}` was matched with relevance note `{relevance}`, meaning the local gatherer identified it as directly connected to the research topic. \
                  Unlike web sources, which provide external context, this local file is part of the project under investigation and its contents reflect the \
-                 actual implementation, configuration, or documentation as it exists right now. The excerpt — \"{excerpt}\" — is a verbatim snapshot from \
+                 actual implementation, configuration, or documentation as it exists right now. The excerpt - \"{excerpt}\" - is a verbatim snapshot from \
                  the file, so it can be trusted as a primary source for the current state of the codebase. However, the excerpt is limited to the matching \
                  lines and their immediate context; the full file may contain additional relevant material outside the captured region. When {local_count} \
                  local file(s) were gathered, this finding should be cross-referenced with the others to build a complete picture of how the topic \
                  manifests across the project. If web sources were also captured, compare the local implementation against the external descriptions to \
-                 identify gaps, drift, or contradictions — these are the most actionable findings because they point to concrete changes that may be needed.",
+                 identify gaps, drift, or contradictions - these are the most actionable findings because they point to concrete changes that may be needed.",
                 path = path,
                 relevance = relevance,
                 excerpt = excerpt,
@@ -317,7 +314,7 @@ pub fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
                  drawn from newer sources. The spec `{spec_id}` (noted as: {note}) represents a deliberate design decision made by the project team, \
                  and its requirements carry more authority than a single web source because it reflects the project's intended direction. When evaluating \
                  newer evidence from web or local sources, any conclusion that conflicts with this spec should be treated as a potential deviation that \
-                 needs explicit resolution — either the spec should be updated to reflect the new reality, or the code should be brought back into \
+                 needs explicit resolution - either the spec should be updated to reflect the new reality, or the code should be brought back into \
                  compliance. The spec may also define acceptance criteria, constraints, or non-functional requirements that are not visible in the \
                  code excerpt alone, so it should be consulted alongside any implementation changes. When {spec_count} spec(s) were cross-referenced, \
                  each one should be checked for overlap or conflict with the others; specs that address the same concern from different angles may \
@@ -342,7 +339,7 @@ pub fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
             "Without captured web pages, local files, or prior specs, the research cannot yet support a substantive conclusion. \
              The gathering phase attempted to find relevant material for the topic '{topic}' but returned empty results from all source types: \
              no web pages were fetched, no in-project files matched the search keywords, and no prior specifications were cross-referenced. \
-             This means the research is in an evidence vacuum — any conclusion drawn without sources would be speculation rather than analysis. \
+             This means the research is in an evidence vacuum - any conclusion drawn without sources would be speculation rather than analysis. \
              There are several possible reasons for the empty result: the topic may be too narrow or use terminology that does not appear in the \
              codebase or on the web; the web search tools may have failed to return results due to network issues or rate limits; the local file \
              gatherer may not have found keyword matches because the relevant code uses different naming conventions; or there may genuinely be \
@@ -362,9 +359,7 @@ pub fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
     out
 }
 
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn default_top_implications(findings: &[String], topic: &str) -> Vec<String> {
+pub(crate) fn default_top_implications(findings: &[String], topic: &str) -> Vec<String> {
     // Try to extract the first sentence from each finding's **Implication:** paragraph.
     let re = implication_re();
     let mut extracted: Vec<String> = findings
@@ -406,12 +401,10 @@ pub fn default_top_implications(findings: &[String], topic: &str) -> Vec<String>
 /// Build a per-source bullet title + short excerpt suitable for embedding
 /// in the Findings section when no LLM analysis is available. Returns an
 /// empty string when the body is empty / unavailable.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn body_excerpt(body: &str, max_chars: usize) -> String {
-    // Strip the "Excerpt — N keyword match(es)" header that the local
+pub(crate) fn body_excerpt(body: &str, max_chars: usize) -> String {
+    // Strip the "Excerpt - N keyword match(es)" header that the local
     // gatherer prepends so we don't double-print it in the Findings section.
-    let stripped = body.strip_prefix("Excerpt —").map_or(body, |rest| {
+    let stripped = body.strip_prefix("Excerpt -").map_or(body, |rest| {
         rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == ' ' || c == '\n')
     });
     // Strip markdown code fences (e.g. ```text) that can appear at the start
@@ -434,19 +427,17 @@ pub fn body_excerpt(body: &str, max_chars: usize) -> String {
     if collapsed.chars().count() <= max_chars {
         collapsed
     } else {
-        // Reserve one character for the ellipsis so the total output never
-        // exceeds the requested limit.
-        let budget = max_chars.saturating_sub(1);
+        // Reserve three characters for the ASCII ellipsis so the total output
+        // never exceeds the requested limit.
+        let budget = max_chars.saturating_sub(3);
         let mut out: String = collapsed.chars().take(budget).collect();
-        out.push('…');
+        out.push_str("...");
         out
     }
 }
 
 /// Build default open-questions bullets when no LLM analysis is available.
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn default_open_questions(sources: &[Source], topic: &str) -> Vec<String> {
+pub(crate) fn default_open_questions(sources: &[Source], topic: &str) -> Vec<String> {
     let mut out = Vec::new();
     let web = sources
         .iter()
@@ -462,21 +453,21 @@ pub fn default_open_questions(sources: &[Source], topic: &str) -> Vec<String> {
         .count();
     if sources.is_empty() {
         out.push(format!(
-            "Why was nothing captured for '{topic}' — was a tool unavailable, the topic too narrow, or the search query off?"
+            "Why was nothing captured for '{topic}' - was a tool unavailable, the topic too narrow, or the search query off?"
         ));
     } else {
         if web == 0 {
-            out.push("No web sources were captured — was `websearch` unavailable, or does the topic lack good public references?".into());
+            out.push("No web sources were captured - was `websearch` unavailable, or does the topic lack good public references?".into());
         }
         if local == 0 {
             out.push(
-                "No in-project files matched — is there a code path or doc the topic should touch that grep did not surface?"
+                "No in-project files matched - is there a code path or doc the topic should touch that grep did not surface?"
                     .into(),
             );
         }
         if spec == 0 {
             out.push(
-                "No prior specs were cross-referenced — is the topic genuinely new, or were existing specs filtered out by the keyword match?"
+                "No prior specs were cross-referenced - is the topic genuinely new, or were existing specs filtered out by the keyword match?"
                     .into(),
             );
         }
@@ -489,9 +480,7 @@ pub fn default_open_questions(sources: &[Source], topic: &str) -> Vec<String> {
 
 /// Extract `CrossReference` entries from local sources.
 #[allow(dead_code)]
-// reason: only consumed inside this crate - `pub` here never escapes the crate.
-#[allow(unreachable_pub)]
-pub fn cross_references_from(sources: &[Source]) -> Vec<CrossReference> {
+pub(crate) fn cross_references_from(sources: &[Source]) -> Vec<CrossReference> {
     sources
         .iter()
         .filter_map(|s| match s {

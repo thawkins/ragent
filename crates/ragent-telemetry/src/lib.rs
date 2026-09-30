@@ -18,7 +18,7 @@
 //! # Dependency policy (NFR-001)
 //!
 //! The crate depends only on `ragent-types`, `ragent-config`, `opentelemetry`,
-//! `opentelemetry-otlp`, and `tokio` — no additional heavyweight dependencies.
+//! `opentelemetry-otlp`, and `tokio` - no additional heavyweight dependencies.
 //!
 //! [`SdkMeterProvider`]: https://docs.rs/opentelemetry/0.27/opentelemetry/sdk/metrics/struct.SdkMeterProvider.html
 

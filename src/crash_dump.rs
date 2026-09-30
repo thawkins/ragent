@@ -2,7 +2,7 @@
 //!
 //! ragent's [`crate::panic_hook`] writes a full report for *unwinding* panics,
 //! but a stack overflow is not one: once the guard page is hit the Rust runtime
-//! prints `thread '...' has overflowed its stack` and calls `abort()`. Nothing
+//! prints `thread "..." has overflowed its stack` and calls `abort()`. Nothing
 //! after that point runs in-process, so the only place a stack overflow can be
 //! trapped is outside the process.
 //!
@@ -11,7 +11,7 @@
 //! session identity (pid, executable, args, working directory, thread name) and
 //! marks the session as *running*; a clean shutdown overwrites the marker with
 //! a `clean exit` record. If the next ragent start finds a session still marked
-//! `running` whose pid is gone, the previous run died without unwinding —
+//! `running` whose pid is gone, the previous run died without unwinding -
 //! an abort, a stack overflow, a SIGKILL, or a `std::process::exit`.
 //!
 //! The record also carries the platform's core-dump *retrieval command* so the
@@ -21,7 +21,44 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+
 use serde::{Deserialize, Serialize};
+
+/// Create (or truncate) `path` owner-only (mode `0o600` on Unix).
+///
+/// ANTIPAT A-02/A-03: the crash marker, panic reports, and the stderr spool
+/// were all created with the process umask (typically `0644`), so a crash or
+/// panic record - which carries the full argv - was world-readable. Every
+/// crash-path file is created owner-only, and a pre-existing file has its mode
+/// re-asserted (`mode()` only applies at creation).
+///
+/// # Errors
+///
+/// Returns the underlying [`std::io::Error`] when the file cannot be created.
+pub fn create_owner_only(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        // `mode(0o600)` only applies at creation; tighten a pre-existing file.
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600)); // INTENTIONAL: best-effort permission tighten (mode set at create)
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+    }
+}
 
 /// Session marker written to `log/panics/last-crash.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,7 +145,13 @@ pub fn write_record(working_dir: &Path, status: &str) -> std::io::Result<PathBuf
         exe: std::env::current_exe()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "<unknown>".to_string()),
-        args: std::env::args().collect(),
+        // ANTIPAT A-02: argv can carry a credential (`ragent auth openai sk-...`,
+        // `--model ...sk-...`), and this record is written to disk. Route every
+        // argument through the shared redactor so the marker never stores a
+        // secret in plain text.
+        args: std::env::args()
+            .map(|a| ragent_types::sanitize::redact_secrets(&a))
+            .collect(),
         cwd: working_dir.display().to_string(),
         status: status.to_string(),
         thread: std::thread::current().name().unwrap_or("main").to_string(),
@@ -117,7 +160,7 @@ pub fn write_record(working_dir: &Path, status: &str) -> std::io::Result<PathBuf
     };
     let json = serde_json::to_string_pretty(&record)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let mut file = std::fs::File::create(&path)?;
+    let mut file = create_owner_only(&path)?;
     file.write_all(json.as_bytes())?;
     file.write_all(b"\n")?;
     Ok(path)
@@ -164,43 +207,5 @@ fn process_alive(pid: u32) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn record_round_trips_and_reports_running() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        write_record(dir.path(), "running").expect("write");
-
-        let path = record_path(dir.path());
-        let content = std::fs::read_to_string(&path).expect("read");
-        let record: CrashRecord = serde_json::from_str(&content).expect("parse");
-        assert_eq!(record.pid, std::process::id());
-        assert_eq!(record.status, "running");
-        assert!(record.is_unclean());
-        assert!(!record.core_dump_hint.is_empty());
-    }
-
-    #[test]
-    fn clean_exit_is_not_reported_as_unclean() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        write_record(dir.path(), "clean exit").expect("write");
-
-        assert!(previous_unclean_exit(dir.path()).expect("scan").is_none());
-    }
-
-    #[test]
-    fn live_pid_is_not_reported_as_unclean() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        // The record names this very process, which is obviously still alive.
-        write_record(dir.path(), "running").expect("write");
-
-        assert!(previous_unclean_exit(dir.path()).expect("scan").is_none());
-    }
-
-    #[test]
-    fn missing_marker_reports_nothing() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        assert!(previous_unclean_exit(dir.path()).expect("scan").is_none());
-    }
-}
+#[path = "../tests/inline/crash_dump_tests.rs"]
+mod tests;

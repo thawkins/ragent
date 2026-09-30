@@ -7,9 +7,11 @@ pub mod git;
 pub mod github;
 pub mod gitlab;
 pub mod http_client;
+pub mod limits;
 pub mod percent;
 pub mod registry;
 pub mod vcs_provider;
+pub mod vocab;
 
 use anyhow::Result;
 use ragent_types::llm::ToolDefinition;

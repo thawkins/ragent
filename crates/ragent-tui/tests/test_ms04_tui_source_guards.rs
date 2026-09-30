@@ -22,10 +22,25 @@ fn alog_run_id_is_character_validated() {
 
 #[test]
 fn log_window_spool_is_owner_only_on_unix() {
-    let source = read("src/app/session_ops.rs");
-    let mentions = source.matches("Permissions::from_mode(0o600)").count();
+    // ANTIPAT M3.15 / M6.9: the spool writers share
+    // `app::helpers::open_owner_only`, which owns the 0600 create-and-tighten
+    // logic, via the thin `open_log_spool` wrapper. Assert that the shared
+    // helper re-asserts 0600, that `open_log_spool` delegates to it, and that
+    // every spool writer routes through the wrapper rather than opening the
+    // file directly.
+    let helper = read("src/app/helpers.rs");
     assert!(
-        mentions >= 2,
-        "both spool writers must re-assert 0600, found {mentions}"
+        helper.contains("Permissions::from_mode(0o600)") && helper.contains("OpenOptionsExt"),
+        "the shared owner-only helper must set and re-assert 0600"
+    );
+    assert!(
+        helper.contains("fn open_log_spool") && helper.contains("open_owner_only(path, false)"),
+        "open_log_spool must delegate to open_owner_only"
+    );
+    let source = read("src/app/session_ops.rs");
+    let calls = source.matches("open_log_spool").count();
+    assert!(
+        calls >= 2,
+        "both spool writers must route through open_log_spool, found {calls}"
     );
 }

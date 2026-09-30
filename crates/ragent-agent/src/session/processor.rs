@@ -5,10 +5,10 @@
 //! until the model signals completion or the step limit is reached.
 //!
 //! The free-standing helpers that support the loop live in sibling modules:
-//! - [`crate::session::stream_buffer`] — stream buffering and stall detection,
-//! - [`crate::session::prompt_builders`] — system-prompt / tool-reference builders,
-//! - [`crate::session::permissions`] — bash splitting and permission prompting,
-//! - [`crate::session::history`] — history↔chat conversion, token-overflow and
+//! - [`crate::session::stream_buffer`] - stream buffering and stall detection,
+//! - [`crate::session::prompt_builders`] - system-prompt / tool-reference builders,
+//! - [`crate::session::permissions`] - bash splitting and permission prompting,
+//! - [`crate::session::history`] - history<->chat conversion, token-overflow and
 //!   stream-error classification.
 
 use std::collections::HashMap;
@@ -56,19 +56,19 @@ pub use crate::session::prompt_builders::build_detailed_tool_reference_section;
 
 /// Maximum wall-clock time a single tool call may run before the watchdog
 /// aborts it and terminates the agent run (2000 seconds).
-const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(2000); // ≈ 33m 20s
+const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(2000); // ~= 33m 20s
 
 /// Nudge injected when a sub-agent's loop terminates with a short text-only
 /// response after prior tool-use steps. The model often produces narration
-/// ("Now let me check …") as a text-only message without a tool call, causing
-/// the loop to treat it as the final answer — even though no findings report
+/// ("Now let me check ...") as a text-only message without a tool call, causing
+/// the loop to treat it as the final answer - even though no findings report
 /// was ever produced. This nudge asks the model to emit its complete findings
 /// immediately and then end the run with `agent_complete` (the mandatory
 /// sub-agent completion signal) so the deliverable is not lost.
 const SUBAGENT_SUMMARY_NUDGE: &str = "System note: you stopped calling tools \
      and produced a short narrative message instead of your findings report. \
      Do NOT call any other tools. Produce your complete written findings \
-     report NOW — all issues, ranked by impact, with file, line numbers, and \
+     report NOW - all issues, ranked by impact, with file, line numbers, and \
      concrete fixes. This is the deliverable. Then end your run with \
      agent_complete(summary: \"<the findings>\") as your final action.";
 
@@ -168,7 +168,7 @@ fn writes_in_spec_dir(
 /// Similarity is deliberately cheap: case-insensitive equality, prefix match,
 /// containment, or a small edit distance against the registry's tool list.
 /// Structural matches (equality/prefix/containment) always outrank edit
-/// distance, and among equals the smallest distance wins — a `find` over
+/// distance, and among equals the smallest distance wins - a `find` over
 /// registry order would otherwise let a loose containment match on an
 /// early-listed tool beat a minimal-distance match later on.
 fn unknown_tool_error(registry: &crate::tool::ToolRegistry, name: &str) -> anyhow::Error {
@@ -436,9 +436,9 @@ pub struct SessionProcessor {
     /// Uses `OnceLock` to break the circular dependency with `TeamManager`.
     pub team_manager: std::sync::OnceLock<Arc<crate::team::TeamManager>>,
     /// M8-T1: cache for `resolve_team_context_for_session`. Maps session id
-    /// → `(TeamContext, Instant)` with a 5-second TTL. Invalidated on team
+    /// -> `(TeamContext, Instant)` with a 5-second TTL. Invalidated on team
     /// create/join/leave. Avoids scanning every team directory on every
-    /// message (O(teams) → O(1) amortised).
+    /// message (O(teams) -> O(1) amortised).
     pub team_context_cache: std::sync::Arc<
         parking_lot::RwLock<
             std::collections::HashMap<String, (crate::tool::TeamContext, std::time::Instant)>,
@@ -526,7 +526,7 @@ pub struct SessionProcessor {
     pub telemetry: Arc<crate::telemetry::TelemetrySubsystem>,
     /// Per-session cache of invoked skill bodies (FR-008).
     ///
-    /// Maps skill name → processed body text. Populated on demand when a skill
+    /// Maps skill name -> processed body text. Populated on demand when a skill
     /// is invoked, so repeated invocations of the same skill within a session
     /// avoid re-reading the `SKILL.md` body from disk. The cache is a
     /// best-effort optimisation: a miss simply triggers a fresh load.
@@ -560,7 +560,7 @@ pub struct SessionProcessor {
     >,
     /// C-001: cached skill registry keyed by the mtimes of the scanned
     /// skill directories plus the `extra_dirs` list. `SkillRegistry::load`
-    /// does synchronous `std::fs` walks + `serde_yaml` parses across up to
+    /// does synchronous `std::fs` walks + `serde_norway` parses across up to
     /// 7 directories on every turn; caching it here (invalidated when any
     /// contributing directory's mtime changes) eliminates that per-turn
     /// disk I/O.
@@ -580,7 +580,7 @@ pub struct SessionProcessor {
     /// [`SessionProcessor::clear_loop`]. The permission layer consults the
     /// spec before every tool execution to enforce the loop's tool-set
     /// restriction (FR-008/FR-009), read-only constraints (FR-021), and
-    /// scope boundaries (FR-022) — denials return observations to the model.
+    /// scope boundaries (FR-022) - denials return observations to the model.
     /// T-003: the stored spec carries the resolved budgets (spec value or
     /// the `loop` config default) so consumers see effective limits.
     pub active_loop_specs:
@@ -642,7 +642,7 @@ pub struct CachedSkillRegistry {
 /// `file_mtines` records `(path, mtime)` for every entry in
 /// [`Config::config_paths`]. The cache is valid while none of those mtimes
 /// change. `env_overrides_present` records whether either
-/// `RAGENT_CONFIG` or `RAGENT_CONFIG_CONTENT` was set at load time — when
+/// `RAGENT_CONFIG` or `RAGENT_CONFIG_CONTENT` was set at load time - when
 /// set, the cache is bypassed on the next load because env vars have no
 /// mtime to track.
 #[derive(Clone)]
@@ -711,14 +711,14 @@ impl SessionProcessor {
     ///
     /// Registers a [`LoopTracker`] initialised from `spec` so the agent
     /// loop enforces the loop stop conditions (FR-010, FR-013, FR-014).
-    /// T-003: budget fallbacks are resolved here — when the spec leaves a
+    /// T-003: budget fallbacks are resolved here - when the spec leaves a
     /// budget unset, the loop config defaults (`ragent-config` T-002:
     /// `loop.max_steps`, `loop.cost_limit`) apply, so the pre-request
     /// budget gates in the agent loop always have limits to enforce. An
     /// explicitly configured spec value wins over the config default.
     /// Starting a loop for a session that already has one replaces the
     /// previous tracker. The tracker is removed when the loop terminates
-    /// (any stop condition) — plain chat turns have no entry and behave
+    /// (any stop condition) - plain chat turns have no entry and behave
     /// exactly as before.
     pub async fn start_loop(&self, session_id: &str, mut spec: LoopSpec) {
         // T-003 (FR-013, FR-014): a `None` budget in the spec means "the
@@ -782,7 +782,7 @@ impl SessionProcessor {
                 self.event_bus.publish(Event::AgentNotice {
                     session_id: session_id.to_string(),
                     message: "loop: workspace is not inside a git repository \
-                              — rollback will be snapshot-only. Confirm to \
+                              - rollback will be snapshot-only. Confirm to \
                               continue."
                         .to_string(),
                 });
@@ -819,7 +819,7 @@ impl SessionProcessor {
         self.active_loops.write().await.remove(session_id);
         self.active_loop_specs.write().await.remove(session_id);
         self.active_loop_interrupts.write().remove(session_id);
-        // T-012: an explicit clear discards the pre-loop capture as well —
+        // T-012: an explicit clear discards the pre-loop capture as well -
         // there is no pending rollback offer to honour.
         self.active_loop_captures.write().await.remove(session_id);
     }
@@ -849,8 +849,8 @@ impl SessionProcessor {
     /// Arm the pre-loop workspace capture for `session_id`'s loop run
     /// (FR-018, T-012), unless it is already armed.
     ///
-    /// Called at the first-write safe point — immediately before the loop's
-    /// first write action executes — so the snapshot records the workspace
+    /// Called at the first-write safe point - immediately before the loop's
+    /// first write action executes - so the snapshot records the workspace
     /// exactly as the loop found it. A no-op when no loop run exists for the
     /// session or when the capture already holds a snapshot.
     ///
@@ -906,7 +906,7 @@ impl SessionProcessor {
     /// The capture is removed only *after* the restore has fully completed:
     /// the TUI's spawned rollback task deposits its outcome into the
     /// `rollback_result` mailbox when this call returns, and the UI then reads
-    /// the workspace files — a caller that observes the capture map becoming
+    /// the workspace files - a caller that observes the capture map becoming
     /// empty must already see the pre-loop contents on disk (CI regression:
     /// `test_rollback_accept_restores_snapshot`; cover:
     /// `test_rollback_loop_file_is_restored_when_the_call_returns`). On a
@@ -1038,7 +1038,7 @@ impl SessionProcessor {
     /// Shared termination path: take the tracker out of the active map,
     /// optionally tally the final exchange's tokens, apply the stop
     /// condition (first stop wins, FR-017), publish
-    /// [`Event::LoopTerminated`] exactly once, and — T-017 (FR-025) —
+    /// [`Event::LoopTerminated`] exactly once, and - T-017 (FR-025) -
     /// record the loop telemetry (`iterations` + `duration_ms`) exactly
     /// once per run when `run_start` is supplied.
     ///
@@ -1059,7 +1059,7 @@ impl SessionProcessor {
     ) -> Option<crate::session::loop_state::StopCondition> {
         let mut tracker = self.active_loops.write().await.remove(session_id)?;
         self.active_loop_specs.write().await.remove(session_id);
-        // T-011 (FR-016): the run is over — drop its interrupt flag.
+        // T-011 (FR-016): the run is over - drop its interrupt flag.
         self.active_loop_interrupts.write().remove(session_id);
         if let Some((input_tokens, output_tokens)) = final_tokens {
             tracker.record_tokens(input_tokens, output_tokens);
@@ -1077,7 +1077,7 @@ impl SessionProcessor {
             verification,
             reason,
         });
-        // T-017 (FR-025): record the loop telemetry exactly once per run —
+        // T-017 (FR-025): record the loop telemetry exactly once per run -
         // the iteration count and total duration via the existing agent-loop
         // instruments, plus the per-iteration tool-call tally published as
         // the per-session tool-call total.
@@ -1186,7 +1186,7 @@ impl SessionProcessor {
     /// hard-deny, tool panic, context overflow, watchdog abort).
     ///
     /// Publishes the loop-termination event with termination status `error`
-    /// and the surfaced failure reason; the failed stage is not retried —
+    /// and the surfaced failure reason; the failed stage is not retried -
     /// the caller propagates the error so the turn ends. A no-op when no
     /// loop is active for `session_id` (plain chat turns are unaffected).
     async fn terminate_loop_on_fatal_error(
@@ -1239,7 +1239,7 @@ impl SessionProcessor {
     ///
     /// This is a no-op when [`ragent_config::activity_log::is_enabled`]
     /// returns `false` or when no [`ActivityLog`] handle has been wired.
-    /// Errors are logged at `warn` level and never propagated — activity
+    /// Errors are logged at `warn` level and never propagated - activity
     /// logging is best-effort and must never break the agent loop.
     ///
     /// PERF-040: the append is queued onto the background writer task
@@ -1247,7 +1247,7 @@ impl SessionProcessor {
     /// `spawn_blocking`. The writer drains the queue in batches, so a turn's
     /// many events collapse into a small number of blocking-thread hops and no
     /// per-event task is created. When the writer is not running (no store
-    /// wired), the append is dropped — matching the previous no-op behaviour.
+    /// wired), the append is dropped - matching the previous no-op behaviour.
     ///
     /// The closure returns `Option<ActivityEvent>` so a batch closure that
     /// appends several events can yield just the last one (or `None`).
@@ -1737,7 +1737,7 @@ impl SessionProcessor {
         // 2. Prepare LLM client, config, working dir, team context
         // T-007 (FR-011): a stage failure before the loop body (missing
         // model/provider, unusable key, client construction failure) is an
-        // unrecoverable provider-stage error — terminate an active loop with
+        // unrecoverable provider-stage error - terminate an active loop with
         // status `error` and surface the reason; no retry of the stage.
         let turn = match self
             .prepare_client(session_id, &user_msg.id, agent, &profiler)
@@ -1905,7 +1905,7 @@ impl SessionProcessor {
         self.event_bus.set_step(session_id, 0);
         // T-009 (FR-008): when a goal-driven loop with a configured tool set
         // is active, the loop's tool surface is exactly that set plus the
-        // mandatory safety tools — other tools stay visible to the rest of
+        // mandatory safety tools - other tools stay visible to the rest of
         // the application but are not offered to this loop's requests.
         let loop_tool_set: Option<std::collections::HashSet<String>> = {
             let specs = self.active_loop_specs.read().await;
@@ -1973,8 +1973,8 @@ impl SessionProcessor {
         let mut subagent_summary_nudged = false;
         // M-008 (amended): count of assistant parts at the last interim save.
         // Parts are only ever pushed or popped (stream deltas, per-call
-        // tool-call appends, the sub-agent narration nudge) — never mutated in
-        // place — so the count alone is a sufficient save gate. Tool-call
+        // tool-call appends, the sub-agent narration nudge) - never mutated in
+        // place - so the count alone is a sufficient save gate. Tool-call
         // parts are included so the child session's SQLite row stays in step
         // with the run and the TUI output-view overlay can render steps live.
         let mut last_interim_parts_count: Option<usize> = None;
@@ -2032,7 +2032,7 @@ impl SessionProcessor {
                     .as_ref()
                     .is_some_and(|flag| flag.load(Ordering::Relaxed))
         };
-        // T-011 (FR-016): set when a safe-point interrupt check fired — the
+        // T-011 (FR-016): set when a safe-point interrupt check fired - the
         // post-loop handler persists the partial turn and ends it normally.
         let mut loop_interrupted = false;
         // FR-033: how many times a blocking Stop hook has already been fed back
@@ -2055,7 +2055,7 @@ impl SessionProcessor {
                     break;
                 }
             }
-            // T-011 (FR-016): inter-stage safe point — an interrupt raised
+            // T-011 (FR-016): inter-stage safe point - an interrupt raised
             // since the last stage boundary aborts the loop before any
             // further stage runs, ahead even of the budget gate (first stop
             // wins; the user's intervention takes precedence).
@@ -2071,7 +2071,7 @@ impl SessionProcessor {
             }
             if let Some(tracker) = loop_tracker.as_mut() {
                 if !tracker.begin_step() {
-                    // FR-013/FR-014: the step or token budget was reached —
+                    // FR-013/FR-014: the step or token budget was reached -
                     // terminate with `budget_exhausted` before sending
                     // another LLM request.
                     let breach = tracker
@@ -2165,12 +2165,13 @@ impl SessionProcessor {
                     .map(Some)
                 })
                 .await;
+                tokio::task::yield_now().await;
                 publish_run_cost_summary(total_elapsed_ms);
                 return Ok(Message::new(session_id, Role::Assistant, vec![]));
             }
             debug!("Agent loop step {}/{}", step, max_steps);
 
-            // P-4: only publish `ToolsSent` on the first step of the turn —
+            // P-4: only publish `ToolsSent` on the first step of the turn -
             // the TUI only renders the tool list once and the previous form
             // cloned ~111 `String`s (or cloned the cached `Arc<[String]>`
             // into a `Vec<String>`) on every step. When `cached_tool_names`
@@ -2188,23 +2189,23 @@ impl SessionProcessor {
                 });
             }
 
-            // Maybe compact (per-iteration pre-send check) — T-008, FR-003,
+            // Maybe compact (per-iteration pre-send check) - T-008, FR-003,
             // FR-006, FR-008. When `compaction.auto` is enabled and compaction
             // has not already run this turn, estimate the request token load
-            // and — if it exceeds `context_window - max(output, buffer)` —
+            // and - if it exceeds `context_window - max(output, buffer)` -
             // invoke the OpenCode-derived summarisation runner before sending
             // the user prompt to the LLM.
             let llm_request_start = std::time::Instant::now();
 
             if turn.session_config.compaction.auto && !compaction_attempted_this_turn {
                 // Skip the local estimate when the provider already reported
-                // input tokens for the previous turn — `evaluate_trigger`
+                // input tokens for the previous turn - `evaluate_trigger`
                 // prefers the provider value, so the local estimate is pure
                 // wasted work (it serialises every message + tool definition).
                 let estimate = if last_reported_input_tokens > 0 {
                     0
                 } else {
-                    // PERF-036: incremental estimate — only changed messages are
+                    // PERF-036: incremental estimate - only changed messages are
                     // re-costed; the tool term reuses the caller's cached byte
                     // hint so ~111 schemas are not re-serialised each step.
                     token_tracker.estimate(
@@ -2324,7 +2325,7 @@ impl SessionProcessor {
             // T-007 (FR-011): an exhausted LLM-stage failure (transport error
             // after the internal retry budget, permanent API error, context
             // overflow that no compaction path could recover) is unrecoverable
-            // — terminate an active loop with status `error`, surface the
+            // - terminate an active loop with status `error`, surface the
             // reason, and stop without another request.
             let mut llm_result = match self
                 .call_llm_step(
@@ -2456,14 +2457,14 @@ impl SessionProcessor {
                 }
             }
 
-            // No tool calls — the loop ends here. The agent's text response
+            // No tool calls - the loop ends here. The agent's text response
             // is the final answer for this turn.
             if llm_result.tool_calls.is_empty() {
                 // Sub-agent premature-termination guard: when a sub-agent that
                 // was actively calling tools (step > 1 implies prior tool-use
                 // steps, otherwise the loop would have broken earlier) produces
                 // a SHORT text-only response, it is almost always narration
-                // ("Now let me check …") rather than the findings report. The
+                // ("Now let me check ...") rather than the findings report. The
                 // model forgot to call a tool or emit findings, and the loop
                 // would silently accept the narration as the deliverable.
                 //
@@ -2480,7 +2481,7 @@ impl SessionProcessor {
                     self.event_bus.publish(Event::AgentNotice {
                         session_id: session_id.to_string(),
                         message: "Sub-agent ended with a short text-only \
-                                 response after tool work — nudging it to \
+                                 response after tool work - nudging it to \
                                  produce its findings report."
                             .to_string(),
                     });
@@ -2518,7 +2519,7 @@ impl SessionProcessor {
                 }
                 // T-005 (FR-007, FR-010): the verification gate. A
                 // no-tool-call response from a loop with a verification
-                // command does not complete the run directly — the command's
+                // command does not complete the run directly - the command's
                 // exit status decides. Success terminates with `completed`;
                 // failure with steps remaining appends the failure output as
                 // an observation and continues; failure with the budget
@@ -2620,7 +2621,7 @@ impl SessionProcessor {
                 }
                 // Goal-driven loop stop condition 1 (FR-010): a no-tool-call
                 // response with no verification command means the goal was
-                // reached — terminate with `GoalAchieved`, publish
+                // reached - terminate with `GoalAchieved`, publish
                 // `Event::LoopTerminated`, and stop.
                 self.terminate_loop_inner(
                     session_id,
@@ -2666,7 +2667,7 @@ impl SessionProcessor {
             }
 
             // T-011 (FR-016): safe point between the LLM response and the
-            // tool phase — an interrupt raised while the model was responding
+            // tool phase - an interrupt raised while the model was responding
             // aborts the run before any tool executes.
             if loop_tracker.is_some() && interrupt_requested(&cancel_flag) {
                 self.terminate_loop_on_interrupt(
@@ -2682,7 +2683,7 @@ impl SessionProcessor {
             // Tool dispatch phase (kept inline due to closure complexity)
             {
                 let _scope = profiler.scope("loop.tool_phase.total");
-                // P-17: clear the reused per-step buffers (cheap — the
+                // P-17: clear the reused per-step buffers (cheap - the
                 // allocations from the previous step are retained).
                 assistant_content_parts.clear();
                 tool_result_parts.clear();
@@ -2777,7 +2778,7 @@ impl SessionProcessor {
                 // task as a fallback (PERFPLAN Milestone D risk note).
                 let mut batch_entries: Vec<ragent_types::event::ToolCallBatchEntry> = Vec::new();
                 // T-007 (FR-011): set when a tool task panicked or failed to
-                // join — an unrecoverable failure that terminates an active
+                // join - an unrecoverable failure that terminates an active
                 // loop after the tool phase. Panics discovered OUTSIDE the
                 // result handler are staged here first: the closure captures
                 // `tool_panic` mutably, so direct writes elsewhere are
@@ -3046,7 +3047,7 @@ impl SessionProcessor {
                         }
                     }
                     // B2: the loop restriction must run even when the args
-                    // JSON failed to parse — fail closed. Unparseable args
+                    // JSON failed to parse - fail closed. Unparseable args
                     // used to be coerced to `{}`, letting path-based scope
                     // checks pass vacuously.
                     let loop_restriction_input = match &parsed_input {
@@ -3063,7 +3064,7 @@ impl SessionProcessor {
                         });
                         event_bus.increment_tool_calls(&session_id_str);
                         // T-010 (FR-015): the destructive-action checkpoint
-                        // applies per call — only when the loop has
+                        // applies per call - only when the loop has
                         // checkpoints enabled AND this invocation is marked
                         // destructive (deletion, config write, dependency
                         // installation, destructive git). Plain write tools
@@ -3078,10 +3079,10 @@ impl SessionProcessor {
                         // A violation returns a denial observation to the
                         // model instead of executing the tool. This check is
                         // unconditional: it applies in auto-approve / YOLO
-                        // mode too (FR-024 — the permission layer is always
+                        // mode too (FR-024 - the permission layer is always
                         // in the path).
                         if let Some(spec) = &loop_spec {
-                            // B2: unparseable args fail closed — a denied
+                            // B2: unparseable args fail closed - a denied
                             // call is returned to the model instead of
                             // silently evaluating the restriction against
                             // `{}`.
@@ -3216,7 +3217,7 @@ impl SessionProcessor {
                             Ok(permit) => permit,
                             Err(e) => {
                                 let err_msg = format!("tool permit acquisition failed: {e}");
-                                // C3: close out the UI tool call — no
+                                // C3: close out the UI tool call - no
                                 // `ToolCallEnd` is published on this early
                                 // return, which used to leave the TUI spinner
                                 // stuck on the in-flight call.
@@ -3386,7 +3387,7 @@ impl SessionProcessor {
                         // tool call fails with a permission error, the TUI
                         // drains the event queue in the same wake as the
                         // `PermissionReplied` handler and re-renders the
-                        // chat — removing the in-flight ToolCall part that
+                        // chat - removing the in-flight ToolCall part that
                         // `ToolCallStart` created (the pending prompt is
                         // gone, so the part is no longer protected). The
                         // already-queued `ToolCallArgs` then finds no part
@@ -3631,7 +3632,7 @@ impl SessionProcessor {
                                 // message, and the only remaining `Err` here is
                                 // `WatchdogAbort`, which is paired with
                                 // `stalled_tool` and handled above. If this arm
-                                // ever fires, log LOUDLY — it means the wrapper
+                                // ever fires, log LOUDLY - it means the wrapper
                                 // contract was broken.
                                 warn!(error = %e, "unreachable: tool task returned Err without a stalled-tool identity; wrapper contract violated");
                                 staged_tool_panic = Some(e.to_string());
@@ -3856,7 +3857,7 @@ impl SessionProcessor {
                                     .or(task.error.as_deref())
                                     .unwrap_or("(no output)");
                                 let mut text = format!(
-                                    "[Background Task {status_label}: {} — {}]\n\n{body}",
+                                    "[Background Task {status_label}: {} - {}]\n\n{body}",
                                     task.agent_name,
                                     task.id.chars().take(8).collect::<String>()
                                 );
@@ -3867,7 +3868,7 @@ impl SessionProcessor {
                                 // tool instead of re-running the sub-agent.
                                 if let Some(ref file) = task.output_file {
                                     text.push_str(&format!(
-                                        "\n\n(Full untruncated report: {} — read this \
+                                        "\n\n(Full untruncated report: {} - read this \
                                          file with the `read` tool if the output above \
                                          appears truncated.)",
                                         file.display()
@@ -3898,7 +3899,7 @@ impl SessionProcessor {
                                     .map(|c| format!("exit={c}"))
                                     .unwrap_or_else(|| "exit=?".to_string());
                                 let text = format!(
-                                    "[Background Shell Task {}: {} — {} ({})]\n\n{}",
+                                    "[Background Shell Task {}: {} - {} ({})]\n\n{}",
                                     task.status,
                                     task.command,
                                     task.task_id.chars().take(8).collect::<String>(),
@@ -3929,8 +3930,8 @@ impl SessionProcessor {
                 // re-serialises unchanged content is wasted work.
                 //
                 // Invariant: non-tool-call parts are only pushed (stream
-                // deltas) or popped (sub-agent narration nudge) — never
-                // mutated in place — and tool-call parts are appended once per
+                // deltas) or popped (sub-agent narration nudge) - never
+                // mutated in place - and tool-call parts are appended once per
                 // completed call, so the total count alone is a sufficient
                 // save gate; hashing the serialised parts (the previous P-12
                 // gate) re-serialised every tool-call input/output on every
@@ -3950,6 +3951,7 @@ impl SessionProcessor {
                     // re-synced wholesale on the final save. Rewriting the FTS
                     // index on every stream event (DELETE + re-INSERT) was the
                     // dominant cost of `storage.assistant_interim.update`.
+                    // INTENTIONAL: interim FTS write; the final save re-syncs wholesale
                     let _ = self
                         .storage_op(move |s| s.update_message_parts_skip_fts(&interim))
                         .await;
@@ -3986,6 +3988,7 @@ impl SessionProcessor {
                 .map(Some)
             })
             .await;
+            tokio::task::yield_now().await;
             publish_run_cost_summary(total_elapsed_ms);
             return Ok(Message::new(session_id, Role::Assistant, vec![]));
         }
@@ -4000,6 +4003,7 @@ impl SessionProcessor {
             let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
             assistant_msg.id = assistant_msg_id;
             let msg_id = assistant_msg.id.clone();
+            // INTENTIONAL: cancelled-turn persistence is best-effort
             let _ = self
                 .storage_op(move |s| s.update_message(&assistant_msg))
                 .await;
@@ -4018,9 +4022,10 @@ impl SessionProcessor {
                 .map(Some)
             })
             .await;
+            tokio::task::yield_now().await;
             publish_run_cost_summary(total_elapsed_ms);
             // T-007 (FR-011): a watchdog abort is an unrecoverable tool-stage
-            // failure — terminate an active loop with status `error`.
+            // failure - terminate an active loop with status `error`.
             let watchdog_err = anyhow::anyhow!(
                 "agent run terminated: tool call stalled beyond the {}s watchdog timeout",
                 TOOL_WATCHDOG_TIMEOUT.as_secs()
@@ -4068,6 +4073,15 @@ impl SessionProcessor {
         let iterations = self.event_bus.current_step(session_id);
         session_recorder.record_session_end();
         session_recorder.record_agent_loop(total_elapsed_ms as f64, iterations);
+        // Yield once before publishing the cost summary: the accumulator task
+        // is driven by `Event::TokenUsage` events on the bus, so on a fully
+        // mocked (fast) provider the loop can reach this point having been the
+        // only task polled since the final usage event. The yield lets the
+        // accumulator drain those events so the summary reports real tokens
+        // instead of zero. A single yield keeps the summary synchronous with
+        // the rest of the teardown (which the callers rely on) and cannot
+        // deadlock.
+        tokio::task::yield_now().await;
         publish_run_cost_summary(total_elapsed_ms);
         let end_reason = last_finish_reason.unwrap_or(FinishReason::Stop);
         // Record the terminal reason before publishing `MessageEnd` so a
@@ -4116,7 +4130,7 @@ impl SessionProcessor {
     ///
     /// Streams a one-shot init exchange to the UI so the user sees that the
     /// project guidelines were loaded. The exchanged messages are NOT added to
-    /// the persisted `chat_messages` history — this is purely a UI affordance.
+    /// the persisted `chat_messages` history - this is purely a UI affordance.
     ///
     /// # Errors
     ///
@@ -4167,7 +4181,7 @@ impl SessionProcessor {
         if already_done {
             return Ok(());
         }
-        // Resolve model / provider — bail silently if not configured yet.
+        // Resolve model / provider - bail silently if not configured yet.
         let model_ref = match agent.model.as_ref() {
             Some(m) => m,
             None => {
@@ -4265,7 +4279,7 @@ impl SessionProcessor {
                         Err(_) => {
                             tracing::warn!(
                                 session_id = %session_id,
-                                "AGENTS.md init exchange stream stalled — no data for 60s"
+                                "AGENTS.md init exchange stream stalled - no data for 60s"
                             );
                             break;
                         }
@@ -4284,7 +4298,7 @@ impl SessionProcessor {
                 tracing::warn!(
                     session_id = %session_id,
                     error = %e,
-                    "AGENTS.md init exchange failed — skipping acknowledgement"
+                    "AGENTS.md init exchange failed - skipping acknowledgement"
                 );
                 self.event_bus.publish(Event::MessageEnd {
                     session_id: session_id.to_string(),
@@ -4318,6 +4332,7 @@ impl SessionProcessor {
                 Role::Assistant,
                 vec![MessagePart::Text { text: ack_text }],
             );
+            // INTENTIONAL: ack persistence is best-effort
             let _ = self
                 .storage_op(move |s| {
                     s.create_message(&user_msg)?;
@@ -4349,9 +4364,9 @@ impl SessionProcessor {
         }
 
         // Copilot: prefer DB-stored device flow token (works for token
-        // exchange), then fall back to env var → IDE discovery.
+        // exchange), then fall back to env var -> IDE discovery.
         if provider_id == "copilot" {
-            // DB first — device flow tokens stored here work for copilot_internal/v2/token
+            // DB first - device flow tokens stored here work for copilot_internal/v2/token
             if let Ok(Some(key)) = self.storage_op(|s| s.get_provider_auth("copilot")).await
                 && !key.is_empty()
             {
@@ -4430,8 +4445,8 @@ impl SessionProcessor {
     }
 }
 
-/// M-007: shared tool-result display preview — trim, truncate to `max_chars`
-/// characters on a char boundary, and append `…` when truncated.
+/// M-007: shared tool-result display preview - trim, truncate to `max_chars`
+/// characters on a char boundary, and append `...` when truncated.
 ///
 /// The `len() <= max` fast path exploits the fact that a string's byte length
 /// is an upper bound on its character count, so short ASCII strings (the
@@ -4442,7 +4457,7 @@ fn truncate_preview(s: &str, max_chars: usize) -> String {
         return trimmed.to_string();
     }
     let mut out: String = trimmed.chars().take(max_chars).collect();
-    out.push('…');
+    out.push_str("...");
     out
 }
 

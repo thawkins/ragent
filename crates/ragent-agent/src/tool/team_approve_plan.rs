@@ -1,4 +1,4 @@
-//! `team_approve_plan` — Lead approves or rejects a teammate's submitted plan.
+//! `team_approve_plan` - Lead approves or rejects a teammate's submitted plan.
 
 use anyhow::Result;
 use serde_json::{Value, json};

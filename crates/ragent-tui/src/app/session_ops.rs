@@ -5,6 +5,7 @@ use std::sync::{Arc, LockResult, MutexGuard};
 
 use ratatui::layout::Rect;
 
+use ragent_agent::team::TeamStore;
 use ragent_agent::{
     event::Event,
     mcp::discovery::DiscoveredMcpServer,
@@ -17,7 +18,6 @@ use ragent_plugins::{
     add_error_report, add_report, installed_ids, probe_stores, render_stores_report_with_probes,
     store_and_config,
 };
-use ragent_team::team::TeamStore;
 use ragent_tools_core::{Tool, ToolContext};
 
 // Prompt optimization templates
@@ -269,7 +269,7 @@ impl App {
     /// Compute the token size of the toolset metadata/wrapper overhead.
     ///
     /// FR-007: measures the extra per-tool bytes the provider wire envelope
-    /// adds beyond the raw tool definitions — JSON envelope keys (e.g.
+    /// adds beyond the raw tool definitions - JSON envelope keys (e.g.
     /// `"type":"function","input_schema":`), wrapper objects, and list
     /// separators. The estimate is derived from the same shared provider tool
     /// serialisation cache the LLM clients use (`ragent_llm`'s `tool_cache`),
@@ -296,7 +296,7 @@ impl App {
     /// FR-008: sums the same per-message byte accounting used by the agent
     /// request-size estimator (`estimate_request_bytes_with_tool_bytes`):
     /// role label length + a fixed ~40-byte per-message JSON overhead plus
-    /// each content part — text, reasoning, tool-call identifier/input and
+    /// each content part - text, reasoning, tool-call identifier/input and
     /// tool-result output. The byte total is converted with the
     /// [`BYTES_PER_TOKEN`] heuristic so the estimate is comparable with
     /// provider-reported prompt tokens.
@@ -335,7 +335,7 @@ impl App {
     /// Compute the token size of the assembled system prompt.
     ///
     /// FR-005: returns an estimated token size of the system prompt the agent
-    /// loop would assemble for the next turn — base agent prompt, project
+    /// loop would assemble for the next turn - base agent prompt, project
     /// context (working directory, AGENTS.md, git status, README), memory
     /// injections and the skills catalog. The file tree is intentionally
     /// omitted (empty) because it is rendered from the TUI's own cached
@@ -428,7 +428,7 @@ impl App {
     /// static catalog for its context window. Falls back to the cached
     /// context window recorded during model selection for dynamically
     /// discovered models that the registry does not list. Returns `None`
-    /// when the provider does not advertise a limit — the panel shows
+    /// when the provider does not advertise a limit - the panel shows
     /// "unknown" percentages rather than guessing (FR-011).
     pub fn active_context_window_tokens(&self) -> Option<usize> {
         if let Some(model_str) = self.selected_model.as_deref()
@@ -585,7 +585,7 @@ impl App {
             tracing::debug!(
                 scheduled = snapshot.history_message_count,
                 current = self.conversation_message_count(),
-                "dropping stale context snapshot — history changed mid-refresh"
+                "dropping stale context snapshot - history changed mid-refresh"
             );
             self.context_refresh_inflight = false;
             self.schedule_context_snapshot_refresh();
@@ -873,42 +873,6 @@ impl App {
                 }
             }
         });
-    }
-
-    /// Set the status line to an informational message and record it in history.
-    #[allow(dead_code)]
-    pub(crate) fn set_status_info(&mut self, message: impl Into<String>) {
-        let msg = message.into();
-        self.status = StatusCategory::Info.format(&msg);
-        self.status_history.push(StatusMessage::info(msg));
-        self.needs_redraw = true;
-    }
-
-    /// Set the status line to a success message and record it in history.
-    #[allow(dead_code)]
-    pub(crate) fn set_status_success(&mut self, message: impl Into<String>) {
-        let msg = message.into();
-        self.status = StatusCategory::Success.format(&msg);
-        self.status_history.push(StatusMessage::success(msg));
-        self.needs_redraw = true;
-    }
-
-    /// Set the status line to a warning message and record it in history.
-    #[allow(dead_code)]
-    pub(crate) fn set_status_warning(&mut self, message: impl Into<String>) {
-        let msg = message.into();
-        self.status = StatusCategory::Warning.format(&msg);
-        self.status_history.push(StatusMessage::warning(msg));
-        self.needs_redraw = true;
-    }
-
-    /// Set the status line to an error message and record it in history.
-    #[allow(dead_code)]
-    pub(crate) fn set_status_error(&mut self, message: impl Into<String>) {
-        let msg = message.into();
-        self.status = StatusCategory::Error.format(&msg);
-        self.status_history.push(StatusMessage::error(msg));
-        self.needs_redraw = true;
     }
 
     /// Set the status line to a working/in-progress message and record it in history.
@@ -1488,7 +1452,7 @@ impl App {
     ///
     /// Called each housekeeping frame. A result whose store no longer matches the
     /// open browser (the panel was closed or re-opened for the other store) is
-    /// still reported to the message window — the install already happened — but
+    /// still reported to the message window - the install already happened - but
     /// never touches a different store's panel. On success the installed set is
     /// re-derived so the newly installed row re-colours (FR-011). No path panics.
     pub fn poll_plugin_store_install_result(&mut self) {
@@ -1703,8 +1667,8 @@ impl App {
     /// (FR-008).
     ///
     /// FR-016 (T-008): dispatch is guarded against processing/compaction
-    /// overlap. The queue is left untouched — deferring to the next safe turn
-    /// boundary — while the primary agent is still executing (`is_processing`)
+    /// overlap. The queue is left untouched - deferring to the next safe turn
+    /// boundary - while the primary agent is still executing (`is_processing`)
     /// or a compaction run owns the turn (`compact_in_progress`,
     /// `auto_compact_in_progress`, or `pending_send_after_compact`). The check
     /// lives here rather than in the callers so every drain path
@@ -1779,7 +1743,7 @@ impl App {
     /// A queued plain message runs as a user turn via
     /// [`App::dispatch_user_message`]; a queued entry whose text begins with `/`
     /// is a slash command and is handed to [`App::execute_slash_command`] exactly
-    /// as a freshly typed one, so a queued `/status`, `/agent`, or `/spec …`
+    /// as a freshly typed one, so a queued `/status`, `/agent`, or `/spec ...`
     /// behaves identically to typing it at a free boundary. This is the single
     /// place the two entry kinds diverge.
     ///
@@ -1824,7 +1788,7 @@ impl App {
         if self.input_queue.is_empty() {
             // FR-023: the `Next` row is non-selectable with an empty queue, so
             // this is only reachable defensively; report and close.
-            self.status = "queue: nothing to run — the queue is empty".to_string();
+            self.status = "queue: nothing to run - the queue is empty".to_string();
             self.close_queue_menu();
             self.needs_redraw = true;
             return;
@@ -1836,10 +1800,10 @@ impl App {
             || self.auto_compact_in_progress
             || self.pending_send_after_compact.is_some()
         {
-            self.status = "queue: next deferred — compaction in progress".to_string();
+            self.status = "queue: next deferred - compaction in progress".to_string();
             self.push_log_no_agent(
                 LogLevel::Warn,
-                "queue: Next deferred — compaction owns the turn (FR-030)".to_string(),
+                "queue: Next deferred - compaction owns the turn (FR-030)".to_string(),
             );
             self.close_queue_menu();
             self.needs_redraw = true;
@@ -1847,16 +1811,16 @@ impl App {
         }
         if self.is_processing {
             // FR-024/FR-029: stop the running turn exactly like `CancelAgent`.
-            // The queue is untouched — halt never advances it — so the oldest
+            // The queue is untouched - halt never advances it - so the oldest
             // entry survives into the resumed turn.
             self.halt_turn_like_cancel_agent();
             // FR-030: the live turn cannot be dispatched over, so defer the run
             // of the oldest entry to the turn boundary the cancel opens.
             self.queue_next_pending = true;
-            self.status = "queue: stopping turn — running the next queued entry".to_string();
+            self.status = "queue: stopping turn - running the next queued entry".to_string();
             self.push_log_no_agent(
                 LogLevel::Info,
-                "queue: Next — halting turn, dispatching oldest queued entry at the boundary"
+                "queue: Next - halting turn, dispatching oldest queued entry at the boundary"
                     .to_string(),
             );
         } else {
@@ -1870,7 +1834,7 @@ impl App {
                 .unwrap_or_default();
             self.push_log_no_agent(
                 LogLevel::Info,
-                format!("queue: Next — dispatching oldest queued entry: {text}"),
+                format!("queue: Next - dispatching oldest queued entry: {text}"),
             );
             self.queue_next_pending = true;
             self.advance_input_queue().await;
@@ -1901,7 +1865,7 @@ impl App {
             // FR-027: the agent is already stopped, so the row resumes the
             // interrupted work instead of halting.
             if !self.agent_halted {
-                self.status = "Nothing to resume — agent was not halted".to_string();
+                self.status = "Nothing to resume - agent was not halted".to_string();
             } else if !self.dispatch_resume_continuation() {
                 self.status = "No active session".to_string();
             }
@@ -2021,7 +1985,7 @@ impl App {
     /// layout area has collapsed to zero (e.g. a side panel that was just
     /// dismissed by a toggle such as Alt+T). The render pass zeroes the
     /// `*_area` of hidden panels, but the `text_selection`/`context_menu`
-    /// state may still reference that pane — left stale, the next
+    /// state may still reference that pane - left stale, the next
     /// [`Self::assert_ui_invariants`] call would panic. This self-heals
     /// that state whenever input arrives.
     pub(crate) fn prune_stale_selection(&mut self) {
@@ -2529,7 +2493,7 @@ impl App {
             // is held for the whole build. Read it BEFORE the try_status
             // probe: the graph build holds the store mutex for its entire
             // duration, so try_status() returning None while graph_busy is
-            // set means the graph build holds the lock — not indexing.
+            // set means the graph build holds the lock - not indexing.
             let graph_busy = idx.graph_busy();
 
             if let Some(stats) = idx.try_status() {
@@ -2550,7 +2514,7 @@ impl App {
                     self.needs_redraw = true;
                 }
             } else {
-                // Locks busy — indexing in progress
+                // Locks busy - indexing in progress
                 if !self.code_index_busy {
                     self.code_index_busy = true;
                     self.needs_redraw = true;
@@ -2738,7 +2702,7 @@ impl App {
     /// Drain the loop-rollback result (FR-020/T-013) deposited by the async
     /// rollback task and surface it in the status line and message window.
     /// Without this poll the status stays at "rolling back to pre-loop
-    /// snapshot…" forever and a failed restore is invisible to the user.
+    /// snapshot..." forever and a failed restore is invisible to the user.
     pub fn poll_rollback_result(&mut self) {
         let outcome = {
             let mut guard = match self.rollback_result.lock() {
@@ -2768,7 +2732,7 @@ impl App {
             Err(e) => {
                 self.status = format!("[err] rollback failed: {e}");
                 self.append_assistant_text(&format!(
-                    "[err] Rollback failed: {e}. The pre-loop capture is kept — retry \
+                    "[err] Rollback failed: {e}. The pre-loop capture is kept - retry \
                      the rollback to try again."
                 ));
                 self.push_log_no_agent(LogLevel::Error, format!("rollback error: {e}"));
@@ -2781,7 +2745,7 @@ impl App {
     /// spawned test task and surface it in the message window. Without this
     /// poll the command would have to block the UI thread for the whole
     /// multi-engine network probe, deferring the "Starting Websearch
-    /// test…" acknowledgement until after the test had already finished.
+    /// test..." acknowledgement until after the test had already finished.
     pub fn poll_websearch_test_result(&mut self) {
         let outcome = {
             let mut guard = match self.websearch_test_result.lock() {
@@ -2871,7 +2835,7 @@ impl App {
         })?;
 
         Ok(format!(
-            "✓ '{}' added to ragent.json. Restart ragent to activate the MCP server.",
+            "[ok] '{}' added to ragent.json. Restart ragent to activate the MCP server.",
             server.id
         ))
     }
@@ -2904,15 +2868,12 @@ impl App {
 
     /// Sync the in-memory `team_members` list with the on-disk team store,
     /// copying session ids, status, and current task ids so the UI reflects the
-    /// authoritative persisted state. Also registers session_id → teammate
+    /// authoritative persisted state. Also registers session_id -> teammate
     /// name mappings for log display.
     ///
-    /// **Note:** This method is no longer called from the render path
-    /// (FR-009).  Team member state is kept in sync by event handlers
-    /// (`TeammateSpawned`, `TeammateIdle`, `TeamTaskClaimed`, etc.).  The
-    /// method is retained for explicit one-shot refreshes when a team is
-    /// first opened.
-    #[allow(dead_code)]
+    /// Called from the Teams subpanel render (`layout_teams::render_teams_subpanel`)
+    /// so a freshly-opened team reflects on-disk state before the event
+    /// handlers have had a chance to fire.
     pub(crate) fn refresh_team_member_session_ids(&mut self) {
         let Some(team_name) = self.active_team.as_ref().map(|t| t.name.clone()) else {
             return;
@@ -2943,7 +2904,7 @@ impl App {
                 member.current_task_id = stored_member.current_task_id.clone();
             }
         }
-        // Register session_id → teammate name mappings for log display.
+        // Register session_id -> teammate name mappings for log display.
         for member in &self.team_members {
             if let Some(ref sid) = member.session_id {
                 let short_sid = short_session_id(sid);
@@ -3017,9 +2978,9 @@ impl App {
                     self.tool_step_map
                         .insert(call_id.clone(), (short_sid, step_counter, substep));
                     let icon = match state.status {
-                        ragent_agent::message::ToolCallStatus::Completed => "✓",
-                        ragent_agent::message::ToolCallStatus::Error => "✗",
-                        _ => "…",
+                        ragent_agent::message::ToolCallStatus::Completed => "[ok]",
+                        ragent_agent::message::ToolCallStatus::Error => "[x]",
+                        _ => "...",
                     };
                     restored_logs.push((step_counter, substep, tool.clone(), icon.to_string()));
                 }
@@ -3627,7 +3588,7 @@ impl App {
             self.agent_info = prev_agent;
             self.agent_name = to_name.clone();
             self.status = format!("agent: {}", to_name);
-            self.push_log_no_agent(LogLevel::Info, format!("plan restore: plan → {}", to_name));
+            self.push_log_no_agent(LogLevel::Info, format!("plan restore: plan -> {}", to_name));
 
             self.event_bus.publish(Event::AgentSwitched {
                 session_id: session_id.to_string(),
@@ -3637,12 +3598,12 @@ impl App {
 
             // Inject the plan summary into the chat so the restored agent
             // can see it in context.
-            let plan_text = format!("📋 **Plan summary:**\n{}", summary);
+            let plan_text = format!("[notice] **Plan summary:**\n{}", summary);
             self.append_assistant_text(&plan_text);
 
             // Offer /swarm as an execution option after plan completion
             self.append_assistant_text(
-                "\n💡 **Tip:** You can execute this plan in parallel with `/swarm <goal>`, \
+                "\n[idea] **Tip:** You can execute this plan in parallel with `/swarm <goal>`, \
                  or implement it step-by-step.\n",
             );
             self.force_new_message = true;
@@ -3687,7 +3648,7 @@ impl App {
             wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,
-            version: 0, // stale → rendered on next frame
+            version: 0, // stale -> rendered on next frame
         });
         // R-11: Cap log entries with FIFO eviction so the Vec (and its
         // mirror `log_line_cache`) do not grow without bound over a long
@@ -3703,33 +3664,15 @@ impl App {
     /// Append a single formatted log line to the log-window spool file.
     fn append_log_entry_to_spool(&self, path: &std::path::Path, level: LogLevel, message: &str) {
         use std::io::Write;
-        let level_str = match level {
-            LogLevel::Info => "INF",
-            LogLevel::Tool => "TUL",
-            LogLevel::Warn => "WRN",
-            LogLevel::Error => "ERR",
-        };
+        let level_str = crate::app::helpers::log_level_str(level);
         let ts = chrono::Utc::now().to_rfc3339();
         let line = format!("{ts} {level_str} {message}\n");
         // SEC-ragent-tui-005 (SECTASKS T-066): every log line (raw tool output,
         // command output, stderr) was appended to a file created at the process
         // umask default, so on a multi-user host the session transcript was
-        // world-readable. Create it owner-only, and tighten a pre-existing file.
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        if let Ok(mut file) = options.open(path) {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt as _;
-                // `mode(0o600)` only applies at creation; an existing file keeps
-                // its old mode, so re-assert it (best-effort).
-                let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
-            }
+        // world-readable. `open_log_spool` creates it owner-only, and tightens
+        // a pre-existing file.
+        if let Some(mut file) = crate::app::helpers::open_log_spool(path) {
             if let Err(e) = file.write_all(line.as_bytes()) {
                 tracing::warn!(error = %e, "failed to append log entry to spool");
             }
@@ -3780,7 +3723,7 @@ impl App {
     /// pane) call this instead of reading `message_content_lines` directly.
     /// Any cache group that is still behind its message (a streaming group
     /// waiting out its throttle window) is rendered first, then the flat
-    /// buffer is rebuilt from the per-message cache — so a copy always reads
+    /// buffer is rebuilt from the per-message cache - so a copy always reads
     /// fresh rows even mid-stream.
     pub fn ensure_copy_content_lines(&mut self) {
         crate::layout::ensure_message_copy_lines(self);
@@ -3827,29 +3770,12 @@ impl App {
             return;
         };
         // SEC-ragent-tui-005 (SECTASKS T-066): same owner-only creation as
-        // `append_log_entry_to_spool`.
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let Ok(mut file) = options.open(path) else {
+        // `append_log_entry_to_spool` - both route through `open_log_spool`.
+        let Some(mut file) = crate::app::helpers::open_log_spool(path) else {
             return;
         };
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
-        }
         for entry in &self.log_entries {
-            let level_str = match entry.level {
-                LogLevel::Info => "INF",
-                LogLevel::Tool => "TUL",
-                LogLevel::Warn => "WRN",
-                LogLevel::Error => "ERR",
-            };
+            let level_str = crate::app::helpers::log_level_str(entry.level);
             let ts = chrono::Utc::now().to_rfc3339();
             let line = format!("{ts} {level_str} {}\n", entry.message);
             if let Err(e) = file.write_all(line.as_bytes()) {

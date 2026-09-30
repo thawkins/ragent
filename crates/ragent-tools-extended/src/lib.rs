@@ -23,6 +23,7 @@ pub mod codeindex_search;
 pub mod codeindex_status;
 pub mod codeindex_symbols;
 pub(crate) mod codeindex_utils;
+pub(crate) mod docio;
 pub mod document_extract;
 pub mod finance;
 pub mod gmail;
@@ -73,7 +74,7 @@ pub mod storage {
     ///
     /// (todo2tasks T-001: extended with `active_form`, `owner`, `metadata`,
     /// and `blocked_by` fields. `#[serde(default)]` on each new field
-    /// ensures legacy JSON rows deserialize without error — FR-002.)
+    /// ensures legacy JSON rows deserialize without error - FR-002.)
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct TaskRow {
         /// The unique task identifier.
@@ -104,7 +105,7 @@ pub mod storage {
         pub blocked_by: Vec<String>,
     }
 
-    /// Default value for `TaskRow::metadata` — an empty JSON object.
+    /// Default value for `TaskRow::metadata` - an empty JSON object.
     fn default_metadata_object() -> serde_json::Value {
         serde_json::Value::Object(serde_json::Map::new())
     }
@@ -201,7 +202,7 @@ pub mod storage {
             metadata: &serde_json::Value,
             blocked_by: &[String],
         ) -> Result<()> {
-            let _ = (active_form, owner, metadata, blocked_by);
+            let _ = (active_form, owner, metadata, blocked_by); // INTENTIONAL: parameters retained for API stability
             self.create_task_simple(id, session_id, subject, status, description)
         }
 
@@ -235,7 +236,7 @@ pub mod storage {
         /// Updates a Task row with all Task-model fields (todo2tasks T-008,
         /// T-017).
         ///
-        /// Each `Option<T>` parameter is `None` → unchanged.  For
+        /// Each `Option<T>` parameter is `None` -> unchanged.  For
         /// `active_form` and `owner`, `Some(None)` clears the field to
         /// empty; `Some(Some(v))` sets it.  `blocked_by` is a full
         /// replacement (`Some(slice)` replaces, `None` leaves unchanged).
@@ -261,7 +262,7 @@ pub mod storage {
             metadata: Option<&serde_json::Value>,
             blocked_by: Option<&[String]>,
         ) -> Result<bool> {
-            let _ = (active_form, owner, metadata, blocked_by);
+            let _ = (active_form, owner, metadata, blocked_by); // INTENTIONAL: parameters retained for API stability
             self.update_task_simple(id, session_id, subject, status, description)
         }
         /// Delete a task row, returning whether it existed.
@@ -514,7 +515,7 @@ pub fn create_extended_registry() -> ToolRegistry {
     // graphCI T-014: codeindex_communities tool (FR-013, FR-017).
     registry.register(Arc::new(codeindex_communities::CodeIndexCommunitiesTool));
     registry.register(Arc::new(browser::BrowserTool));
-    // JCODEPLAN M7 — external integrations.
+    // JCODEPLAN M7 - external integrations.
     registry.register(Arc::new(gmail::GmailTool::new()));
     registry.register(Arc::new(channels::SendChannelMessageTool));
 
@@ -527,7 +528,7 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(masterfetch::tools::version::MfVersionTool));
 
     // plot_* tools: render graphs on the message window via ratatui-plt
-    // (GPL-3.0 — explicitly accepted by the project owner 2026-09-06; see
+    // (GPL-3.0 - explicitly accepted by the project owner 2026-09-06; see
     // src/plot/mod.rs). Read-only, local off-screen rendering, "system"
     // permission category.
     registry.register(Arc::new(plot::plot_line::PlotLineTool));

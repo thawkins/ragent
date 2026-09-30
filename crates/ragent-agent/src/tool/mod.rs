@@ -23,12 +23,10 @@ pub mod plan;
 pub mod structured_memory;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
 ///
-/// These tool implementations live in `crates/ragent-team/src/tools/` and are
-/// compiled into `ragent-agent` via `#[path]` includes, exactly like the
-/// team *runtime* modules in `crate::team`. This keeps a single source of
-/// truth for the team tools so fixes no longer have to be applied twice.
-/// See `docs/team-unification-decision.md` and
-/// `scripts/check-team-duplication.sh`.
+/// These tool implementations live natively in `crate::tool` alongside the
+/// team *runtime* modules in `crate::team`; the separate `ragent-team` crate
+/// was retired (ANTIPAT M7.8, see `docs/team-unification-decision.md`) so
+/// there is a single source of truth for the team tools.
 pub mod team_approve_plan;
 pub mod team_assign_task;
 pub mod team_broadcast;
@@ -58,20 +56,20 @@ pub mod session_search;
 /// Background shell task manager (M3).
 pub mod bg;
 
-/// Durable initiatives — cross-session goals with milestones (M8, T-070).
+/// Durable initiatives - cross-session goals with milestones (M8, T-070).
 pub mod initiative;
 
-/// Runtime skill management — load/list/reload/read skill prompts (M8, T-071).
+/// Runtime skill management - load/list/reload/read skill prompts (M8, T-071).
 pub mod skill_manage;
 
-/// Model metadata introspection — report the currently connected provider/model.
+/// Model metadata introspection - report the currently connected provider/model.
 pub mod model_info;
 
-/// Build and version introspection — report the running ragent version and
+/// Build and version introspection - report the running ragent version and
 /// when the binary was built.
 pub mod ragent_info;
 
-/// Registry introspection — `tool_info` / `commands_info` JSON dumps.
+/// Registry introspection - `tool_info` / `commands_info` JSON dumps.
 pub mod tool_info;
 
 /// Static catalog of the built-in slash commands (mirrors the TUI's
@@ -291,8 +289,8 @@ pub struct ToolContext {
     pub cached_team_dir: Arc<std::sync::Mutex<Option<(String, PathBuf)>>>,
     /// Permission checker of the owning session.
     ///
-    /// Tools that execute *other* tools on the session's behalf — currently
-    /// only `team_create` running a blueprint seed file — must route those
+    /// Tools that execute *other* tools on the session's behalf - currently
+    /// only `team_create` running a blueprint seed file - must route those
     /// calls through the same permission decision the agent loop applies, so a
     /// blueprint (untrusted project content) cannot execute `bash`/`write`
     /// without approval (SEC-ragent-team-001, FR-024).
@@ -353,7 +351,7 @@ pub trait Tool: Send + Sync {
 /// allocated and spawned per `execute()` invocation.
 ///
 /// Previously every `execute()` call did `Arc::new(EventBus::new(256))`,
-/// spawned two forwarder tasks, and aborted them at the end — paying an
+/// spawned two forwarder tasks, and aborted them at the end - paying an
 /// event-bus allocation + two task spawns + two channel subscriptions per
 /// tool call. With this wrapper the bus lives for the lifetime of the
 /// adapter and the forwarders are long-lived.
@@ -367,7 +365,7 @@ pub trait Tool: Send + Sync {
 /// Adapter that wraps a `ragent_tools_core::Tool` and exposes it as an
 /// agent-local [`Tool`]. The runtime registry uses this to register the core
 /// tool implementations under the agent's `Tool` trait; it is also reused by
-/// `aliases.rs` to delegate alias calls (`update_file`→`write`, `run_code`→
+/// `aliases.rs` to delegate alias calls (`update_file`->`write`, `run_code`->
 /// `bash`) to the single source-of-truth implementations in
 /// `ragent-tools-core` (see DCREMOVALPLAN M3).
 pub(crate) struct ExtractedCoreToolAdapter {
@@ -566,7 +564,7 @@ impl Tool for ExtractedCoreToolAdapter {
 ///
 /// Wraps an [`ExtractedCoreToolAdapter`] and overrides [`Tool::name`] to
 /// return `"multiedit"`. On [`Tool::execute`] it normalises legacy
-/// parameter names (`path`/`old_str`/`new_str` → `file_path`/`old_string`/
+/// parameter names (`path`/`old_str`/`new_str` -> `file_path`/`old_string`/
 /// `new_string`) inside each edit object before delegating to the inner
 /// adapter, so existing agent prompts continue to work during the
 /// deprecation window.
@@ -659,10 +657,10 @@ fn register_extracted_core_tools(registry: &ToolRegistry) {
             registry.register(Arc::new(ExtractedCoreToolAdapter::new(tool)));
         }
     }
-    // editrenewal FR-012 — legacy `multiedit` alias for the renamed
+    // editrenewal FR-012 - legacy `multiedit` alias for the renamed
     // `multi_edit` tool. The alias forwards calls to the same core
     // `MultiEditTool` (now registered as `multi_edit` above) and normalises
-    // legacy parameter names (path/old_str/new_str → file_path/old_string/
+    // legacy parameter names (path/old_str/new_str -> file_path/old_string/
     // new_string) so existing agent prompts keep working during the
     // deprecation window.
     if let Some(multi_edit) = extracted.get("multi_edit") {
@@ -698,7 +696,7 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
                     updated_at: row.updated_at,
                     // T-001: map new Task fields. metadata is stored as a
                     // JSON string in the storage layer; parse it to Value
-                    // for the tool-facing type. Empty string → `{}`.
+                    // for the tool-facing type. Empty string -> `{}`.
                     active_form: row.active_form,
                     owner: row.owner,
                     metadata: if row.metadata.is_empty() {
@@ -1540,8 +1538,8 @@ impl ToolRegistry {
     /// Returns every registered tool sorted by name, including hidden ones.
     ///
     /// Used by the `tool_info` introspection tool, which must snapshot the
-    /// full registry — visible tools plus tools hidden by a visibility
-    /// switch — regardless of the hidden set.
+    /// full registry - visible tools plus tools hidden by a visibility
+    /// switch - regardless of the hidden set.
     #[must_use]
     pub fn all_tools(&self) -> Vec<Arc<dyn Tool>> {
         let tools = self
@@ -1668,7 +1666,7 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(cron::CronDisableTool));
     // Background task manager (M3)
     registry.register(Arc::new(bg::BgTool));
-    // M8 — durable initiatives and skill management
+    // M8 - durable initiatives and skill management
     registry.register(Arc::new(initiative::InitiativeTool));
     registry.register(Arc::new(skill_manage::SkillManageTool));
     // Model metadata introspection
@@ -1678,7 +1676,7 @@ pub fn create_default_registry() -> ToolRegistry {
     // Registry introspection (tool_info/commands_info)
     registry.register(Arc::new(tool_info::ToolInfoTool));
     registry.register(Arc::new(tool_info::CommandsInfoTool));
-    // Phase 1 — alias layer (commonly hallucinated tool names)
+    // Phase 1 - alias layer (commonly hallucinated tool names)
     registry.register(Arc::new(aliases::UpdateFileTool));
     registry.register(Arc::new(aliases::AskUserTool));
     registry

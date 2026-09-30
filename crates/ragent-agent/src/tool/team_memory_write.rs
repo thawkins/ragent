@@ -1,4 +1,4 @@
-//! `team_memory_write` — Write structured memories for a team.
+//! `team_memory_write` - Write structured memories for a team.
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -220,17 +220,5 @@ fn slugify(s: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{path_tag, slugify};
-
-    #[test]
-    fn test_path_tag_normalisation() {
-        assert_eq!(path_tag("MEMORY.md"), "path-memory-md");
-        assert_eq!(path_tag("Notes / Decisions"), "path-notes-decisions");
-    }
-
-    #[test]
-    fn test_slugify() {
-        assert_eq!(slugify("Alice Smith"), "alice-smith");
-    }
-}
+#[path = "../tests/inline/team_memory_write_tests.rs"]
+mod tests;

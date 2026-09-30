@@ -8,14 +8,14 @@
 //!
 //! - an unknown plugin id ([`RemoveError::UnknownPlugin`]);
 //! - a plugin currently enabled in the store ledger
-//!   ([`RemoveError::Enabled`] — "disable it first"); the caller refuses rather
+//!   ([`RemoveError::Enabled`] - "disable it first"); the caller refuses rather
 //!   than silently unloading a running plugin, matching the T-011 plan.
 //!
 //! Disabled plugins are inert (FR-016), so removing one touches only its files.
 
 use std::path::PathBuf;
 
-use crate::error::PluginError;
+use crate::error::IoError;
 use crate::store::{ScannedPlugin, StoreDirs, StoreLedger, scan_dirs};
 
 /// The outcome of a successful [`remove`].
@@ -41,8 +41,10 @@ pub enum RemoveError {
     Enabled(String),
 
     /// An I/O failure while deleting the plugin directory or the ledger row.
+    /// Uses [`IoError`] so the underlying error's source chain survives
+    /// (ANTIPAT M15).
     #[error("plugin remove: {0}")]
-    Io(String),
+    Io(#[from] IoError),
 }
 
 /// Uninstall a plugin from its store (FR-010).
@@ -66,8 +68,7 @@ pub fn remove(dirs: &StoreDirs, plugin_id: &str) -> Result<RemoveOutcome, Remove
         return Err(RemoveError::Enabled(plugin_id.to_string()));
     }
 
-    std::fs::remove_dir_all(&found.dir)
-        .map_err(|e| RemoveError::Io(PluginError::io(e).to_string()))?;
+    std::fs::remove_dir_all(&found.dir).map_err(IoError::new)?;
 
     // Drop the ledger row so a re-add starts clean; only rewrite the ledger
     // when the row was actually present so an absent `_state.json` is not

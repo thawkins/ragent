@@ -16,29 +16,20 @@ use super::thinking::{
 };
 use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::event::FinishReason;
 
-/// Extract the MIME type from a `data:<mime>;base64,<data>` URI.
-///
-/// # Errors
-///
-/// This function does not return errors; it returns `None` if the URI is malformed.
-fn extract_mime_from_data_uri(uri: &str) -> Option<&str> {
-    uri.strip_prefix("data:").and_then(|s| s.split(';').next())
-}
+use super::media::{extract_base64_from_data_uri, extract_mime_from_data_uri};
 
-/// Extract the raw base64 payload from a `data:<mime>;base64,<data>` URI.
-///
-/// # Errors
-///
-/// This function does not return errors; it returns `None` if the URI is malformed.
-fn extract_base64_from_data_uri(uri: &str) -> Option<&str> {
-    uri.find(",base64,")
-        .map(|i| &uri[i + 8..])
-        .or_else(|| uri.find(',').map(|i| &uri[i + 1..]))
-}
+/// Default max output tokens when a request does not specify `max_tokens`
+/// (ANTIPAT 5.6: named default limit).
+pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 8192;
+
+/// Default Anthropic context window (tokens) when the model entry does not
+/// declare one (ANTIPAT 5.6: named default limit).
+pub(crate) const DEFAULT_CONTEXT_WINDOW: usize = 200_000;
 
 /// Provider implementation for the Anthropic Claude API.
 pub struct AnthropicProvider;
@@ -94,6 +85,9 @@ impl Provider for AnthropicProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
+        // ANTIPAT 3.6: register the credential with the shared redaction
+        // registry so any text passed through `redact_secrets` masks it.
+        ragent_types::sanitize::register_secret(api_key);
         let resolved = base_url
             .unwrap_or(Self::API_BASE)
             .trim_end_matches('/')
@@ -216,7 +210,7 @@ fn anthropic_model_to_info(
         capabilities,
         context_window: anthropic_usize(entry, &["context_window", "input_token_limit"])
             .or_else(|| default.map(|model| model.context_window))
-            .unwrap_or(200_000),
+            .unwrap_or(DEFAULT_CONTEXT_WINDOW),
         max_output: anthropic_usize(entry, &["max_output_tokens", "output_token_limit"])
             .or_else(|| default.and_then(|model| model.max_output)),
         request_multiplier: default.and_then(|model| model.request_multiplier),
@@ -341,7 +335,7 @@ impl AnthropicClient {
         let mut body = json!({
             "model": request.model,
             "messages": messages,
-            "max_tokens": request.max_tokens.unwrap_or(8192),
+            "max_tokens": request.max_tokens.unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS),
             "stream": true
         });
 
@@ -401,10 +395,9 @@ impl LlmClient for AnthropicClient {
             .with_context(|| format!("Failed to send request to Anthropic API at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "Failed to read response body");
-                String::new()
-            });
+            // ANTIPAT 3.1/3.2: route the error body through the capped
+            // reader so a hostile endpoint cannot buffer an unbounded body.
+            let body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
             tracing::warn!(
                 url = %url,
                 model = %request.model,
@@ -458,7 +451,7 @@ impl LlmClient for AnthropicClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "Anthropic: stream stalled — no data received for {}s",
+                                "Anthropic: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -507,7 +500,7 @@ impl LlmClient for AnthropicClient {
                             Ok(v) => v,
                             Err(e) => {
                                 // FUNC-032: a corrupt frame must be logged, not
-                                // silently dropped — it can carry tool-call
+                                // silently dropped - it can carry tool-call
                                 // deltas.
                                 tracing::warn!(
                                     error = %e,
@@ -632,7 +625,7 @@ pub(crate) fn parse_anthropic_rate_limit_headers(
     let tok_limit = header_u64("anthropic-ratelimit-tokens-limit");
     let tok_remaining = header_u64("anthropic-ratelimit-tokens-remaining");
 
-    // NOTE: intentional duplication — see DUPPLAN.md Milestone J.
+    // NOTE: intentional duplication - see DUPPLAN.md Milestone J.
     // Two distinct streaming closures with different capture sets.
     let requests_used_pct = req_limit.zip(req_remaining).map(|(limit, remaining)| {
         if limit == 0 {
@@ -661,33 +654,5 @@ pub(crate) fn parse_anthropic_rate_limit_headers(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_anthropic_model_to_info_uses_live_thinking_capability() {
-        let defaults = AnthropicProvider
-            .default_models()
-            .into_iter()
-            .map(|model| (model.id.clone(), model))
-            .collect::<HashMap<_, _>>();
-        let entry = json!({
-            "id": "claude-sonnet-4-20250514",
-            "display_name": "Claude Sonnet 4",
-            "context_window": 250_000,
-            "max_output_tokens": 32000,
-            "capabilities": {
-                "thinking": {
-                    "supported": true,
-                    "types": ["adaptive", "enabled"]
-                }
-            }
-        });
-
-        let model = anthropic_model_to_info(&entry, &defaults).expect("model info");
-        assert!(model.capabilities.reasoning);
-        assert_eq!(model.capabilities.thinking_levels, full_reasoning_levels());
-        assert_eq!(model.context_window, 250_000);
-        assert_eq!(model.max_output, Some(32_000));
-    }
-}
+#[path = "../tests/inline/anthropic_tests.rs"]
+mod tests;

@@ -1,4 +1,4 @@
-//! `mf_screenshot` tool — graceful degradation for screenshot capture.
+//! `mf_screenshot` tool - graceful degradation for screenshot capture.
 //!
 //! Implements FR-015, FR-022, FR-026.
 //!
@@ -74,7 +74,7 @@ impl Tool for MfScreenshotTool {
             anyhow::bail!("Missing required 'url' parameter");
         }
 
-        // FR-015: graceful degradation — the browser engine is never available
+        // FR-015: graceful degradation - the browser engine is never available
         // in the integrated Rust runtime. This is the complete, permanent
         // implementation of this tool, not a temporary stub.
         let content = format!(

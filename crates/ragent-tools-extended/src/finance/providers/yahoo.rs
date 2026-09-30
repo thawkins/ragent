@@ -66,6 +66,9 @@ pub struct YahooFinanceProvider {
     client: Arc<yfinance_rs::YfClient>,
     rate_limiter: RateLimiter,
     throttle: Option<Throttle>,
+    /// Configured minimum seconds between finance API calls; `0` means "use the
+    /// built-in default" (see [`wait_for_min_interval`]). ANTIPAT M5.9 / 3.4.
+    min_call_interval_seconds: u64,
 }
 
 impl YahooFinanceProvider {
@@ -76,6 +79,7 @@ impl YahooFinanceProvider {
             client,
             rate_limiter: RateLimiter::new(),
             throttle: None,
+            min_call_interval_seconds: 0,
         }
     }
 
@@ -111,6 +115,7 @@ impl YahooFinanceProvider {
             client,
             rate_limiter: RateLimiter::new(),
             throttle,
+            min_call_interval_seconds: config.min_call_interval_seconds,
         })
     }
 
@@ -120,11 +125,28 @@ impl YahooFinanceProvider {
 
     async fn apply_throttle(&self) {
         // Process-wide cross-provider throttle; prevents rapid fire calls
-        // across Yahoo and Alpha Vantage from triggering rate limits.
-        wait_for_min_interval(None).await;
+        // across Yahoo and Alpha Vantage from triggering rate limits. The
+        // config-derived interval is threaded through so
+        // `finance.min_call_interval_seconds` is honoured (ANTIPAT M5.9 / 3.4).
+        wait_for_min_interval(self.min_call_interval_config().as_ref()).await;
         if let Some(throttle) = &self.throttle {
             throttle.wait().await;
         }
+    }
+
+    /// Build the throttle config to pass to [`wait_for_min_interval`].
+    ///
+    /// When no explicit interval was configured (the bare [`Self::new`] /
+    /// [`Self::default_client`] constructors) this returns the all-default
+    /// config, which yields the documented 5-second default.
+    fn min_call_interval_config(&self) -> Option<ragent_config::finance::FinanceProviderConfig> {
+        if self.min_call_interval_seconds == 0 {
+            return None;
+        }
+        Some(ragent_config::finance::FinanceProviderConfig {
+            min_call_interval_seconds: self.min_call_interval_seconds,
+            ..Default::default()
+        })
     }
 }
 

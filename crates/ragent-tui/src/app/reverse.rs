@@ -29,16 +29,16 @@ struct ReverseArgs {
     /// Optional spec-create flag (`--create <name>`).
     create: Option<String>,
     /// Optional tree-fetch depth (`--depth <N>`), raw string. Validated to
-    /// `u32` in the range 1–10 by `handle_reverse_command` (FR-025, FR-029).
+    /// `u32` in the range 1-10 by `handle_reverse_command` (FR-025, FR-029).
     depth: Option<String>,
 }
 
 /// Tokenize `/reverse` arguments into shell-like tokens.
 ///
-/// Only the test module drives this directly now: `/spec reverse` hands its
+/// Only the test module drives this directly: `/spec reverse` hands its
 /// validated values to [`App::run_spec_reverse`] as a struct, and the struct
-/// fields are what the handler consumes.
-#[allow(dead_code)]
+/// fields are what the handler consumes. Kept so the text grammar of
+/// [`parse_reverse_args`] stays reachable for the integration tests.
 fn tokenize_reverse_args(args: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -82,11 +82,11 @@ fn tokenize_reverse_args(args: &str) -> Vec<String> {
 /// Parse `/reverse` arguments.
 ///
 /// Accepts:
-/// - `/reverse <repo>` — basic form
-/// - `/reverse <repo> --tech <stack>` — with tech constraint
-/// - `/reverse <repo> --create <name>` — chain into `/spec create`
-/// - `/reverse <repo> --depth <N>` — tree-fetch depth (FR-025)
-/// - `/reverse help` — usage message
+/// - `/reverse <repo>` - basic form
+/// - `/reverse <repo> --tech <stack>` - with tech constraint
+/// - `/reverse <repo> --create <name>` - chain into `/spec create`
+/// - `/reverse <repo> --depth <N>` - tree-fetch depth (FR-025)
+/// - `/reverse help` - usage message
 ///
 /// Flags may appear in any order after the positional repo argument.
 /// Quoted flag values (single or double quotes) are captured whole, so
@@ -143,9 +143,9 @@ fn parse_reverse_args(args: &str) -> Option<ReverseArgs> {
 /// the resolved [`VcsProvider`] (FR-016, FR-017).
 ///
 /// Returns `(repo_id, provider_label)`:
-/// - GitHub → `("owner/repo", "GitHub")`
-/// - GitLab with explicit host → `("namespace/project", "GitLab (host)")`
-/// - GitLab with configured instance → `("namespace/project", "GitLab")`
+/// - GitHub -> `("owner/repo", "GitHub")`
+/// - GitLab with explicit host -> `("namespace/project", "GitLab (host)")`
+/// - GitLab with configured instance -> `("namespace/project", "GitLab")`
 fn provider_label_and_id(provider: &VcsProvider) -> (String, String) {
     match provider {
         VcsProvider::GitHub { owner, repo } => (format!("{owner}/{repo}"), "GitHub".to_string()),
@@ -175,7 +175,7 @@ fn resolve_gitlab_token() -> Option<String> {
 
 /// Resolve the GitLab instance base URL (FR-002).
 ///
-/// Priority: explicit `host` from the identifier → `GITLAB_URL` env var →
+/// Priority: explicit `host` from the identifier -> `GITLAB_URL` env var ->
 /// default `https://gitlab.com`.
 fn resolve_gitlab_host(host: Option<&str>) -> String {
     if let Some(h) = host {
@@ -190,8 +190,8 @@ fn resolve_gitlab_host(host: Option<&str>) -> String {
 /// Validate the `--depth <N>` flag value (FR-025, FR-029).
 ///
 /// Returns the validated depth on success:
-/// - `None` → `1` (the default, FR-025)
-/// - `Some(val)` where `val` parses as a `u32` in `1..=10` → that value
+/// - `None` -> `1` (the default, FR-025)
+/// - `Some(val)` where `val` parses as a `u32` in `1..=10` -> that value
 ///
 /// Returns an error message on failure (FR-029):
 /// - `Some(val)` that doesn't parse as `u32` (e.g. `"abc"`, `"-1"`)
@@ -369,7 +369,7 @@ impl App {
     /// Resolve the GitLab Personal Access Token for the `/reverse` command
     /// (FR-007).
     ///
-    /// Priority: `GITLAB_TOKEN` env → `ragent.json` → encrypted database via
+    /// Priority: `GITLAB_TOKEN` env -> `ragent.json` -> encrypted database via
     /// `/gitlab setup`. Uses the App's `storage` handle to access the
     /// encrypted database.
     fn resolve_gitlab_token_for_reverse(&self) -> Option<String> {
@@ -390,15 +390,17 @@ impl App {
         ragent_agent::gitlab::auth::load_token(self.storage.as_ref())
     }
 
-    /// Handle the `/reverse` slash command (FR-001, FR-004, FR-009, FR-010,
-    /// FR-018).
+    /// Parse a `/reverse` argument string and run the fetch-and-generate path
+    /// (FR-001, FR-004, FR-009, FR-010, FR-018).
     ///
-    /// Parses the repo identifier, validates auth, shows a `[wait]`-prefixed
-    /// status, then spawns an async task that fetches repo metadata + tree +
-    /// README, builds a context block, and dispatches it to the LLM via
-    /// `process_message`.
-    #[allow(dead_code)]
-    pub(crate) fn handle_reverse_command(&mut self, args: &str) {
+    /// Test-only entry point: production always drives `/reverse` through
+    /// `/spec reverse`, which parses and validates its own flags and hands the
+    /// validated values to [`Self::run_spec_reverse`]. This entry point keeps
+    /// the `parse_reverse_args` text grammar reachable end to end for the
+    /// integration tests (`crate::app::reverse_command_for_tests` re-exports
+    /// it), so it is retained but never reached from the runtime.
+    #[doc(hidden)]
+    pub fn handle_reverse_command(&mut self, args: &str) {
         // FR-013: parse args via the shared `parse_reverse_args` helper.
         let mut parsed = match parse_reverse_args(args) {
             Some(p) => p,
@@ -441,7 +443,7 @@ impl App {
         let (repo_id, provider_label) = provider_label_and_id(&provider);
 
         // FR-025 / FR-029: validate the --depth flag. Default is 1; valid
-        // range is 1–10. An invalid value surfaces a human-readable error
+        // range is 1-10. An invalid value surfaces a human-readable error
         // without making any API calls.
         let depth: u32 = match validate_depth(parsed.depth.as_deref()) {
             Ok(n) => n,
@@ -476,7 +478,7 @@ impl App {
                     self.status = "reverse: no gitlab token".to_string();
                     return;
                 }
-                let _ = resolve_gitlab_host(host.as_deref());
+                let _ = resolve_gitlab_host(host.as_deref()); // INTENTIONAL: host hint only; the parsed value is unused here
             }
         }
 
@@ -487,7 +489,7 @@ impl App {
         if let Some(request) = scaffold.as_ref() {
             let target = folder_for_scaffold(folder.as_deref());
             self.append_assistant_text(&format!(
-                "From: /spec reverse\n\n[wait] **Scaffolding project in `{target}`…**"
+                "From: /spec reverse\n\n[wait] **Scaffolding project in `{target}`...**"
             ));
             let outcome = run_govcreate_scaffold(request, std::path::Path::new(&target));
             self.append_assistant_text(&render_scaffold_outcome(&target, outcome));
@@ -499,7 +501,7 @@ impl App {
         }
 
         // FR-017: status messages and log entries include the provider label.
-        self.status = format!("[wait] reverse: {provider_label}: {repo_id}…");
+        self.status = format!("[wait] reverse: {provider_label}: {repo_id}...");
         self.push_log_no_agent(
             LogLevel::Info,
             format!("reverse: fetching {repo_id} via {provider_label}"),
@@ -518,7 +520,7 @@ impl App {
         let sid = self.session_id.clone().unwrap_or_default();
         let context_msg = Message::user_text(
             &sid,
-            format!("[wait] Reverse-engineering {provider_label}: {repo_id}…"),
+            format!("[wait] Reverse-engineering {provider_label}: {repo_id}..."),
         );
         self.messages.push(context_msg);
 
@@ -558,7 +560,7 @@ impl App {
 
         // FR-017: user feedback includes the provider label.
         self.append_assistant_text(&format!(
-            "From: /reverse\n\n[wait] **Fetching {repo_id} via {provider_label}…**\n\n\
+            "From: /reverse\n\n[wait] **Fetching {repo_id} via {provider_label}...**\n\n\
              Gathering repository metadata, file tree, and README, then generating \
              a synthetic creation prompt."
         ));
@@ -698,7 +700,7 @@ impl App {
                 let notice = format!(
                     "reverse: generated prompt for {repo_id_for_spawn} via \
                      {provider_label_for_spawn}. Chaining into /spec create {name} \
-                     (spec written to {project}/specs/{name}/)…"
+                     (spec written to {project}/specs/{name}/)..."
                 );
                 event_bus.publish(Event::AgentNotice {
                     session_id: sid.clone(),
@@ -771,7 +773,7 @@ pub(crate) fn reverse_help_message() -> String {
      **Usage:**\n\
      `/reverse <repo> [--tech <stack>] [--create <name>] [--depth <N>]`\n\n\
      **Arguments:**\n\
-     - `<repo>` — repository identifier. Accepts:\n\
+     - `<repo>` - repository identifier. Accepts:\n\
        - Shorthand: `owner/repo` (defaults to GitHub)\n\
        - `github:owner/repo` or `github:<github-url>`\n\
        - `gitlab:namespace/project` (uses configured GitLab instance)\n\
@@ -779,10 +781,10 @@ pub(crate) fn reverse_help_message() -> String {
        - HTTPS URL: `https://github.com/owner/repo` or `https://gitlab.com/ns/proj`\n\
        - SSH URL: `git@github.com:owner/repo.git` or `git@gitlab.com:ns/proj.git`\n\n\
      **Optional flags:**\n\
-     - `--tech <stack>` — constrain the generated prompt to a technology \
+     - `--tech <stack>` - constrain the generated prompt to a technology \
      stack (quote values containing spaces, e.g. `--tech \"Next.js + Rails\"`)\n\
-     - `--create <name>` — after generation, chain into `/spec create <name>`\n\
-     - `--depth <N>` — directory levels to fetch (1–10, default 1)\n\n\
+     - `--create <name>` - after generation, chain into `/spec create <name>`\n\
+     - `--depth <N>` - directory levels to fetch (1-10, default 1)\n\n\
      **Prerequisites:**\n\
      - GitHub: run `/github login` first to configure a GitHub token.\n\
      - GitLab: run `/gitlab setup` first (or set GITLAB_TOKEN + GITLAB_URL env vars)."
@@ -794,278 +796,5 @@ pub(crate) fn reverse_help_message() -> String {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_reverse_args_basic() {
-        let args = parse_reverse_args("octocat/Hello-World").unwrap();
-        assert_eq!(args.repo_input, "octocat/Hello-World");
-        assert!(args.tech.is_none());
-        assert!(args.create.is_none());
-    }
-
-    #[test]
-    fn test_parse_reverse_args_with_tech() {
-        let args = parse_reverse_args("octocat/Hello-World --tech Rust").unwrap();
-        assert_eq!(args.repo_input, "octocat/Hello-World");
-        assert_eq!(args.tech.as_deref(), Some("Rust"));
-        assert!(args.create.is_none());
-    }
-
-    #[test]
-    fn test_parse_reverse_args_with_quoted_tech_double_quotes() {
-        let args = parse_reverse_args("octocat/Hello-World --tech \"Next.js + Rails\"").unwrap();
-        assert_eq!(args.repo_input, "octocat/Hello-World");
-        assert_eq!(args.tech.as_deref(), Some("Next.js + Rails"));
-    }
-
-    #[test]
-    fn test_parse_reverse_args_with_quoted_tech_single_quotes() {
-        let args = parse_reverse_args("octocat/Hello-World --tech 'Vue + Vite'").unwrap();
-        assert_eq!(args.tech.as_deref(), Some("Vue + Vite"));
-    }
-
-    #[test]
-    fn test_tokenize_reverse_args_preserves_inner_quotes() {
-        let tokens = tokenize_reverse_args("repo --tech \"a 'b' c\" --depth 2");
-        assert_eq!(
-            tokens,
-            vec![
-                "repo".to_string(),
-                "--tech".to_string(),
-                "a 'b' c".to_string(),
-                "--depth".to_string(),
-                "2".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn test_tokenize_reverse_args_empty_quoted_value_splits_nothing() {
-        let tokens = tokenize_reverse_args("--tech \"\" Rust");
-        assert_eq!(tokens, vec!["--tech".to_string(), "Rust".to_string(),]);
-    }
-
-    #[test]
-    fn test_parse_reverse_args_with_create() {
-        let args = parse_reverse_args("octocat/Hello-World --create my-spec").unwrap();
-        assert_eq!(args.repo_input, "octocat/Hello-World");
-        assert_eq!(args.create.as_deref(), Some("my-spec"));
-        assert!(args.tech.is_none());
-    }
-
-    #[test]
-    fn test_parse_reverse_args_with_both_flags() {
-        let args = parse_reverse_args("octocat/Hello-World --tech \"Rust + Tokio\" --create spec1")
-            .unwrap();
-        assert_eq!(args.repo_input, "octocat/Hello-World");
-        assert!(args.tech.is_some());
-        assert_eq!(args.create.as_deref(), Some("spec1"));
-    }
-
-    #[test]
-    fn test_parse_reverse_args_with_depth() {
-        let args = parse_reverse_args("octocat/Hello-World --depth 3").unwrap();
-        assert_eq!(args.repo_input, "octocat/Hello-World");
-        assert_eq!(args.depth.as_deref(), Some("3"));
-    }
-
-    #[test]
-    fn test_parse_reverse_args_with_all_flags() {
-        let args =
-            parse_reverse_args("octocat/Hello-World --tech Rust --create spec1 --depth 5").unwrap();
-        assert_eq!(args.repo_input, "octocat/Hello-World");
-        assert_eq!(args.tech.as_deref(), Some("Rust"));
-        assert_eq!(args.create.as_deref(), Some("spec1"));
-        assert_eq!(args.depth.as_deref(), Some("5"));
-    }
-
-    #[test]
-    fn test_parse_reverse_args_url() {
-        let args = parse_reverse_args("https://github.com/octocat/Hello-World").unwrap();
-        assert_eq!(args.repo_input, "https://github.com/octocat/Hello-World");
-    }
-
-    #[test]
-    fn test_parse_reverse_args_empty() {
-        assert!(parse_reverse_args("").is_none());
-    }
-
-    #[test]
-    fn test_parse_reverse_args_help() {
-        assert!(parse_reverse_args("help").is_none());
-    }
-
-    #[test]
-    fn test_parse_reverse_args_missing_repo() {
-        assert!(parse_reverse_args("--tech Rust").is_none());
-    }
-
-    #[test]
-    fn test_parse_reverse_args_missing_flag_value() {
-        assert!(parse_reverse_args("octocat/Hello-World --tech").is_none());
-    }
-
-    #[test]
-    fn test_parse_reverse_args_missing_depth_value() {
-        assert!(parse_reverse_args("octocat/Hello-World --depth").is_none());
-    }
-
-    #[test]
-    fn test_parse_reverse_args_flags_before_repo() {
-        let args = parse_reverse_args("--tech Rust octocat/Hello-World").unwrap();
-        assert_eq!(args.repo_input, "octocat/Hello-World");
-        assert_eq!(args.tech.as_deref(), Some("Rust"));
-    }
-
-    #[test]
-    fn test_quote_arg_wraps_values_with_whitespace() {
-        assert_eq!(quote_arg("rust"), "rust");
-        assert_eq!(
-            quote_arg("next: rust; stack: axum"),
-            "\"next: rust; stack: axum\""
-        );
-        assert_eq!(quote_arg("say \"hi\" now"), "\"say 'hi' now\"");
-    }
-
-    #[test]
-    fn test_build_spec_reverse_args_folds_scaffold_into_tech() {
-        // The validated `/new` flags are rendered as the free-form `--tech`
-        // constraint `/reverse` already understands.
-        let scaffold = ragent_tools_extended::project_scaffold::parse_flags(&[
-            "--language",
-            "rust",
-            "--type",
-            "gui",
-            "--stack",
-            "gtk4",
-        ])
-        .expect("valid scaffold flags");
-        let args = build_spec_reverse_args(
-            "octocat/Hello-World".to_string(),
-            Some("my-spec".to_string()),
-            Some("3".to_string()),
-            Some(scaffold),
-            Some("./out".to_string()),
-        );
-        assert_eq!(args.repo, "octocat/Hello-World");
-        assert_eq!(args.create.as_deref(), Some("my-spec"));
-        assert_eq!(args.depth.as_deref(), Some("3"));
-        assert_eq!(
-            args.tech.as_deref(),
-            Some("language: rust; type: gui; stack: gtk4")
-        );
-    }
-
-    #[test]
-    fn test_run_spec_reverse_renders_parseable_args() {
-        // The rendered argument string must survive the `/reverse` tokenizer
-        // unchanged so a scaffolded invocation reaches the same parser.
-        let scaffold = ragent_tools_extended::project_scaffold::parse_flags(&[
-            "--language",
-            "rust",
-            "--type",
-            "cmdline",
-        ])
-        .expect("valid scaffold flags");
-        let args = build_spec_reverse_args(
-            "octocat/Hello-World".to_string(),
-            None,
-            None,
-            Some(scaffold),
-            None,
-        );
-        let rendered = format!(
-            "{} --tech {}",
-            quote_arg(&args.repo),
-            quote_arg(args.tech.as_deref().unwrap_or_default())
-        );
-        let parsed = parse_reverse_args(&rendered).expect("rendered args parse");
-        assert_eq!(parsed.repo_input, "octocat/Hello-World");
-        assert_eq!(
-            parsed.tech.as_deref(),
-            Some("language: rust; type: cmdline")
-        );
-    }
-
-    #[test]
-    fn test_build_llm_task_includes_context() {
-        let context = "## Repository Metadata\nDescription: test";
-        let task = build_llm_task(context, None);
-        assert!(task.contains("reverse-engineer"));
-        assert!(task.contains(context));
-        assert!(task.contains("Output only the prompt text"));
-    }
-
-    #[test]
-    fn test_build_llm_task_with_tech() {
-        let context = "## Repository Metadata\nDescription: test";
-        let task = build_llm_task(context, Some("Rust + Tokio"));
-        assert!(task.contains("technology stack: Rust + Tokio"));
-    }
-
-    #[test]
-    fn test_build_llm_task_without_tech() {
-        let context = "test";
-        let task = build_llm_task(context, None);
-        assert!(!task.contains("technology stack"));
-    }
-
-    #[test]
-    fn test_provider_label_and_id_github() {
-        let provider = VcsProvider::GitHub {
-            owner: "octocat".to_string(),
-            repo: "Hello-World".to_string(),
-        };
-        let (repo_id, label) = provider_label_and_id(&provider);
-        assert_eq!(repo_id, "octocat/Hello-World");
-        assert_eq!(label, "GitHub");
-    }
-
-    #[test]
-    fn test_provider_label_and_id_gitlab_default() {
-        let provider = VcsProvider::GitLab {
-            host: None,
-            project_path: "group/project".to_string(),
-        };
-        let (repo_id, label) = provider_label_and_id(&provider);
-        assert_eq!(repo_id, "group/project");
-        assert_eq!(label, "GitLab");
-    }
-
-    #[test]
-    fn test_provider_label_and_id_gitlab_self_hosted() {
-        let provider = VcsProvider::GitLab {
-            host: Some("https://gitlab.example.com".to_string()),
-            project_path: "group/project".to_string(),
-        };
-        let (repo_id, label) = provider_label_and_id(&provider);
-        assert_eq!(repo_id, "group/project");
-        assert_eq!(label, "GitLab (gitlab.example.com)");
-    }
-
-    #[test]
-    fn test_reverse_help_message_content() {
-        let msg = reverse_help_message();
-        assert!(msg.contains("Usage:"));
-        assert!(msg.contains("--tech"));
-        assert!(msg.contains("--create"));
-        assert!(msg.contains("--depth"));
-        assert!(msg.contains("/github login"));
-        assert!(msg.contains("/gitlab setup"));
-        assert!(msg.contains("gitlab:"));
-    }
-
-    #[test]
-    fn test_reverse_help_message_lists_all_formats() {
-        let msg = reverse_help_message();
-        assert!(msg.contains("owner/repo"));
-        assert!(msg.contains("github:"));
-        assert!(msg.contains("gitlab:"));
-        assert!(msg.contains("https://github.com"));
-        assert!(msg.contains("https://gitlab.com"));
-        assert!(msg.contains("git@github.com"));
-        assert!(msg.contains("git@gitlab.com"));
-    }
-}
+#[path = "../tests/inline/reverse_tests.rs"]
+mod tests;

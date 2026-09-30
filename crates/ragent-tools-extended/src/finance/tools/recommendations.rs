@@ -1,4 +1,4 @@
-//! `stock_recommendations` tool — analyst recommendation trends for a ticker.
+//! `stock_recommendations` tool - analyst recommendation trends for a ticker.
 
 use crate::finance::tools::with_yahoo_fallback;
 use crate::{Tool, ToolContext, ToolOutput};

@@ -3,15 +3,15 @@
 //! This module contains the summarisation-based compaction runner.
 //! It currently exposes:
 //!
-//! - [`estimator`] — fast local token estimator and compaction trigger
+//! - [`estimator`] - fast local token estimator and compaction trigger
 //!   (FR-002, FR-003).
-//! - [`prompt`] — the summarisation prompt builder.
-//! - [`serializer`] — the conversation serialiser that flattens history into
+//! - [`prompt`] - the summarisation prompt builder.
+//! - [`serializer`] - the conversation serialiser that flattens history into
 //!   the transcript fed to the summarisation prompt.
-//! - [`runner`] — the compaction runner: selects recent turns, calls the LLM
+//! - [`runner`] - the compaction runner: selects recent turns, calls the LLM
 //!   for a summary, and produces the replacement message list (FR-005,
 //!   FR-007).
-//! - [`convert`] — bidirectional `ChatMessage` ↔ `Message` conversion used by
+//! - [`convert`] - bidirectional `ChatMessage` <-> `Message` conversion used by
 //!   the runner and the agent loop's pre-send / emergency-overflow paths.
 
 pub mod convert;

@@ -89,6 +89,74 @@ fn parse_create_rejects_non_numeric_output_limit() {
     }
 }
 
+// ── F-19 numeric-flag rejection (all numeric arms) ────────────────────────
+
+#[test]
+fn parse_create_rejects_non_numeric_numeric_flags() {
+    // F-19: every numeric flag must reject a malformed value and name the flag,
+    // instead of silently degrading to the default via `parse().ok()`.
+    for flag in [
+        "--fetch-concurrently",
+        "--local-concurrently",
+        "--fetch-timeout-secs",
+        "--web-phase-timeout-secs",
+        "--web-time",
+        "--local-phase-timeout-secs",
+        "--search-max-retries",
+        "--search-retry-base-delay-ms",
+        "--max-web-results",
+        "--max-search-calls",
+        "--max-local-sources",
+        "--max-synthesis-sources",
+        "--iterations",
+        "--max-concurrent-research-units",
+        "--max-concepts",
+        "--max-findings",
+    ] {
+        let input = format!("create badnum topic {flag} abc");
+        match ResearchCliCommand::parse(&input) {
+            ResearchCliCommand::Invalid(msg) => {
+                assert!(
+                    msg.contains(flag),
+                    "rejection must name the offending flag `{flag}`: {msg}"
+                );
+                assert!(
+                    msg.contains("expected an integer"),
+                    "rejection should explain the expected type for `{flag}`: {msg}"
+                );
+            }
+            other => panic!("expected Invalid for `{input}`, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn parse_create_accepts_valid_numeric_flags() {
+    // F-19: the rewritten match arms still parse valid values.
+    match ResearchCliCommand::parse(
+        "create ok num --fetch-concurrently 8 --search-max-retries 3 --max-web-results 40 \
+         --iterations 2 --max-concepts 4 --max-findings 6",
+    ) {
+        ResearchCliCommand::Create {
+            iterations,
+            fetch_concurrency,
+            search_max_retries,
+            max_web_results,
+            max_concepts,
+            max_findings,
+            ..
+        } => {
+            assert_eq!(iterations, Some(2));
+            assert_eq!(fetch_concurrency, Some(8));
+            assert_eq!(search_max_retries, Some(3));
+            assert_eq!(max_web_results, Some(40));
+            assert_eq!(max_concepts, Some(4));
+            assert_eq!(max_findings, Some(6));
+        }
+        other => panic!("expected Create, got {other:?}"),
+    }
+}
+
 // ── Help text (NFR-003) ───────────────────────────────────────────────────
 
 #[test]

@@ -1,4 +1,4 @@
-//! `team_submit_plan` — Teammate submits a plan to the lead for approval.
+//! `team_submit_plan` - Teammate submits a plan to the lead for approval.
 
 use anyhow::Result;
 use serde_json::{Value, json};

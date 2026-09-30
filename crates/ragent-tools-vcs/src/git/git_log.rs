@@ -1,8 +1,9 @@
-//! `git_log` — Show commit history.
+//! `git_log` - Show commit history.
 
 use anyhow::Result;
 use serde_json::{Value, json};
 
+use crate::limits::{DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT};
 use crate::{Tool, ToolContext, ToolOutput};
 
 /// Tool that shows commit history.
@@ -57,7 +58,10 @@ impl Tool for GitLogTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let limit = input["limit"].as_u64().unwrap_or(20);
+        let limit = input["limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_PAGE_LIMIT)
+            .min(MAX_PAGE_LIMIT);
         let oneline = input["oneline"].as_bool().unwrap_or(true);
         let branch = input["branch"].as_str().unwrap_or("HEAD");
         let author = input["author"].as_str();

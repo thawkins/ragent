@@ -1,4 +1,4 @@
-//! `team_task_complete` — Mark a task as completed and unblock its dependents.
+//! `team_task_complete` - Mark a task as completed and unblock its dependents.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -25,7 +25,7 @@ impl Tool for TeamTaskCompleteTool {
              \\\n\\\n\
              WARNING: DO NOT confuse with `agent_complete` (a different tool used OUTSIDE teams to \
              signal the end of the autonomous loop, which takes `summary` as its only parameter). \
-             This tool takes `team_name` + `task_id` — NOT `summary`. \
+             This tool takes `team_name` + `task_id` - NOT `summary`. \
              \\\n\\\n\
              Example: team_task_complete(team_name: \"audit-team\", task_id: \"task-001\")"
     }
@@ -36,7 +36,7 @@ impl Tool for TeamTaskCompleteTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "REQUIRED. Name of the team. If you are NOT inside a team session, this tool will fail — use `agent_complete(summary: ...)` instead to end the autonomous loop."
+                    "description": "REQUIRED. Name of the team. If you are NOT inside a team session, this tool will fail - use `agent_complete(summary: ...)` instead to end the autonomous loop."
                 },
                 "task_id": {
                     "type": "string",
@@ -146,7 +146,7 @@ impl Tool for TeamTaskCompleteTool {
         let outcome = run_team_hook(&team_dir, HookEvent::TaskCompleted, Some(&hook_stdin)).await;
 
         if let HookOutcome::Feedback(feedback) = outcome {
-            // Hook rejected completion — revert task to InProgress.
+            // Hook rejected completion - revert task to InProgress.
             let _ = store.update_task(task_id, |t| {
                 t.status = TaskStatus::InProgress;
                 t.completed_at = None;

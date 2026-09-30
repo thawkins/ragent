@@ -1,7 +1,7 @@
 //! Configuration loading, merging, and types for ragent.
 //!
 //! [`Config`] is loaded via [`Config::load`] with a layered precedence:
-//! compiled defaults → global file → project file → `RAGENT_CONFIG` env →
+//! compiled defaults -> global file -> project file -> `RAGENT_CONFIG` env ->
 //! `RAGENT_CONFIG_CONTENT` env. Provider, agent, MCP server, and permission
 //! settings are all configured here.
 
@@ -30,7 +30,10 @@ struct CachedConfigFile {
 }
 
 /// Top-level ragent configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+///
+/// `Debug` is hand-written (see below) so secret-bearing fields are redacted
+/// rather than printed by a `{:?}`/`tracing::debug!(?config)`.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Display name of the user.
     #[serde(default)]
@@ -154,7 +157,7 @@ pub struct Config {
     /// GCF (Graph Compact Format) encoding of JSON tool results for the LLM
     /// view (spec `gcf`, FR-001).
     ///
-    /// Default: disabled — a config file with no `gcf` section means tool
+    /// Default: disabled - a config file with no `gcf` section means tool
     /// results are never encoded; the `gcf` key is omitted from serialisation
     /// while `enabled` is `false`.
     #[serde(default, skip_serializing_if = "GcfConfig::is_default")]
@@ -184,13 +187,13 @@ pub struct Config {
     /// Tool names to hide from the LLM (excluded from tool definitions and system-prompt listings).
     /// Hidden tools remain registered and executable; they are simply not advertised to the model.
     ///
-    /// Example — suppress all GitHub and GitLab tools:
+    /// Example - suppress all GitHub and GitLab tools:
     /// ```json
     /// { "hidden_tools": ["github_list_issues", "github_get_issue", "gitlab_list_mrs"] }
     /// ```
     #[serde(default)]
     pub hidden_tools: Vec<String>,
-    /// YOLO mode — bypass command validation and tool restrictions.
+    /// YOLO mode - bypass command validation and tool restrictions.
     #[serde(default)]
     pub yolo: bool,
     /// Edit-operation logging enabled for `edit` and `multi_edit`.
@@ -244,7 +247,7 @@ pub struct Config {
     /// Pie feature gap toggles (spec `piegap` FR-016, FR-018).
     ///
     /// Each flag gates a standalone pie-derived feature so that existing
-    /// workflows are not disrupted. All flags default to `false` — features are
+    /// workflows are not disrupted. All flags default to `false` - features are
     /// opt-in. When a flag is disabled, the corresponding feature is inactive.
     #[serde(default, skip_serializing_if = "PieGapConfig::is_empty")]
     pub piegap: PieGapConfig,
@@ -277,6 +280,97 @@ pub struct Config {
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
+}
+
+/// Explicit [`Default`] for [`Config`] (ANTIPAT M-7).
+///
+/// The derive would zero every bool and leave `default_agent` empty, which
+/// drifts from the serde field defaults (`default_agent == "general"`,
+/// `activity_log == true`). Keeping the two in sync here means every
+/// `Config::default()` - including the processor's load-failure fallback -
+/// observes the same defaults as a config file with the keys omitted, so the
+/// load-time workaround is no longer needed.
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            username: None,
+            default_agent: default_agent_name(),
+            specified_default_agent: false,
+            provider: HashMap::new(),
+            permission: Vec::new(),
+            agent: HashMap::new(),
+            r#loop: LoopConfig::default(),
+            command: HashMap::new(),
+            mcp: HashMap::new(),
+            instructions: Vec::new(),
+            skill_dirs: Vec::new(),
+            experimental: ExperimentalFlags::default(),
+            hooks: Vec::new(),
+            bash: BashConfig::default(),
+            dirs: DirsConfig::default(),
+            tavily_api_key: None,
+            langsearch_api_key: None,
+            perplexity_api_key: None,
+            openalex_email: None,
+            exa_api_key: None,
+            serper_api_key: None,
+            code_index: CodeIndexConfig::default(),
+            stream: StreamConfig::default(),
+            memory: MemoryConfig::default(),
+            compaction: CompactionConfig::default(),
+            gcf: GcfConfig::default(),
+            gitlab: GitLabIntegrationConfig::default(),
+            tool_visibility: ToolVisibilityConfig::default(),
+            agent_perf: AgentPerfConfig::default(),
+            telemetry: crate::telemetry::TelemetryConfig::default(),
+            hidden_tools: Vec::new(),
+            yolo: false,
+            edit_log: false,
+            activity_log: true,
+            prices: Vec::new(),
+            browser: BrowserConfig::default(),
+            channels: ChannelsConfig::default(),
+            gmail: GmailConfig::default(),
+            sdd: SddConfig::default(),
+            trigger: crate::trigger::TriggerConfig::default(),
+            piegap: PieGapConfig::default(),
+            research: ResearchConfig::default(),
+            finance: crate::finance::FinanceProviderConfig::default(),
+            plugins: None,
+            input_queue_capacity: None,
+            config_paths: Vec::new(),
+        }
+    }
+}
+
+/// Redacted [`Debug`] rendering of [`Config`] (ANTIPAT H-2).
+///
+/// `Config` carries plaintext secrets (`tavily_api_key`,
+/// `langsearch_api_key`, `perplexity_api_key`, `exa_api_key`,
+/// `serper_api_key`, `gitlab.token`, `channels.telegram.bot_token`,
+/// `channels.discord.webhook_url`, `gmail.client_secret`,
+/// `finance.api_key`). A derived `Debug` printed them verbatim on any
+/// `{:?}`/`{cfg:?}`/`tracing::debug!(?cfg)`; this impl mirrors the MS-05
+/// decision to drop derived `Debug` from `ragent_types::Event`.
+///
+/// The rendering is produced by [`render_redacted`], which serialises to JSON
+/// and then routes the text through [`ragent_types::sanitize::redact_secrets`],
+/// so a secret is masked even if a new secret-bearing field is added later.
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&render_redacted(self))
+    }
+}
+
+/// Render a config value as redacted JSON for [`Config`]'s `Debug` impl.
+///
+/// Falls back to a fixed placeholder when serialisation fails, so the impl can
+/// never panic and never leaks a partially-rendered value.
+fn render_redacted<T: serde::Serialize>(value: &T) -> String {
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => ragent_types::sanitize::redact_secrets(&json),
+        Err(e) => format!("<config: unserialisable: {e}>"),
+    }
 }
 
 /// Default capacity of the TUI message input queue (spec `inputqueue` FR-015).
@@ -333,7 +427,7 @@ pub struct ToolVisibilitySpecified {
 /// it (tracked by [`ToolVisibilitySpecified::codeindex`]). This lets the default
 /// config omit the key so code-level default changes propagate, while ensuring
 /// that an explicit user toggle (e.g. `/tools codeindex on|off`) is written to
-/// disk and survives a restart — even when a global config disagrees.
+/// disk and survives a restart - even when a global config disagrees.
 #[derive(Debug, Clone)]
 pub struct ToolVisibilityConfig {
     /// Office document tools (office_read, office_write, office_info, libre_read, etc.).
@@ -349,26 +443,26 @@ pub struct ToolVisibilityConfig {
     /// Plan-mode tools (plan_enter, plan_exit).
     pub plan: bool,
     /// Code-index tools (codeindex_search, codeindex_status, codeindex_symbols, etc.).
-    /// Default `true` — codeindex tools are visible when the subsystem is enabled.
+    /// Default `true` - codeindex tools are visible when the subsystem is enabled.
     /// When serialised, this field is only written if the user explicitly set it
     /// (via [`ToolVisibilityConfig::set_codeindex`] or by having it present in the
     /// loaded JSON).
     pub codeindex: bool,
     /// Masterfetch web-access tools (mf_fetch, mf_crawl, mf_search,
     /// mf_screenshot, mf_cache_clear, mf_version).
-    /// Default `true` — masterfetch tools are visible by default.
+    /// Default `true` - masterfetch tools are visible by default.
     /// When serialised, this field is only written if the user explicitly set it
     /// (tracked by [`ToolVisibilitySpecified::masterfetch`]).
     pub masterfetch: bool,
     /// Browser automation tool (`browser`).
-    /// Default `true` — the browser tool is visible by default.
+    /// Default `true` - the browser tool is visible by default.
     /// When serialised, this field is only written if the user explicitly set it
     /// (tracked by [`ToolVisibilitySpecified::browser`]).
     pub browser: bool,
     /// Finance tools (`stock_quote`, `stock_history`, `stock_fundamentals`,
     /// `stock_recommendations`, `currency_rate`, `currency_history`,
     /// `stock_search`, `stock_options`).
-    /// Default `true` — the finance tools are visible by default.
+    /// Default `true` - the finance tools are visible by default.
     /// When serialised, this field is only written if the user explicitly set it
     /// (tracked by [`ToolVisibilitySpecified::finance`]).
     pub finance: bool,
@@ -500,7 +594,7 @@ impl Serialize for ToolVisibilityConfig {
 pub struct AgentPerfConfig {
     /// Master switch for the entire perf subsystem.
     /// When `false`, every performance optimisation short-circuits.
-    #[serde(default = "agent_perf_default_true")]
+    #[serde(default = "default_true")]
     pub enabled: bool,
     /// Emit detailed per-scope timing logs at `info` level.
     #[serde(default)]
@@ -516,12 +610,8 @@ pub struct AgentPerfConfig {
     #[serde(default = "default_max_concurrent_tools")]
     pub max_concurrent_tools: u32,
     /// Execute independent tool calls in parallel.
-    #[serde(default = "agent_perf_default_true")]
+    #[serde(default = "default_true")]
     pub parallel_independent_tools: bool,
-}
-
-fn agent_perf_default_true() -> bool {
-    true
 }
 
 fn default_step_budget_secs() -> u64 {
@@ -552,6 +642,18 @@ impl Default for AgentPerfConfig {
     }
 }
 
+/// Minimum allowed `agent_perf.step_budget_secs` / `stall_timeout_secs`
+/// (ANTIPAT M-11).
+///
+/// Below this a step budget or stall timeout is too small to be useful and
+/// almost certainly a misconfiguration.
+const MIN_AGENT_PERF_TIMEOUT_SECS: u64 = 5;
+
+/// Minimum allowed `agent_perf.max_concurrent_tools` (ANTIPAT M-11).
+///
+/// At least one tool must be allowed to run per turn.
+const MIN_AGENT_PERF_CONCURRENT_TOOLS: u32 = 1;
+
 impl AgentPerfConfig {
     /// Validate the configuration and return a list of any problems.
     ///
@@ -560,21 +662,21 @@ impl AgentPerfConfig {
     #[must_use]
     pub fn validate(&self) -> Vec<String> {
         let mut problems = Vec::new();
-        if self.step_budget_secs < 5 {
+        if self.step_budget_secs < MIN_AGENT_PERF_TIMEOUT_SECS {
             problems.push(format!(
-                "agent_perf.step_budget_secs must be >= 5 (got {})",
+                "agent_perf.step_budget_secs must be >= {MIN_AGENT_PERF_TIMEOUT_SECS} (got {})",
                 self.step_budget_secs
             ));
         }
-        if self.stall_timeout_secs < 5 {
+        if self.stall_timeout_secs < MIN_AGENT_PERF_TIMEOUT_SECS {
             problems.push(format!(
-                "agent_perf.stall_timeout_secs must be >= 5 (got {})",
+                "agent_perf.stall_timeout_secs must be >= {MIN_AGENT_PERF_TIMEOUT_SECS} (got {})",
                 self.stall_timeout_secs
             ));
         }
-        if self.max_concurrent_tools < 1 {
+        if self.max_concurrent_tools < MIN_AGENT_PERF_CONCURRENT_TOOLS {
             problems.push(format!(
-                "agent_perf.max_concurrent_tools must be >= 1 (got {})",
+                "agent_perf.max_concurrent_tools must be >= {MIN_AGENT_PERF_CONCURRENT_TOOLS} (got {})",
                 self.max_concurrent_tools
             ));
         }
@@ -912,7 +1014,7 @@ pub struct StreamConfig {
     ///
     /// Used by the session processor's per-event stall detection.  The
     /// `agent_perf.stall_timeout_secs` knob is a separate budget used by
-    /// the agent-perf profiler and should be ≤ this value.
+    /// the agent-perf profiler and should be <= this value.
     #[serde(default = "default_stream_timeout_secs")]
     pub timeout_secs: u64,
     /// Maximum number of retry attempts after a stall or connection failure (default: 4).
@@ -951,6 +1053,16 @@ impl Default for StreamConfig {
     }
 }
 
+/// Minimum allowed `stream.initial_response_timeout_secs` / `timeout_secs`
+/// (ANTIPAT M-11).
+const MIN_STREAM_TIMEOUT_SECS: u64 = 5;
+
+/// Maximum allowed `stream.max_retries` (ANTIPAT M-11).
+///
+/// An unbounded retry count would let a single request spin for an
+/// arbitrarily long time.
+const MAX_STREAM_RETRIES: u32 = 32;
+
 impl StreamConfig {
     /// Validate the configuration and return a list of any problems.
     ///
@@ -960,15 +1072,15 @@ impl StreamConfig {
     #[must_use]
     pub fn validate(&self) -> Vec<String> {
         let mut problems = Vec::new();
-        if self.initial_response_timeout_secs < 5 {
+        if self.initial_response_timeout_secs < MIN_STREAM_TIMEOUT_SECS {
             problems.push(format!(
-                "stream.initial_response_timeout_secs must be >= 5 (got {})",
+                "stream.initial_response_timeout_secs must be >= {MIN_STREAM_TIMEOUT_SECS} (got {})",
                 self.initial_response_timeout_secs
             ));
         }
-        if self.timeout_secs < 5 {
+        if self.timeout_secs < MIN_STREAM_TIMEOUT_SECS {
             problems.push(format!(
-                "stream.timeout_secs must be >= 5 (got {})",
+                "stream.timeout_secs must be >= {MIN_STREAM_TIMEOUT_SECS} (got {})",
                 self.timeout_secs
             ));
         }
@@ -978,9 +1090,9 @@ impl StreamConfig {
                 self.initial_response_timeout_secs, self.timeout_secs
             ));
         }
-        if self.max_retries > 32 {
+        if self.max_retries > MAX_STREAM_RETRIES {
             problems.push(format!(
-                "stream.max_retries must be <= 32 (got {})",
+                "stream.max_retries must be <= {MAX_STREAM_RETRIES} (got {})",
                 self.max_retries
             ));
         }
@@ -1013,7 +1125,7 @@ pub struct CodeIndexSpecified {
 /// (tracked by [`CodeIndexSpecified::enabled`]). This lets the default config
 /// omit the key so code-level default changes propagate, while ensuring that an
 /// explicit user toggle (e.g. `/codeindex on`/`/codeindex off`) is written to disk
-/// and survives a restart — even when a global config disagrees.
+/// and survives a restart - even when a global config disagrees.
 #[derive(Debug, Clone)]
 pub struct CodeIndexConfig {
     /// Whether code indexing is enabled.
@@ -1046,10 +1158,6 @@ impl CodeIndexConfig {
     }
 }
 
-const fn default_code_index_enabled() -> bool {
-    true
-}
-
 const fn default_max_file_size() -> u64 {
     1_048_576 // 1 MB
 }
@@ -1057,7 +1165,7 @@ const fn default_max_file_size() -> u64 {
 impl Default for CodeIndexConfig {
     fn default() -> Self {
         Self {
-            enabled: default_code_index_enabled(),
+            enabled: default_true(),
             max_file_size: default_max_file_size(),
             extra_exclude_dirs: Vec::new(),
             extra_exclude_patterns: Vec::new(),
@@ -1211,7 +1319,11 @@ pub struct Capabilities {
     pub thinking_levels: Vec<ragent_types::ThinkingLevel>,
 }
 
-const fn default_true() -> bool {
+/// Serde/section default of `true`, shared by every boolean field whose default
+/// is on (ANTIPAT M-8: one helper instead of a per-field copy). `pub(crate)` so
+/// the `plugins` and `trigger` sub-configs reuse it rather than declaring their
+/// own.
+pub(crate) const fn default_true() -> bool {
     true
 }
 
@@ -1269,7 +1381,7 @@ pub struct AgentConfig {
 /// Entries in `allowlist` are command prefixes that bypass the built-in
 /// banned-command check (e.g. `"curl"` to allow curl).  Entries in
 /// `denylist` are substring patterns that always reject a command (e.g.
-/// `"git push --force"`).  Both global and project configs are merged —
+/// `"git push --force"`).  Both global and project configs are merged -
 /// the union of all entries is used.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BashConfig {
@@ -1286,11 +1398,11 @@ pub struct BashConfig {
 /// Entries in `allowlist` are glob patterns (e.g. `"src/**"`, `"*.rs"`) that
 /// automatically grant permission for read/edit operations without prompting.
 /// Entries in `denylist` are glob patterns that unconditionally reject access
-/// (e.g. `"secrets/**"`, `"/etc/**"`). Both global and project configs are merged —
-/// Configuration for directory/file path allowlists and denylists.
+/// (e.g. `"secrets/**"`, `"/etc/**"`). The lists are unioned across trusted
+/// config sources (user-global, `--config`, environment overrides); a
+/// project-local `.ragent/ragent.json` overlay's `dirs` lists are dropped by
+/// [`Config::merge_project`](crate::Config::merge_project) rather than merged.
 ///
-/// The `allowlist` and `denylist` fields contain glob patterns that control
-/// automatic approval/rejection of file operations without prompting.
 /// The `allowed_roots` field specifies additional directory paths that are
 /// treated as valid roots for path escape checking, allowing sub-agents and
 /// tools to access files in multiple project directories.
@@ -1442,9 +1554,25 @@ const fn default_background_agent_timeout() -> u64 {
     3600
 }
 
+/// Read an environment variable, treating a present-but-blank value as unset
+/// (ANTIPAT L-9).
+///
+/// This is the single env-read helper for the crate, shared by the
+/// `RAGENT_CONFIG` / `RAGENT_CONFIG_CONTENT` reads here and
+/// [`crate::github::env_token`], so a present-but-blank value is handled the
+/// same everywhere. `None` means "unset or blank".
+pub(crate) fn read_env(name: &str) -> Option<String> {
+    let value = std::env::var(name).ok()?;
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
 impl Config {
     /// Load configuration with precedence:
-    /// compiled defaults → global → project → env var → inline content
+    /// compiled defaults -> global -> project -> env var -> inline content
     ///
     /// Provider configurations are merged deeply: each provider block is merged
     /// per-provider, and model-level entries inside `provider.<id>.models` are
@@ -1471,8 +1599,10 @@ impl Config {
         // config path is relative) so hot uncached callers (per-turn prompt
         // build, gitlab tool auth, slash-menu) do not re-read/re-parse on every
         // call. The cache is bypassed when either env-var override is present.
-        let env_overrides = std::env::var_os("RAGENT_CONFIG").is_some()
-            || std::env::var_os("RAGENT_CONFIG_CONTENT").is_some();
+        // L-9: use the shared `read_env` helper so a present-but-blank override
+        // is treated the same here and in `load_uncached`.
+        let env_overrides =
+            read_env("RAGENT_CONFIG").is_some() || read_env("RAGENT_CONFIG_CONTENT").is_some();
 
         if env_overrides {
             return Self::load_uncached();
@@ -1482,8 +1612,22 @@ impl Config {
         // The project config path (`.ragent/ragent.json`) is relative to the
         // current working directory, which can change (e.g. in tests); include
         // it in the cache key so a stale entry is never returned.
-        let cwd = std::env::current_dir().unwrap_or_default();
-        let global_path = dirs::config_dir().map(|d| d.join("ragent").join("ragent.json"));
+        //
+        // L-5: an unobtainable cwd used to collapse to "" via
+        // `unwrap_or_default()`, weakening the cache key so two different
+        // directories could share an entry. Warn and skip the cache entirely
+        // rather than risk serving a config resolved for the wrong directory.
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "cannot determine current directory; bypassing the config load cache"
+                );
+                return Self::load_uncached();
+            }
+        };
+        let global_path = Self::global_config_path();
         let project_path = PathBuf::from(".ragent").join("ragent.json");
         let candidates: Vec<PathBuf> = [global_path.clone(), Some(project_path.clone())]
             .into_iter()
@@ -1560,25 +1704,20 @@ impl Config {
 
     /// The uncached config loader (the real work behind [`Config::load`]).
     fn load_uncached() -> anyhow::Result<Self> {
-        // Derived `Default` zeroes all bools, but `activity_log`'s intended
-        // default is `true` (serde `default_true`). Keep the load-time seed
-        // consistent with the serde default so a fresh install never writes
-        // `activity_log: false` to the generated default config.
-        let mut config = Self {
-            activity_log: true,
-            ..Self::default()
-        };
+        // `Config::default()` implements the same defaults as the serde field
+        // attributes (`default_agent == "general"`, `activity_log == true`), so
+        // no load-time patch is needed here (ANTIPAT M-7).
+        let mut config = Self::default();
         let mut loaded = false;
 
         // Global config: ~/.config/ragent/ragent.json
-        if let Some(config_dir) = dirs::config_dir() {
-            let global_path = config_dir.join("ragent").join("ragent.json");
-            if global_path.exists() {
-                let overlay = Self::load_file(&global_path)?;
-                config = Self::merge(config, overlay);
-                config.config_paths.push(global_path);
-                loaded = true;
-            }
+        if let Some(global_path) = Self::global_config_path()
+            && global_path.exists()
+        {
+            let overlay = Self::load_file(&global_path)?;
+            config = Self::merge(config, overlay);
+            config.config_paths.push(global_path);
+            loaded = true;
         }
 
         // Project config: ./.ragent/ragent.json
@@ -1617,7 +1756,7 @@ impl Config {
         }
 
         // Environment variable pointing to config file
-        if let Ok(env_path) = std::env::var("RAGENT_CONFIG") {
+        if let Some(env_path) = read_env("RAGENT_CONFIG") {
             let path = PathBuf::from(&env_path);
             if path.exists() {
                 let overlay = Self::load_file(&path)?;
@@ -1629,7 +1768,7 @@ impl Config {
         // Inline config from environment variable. Parsed once into a raw
         // `Value` so the `specified_default_agent` probe and the typed
         // conversion share a single JSON parse.
-        if let Ok(content) = std::env::var("RAGENT_CONFIG_CONTENT") {
+        if let Some(content) = read_env("RAGENT_CONFIG_CONTENT") {
             let label = "RAGENT_CONFIG_CONTENT environment variable";
             let overlay_value: serde_json::Value = serde_json::from_str(&content)
                 .map_err(|e| Self::json_parse_error(label, &content, e))?;
@@ -1708,6 +1847,10 @@ impl Config {
     /// JSON-parsed once into a raw [`serde_json::Value`]; both the
     /// `specified_default_agent` probe and the typed conversion derive from
     /// that single parse.
+    ///
+    /// L-9: every environment read goes through [`read_env`], which skips
+    /// present-but-blank values, so the env handling here matches `github.rs`
+    /// (the only other env reader in the crate).
     pub(crate) fn parse_file(path: &Path, content: &str) -> anyhow::Result<Self> {
         let label = format!("config file '{}'", path.display());
         let config_value: serde_json::Value = serde_json::from_str(content)
@@ -1747,8 +1890,7 @@ impl Config {
             }
             project
         } else {
-            dirs::config_dir()
-                .map(|d| d.join("ragent").join("ragent.json"))
+            Self::global_config_path()
                 .ok_or_else(|| anyhow::anyhow!("no config directory found"))?
         };
 
@@ -1792,8 +1934,7 @@ impl Config {
         let path = if was_loaded_from_project {
             project_path
         } else {
-            dirs::config_dir()
-                .map(|d| d.join("ragent").join("ragent.json"))
+            Self::global_config_path()
                 .ok_or_else(|| anyhow::anyhow!("no config directory found"))?
         };
 
@@ -1876,11 +2017,11 @@ impl Config {
     /// The `saves/` directory is created if it does not already exist. The
     /// backup is written via a temp-file-then-rename so a crash mid-write never
     /// leaves a partial backup (FR-003). Each call produces a new, uniquely
-    /// named file — existing backups are never overwritten (FR-011).
+    /// named file - existing backups are never overwritten (FR-011).
     ///
     /// # Arguments
     ///
-    /// * `config_dir` — the global config directory (e.g.
+    /// * `config_dir` - the global config directory (e.g.
     ///   `~/.config/ragent`). When `None`, the directory is resolved via
     ///   [`global_config_dir`](Self::global_config_dir); an error is returned
     ///   if it cannot be determined. Tests may pass a temp directory so the
@@ -1905,7 +2046,7 @@ impl Config {
         let source = dir.join("ragent.json");
 
         // Read the current global config. If it does not exist there is nothing
-        // to back up — surface a clear error rather than creating an empty file.
+        // to back up - surface a clear error rather than creating an empty file.
         let content = std::fs::read_to_string(&source).map_err(|e| {
             anyhow::anyhow!("Failed to read global config '{}': {}", source.display(), e)
         })?;
@@ -1953,7 +2094,7 @@ impl Config {
         })?;
         std::fs::rename(&tmp_path, &backup_path).map_err(|e| {
             // Best-effort cleanup of the orphaned temp file on rename failure.
-            let _ = std::fs::remove_file(&tmp_path);
+            let _ = std::fs::remove_file(&tmp_path); // INTENTIONAL: best-effort temp cleanup
             anyhow::anyhow!(
                 "Failed to rename temp file to backup '{}': {}",
                 backup_path.display(),
@@ -1982,9 +2123,9 @@ impl Config {
     ///
     /// # Arguments
     ///
-    /// * `config_dir` — the global config directory (e.g. `~/.config/ragent`).
+    /// * `config_dir` - the global config directory (e.g. `~/.config/ragent`).
     ///   When `None`, resolved via [`global_config_dir`].
-    /// * `backup` — backup file name or full path inside the `saves/` subfolder.
+    /// * `backup` - backup file name or full path inside the `saves/` subfolder.
     ///
     /// # Errors
     ///
@@ -2040,7 +2181,7 @@ impl Config {
             )
         })?;
         std::fs::rename(&tmp_path, &target).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp_path);
+            let _ = std::fs::remove_file(&tmp_path); // INTENTIONAL: best-effort temp cleanup
             anyhow::anyhow!(
                 "Failed to rename restored config to '{}': {}",
                 target.display(),
@@ -2114,8 +2255,8 @@ impl Config {
     /// fields.
     ///
     /// SEC-ragent-config-001/002/003 (SECTASKS T-011): a config file that lives
-    /// in the working directory (`.ragent/ragent.json`) is repository content —
-    /// untrusted — and must not be able to widen privileges. Callers merging a
+    /// in the working directory (`.ragent/ragent.json`) is repository content -
+    /// untrusted - and must not be able to widen privileges. Callers merging a
     /// project-local overlay must use [`Config::merge_project`], which strips
     /// the privilege-widening keys first. This method applies no such
     /// restriction and is intended for user-owned/operator sources only
@@ -2148,12 +2289,15 @@ impl Config {
     /// - `yolo` may not be enabled by the project (a project file cannot turn
     ///   off the interactive permission prompts);
     /// - `permission` rules that grant (`allow`) are dropped, so a project
-    ///   cannot override a user-global `deny` (deny/ask entries are kept — a
+    ///   cannot override a user-global `deny` (deny/ask entries are kept - a
     ///   project may always *tighten*);
     /// - `bash.allowlist`, `bash.denylist`, `dirs.allowlist`,
-    ///   `dirs.denylist`, and `dirs.allowed_roots` may not be widened, so a
-    ///   project cannot auto-approve commands/paths or extend the tool escape
-    ///   roots beyond the working directory;
+    ///   `dirs.denylist`, and `dirs.allowed_roots` are treated as
+    ///   trusted-config-only: the project's values are dropped entirely rather
+    ///   than merged. A project therefore cannot auto-approve commands/paths,
+    ///   inject denylist noise, or extend the tool escape roots beyond the
+    ///   working directory. Both denylists follow the same policy so the two
+    ///   list types are handled symmetrically (ANTIPAT M-3);
     /// - `telemetry` is dropped entirely, so a project cannot enable telemetry
     ///   or point the OTLP endpoint at an attacker host (SEC-ragent-telemetry-002);
     /// - `hooks` contributed by a project are dropped: a project hook runs
@@ -2183,15 +2327,23 @@ impl Config {
         }
         if !overlay.bash.denylist.is_empty() {
             // A project denylist *tightens*, but a hostile project can also
-            // remove nothing and only add noise; keeping it is safe, yet the
-            // union below would still admit attacker entries. Treat it as
-            // untrusted and drop it so the effective policy is the user's.
+            // add entries that the union below would admit even though the
+            // user never wrote them. Treat it as untrusted and drop it so the
+            // effective policy is the user's, matching the `dirs.denylist`
+            // handling below (ANTIPAT M-3: the two denylists are symmetric).
             overlay.bash.denylist.clear();
             rejected.push("bash.denylist");
         }
         if !overlay.dirs.allowlist.is_empty() {
             overlay.dirs.allowlist.clear();
             rejected.push("dirs.allowlist");
+        }
+        if !overlay.dirs.denylist.is_empty() {
+            // Symmetric with `bash.denylist`: a project denylist is dropped so
+            // repository content cannot contribute enforced deny patterns that
+            // the union in `merge_inner` would otherwise admit (ANTIPAT M-3).
+            overlay.dirs.denylist.clear();
+            rejected.push("dirs.denylist");
         }
         if !overlay.dirs.allowed_roots.is_empty() {
             overlay.dirs.allowed_roots.clear();
@@ -2409,18 +2561,18 @@ impl Config {
 
         // Activity-log: overlay takes precedence (last-wins, same semantics
         // as `compaction` above). This cannot use the OR semantics of
-        // `yolo`/`edit_log` because `/alog off` must be respected — once any
+        // `yolo`/`edit_log` because `/alog off` must be respected - once any
         // config disables logging, a higher-precedence config that re-enables
         // it should win, and vice-versa. Without this line the merged value
         // always stayed at the derived-`Default` of `false`, so the status bar
         // showed "off" at startup regardless of the configured state.
         base.activity_log = overlay.activity_log;
 
-        // SDD flags: OR semantics — a flag enabled in either base or overlay
+        // SDD flags: OR semantics - a flag enabled in either base or overlay
         // stays enabled. All flags default to false (opt-in, FR-019).
         base.sdd.merge(&overlay.sdd);
 
-        // Pie gap flags: OR semantics — a flag enabled in either base or overlay
+        // Pie gap flags: OR semantics - a flag enabled in either base or overlay
         // stays enabled. All flags default to false (opt-in, FR-016/FR-018).
         base.piegap.merge(&overlay.piegap);
 
@@ -2474,8 +2626,8 @@ impl Config {
 
         // Config provenance: the paths that contributed to the resolved config
         // are accumulated here (the loader pushes each leg separately), so a
-        // consumer that needs to locate the active project config — for
-        // example the plugin store bridge — can read them off the value
+        // consumer that needs to locate the active project config - for
+        // example the plugin store bridge - can read them off the value
         // returned by `load`, not just the intermediate `config` binding.
         for path in overlay.config_paths {
             if !base.config_paths.contains(&path) {
@@ -2612,7 +2764,7 @@ impl Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
     /// Whether the memory system is enabled.
-    #[serde(default = "default_memory_enabled")]
+    #[serde(default = "default_true")]
     pub enabled: bool,
     /// Memory tier: "core" (file blocks only), "structured" (SQLite store),
     /// or "semantic" (with embeddings).
@@ -2657,7 +2809,7 @@ impl Default for MemoryConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructuredMemoryConfig {
     /// Whether the structured store is enabled.
-    #[serde(default = "default_structured_enabled")]
+    #[serde(default = "default_true")]
     pub enabled: bool,
 }
 
@@ -2753,10 +2905,10 @@ pub struct RetrievalConfig {
     /// `max_memories_per_prompt` count cap applies with no token budget.
     #[serde(default = "default_max_memory_tokens")]
     pub max_memory_tokens: Option<usize>,
-    /// Weight for recency when ranking memories (0.0–1.0).
+    /// Weight for recency when ranking memories (0.0-1.0).
     #[serde(default = "default_recency_weight")]
     pub recency_weight: f64,
-    /// Weight for relevance when ranking memories (0.0–1.0).
+    /// Weight for relevance when ranking memories (0.0-1.0).
     #[serde(default = "default_relevance_weight")]
     pub relevance_weight: f64,
 }
@@ -2790,14 +2942,6 @@ fn default_recency_weight() -> f64 {
 
 fn default_relevance_weight() -> f64 {
     0.7
-}
-
-fn default_memory_enabled() -> bool {
-    true
-}
-
-fn default_structured_enabled() -> bool {
-    true
 }
 
 /// Automatic memory extraction configuration.
@@ -2854,7 +2998,7 @@ fn default_require_confirmation() -> bool {
 /// Memory confidence decay configuration.
 ///
 /// Memories that are not accessed gradually lose confidence over time.
-/// This keeps the memory store clean — stale, unconfirmed memories fade
+/// This keeps the memory store clean - stale, unconfirmed memories fade
 /// while frequently recalled memories maintain high confidence.
 ///
 /// ```json
@@ -2875,7 +3019,7 @@ pub struct DecayConfig {
     /// Set to 1.0 to disable decay entirely.
     #[serde(default = "default_decay_factor")]
     pub factor: f64,
-    /// Minimum confidence threshold — memories never decay below this value.
+    /// Minimum confidence threshold - memories never decay below this value.
     ///
     /// Once a memory's confidence reaches this floor, it stays there
     /// until explicitly deleted or re-confirmed.
@@ -3055,7 +3199,7 @@ impl Default for BrowserConfig {
 /// }
 /// ```
 ///
-/// Token values support a `env:VAR_NAME` prefix — the value is then read from
+/// Token values support a `env:VAR_NAME` prefix - the value is then read from
 /// the named environment variable at use time, so secrets do not need to live
 /// in the config file (e.g. `"bot_token": "env:TELEGRAM_BOT_TOKEN"`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3076,6 +3220,13 @@ impl ChannelsConfig {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         !self.enabled && self.telegram.is_none() && self.discord.is_none()
+    }
+
+    /// Canonical name for "at defaults"; equivalent to [`ChannelsConfig::is_empty`]
+    /// (ANTIPAT L-4 standardises the predicate on `is_default`).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.is_empty()
     }
 }
 
@@ -3119,7 +3270,7 @@ pub struct DiscordChannelConfig {
 ///
 /// The OAuth2 access/refresh tokens used to call the Gmail API are managed by
 /// the `gmail` tool itself (`auth`/`status`/`logout` actions) and are stored
-/// encrypted in `ragent-storage` — never in this file.
+/// encrypted in `ragent-storage` - never in this file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GmailConfig {
     /// OAuth2 client ID used for refresh-token exchange. Supports the
@@ -3144,12 +3295,19 @@ impl GmailConfig {
     pub fn is_empty(&self) -> bool {
         self.client_id.is_none() && self.client_secret.is_none() && self.base_url.is_none()
     }
+
+    /// Canonical name for "at defaults"; equivalent to [`GmailConfig::is_empty`]
+    /// (ANTIPAT L-4).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.is_empty()
+    }
 }
 
 /// Spec-Driven Development (SDD) capability toggles (FR-019).
 ///
 /// Each flag gates a new SDD artifact or validation check so that existing
-/// workflows are not disrupted. All flags default to `false` — capabilities are
+/// workflows are not disrupted. All flags default to `false` - capabilities are
 /// opt-in. When a flag is disabled, the corresponding artifact is not generated
 /// and the corresponding validation check is skipped.
 ///
@@ -3226,7 +3384,14 @@ impl SddConfig {
             && !self.feedback_loop
     }
 
-    /// Merge another config into `self` using OR semantics — a flag enabled in
+    /// Canonical name for "at defaults"; equivalent to [`SddConfig::is_empty`]
+    /// (ANTIPAT L-4).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.is_empty()
+    }
+
+    /// Merge another config into `self` using OR semantics - a flag enabled in
     /// either config remains enabled. This matches the opt-in nature of the
     /// flags: once enabled at any config layer, the capability stays on.
     pub fn merge(&mut self, other: &Self) {
@@ -3251,7 +3416,7 @@ impl SddConfig {
 /// Pie feature gap toggles (spec `piegap` FR-016, FR-018).
 ///
 /// Each flag gates a standalone pie-derived feature so that existing
-/// workflows are not disrupted. All flags default to `false` — features are
+/// workflows are not disrupted. All flags default to `false` - features are
 /// opt-in. When a flag is disabled, the corresponding feature is inactive.
 ///
 /// Configured under the `piegap` key in `ragent.json`:
@@ -3324,7 +3489,14 @@ impl PieGapConfig {
             && !self.session_naming
     }
 
-    /// Merge another config into `self` using OR semantics — a flag enabled in
+    /// Canonical name for "at defaults"; equivalent to [`PieGapConfig::is_empty`]
+    /// (ANTIPAT L-4).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.is_empty()
+    }
+
+    /// Merge another config into `self` using OR semantics - a flag enabled in
     /// either config remains enabled. This matches the opt-in nature of the
     /// flags: once enabled at any config layer, the capability stays on.
     pub fn merge(&mut self, other: &Self) {
@@ -3437,6 +3609,13 @@ impl ResearchSupervisorConfig {
     pub fn is_empty(&self) -> bool {
         self.max_concurrent_research_units == default_max_concurrent_research_units()
     }
+
+    /// Canonical name for "at defaults"; equivalent to
+    /// [`ResearchSupervisorConfig::is_empty`] (ANTIPAT L-4).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.is_empty()
+    }
 }
 
 const fn default_max_concurrent_research_units() -> usize {
@@ -3462,7 +3641,14 @@ impl ResearchEvaluateConfig {
         !self.enabled
     }
 
-    /// Merge another evaluate config into `self` using OR semantics — once
+    /// Canonical name for "at defaults"; equivalent to
+    /// [`ResearchEvaluateConfig::is_empty`] (ANTIPAT L-4).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.is_empty()
+    }
+
+    /// Merge another evaluate config into `self` using OR semantics - once
     /// enabled at any config layer, evaluation stays on.
     pub fn merge(&mut self, other: &Self) {
         self.enabled |= other.enabled;
@@ -3494,6 +3680,13 @@ impl ResearchModelsConfig {
             && self.compression_model.is_none()
             && self.final_report_model.is_none()
     }
+
+    /// Canonical name for "at defaults"; equivalent to
+    /// [`ResearchModelsConfig::is_empty`] (ANTIPAT L-4).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.is_empty()
+    }
 }
 
 const fn default_oa_min_full_text_chars() -> usize {
@@ -3524,6 +3717,13 @@ impl ResearchConfig {
             && self.models.is_empty()
             && self.supervisor.is_empty()
             && self.evaluate.is_empty()
+    }
+
+    /// Canonical name for "at defaults"; equivalent to
+    /// [`ResearchConfig::is_empty`] (ANTIPAT L-4).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.is_empty()
     }
 }
 

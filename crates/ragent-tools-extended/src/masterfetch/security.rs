@@ -9,7 +9,7 @@
 //! (octal, hex, decimal, short-form) are normalised before checking so that
 //! attackers cannot bypass range checks with `0177.0.0.1` or `0x7f.0.0.1`.
 //!
-//! No DNS resolution is performed — the check is against the hostname/IP
+//! No DNS resolution is performed - the check is against the hostname/IP
 //! literal in the URL, matching Hound's approach. This means a domain that
 //! *resolves* to a private IP is not caught here; that is an accepted
 //! limitation of the HTTP-only integrated runtime (no DNS rebinding via
@@ -79,7 +79,7 @@ pub enum SecurityError {
     #[error("URL parse error: {0}")]
     Parse(String),
     /// URL uses a blocked or non-HTTP scheme.
-    #[error("Blocked scheme: '{0}' — only http and https are allowed")]
+    #[error("Blocked scheme: '{0}' - only http and https are allowed")]
     BlockedScheme(String),
     /// Host is empty or missing.
     #[error("URL has no host")]
@@ -109,7 +109,7 @@ pub type SecurityResult = Result<(), SecurityError>;
 
 /// Validate a URL against SSRF and security rules (FR-019).
 ///
-/// This is a pure function — no network I/O, no DNS resolution. It checks the
+/// This is a pure function - no network I/O, no DNS resolution. It checks the
 /// URL string and its parsed components against the security rules defined in
 /// the module documentation.
 ///
@@ -145,7 +145,7 @@ pub fn validate_url(raw: &str) -> SecurityResult {
     // 4. Parse the URL.
     let parsed = url::Url::parse(raw).map_err(|e| SecurityError::Parse(e.to_string()))?;
 
-    // 5. Check scheme — reject blocked, accept only http/https.
+    // 5. Check scheme - reject blocked, accept only http/https.
     let scheme = parsed.scheme();
     if BLOCKED_SCHEMES.contains(&scheme) {
         return Err(SecurityError::BlockedScheme(scheme.to_string()));
@@ -156,7 +156,7 @@ pub fn validate_url(raw: &str) -> SecurityResult {
 
     // 6. Extract the host using the typed `Host` enum from the `url` crate.
     //    This gives us `Domain(&str)`, `Ipv4(Ipv4Addr)`, or `Ipv6(Ipv6Addr)`
-    //    directly — no manual bracket-stripping needed for IPv6 literals.
+    //    directly - no manual bracket-stripping needed for IPv6 literals.
     let host = match parsed.host() {
         Some(url::Host::Domain(d)) => HostKind::Domain(d.to_string()),
         Some(url::Host::Ipv4(addr)) => HostKind::Ip(std::net::IpAddr::V4(addr)),
@@ -201,7 +201,7 @@ fn ssrf_test_skip() -> bool {
     std::env::var(SSRF_TEST_SKIP_VAR).is_ok_and(|v| !v.is_empty())
 }
 
-/// Validate a hostname — either a domain name or an IP literal — against
+/// Validate a hostname - either a domain name or an IP literal - against
 /// SSRF rules (FR-019).
 ///
 /// # Errors
@@ -214,7 +214,7 @@ fn validate_host(host: HostKind) -> SecurityResult {
             if ssrf_test_skip() {
                 return Ok(());
             }
-            // The `url` crate already parsed this as a valid IP — check ranges.
+            // The `url` crate already parsed this as a valid IP - check ranges.
             check_ip_range(&ip)
         }
         HostKind::Domain(domain) => {
@@ -245,7 +245,7 @@ fn validate_host(host: HostKind) -> SecurityResult {
                 let ip_addr = std::net::IpAddr::V4(normalised_ip);
                 check_ip_range(&ip_addr)?;
             }
-            // If it's not an IP in any notation, it's a regular hostname — pass.
+            // If it's not an IP in any notation, it's a regular hostname - pass.
 
             Ok(())
         }
@@ -302,7 +302,7 @@ fn check_ipv4_range(ip: std::net::Ipv4Addr) -> SecurityResult {
 /// - `fc00::/7` (unique local)
 /// - `fe80::/10` (link-local)
 /// - `ff00::/8` (multicast)
-/// - IPv4-mapped IPv6 (`::ffff:a.b.c.d`) — the embedded IPv4 is checked too
+/// - IPv4-mapped IPv6 (`::ffff:a.b.c.d`) - the embedded IPv4 is checked too
 fn check_ipv6_range(ip: std::net::Ipv6Addr) -> SecurityResult {
     let segments = ip.segments();
 
@@ -316,22 +316,22 @@ fn check_ipv6_range(ip: std::net::Ipv6Addr) -> SecurityResult {
         return Err(SecurityError::PrivateRange(ip.to_string()));
     }
 
-    // fc00::/7 (unique local) — top 7 bits
+    // fc00::/7 (unique local) - top 7 bits
     if (segments[0] & 0xfe00) == 0xfc00 {
         return Err(SecurityError::PrivateRange(ip.to_string()));
     }
 
-    // fe80::/10 (link-local) — top 10 bits
+    // fe80::/10 (link-local) - top 10 bits
     if (segments[0] & 0xffc0) == 0xfe80 {
         return Err(SecurityError::PrivateRange(ip.to_string()));
     }
 
-    // ff00::/8 (multicast) — top 8 bits
+    // ff00::/8 (multicast) - top 8 bits
     if (segments[0] & 0xff00) == 0xff00 {
         return Err(SecurityError::PrivateRange(ip.to_string()));
     }
 
-    // IPv4-mapped IPv6: ::ffff:a.b.c.d — check the embedded IPv4 address.
+    // IPv4-mapped IPv6: ::ffff:a.b.c.d - check the embedded IPv4 address.
     if let Some(v4) = ip.to_ipv4_mapped() {
         return check_ipv4_range(v4);
     }
@@ -342,16 +342,16 @@ fn check_ipv6_range(ip: std::net::Ipv6Addr) -> SecurityResult {
 /// Normalise alternate IP notations to a canonical IPv4 address.
 ///
 /// Handles:
-/// - **Octal**: `0177.0.0.1` → `127.0.0.1` (leading `0` or `0o` prefix)
-/// - **Hex**: `0x7f.0.0.1` → `127.0.0.1` (leading `0x` prefix)
-/// - **Decimal**: `2130706433` → `127.0.0.1` (single 32-bit integer)
-/// - **Short-form**: `127.1` → `127.0.0.1` (fewer than 4 octets; last octet
+/// - **Octal**: `0177.0.0.1` -> `127.0.0.1` (leading `0` or `0o` prefix)
+/// - **Hex**: `0x7f.0.0.1` -> `127.0.0.1` (leading `0x` prefix)
+/// - **Decimal**: `2130706433` -> `127.0.0.1` (single 32-bit integer)
+/// - **Short-form**: `127.1` -> `127.0.0.1` (fewer than 4 octets; last octet
 ///   absorbs the remaining value)
 ///
 /// Returns `Some(Ipv4Addr)` if the host is an IP in an alternate notation,
 /// `None` if it is a regular hostname.
 fn normalise_ip_notation(host: &str) -> Option<std::net::Ipv4Addr> {
-    // Try single-integer decimal notation: "2130706433" → 127.0.0.1
+    // Try single-integer decimal notation: "2130706433" -> 127.0.0.1
     if !host.contains('.') && !host.contains(':') {
         if let Ok(n) = host.parse::<u32>() {
             return Some(std::net::Ipv4Addr::from(n));
@@ -383,8 +383,8 @@ fn normalise_ip_notation(host: &str) -> Option<std::net::Ipv4Addr> {
     }
 
     // Short-form: if fewer than 4 parts, the last part holds the remaining
-    // value. E.g. "127.1" → [127, 1] → [127, 0, 0, 1].
-    // "127.0x10001" → [127, 65537] → [127, 0, 0, 1].
+    // value. E.g. "127.1" -> [127, 1] -> [127, 0, 0, 1].
+    // "127.0x10001" -> [127, 65537] -> [127, 0, 0, 1].
     if parsed.len() == 4 {
         // Standard 4-octet form.
         for (i, &v) in parsed.iter().enumerate() {
@@ -404,7 +404,7 @@ fn normalise_ip_notation(host: &str) -> Option<std::net::Ipv4Addr> {
         let absorbing_bytes = 4usize.saturating_sub(parsed.len() - 1);
         for _ in 0..absorbing_bytes {
             if byte_idx < 2 {
-                // Not enough room — invalid.
+                // Not enough room - invalid.
                 break;
             }
             octets[byte_idx] = (remaining & 0xFF) as u8;
@@ -438,9 +438,9 @@ fn normalise_ip_notation(host: &str) -> Option<std::net::Ipv4Addr> {
 
 /// Parse a single IP octet in decimal, octal, or hex notation.
 ///
-/// - `127` → `127` (decimal)
-/// - `0177` or `0o177` → `127` (octal)
-/// - `0x7f` → `127` (hex)
+/// - `127` -> `127` (decimal)
+/// - `0177` or `0o177` -> `127` (octal)
+/// - `0x7f` -> `127` (hex)
 ///
 /// Returns `Some(u32)` if parseable, `None` otherwise. The value may exceed 255
 /// for short-form notation (e.g. `0x10001` for `65537`).

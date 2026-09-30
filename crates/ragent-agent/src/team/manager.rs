@@ -1,4 +1,4 @@
-//! `TeamManager` — runtime for spawning and coordinating teammate sessions.
+//! `TeamManager` - runtime for spawning and coordinating teammate sessions.
 //!
 //! Implements [`crate::tool::TeamManagerInterface`] so the `team_spawn` tool
 //! can call it once M3 is wired into the session processor.
@@ -7,12 +7,12 @@
 //!
 //! ```text
 //! TeamManager (Arc-shared)
-//!   ├─ spawn_teammate()   → creates child session, injects team system prompt,
+//!   ├─ spawn_teammate()   -> creates child session, injects team system prompt,
 //!   │                       starts mailbox polling loop
-//!   ├─ mailbox_poll_loop  → tokio::spawn per teammate; drains unread messages,
+//!   ├─ mailbox_poll_loop  -> tokio::spawn per teammate; drains unread messages,
 //!   │                       publishes Event::TeammateMessage etc.
-//!   ├─ run_hook()         → exec shell hook, interpret exit code
-//!   └─ shutdown_teammate()→ writes shutdown_request mailbox message, marks Stopped
+//!   ├─ run_hook()         -> exec shell hook, interpret exit code
+//!   └─ shutdown_teammate()-> writes shutdown_request mailbox message, marks Stopped
 //! ```
 
 use std::collections::HashMap;
@@ -49,7 +49,7 @@ fn fs_mtime(path: &Path) -> Option<SystemTime> {
 /// Check if an error message indicates a context-window / token-count overflow.
 ///
 /// These errors come from Anthropic, `OpenAI`, and GitHub Copilot when the prompt
-/// is too long for the model's context window. They are *not* permanent failures —
+/// is too long for the model's context window. They are *not* permanent failures -
 /// the session processor's compression pipeline will reduce context on retry.
 ///
 /// This is a thin wrapper around the canonical implementation in
@@ -81,10 +81,10 @@ fn is_permanent_api_error(error_msg: &str) -> bool {
 /// | attempt | base    | range (jitter) |
 /// |---------|---------|----------------|
 /// | 0       |  0 ms   | 0 ms           |
-/// | 1       |  1 s    | 1.0 s – 1.5 s  |
-/// | 2       |  2 s    | 2.0 s – 2.5 s  |
-/// | 3       |  4 s    | 4.0 s – 4.5 s  |
-/// | 4       |  8 s    | 8.0 s – 8.5 s  |
+/// | 1       |  1 s    | 1.0 s - 1.5 s  |
+/// | 2       |  2 s    | 2.0 s - 2.5 s  |
+/// | 3       |  4 s    | 4.0 s - 4.5 s  |
+/// | 4       |  8 s    | 8.0 s - 8.5 s  |
 ///
 /// `attempt` is the 1-based retry index: `1` = first retry, `2` = second,
 /// and so on.  `attempt == 0` returns [`Duration::ZERO`] so callers can
@@ -93,7 +93,7 @@ fn is_permanent_api_error(error_msg: &str) -> bool {
 /// The cap (`MAX_TEAMMATE_BACKOFF_MS`) prevents an unbounded wait when the
 /// caller passes a large `attempt` value by mistake.
 ///
-/// Jitter is derived from the current monotonic clock — cheap, allocation-
+/// Jitter is derived from the current monotonic clock - cheap, allocation-
 /// free, and sufficient to spread sibling retries across a sub-second
 /// window.  True cryptographic randomness is not required here.
 #[must_use]
@@ -132,10 +132,10 @@ pub fn teammate_retry_backoff(attempt: u32) -> std::time::Duration {
 /// Build the team-context section injected into every teammate's system prompt.
 ///
 /// Template variables:
-/// - `{{TEAM_NAME}}` — name of the team
-/// - `{{TEAMMATE_NAME}}` — this teammate's friendly name
-/// - `{{AGENT_ID}}` — this teammate's agent ID (e.g. `"tm-001"`)
-/// - `{{TEAMMATE_ROSTER}}` — list of other teammates with names and agent IDs
+/// - `{{TEAM_NAME}}` - name of the team
+/// - `{{TEAMMATE_NAME}}` - this teammate's friendly name
+/// - `{{AGENT_ID}}` - this teammate's agent ID (e.g. `"tm-001"`)
+/// - `{{TEAMMATE_ROSTER}}` - list of other teammates with names and agent IDs
 #[must_use]
 pub fn build_team_prompt_addition(
     team_name: &str,
@@ -160,7 +160,7 @@ pub fn build_team_prompt_addition(
 You are a teammate in team "{team_name}". Your name is "{teammate_name}" (agent ID: {agent_id}).
 The team lead is "lead". Other teammates: {others}.
 
-### Team tool usage — CRITICAL
+### Team tool usage - CRITICAL
 
 **Your very first action in every response MUST be a tool call.** Do NOT write planning text.
 Call `team_read_messages` (team_name: "{team_name}") immediately at the start of each turn
@@ -292,9 +292,9 @@ pub enum HookOutcome {
 
 /// Execute a hook command and interpret its exit code.
 ///
-/// - Exit 0 → `HookOutcome::Allow`
-/// - Exit 2 → `HookOutcome::Feedback(stdout)`
-/// - Other → log warning, allow
+/// - Exit 0 -> `HookOutcome::Allow`
+/// - Exit 2 -> `HookOutcome::Feedback(stdout)`
+/// - Other -> log warning, allow
 ///
 /// If `stdin_data` is `Some`, it is piped to the child process on stdin.
 ///
@@ -335,6 +335,7 @@ pub async fn run_hook(command: &str, args: &[String], stdin_data: Option<&str>) 
                 && let Some(mut stdin) = child_proc.stdin.take()
             {
                 use tokio::io::AsyncWriteExt;
+                // INTENTIONAL: best-effort teammate stdin write
                 let _ = stdin.write_all(data.as_bytes()).await;
                 drop(stdin);
             }
@@ -523,14 +524,14 @@ pub struct TeamManager {
     ///
     /// PERF-025: a [`DashMap`] instead of `RwLock<HashMap>`. `handles` is
     /// accessed by nearly every manager method (and by the watchdog), and
-    /// DashMap provides lock-free shard-based concurrent access — readers
+    /// DashMap provides lock-free shard-based concurrent access - readers
     /// on one agent's handle never block readers on another's. `DashMap`
     /// is already a workspace dependency (used by the orchestrator in
     /// `ragent-agent`).
     handles: Arc<dashmap::DashMap<String, TeammateHandle>>,
     /// Underlying session processor (shared with the lead).
     ///
-    /// R-6: Stored as `Weak` to break the `TeamManager` ↔ `SessionProcessor`
+    /// R-6: Stored as `Weak` to break the `TeamManager` <-> `SessionProcessor`
     /// `Arc` cycle. Upgraded to `Arc` on access via `processor()`.
     processor: std::sync::Weak<SessionProcessor>,
     /// Event bus for publishing team lifecycle events.
@@ -545,7 +546,7 @@ pub struct TeamManager {
     poll_interval: Duration,
     /// Serialises spawn operations to avoid concurrent config read/write races.
     spawn_lock: Arc<Mutex<()>>,
-    /// The lead's active model — teammates inherit this when spawned via
+    /// The lead's active model - teammates inherit this when spawned via
     /// the reconcile loop (where no `ToolContext` model is available).
     pub active_model: Option<crate::agent::ModelRef>,
     /// M6-T1: watchdog timeout. If a `Working` / `Spawning` member records no
@@ -637,7 +638,7 @@ impl TeamManager {
     /// Create a new `TeamManager` for an existing team on disk.
     ///
     /// M6-T2: if the team's `config.json` records a different
-    /// `lead_session_id` from the one passed here, the team is *adopted* —
+    /// `lead_session_id` from the one passed here, the team is *adopted* -
     /// any tasks that were `InProgress` and assigned to the old lead are
     /// reset to `Pending` so a new lead can pick them up. See
     /// [`TeamManager::adopt_orphaned_tasks`].
@@ -669,12 +670,13 @@ impl TeamManager {
             // Update the config to reflect the new lead.
             if let Ok(mut new_store) = TeamStore::load(&team_dir) {
                 new_store.config.lead_session_id = lead_sid.clone();
+                // INTENTIONAL: best-effort team-store persistence
                 let _ = new_store.save();
             }
         }
 
         // R-6: Store a `Weak<SessionProcessor>` to break the
-        // `TeamManager` ↔ `SessionProcessor` `Arc` cycle.
+        // `TeamManager` <-> `SessionProcessor` `Arc` cycle.
         Self {
             team_name: name,
             lead_session_id: lead_sid,
@@ -738,7 +740,7 @@ impl TeamManager {
                             String,
                             Option<crate::agent::ModelRef>,
                         )> = {
-                            // PERF-025: DashMap — no async read guard; we just
+                            // PERF-025: DashMap - no async read guard; we just
                             // check `contains_key` on each candidate's agent_id.
                             store.config.members.iter()
                                                           .filter(|m| m.status == crate::team::config::MemberStatus::Spawning)
@@ -821,7 +823,7 @@ impl TeamManager {
     /// 6. Publishes `Event::TeammateSpawned`.
     ///
     /// PERF-024: the `spawn_lock` is now held **only** for the config
-    /// read → `next_agent_id()` → `add_member()` → `save()` cycle that
+    /// read -> `next_agent_id()` -> `add_member()` -> `save()` cycle that
     /// allocates the agent ID and records the `Spawning` member. Everything
     /// afterwards (child session creation, system-prompt build, memory
     /// load, handle registration, the `tokio::spawn` of the agent loop) runs
@@ -906,7 +908,7 @@ impl TeamManager {
             store.save()?;
             id
         };
-        // spawn_lock released here — concurrent spawns may proceed.
+        // spawn_lock released here - concurrent spawns may proceed.
 
         // Create isolated child session.
         tracing::info!(team = %self.team_name, agent_id = %agent_id, "Creating child session for teammate");
@@ -925,7 +927,7 @@ impl TeamManager {
         // by `agent_id`, which is now unique and owned by this caller), and
         // `TeamStore::save` already takes the config.json `flock` for atomic
         // write safety. The only state that needs serialisation across
-        // concurrent spawns — the agent-ID allocation — already happened
+        // concurrent spawns - the agent-ID allocation - already happened
         // under the lock above.
         let (teammate_roster, memory_scope) = {
             let mut store = TeamStore::load(&self.team_dir)?;
@@ -1005,7 +1007,7 @@ impl TeamManager {
         register_notifier(&self.team_dir, &agent_id, Arc::clone(&notify));
 
         // Register handle.
-        // PERF-025: DashMap — direct insert, no async write guard.
+        // PERF-025: DashMap - direct insert, no async write guard.
         self.handles.insert(
             agent_id.clone(),
             TeammateHandle {
@@ -1037,7 +1039,7 @@ impl TeamManager {
         let agent_handle = tokio::spawn(async move {
             // Retry with exponential backoff + jitter for transient API errors
             // (e.g. rate limits, cloud-provider cold-start).  Linear backoff
-            // was insufficient — multiple teammates that failed at the same
+            // was insufficient - multiple teammates that failed at the same
             // moment retried at the same time and re-triggered the upstream
             // pressure.  See `teammate_retry_backoff` for the schedule.
             const MAX_RETRIES: u32 = 3;
@@ -1065,7 +1067,7 @@ impl TeamManager {
                     .await
                 {
                     Ok(_msg) => {
-                        // Teammate finished its initial prompt — mark as Idle.
+                        // Teammate finished its initial prompt - mark as Idle.
                         tracing::info!(
                             team = %team_name_clone,
                             agent_id = %agent_id_clone,
@@ -1076,6 +1078,7 @@ impl TeamManager {
                                 m.status = crate::team::config::MemberStatus::Idle;
                                 m.current_task_id = None;
                             }
+                            // INTENTIONAL: best-effort team-store persistence
                             let _ = store.save();
                         }
                         event_bus_clone.publish(Event::TeammateIdle {
@@ -1083,7 +1086,7 @@ impl TeamManager {
                             team_name: team_name_clone,
                             agent_id: agent_id_clone,
                         });
-                        return; // success — exit the retry loop
+                        return; // success - exit the retry loop
                     }
                     Err(e) => {
                         last_error = format!("{e}");
@@ -1101,7 +1104,7 @@ impl TeamManager {
                             tracing::warn!(
                                 team = %team_name_clone,
                                 agent_id = %agent_id_clone,
-                                "Token overflow — the session processor will compress history on retry"
+                                "Token overflow - the session processor will compress history on retry"
                             );
                         }
 
@@ -1110,14 +1113,14 @@ impl TeamManager {
                             tracing::error!(
                                 team = %team_name_clone,
                                 agent_id = %agent_id_clone,
-                                "Permanent API error — skipping remaining retries"
+                                "Permanent API error - skipping remaining retries"
                             );
                             break;
                         }
                     }
                 }
             }
-            // All retries exhausted or permanent error — persist failure.
+            // All retries exhausted or permanent error - persist failure.
             tracing::error!(
                 team = %team_name_clone,
                 agent_id = %agent_id_clone,
@@ -1171,8 +1174,8 @@ impl TeamManager {
     /// publishes events when new messages arrive.
     ///
     /// Uses `tokio::select!` to wake on either:
-    /// - `notify.notified()` — instant push from [`Mailbox::push`], or
-    /// - `sleep(poll_interval)` — safety net for external writers.
+    /// - `notify.notified()` - instant push from [`Mailbox::push`], or
+    /// - `sleep(poll_interval)` - safety net for external writers.
     fn start_poll_loop(
         &self,
         agent_id: String,
@@ -1249,7 +1252,7 @@ impl TeamManager {
     /// Use [`resume_teammate`] to restore the teammate to active status.
     pub async fn suspend_teammate(&self, agent_id: &str) -> Result<()> {
         // Pause the poll loop so no new messages wake the agent.
-        // PERF-025: DashMap — `.get()` returns a short-lived shard guard.
+        // PERF-025: DashMap - `.get()` returns a short-lived shard guard.
         if let Some(handle) = self.handles.get(agent_id) {
             handle.poll_cancel.store(true, Ordering::Relaxed);
         }
@@ -1288,7 +1291,7 @@ impl TeamManager {
         drop(store);
 
         // Re-enable the poll loop.
-        // PERF-025: DashMap — `.get()` returns a short-lived shard guard.
+        // PERF-025: DashMap - `.get()` returns a short-lived shard guard.
         if let Some(handle) = self.handles.get(agent_id) {
             handle.poll_cancel.store(false, Ordering::Relaxed);
             // Wake the poll loop so it starts processing again.
@@ -1342,7 +1345,7 @@ impl TeamManager {
     pub async fn shutdown_teammate(&self, agent_id: &str, graceful: bool) -> Result<()> {
         // ── Handle-level cancellation (immediate path only) ───────────────
         if !graceful {
-            // PERF-025: DashMap — `.get()` returns a short-lived shard guard,
+            // PERF-025: DashMap - `.get()` returns a short-lived shard guard,
             // so there's no async read lock to hold/drop.
             if let Some(handle) = self.handles.get(agent_id) {
                 handle.cancel.store(true, Ordering::Relaxed);
@@ -1437,7 +1440,7 @@ impl TeamManager {
             h.abort();
         }
 
-        // PERF-025: DashMap — `.iter()` over the map yields owned keys (or
+        // PERF-025: DashMap - `.iter()` over the map yields owned keys (or
         // we can collect via `.keys()` on a `DashMap`). No async read guard.
         let agent_ids: Vec<String> = self
             .handles
@@ -1490,7 +1493,7 @@ impl TeamManager {
                 }
                 // Collect candidates whose last_progress is older than the timeout.
                 //
-                // PERF-025: DashMap — iterate directly via `.iter()`; the
+                // PERF-025: DashMap - iterate directly via `.iter()`; the
                 // returned iterator yields `(String, TeammateHandle)` owned
                 // entries (key is `String`, value is deref'd). No async read
                 // guard is held across the iteration boundary.
@@ -1550,7 +1553,7 @@ impl TeamManager {
                     );
 
                     // Set cancel flags so any live agent loop terminates.
-                    // PERF-025: DashMap — `.get()` returns a short-lived guard.
+                    // PERF-025: DashMap - `.get()` returns a short-lived guard.
                     if let Some(h) = manager.handles.get(&agent_id) {
                         h.cancel.store(true, Ordering::Relaxed);
                         h.poll_cancel.store(true, Ordering::Relaxed);
@@ -1622,7 +1625,7 @@ impl TeamManager {
     /// parsed list and the file's `mtime`. Subsequent calls return the
     /// cached list in O(1). If another process (or a `team_task_*` tool
     /// that bypassed the cache) wrote to `tasks.json`, the `mtime` will
-    /// have advanced and the cache is transparently reloaded — so the
+    /// have advanced and the cache is transparently reloaded - so the
     /// cache is always consistent with disk without sacrificing the O(1)
     /// hit path.
     pub fn task_list(&self) -> Result<TaskList> {
@@ -1697,7 +1700,7 @@ impl TeamManager {
         let mut claimed_out: Option<(Option<Task>, bool)> = None;
         let written = self.apply_to_task_list(|list| {
             let done = list.completed_ids();
-            // Guard: agent already has an in-progress task — return it as-is.
+            // Guard: agent already has an in-progress task - return it as-is.
             if let Some(active) = list
                 .tasks
                 .iter()
@@ -1719,12 +1722,13 @@ impl TeamManager {
                 claimed_out = Some((None, false));
             }
         })?;
+        // INTENTIONAL: diagnostic counter, not an error
         let _ = written;
         claimed_out.ok_or_else(|| anyhow::anyhow!("claim_next closure did not run"))
     }
 
     /// PERF-023: mark `task_id` as `Completed` by `agent_id` via the
-    /// write-through cache (idempotent — same agent re-completing is a
+    /// write-through cache (idempotent - same agent re-completing is a
     /// no-op success).
     pub fn complete_task(&self, task_id: &str, agent_id: &str) -> Result<Task> {
         let mut completed_out: Option<Task> = None;
@@ -1757,7 +1761,7 @@ impl TeamManager {
     /// M6-T1: Record progress for `agent_id` (called when an event indicates
     /// the teammate did something). Resets the watchdog timer.
     pub fn record_progress(&self, agent_id: &str) {
-        // PERF-025: DashMap — `.get()` returns a short-lived shard guard; no
+        // PERF-025: DashMap - `.get()` returns a short-lived shard guard; no
         // async read lock, so this method remains sync (matching its
         // pre-DashMap contract).
         if let Some(h) = self.handles.get(agent_id) {
@@ -1781,7 +1785,7 @@ impl TeamManager {
             }
         }
         store.save()?;
-        // PERF-027: the plan status just changed — drop the cached entry so
+        // PERF-027: the plan status just changed - drop the cached entry so
         // the next `is_plan_pending` query observes the new value
         // immediately instead of waiting for the TTL.
         self.invalidate_plan_pending_cache(agent_id);
@@ -1804,7 +1808,7 @@ impl TeamManager {
                 if entry.observed_at.elapsed() < self.plan_pending_ttl {
                     return entry.pending;
                 }
-                // Expired — fall through and re-read from disk.
+                // Expired - fall through and re-read from disk.
                 cache.remove(agent_id);
             }
         }

@@ -3345,7 +3345,7 @@ async fn test_slash_spec_validate_all() {
     );
 }
 
-// Use a multi-threaded runtime because `execute_slash_command("/spec create …")`
+// Use a multi-threaded runtime because `execute_slash_command("/spec create ...")`
 // spawns a background task that calls `processor.process_message`, whose model
 // resolution path may call `block_in_place` for spec reads/writes.
 // `block_in_place` panics on the default current-thread `#[tokio::test]` runtime;
@@ -3361,7 +3361,7 @@ async fn test_slash_spec_create_starts_generation() {
     assert_eq!(
         app.status,
         "spec: writing specs/websocket/SPEC.md + specs/websocket/PLAN.md + \
-         specs/websocket/TESTPLAN.md…",
+         specs/websocket/TESTPLAN.md...",
         "status should indicate generation"
     );
     assert!(app.is_processing, "should set is_processing");

@@ -22,7 +22,7 @@ use crate::tool_adapter::{PluginToolAdapter, plugin_tool_name};
 
 /// An ephemeral [`PluginSurface`] for one `/plugins` invocation: it records the
 /// names registered during the call so `enable`/`disable` can collision-check
-/// and report contributions. Nothing is persisted — the surface exists only for
+/// and report contributions. Nothing is persisted - the surface exists only for
 /// the duration of the call.
 ///
 /// `existing_tools` / `existing_commands` are seeded by the caller (built-in

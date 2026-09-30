@@ -21,7 +21,7 @@ impl Tool for RmTool {
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
         "Delete a single file. Required parameter: `path` (string). Wildcards and \
-         glob patterns (`*`, `?`, `[...]`) are not allowed — specify one exact \
+         glob patterns (`*`, `?`, `[...]`) are not allowed - specify one exact \
          file. Fails if the file does not exist or if the path is a directory. \
          To delete directories, use `bash` with an appropriate command instead."
     }
@@ -72,11 +72,13 @@ impl Tool for RmTool {
             &ctx.canonical_cache,
         )?;
 
-        if !path.exists() {
-            bail!("File not found: {}", path.display());
-        }
+        // ANTIPAT F-10: probe via the async metadata call, not blocking
+        // exists()/is_dir() on the async execution path.
+        let meta = tokio::fs::metadata(&path)
+            .await
+            .map_err(|_| anyhow::anyhow!("File not found: {}", path.display()))?;
 
-        if path.is_dir() {
+        if meta.is_dir() {
             bail!("Path is a directory, not a file: {}", path.display());
         }
 

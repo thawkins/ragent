@@ -1,4 +1,4 @@
-//! Swarm — Fleet-style auto-decomposition for ragent teams.
+//! Swarm - Fleet-style auto-decomposition for ragent teams.
 //!
 //! A *swarm* takes a high-level prompt (or plan) and uses the LLM to decompose
 //! it into independent subtasks with dependency edges.  An ephemeral team is
@@ -78,7 +78,7 @@ pub const DECOMPOSITION_SYSTEM_PROMPT: &str = r#"You are a task decomposition en
 Given a user's goal, break it into the smallest reasonable set of INDEPENDENT subtasks that can be worked on in parallel by separate AI coding agents. Each agent has its own context window and cannot see the others' work.
 
 Rules:
-1. Each subtask must be self-contained — an agent must be able to complete it without seeing another agent's output, unless declared as a dependency.
+1. Each subtask must be self-contained - an agent must be able to complete it without seeing another agent's output, unless declared as a dependency.
 2. Minimise dependencies. Prefer independent tasks that can run in parallel.
 3. When a dependency is unavoidable (e.g. "create the API" before "write integration tests"), declare it via `depends_on`.
 4. Keep the number of subtasks between 2 and 8. If the goal is simple, use fewer.
@@ -107,7 +107,7 @@ Guidance for choosing `agent_type`:
   build/CI, debugging), choose the matching specialist agent type.
 - If the work is mixed or unclear, use `"general"`.
 
-The "agent_type" and "model" fields are optional — omit or set to null to use defaults."depends_on" is an array of task IDs that must complete first (empty array for independent tasks)."#;
+The "agent_type" and "model" fields are optional - omit or set to null to use defaults."depends_on" is an array of task IDs that must complete first (empty array for independent tasks)."#;
 
 /// Build the user prompt for decomposition, injecting the user's goal.
 #[must_use]

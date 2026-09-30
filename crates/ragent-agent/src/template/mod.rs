@@ -17,13 +17,13 @@
 //!
 //! Templates support the following placeholders:
 //!
-//! - `{{title}}` — Title or name of the task
-//! - `{{description}}` — Detailed description
-//! - `{{context}}` — Additional context or background
-//! - `{{requirements}}` — List of requirements
-//! - `{{constraints}}` — Constraints or limitations
-//! - `{{examples}}` — Example inputs/outputs
-//! - `{{arguments}}` — Raw arguments passed to the template
+//! - `{{title}}` - Title or name of the task
+//! - `{{description}}` - Detailed description
+//! - `{{context}}` - Additional context or background
+//! - `{{requirements}}` - List of requirements
+//! - `{{constraints}}` - Constraints or limitations
+//! - `{{examples}}` - Example inputs/outputs
+//! - `{{arguments}}` - Raw arguments passed to the template
 //!
 //! # Template Scopes
 //!
@@ -174,7 +174,7 @@ fn extract_placeholders(body: &str) -> Vec<String> {
 
 /// Discovers and loads templates from all known directories.
 ///
-/// Returns a map of template name → TemplateInfo, with higher-priority scopes
+/// Returns a map of template name -> TemplateInfo, with higher-priority scopes
 /// overriding lower-priority ones when names conflict.
 pub fn discover_templates(working_dir: &Path) -> HashMap<String, TemplateInfo> {
     let mut templates = HashMap::new();
@@ -429,43 +429,5 @@ fn load_template_from_file(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_template_apply() {
-        let template = TemplateInfo::new("test", "Hello, {{name}}! Welcome to {{place}}.");
-        let mut subs = HashMap::new();
-        subs.insert("name".to_string(), "Alice".to_string());
-        subs.insert("place".to_string(), "Wonderland".to_string());
-
-        let result = template.apply(&subs);
-        assert_eq!(result, "Hello, Alice! Welcome to Wonderland.");
-    }
-
-    #[test]
-    fn test_template_apply_missing_placeholder() {
-        let template = TemplateInfo::new("test", "Hello, {{name}}! {{missing}}");
-        let mut subs = HashMap::new();
-        subs.insert("name".to_string(), "Bob".to_string());
-
-        let result = template.apply(&subs);
-        assert_eq!(result, "Hello, Bob! {{missing}}");
-    }
-
-    #[test]
-    fn test_extract_placeholders() {
-        let body = "Hello {{name}}, welcome to {{place}}. Say {{name}} again.";
-        let placeholders = extract_placeholders(body);
-        assert_eq!(placeholders.len(), 2);
-        assert!(placeholders.contains(&"name".to_string()));
-        assert!(placeholders.contains(&"place".to_string()));
-    }
-
-    #[test]
-    fn test_apply_simple() {
-        let template = TemplateInfo::new("test", "Args: {{arguments}}");
-        let result = template.apply_simple("test value");
-        assert_eq!(result, "Args: test value");
-    }
-}
+#[path = "../tests/inline/template_mod_tests.rs"]
+mod tests;

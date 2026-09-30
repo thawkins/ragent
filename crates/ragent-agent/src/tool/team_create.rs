@@ -1,4 +1,4 @@
-//! `team_create` — Create a new named team and write its config to disk.
+//! `team_create` - Create a new named team and write its config to disk.
 
 use anyhow::Result;
 use chrono::Utc;
@@ -16,7 +16,7 @@ use crate::tool::metadata::MetadataBuilder;
 /// A blueprint directory is untrusted project content (it is contributed by a
 /// repository, a plugin pack, or a marketplace bundle), so a seed entry naming
 /// `bash`/`write`/`rm`/`team_spawn` must not execute directly: that bypassed
-/// `dispatch_tool_with_permissions` entirely — no permission-category check, no
+/// `dispatch_tool_with_permissions` entirely - no permission-category check, no
 /// prompt, no repeat guard (SEC-ragent-team-001, SEC-ragent-agent-008).
 ///
 /// The gate applied here is the subset of the agent-loop decision that is
@@ -24,7 +24,7 @@ use crate::tool::metadata::MetadataBuilder;
 ///
 /// - a tool with no permission category (or `none`) is inert and runs;
 /// - a tool the session policy explicitly denies never runs;
-/// - a tool with an explicit `Allow` rule runs without a prompt — the user
+/// - a tool with an explicit `Allow` rule runs without a prompt - the user
 ///   already granted that category, exactly as for an ordinary call;
 /// - anything else (`Ask`, or no permission checker at all) fails closed with
 ///   an error naming the tool, so the lead sees why the seed did not run
@@ -85,7 +85,7 @@ impl Tool for TeamCreateTool {
         "Create a new named agent team. ALWAYS pass 'context' with the user's \
              specific request (e.g. which directory/files to review, what task to \
              perform, where to write output). If a blueprint is provided, all teammates \
-             defined in the blueprint's spawn-prompts.json are spawned automatically — \
+             defined in the blueprint's spawn-prompts.json are spawned automatically - \
              do NOT spawn them again. REQUIRED parameters: 'blueprint' (string) and \
              'context' (string). Optional: 'name' (string, lowercase/hyphens OK; auto-generated \
              from blueprint and timestamp if omitted) and 'project_local' (boolean, default true). \
@@ -99,11 +99,11 @@ impl Tool for TeamCreateTool {
             "properties": {
                 "blueprint": {
                     "type": "string",
-                    "description": "Blueprint name to seed the team from [PROJECT]/.ragent/blueprints/teams/<name>, ~/.config/ragent/blueprints/teams/<name>, or ~/.ragent/blueprints/teams/<name> — closest wins (required)"
+                    "description": "Blueprint name to seed the team from [PROJECT]/.ragent/blueprints/teams/<name>, ~/.config/ragent/blueprints/teams/<name>, or ~/.ragent/blueprints/teams/<name> - closest wins (required)"
                 },
                 "context": {
                     "type": "string",
-                    "description": "REQUIRED: The specific work context from the user's request — which files/directories to target, what to produce, where to write output. This is prepended to every teammate's spawn prompt so they know exactly what to work on."
+                    "description": "REQUIRED: The specific work context from the user's request - which files/directories to target, what to produce, where to write output. This is prepended to every teammate's spawn prompt so they know exactly what to work on."
                 },
                 "name": {
                     "type": "string",
@@ -160,7 +160,7 @@ impl Tool for TeamCreateTool {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(true);
 
-        // Work context from the user's request — prepended to every teammate's
+        // Work context from the user's request - prepended to every teammate's
         // spawn prompt so they know which files/directories to target.
         let work_context = input
             .get("context")
@@ -250,8 +250,10 @@ impl Tool for TeamCreateTool {
                 // If README.md exists in blueprint, copy it to team dir
                 let readme = bdir.join("README.md");
                 if readme.exists() {
+                    // INTENTIONAL: best-effort team-directory + readme scaffolding
                     let _ = std::fs::create_dir_all(&store.dir);
                     let dest = store.dir.join("README.md");
+                    // INTENTIONAL: best-effort readme copy
                     let _ = std::fs::copy(&readme, &dest);
                 }
 
@@ -318,6 +320,7 @@ impl Tool for TeamCreateTool {
                                     {
                                         task.description = desc.to_string();
                                     }
+                                    // INTENTIONAL: best-effort store mutation; the in-memory task list is authoritative
                                     let _ = store.add_task(task.clone());
 
                                     // Run TaskCreated hook; remove task if rejected.
@@ -336,6 +339,7 @@ impl Tool for TeamCreateTool {
                                     .await;
                                     if let HookOutcome::Feedback(feedback) = outcome {
                                         if let Ok(ts) = TaskStore::open(&store.dir) {
+                                            // INTENTIONAL: best-effort store cleanup
                                             let _ = ts.remove_task(&id);
                                         }
                                         tracing::warn!(task_id = %id, feedback = %feedback, "TaskCreated hook rejected seeded task");
@@ -517,6 +521,7 @@ impl Tool for TeamCreateTool {
                                                             }
                                                             member.model_override = model_override;
                                                             member.memory_scope = memory_scope;
+                                                            // INTENTIONAL: best-effort store rebuild
                                                             let _ = fresh_store.add_member(member);
                                                         }
                                                     }
@@ -578,7 +583,7 @@ impl Tool for TeamCreateTool {
             "No teammates spawned yet. Use team_spawn to add teammates.".to_string()
         } else {
             format!(
-                "Blueprint spawned {} teammate(s) — do NOT spawn these again:\n{}",
+                "Blueprint spawned {} teammate(s) - do NOT spawn these again:\n{}",
                 member_list.len(),
                 member_list.join("\n")
             )
@@ -605,7 +610,7 @@ impl Tool for TeamCreateTool {
                 })
                 .collect();
             format!(
-                "\n\n⚠ {} blueprint spawn(s) failed:\n{}\n\
+                "\n\n[!] {} blueprint spawn(s) failed:\n{}\n\
                          These teammates were not created. Re-spawn them manually with `team_spawn` if needed.",
                 failed_spawn_count,
                 lines.join("\n")

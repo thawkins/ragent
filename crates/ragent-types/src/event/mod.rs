@@ -29,7 +29,7 @@ pub enum FinishReason {
     /// finish signal: no `Finish` event and no terminal `Error`, leaving the
     /// message to stop mid-sentence. Some providers (observed with Ollama and
     /// some GitHub Copilot models) silently truncate long completions this
-    /// way. For sub-agents this is fatal to the deliverable — the final
+    /// way. For sub-agents this is fatal to the deliverable - the final
     /// message usually gets cut off mid-thought and the task result is a
     /// fragment. The session loop emits this when it detects a silent
     /// end-of-stream so callers can either retry (sub-agents do) or surface
@@ -42,7 +42,12 @@ pub enum FinishReason {
 /// Bundles the `ToolCallStart` + `ToolCallEnd` + `ToolResult` data for a
 /// single tool call so consumers can render a whole step's tool calls
 /// atomically without sorting racing per-call events by `call_id`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Eq` is not derived: `ToolCallBatchEntry` holds no float fields, but it is
+/// embedded in [`Event`], which cannot implement `Eq` because of its `f32`/
+/// `f64` payloads; keeping the two derives in step avoids a false `Eq` claim.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCallBatchEntry {
     /// Provider-assigned call identifier.
     pub call_id: String,
@@ -74,7 +79,16 @@ pub struct ToolCallBatchEntry {
 /// TODO: Consider using `Cow<'static, str>` for string fields that are
 /// often static (e.g., `tool`, `permission`, `status`) to avoid
 /// unnecessary allocations when the value is a known constant.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// ANTIPAT F13 (M2.5): `PartialEq` is derived so tests and callers can compare
+/// published events. `serde_json::Value` and the `f32`/`f64` payload fields all
+/// implement `PartialEq`; `NaN` payloads compare unequal to themselves, which
+/// matches IEEE semantics and is acceptable for a UI event stream.
+///
+/// `Eq` is intentionally NOT derived: the `f32`/`f64` payload fields make the
+/// equality relation non-reflexive for `NaN`, so the stricter `Eq` contract
+/// does not hold.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     /// A new session has been created.
@@ -318,7 +332,7 @@ pub enum Event {
         requested_tier: Option<String>,
         /// Selected downstream model as "provider:model".
         model: String,
-        /// Composite weighted complexity score (0.0–1.0).
+        /// Composite weighted complexity score (0.0-1.0).
         composite_score: f64,
         /// Prompt text that was classified (after modifier stripping).
         prompt: String,
@@ -597,7 +611,7 @@ pub enum Event {
     QuotaUpdate {
         /// Session this update belongs to.
         session_id: String,
-        /// Quota consumed as a percentage (0.0–100.0).
+        /// Quota consumed as a percentage (0.0-100.0).
         /// Derived from rate-limit response headers where available.
         percent: f32,
     },
@@ -967,6 +981,95 @@ pub enum Event {
     },
 }
 
+/// Hand-written `Debug` for [`Event`] (SECTASKS MS-05 T-069).
+///
+/// SEC-ragent-types-006 and SEC-ragent-server-008: several variants carry
+/// credential material - `CopilotDeviceFlowComplete.token` and
+/// `CopilotDeviceFlowStartResult.device_code` are OAuth secrets. Deriving
+/// `Debug` makes every `tracing::debug!("{event:?}")`, every `.expect()`
+/// message, and every panic payload a potential credential leak.
+///
+/// The rendering below delegates to [`DebugProxy`], which reproduces the
+/// derived field-by-field shape but replaces credential-bearing fields with
+/// presence flags. The two credential-bearing variants are then piped through
+/// the shared [`redact_secrets`](crate::sanitize::redact_secrets) pass, so any
+/// value registered in the secret registry or matching `SECRET_PATTERN` is
+/// masked; every other variant renders content-free via
+/// [`render_event_debug`](crate::event::render_event_debug) and needs no
+/// redaction pass.
+impl std::fmt::Debug for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // F15: the credential-bearing variants are the only ones whose proxy
+        // rendering carries content that needs a redaction pass. Every other
+        // variant renders content-free via `render_event_debug`, so it can be
+        // written straight to the formatter without the `format!` +
+        // `redact_secrets` double allocation. The whole render is still piped
+        // through `redact_secrets` for the credential variants, so redaction is
+        // not weakened.
+        match self {
+            Self::CopilotDeviceFlowComplete { .. } | Self::CopilotDeviceFlowStartResult { .. } => {
+                let rendered = crate::sanitize::redact_secrets(&format!("{:?}", DebugProxy(self)));
+                f.write_str(&rendered)
+            }
+            other => crate::event::render_event_debug(other, f),
+        }
+    }
+}
+
+/// Rendering helper for [`Event`]'s hand-written `Debug`.
+///
+/// `Event`'s own `Debug` cannot format itself (infinite recursion), so all
+/// variants except the credential-bearing ones are rendered here via
+/// [`render_event_debug`](crate::event::render_event_debug).
+///
+/// Fields listed here are the credential carriers; every other field is safe
+/// to print.
+pub(crate) struct DebugProxy<'a>(pub(crate) &'a Event);
+
+impl std::fmt::Debug for DebugProxy<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Event::CopilotDeviceFlowComplete { token, api_base } => f
+                .debug_struct("CopilotDeviceFlowComplete")
+                .field("token_present", &!token.is_empty())
+                .field("api_base", api_base)
+                .finish(),
+            Event::CopilotDeviceFlowStartResult {
+                device_code,
+                user_code,
+                verification_uri,
+                interval,
+                error,
+            } => f
+                .debug_struct("CopilotDeviceFlowStartResult")
+                .field(
+                    "device_code_present",
+                    &device_code.as_ref().is_some_and(|c| !c.is_empty()),
+                )
+                .field("user_code", user_code)
+                .field("verification_uri", verification_uri)
+                .field("interval", interval)
+                .field("error", error)
+                .finish(),
+            other => crate::event::render_event_debug(other, f),
+        }
+    }
+}
+
+/// Render an [`Event`] variant that carries no credential material.
+///
+/// This is the `#[derive(Debug)]` shape minus the two credential-bearing
+/// variants, which [`DebugProxy`] intercepts before reaching here. The variant
+/// name comes from [`Event::type_name`]; the payload is summarised as
+/// `..` because the fields are already rendered by the typed events published
+/// to subscribers and re-printing them here only widens the leak surface.
+pub(crate) fn render_event_debug(
+    event: &Event,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    f.debug_struct(event.type_name()).finish_non_exhaustive()
+}
+
 /// Broadcast-based event bus for distributing [`Event`] values to subscribers.
 #[derive(Clone)]
 pub struct EventBus {
@@ -975,7 +1078,7 @@ pub struct EventBus {
     ///
     /// Keyed by session ID. The value is the current loop step for that agent
     /// run. Using a shared `RwLock<HashMap>` means each clone of the bus sees
-    /// the same counters — important because the processor and TUI hold
+    /// the same counters - important because the processor and TUI hold
     /// different clones of the same bus.
     steps: Arc<RwLock<HashMap<String, u64>>>,
     /// Per-session tool-call counters.
@@ -986,6 +1089,14 @@ pub struct EventBus {
     /// tool calls mode), and UI panels display the tool-call count while log
     /// tags use the loop-step number.
     tool_calls: Arc<RwLock<HashMap<String, u64>>>,
+}
+
+impl std::fmt::Debug for EventBus {
+    /// Render the bus without touching the counter maps (locking in a `Debug`
+    /// render could deadlock against a caller holding the write guard).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventBus").finish_non_exhaustive()
+    }
 }
 
 impl Event {
@@ -1299,7 +1410,7 @@ impl EventBus {
             // handle here.
             Ok(_) => {}
             Err(broadcast::error::SendError(ev)) => {
-                // Buffer overflow — some receivers are lagging. (SendError is
+                // Buffer overflow - some receivers are lagging. (SendError is
                 // also returned when a subscriber unsubscribes between the
                 // receiver_count check above and this send; that benign
                 // check-then-act race is indistinguishable here, so the

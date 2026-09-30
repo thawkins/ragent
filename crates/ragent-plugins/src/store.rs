@@ -97,6 +97,14 @@ pub struct PluginState {
     /// `/plugins disable`.
     #[serde(default)]
     pub enabled: bool,
+    /// SHA-256 of the installed content tree, recorded at install time.
+    ///
+    /// ANTIPAT H2: the install path had no integrity record, so a substituted
+    /// archive or cloned repository could not be detected after the fact. The
+    /// digest is over the staged tree's relative paths and file bytes (see
+    /// `add::content_digest`); `None` means the plugin predates the record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_digest: Option<String>,
     /// Telemetry counters for the plugin (loads, tool invocations, failures).
     #[serde(default)]
     pub counters: TelemetryCounters,
@@ -144,7 +152,7 @@ impl StoreLedger {
                     error = %e,
                     "plugin store ledger is corrupt; renaming aside and starting fresh"
                 );
-                let _ = std::fs::rename(&path, aside);
+                let _ = std::fs::rename(&path, aside); // INTENTIONAL: corrupt-ledger quarantine rename; failure leaves the file untouched
                 Self::default()
             }
         }

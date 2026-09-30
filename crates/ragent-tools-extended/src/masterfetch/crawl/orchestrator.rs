@@ -11,18 +11,18 @@
 //!
 //! Each discovered URL is scored by [`score_url`]:
 //!
-//! - **Focus relevance** — query terms appearing in the URL path receive a
+//! - **Focus relevance** - query terms appearing in the URL path receive a
 //!   boost. When no focus query is provided, all URLs start at the same base
 //!   score.
-//! - **Content-likelihood** — URLs containing `docs`, `guide`, `api`,
+//! - **Content-likelihood** - URLs containing `docs`, `guide`, `api`,
 //!   `reference`, `tutorial`, `manual`, `help`, `wiki` are boosted (these
 //!   are likely to contain substantive content). URLs containing `login`,
 //!   `signin`, `auth`, `signup`, `register`, `submit`, `post`, `comment`,
 //!   `cart`, `checkout`, `payment` are penalised (these are unlikely to
 //!   contain crawlable content).
-//! - **Depth** — shallower URLs (lower `depth`) receive a small boost so the
+//! - **Depth** - shallower URLs (lower `depth`) receive a small boost so the
 //!   crawl doesn't dive deep before exploring breadth.
-//! - **Non-HTML assets** — URLs ending in `.pdf`, `.jpg`, `.png`, `.gif`,
+//! - **Non-HTML assets** - URLs ending in `.pdf`, `.jpg`, `.png`, `.gif`,
 //!   `.zip`, `.css`, `.js`, `.svg`, `.ico` are heavily penalised.
 //!
 //! # Same-domain scoping
@@ -33,23 +33,23 @@
 //!
 //! # Caps
 //!
-//! - `max_pages` — maximum number of pages to fetch (default 10).
-//! - `max_depth` — maximum crawl depth from the start URL (default 2).
-//! - `max_total_chars` — total character budget across all pages (default
+//! - `max_pages` - maximum number of pages to fetch (default 10).
+//! - `max_depth` - maximum crawl depth from the start URL (default 2).
+//! - `max_total_chars` - total character budget across all pages (default
 //!   200 000). When exceeded, the crawl is truncated with
 //!   `truncated_by = "max_total_chars"`.
-//! - `deadline_ms` — wall-clock time budget (default 120 000 ms = 2 min).
+//! - `deadline_ms` - wall-clock time budget (default 120 000 ms = 2 min).
 //!   When exceeded, the crawl is truncated with `truncated_by = "deadline"`.
 //!
 //! # Modes
 //!
-//! - **Normal** — crawl from the start URL, discover and fetch same-domain
+//! - **Normal** - crawl from the start URL, discover and fetch same-domain
 //!   pages in best-first order.
-//! - **`discover_only = true`** — discover URLs (via BFS or sitemap) but do
+//! - **`discover_only = true`** - discover URLs (via BFS or sitemap) but do
 //!   not fetch page content. Returns the URL map only.
-//! - **`crawl_urls = [...]`** — fetch only the specified subset of URLs
+//! - **`crawl_urls = [...]`** - fetch only the specified subset of URLs
 //!   (second-phase selective crawl). No BFS discovery is performed.
-//! - **`sitemap = true`** — discover URLs from the site's `sitemap.xml`
+//! - **`sitemap = true`** - discover URLs from the site's `sitemap.xml`
 //!   before crawling (FR-013). When `sitemap = "auto"`, the sitemap is used
 //!   if present and BFS is the fallback.
 //!
@@ -186,7 +186,7 @@ pub struct CrawlConfig {
     pub sitemap: SitemapMode,
     /// If `true`, discover URLs but do not fetch page content (FR-013).
     pub discover_only: bool,
-    /// If non-empty, fetch only this subset of URLs — no BFS discovery
+    /// If non-empty, fetch only this subset of URLs - no BFS discovery
     /// (FR-014).
     pub crawl_urls: Vec<String>,
     /// If `true`, check robots.txt before fetching each page.
@@ -246,7 +246,7 @@ pub struct CrawlResult {
 }
 
 // ---------------------------------------------------------------------------
-// CrawlFetcher trait (mockable I/O — NFR-003)
+// CrawlFetcher trait (mockable I/O - NFR-003)
 // ---------------------------------------------------------------------------
 
 /// The output of fetching a single page during a crawl.
@@ -324,21 +324,21 @@ pub trait CrawlFetcher: Send + Sync {
 ///
 /// Higher scores are crawled first. The score combines:
 ///
-/// - **Content-likelihood** — URLs with `docs`, `guide`, `api`, etc. in the
+/// - **Content-likelihood** - URLs with `docs`, `guide`, `api`, etc. in the
 ///   path are boosted; URLs with `login`, `cart`, `submit`, etc. are
 ///   penalised.
-/// - **Focus relevance** — if a focus query is provided, URLs containing
+/// - **Focus relevance** - if a focus query is provided, URLs containing
 ///   query terms in the path receive a boost.
-/// - **Depth** — shallower URLs get a small boost.
-/// - **Non-HTML assets** — URLs ending in `.pdf`, `.jpg`, etc. are heavily
+/// - **Depth** - shallower URLs get a small boost.
+/// - **Non-HTML assets** - URLs ending in `.pdf`, `.jpg`, etc. are heavily
 ///   penalised.
 ///
 /// # Arguments
 ///
-/// - `url` — the discovered URL (must be absolute).
-/// - `focus` — optional focus query string. When `None`, no focus boost is
+/// - `url` - the discovered URL (must be absolute).
+/// - `focus` - optional focus query string. When `None`, no focus boost is
 ///   applied.
-/// - `depth` — crawl depth of this URL (0 = start page).
+/// - `depth` - crawl depth of this URL (0 = start page).
 ///
 /// # Returns
 ///
@@ -403,7 +403,7 @@ pub fn score_url(url: &str, focus: Option<&str>, depth: usize) -> f64 {
     }
 
     // Depth: shallow URLs get a small boost.
-    // depth 0 → +1.0, depth 1 → +0.5, depth 2 → +0.25, etc.
+    // depth 0 -> +1.0, depth 1 -> +0.5, depth 2 -> +0.25, etc.
     let depth_boost = 1.0 / f64::from(1u32 << depth.min(10) as u32);
     score += depth_boost;
 
@@ -463,7 +463,11 @@ pub fn is_same_domain(url: &str, reference_url: &str) -> bool {
 #[must_use]
 pub fn normalize_and_dedup(urls: &[String]) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
-    let mut result: Vec<String> = Vec::with_capacity(urls.len());
+    // No `Vec::with_capacity(urls.len())`: `urls` can come from an untrusted
+    // LLM-supplied `crawl_urls` array, so sizing the pre-allocation from it
+    // would let a huge array force a large up-front allocation (ANTIPAT 4.4).
+    // Dedup also shrinks the list, so growing from empty is the safe default.
+    let mut result: Vec<String> = Vec::new();
 
     for url in urls {
         let normalised = normalise_url(url).unwrap_or_else(|_| url.clone());
@@ -609,8 +613,8 @@ impl CrawlOrchestrator {
     ///
     /// # Arguments
     ///
-    /// - `start_url` — the seed URL for the crawl.
-    /// - `fetcher` — the page fetcher (real HTTP or mock).
+    /// - `start_url` - the seed URL for the crawl.
+    /// - `fetcher` - the page fetcher (real HTTP or mock).
     ///
     /// # Returns
     ///
@@ -628,8 +632,8 @@ impl CrawlOrchestrator {
     ///
     /// # Arguments
     ///
-    /// - `start_url` — the seed URL for the crawl.
-    /// - `fetcher` — the page fetcher (real HTTP or mock).
+    /// - `start_url` - the seed URL for the crawl.
+    /// - `fetcher` - the page fetcher (real HTTP or mock).
     ///
     /// # Returns
     ///
@@ -685,7 +689,7 @@ impl CrawlOrchestrator {
             // Record discovered URL (even cross-domain).
             result.discovered_urls.push(entry.url.clone());
 
-            // In discover_only mode, don't fetch — just discover.
+            // In discover_only mode, don't fetch - just discover.
             if self.config.discover_only {
                 // We can't discover links without fetching the page.
                 // In discover_only mode, we still need to fetch pages to
@@ -713,7 +717,7 @@ impl CrawlOrchestrator {
             // Fetch the page.
             let fetched = match fetcher.fetch_page(&entry.url).await {
                 Some(f) => f,
-                None => continue, // Fetch failed — skip.
+                None => continue, // Fetch failed - skip.
             };
 
             // Accumulate total chars.
@@ -801,7 +805,7 @@ impl CrawlOrchestrator {
         }
     }
 
-    /// Run a selective crawl — fetch only the specified `crawl_urls` (FR-014).
+    /// Run a selective crawl - fetch only the specified `crawl_urls` (FR-014).
     async fn crawl_selective(&self, fetcher: &dyn CrawlFetcher, deadline: Instant) -> CrawlResult {
         let mut result = CrawlResult::default();
         let mut total_chars: usize = 0;

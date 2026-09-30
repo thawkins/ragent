@@ -34,7 +34,7 @@ pub fn best_exact_or_similarity_sample(
 ) -> (String, f64) {
     let normalized_reference = normalized_code(reference);
     // Phase 1: an exact match scores the maximum 1.0 (similarity is clamped
-    // to [0, 1]), so the O(L×R) Levenshtein pass can be skipped entirely the
+    // to [0, 1]), so the O(LxR) Levenshtein pass can be skipped entirely the
     // moment one is found.
     if let Some(sample) = generation
         .samples
@@ -43,7 +43,7 @@ pub fn best_exact_or_similarity_sample(
     {
         return (sample.text.clone(), 1.0);
     }
-    // Phase 2: no exact hit — compare all samples by edit similarity.
+    // Phase 2: no exact hit - compare all samples by edit similarity.
     generation
         .samples
         .iter()

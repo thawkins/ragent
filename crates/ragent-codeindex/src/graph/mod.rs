@@ -1,40 +1,51 @@
 //! Semantic code graph: typed edges between indexed symbols.
 //!
-//! This module provides [`SymbolGraph`], the public API for building and
+//! This module provides `SymbolGraph`, the public API for building and
 //! querying the semantic edge graph.  The graph is derived deterministically
 //! from the existing tree-sitter parse output (symbols, imports, references)
-//! — no LLM or embeddings are used.
+//! - no LLM or embeddings are used.
 //!
 //! ## Overview
 //!
-//! - [`SymbolGraph::build`] — derive edges from the indexed symbols and
+//! - `SymbolGraph::build` - derive edges from the indexed symbols and
 //!   persist them in the `graph_edges` SQLite table.
-//! - [`SymbolGraph::explain`] — show a symbol's node metadata and its
+//! - `SymbolGraph::explain` - show a symbol's node metadata and its
 //!   incoming/outgoing connections.
-//! - [`SymbolGraph::path`] — compute the shortest path (by hop count) between
+//! - `SymbolGraph::path` - compute the shortest path (by hop count) between
 //!   two symbols.
-//! - [`SymbolGraph::communities`] — run community detection over the graph.
-//! - [`SymbolGraph::godnodes`] — list the highest-degree (most-connected)
+//! - `SymbolGraph::communities` - run community detection over the graph.
+//! - `SymbolGraph::godnodes` - list the highest-degree (most-connected)
 //!   symbols.
-//! - [`SymbolGraph::export_json`] / [`SymbolGraph::export_report`] —
+//! - `SymbolGraph::export_json` / `SymbolGraph::export_report` -
 //!   serialise the graph to `graph.json` and `GRAPH_REPORT.md`.
 //!
-//! The submodules will be populated by later tasks:
-//! - `edges` — edge derivation logic (T-004)
-//! - `resolve` — cross-file symbol resolution (T-005)
-//! - `traverse` — BFS shortest-path and explain queries (T-008, T-009)
-//! - `communities` — community detection (T-010)
-//! - `export` — JSON and Markdown export (T-011)
+//! ## Module-doc link style
+//!
+//! References to items defined in this crate are written as plain backticks
+//! (for example `SymbolGraph`), not intra-doc links: the `SymbolGraph` item is
+//! defined in this very module, so an unqualified intra-doc link to it would
+//! not resolve. Backticks are used consistently instead.
+//!
+//! Submodules:
+//! - `edges` - edge derivation logic
+//! - `resolve` - cross-file symbol resolution
+//! - `traverse` - BFS shortest-path and explain queries
+//! - `communities` - community detection
+//! - `export` - JSON and Markdown export
 
 use crate::store::IndexStore;
 use crate::types::{Confidence, GraphEdge};
 use anyhow::Result;
 
-// Submodule stubs — populated by later tasks.
+/// Community detection over the symbol graph.
 pub mod communities;
+/// Edge derivation from indexed symbols, imports, and references.
 pub mod edges;
+/// JSON and Markdown graph export.
 pub mod export;
+/// Cross-file symbol resolution.
 pub mod resolve;
+/// BFS shortest-path, explain, and god-node queries.
 pub mod traverse;
 
 // ── Explain Result ──────────────────────────────────────────────────────────
@@ -88,7 +99,7 @@ pub struct PathResult {
     pub steps: Vec<(String, Option<String>)>,
 }
 
-// ── God Node ──────────────────────────────────────────────────��──────────────
+// ── God Node ────────────────────────────────────────────────────────────────
 
 /// A high-degree (hub) symbol.
 #[derive(Debug, Clone)]
@@ -143,15 +154,12 @@ impl<'a> SymbolGraph<'a> {
     /// then persists them in the `graph_edges` table.
     ///
     /// Returns a [`BuildResult`] with edge counts.
-    ///
-    /// *Full implementation in T-004 / T-005.*
     pub fn build(&self) -> Result<BuildResult> {
         edges::derive_and_store(self.store, None)
     }
 
     /// Build the graph restricted to symbols from a single language.
     ///
-    /// *Full implementation in T-004 (with language filter).*
     pub fn build_for_language(&self, language: &str) -> Result<BuildResult> {
         edges::derive_and_store_for_language(self.store, language)
     }
@@ -162,8 +170,6 @@ impl<'a> SymbolGraph<'a> {
     ///
     /// Looks up the symbol by name, retrieves its incoming and outgoing edges
     /// (up to 50 connections), and returns a structured [`ExplainResult`].
-    ///
-    /// *Full implementation in T-009.*
     pub fn explain(&self, name: &str) -> Result<Option<ExplainResult>> {
         traverse::explain(self.store, name)
     }
@@ -171,8 +177,6 @@ impl<'a> SymbolGraph<'a> {
     /// Compute the shortest path (by hop count) between two symbols.
     ///
     /// Returns `None` if no path exists.
-    ///
-    /// *Full implementation in T-008.*
     pub fn path(&self, from: &str, to: &str) -> Result<Option<PathResult>> {
         traverse::shortest_path(self.store, from, to)
     }
@@ -243,15 +247,11 @@ impl<'a> SymbolGraph<'a> {
     // ── Export ───────────────────────────────────────────────────────────
 
     /// Serialise the graph to a JSON string.
-    ///
-    /// *Full implementation in T-011.*
     pub fn export_json(&self) -> Result<String> {
         export::to_json(self.store)
     }
 
     /// Generate a `GRAPH_REPORT.md` report.
-    ///
-    /// *Full implementation in T-011.*
     pub fn export_report(&self) -> Result<String> {
         export::to_report(self.store)
     }

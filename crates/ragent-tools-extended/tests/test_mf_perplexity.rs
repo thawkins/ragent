@@ -189,7 +189,7 @@ fn test_parse_response_json_snippet_truncation() {
     assert_eq!(results.len(), 1);
     let snippet = &results[0].snippet;
     assert!(snippet.chars().count() <= 201);
-    assert!(snippet.ends_with('…'));
+    assert!(snippet.ends_with("..."));
 }
 
 // ===========================================================================

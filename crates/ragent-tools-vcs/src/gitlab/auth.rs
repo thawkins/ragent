@@ -70,7 +70,7 @@ pub struct GitLabConfig {
 
 /// Resolve the GitLab PAT, best-effort.
 ///
-/// Priority: `GITLAB_TOKEN` env → `ragent.json` → encrypted database.
+/// Priority: `GITLAB_TOKEN` env -> `ragent.json` -> encrypted database.
 /// The database lookup is cached per storage handle (PERF-059) so repeat calls
 /// do not re-decrypt the credential; [`save_token`] and [`delete_token`] clear
 /// the cache.
@@ -95,7 +95,7 @@ pub fn load_token(storage: &Storage) -> Option<String> {
 
 /// Resolve the GitLab PAT, propagating credential-store read failures.
 ///
-/// Priority: `GITLAB_TOKEN` env → `ragent.json` → encrypted database.
+/// Priority: `GITLAB_TOKEN` env -> `ragent.json` -> encrypted database.
 ///
 /// Returns `Ok(None)` only when no layer supplies a token. A database read
 /// *error* is returned as `Err` so callers never mistake a broken store for
@@ -145,7 +145,7 @@ pub fn load_token_checked(storage: &Storage) -> Result<Option<String>> {
 
 /// Resolve the GitLab configuration (instance URL + username).
 ///
-/// Priority: env vars → `ragent.json` → database settings.
+/// Priority: env vars -> `ragent.json` -> database settings.
 #[must_use]
 pub fn load_config(storage: &Storage) -> Option<GitLabConfig> {
     let env_url = std::env::var("GITLAB_URL").ok().filter(|s| !s.is_empty());
@@ -263,7 +263,7 @@ pub async fn validate_token(instance_url: &str, token: &str) -> Result<String> {
         .context("Failed to connect to GitLab instance")?;
 
     if resp.status().as_u16() == 401 {
-        anyhow::bail!("Authentication failed — invalid Personal Access Token");
+        anyhow::bail!("Authentication failed - invalid Personal Access Token");
     }
     if !resp.status().is_success() {
         let body = resp.text().await.unwrap_or_default();
@@ -279,7 +279,7 @@ pub async fn validate_token(instance_url: &str, token: &str) -> Result<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Migration: file-based storage → database
+// Migration: file-based storage -> database
 // ---------------------------------------------------------------------------
 
 /// Migrate legacy file-based GitLab credentials into the database.
@@ -302,7 +302,7 @@ pub fn migrate_legacy_files(storage: &Storage) {
                 .is_none()
             && storage.set_provider_auth(DB_PROVIDER_ID, &token).is_ok()
         {
-            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_file(&path); // INTENTIONAL: best-effort temp cleanup
         }
     }
 
@@ -314,11 +314,11 @@ pub fn migrate_legacy_files(storage: &Storage) {
         && load_config_from_db(storage).is_none()
         && save_config(storage, &config).is_ok()
     {
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&path); // INTENTIONAL: best-effort temp cleanup
     }
 }
 
-/// Legacy `~/.ragent/` GitLab token path — the only location the migration
+/// Legacy `~/.ragent/` GitLab token path - the only location the migration
 /// scans. New code must not read or write here.
 fn legacy_token_file_path() -> Option<std::path::PathBuf> {
     legacy_home_dir().map(|h| h.join("gitlab_token"))

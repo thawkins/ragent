@@ -137,7 +137,7 @@ async fn test_conversation_search_turn_range() {
         .await
         .expect("execute");
 
-    assert!(out.content.contains("Turns 2–3"));
+    assert!(out.content.contains("Turns 2-3"));
     assert!(out.content.contains("second"));
     assert!(out.content.contains("third"));
     assert!(!out.content.contains("first"));

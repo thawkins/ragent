@@ -76,15 +76,26 @@ pub struct PaidProvider {
     api_key: String,
     base_url: Option<String>,
     client: reqwest::Client,
+    /// Configured minimum seconds between finance API calls; `0` means "use the
+    /// built-in default" (see [`wait_for_min_interval`]). ANTIPAT M5.9 / 3.4.
+    min_call_interval_seconds: u64,
 }
 
 impl PaidProvider {
     /// Create a new paid provider from a provider name and API key.
     ///
+    /// `min_call_interval_seconds` is the configured global throttle interval;
+    /// pass `0` to fall back to the built-in default (ANTIPAT M5.9 / 3.4).
+    ///
     /// # Errors
     ///
     /// Returns an error if `provider` is empty or `api_key` is empty.
-    pub fn new(provider: &str, api_key: &str, base_url: Option<String>) -> FinanceResult<Self> {
+    pub fn new(
+        provider: &str,
+        api_key: &str,
+        base_url: Option<String>,
+        min_call_interval_seconds: u64,
+    ) -> FinanceResult<Self> {
         if provider.is_empty() {
             return Err(FinanceError::ConfigError(
                 "paid provider name is empty".to_string(),
@@ -105,11 +116,30 @@ impl PaidProvider {
                 "paid provider base_url rejected: {e}"
             )));
         }
+        // ANTIPAT M5.9 / 3.2: a bare `Client::new()` had the reqwest default
+        // (no timeout), so a hung finance endpoint blocked indefinitely.
+        let client = crate::masterfetch::http::build_default_client().map_err(|e| {
+            FinanceError::ConfigError(format!("failed to build finance HTTP client: {e}"))
+        })?;
         Ok(Self {
             name: provider.to_string(),
             api_key: api_key.to_string(),
             base_url,
-            client: reqwest::Client::new(),
+            client,
+            min_call_interval_seconds,
+        })
+    }
+
+    /// Build the throttle config to pass to [`wait_for_min_interval`].
+    ///
+    /// `None` (no explicit interval configured) yields the documented default.
+    fn min_call_interval_config(&self) -> Option<FinanceProviderConfig> {
+        if self.min_call_interval_seconds == 0 {
+            return None;
+        }
+        Some(FinanceProviderConfig {
+            min_call_interval_seconds: self.min_call_interval_seconds,
+            ..Default::default()
         })
     }
 
@@ -174,8 +204,10 @@ impl PaidProvider {
         params: &[(&str, String)],
     ) -> FinanceResult<serde_json::Value> {
         // Process-wide cross-provider throttle; prevents rapid fire calls
-        // across Yahoo and Alpha Vantage from triggering rate limits.
-        wait_for_min_interval(None).await;
+        // across Yahoo and Alpha Vantage from triggering rate limits. The
+        // config-derived interval is threaded through so
+        // `finance.min_call_interval_seconds` is honoured (ANTIPAT M5.9 / 3.4).
+        wait_for_min_interval(self.min_call_interval_config().as_ref()).await;
 
         let url = self.alpha_vantage_url(function, params);
         let response =
@@ -188,13 +220,16 @@ impl PaidProvider {
                     message: e.to_string(),
                 })?;
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| FinanceError::ProviderFailure {
-                provider: self.name.clone(),
-                message: e.to_string(),
-            })?;
+        // ANTIPAT 4.1: bound the provider response body.
+        let body = crate::masterfetch::http::read_body_capped(
+            response,
+            crate::masterfetch::http::MAX_RESPONSE_BODY_BYTES,
+        )
+        .await
+        .map_err(|e| FinanceError::ProviderFailure {
+            provider: self.name.clone(),
+            message: e.to_string(),
+        })?;
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return Err(FinanceError::RateLimit {
                 provider: self.name.clone(),
@@ -365,7 +400,7 @@ impl FinanceProvider for PaidProvider {
     }
 
     async fn fundamentals(&self, symbol: &str) -> FinanceResult<Fundamentals> {
-        let _ = symbol;
+        let _ = symbol; // INTENTIONAL: parameter retained for API stability
         Err(FinanceError::ProviderFailure {
             provider: self.name.clone(),
             message: "fundamentals not implemented for paid provider".to_string(),
@@ -373,7 +408,7 @@ impl FinanceProvider for PaidProvider {
     }
 
     async fn currency_rate(&self, base: &str, quote: &str) -> FinanceResult<CurrencyRate> {
-        let _ = (base, quote);
+        let _ = (base, quote); // INTENTIONAL: parameters retained for API stability
         Err(FinanceError::ProviderFailure {
             provider: self.name.clone(),
             message: "currency_rate not implemented for paid provider".to_string(),
@@ -387,7 +422,7 @@ impl FinanceProvider for PaidProvider {
         interval: &str,
         period: &str,
     ) -> FinanceResult<Vec<OhlcvBar>> {
-        let _ = (base, quote, interval, period);
+        let _ = (base, quote, interval, period); // INTENTIONAL: parameters retained for API stability
         Err(FinanceError::ProviderFailure {
             provider: self.name.clone(),
             message: "currency_history not implemented for paid provider".to_string(),
@@ -395,7 +430,7 @@ impl FinanceProvider for PaidProvider {
     }
 
     async fn search(&self, query: &str) -> FinanceResult<Vec<SearchResult>> {
-        let _ = query;
+        let _ = query; // INTENTIONAL: parameter retained for API stability
         Err(FinanceError::ProviderFailure {
             provider: self.name.clone(),
             message: "search not implemented for paid provider".to_string(),
@@ -407,7 +442,7 @@ impl FinanceProvider for PaidProvider {
         symbol: &str,
         expiration: Option<&str>,
     ) -> FinanceResult<Vec<OptionContract>> {
-        let _ = (symbol, expiration);
+        let _ = (symbol, expiration); // INTENTIONAL: parameters retained for API stability
         Err(FinanceError::ProviderFailure {
             provider: self.name.clone(),
             message: "options not implemented for paid provider".to_string(),
@@ -496,6 +531,7 @@ pub fn paid_provider_from_config(
                 "alpha_vantage",
                 api_key,
                 config.base_url.clone(),
+                config.min_call_interval_seconds,
             )?))
         }
         "twelvedata" => {
@@ -505,6 +541,7 @@ pub fn paid_provider_from_config(
             Ok(Arc::new(TwelveDataProvider::new(
                 api_key,
                 config.base_url.clone(),
+                config.min_call_interval_seconds,
             )?))
         }
         _ => Err(FinanceError::ConfigError(format!(

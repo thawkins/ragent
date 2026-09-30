@@ -23,7 +23,7 @@
 //!   ([`AddError::UnsafePath`]);
 //! - an existing plugin id refuses unless `force` ([`AddError::Exists`]);
 //! - the installed tree must parse as a valid plugin manifest
-//!   ([`AddError::NotAPlugin`] — no manifest, or [`AddError::Manifest`]).
+//!   ([`AddError::NotAPlugin`] - no manifest, or [`AddError::Manifest`]).
 //!
 //! A manifest that contributes no JavaScript (a skill-only or MCP-only plugin,
 //! the shape the official Claude marketplace ships) parses with no entry point
@@ -40,13 +40,34 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use sha2::Digest as _;
+
+use ragent_tools_core::guard::validate_identifier;
+
 use crate::descriptor::detect_dialect;
-use crate::error::PluginError;
+use crate::error::{IoError, PluginError};
 use crate::manifest::{ParsedManifest, parse_plugin_dir};
 use crate::store::{StoreDirs, StoreLedger};
 
 /// Maximum accepted archive size: 50 MiB (FR-010 size cap).
 pub const MAX_ARCHIVE_BYTES: u64 = 50 * 1024 * 1024;
+
+/// Maximum total decompressed bytes extracted from one archive (ANTIPAT M17).
+///
+/// The per-entry cap alone is not enough: an archive holding many
+/// just-under-the-cap entries wrote unbounded data into the store. The running
+/// total across all entries is bounded by this value.
+pub const MAX_EXTRACTED_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Wall-clock budget for one plugin archive download (ANTIPAT M19).
+///
+/// Was a bare `from_secs(60)` inside [`download_and_extract`]; naming it keeps
+/// the crate's other limits (`MAX_ARCHIVE_BYTES`, `FetchLimits::DEFAULT_TIMEOUT`)
+/// company.
+pub const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Read/write chunk size for streaming a download to disk.
+const STREAM_CHUNK_BYTES: usize = 65_536;
 
 /// The outcome of a successful [`add`].
 #[derive(Debug)]
@@ -98,14 +119,15 @@ pub enum AddError {
     )]
     UnknownSource(String),
 
-    /// A network or I/O failure during download/copy/extract.
+    /// A network or I/O failure during download/copy/extract. Uses [`IoError`]
+    /// so the underlying error's source chain survives (ANTIPAT M15).
     #[error("plugin add: {0}")]
-    Io(String),
+    Io(#[from] IoError),
 }
 
 /// How the plugin files arrived at staging.
 enum Staging {
-    /// The source was a directory; staging IS the source (no copy — we rename
+    /// The source was a directory; staging IS the source (no copy - we rename
     /// nothing, we copy on success).
     Existing(PathBuf),
     /// The source was an archive or a git checkout; files are staged under this
@@ -135,7 +157,7 @@ pub fn add(
         .project
         .clone()
         .or_else(|| dirs.global.clone())
-        .ok_or_else(|| AddError::Io("no plugin store directory resolvable".to_string()))?;
+        .ok_or_else(|| AddError::Io(IoError::message("no plugin store directory resolvable")))?;
     std::fs::create_dir_all(&dest_store).map_err(io_err)?;
 
     let staging_root = dest_store.join(".add-staging");
@@ -154,8 +176,8 @@ pub fn add(
     let staged = match result {
         Ok(staged) => staged,
         Err(err) => {
-            let _ = std::fs::remove_dir_all(&staging);
-            let _ = remove_if_empty(&staging_root);
+            let _ = std::fs::remove_dir_all(&staging); // INTENTIONAL: best-effort temp cleanup
+            let _ = remove_if_empty(&staging_root); // INTENTIONAL: best-effort temp cleanup
             return Err(err);
         }
     };
@@ -207,6 +229,13 @@ pub fn add(
     // id, but the sink re-asserts containment so a future parser change cannot
     // silently reintroduce an arbitrary write/delete primitive.
     let dest_dir = confined_dest_dir(&dest_store, &id)?;
+
+    // ANTIPAT H2: record a deterministic digest of the staged content so a
+    // substituted archive/checkout is at least detectable after the fact. The
+    // digest is computed over the staged tree *before* the commit below, which
+    // is the exact byte content that lands in the store.
+    let staged_digest = content_digest(&staged_root)?;
+
     if dest_dir.exists() {
         if !force {
             cleanup_staging(&staging, &staging_root);
@@ -237,12 +266,21 @@ pub fn add(
     // persisted flag. The ledger lives in `dest_store` (the leg the install
     // targeted), matching where `/plugins enable` would write it.
     let mut ledger = StoreLedger::load(&dest_store);
-    ledger.state_mut(&id).enabled = true;
+    let state = ledger.state_mut(&id);
+    state.enabled = true;
+    // ANTIPAT H2: persist the observed digest of the installed content so a
+    // later content swap is detectable (and so `/plugins` can display it).
+    state.content_digest = Some(staged_digest.clone());
     ledger.save(&dest_store).map_err(|e| {
         AddError::Manifest(PluginError::Io(format!(
             "plugin installed but the enable flag could not be persisted: {e}"
         )))
     })?;
+    tracing::info!(
+        plugin = %id,
+        digest = %staged_digest,
+        "plugin installed; recorded content digest in the store ledger"
+    );
 
     Ok(AddOutcome {
         parsed: installed_parsed,
@@ -295,10 +333,14 @@ fn add_inner(source: &str, workdir: &Path, staging: &Path) -> Result<Staging, Ad
 }
 
 /// Classify an extraction failure into a structured [`AddError`].
+///
+/// An [`ExtractError`] carries either a structured [`std::io::Error`] (whose
+/// source chain is preserved) or an already-formatted message.
 fn classify_extract_failure(err: ExtractError) -> AddError {
     match err {
         ExtractError::UnsafePath(p) => AddError::UnsafePath(p),
-        ExtractError::Io(msg) => AddError::Io(msg),
+        ExtractError::Io(io) => AddError::Io(IoError::new(io)),
+        ExtractError::Message(msg) => AddError::Io(IoError::message(msg)),
     }
 }
 
@@ -352,7 +394,7 @@ pub fn parse_git_source(source: &str) -> Option<GitSource> {
 /// and `git` parses a leading `-` as an *option*, not a positional. Options
 /// such as `--upload-pack=<cmd>` execute a program, which escapes the plugin
 /// sandbox entirely (SEC-ragent-plugins-001). Anything that is not
-/// `[A-Za-z0-9._/-]+` — and anything beginning with `-` — is refused.
+/// `[A-Za-z0-9._/-]+` - and anything beginning with `-` - is refused.
 fn git_ref(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("HEAD") {
@@ -387,13 +429,11 @@ fn git_subpath(raw: &str) -> Option<String> {
 /// See SEC-ragent-plugins-001: without this gate, a `git+` ref of
 /// `--upload-pack=/bin/sh -c true` reaches `Command::new("git")` and executes
 /// a program with the user's privileges.
+///
+/// Delegates to the shared [`ragent_tools_core::guard::is_safe_operand`]
+/// (SECTASKS MS-05 T-068) and adds this crate's stricter `..` rule.
 fn is_safe_git_argument(value: &str) -> bool {
-    !value.is_empty()
-        && !value.starts_with('-')
-        && !value.contains("..")
-        && value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+    ragent_tools_core::guard::is_safe_operand(value) && !value.contains("..")
 }
 
 /// Materialise a marketplace-inline manifest for a manifest-less stub.
@@ -403,8 +443,8 @@ fn is_safe_git_argument(value: &str) -> bool {
 /// from the source's git subpath (its final path segment), and the recorded
 /// inline manifest is written into `.claude-plugin/plugin.json` under
 /// `staged_root` (or, for a sparse checkout layout, `<staged_root>/<name>`).
-/// Any other source — no suffix, an unrecorded key, a tree that already has
-/// a recognisable manifest — returns `staged_root` unchanged.
+/// Any other source - no suffix, an unrecorded key, a tree that already has
+/// a recognisable manifest - returns `staged_root` unchanged.
 fn materialize_marketplace_manifest(staged_root: PathBuf, source: &str) -> PathBuf {
     // Strip the key first so the name parse below never sees the suffix.
     let (stripped, Some(key)) = crate::marketplace::split_manifest_key(source) else {
@@ -473,22 +513,18 @@ fn git_clone_stage(source: &str, staging: &Path) -> Result<PathBuf, AddError> {
 /// talked into installing). `Path::join` honours `..` segments and *replaces*
 /// the base entirely when the argument is absolute, so an id of
 /// `../../../../home/user/.ssh` or `/home/user/.config/autostart` would write
-/// — and, on `--force`, recursively delete — outside the store
+///   and, on `--force`, recursively delete - outside the store
 /// (SEC-ragent-plugins-002). Only `[A-Za-z0-9._-]+` is accepted.
+///
+/// Delegates the charset + single-component rule to the shared
+/// [`ragent_tools_core::guard::validate_identifier`] predicate (ANTIPAT M14) so the
+/// install sink and the manifest parser (`manifest::sanitize_declared_id`) can
+/// never drift apart.
 fn confined_dest_dir(store: &Path, id: &str) -> Result<PathBuf, AddError> {
-    let mut components = Path::new(id).components();
-    let single_normal =
-        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
-    if id.is_empty()
-        || !single_normal
-        || id.contains('\\')
-        || !id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-    {
-        return Err(AddError::Io(format!(
+    if validate_identifier(id, "plugin id").is_err() {
+        return Err(AddError::Io(IoError::message(format!(
             "plugin add: refusing plugin id {id:?}; an id must be a single component matching [A-Za-z0-9._-]+"
-        )));
+        ))));
     }
     Ok(store.join(id))
 }
@@ -508,10 +544,13 @@ fn git_run(args: &[&str], cwd: Option<&Path>) -> Result<(), AddError> {
     }
     let output = command
         .output()
-        .map_err(|e| AddError::Io(format!("git {verb}: {e}")))?;
+        .map_err(|e| AddError::Io(IoError::message(format!("git {verb}: {e}"))))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AddError::Io(format!("git {verb}: {}", stderr.trim())));
+        return Err(AddError::Io(IoError::message(format!(
+            "git {verb}: {}",
+            stderr.trim()
+        ))));
     }
     Ok(())
 }
@@ -530,18 +569,18 @@ fn download_and_extract(url: &str, staging: &Path) -> Result<PathBuf, AddError> 
         // https -> http downgrade. Reuse the store-fetch policy that stops any
         // non-https redirect, so a plaintext mirror cannot substitute the archive.
         .redirect(crate::store_fetch::https_only_redirects())
-        .timeout(std::time::Duration::from_secs(60))
+        .timeout(DOWNLOAD_TIMEOUT)
         .build()
-        .map_err(|e| AddError::Io(format!("http client: {e}")))?;
+        .map_err(|e| AddError::Io(IoError::message(format!("http client: {e}"))))?;
     let mut response = client
         .get(url)
         .send()
-        .map_err(|e| AddError::Io(format!("download {url}: {e}")))?;
+        .map_err(|e| AddError::Io(IoError::message(format!("download {url}: {e}"))))?;
     if !response.status().is_success() {
-        return Err(AddError::Io(format!(
+        return Err(AddError::Io(IoError::message(format!(
             "download {url}: HTTP {}",
             response.status()
-        )));
+        ))));
     }
 
     // Enforce the size cap; use Content-Length when available, then stream with
@@ -555,12 +594,12 @@ fn download_and_extract(url: &str, staging: &Path) -> Result<PathBuf, AddError> 
         });
     }
     let mut bytes = Vec::new();
-    let mut chunk = vec![0_u8; 65536];
+    let mut chunk = vec![0_u8; STREAM_CHUNK_BYTES];
     use std::io::Read as _;
     loop {
         let read = response
             .read(&mut chunk)
-            .map_err(|e| AddError::Io(format!("download {url}: {e}")))?;
+            .map_err(|e| AddError::Io(IoError::message(format!("download {url}: {e}"))))?;
         if read == 0 {
             break;
         }
@@ -604,30 +643,32 @@ impl ArchiveKind {
 }
 
 /// Extraction failure (converted to [`AddError`] at the module boundary).
+///
+/// The `Io` arm keeps the structured [`std::io::Error`] so its source chain
+/// survives the conversion to [`AddError::Io`] (ANTIPAT M15); a failure that
+/// only has an already-formatted detail uses `Message`.
 #[derive(Debug)]
 enum ExtractError {
     UnsafePath(String),
-    Io(String),
+    Io(std::io::Error),
+    Message(String),
 }
 
 /// Extract a local archive file into `staging`, returning the extraction root.
 fn extract_archive_into(file: &Path, staging: &Path) -> Result<PathBuf, ExtractError> {
     let Some(kind) = ArchiveKind::from_path(&file.to_string_lossy()) else {
-        return Err(ExtractError::Io(format!(
+        return Err(ExtractError::Message(format!(
             "unsupported archive type for {}",
             file.display()
         )));
     };
-    let size = file
-        .metadata()
-        .map_err(|e| ExtractError::Io(e.to_string()))?
-        .len();
+    let size = file.metadata().map_err(ExtractError::Io)?.len();
     if size > MAX_ARCHIVE_BYTES {
-        return Err(ExtractError::Io(format!(
+        return Err(ExtractError::Message(format!(
             "archive is {size} bytes, over the {MAX_ARCHIVE_BYTES} byte cap"
         )));
     }
-    let bytes = std::fs::read(file).map_err(|e| ExtractError::Io(e.to_string()))?;
+    let bytes = std::fs::read(file).map_err(ExtractError::Io)?;
     extract_archive(&bytes, kind, staging, None)
 }
 
@@ -640,18 +681,18 @@ fn extract_archive(
     remove_after: Option<&Path>,
 ) -> Result<PathBuf, ExtractError> {
     if bytes.len() as u64 > MAX_ARCHIVE_BYTES {
-        return Err(ExtractError::Io(format!(
+        return Err(ExtractError::Message(format!(
             "archive is {} bytes, over the {MAX_ARCHIVE_BYTES} byte cap",
             bytes.len()
         )));
     }
-    std::fs::create_dir_all(staging).map_err(|e| ExtractError::Io(e.to_string()))?;
+    std::fs::create_dir_all(staging).map_err(ExtractError::Io)?;
     let result = match kind {
         ArchiveKind::Zip => extract_zip(bytes, staging),
         ArchiveKind::TarGz => extract_tar_gz(bytes, staging),
     };
     if let Some(path) = remove_after {
-        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(path); // INTENTIONAL: best-effort temp cleanup
     }
     result.map(|_| staging.to_path_buf())
 }
@@ -660,11 +701,14 @@ fn extract_zip(bytes: &[u8], staging: &Path) -> Result<(), ExtractError> {
     use std::io::{Cursor, Read as _};
 
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes.to_vec()))
-        .map_err(|e| ExtractError::Io(format!("zip open: {e}")))?;
+        .map_err(|e| ExtractError::Message(format!("zip open: {e}")))?;
+    // ANTIPAT M17: the per-entry cap does not bound the total, so track a
+    // running total across every entry and abort past MAX_EXTRACTED_BYTES.
+    let mut total: u64 = 0;
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
-            .map_err(|e| ExtractError::Io(format!("zip entry {i}: {e}")))?;
+            .map_err(|e| ExtractError::Message(format!("zip entry {i}: {e}")))?;
         let name = entry.name().to_string();
         if entry.is_dir() {
             continue;
@@ -672,18 +716,24 @@ fn extract_zip(bytes: &[u8], staging: &Path) -> Result<(), ExtractError> {
         let rel = safe_relative_path(&name)?;
         let dest = staging.join(&rel);
         if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| ExtractError::Io(e.to_string()))?;
+            std::fs::create_dir_all(parent).map_err(ExtractError::Io)?;
         }
         let mut body = Vec::new();
         entry
             .read_to_end(&mut body)
-            .map_err(|e| ExtractError::Io(format!("zip entry {name}: {e}")))?;
+            .map_err(|e| ExtractError::Message(format!("zip entry {name}: {e}")))?;
         if body.len() as u64 > MAX_ARCHIVE_BYTES {
-            return Err(ExtractError::Io(format!(
+            return Err(ExtractError::Message(format!(
                 "zip entry {name} decompressed past the size cap"
             )));
         }
-        std::fs::write(&dest, &body).map_err(|e| ExtractError::Io(e.to_string()))?;
+        total = total.saturating_add(body.len() as u64);
+        if total > MAX_EXTRACTED_BYTES {
+            return Err(ExtractError::Message(format!(
+                "archive decompressed past the {MAX_EXTRACTED_BYTES} byte total cap"
+            )));
+        }
+        std::fs::write(&dest, &body).map_err(ExtractError::Io)?;
     }
     Ok(())
 }
@@ -695,12 +745,14 @@ fn extract_tar_gz(bytes: &[u8], staging: &Path) -> Result<(), ExtractError> {
     let mut archive = tar::Archive::new(decoder);
     let entries = archive
         .entries()
-        .map_err(|e| ExtractError::Io(format!("tar entries: {e}")))?;
+        .map_err(|e| ExtractError::Message(format!("tar entries: {e}")))?;
+    // ANTIPAT M17: bound the total decompressed size across all entries.
+    let mut total: u64 = 0;
     for entry in entries {
-        let mut entry = entry.map_err(|e| ExtractError::Io(format!("tar entry: {e}")))?;
+        let mut entry = entry.map_err(|e| ExtractError::Message(format!("tar entry: {e}")))?;
         let path = entry
             .path()
-            .map_err(|e| ExtractError::Io(format!("tar entry path: {e}")))?
+            .map_err(|e| ExtractError::Message(format!("tar entry path: {e}")))?
             .to_path_buf();
         let name = path.to_string_lossy().replace('\\', "/");
         let rel = safe_relative_path(&name)?;
@@ -709,18 +761,24 @@ fn extract_tar_gz(bytes: &[u8], staging: &Path) -> Result<(), ExtractError> {
         }
         let dest = staging.join(&rel);
         if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| ExtractError::Io(e.to_string()))?;
+            std::fs::create_dir_all(parent).map_err(ExtractError::Io)?;
         }
         let mut body = Vec::new();
         entry
             .read_to_end(&mut body)
-            .map_err(|e| ExtractError::Io(format!("tar entry {name}: {e}")))?;
+            .map_err(|e| ExtractError::Message(format!("tar entry {name}: {e}")))?;
         if body.len() as u64 > MAX_ARCHIVE_BYTES {
-            return Err(ExtractError::Io(format!(
+            return Err(ExtractError::Message(format!(
                 "tar entry {name} decompressed past the size cap"
             )));
         }
-        std::fs::write(&dest, &body).map_err(|e| ExtractError::Io(e.to_string()))?;
+        total = total.saturating_add(body.len() as u64);
+        if total > MAX_EXTRACTED_BYTES {
+            return Err(ExtractError::Message(format!(
+                "archive decompressed past the {MAX_EXTRACTED_BYTES} byte total cap"
+            )));
+        }
+        std::fs::write(&dest, &body).map_err(ExtractError::Io)?;
     }
     Ok(())
 }
@@ -765,12 +823,27 @@ fn descend_single_wrapper(root: &Path) -> PathBuf {
     root.to_path_buf()
 }
 
+/// Copy a directory tree, refusing symlink entries (ANTIPAT M18).
+///
+/// The previous implementation used `entry.file_type()` (from `read_dir`, i.e.
+/// `symlink_metadata`) only to choose directory-vs-file, then called
+/// `std::fs::copy`, which *follows* the link. A symlink inside a
+/// user-supplied plugin directory was therefore dereferenced and the target's
+/// contents copied into the store. A symlink is now refused with a contained
+/// error rather than dereferenced.
 fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), AddError> {
     std::fs::create_dir_all(to).map_err(io_err)?;
     for entry in std::fs::read_dir(from).map_err(io_err)?.flatten() {
         let src = entry.path();
         let dst = to.join(entry.file_name());
-        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        let ft = entry.file_type().map_err(io_err)?;
+        if ft.is_symlink() {
+            return Err(AddError::Io(IoError::message(format!(
+                "plugin install: refusing symlink {} (symlinks are not copied into the store)",
+                src.display()
+            ))));
+        }
+        if ft.is_dir() {
             copy_dir_recursive(&src, &dst)?;
         } else {
             std::fs::copy(&src, &dst).map_err(io_err)?;
@@ -797,17 +870,74 @@ fn move_or_copy(from: &Path, to: &Path) -> Result<(), AddError> {
 /// selected subpath: leaving it behind would leak a checkout into the store and
 /// make the parent directory unremovable.
 fn cleanup_staging(staging: &Path, staging_root: &Path) {
-    let _ = std::fs::remove_dir_all(staging);
-    let _ = remove_if_empty(staging_root);
+    let _ = std::fs::remove_dir_all(staging); // INTENTIONAL: best-effort temp cleanup
+    let _ = remove_if_empty(staging_root); // INTENTIONAL: best-effort temp cleanup
 }
 
 /// Remove the staging directory, ignoring "not empty" (the caller only uses
 /// this once the staged contents have been moved or copied out).
 fn remove_if_empty(dir: &Path) -> std::io::Result<()> {
-    let _ = std::fs::remove_dir(dir);
+    let _ = std::fs::remove_dir(dir); // INTENTIONAL: best-effort temp cleanup
     Ok(())
 }
 
 fn io_err(e: std::io::Error) -> AddError {
-    AddError::Io(PluginError::io(e).to_string())
+    AddError::Io(IoError::new(e))
+}
+
+/// Compute a deterministic SHA-256 digest of a directory tree's contents.
+///
+/// ANTIPAT H2: plugin installs had no integrity record at all, so a
+/// TLS-terminating mirror (or a swapped local directory) could substitute the
+/// payload undetected. Hashing the staged tree before it is committed to the
+/// store gives a stable fingerprint that is persisted in the store ledger;
+/// a later content swap is then detectable, and the digest is surfaced in
+/// `/plugins` output.
+///
+/// The digest covers, for every regular file below `root` (relative path
+/// sorted, depth-first):
+///
+/// - the relative path (with `/` separators) and a length prefix,
+/// - the file's byte length and its bytes.
+///
+/// Directory entries and (refused) symlinks contribute nothing of their own.
+///
+/// # Errors
+///
+/// Returns [`AddError::Io`] when the tree cannot be walked or a file cannot be
+/// read.
+fn content_digest(root: &Path) -> Result<String, AddError> {
+    fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), AddError> {
+        for entry in std::fs::read_dir(dir).map_err(io_err)?.flatten() {
+            let path = entry.path();
+            let ft = entry.file_type().map_err(io_err)?;
+            if ft.is_symlink() {
+                // Symlinks never reach the store (see `copy_dir_recursive`), so
+                // they must not influence the digest either.
+                continue;
+            }
+            if ft.is_dir() {
+                collect(&path, out)?;
+            } else {
+                out.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    collect(root, &mut files)?;
+    files.sort();
+
+    let mut hasher = sha2::Sha256::new();
+    for path in &files {
+        let rel = path.strip_prefix(root).unwrap_or(path);
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        hasher.update((rel.len() as u64).to_be_bytes());
+        hasher.update(rel.as_bytes());
+        let bytes = std::fs::read(path).map_err(io_err)?;
+        hasher.update((bytes.len() as u64).to_be_bytes());
+        hasher.update(&bytes);
+    }
+    Ok(hex::encode(hasher.finalize()))
 }

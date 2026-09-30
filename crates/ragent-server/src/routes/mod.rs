@@ -8,25 +8,26 @@ pub mod research;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use axum::{
     Json, Router,
-    extract::{Path, Request, State},
-    http::StatusCode,
+    extract::{DefaultBodyLimit, Path, Query, Request, State},
+    http::{HeaderValue, Method, StatusCode, header},
     middleware,
     response::{
         IntoResponse, Response,
-        sse::{Event as SseEvent, KeepAlive, Sse},
+        sse::{KeepAlive, Sse},
     },
     routing::{get, post},
 };
 use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::BroadcastStream;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::ServeDir;
+use tower_http::timeout::TimeoutLayer;
 
 use ragent_agent::{
     Config,
@@ -40,6 +41,47 @@ use ragent_agent::{
 
 use crate::sse::event_to_sse;
 use ragent_research::SessionEvent;
+
+/// Maximum request body size accepted by every API route (F-M10).
+///
+/// 10 MiB comfortably covers the research POST body (~40 optional fields) and
+/// large edit payloads while bounding memory use; it replaces Axum's implicit
+/// 2 MiB default with an explicit, documented limit.
+const MAX_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024;
+
+/// Per-request server-side deadline (F-M10).
+///
+/// Bounds any handler, including the multi-second `spawn_blocking` storage
+/// work behind the research endpoints, so a stalled downstream cannot pin a
+/// connection indefinitely.
+const REQUEST_TIMEOUT_SECS: u64 = 60;
+
+/// Maximum concurrent SSE connections across the process (F-M9).
+///
+/// Every connected client holds a broadcast receiver plus a streaming task, so
+/// `/events` fan-out must be bounded. Connections beyond this cap are rejected
+/// with `503 Service Unavailable`.
+const MAX_SSE_CONNECTIONS: usize = 64;
+
+/// Requests permitted per rolling minute per rate-limit key (F-L1).
+///
+/// Referenced by the limiter condition and the error message so the advertised
+/// limit and the enforced limit cannot drift apart.
+const RATE_LIMIT_PER_MINUTE: u32 = 60;
+
+/// Origins permitted to make cross-origin requests to the API (F-M8).
+///
+/// The API exposes `/config` and session mutation endpoints behind a bearer
+/// token, so a wildcard CORS policy would let any web page the operator visits
+/// script those routes. The allowlist is restricted to loopback origins used by
+/// the bundled dev UI; no deployment should widen it without an explicit config
+/// hook.
+const ALLOWED_ORIGINS: [HeaderValue; 4] = [
+    HeaderValue::from_static("http://localhost:3000"),
+    HeaderValue::from_static("http://127.0.0.1:3000"),
+    HeaderValue::from_static("http://localhost:9100"),
+    HeaderValue::from_static("http://127.0.0.1:9100"),
+];
 
 /// Shared application state passed to every Axum handler.
 #[derive(Clone)]
@@ -65,6 +107,14 @@ pub struct AppState {
     pub research_runs:
         Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::broadcast::Sender<SessionEvent>>>>,
 }
+
+/// Count of currently open `/events` SSE connections across the process (F-M9).
+///
+/// Bounded by [`MAX_SSE_CONNECTIONS`]: a slot is reserved when a client
+/// connects and released when its stream is dropped, so the fan-out cannot grow
+/// without limit. A process-global counter is sufficient because the server
+/// runs a single shared event bus per process.
+static SSE_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
 /// Bind to `addr` and serve the ragent HTTP/SSE API.
 ///
@@ -123,7 +173,7 @@ pub fn router(state: AppState) -> Router {
         .nest("/memory", memory::memory_routes())
         // Research API (research system)
         .nest("/research", research::research_routes())
-        // Orchestration endpoints (Milestone 3 — Task 3.1)
+        // Orchestration endpoints (Milestone 3 - Task 3.1)
         .route("/orchestrator/start", post(orch_start))
         .route("/orchestrator/jobs/{id}", get(orch_job))
         .route_layer(middleware::from_fn_with_state(
@@ -132,19 +182,53 @@ pub fn router(state: AppState) -> Router {
         ));
 
     // Serve static web UI files from the embedded static directory.
-    // Axum ≥ 0.8 rejects `nest_service("/")` ("Nesting at the root is no
+    // Axum >= 0.8 rejects `nest_service("/")` ("Nesting at the root is no
     // longer supported"), so the static tree is attached as the fallback for
     // any path that matched no API route above.
     let static_files =
         ServeDir::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/static"))
             .append_index_html_on_directories(true);
 
+    // F-M8: an explicit loopback-only origin policy replaces
+    // `CorsLayer::permissive()`. Only the verbs and headers the REST/SSE API
+    // actually uses are allowed, and credentials are never reflected.
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(ALLOWED_ORIGINS))
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT]);
+
     Router::new()
         .route("/health", get(health))
         .merge(protected)
         .fallback_service(static_files)
-        .layer(CorsLayer::permissive())
+        // F-M10: bound the request body and give every handler a deadline.
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(REQUEST_TIMEOUT_SECS),
+        ))
+        .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
+        .layer(cors)
         .with_state(state)
+}
+
+/// Compare two secret strings in constant time.
+///
+/// FUNC-066: hash both sides to a fixed 32-byte BLAKE3 digest before comparing.
+/// The previous length-early-return leaked the token length via timing, and its
+/// byte loop stopped at the shorter slice. A fixed-length digest means the
+/// comparison length is constant regardless of input length, and the byte loop
+/// always runs the full digest. `res` accumulates every differing bit so the
+/// loop cannot short-circuit.
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
+    let da = blake3::hash(a.as_bytes());
+    let db = blake3::hash(b.as_bytes());
+    let da = da.as_bytes();
+    let db = db.as_bytes();
+    let mut res: u8 = 0;
+    for (x, y) in da.iter().zip(db.iter()) {
+        res |= x ^ y;
+    }
+    res == 0
 }
 
 async fn auth_middleware(
@@ -152,23 +236,6 @@ async fn auth_middleware(
     request: Request,
     next: middleware::Next,
 ) -> Response {
-    // FUNC-066: compare fixed-length digests rather than the raw tokens. The
-    // previous length-early-return leaked the token length via timing, and its
-    // byte loop stopped at the shorter slice. Hashing both sides to a fixed
-    // 32-byte BLAKE3 digest means the comparison length is constant regardless
-    // of input length, and the byte loop always runs the full digest.
-    fn constant_time_eq(a: &str, b: &str) -> bool {
-        let da = blake3::hash(a.as_bytes());
-        let db = blake3::hash(b.as_bytes());
-        let da = da.as_bytes();
-        let db = db.as_bytes();
-        let mut res: u8 = 0;
-        for (x, y) in da.iter().zip(db.iter()) {
-            res |= x ^ y;
-        }
-        res == 0
-    }
-
     let auth_header = request
         .headers()
         .get("authorization")
@@ -334,6 +401,12 @@ async fn create_session(
     State(state): State<AppState>,
     Json(body): Json<CreateSessionRequest>,
 ) -> impl IntoResponse {
+    // F-L9: throttle session creation through the shared limiter. There is no
+    // session id yet, so all creations share one fixed bucket.
+    if let Some(rate_limited) = check_rate_limit(&state, "create_session").await {
+        return rate_limited.into_response();
+    }
+
     let path = std::path::Path::new(&body.directory);
     let canonical = match tokio::fs::canonicalize(path).await {
         Ok(p) => p,
@@ -355,7 +428,7 @@ async fn create_session(
     if !is_dir {
         return (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "Path is not a directory" })),
+            Json(serde_json::json!({ "error": "invalid directory" })),
         )
             .into_response();
     }
@@ -377,16 +450,8 @@ async fn create_session(
             )
                 .into_response()
         }
-        Ok(Err(e)) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("{e}") })),
-        )
-            .into_response(),
+        Ok(Err(e)) => internal_error_response("create_session", e).into_response(),
+        Err(e) => internal_error_response("create_session (task)", e).into_response(),
     }
 }
 
@@ -441,36 +506,8 @@ async fn send_message(
     Path(id): Path<String>,
     Json(body): Json<SendMessageRequest>,
 ) -> Response {
-    {
-        let mut limiter = state.rate_limiter.lock().await;
-        let now = Instant::now();
-
-        // Evict stale entries older than 120 seconds to bound memory.
-        const EVICTION_WINDOW_SECS: u64 = 120;
-        const MAX_ENTRIES: usize = 10_000;
-        if limiter.len() > MAX_ENTRIES {
-            limiter.retain(|_, (_, ts)| now.duration_since(*ts).as_secs() < EVICTION_WINDOW_SECS);
-        }
-
-        // FUNC-066: enforce exactly 60 requests per rolling minute. The previous
-        // code incremented *then* rejected on `> 60`, so the 61st request was
-        // the first rejection on a warmed window but the count had already been
-        // bumped — an off-by-one against the advertised 60. Check before
-        // incrementing so the boundary matches the message.
-        let entry = limiter.entry(id.clone()).or_insert((0, now));
-        if now.duration_since(entry.1).as_secs() >= 60 {
-            *entry = (1, now);
-        } else if entry.0 >= 60 {
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(
-                    serde_json::json!({ "error": "rate limit exceeded: 60 requests per minute per session" }),
-                ),
-            )
-                .into_response();
-        } else {
-            entry.0 += 1;
-        }
+    if let Some(rate_limited) = check_rate_limit(&state, &id).await {
+        return rate_limited.into_response();
     }
 
     let session_id = id.clone();
@@ -533,6 +570,15 @@ async fn send_message(
         .into_response()
 }
 
+/// `POST /sessions/{id}/abort` - archive the session and broadcast a
+/// [`Event::SessionAborted`].
+///
+/// F-L8: this route intentionally shares the archive path with
+/// `DELETE /sessions/{id}`. There is no separate agent-side cancellation
+/// surface for a session (the session processor's per-message loop is
+/// detached), so "abort" means archive + an explicit `SessionAborted` event;
+/// clients waiting on that event get the same effect as a delete. The route is
+/// kept as public API and must not be removed.
 #[tracing::instrument(skip(state), fields(session_id = %id))]
 async fn abort_session(
     State(state): State<AppState>,
@@ -559,26 +605,14 @@ async fn abort_session(
                         error = %e,
                         "Failed to archive session during abort"
                     );
-                    error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to archive session: {e}"),
-                    )
+                    internal_error_response("abort_session (archive)", e)
                 }
-                Err(e) => error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to archive session: {e}"),
-                ),
+                Err(e) => internal_error_response("abort_session (archive task)", e),
             }
         }
-        Ok(Ok(None)) => error_response(StatusCode::NOT_FOUND, "Session not found"),
-        Ok(Err(e)) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to look up session: {e}"),
-        ),
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to look up session: {e}"),
-        ),
+        Ok(Ok(None)) => error_response(StatusCode::NOT_FOUND, "session not found"),
+        Ok(Err(e)) => internal_error_response("abort_session (lookup)", e),
+        Err(e) => internal_error_response("abort_session (lookup task)", e),
     }
 }
 
@@ -615,17 +649,56 @@ async fn reply_permission(
     Json(serde_json::json!({ "ok": true }))
 }
 
+/// Query string accepted by `GET /events`.
+#[derive(Debug, Default, Deserialize)]
+struct EventsStreamQuery {
+    /// Optional session id. When present, only events belonging to that
+    /// session are forwarded (F-M9); when absent the stream is admin-wide and
+    /// forwards every process-wide [`Event`].
+    session: Option<String>,
+}
+
+/// `GET /events` - process-wide server-sent event stream.
+///
+/// Scope (F-M9): by default this endpoint is **admin-wide** and forwards every
+/// process-wide [`Event`] to the authenticated client, regardless of session.
+/// Pass `?session=<id>` to receive only that session's events (filtered with
+/// [`event_matches_session`], matching the per-message stream). Concurrent
+/// connections are capped at [`MAX_SSE_CONNECTIONS`]; beyond the cap the
+/// request is rejected with `503 Service Unavailable`.
 #[tracing::instrument(skip(state))]
 async fn events_stream(
     State(state): State<AppState>,
-) -> Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
+    Query(query): Query<EventsStreamQuery>,
+) -> Response {
+    // F-M9: reserve a slot in the connection budget before subscribing, so a
+    // flood of clients cannot each hold a broadcast receiver unboundedly.
+    let reserved = SSE_CONNECTIONS.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+        (n < MAX_SSE_CONNECTIONS).then_some(n + 1)
+    });
+    if reserved.is_err() {
+        tracing::warn!(
+            limit = MAX_SSE_CONNECTIONS,
+            "SSE connection limit reached; rejecting /events client"
+        );
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "too many concurrent SSE connections",
+        )
+        .into_response();
+    }
+
     let rx = state.event_bus.subscribe();
     let lagged = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let session_filter = query.session;
     let stream = BroadcastStream::new(rx).filter_map({
         let lagged = Arc::clone(&lagged);
         move |result| {
             let mapped = match result {
-                Ok(event) => Some(Ok(event_to_sse(&event))),
+                Ok(event) => match session_filter.as_deref() {
+                    Some(sid) if !event_matches_session(&event, sid) => None,
+                    _ => Some(Ok::<_, std::convert::Infallible>(event_to_sse(&event))),
+                },
                 Err(err) => {
                     let dropped = lagged.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                     tracing::warn!(
@@ -639,7 +712,47 @@ async fn events_stream(
             std::future::ready(mapped)
         }
     });
-    Sse::new(stream).keep_alive(KeepAlive::default())
+
+    // Release the reserved slot when the stream is dropped (client disconnect).
+    let tracked = TrackedSseStream {
+        inner: stream,
+        _guard: DropGuard,
+    };
+    Sse::new(tracked)
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+/// An SSE stream tagged with a connection-count [`DropGuard`] (F-M9).
+///
+/// Holds a reserved slot in the global SSE connection budget for as long as the
+/// stream (and thus the client connection) is alive, releasing it on drop.
+struct TrackedSseStream<S> {
+    inner: S,
+    _guard: DropGuard,
+}
+
+impl<S> futures::Stream for TrackedSseStream<S>
+where
+    S: futures::Stream + Unpin,
+{
+    type Item = S::Item;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.inner).poll_next(cx)
+    }
+}
+
+/// Decrements [`SSE_CONNECTIONS`] exactly once when dropped (F-M9).
+struct DropGuard;
+
+impl Drop for DropGuard {
+    fn drop(&mut self) {
+        SSE_CONNECTIONS.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 // ── Orchestration (Milestone 3) ───────────────────────────────────
@@ -657,11 +770,22 @@ struct OrchestrateRequest {
     mode: Option<String>,
 }
 
-/// `POST /orchestrator/start` — start a multi-agent job.
+/// `POST /orchestrator/start` - start a multi-agent job.
 async fn orch_start(
     State(state): State<AppState>,
     Json(body): Json<OrchestrateRequest>,
 ) -> impl IntoResponse {
+    // F-L9: throttle orchestrator starts through the shared limiter, keyed by
+    // the requested job id (or the shared "orchestrator" bucket for generated
+    // ids) so a single client cannot flood job creation.
+    let rate_key = body
+        .id
+        .clone()
+        .unwrap_or_else(|| "orchestrator".to_string());
+    if let Some(rate_limited) = check_rate_limit(&state, &rate_key).await {
+        return rate_limited.into_response();
+    }
+
     let coord = match &state.coordinator {
         Some(c) => c.clone(),
         None => {
@@ -685,9 +809,7 @@ async fn orch_start(
                 Json(serde_json::json!({ "job_id": job_id, "result": result })),
             )
                 .into_response(),
-            Err(e) => {
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-            }
+            Err(e) => internal_error_response("start_job_sync", e).into_response(),
         }
     } else {
         match coord.start_job_async(desc).await {
@@ -696,14 +818,12 @@ async fn orch_start(
                 Json(serde_json::json!({ "job_id": id })),
             )
                 .into_response(),
-            Err(e) => {
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-            }
+            Err(e) => internal_error_response("start_job_async", e).into_response(),
         }
     }
 }
 
-/// `GET /orchestrator/jobs/{id}` — poll job status / result.
+/// `GET /orchestrator/jobs/{id}` - poll job status / result.
 async fn orch_job(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -750,6 +870,11 @@ async fn spawn_task(
     Path(session_id): Path<String>,
     Json(body): Json<SpawnTaskRequest>,
 ) -> Result<(StatusCode, Json<TaskResponse>), (StatusCode, Json<serde_json::Value>)> {
+    // F-L9: share the per-session rate-limit budget with `send_message`.
+    if let Some(rate_limited) = check_rate_limit(&state, &session_id).await {
+        return Err(rate_limited);
+    }
+
     // Verify session exists and get its directory
     let storage = Arc::clone(&state.storage);
     let sid = session_id.clone();
@@ -759,15 +884,12 @@ async fn spawn_task(
             return Err(error_response(StatusCode::NOT_FOUND, "session not found"));
         }
         Ok(Err(e)) => {
-            return Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                e.to_string(),
-            ));
+            return Err(internal_error_response("spawn_task (session lookup)", e));
         }
         Err(e) => {
-            return Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("{e}"),
+            return Err(internal_error_response(
+                "spawn_task (session lookup task)",
+                e,
             ));
         }
     };
@@ -804,10 +926,7 @@ async fn spawn_task(
             let response = task_entry_to_response(entry, background);
             Ok((StatusCode::CREATED, Json(response)))
         }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            e.to_string(),
-        )),
+        Err(e) => Err(internal_error_response("spawn_task", e)),
     }
 }
 
@@ -872,10 +991,7 @@ async fn cancel_agent(
 
     match agent_manager.cancel_agent(&task_id).await {
         Ok(()) => Ok((StatusCode::OK, Json(serde_json::json!({ "ok": true })))),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            e.to_string(),
-        )),
+        Err(e) => Err(internal_error_response("cancel_agent", e)),
     }
 }
 
@@ -885,6 +1001,48 @@ pub(crate) fn error_response(
     message: impl Into<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     (status, Json(serde_json::json!({ "error": message.into() })))
+}
+
+/// Apply the per-session rate limit to a mutating request.
+///
+/// FUNC-066: enforce exactly 60 requests per rolling minute per session. The
+/// previous code incremented *then* rejected on `> 60`, so the 61st request was
+/// the first rejection on a warmed window but the count had already been
+/// bumped - an off-by-one against the advertised 60. Check before incrementing
+/// so the boundary matches the message.
+///
+/// F-L9: the limiter was previously inlined in `send_message` only. It is now a
+/// shared helper used by every mutating session route (`send_message`,
+/// `spawn_task`, `orch_start`), so they all share one budget. Returns `Some`
+/// response when the caller is over the limit, `None` when the request may
+/// proceed.
+async fn check_rate_limit(
+    state: &AppState,
+    key: &str,
+) -> Option<(StatusCode, Json<serde_json::Value>)> {
+    let mut limiter = state.rate_limiter.lock().await;
+    let now = Instant::now();
+
+    // Evict stale entries older than 120 seconds to bound memory.
+    const EVICTION_WINDOW_SECS: u64 = 120;
+    const MAX_ENTRIES: usize = 10_000;
+    if limiter.len() > MAX_ENTRIES {
+        limiter.retain(|_, (_, ts)| now.duration_since(*ts).as_secs() < EVICTION_WINDOW_SECS);
+    }
+
+    let entry = limiter.entry(key.to_string()).or_insert((0, now));
+    if now.duration_since(entry.1).as_secs() >= RATE_LIMIT_PER_MINUTE.into() {
+        *entry = (1, now);
+        None
+    } else if entry.0 >= RATE_LIMIT_PER_MINUTE {
+        Some(error_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("rate limit exceeded: {RATE_LIMIT_PER_MINUTE} requests per minute per session"),
+        ))
+    } else {
+        entry.0 += 1;
+        None
+    }
 }
 
 /// Return a generic internal error to the client and keep the detail in the log.
@@ -902,7 +1060,7 @@ pub fn internal_error_response(
 }
 
 /// Helper to serialize a value to JSON and return a response, or an internal server error.
-fn serialize_response<T: serde::Serialize>(
+pub(crate) fn serialize_response<T: serde::Serialize>(
     value: T,
     context: &str,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -942,14 +1100,8 @@ async fn verify_session_exists(
     match tokio::task::spawn_blocking(move || storage.get_session(&sid)).await {
         Ok(Ok(Some(_))) => Ok(()),
         Ok(Ok(None)) => Err(error_response(StatusCode::NOT_FOUND, "session not found")),
-        Ok(Err(e)) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            e.to_string(),
-        )),
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{e}"),
-        )),
+        Ok(Err(e)) => Err(internal_error_response("verify_session_exists", e)),
+        Err(e) => Err(internal_error_response("verify_session_exists (task)", e)),
     }
 }
 

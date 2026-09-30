@@ -45,7 +45,7 @@ pub enum StoreCommand {
     },
 }
 
-/// Why a store subcommand could not be parsed (malformed arguments — reported
+/// Why a store subcommand could not be parsed (malformed arguments - reported
 /// as an `[err]` row that changes no state, per the SPEC error policy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreArgError {

@@ -17,11 +17,11 @@ use std::path::Path;
 ///
 /// # Arguments
 ///
-/// * `body` — The raw skill body text (markdown after frontmatter).
-/// * `args` — The raw argument string passed when invoking the skill
+/// * `body` - The raw skill body text (markdown after frontmatter).
+/// * `args` - The raw argument string passed when invoking the skill
 ///   (e.g. for `/deploy staging`, this is `"staging"`).
-/// * `session_id` — The current ragent session identifier.
-/// * `skill_dir` — Absolute path to the directory containing SKILL.md.
+/// * `session_id` - The current ragent session identifier.
+/// * `skill_dir` - Absolute path to the directory containing SKILL.md.
 ///
 /// # Examples
 ///
@@ -43,13 +43,13 @@ pub fn substitute_args(body: &str, args: &str, session_id: &str, skill_dir: &Pat
     result = result.replace("${RAGENT_SESSION_ID}", session_id);
     result = result.replace("${RAGENT_SKILL_DIR}", &skill_dir.display().to_string());
 
-    // 2. $ARGUMENTS[N] — indexed argument access (must come before $ARGUMENTS)
+    // 2. $ARGUMENTS[N] - indexed argument access (must come before $ARGUMENTS)
     result = substitute_indexed_args(&result, &parsed_args);
 
-    // 3. $ARGUMENTS — all arguments as a single string
+    // 3. $ARGUMENTS - all arguments as a single string
     result = result.replace("$ARGUMENTS", args);
 
-    // 4. $N shorthand — bare positional references ($0, $1, etc.)
+    // 4. $N shorthand - bare positional references ($0, $1, etc.)
     result = substitute_positional_shorthand(&result, &parsed_args);
 
     result
@@ -58,9 +58,9 @@ pub fn substitute_args(body: &str, args: &str, session_id: &str, skill_dir: &Pat
 /// Parse a raw argument string into individual arguments.
 ///
 /// Supports:
-/// - Whitespace-separated tokens: `staging prod` → `["staging", "prod"]`
-/// - Double-quoted strings: `"hello world" foo` → `["hello world", "foo"]`
-/// - Single-quoted strings: `'hello world' foo` → `["hello world", "foo"]`
+/// - Whitespace-separated tokens: `staging prod` -> `["staging", "prod"]`
+/// - Double-quoted strings: `"hello world" foo` -> `["hello world", "foo"]`
+/// - Single-quoted strings: `'hello world' foo` -> `["hello world", "foo"]`
 /// - Empty string returns an empty vec
 ///
 /// # Errors

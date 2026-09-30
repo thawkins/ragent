@@ -40,7 +40,7 @@ impl ContradictionClaim {
                 text,
                 source_index: index,
                 source_kind: "web".to_string(),
-                source_path: format!("{} — {}", title, url),
+                source_path: format!("{} - {}", title, url),
             },
             Source::Local { path, .. } => Self {
                 text,
@@ -75,7 +75,7 @@ pub struct ContradictionEdge {
     pub dimension: String,
     /// Human-readable note describing the conflict.
     pub note: String,
-    /// Strength score 0–100. Higher means more overlapping evidence.
+    /// Strength score 0-100. Higher means more overlapping evidence.
     pub strength: u8,
 }
 
@@ -417,7 +417,7 @@ pub fn build_contradiction_graph_with(
 /// Human-readable positive direction label for a dimension.
 ///
 /// FUNC-065: an unknown dimension must produce a *neutral* label that does not
-/// assert a direction it cannot know — the previous catch-all returned
+/// assert a direction it cannot know - the previous catch-all returned
 /// "positive"/"negative", which mislabelled any dimension outside the known set.
 fn positive_label(dimension: &str) -> &'static str {
     match dimension {

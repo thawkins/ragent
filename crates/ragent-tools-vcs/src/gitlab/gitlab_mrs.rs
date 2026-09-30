@@ -3,25 +3,15 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
+use super::helpers::detect;
 use super::{Tool, ToolContext, ToolOutput};
-use crate::gitlab::client::GitLabClient;
+use crate::limits::{DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, NOTES_PER_PAGE};
+use crate::vocab::normalize_gitlab_state;
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// -- helpers ------------------------------------------------------------------
 
 /// Create an authenticated client and detect the project path.
-fn detect(ctx: &ToolContext) -> Result<(GitLabClient, String)> {
-    let storage = ctx
-        .storage
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("Storage not available for GitLab client"))?;
-    let client = GitLabClient::new(storage)
-        .map_err(|_| anyhow::anyhow!("GitLab not configured. Run /gitlab setup."))?;
-    let project = GitLabClient::detect_project(&ctx.working_dir)
-        .ok_or_else(|| anyhow::anyhow!("Could not detect GitLab project from git remote."))?;
-    Ok((client, project))
-}
-
-// ── GitlabListMrsTool ─────────────────────────────────────────────────────────
+// -- GitlabListMrsTool ---------------------------------------------------------
 
 /// Tool that lists merge requests in a GitLab project.
 pub struct GitlabListMrsTool;
@@ -35,9 +25,11 @@ impl Tool for GitlabListMrsTool {
     fn description(&self) -> &'static str {
         "List GitLab merge requests in the project detected from the current working directory. \
          No required parameters. 'state' (enum 'opened', 'closed', 'merged', 'all', default 'opened') filters by MR state; \
+         both 'opened' and GitHub's 'open' spelling are accepted. \
          'target_branch' (string) filters by the target branch; 'limit' (integer, default 20, max 100) caps the result count. \
          Requires GitLab configuration and a GitLab-backed git repo. \
-         Common gotcha: 'target_branch' must exactly match the branch name in GitLab; only the most recent MRs up to 'limit' are returned."
+         Common gotcha: 'target_branch' must exactly match the branch name in GitLab; only the most recent MRs up to 'limit' are returned. \
+         Cross-provider note: GitLab calls these 'merge requests' filtered by 'target_branch' where GitHub calls them 'pull requests' filtered by 'base'."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -48,7 +40,7 @@ impl Tool for GitlabListMrsTool {
                 "state": {
                     "type": "string",
                     "enum": ["opened", "closed", "merged", "all"],
-                    "description": "Filter by MR state (default: opened)"
+                    "description": "Filter by MR state (default: opened; GitHub's 'open' is also accepted)"
                 },
                 "target_branch": {
                     "type": "string",
@@ -69,8 +61,11 @@ impl Tool for GitlabListMrsTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let (client, project) = detect(ctx)?;
 
-        let state = input["state"].as_str().unwrap_or("opened");
-        let limit = input["limit"].as_u64().unwrap_or(20).min(100);
+        let state = normalize_gitlab_state(input["state"].as_str().unwrap_or("opened"));
+        let limit = input["limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_PAGE_LIMIT)
+            .min(MAX_PAGE_LIMIT);
 
         let mut path = format!("/projects/{project}/merge_requests?state={state}&per_page={limit}");
         if let Some(target) = input["target_branch"].as_str() {
@@ -98,7 +93,7 @@ impl Tool for GitlabListMrsTool {
             let source = mr["source_branch"].as_str().unwrap_or("?");
             let target = mr["target_branch"].as_str().unwrap_or("?");
             lines.push(format!(
-                "!{iid} [{mr_state}] {title} (by {author}, from {source} → {target})"
+                "!{iid} [{mr_state}] {title} (by {author}, from {source} -> {target})"
             ));
         }
 
@@ -109,7 +104,7 @@ impl Tool for GitlabListMrsTool {
     }
 }
 
-// ── GitlabGetMrTool ───────────────────────────────────────────────────────────
+// -- GitlabGetMrTool -----------------------------------------------------------
 
 /// Tool that retrieves a single GitLab merge request by IID.
 pub struct GitlabGetMrTool;
@@ -153,7 +148,8 @@ impl Tool for GitlabGetMrTool {
             .context("Missing required 'iid' parameter")?;
 
         let mr_path = format!("/projects/{project}/merge_requests/{iid}");
-        let notes_path = format!("/projects/{project}/merge_requests/{iid}/notes?per_page=10");
+        let notes_path =
+            format!("/projects/{project}/merge_requests/{iid}/notes?per_page={NOTES_PER_PAGE}");
 
         let (mr, notes_val) = tokio::try_join!(client.get(&mr_path), client.get(&notes_path))?;
 
@@ -169,7 +165,7 @@ impl Tool for GitlabGetMrTool {
             "## MR !{iid}: {title}\n\n\
              **State**: {state}  \n\
              **Author**: {author}  \n\
-             **Branch**: {source} → {target}  \n\
+             **Branch**: {source} -> {target}  \n\
              **URL**: {url}\n\n\
              ### Description\n\n{body}\n"
         );
@@ -181,7 +177,7 @@ impl Tool for GitlabGetMrTool {
                 .collect();
             if !user_notes.is_empty() {
                 md.push_str(&format!("\n### Notes ({})\n\n", user_notes.len()));
-                for note in user_notes.iter().take(10) {
+                for note in user_notes.iter().take(NOTES_PER_PAGE as usize) {
                     let reviewer = note["author"]["username"].as_str().unwrap_or("?");
                     let nbody = note["body"].as_str().unwrap_or("");
                     if nbody.is_empty() {
@@ -200,7 +196,7 @@ impl Tool for GitlabGetMrTool {
     }
 }
 
-// ── GitlabCreateMrTool ────────────────────────────────────────────────────────
+// -- GitlabCreateMrTool --------------------------------------------------------
 
 /// Tool that creates a new GitLab merge request.
 pub struct GitlabCreateMrTool;
@@ -313,7 +309,7 @@ impl Tool for GitlabCreateMrTool {
     }
 }
 
-// ── GitlabMergeMrTool ─────────────────────────────────────────────────────────
+// -- GitlabMergeMrTool ---------------------------------------------------------
 
 /// Tool that merges a GitLab merge request.
 pub struct GitlabMergeMrTool;
@@ -397,7 +393,7 @@ impl Tool for GitlabMergeMrTool {
     }
 }
 
-// ── GitlabApproveMrTool ──────────────────────────────────────────────────────
+// -- GitlabApproveMrTool ------------------------------------------------------
 
 /// Tool that approves a GitLab merge request.
 pub struct GitlabApproveMrTool;

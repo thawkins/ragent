@@ -1,9 +1,9 @@
-//! YOLO mode — bypass all command validation and tool restrictions.
+//! YOLO mode - bypass all command validation and tool restrictions.
 //!
 //! When enabled, the following safety checks are skipped:
-//! - **Bash denied patterns** — destructive commands like `rm -rf /` are allowed
-//! - **Dynamic context allowlist** — any executable can run in skill bodies
-//! - **MCP config validation** — shell metacharacters and unvalidated paths are permitted
+//! - **Bash denied patterns** - destructive commands like `rm -rf /` are allowed
+//! - **Dynamic context allowlist** - any executable can run in skill bodies
+//! - **MCP config validation** - shell metacharacters and unvalidated paths are permitted
 //!
 //! # Warning
 //!

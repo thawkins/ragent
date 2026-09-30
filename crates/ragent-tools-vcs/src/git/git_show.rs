@@ -1,4 +1,4 @@
-//! `git_show` — Show commit details.
+//! `git_show` - Show commit details.
 
 use anyhow::Result;
 use serde_json::{Value, json};

@@ -114,13 +114,13 @@ impl FromStr for SymbolKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
-    /// `pub` — visible everywhere.
+    /// `pub` - visible everywhere.
     Public,
-    /// `pub(crate)` — visible within the crate.
+    /// `pub(crate)` - visible within the crate.
     PubCrate,
-    /// `pub(super)` — visible to the parent module.
+    /// `pub(super)` - visible to the parent module.
     PubSuper,
-    /// No visibility modifier — private to the containing module.
+    /// No visibility modifier - private to the containing module.
     Private,
 }
 
@@ -217,7 +217,7 @@ pub struct ImportEntry {
     pub imported_name: String,
     /// Source module path (e.g. `std::collections`).
     pub source_module: String,
-    /// Optional alias (e.g. `use Foo as Bar` → alias = `Bar`).
+    /// Optional alias (e.g. `use Foo as Bar` -> alias = `Bar`).
     pub alias: Option<String>,
     /// Line number of the import statement.
     pub line: u32,
@@ -457,6 +457,10 @@ impl StaleDiff {
 
 // ── Search Query ────────────────────────────────────────────────────────────
 
+/// Default maximum number of results a [`SearchQuery`] returns when the caller
+/// leaves `max_results` at zero (ANTIPAT M5.3 / audit 3.3).
+pub const DEFAULT_SEARCH_LIMIT: usize = 20;
+
 /// A search request for the code index.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SearchQuery {
@@ -468,7 +472,7 @@ pub struct SearchQuery {
     pub language: Option<String>,
     /// Optional filter by file path glob pattern.
     pub file_pattern: Option<String>,
-    /// Maximum number of results to return (default: 20).
+    /// Maximum number of results to return (default: [`DEFAULT_SEARCH_LIMIT`]).
     pub max_results: usize,
     /// Whether to include body snippets in results.
     pub include_body: bool,
@@ -479,7 +483,7 @@ impl SearchQuery {
     pub fn new(query: impl Into<String>) -> Self {
         Self {
             query: query.into(),
-            max_results: 20,
+            max_results: DEFAULT_SEARCH_LIMIT,
             ..Default::default()
         }
     }
@@ -548,7 +552,7 @@ pub enum DepDirection {
 /// The semantic kind of a typed edge between two symbols in the code graph.
 ///
 /// Edges are derived deterministically from the existing tree-sitter parse
-/// output (symbols, imports, references) — no LLM or embeddings are used.
+/// output (symbols, imports, references) - no LLM or embeddings are used.
 /// Each edge is tagged with a [`Confidence`] indicating whether it was
 /// read directly from the source (`EXTRACTED`) or resolved by cross-file
 /// name matching (`INFERRED`).

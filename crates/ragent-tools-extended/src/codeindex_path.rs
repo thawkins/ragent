@@ -1,4 +1,4 @@
-//! Codebase index path tool — shortest path between two symbols (FR-012).
+//! Codebase index path tool - shortest path between two symbols (FR-012).
 //!
 //! Computes the shortest path (by hop count) between two symbols in the
 //! semantic code graph, showing each hop as `A --kind--> B` with

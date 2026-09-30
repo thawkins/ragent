@@ -1,4 +1,4 @@
-//! `mf_fetch` tool — fetch any URL with content extraction and envelope signals.
+//! `mf_fetch` tool - fetch any URL with content extraction and envelope signals.
 //!
 //! Implements FR-002 through FR-007, FR-019, FR-022, FR-025, FR-026, FR-028,
 //! FR-029, FR-030.
@@ -68,7 +68,7 @@ impl Tool for MfFetchTool {
 
     fn description(&self) -> &'static str {
         "Fetch any URL or PDF with automatic content extraction. Required \
-             parameter: 'url' (single) or 'urls' (array) — at least one URL must be \
+             parameter: 'url' (single) or 'urls' (array) - at least one URL must be \
              provided. Optional 'format' (markdown/html/text/raw, default markdown), \
              'css_selector' scope narrowing, 'focus' BM25 query, 'max_content_chars', \
              'offset' pagination, 'include_links', 'respect_robots', and 'cache_ttl'. \
@@ -303,13 +303,14 @@ async fn fetch_one_url(
 
     let is_youtube = is_youtube_url(url);
 
-    let body_bytes = match read_response_capped(response, MAX_FETCH_BODY_BYTES).await {
-        Ok(b) => b,
-        Err(e) => {
-            return fetch_error_output(url, status, &e);
-        }
-    };
-    let _ = is_youtube;
+    let body_bytes =
+        match crate::masterfetch::http::read_bytes_capped(response, MAX_FETCH_BODY_BYTES).await {
+            Ok(b) => b,
+            Err(e) => {
+                return fetch_error_output(url, status, &e);
+            }
+        };
+    let _ = is_youtube; // INTENTIONAL: parameter retained for API stability
 
     if is_pdf {
         return pdf_tool_output(url, status, &content_type, &body_bytes, params).await;
@@ -402,7 +403,7 @@ async fn fetch_one_url(
         let key = cache_key.clone();
         let cache_clone = cache.clone();
         let cache_metadata = metadata.clone();
-        let _ = tokio::task::spawn_blocking(move || {
+        let cache_join = tokio::task::spawn_blocking(move || {
             let method = Some(extraction_method_for_cache.as_str());
             if let Err(e) = cache_clone.set_cached_with_metadata(
                 &key,
@@ -418,6 +419,9 @@ async fn fetch_one_url(
             }
         })
         .await;
+        if let Err(e) = cache_join {
+            tracing::warn!(error = %e, "mf_fetch: cache-write blocking task failed");
+        }
     }
 
     let content = format!(
@@ -558,35 +562,7 @@ async fn pdf_tool_output(
 ///
 /// SEC-tools-extended-006 (SECTASKS T-033): 16 MiB of decompressed content is
 /// far above any legitimate page or PDF and bounds the per-request footprint.
-const MAX_FETCH_BODY_BYTES: usize = 16 * 1024 * 1024;
-
-/// Stream a response into memory, stopping at `limit` bytes.
-///
-/// SEC-tools-extended-006 (SECTASKS T-033): the size budget is applied per
-/// chunk, so a decompression bomb cannot be buffered in full first.
-async fn read_response_capped(
-    response: reqwest::Response,
-    limit: usize,
-) -> Result<Vec<u8>, String> {
-    let mut stream = response;
-    let mut buf: Vec<u8> = Vec::new();
-    loop {
-        match stream.chunk().await {
-            Ok(Some(chunk)) => {
-                if buf.len() + chunk.len() > limit {
-                    let room = limit.saturating_sub(buf.len());
-                    buf.extend_from_slice(&chunk[..room]);
-                    buf.extend_from_slice(b"\n[truncated at the fetch size cap]\n");
-                    break;
-                }
-                buf.extend_from_slice(&chunk);
-            }
-            Ok(None) => break,
-            Err(e) => return Err(e.to_string()),
-        }
-    }
-    Ok(buf)
-}
+const MAX_FETCH_BODY_BYTES: usize = crate::masterfetch::http::MAX_RESPONSE_BODY_BYTES;
 
 fn pdf_error_output(url: &str, status: u16, error: &str) -> ToolOutput {
     ToolOutput {

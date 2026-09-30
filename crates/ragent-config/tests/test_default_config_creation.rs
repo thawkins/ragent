@@ -71,12 +71,12 @@ fn test_creates_default_project_config_when_none_exists() {
     let content = std::fs::read_to_string(&project_config).expect("read created config");
     let roundtrip: ragent_config::Config =
         serde_json::from_str(&content).expect("created config should be valid JSON");
-    // Config::default() sets default_agent to "" (empty string) via the
-    // standard Default derive; the "general" fallback only applies during
-    // serde deserialization when the field is absent.
+    // ANTIPAT M-7: `Config::default()` now matches the serde defaults, so
+    // `default_agent` is "general" (not the derived-Default empty string) and
+    // the generated default config carries that value.
     assert_eq!(
-        roundtrip.default_agent, "",
-        "default_agent from Config::default() is empty"
+        roundtrip.default_agent, "general",
+        "default_agent from Config::default() is the serde default"
     );
     assert!(
         roundtrip.provider.is_empty(),

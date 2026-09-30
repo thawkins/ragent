@@ -59,6 +59,13 @@ const SQL_LIST_SESSIONS_LEGACY: &str = "SELECT id, title, project_id, directory,
      created_at, updated_at, archived_at, summary \
      FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC";
 
+/// Canonical `SELECT` column list for a structured memory row.
+///
+/// Shared by every memory read path so the column order cannot drift from
+/// [`memory_row_from_sql`] (see `ANTIPAT.md` M3.7).
+const SQL_MEMORY_COLUMNS: &str = "id, content, category, source, confidence, project, session_id, \
+     created_at, updated_at, access_count, last_accessed";
+
 /// Extract searchable text content from a message's parts.
 ///
 /// Concatenates all [`MessagePart::Text`] blocks, tool-call names, and
@@ -115,6 +122,22 @@ const NONCE_LEN: usize = 16;
 
 /// File name of the per-install credential key, under the state directory.
 const CREDENTIAL_KEY_FILE: &str = "credential.key";
+
+/// SQLite `busy_timeout` in milliseconds for the writer and read-only
+/// connections (ANTIPAT D-8).
+///
+/// R-24: generous enough that a startup write (e.g. the background FTS
+/// warm-up, which holds a single long write transaction and can take ~9 s on a
+/// 2,000+ message history) never surfaces as an immediate `SQLITE_BUSY`;
+/// 5 s was too short.
+const BUSY_TIMEOUT_MS: i64 = 30_000;
+
+/// SQLite `wal_autocheckpoint` threshold in pages (ANTIPAT D-8).
+///
+/// R-23: the SQLite default is 1,000 pages; 500 is more aggressive so the WAL
+/// file does not grow to hundreds of MB for a desktop agent that may run for
+/// hours.
+const WAL_AUTOCHECKPOINT_PAGES: i64 = 500;
 
 /// Per-installation 32-byte AEAD key.
 ///
@@ -260,7 +283,7 @@ pub(crate) fn restrict_file_permissions(path: &Path) {
     }
     #[cfg(not(unix))]
     {
-        let _ = path;
+        let _ = path; // INTENTIONAL: parameter retained for API stability
     }
 }
 
@@ -285,7 +308,7 @@ pub(crate) fn restrict_dir_permissions(path: &Path) {
     }
     #[cfg(not(unix))]
     {
-        let _ = path;
+        let _ = path; // INTENTIONAL: parameter retained for API stability
     }
 }
 
@@ -436,10 +459,11 @@ fn decrypt_v2_legacy(data: &str) -> std::result::Result<String, &'static str> {
         return Err("v2 payload too short");
     }
     let (nonce, ciphertext) = payload.split_at(NONCE_LEN);
-    let keystream = generate_legacy_keystream(
-        nonce.try_into().unwrap_or(&[0u8; NONCE_LEN]),
-        ciphertext.len(),
-    );
+    // ANTIPAT D-4: the length check above makes `try_into` infallible today, but
+    // an all-zero fallback would silently decrypt a legacy row under a zero
+    // nonce if that check were ever loosened. Fail closed instead.
+    let nonce: [u8; NONCE_LEN] = nonce.try_into().map_err(|_| "v2 nonce length invalid")?;
+    let keystream = generate_legacy_keystream(&nonce, ciphertext.len());
     let plaintext: Vec<u8> = ciphertext
         .iter()
         .zip(keystream.iter())
@@ -461,7 +485,7 @@ fn generate_legacy_keystream(nonce: &[u8; NONCE_LEN], len: usize) -> Vec<u8> {
     output
 }
 
-/// Legacy v1 obfuscation — kept for reading old database entries.
+/// Legacy v1 obfuscation - kept for reading old database entries.
 ///
 /// Returns `Err` when the encoded value cannot be decoded or does not decode to
 /// valid UTF-8, so a corrupt key is distinguishable from an absent one instead
@@ -517,6 +541,14 @@ pub fn deobfuscate_key(encoded: &str) -> String {
 }
 
 /// SQLite-backed storage for sessions, messages, and provider credentials.
+///
+/// # Error style (intentional asymmetry, C-5)
+///
+/// This CRUD store surfaces bare `anyhow` errors - its failures are uniform
+/// infrastructure faults callers do not match on. The append-only
+/// [`ActivityLog`](crate::activity_log::ActivityLog) instead returns the typed
+/// [`AppendError`](crate::activity_log::AppendError) enum because its appends
+/// are rejected for semantic reasons callers must distinguish (FR-002/FR-010).
 pub struct Storage {
     conn: Mutex<Connection>,
     /// PERF-069: a second, read-only connection used by the read-only query
@@ -592,8 +624,8 @@ impl Storage {
     /// exists, using the cached `AtomicBool` when it has already been
     /// populated (by [`migrate`](Self::migrate) or a prior call).
     ///
-    /// On the first call after construction — when the flag is still
-    /// `false` — this runs the `pragma_table_info` query once and records
+    /// On the first call after construction - when the flag is still
+    /// `false` - this runs the `pragma_table_info` query once and records
     /// the result so every subsequent `get_session` / `list_sessions`
     /// call skips the `SQLite` round-trip.  The schema never loses the
     /// column after it has been added, so caching is safe.
@@ -655,16 +687,13 @@ impl Storage {
         // fsync on every WAL commit while remaining crash-safe (the WAL is
         // still durable on checkpoint). This matches the activity-log store.
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        // R-24: Use a generous busy_timeout so a startup write (e.g. the
-        // background FTS warm-up, which holds a single long write transaction
-        // on a second connection to the same DB) never surfaces as an
-        // immediate `SQLITE_BUSY` / "database is locked" error. The warm-up
-        // can take ~9s on a 2,000+ message history, so 5s was too short.
-        conn.pragma_update(None, "busy_timeout", 30000)?;
-        // R-23: Set an explicit WAL auto-checkpoint so the WAL file does not
-        // grow to hundreds of MB. The default is 1000 pages; 500 is more
-        // aggressive for a desktop agent that may run for hours.
-        conn.pragma_update(None, "wal_autocheckpoint", 500)?;
+        // R-24: generous busy_timeout so a startup write (e.g. the background
+        // FTS warm-up on a second connection) never surfaces as an immediate
+        // `SQLITE_BUSY` / "database is locked" error. See `BUSY_TIMEOUT_MS`.
+        conn.pragma_update(None, "busy_timeout", BUSY_TIMEOUT_MS)?;
+        // R-23: explicit WAL auto-checkpoint so the WAL file does not grow to
+        // hundreds of MB. See `WAL_AUTOCHECKPOINT_PAGES`.
+        conn.pragma_update(None, "wal_autocheckpoint", WAL_AUTOCHECKPOINT_PAGES)?;
         let mut storage = Self {
             conn: Mutex::new(conn),
             reader: None,
@@ -678,7 +707,7 @@ impl Storage {
         restrict_file_permissions(path);
         // PERF-069: open the dedicated read-only connection after migration so
         // the schema is complete. On any failure the reader is left `None` and
-        // reads fall back to sharing the writer connection — a graceful
+        // reads fall back to sharing the writer connection - a graceful
         // degradation rather than an `open` failure.
         storage.reader = Self::open_read_only(path);
         Ok(storage)
@@ -699,7 +728,8 @@ impl Storage {
             | rusqlite::OpenFlags::SQLITE_OPEN_URI
             | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
         let conn = Connection::open_with_flags(path, flags).ok()?;
-        conn.pragma_update(None, "busy_timeout", 30000).ok()?;
+        conn.pragma_update(None, "busy_timeout", BUSY_TIMEOUT_MS)
+            .ok()?;
         Some(Mutex::new(conn))
     }
 
@@ -772,7 +802,7 @@ impl Storage {
             )
             .optional()?;
         if stored_version.as_deref() == Some(SCHEMA_VERSION.to_string().as_str()) {
-            // Schema is current — skip the full batch.  The
+            // Schema is current - skip the full batch.  The
             // `format_version` column definitely exists on any DB with this
             // version, so cache that fact for `get_session` / `list_sessions`.
             self.has_format_version
@@ -1078,11 +1108,11 @@ impl Storage {
         // todo2tasks T-002: additive migration for the Task model columns.
         // Adds `active_form`, `owner`, `metadata` (JSON text), and
         // `blocked_by` (JSON text array) to the `todos` table.  Existing
-        // rows receive safe defaults via ADD COLUMN … DEFAULT (FR-002):
-        //   active_form → NULL   (TaskRow.active_form = None)
-        //   owner       → NULL   (TaskRow.owner = None)
-        //   metadata    → '{}'    (empty JSON object)
-        //   blocked_by  → '[]'    (empty JSON array)
+        // rows receive safe defaults via ADD COLUMN ... DEFAULT (FR-002):
+        //   active_form -> NULL   (TaskRow.active_form = None)
+        //   owner       -> NULL   (TaskRow.owner = None)
+        //   metadata    -> '{}'    (empty JSON object)
+        //   blocked_by  -> '[]'    (empty JSON array)
         for (col, default_expr) in &[
             ("active_form", "NULL"),
             ("owner", "NULL"),
@@ -1509,7 +1539,7 @@ impl Storage {
             params![parts_json, updated, msg.id],
         )?;
         if sync_fts {
-            // M5: Sync the message FTS index — delete old entry and re-insert.
+            // M5: Sync the message FTS index - delete old entry and re-insert.
             tx.execute(
                 "DELETE FROM messages_fts WHERE message_id = ?1",
                 params![msg.id],
@@ -1530,7 +1560,7 @@ impl Storage {
     ///
     /// This is a cheap variant of [`Storage::update_message`] intended for
     /// interim (in-progress) assistant saves whose searchable text content is
-    /// unchanged — typically a tool-call status transition mid-step. The FTS
+    /// unchanged - typically a tool-call status transition mid-step. The FTS
     /// entry is only re-synced once the message is finalised via
     /// [`Storage::update_message`].
     ///
@@ -1561,16 +1591,21 @@ impl Storage {
     /// assert!(storage.get_messages("sess-1").unwrap().is_empty());
     /// ```
     pub fn delete_messages(&self, session_id: &str) -> Result<usize> {
-        let conn = lock_conn!(self)?;
+        let mut conn = lock_conn!(self)?;
+        // C-3: the FTS delete and the base-table delete must commit together,
+        // otherwise a failure between them desyncs the search index from the
+        // messages table.
+        let tx = conn.transaction()?;
         // M5: Remove FTS entries before deleting messages.
-        conn.execute(
+        tx.execute(
             "DELETE FROM messages_fts WHERE session_id = ?1",
             params![session_id],
         )?;
-        let n = conn.execute(
+        let n = tx.execute(
             "DELETE FROM messages WHERE session_id = ?1",
             params![session_id],
         )?;
+        tx.commit()?;
         Ok(n)
     }
 
@@ -2133,17 +2168,17 @@ impl Storage {
     ///
     /// # Arguments
     ///
-    /// * `id` — unique task identifier (generated by the caller via the
+    /// * `id` - unique task identifier (generated by the caller via the
     ///   existing `generate_todo_id` scheme, FR-012).
-    /// * `session_id` — session this task belongs to (FR-001).
-    /// * `subject` — imperative title (stored in the `title` column).
-    /// * `description` — free-text description carrying acceptance criteria.
-    /// * `status` — initial status; callers should pass `"pending"`.
-    /// * `active_form` — present-continuous phrase for progress indicators
+    /// * `session_id` - session this task belongs to (FR-001).
+    /// * `subject` - imperative title (stored in the `title` column).
+    /// * `description` - free-text description carrying acceptance criteria.
+    /// * `status` - initial status; callers should pass `"pending"`.
+    /// * `active_form` - present-continuous phrase for progress indicators
     ///   (FR-007); `None` when not provided.
-    /// * `owner` — free-form owner label (FR-006); `None` when not provided.
-    /// * `metadata` — JSON text blob (FR-008); pass `"{}"` for empty.
-    /// * `blocked_by` — task IDs that must reach `completed` before this
+    /// * `owner` - free-form owner label (FR-006); `None` when not provided.
+    /// * `metadata` - JSON text blob (FR-008); pass `"{}"` for empty.
+    /// * `blocked_by` - task IDs that must reach `completed` before this
     ///   task is available (FR-001); empty slice for no dependencies.
     ///
     /// # Errors
@@ -2234,12 +2269,12 @@ impl Storage {
     /// supporting all columns including `active_form`, `owner`, `metadata`,
     /// and `blocked_by` (FR-013).
     ///
-    /// The [`TaskUpdateParams`] struct uses `Option<Option<…>>` for
+    /// The [`TaskUpdateParams`] struct uses `Option<Option<...>>` for
     /// `active_form` and `owner` to distinguish "don't change this
     /// field" (`None`) from "clear it to NULL" (`Some(None)`) from
-    /// "set it to a value" (`Some(Some(…))`).  For `blocked_by`,
+    /// "set it to a value" (`Some(Some(...))`).  For `blocked_by`,
     /// `None` means "don't change" and `Some(slice)` means "replace
-    /// the entire dependency list" — the `add_blocked_by` / `add_blocks`
+    /// the entire dependency list" - the `add_blocked_by` / `add_blocks`
     /// merge semantics are a tool-layer concern (T-008).
     ///
     /// # Returns
@@ -2465,51 +2500,61 @@ impl Storage {
     ) -> Result<bool> {
         let conn = lock_conn!(self)?;
         // Checkpoint notes are recorded in the `initiative_notes` JSON array
-        // embedded in the description is *not* used — notes are appended to a
+        // embedded in the description is *not* used - notes are appended to a
         // dedicated `settings` key instead so they never collide with the
         // human-readable description. Kept simple: ignore when None.
-        let _ = note;
+        let _ = note; // INTENTIONAL: parameter retained for API stability
 
         let now = Utc::now().to_rfc3339();
-        let mut sets: Vec<String> = vec!["updated_at = ?NOW".to_string()];
+        // C-1: standardise on the explicit `idx`-counter placeholder scheme used
+        // by `update_task`/`update_task_simple` instead of the magic `?NOW`
+        // token plus `vals.len()` indexing.
+        let mut sets: Vec<String> = vec!["updated_at = ?1".to_string()];
+        let mut idx = 2u32;
         let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now.clone())];
 
         if let Some(t) = title {
+            sets.push(format!("title = ?{idx}"));
             vals.push(Box::new(t.to_string()));
-            sets.push(format!("title = ?{}", vals.len()));
+            idx += 1;
         }
         if let Some(d) = description {
+            sets.push(format!("description = ?{idx}"));
             vals.push(Box::new(d.to_string()));
-            sets.push(format!("description = ?{}", vals.len()));
+            idx += 1;
         }
         if let Some(m) = milestones {
             let mj = serde_json::to_string(m)?;
+            sets.push(format!("milestones_json = ?{idx}"));
             vals.push(Box::new(mj));
-            sets.push(format!("milestones_json = ?{}", vals.len()));
+            idx += 1;
         }
         if let Some(p) = progress {
+            sets.push(format!("progress = ?{idx}"));
             vals.push(Box::new(i64::from(p)));
-            sets.push(format!("progress = ?{}", vals.len()));
+            idx += 1;
         }
         if let Some(s) = status {
+            sets.push(format!("status = ?{idx}"));
             vals.push(Box::new(s.to_string()));
-            sets.push(format!("status = ?{}", vals.len()));
+            idx += 1;
             if s == "completed" || s == "abandoned" {
+                sets.push(format!("closed_at = ?{idx}"));
                 vals.push(Box::new(now.clone()));
-                sets.push(format!("closed_at = ?{}", vals.len()));
+                idx += 1;
             } else {
                 sets.push("closed_at = NULL".to_string());
             }
         }
 
+        let id_ph = format!("?{idx}");
         vals.push(Box::new(id.to_string()));
-        let id_ph = format!("?{}", vals.len());
+        let proj_ph = format!("?{}", idx + 1);
         vals.push(Box::new(project.to_string()));
-        let proj_ph = format!("?{}", vals.len());
 
         let sql = format!(
             "UPDATE initiatives SET {} WHERE id = {} AND project = {}",
-            sets.join(", ").replace("?NOW", "?1"),
+            sets.join(", "),
             id_ph,
             proj_ph
         );
@@ -2717,30 +2762,35 @@ impl Storage {
         session_id: &str,
         tags: &[String],
     ) -> Result<i64> {
-        let conn = lock_conn!(self)?;
+        let mut conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
 
-        conn.execute(
+        // C-3: the memory insert, tag rows, and FTS insert must commit together
+        // so a mid-write failure cannot leave the FTS index out of sync with the
+        // base table.
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO memories (content, category, source, confidence, project, session_id, created_at, updated_at, access_count, last_accessed)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 0, ?7)",
             params![content, category, source, confidence, project, session_id, now],
         )?;
 
-        let id = conn.last_insert_rowid();
+        let id = tx.last_insert_rowid();
 
         for tag in tags {
-            conn.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?1, ?2)",
                 params![id, tag],
             )?;
         }
 
         // Update FTS index.
-        conn.execute(
+        tx.execute(
             "INSERT INTO memories_fts(rowid, content)
              SELECT rowid, content FROM memories WHERE id = ?1",
             params![id],
         )?;
+        tx.commit()?;
 
         Ok(id)
     }
@@ -2754,25 +2804,9 @@ impl Storage {
         let conn = lock_conn_read!(self)?;
         let row = conn
             .query_row(
-                "SELECT id, content, category, source, confidence, project, session_id,
-                        created_at, updated_at, access_count, last_accessed
-                 FROM memories WHERE id = ?1",
+                &format!("SELECT {SQL_MEMORY_COLUMNS} FROM memories WHERE id = ?1"),
                 params![id],
-                |row| {
-                    Ok(MemoryRow {
-                        id: row.get(0)?,
-                        content: row.get(1)?,
-                        category: row.get(2)?,
-                        source: row.get(3)?,
-                        confidence: row.get(4)?,
-                        project: row.get(5)?,
-                        session_id: row.get(6)?,
-                        created_at: row.get(7)?,
-                        updated_at: row.get(8)?,
-                        access_count: row.get(9)?,
-                        last_accessed: row.get(10)?,
-                    })
-                },
+                memory_row_from_sql,
             )
             .optional()?;
         Ok(row)
@@ -2795,7 +2829,7 @@ impl Storage {
 
     /// M-002: retrieve tags for a specific set of memory IDs in a single
     /// batched query, replacing the N+1 `get_memory_tags` pattern at hot call
-    /// sites. Returns a `memory_id → tags` map (only entries with at least one
+    /// sites. Returns a `memory_id -> tags` map (only entries with at least one
     /// tag are present).
     ///
     /// # Errors
@@ -2831,11 +2865,11 @@ impl Storage {
 
     /// Retrieves tags for all structured memories in a single query (FR-010).
     ///
-    /// Returns a map of `memory_id → tags`.  This avoids issuing one SQLite
+    /// Returns a map of `memory_id -> tags`.  This avoids issuing one SQLite
     /// query per memory row during visualisation generation, replacing N
     /// queries with one.
     ///
-    /// Rows that fail to deserialize are silently skipped — tags are
+    /// Rows that fail to deserialize are silently skipped - tags are
     /// denormalized data and a partial row is preferable to failing the
     /// entire query.
     ///
@@ -2877,7 +2911,10 @@ impl Storage {
         limit: usize,
         min_confidence: f64,
     ) -> Result<Vec<MemoryRow>> {
-        let conn = lock_conn!(self)?;
+        // C-4: the SELECT is a pure read, so use the read-only connection
+        // (PERF-069). Only the access-count UPDATE loop below takes the writer
+        // lock.
+        let conn = lock_conn_read!(self)?;
 
         // Sanitise the FTS query.
         let safe_query: String = query
@@ -2968,30 +3005,30 @@ impl Storage {
 
         let mut stmt = conn.prepare_cached(&sql)?;
         let rows: Vec<MemoryRow> = stmt
-            .query_map(param_refs.as_slice(), |row| {
-                Ok(MemoryRow {
-                    id: row.get(0)?,
-                    content: row.get(1)?,
-                    category: row.get(2)?,
-                    source: row.get(3)?,
-                    confidence: row.get(4)?,
-                    project: row.get(5)?,
-                    session_id: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
-                    access_count: row.get(9)?,
-                    last_accessed: row.get(10)?,
-                })
-            })?
+            .query_map(param_refs.as_slice(), memory_row_from_sql)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
+        // C-4: the search itself held only the read-only connection; drop it
+        // before taking the writer lock for the bookkeeping UPDATE loop.
+        drop(stmt);
+        drop(conn);
+
         // Increment access count for returned results.
-        for row in &rows {
-            let now = Utc::now().to_rfc3339();
-            let _ = conn.execute(
-                "UPDATE memories SET access_count = access_count + 1, last_accessed = ?1 WHERE id = ?2",
-                params![now, row.id],
-            );
+        if !rows.is_empty() {
+            let conn = lock_conn!(self)?;
+            for row in &rows {
+                let now = Utc::now().to_rfc3339();
+                // ANTIPAT D-1: a failed counter update was discarded with `let _ =`,
+                // contradicting `increment_memory_access`, which propagates `?`. Log
+                // the cause so a broken access counter is diagnosable, without
+                // failing the whole search for a best-effort bookkeeping write.
+                if let Err(e) = conn.execute(
+                    "UPDATE memories SET access_count = access_count + 1, last_accessed = ?1 WHERE id = ?2",
+                    params![now, row.id],
+                ) {
+                    tracing::warn!(error = %e, memory_id = %row.id, "memory access-count bump failed");
+                }
+            }
         }
 
         Ok(rows)
@@ -3006,29 +3043,10 @@ impl Storage {
     pub fn list_memories(&self, project: &str, limit: usize) -> Result<Vec<MemoryRow>> {
         let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
-            "SELECT id, content, category, source, confidence, project, session_id,
-                    created_at, updated_at, access_count, last_accessed
-             FROM memories
-             WHERE project = ?1
-             ORDER BY updated_at DESC, confidence DESC
-             LIMIT ?2",
+            &format!("SELECT {SQL_MEMORY_COLUMNS} FROM memories WHERE project = ?1 ORDER BY updated_at DESC, confidence DESC LIMIT ?2"),
         )?;
         let rows = stmt
-            .query_map(params![project, limit as i64], |row| {
-                Ok(MemoryRow {
-                    id: row.get(0)?,
-                    content: row.get(1)?,
-                    category: row.get(2)?,
-                    source: row.get(3)?,
-                    confidence: row.get(4)?,
-                    project: row.get(5)?,
-                    session_id: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
-                    access_count: row.get(9)?,
-                    last_accessed: row.get(10)?,
-                })
-            })?
+            .query_map(params![project, limit as i64], memory_row_from_sql)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -3039,14 +3057,18 @@ impl Storage {
     ///
     /// Returns an error if the delete fails.
     pub fn delete_memory(&self, id: i64) -> Result<bool> {
-        let conn = lock_conn!(self)?;
+        let mut conn = lock_conn!(self)?;
 
-        conn.execute(
+        // C-3: delete the FTS row and the base row in one transaction so a
+        // failure between them cannot desync the search index.
+        let tx = conn.transaction()?;
+        tx.execute(
             "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?1)",
             params![id],
         )?;
 
-        let affected = conn.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
+        let affected = tx.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
+        tx.commit()?;
         Ok(affected > 0)
     }
 
@@ -3072,7 +3094,7 @@ impl Storage {
             anyhow::bail!("At least one filter criterion is required to delete memories");
         }
 
-        let conn = lock_conn!(self)?;
+        let mut conn = lock_conn!(self)?;
         let cutoff = older_than_days.map(|days| {
             let dt = Utc::now() - chrono::Duration::days(i64::from(days));
             dt.to_rfc3339()
@@ -3123,17 +3145,23 @@ impl Storage {
         let ids: Vec<i64> = stmt
             .query_map(param_refs.as_slice(), |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
 
+        // C-3: wrap the per-id delete loop in a single transaction so a failure
+        // part-way through cannot leave the FTS index out of sync with the
+        // memories table.
+        let tx = conn.transaction()?;
         let mut deleted = 0usize;
         for id in &ids {
             // Propagate failures and count only rows actually deleted, so the
             // caller never reports a deletion that did not happen (FUNC-021).
-            conn.execute(
+            tx.execute(
                 "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?1)",
                 params![id],
             )?;
-            deleted += conn.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
+            deleted += tx.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
         }
+        tx.commit()?;
 
         Ok(deleted)
     }
@@ -3175,7 +3203,10 @@ impl Storage {
     /// Returns an error if the query fails.
     pub fn count_memories(&self) -> Result<u64> {
         let conn = lock_conn_read!(self)?;
-        let count: u64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
+        let count: u64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |row| {
+            let n: i64 = row.get(0)?;
+            Ok(n as u64)
+        })?;
         Ok(count)
     }
 
@@ -3200,13 +3231,19 @@ impl Storage {
             conn.query_row(
                 "SELECT COUNT(*) FROM memories WHERE project = ?1",
                 params![full.as_ref()],
-                |row| row.get(0),
+                |row| {
+                    let n: i64 = row.get(0)?;
+                    Ok(n as u64)
+                },
             )?
         } else {
             conn.query_row(
                 "SELECT COUNT(*) FROM memories WHERE project IN (?1, ?2)",
                 params![full.as_ref(), name],
-                |row| row.get(0),
+                |row| {
+                    let n: i64 = row.get(0)?;
+                    Ok(n as u64)
+                },
             )?
         };
         Ok(count)
@@ -3237,22 +3274,12 @@ impl Storage {
         let mut stmt;
         let rows = if name.is_empty() {
             stmt = conn.prepare_cached(
-                "SELECT id, content, category, source, confidence, project, session_id,
-                        created_at, updated_at, access_count, last_accessed
-                 FROM memories
-                 WHERE project = ?1
-                 ORDER BY updated_at DESC, confidence DESC
-                 LIMIT ?2",
+                &format!("SELECT {SQL_MEMORY_COLUMNS} FROM memories WHERE project = ?1 ORDER BY updated_at DESC, confidence DESC LIMIT ?2"),
             )?;
             stmt.query_map(params![full.as_ref(), limit as i64], memory_row_from_sql)?
         } else {
             stmt = conn.prepare_cached(
-                "SELECT id, content, category, source, confidence, project, session_id,
-                        created_at, updated_at, access_count, last_accessed
-                 FROM memories
-                 WHERE project IN (?1, ?2)
-                 ORDER BY updated_at DESC, confidence DESC
-                 LIMIT ?3",
+                &format!("SELECT {SQL_MEMORY_COLUMNS} FROM memories WHERE project IN (?1, ?2) ORDER BY updated_at DESC, confidence DESC LIMIT ?3"),
             )?;
             stmt.query_map(
                 params![full.as_ref(), name, limit as i64],
@@ -3274,28 +3301,10 @@ impl Storage {
     pub fn list_all_memories(&self, limit: usize) -> Result<Vec<MemoryRow>> {
         let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
-            "SELECT id, content, category, source, confidence, project, session_id,
-                    created_at, updated_at, access_count, last_accessed
-             FROM memories
-             ORDER BY updated_at DESC, confidence DESC
-             LIMIT ?1",
+            &format!("SELECT {SQL_MEMORY_COLUMNS} FROM memories ORDER BY updated_at DESC, confidence DESC LIMIT ?1"),
         )?;
         let rows = stmt
-            .query_map(params![limit as i64], |row| {
-                Ok(MemoryRow {
-                    id: row.get(0)?,
-                    content: row.get(1)?,
-                    category: row.get(2)?,
-                    source: row.get(3)?,
-                    confidence: row.get(4)?,
-                    project: row.get(5)?,
-                    session_id: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
-                    access_count: row.get(9)?,
-                    last_accessed: row.get(10)?,
-                })
-            })?
+            .query_map(params![limit as i64], memory_row_from_sql)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -3453,7 +3462,7 @@ impl Storage {
         Ok(results)
     }
 
-    // ── Session message embeddings (M5) ────────────────────────���────────
+    // ── Session message embeddings (M5) ────────────────────────────────
 
     /// Stores or updates an embedding vector for a session message.
     ///
@@ -3547,7 +3556,9 @@ impl Storage {
     where
         F: Fn(&[f32], &[f32]) -> f32,
     {
-        let conn = lock_conn!(self)?;
+        // C-4: this is a pure read, so use the read-only connection (PERF-069)
+        // rather than serialising behind writers.
+        let conn = lock_conn_read!(self)?;
         let mut stmt = conn.prepare_cached(
             "SELECT message_id, embedding FROM messages_embedding WHERE dimensions = ?1",
         )?;
@@ -4126,7 +4137,7 @@ impl Storage {
         let conn = lock_conn_read!(self)?;
 
         // Sanitise the FTS query.
-        let safe_query = sanitise_fts_query(query);
+        let safe_query = sanitize_fts_query(query);
         if safe_query.is_empty() {
             return Ok(Vec::new());
         }
@@ -4200,7 +4211,7 @@ impl Storage {
         let conn = lock_conn_read!(self)?;
 
         // Sanitise the FTS query.
-        let safe_query = sanitise_fts_query(&params.query);
+        let safe_query = sanitize_fts_query(&params.query);
         if safe_query.is_empty() {
             return Ok(Vec::new());
         }
@@ -4340,37 +4351,29 @@ impl Storage {
     /// ```
     pub fn conversation_stats(&self, session_id: &str) -> Result<ConversationStats> {
         let conn = lock_conn_read!(self)?;
-        let total: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM messages WHERE session_id = ?1",
-                params![session_id],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE session_id = ?1",
+            params![session_id],
+            |r| r.get(0),
+        )?;
 
-        let user_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND role = 'user'",
-                params![session_id],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
+        let user_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND role = 'user'",
+            params![session_id],
+            |r| r.get(0),
+        )?;
 
-        let assistant_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND role = 'assistant'",
-                params![session_id],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
+        let assistant_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND role = 'assistant'",
+            params![session_id],
+            |r| r.get(0),
+        )?;
 
-        let compaction_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND role = 'compaction'",
-                params![session_id],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
+        let compaction_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND role = 'compaction'",
+            params![session_id],
+            |r| r.get(0),
+        )?;
 
         let has_compaction = compaction_count > 0;
 
@@ -4416,7 +4419,7 @@ impl Storage {
         // are normally *zero* missing rows and this method is a fast no-op.
         // The previous implementation always DELETE+rebuilt the whole table,
         // which (a) rewrote every row on every launch and (b) held the SQLite
-        // write lock for the entire rebuild — serialising the main thread's own
+        // write lock for the entire rebuild - serialising the main thread's own
         // `create_session` write behind it and adding ~5s to startup.
         //
         // When rows ARE missing (first run after a schema change), the catch-up
@@ -4492,7 +4495,7 @@ pub struct ConversationStats {
 /// Splits on whitespace, wraps each term in double quotes (removing any
 /// embedded double quotes), and joins with spaces so FTS5 treats each term
 /// as a phrase query connected by implicit AND.
-fn sanitise_fts_query(query: &str) -> String {
+fn sanitize_fts_query(query: &str) -> String {
     query
         .split_whitespace()
         .filter(|s| !s.is_empty())
@@ -4557,7 +4560,7 @@ pub struct InitiativeRow {
     pub status: String,
     /// JSON-encoded `Vec<InitiativeMilestone>`.
     pub milestones_json: String,
-    /// Overall progress 0–100.
+    /// Overall progress 0-100.
     pub progress: u32,
     /// Project the initiative belongs to (typically working-dir string).
     pub project: String,
@@ -4641,7 +4644,7 @@ fn initiative_progress(value: i64, initiative_id: &str) -> u32 {
 /// (todo2tasks T-001: extended with `active_form`, `owner`, `metadata`,
 /// and `blocked_by` fields to support the Task model.  T-002: the
 /// corresponding SQLite columns are added via additive `ALTER TABLE`
-/// migration with safe defaults — see FR-002.)
+/// migration with safe defaults - see FR-002.)
 #[derive(Debug, Clone)]
 pub struct TaskRow {
     /// Unique todo identifier.
@@ -4677,13 +4680,13 @@ pub struct TaskRow {
 /// FR-013).
 ///
 /// Every field is `Option`:
-/// - `None` → **do not change** this column.
-/// - `Some(value)` → set the column to `value`.
+/// - `None` -> **do not change** this column.
+/// - `Some(value)` -> set the column to `value`.
 ///
 /// For `active_form` and `owner`, which are nullable, a nested
 /// `Option<Option<&str>>` is used so the caller can distinguish
 /// "leave unchanged" (`None`) from "clear to NULL" (`Some(None)`)
-/// from "set to a string" (`Some(Some("…"))`).
+/// from "set to a string" (`Some(Some("..."))`).
 ///
 /// For `blocked_by`, `None` means "leave the dependency list unchanged"
 /// and `Some(slice)` means "replace the entire list".  The
@@ -4700,15 +4703,15 @@ pub struct TaskUpdateParams<'a> {
     /// New description text.
     pub description: Option<&'a str>,
     /// New active-form phrase.
-    /// `None` → unchanged; `Some(None)` → clear to NULL; `Some(Some(x))` → set.
+    /// `None` -> unchanged; `Some(None)` -> clear to NULL; `Some(Some(x))` -> set.
     pub active_form: Option<Option<&'a str>>,
     /// New owner label.
-    /// `None` → unchanged; `Some(None)` → clear to NULL; `Some(Some(x))` → set.
+    /// `None` -> unchanged; `Some(None)` -> clear to NULL; `Some(Some(x))` -> set.
     pub owner: Option<Option<&'a str>>,
     /// New metadata JSON text blob (FR-008).
     pub metadata: Option<&'a str>,
     /// Full replacement for the `blocked_by` dependency list (FR-001).
-    /// `None` → unchanged; `Some(slice)` → replace.
+    /// `None` -> unchanged; `Some(slice)` -> replace.
     pub blocked_by: Option<&'a [String]>,
 }
 
@@ -4717,20 +4720,20 @@ pub struct TaskUpdateParams<'a> {
 /// Derived/computed DAG fields for a single task (todo2tasks T-004,
 /// FR-005).
 ///
-/// These fields are **not stored** in the database — they are computed
+/// These fields are **not stored** in the database - they are computed
 /// at read time from the full session task set by
 /// [`compute_task_dag`].
 ///
 /// # Fields
 ///
-/// - `blocks` — inverse edges: task IDs that list *this* task in their
+/// - `blocks` - inverse edges: task IDs that list *this* task in their
 ///   `blocked_by`.  Satisfies FR-014 (TaskGet output includes derived
 ///   `blocks`).
-/// - `is_blocked` — `true` if this task's status is `"pending"` and at
+/// - `is_blocked` - `true` if this task's status is `"pending"` and at
 ///   least one ID in its `blocked_by` list is not `"completed"`
 ///   (FR-005).  A `"blocked"` status value is never stored; blocked-ness
 ///   is always derived.
-/// - `is_available` — `true` if this task's status is `"pending"`, its
+/// - `is_available` - `true` if this task's status is `"pending"`, its
 ///   `owner` is `None` or empty, and every ID in its `blocked_by` list
 ///   is `"completed"` (or `blocked_by` is empty).  See the spec's
 ///   Definitions section.
@@ -4764,7 +4767,7 @@ pub struct TaskView {
 /// Given a slice of [`TaskRow`] values (typically from
 /// [`Storage::list_tasks`]), this function:
 ///
-/// 1. Builds a status lookup map (`id` → `status`) so that
+/// 1. Builds a status lookup map (`id` -> `status`) so that
 ///    `blocked_by` references can be resolved without scanning the
 ///    slice repeatedly.
 /// 2. Computes the **inverse edge** (`blocks`) for each task: if task
@@ -4779,7 +4782,7 @@ pub struct TaskView {
 /// # Edge cases
 ///
 /// - A `blocked_by` entry that does not correspond to any task in the
-///   slice is treated as "not completed" — the task stays blocked.
+///   slice is treated as "not completed" - the task stays blocked.
 ///   This should not happen in normal operation (T-017 validates
 ///   references), but the graceful fallback prevents panic.
 /// - Tasks with status `"in_progress"` or `"completed"` are never
@@ -4789,7 +4792,7 @@ pub struct TaskView {
 ///
 /// A `HashMap<String, TaskDerived>` keyed by task ID.
 pub fn compute_task_dag(tasks: &[TaskRow]) -> std::collections::HashMap<String, TaskDerived> {
-    // Build id → status lookup for O(1) blocked_by resolution.
+    // Build id -> status lookup for O(1) blocked_by resolution.
     let status_map: HashMap<&str, &str> = tasks
         .iter()
         .map(|t| (t.id.as_str(), t.status.as_str()))
@@ -4850,10 +4853,10 @@ pub fn compute_task_dag(tasks: &[TaskRow]) -> std::collections::HashMap<String, 
 ///
 /// The `cycle_path` field lists the task IDs that form the cycle,
 /// starting and ending with the same ID, e.g. `["a", "b", "c", "a"]`
-/// means `a → b → c → a` (a depends on b, b depends on c, c depends
+/// means `a -> b -> c -> a` (a depends on b, b depends on c, c depends
 /// on a).
 #[derive(Debug, Clone, thiserror::Error)]
-#[error("dependency cycle detected: {} (would create a circular dependency)", cycle_path.join(" → "))]
+#[error("dependency cycle detected: {} (would create a circular dependency)", cycle_path.join(" -> "))]
 pub struct CycleError {
     /// Ordered list of task IDs forming the cycle, starting and ending
     /// with the same ID.
@@ -4867,7 +4870,7 @@ pub struct CycleError {
 /// "Source depends on target" means `target` is being added to
 /// `source`'s `blocked_by` list.  A cycle exists if `target` already
 /// (directly or transitively) depends on `source`, because the new
-/// edge would close the loop: `source → target → … → source`.
+/// edge would close the loop: `source -> target -> ... -> source`.
 ///
 /// The function performs a depth-first search from `target` following
 /// existing `blocked_by` edges.  If `source` is reachable from
@@ -4876,10 +4879,10 @@ pub struct CycleError {
 ///
 /// # Arguments
 ///
-/// - `tasks` — all tasks in the session (the full graph snapshot).
-/// - `source` — the task ID that will gain a new dependency on
+/// - `tasks` - all tasks in the session (the full graph snapshot).
+/// - `source` - the task ID that will gain a new dependency on
 ///   `target`.
-/// - `target` — the task ID being added to `source`'s `blocked_by`.
+/// - `target` - the task ID being added to `source`'s `blocked_by`.
 ///
 /// # Returns
 ///
@@ -4898,7 +4901,7 @@ pub struct CycleError {
 ///
 /// O(N + E) where N is the number of tasks and E is the number of
 /// `blocked_by` edges, using stdlib `HashMap` / `HashSet` only
-/// (NFR-003 — no new dependencies).
+/// (NFR-003 - no new dependencies).
 pub fn detect_cycle(tasks: &[TaskRow], source: &str, target: &str) -> Result<(), CycleError> {
     use std::collections::HashSet;
 
@@ -4909,22 +4912,22 @@ pub fn detect_cycle(tasks: &[TaskRow], source: &str, target: &str) -> Result<(),
         });
     }
 
-    // Build adjacency list: task_id → blocked_by list.
+    // Build adjacency list: task_id -> blocked_by list.
     let adj: HashMap<&str, &[String]> = tasks
         .iter()
         .map(|t| (t.id.as_str(), t.blocked_by.as_slice()))
         .collect();
 
     // DFS from target following blocked_by edges.
-    // If we reach source, we found a cycle: source → target → … → source.
+    // If we reach source, we found a cycle: source -> target -> ... -> source.
     let mut visited: HashSet<&str> = HashSet::new();
     // Stack entries: (current node, path from target to current node).
     let mut stack: Vec<(&str, Vec<String>)> = vec![(target, vec![target.to_string()])];
 
     while let Some((node, path)) = stack.pop() {
         if node == source {
-            // Found a path target → … → source.
-            // Full cycle: source → target → … → source.
+            // Found a path target -> ... -> source.
+            // Full cycle: source -> target -> ... -> source.
             let mut cycle_path = vec![source.to_string()];
             cycle_path.extend(path);
             return Err(CycleError { cycle_path });
@@ -4952,9 +4955,9 @@ pub fn detect_cycle(tasks: &[TaskRow], source: &str, target: &str) -> Result<(),
 /// Maps a `rusqlite::Row` to a [`TaskRow`], reading the 4 new Task-model
 /// columns added by the todo2tasks T-002 migration (`active_form`, `owner`,
 /// `metadata`, `blocked_by`).  Legacy rows that predate the migration get
-/// safe defaults from the `ADD COLUMN … DEFAULT` clause (FR-002):
-/// `active_form` and `owner` are `NULL` → `None`; `metadata` is `'{}'`;
-/// `blocked_by` is `'[]'` → empty `Vec`.
+/// safe defaults from the `ADD COLUMN ... DEFAULT` clause (FR-002):
+/// `active_form` and `owner` are `NULL` -> `None`; `metadata` is `'{}'`;
+/// `blocked_by` is `'[]'` -> empty `Vec`.
 fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRow> {
     let metadata_str: String = row.get(9)?;
     let blocked_by_str: String = row.get(10)?;
@@ -5041,7 +5044,7 @@ pub struct MemoryRow {
     pub category: String,
     /// Source of the memory (e.g., tool name, auto-extract).
     pub source: String,
-    /// Confidence score (0.0–1.0).
+    /// Confidence score (0.0-1.0).
     pub confidence: f64,
     /// Project this memory belongs to.
     pub project: String,
@@ -5093,7 +5096,7 @@ pub struct KgRelationshipRow {
     pub target_id: i64,
     /// Relationship type (`uses`/`prefers`/`depends_on`/`avoids`/`related_to`).
     pub relation_type: String,
-    /// Confidence in this relationship (0.0–1.0).
+    /// Confidence in this relationship (0.0-1.0).
     pub confidence: f64,
     /// The memory ID that established this relationship, if any.
     pub source_memory_id: Option<i64>,
@@ -5160,7 +5163,7 @@ pub struct BackgroundTaskRow {
 /// Returned by [`Storage::search_conversation`] and
 /// [`Storage::search_session_messages`].  The `content` field is the
 /// extracted text from the message parts (text blocks, tool names,
-/// reasoning) — not the raw JSON parts blob.
+/// reasoning) - not the raw JSON parts blob.
 #[derive(Debug, Clone)]
 pub struct MessageSearchResult {
     /// Unique message identifier (UUID v4).

@@ -64,7 +64,7 @@ pub enum PluginError {
     UnknownPlugin(String),
 
     /// A plugin tried to contribute a tool (or command) whose registered name
-    /// already exists in the session registry — built-in or another plugin's
+    /// already exists in the session registry - built-in or another plugin's
     /// (T-010; FR-024). The full colliding name is carried; the session
     /// records the plugin `errored` with cause `name-collision`.
     #[error("name-collision: tool name '{0}' is already registered")]
@@ -77,12 +77,73 @@ impl PluginError {
     /// (or lower-level OS error) is reported, per AGENTS.md "meaningful error
     /// messages and context".
     pub fn io(err: impl std::error::Error + 'static) -> Self {
-        let mut detail = err.to_string();
-        let mut source = err.source();
-        while let Some(cause) = source {
-            let _ = write!(detail, ": {cause}");
-            source = cause.source();
-        }
-        Self::Io(detail)
+        Self::Io(flatten_chain(&err))
+    }
+}
+
+/// Flatten any error's full source chain into one `": "`-joined message.
+///
+/// Shared by [`PluginError::io`] and [`IoError::new`] so both preserve the
+/// same structured chain (ANTIPAT M15).
+fn flatten_chain(err: &(impl std::error::Error + 'static)) -> String {
+    let mut detail = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        let _ = write!(detail, ": {cause}"); // INTENTIONAL: write to a String buffer is infallible
+        source = cause.source();
+    }
+    detail
+}
+
+/// A stringified I/O failure that preserves its source-error chain.
+///
+/// The `add`/`remove` subsystem errors used to hold a bare `String`, which
+/// discarded the chain [`PluginError::io`] works hard to build (ANTIPAT M15).
+/// Holding this wrapper keeps the chain structured while its `Display` prints
+/// exactly the same text the former `String` payload did, so every rendered
+/// report and `to_string()` call is unchanged.
+///
+/// `IoError` also means a caller can no longer construct an `AddError::Io` /
+/// `RemoveError::Io` by typing a bare `String`; the `message` constructor is
+/// the explicit way to carry a source-less detail.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct IoError(String);
+
+impl IoError {
+    /// Build from any error, capturing its full source chain
+    /// (see [`PluginError::io`]).
+    #[must_use]
+    pub fn new(err: impl std::error::Error + 'static) -> Self {
+        Self(flatten_chain(&err))
+    }
+
+    /// Build from an already-formatted message with no source chain.
+    #[must_use]
+    pub fn message(detail: impl Into<String>) -> Self {
+        Self(detail.into())
+    }
+
+    /// The flattened message.
+    #[must_use]
+    pub fn message_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Attach the plugin id to a sandbox error.
+///
+/// The runtime classifies errors without knowing which plugin it served, so
+/// each adapter re-tags a [`PluginError::Script`] with the owning plugin id.
+/// Defined once here to keep the two JS adapters from drifting
+/// (see `ANTIPAT.md` M3.11).
+#[must_use]
+pub(crate) fn with_plugin(error: PluginError, plugin_id: &str) -> PluginError {
+    match error {
+        PluginError::Script { detail, .. } => PluginError::Script {
+            plugin: plugin_id.to_string(),
+            detail,
+        },
+        other => other,
     }
 }

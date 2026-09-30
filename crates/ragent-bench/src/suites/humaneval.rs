@@ -7,8 +7,8 @@ use crate::data::BenchCaseFixture;
 use crate::model::BenchGenerationResult;
 use crate::suites::{
     BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter, bench_temp_root,
-    best_exact_or_similarity_sample, exact_match_count, first_sample_exact_match, pass_at_k,
-    skipped_metric, strip_code_fences,
+    best_exact_or_similarity_sample, count_passed_failed, exact_match_count,
+    first_sample_exact_match, pass_at_1, pass_at_k, skipped_metric, strip_code_fences,
 };
 
 pub(super) static ADAPTER: HumanEvalAdapter = HumanEvalAdapter;
@@ -95,15 +95,7 @@ impl BenchSuiteAdapter for HumanEvalAdapter {
             return metrics;
         }
 
-        let pass_at_1 = if evaluations.is_empty() {
-            0.0
-        } else {
-            evaluations
-                .iter()
-                .filter(|evaluation| evaluation.first_sample_exact_match)
-                .count() as f64
-                / evaluations.len() as f64
-        };
+        let pass_at_1_value = pass_at_1(evaluations);
         let pass_at_k_value = if evaluations.is_empty() {
             0.0
         } else {
@@ -115,18 +107,11 @@ impl BenchSuiteAdapter for HumanEvalAdapter {
                 .sum::<f64>()
                 / evaluations.len() as f64
         };
-        let passed_count = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "passed")
-            .count();
-        let failed_count = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "failed")
-            .count();
+        let (passed_count, failed_count) = count_passed_failed(evaluations);
 
         let mut metrics = vec![BenchMetricEvaluation {
             metric_name: "pass_at_1".to_string(),
-            metric_value: pass_at_1,
+            metric_value: pass_at_1_value,
             metric_unit: "ratio".to_string(),
             passed_count: Some(passed_count),
             failed_count: Some(failed_count),
@@ -179,55 +164,19 @@ fn evaluate_humaneval_hidden_tests(
     entry_point: &str,
 ) -> BenchCaseEvaluation {
     let fallback = fallback_proxy_evaluation(case, generation);
-    let mut passed_count = 0usize;
-    let mut first_sample_passed = false;
-    let mut first_error = None;
-    let mut selected_response = fallback.selected_response;
-
-    for (idx, sample) in generation.samples.iter().enumerate() {
-        match run_humaneval_hidden_tests(case, &sample.text, test_code, entry_point) {
-            Ok(()) => {
-                passed_count += 1;
-                if idx == 0 {
-                    first_sample_passed = true;
-                }
-                if passed_count == 1 {
-                    selected_response = sample.text.clone();
-                }
-            }
-            Err(error) => {
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
-            }
-        }
-    }
-
-    let passed = passed_count > 0;
-    BenchCaseEvaluation {
-        status: if passed { "passed" } else { "failed" }.to_string(),
-        score: Some(if passed { 1.0 } else { 0.0 }),
-        selected_response,
-        exact_match_count: passed_count,
-        first_sample_exact_match: first_sample_passed,
-        notes: if passed {
+    let total = generation.samples.len();
+    crate::suites::evaluate_suite_samples(
+        generation,
+        fallback.selected_response,
+        |text| run_humaneval_hidden_tests(case, text, test_code, entry_point),
+        |passed_count| {
             format!(
-                "HumanEval hidden-test execution passed for {passed_count}/{} generated sample(s).",
-                generation.samples.len()
-            )
-        } else {
-            format!(
-                "HumanEval hidden-test execution failed for all {} generated sample(s).",
-                generation.samples.len()
+                "HumanEval hidden-test execution passed for {passed_count}/{total} generated sample(s)."
             )
         },
-        error_code: if passed {
-            None
-        } else {
-            Some("hidden_test_failed".to_string())
-        },
-        error_message: if passed { None } else { first_error },
-    }
+        || format!("HumanEval hidden-test execution failed for all {total} generated sample(s)."),
+        "hidden_test_failed",
+    )
 }
 
 fn evaluate_humaneval_native_tests(
@@ -237,57 +186,20 @@ fn evaluate_humaneval_native_tests(
     entry_point: &str,
 ) -> BenchCaseEvaluation {
     let fallback = fallback_proxy_evaluation(case, generation);
-    let mut passed_count = 0usize;
-    let mut first_sample_passed = false;
-    let mut first_error = None;
-    let mut selected_response = fallback.selected_response;
-
-    for (idx, sample) in generation.samples.iter().enumerate() {
-        match run_humaneval_native_tests(case, &sample.text, test_code, entry_point) {
-            Ok(()) => {
-                passed_count += 1;
-                if idx == 0 {
-                    first_sample_passed = true;
-                }
-                if passed_count == 1 {
-                    selected_response = sample.text.clone();
-                }
-            }
-            Err(error) => {
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
-            }
-        }
-    }
-
-    let passed = passed_count > 0;
-    BenchCaseEvaluation {
-        status: if passed { "passed" } else { "failed" }.to_string(),
-        score: Some(if passed { 1.0 } else { 0.0 }),
-        selected_response,
-        exact_match_count: passed_count,
-        first_sample_exact_match: first_sample_passed,
-        notes: if passed {
+    let total = generation.samples.len();
+    let label = humaneval_language_label(&case.language);
+    crate::suites::evaluate_suite_samples(
+        generation,
+        fallback.selected_response,
+        |text| run_humaneval_native_tests(case, text, test_code, entry_point),
+        |passed_count| {
             format!(
-                "HumanEval native {} tests passed for {passed_count}/{} generated sample(s).",
-                humaneval_language_label(&case.language),
-                generation.samples.len()
-            )
-        } else {
-            format!(
-                "HumanEval native {} tests failed for all {} generated sample(s).",
-                humaneval_language_label(&case.language),
-                generation.samples.len()
+                "HumanEval native {label} tests passed for {passed_count}/{total} generated sample(s)."
             )
         },
-        error_code: if passed {
-            None
-        } else {
-            Some("hidden_test_failed".to_string())
-        },
-        error_message: if passed { None } else { first_error },
-    }
+        || format!("HumanEval native {label} tests failed for all {total} generated sample(s)."),
+        "hidden_test_failed",
+    )
 }
 
 fn run_humaneval_hidden_tests(
@@ -312,7 +224,10 @@ fn run_humaneval_hidden_tests(
             "def _timeout_handler(signum, frame):".to_string(),
             "    raise TimeoutError('HumanEval execution timed out')".to_string(),
             "signal.signal(signal.SIGALRM, _timeout_handler)".to_string(),
-            "signal.alarm(10)".to_string(),
+            format!(
+                "signal.alarm({})",
+                crate::exec_guard::FIXTURE_DEFAULT_TIMEOUT_SECS
+            ),
             "namespace = {}".to_string(),
             format!("candidate_source = {candidate_literal}"),
             format!("test_source = {tests_literal}"),
@@ -347,7 +262,7 @@ fn run_humaneval_hidden_tests(
             .output()
             .map_err(|error| format!("launch python3: {error}"))?;
         if output.status.success() {
-            let _ = std::fs::remove_file(&script_path);
+            let _ = std::fs::remove_file(&script_path); // INTENTIONAL: best-effort temp cleanup
             return Ok(());
         }
 
@@ -362,7 +277,7 @@ fn run_humaneval_hidden_tests(
         });
     }
 
-    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(&script_path); // INTENTIONAL: best-effort temp cleanup
     Err(last_error.unwrap_or_else(|| "HumanEval execution failed".to_string()))
 }
 
@@ -392,52 +307,15 @@ fn run_humaneval_native_tests(
                 format!("write HumanEval source {}: {error}", source_path.display())
             })?;
 
-            let mut last_stdout = String::new();
-            let mut last_stderr = String::new();
-            let mut command_failed = None;
-            for (index, command_parts) in case.execution_commands.iter().enumerate() {
-                let timeout_secs = case
-                    .execution_timeouts_secs
-                    .get(index)
-                    .copied()
-                    .unwrap_or(10);
-                let rendered_parts = command_parts
-                    .iter()
-                    .map(|part| part.replace("__FILENAME__", &file_name))
-                    .collect::<Vec<_>>();
-                // SEC-ragent-bench-001 (SECTASKS T-009): the fixture supplies
-                // the program; it must be an allowlisted toolchain binary.
-                crate::exec_guard::validate_fixture_command(&rendered_parts)?;
-                let Some(program) = rendered_parts.first() else {
-                    return Err("HumanEval command list was empty".to_string());
+            let (last_stdout, last_stderr) =
+                match crate::suites::run_fixture_commands(case, &run_root, &file_name, "HumanEval")
+                {
+                    Ok(output) => output,
+                    Err(error) => {
+                        last_error = Some(error);
+                        continue;
+                    }
                 };
-                let output = Command::new("timeout")
-                    .arg(format!("{timeout_secs}s"))
-                    .arg(program)
-                    .args(rendered_parts.iter().skip(1))
-                    .current_dir(&run_root)
-                    .output()
-                    .map_err(|error| format!("launch HumanEval command `{program}`: {error}"))?;
-                last_stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                last_stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                if !output.status.success() {
-                    let detail = [last_stderr.trim(), last_stdout.trim()]
-                        .into_iter()
-                        .find(|part| !part.is_empty())
-                        .unwrap_or("HumanEval native command failed");
-                    command_failed = Some(format!(
-                        "HumanEval command `{}` failed: {}",
-                        rendered_parts.join(" "),
-                        detail
-                    ));
-                    break;
-                }
-            }
-
-            if let Some(error) = command_failed {
-                last_error = Some(error);
-                continue;
-            }
             if last_stderr.contains("FAILED")
                 || last_stdout.contains("FAILED")
                 || last_stderr.contains("Assertion failed")
@@ -456,7 +334,7 @@ fn run_humaneval_native_tests(
         Err(last_error.unwrap_or_else(|| "HumanEval native execution failed".to_string()))
     })();
 
-    let _ = std::fs::remove_dir_all(&run_root);
+    let _ = std::fs::remove_dir_all(&run_root); // INTENTIONAL: best-effort temp cleanup
     result
 }
 

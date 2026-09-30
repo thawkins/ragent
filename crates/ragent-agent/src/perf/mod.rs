@@ -3,10 +3,10 @@
 //! Centralises the runtime configuration and helpers used by the
 //! `AgentPerf` specification (`specs/AgentPerf/SPEC.md`):
 //!
-//! * [`is_profiling_enabled`] — resolves the `RAGENT_AGENT_PERF` environment
+//! * [`is_profiling_enabled`] - resolves the `RAGENT_AGENT_PERF` environment
 //!   variable (and, when present, the `agent_perf.profiling` config field) and
 //!   caches the result for cheap repeated lookups.
-//! * [`agent_perf_enabled`] — master switch consulted by all performance
+//! * [`agent_perf_enabled`] - master switch consulted by all performance
 //!   optimisations; allows the entire subsystem to be turned off without
 //!   recompiling.
 //!
@@ -69,7 +69,7 @@ pub fn init_from_env() {
         Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" | "enable" | "enabled" => ProfilingState::Enabled,
             "0" | "false" | "no" | "off" | "disable" | "disabled" => ProfilingState::Disabled,
-            // Unknown values fall back to "disabled" — fail closed.
+            // Unknown values fall back to "disabled" - fail closed.
             _ => ProfilingState::Disabled,
         },
         Err(_) => ProfilingState::Unset,
@@ -183,81 +183,5 @@ pub fn env_var_name() -> &'static str {
     ENV_VAR
 }
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// RAII guard that restores the perf state at the end of a test.
-    struct StateGuard;
-    impl Drop for StateGuard {
-        fn drop(&mut self) {
-            // Reset all atomics to their defaults so each test starts
-            // from a clean slate.
-            PROFILING_STATE.store(ProfilingState::Unset as u8, Ordering::Relaxed);
-            MASTER_ENABLED.store(true, Ordering::Relaxed);
-            PROFILING_OVERRIDE.store(false, Ordering::Relaxed);
-            PROFILING_OVERRIDE_INSTALLED.store(false, Ordering::Relaxed);
-            CONFIG_BACKUP.store(ProfilingState::Unset as u8, Ordering::Relaxed);
-        }
-    }
-
-    #[test]
-    fn default_is_disabled() {
-        let _g = StateGuard;
-        assert!(!is_profiling_enabled());
-        assert!(agent_perf_enabled());
-    }
-
-    #[test]
-    fn master_enabled_can_be_toggled() {
-        let _g = StateGuard;
-        set_master_enabled(false);
-        assert!(!agent_perf_enabled());
-        set_master_enabled(true);
-        assert!(agent_perf_enabled());
-    }
-
-    #[test]
-    fn runtime_override_wins_over_config() {
-        let _g = StateGuard;
-        set_profiling_from_config(true);
-        assert!(is_profiling_enabled());
-        set_profiling_override(Some(false));
-        assert!(!is_profiling_enabled());
-        set_profiling_override(None);
-        // After clearing the override, we fall back to the config value.
-        assert!(is_profiling_enabled());
-    }
-
-    #[test]
-    fn env_var_name_is_stable() {
-        assert_eq!(env_var_name(), "RAGENT_AGENT_PERF");
-    }
-
-    #[test]
-    fn config_false_disables_profiling() {
-        let _g = StateGuard;
-        set_profiling_from_config(false);
-        assert!(!is_profiling_enabled());
-    }
-
-    #[test]
-    fn config_true_enables_profiling() {
-        let _g = StateGuard;
-        set_profiling_from_config(true);
-        assert!(is_profiling_enabled());
-    }
-
-    #[test]
-    fn profiling_override_round_trip() {
-        let _g = StateGuard;
-        assert!(!profiling_override_active());
-        set_profiling_override(Some(true));
-        assert!(profiling_override_active());
-        assert!(is_profiling_enabled());
-        set_profiling_override(Some(false));
-        assert!(profiling_override_active());
-        assert!(!is_profiling_enabled());
-        set_profiling_override(None);
-        assert!(!profiling_override_active());
-    }
-}
+#[path = "../tests/inline/perf_mod_tests.rs"]
+mod tests;

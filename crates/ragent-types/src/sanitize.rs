@@ -16,11 +16,11 @@ use regex::Regex;
 /// - `AKIA` AWS access key IDs
 /// - `hf_` Hugging Face and `npm_` npm tokens
 /// - `[?&]key=` query-string API keys (a bare `key=` is what Google's
-///   `?key=AIza…` form used, which the assignment group below did not match)
+///   `?key=AIza...` form used, which the assignment group below did not match)
 /// - Generic long base64-like tokens following a `token` / `apikey` / `api_key` /
 ///   `secret` / `password` key. This group is case-insensitive and accepts an
-///   optional quote and either `=` or `:`, so `API_KEY=…`, `"token": "…"` and
-///   `token: …` all match (FUNC-007).
+///   optional quote and either `=` or `:`, so `API_KEY=...`, `"token": "..."` and
+///   `token: ...` all match (FUNC-007).
 static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::expect_used)]
     Regex::new(concat!(
@@ -51,7 +51,7 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         r"|",
         r"npm_[a-zA-Z0-9]{20,}",
         r"|",
-        // Query-string API keys: `?key=AIza…` / `&key=…` (the assignment group
+        // Query-string API keys: `?key=AIza...` / `&key=...` (the assignment group
         // below requires a longer key name and missed a bare `key=`).
         r"(?i:[?&]key=)[a-zA-Z0-9_\-\.]{16,}",
         r"|",
@@ -59,7 +59,7 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         // Capture group 1 holds the key + separator so the replacement keeps the
         // key and only blanks the value (FUNC-007). Case-insensitive, with an
         // optional quote around the key and value and either `=` or `:` as the
-        // separator, so `API_KEY=…`, `"token": "…"` and `token: …` all match.
+        // separator, so `API_KEY=...`, `"token": "..."` and `token: ...` all match.
         // The value charset includes `/`, `+`, `=` so base64/base64url/JWT
         // payloads redact fully instead of leaking the tail past the first
         // excluded byte. The 16-char value floor keeps innocuous prose out.
@@ -78,6 +78,14 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// PERF-055: the registry is kept sorted longest-first on insert so
 /// [`redact_secrets_cow`] does not have to collect and sort it on every call.
 static SECRET_REGISTRY: LazyLock<RwLock<Vec<String>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+
+/// Maximum number of exact-match secrets retained in the registry.
+///
+/// F14: on a long-lived server that re-registers credentials (for example
+/// rotating provider keys) the registry would otherwise grow without bound,
+/// and [`redact_secrets_cow`] scans it linearly on every call. Beyond this cap
+/// the oldest entries are evicted on insert so the registry stays bounded.
+pub const MAX_SECRET_REGISTRY_ENTRIES: usize = 1024;
 
 /// Registers a secret value for exact-match redaction.
 ///
@@ -129,11 +137,26 @@ pub fn clear_secret_registry() {
 pub fn seed_secrets(secrets: impl IntoIterator<Item = String>) {
     let mut registry = registry_write();
     for s in secrets {
-        if !s.is_empty() {
-            registry.push(s);
+        if s.is_empty() || registry.iter().any(|existing| existing == &s) {
+            continue;
         }
+        registry.push(s);
     }
     sort_by_len_desc(&mut registry);
+    enforce_registry_cap(&mut registry);
+}
+
+/// Bound the registry at [`MAX_SECRET_REGISTRY_ENTRIES`] (F14).
+///
+/// The registry is kept longest-first (PERF-055), so the entries past the cap
+/// are the shortest ones and are dropped. The longest secrets are the ones that
+/// must be matched first to avoid a partial replacement, so they are the
+/// entries worth retaining; dropping the shortest keeps the redaction-critical
+/// shape intact while still bounding memory and the linear scan.
+fn enforce_registry_cap(registry: &mut Vec<String>) {
+    if registry.len() > MAX_SECRET_REGISTRY_ENTRIES {
+        registry.truncate(MAX_SECRET_REGISTRY_ENTRIES);
+    }
 }
 
 /// Acquire a write guard on the registry, recovering from poison.
@@ -150,7 +173,7 @@ fn registry_write() -> std::sync::RwLockWriteGuard<'static, Vec<String>> {
 /// Acquire a read guard on the registry, recovering from poison.
 ///
 /// Recovers the inner value on poison so exact-match redaction still consults
-/// the registered secrets — failing closed instead of leaking them (FUNC-006).
+/// the registered secrets - failing closed instead of leaking them (FUNC-006).
 fn registry_read() -> std::sync::RwLockReadGuard<'static, Vec<String>> {
     SECRET_REGISTRY
         .read()
@@ -164,6 +187,7 @@ fn register_secret_inner(registry: &mut Vec<String>, secret: &str) {
     }
     registry.push(secret.to_string());
     sort_by_len_desc(registry);
+    enforce_registry_cap(registry);
 }
 
 /// Sort secrets by descending length so a shorter secret that is a substring
@@ -176,9 +200,9 @@ fn sort_by_len_desc(registry: &mut [String]) {
 /// from the given text, replacing each match with `[REDACTED]`.
 ///
 /// Applies two layers of redaction:
-/// 1. **Exact match** — any secret registered via [`register_secret`] or
+/// 1. **Exact match** - any secret registered via [`register_secret`] or
 ///    [`seed_secrets`] is replaced by substring match.
-/// 2. **Regex match** — common patterns (`sk-…`, `Bearer …`, etc.) are
+/// 2. **Regex match** - common patterns (`sk-...`, `Bearer ...`, etc.) are
 ///    caught by a static regex.
 ///
 /// # Examples
@@ -198,7 +222,7 @@ pub fn redact_secrets(msg: &str) -> String {
 /// Cow-returning variant of [`redact_secrets`] (PERF-055).
 ///
 /// Returns [`Cow::Borrowed`] without allocating when the message contains no
-/// registered secret and does not match the secret regex — the common case for
+/// registered secret and does not match the secret regex - the common case for
 /// streaming events. Callers on hot paths (e.g. SSE serialisation) should use
 /// this and keep the borrowed slice rather than materialising a `String`.
 ///
@@ -252,35 +276,5 @@ fn redact_secrets_owned(msg: &str, registry_empty: bool) -> String {
 }
 
 #[cfg(test)]
-mod sectasks_t046_secret_pattern_tests {
-    use super::*;
-
-    /// SEC-ragent-types-004 (SECTASKS T-046): the pattern layer must cover the
-    /// credential shapes that were previously unregistered.
-    #[test]
-    fn redacts_gitlab_pat_and_env_sourced_credentials() {
-        let gitlab = "glpat-abcdefghijklmnopqrst";
-        let out = redact_secrets(&format!("token is {gitlab} here"));
-        assert!(!out.contains(gitlab), "GitLab PAT leaked: {out}");
-
-        let hf = "hf_abcdefghijklmnopqrstuvwx";
-        let out = redact_secrets(&format!("use {hf} for the model"));
-        assert!(!out.contains(hf), "Hugging Face token leaked: {out}");
-
-        let npm = "npm_abcdefghijklmnopqrstuvwx";
-        let out = redact_secrets(&format!("auth {npm}"));
-        assert!(!out.contains(npm), "npm token leaked: {out}");
-    }
-
-    /// A bare `?key=` query parameter (the Google Gemini form) must redact.
-    #[test]
-    fn redacts_query_string_key_parameter() {
-        let url =
-            "https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyABCDEFGHIJKLMNOP";
-        let out = redact_secrets(url);
-        assert!(
-            !out.contains("AIzaSyABCDEFGHIJKLMNOP"),
-            "query key leaked: {out}"
-        );
-    }
-}
+#[path = "../tests/inline/sanitize_sectasks_t046_secret_pattern_tests.rs"]
+mod sectasks_t046_secret_pattern_tests;

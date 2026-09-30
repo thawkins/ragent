@@ -79,8 +79,8 @@ Rules:
 ///
 /// # Arguments
 ///
-/// * `previous_summary` — an existing compaction summary, if any.
-/// * `context` — one or more context strings (typically the serialised recent
+/// * `previous_summary` - an existing compaction summary, if any.
+/// * `context` - one or more context strings (typically the serialised recent
 ///   turns plus the head of the conversation to summarise).
 #[must_use]
 pub fn build_prompt(previous_summary: Option<&str>, context: &[&str]) -> String {

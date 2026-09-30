@@ -5,7 +5,7 @@
 //! Visibility: header-based heuristic (public if in `.h`).
 
 use super::{LanguageParser, ParsedFile};
-use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
+use crate::types::{ImportEntry, Symbol, SymbolKind, Visibility};
 use anyhow::{Context, Result};
 use tree_sitter::{Node, Parser};
 
@@ -39,14 +39,8 @@ impl LanguageParser for CParser {
             .parse(source, None)
             .context("tree-sitter parse returned None")?;
 
-        let mut ctx = Ctx {
-            source,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            references: Vec::new(),
-            next_id: 0,
-            is_cpp: false,
-        };
+        let mut ctx = Ctx::new(source);
+        ctx.is_cpp = false;
 
         walk(&mut ctx, tree.root_node(), None, &[]);
 
@@ -89,14 +83,8 @@ impl LanguageParser for CppParser {
             .parse(source, None)
             .context("tree-sitter parse returned None")?;
 
-        let mut ctx = Ctx {
-            source,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            references: Vec::new(),
-            next_id: 0,
-            is_cpp: true,
-        };
+        let mut ctx = Ctx::new(source);
+        ctx.is_cpp = true;
 
         walk(&mut ctx, tree.root_node(), None, &[]);
 
@@ -111,27 +99,14 @@ impl LanguageParser for CppParser {
 
 // ── Shared implementation ───────────────────────────────────────────────────
 
-struct Ctx<'a> {
-    source: &'a [u8],
-    symbols: Vec<Symbol>,
-    imports: Vec<ImportEntry>,
-    references: Vec<SymbolRef>,
-    next_id: i64,
-    is_cpp: bool,
-}
-
-impl Ctx<'_> {
-    const fn alloc_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-    fn text(&self, n: Node) -> &str {
-        n.utf8_text(self.source).unwrap_or("")
-    }
-}
+/// Parser-local alias of the shared extraction context.
+type Ctx<'a> = super::ctx::Ctx<'a>;
 
 fn walk(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
+    let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
+        return;
+    };
+
     match node.kind() {
         "function_definition" | "function_declarator" => {
             if node.kind() == "function_definition" {
@@ -480,7 +455,7 @@ fn extract_class(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String
 fn extract_namespace(ctx: &mut Ctx, node: Node, _parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
-        // anonymous namespace — still recurse
+        // anonymous namespace - still recurse
         if let Some(body) = node.child_by_field_name("body") {
             let cursor = &mut body.walk();
             for child in body.children(cursor) {
@@ -584,8 +559,7 @@ fn extract_c_doc(ctx: &Ctx, node: Node) -> Option<String> {
 }
 
 fn field_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {
-    node.child_by_field_name(field)
-        .map(|n| ctx.text(n).to_string())
+    super::util::field_text(ctx.source, node, field)
 }
 
 /// Build a qualified name from the current scope and a local name.
@@ -597,11 +571,9 @@ fn build_qname(scope: &[String], name: &str) -> String {
 }
 
 fn ext_scope(scope: &[String], name: &str) -> Vec<String> {
-    let mut s = scope.to_vec();
-    s.push(name.to_string());
-    s
+    super::util::extend_scope(scope, name)
 }
 
 fn hash_node(ctx: &Ctx, node: Node) -> String {
-    crate::scanner::hash_content(ctx.text(node).as_bytes())
+    super::util::node_hash(ctx.source, node)
 }

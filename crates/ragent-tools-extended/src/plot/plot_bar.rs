@@ -1,4 +1,4 @@
-//! `plot_bar` tool — render a bar chart on the message window.
+//! `plot_bar` tool - render a bar chart on the message window.
 
 use anyhow::{Result, bail};
 use ratatui_plt::prelude::{Color, Theme};
@@ -6,9 +6,9 @@ use ratatui_plt::widgets::bar_chart::{BarChart, BarDataset, BarMode, Orientation
 use serde_json::{Value, json};
 
 use super::{
-    DEFAULT_HEIGHT, DEFAULT_WIDTH, MAX_HEIGHT, MAX_WIDTH, canvas_dimension, error_output,
-    parse_bool, parse_color, parse_floats, parse_labels, parse_title, render_ansi, render_text,
-    success_output,
+    DEFAULT_HEIGHT, DEFAULT_WIDTH, MAX_HEIGHT, MAX_WIDTH, canvas_dimension, checked_len,
+    error_output, parse_bool, parse_color, parse_floats, parse_labels, parse_title, render_ansi,
+    render_text, success_output,
 };
 use crate::{Tool, ToolContext, ToolOutput};
 
@@ -22,7 +22,10 @@ struct BarSpec {
 fn parse_datasets(input: &Value) -> Result<Vec<BarSpec>> {
     let input = &super::coerce_json(input);
     let arr = match input {
-        Value::Array(a) => a.clone(),
+        Value::Array(a) => {
+            checked_len(a, "'datasets'")?;
+            a.clone()
+        }
         Value::Object(_) => vec![input.clone()],
         other => bail!("expected a dataset or array of datasets, got {other}"),
     };
@@ -62,8 +65,8 @@ impl Tool for PlotBarTool {
     }
 
     fn description(&self) -> &'static str {
-        "Render a bar chart on the message window. Required: 'categories' — \
-         an array of category labels; 'datasets' — one object \
+        "Render a bar chart on the message window. Required: 'categories' - \
+         an array of category labels; 'datasets' - one object \
          {name?, data: [values], color?} or an array of such objects. \
          Optional: 'title', 'x_label', 'y_label', 'width', 'height', \
          'horizontal' (bool, default false), 'stacked' (bool, default false)."

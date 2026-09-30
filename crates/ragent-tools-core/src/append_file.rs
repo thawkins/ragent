@@ -24,8 +24,8 @@ impl Tool for AppendFileTool {
     fn description(&self) -> &'static str {
         "Append text to the end of an existing file, creating the file and any \
          missing parent directories if they do not already exist. Required \
-         parameters: `path` (string) — the file to append to, and `content` \
-         (string) — the text to append. This is more efficient than rewriting \
+         parameters: `path` (string) - the file to append to, and `content` \
+         (string) - the text to append. This is more efficient than rewriting \
          the whole file when only adding content to the end. Avoid using this \
          for mid-file edits; use `edit` or `apply_patch` instead."
     }

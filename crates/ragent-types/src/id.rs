@@ -1,6 +1,6 @@
 //! Typed newtype wrappers for identifiers used throughout ragent.
 //!
-//! Each wrapper ensures type safety — a [`SessionId`] cannot be accidentally
+//! Each wrapper ensures type safety - a [`SessionId`] cannot be accidentally
 //! used where a [`MessageId`] is expected, even though both are strings.
 //!
 //! # Examples

@@ -247,7 +247,7 @@ struct SubagentCompleteP<'a> {
     success: bool,
     duration_ms: u64,
     /// Termination signature (`"complete"`, `"continued"`, `"truncated"`,
-    /// `"error"`, …) so remote consumers can flag possibly-incomplete
+    /// `"error"`, ...) so remote consumers can flag possibly-incomplete
     /// reports.
     finish_reason: &'a str,
 }
@@ -309,7 +309,12 @@ struct TeamNameP<'a> {
 
 /// Serialize a payload directly to a JSON string, bypassing `serde_json::Value`.
 fn to_data<T: Serialize>(payload: &T) -> String {
-    serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(payload).unwrap_or_else(|e| {
+        // F-L7: a serialization failure must not silently ship an empty object
+        // on the wire; log it so the degraded payload is diagnosable.
+        tracing::warn!(error = %e, "failed to serialize SSE payload; sending empty object");
+        "{}".to_string()
+    })
 }
 
 /// Return the SSE event type name for an [`Event`] variant.
@@ -1179,26 +1184,19 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
 
 /// Render an [`Event`] for logs without any credential material.
 ///
-/// SEC-ragent-types-006 (SECTASKS T-066): the derived `Debug` on [`Event`]
-/// prints OAuth tokens and device codes verbatim, and the workspace has
-/// precedent for logging whole events with `{:?}`. Use this at any log site.
+/// SEC-ragent-types-006 / ANTIPAT M3.14: [`Event`]'s hand-written `Debug`
+/// already replaces the credential-bearing variants with `*_present` flags and
+/// runs the shared redaction pass, so this is a thin delegate that keeps the
+/// historic public entry point without duplicating the credential-shape
+/// knowledge in `ragent-server`.
 #[must_use]
 pub fn redacted_event_debug(event: &Event) -> String {
-    match event {
-        Event::CopilotDeviceFlowComplete { api_base, token } => format!(
-            "CopilotDeviceFlowComplete {{ token_present: {}, api_base: {api_base:?} }}",
-            !token.is_empty()
-        ),
-        Event::CopilotDeviceFlowStartResult { device_code, .. } => format!(
-            "CopilotDeviceFlowStartResult {{ device_code_present: {}, .. }}",
-            device_code.as_ref().is_some_and(|c| !c.is_empty())
-        ),
-        other => format!("{other:?}"),
-    }
+    format!("{event:?}")
 }
+
 /// Convert a `ragent_agent` [`Event`] into an Axum [`SseEvent`].
 ///
-/// Payloads are serialized directly from typed structs — no intermediate
+/// Payloads are serialized directly from typed structs - no intermediate
 /// `serde_json::Value` is allocated.
 ///
 /// ```rust

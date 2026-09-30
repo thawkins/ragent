@@ -6,7 +6,7 @@
 //! `OpenSCAD` is a declarative CAD scripting language. Its main code units are
 //! **modules** (imperative geometry generators) and **functions** (pure
 //! expressions that return values). Both can accept parameters. Variables are
-//! declared with `=`, and files are pulled in via `include <…>` or `use <…>`.
+//! declared with `=`, and files are pulled in via `include <...>` or `use <...>`.
 
 use super::{LanguageParser, ParsedFile};
 use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
@@ -41,13 +41,7 @@ impl LanguageParser for OpenScadParser {
         let tree = Self::parse_tree(source)?;
         let root = tree.root_node();
 
-        let mut ctx = Ctx {
-            source,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            references: Vec::new(),
-            next_id: 0,
-        };
+        let mut ctx = Ctx::new(source);
 
         walk(&mut ctx, root, None, &[]);
 
@@ -60,33 +54,20 @@ impl LanguageParser for OpenScadParser {
     }
 }
 
-// ── Extraction context ────────────────────────────────────���─────────────────
+// ── Extraction context ─────────────────────────────────────────────────────
 
 /// Mutable context threaded through recursive extraction.
-struct Ctx<'a> {
-    source: &'a [u8],
-    symbols: Vec<Symbol>,
-    imports: Vec<ImportEntry>,
-    references: Vec<SymbolRef>,
-    next_id: i64,
-}
-
-impl Ctx<'_> {
-    const fn alloc_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
-    fn text(&self, node: Node) -> &str {
-        node.utf8_text(self.source).unwrap_or("")
-    }
-}
+/// Parser-local alias of the shared extraction context.
+type Ctx<'a> = super::ctx::Ctx<'a>;
 
 // ── Recursive walk ──────────────────────────────────────────────────────────
 
 /// Walk a tree-sitter node, extracting `OpenSCAD` symbols and imports.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
+    let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
+        return;
+    };
+
     match node.kind() {
         "module_item" => extract_module_item(ctx, node, parent_id, scope),
         "function_item" => extract_function_item(ctx, node, parent_id, scope),
@@ -104,7 +85,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     }
 }
 
-// ── Module item (`module <name>(…) { … }`) ──────────────────────────────────
+// ── Module item (`module <name>(...) { ... }`) ──────────────────────────────────
 
 /// Extract an `OpenSCAD` module definition.
 ///
@@ -146,7 +127,7 @@ fn extract_module_item(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope:
     }
 }
 
-// ── Function item (`function <name>(…) = …;`) ──────────────────────────────
+// ── Function item (`function <name>(...) = ...;`) ──────────────────────────────
 
 /// Extract an `OpenSCAD` function definition.
 ///
@@ -188,7 +169,7 @@ fn extract_function_item(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scop
 /// A `var_declaration` contains a single `assignment` child, which has fields
 /// `name` (identifier or `special_variable`) and `value` (expression).
 fn extract_var_declaration(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
-    // The var_declaration node wraps an assignment — delegate to assignment
+    // The var_declaration node wraps an assignment - delegate to assignment
     // extraction by finding the assignment child.
     let cursor = &mut node.walk();
     for child in node.children(cursor) {
@@ -210,7 +191,7 @@ fn extract_assignment(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: 
         return;
     }
 
-    // OpenSCAD special variables ($fn, $fa, $fs, etc.) start with '$' — skip.
+    // OpenSCAD special variables ($fn, $fa, $fs, etc.) start with '$' - skip.
     if name.starts_with('$') {
         return;
     }
@@ -315,7 +296,7 @@ fn extract_function_call_ref(ctx: &mut Ctx, node: Node) {
         if n.kind() == "identifier" {
             ctx.text(n).to_string()
         } else {
-            // Expression node — find the first identifier child.
+            // Expression node - find the first identifier child.
             child_text_by_kind(ctx, n, "identifier").unwrap_or_default()
         }
     } else {
@@ -365,15 +346,12 @@ fn build_qname(scope: &[String], name: &str) -> String {
 
 /// Extend the scope with one more level.
 fn ext_scope(scope: &[String], name: &str) -> Vec<String> {
-    let mut v = scope.to_vec();
-    v.push(name.to_string());
-    v
+    super::util::extend_scope(scope, name)
 }
 
-/// Compute a blake3 hash of the node's text for change detection.
+/// Content hash of the node's text for change detection.
 fn hash_node(ctx: &Ctx, node: Node) -> String {
-    let text = ctx.text(node);
-    blake3::hash(text.as_bytes()).to_hex().to_string()
+    super::util::node_hash(ctx.source, node)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

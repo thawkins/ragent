@@ -4,9 +4,9 @@
 //! in `~/Projects/opencode/packages/core/src/session/compaction.ts`. It ties together
 //! the pieces built by the earlier compaction tasks:
 //!
-//! - [`super::serializer`] — flattens history into a transcript.
-//! - [`super::prompt`] — builds the Markdown summarisation prompt.
-//! - [`super::estimator`] — fast token estimate + trigger event helper.
+//! - [`super::serializer`] - flattens history into a transcript.
+//! - [`super::prompt`] - builds the Markdown summarisation prompt.
+//! - [`super::estimator`] - fast token estimate + trigger event helper.
 //!
 //! # Flow
 //!
@@ -156,11 +156,11 @@ pub struct CompactionOutcome {
 ///
 /// # Arguments
 ///
-/// * `messages` — full conversation history (consumed; head and recent
-///   messages are *moved* out rather than cloned — PERF-038).
-/// * `config` — compaction configuration (supplies `keep_fraction` and
+/// * `messages` - full conversation history (consumed; head and recent
+///   messages are *moved* out rather than cloned - PERF-038).
+/// * `config` - compaction configuration (supplies `keep_fraction` and
 ///   `tool_output_max_chars`).
-/// * `context_window` — the model's context window in tokens, used to turn the
+/// * `context_window` - the model's context window in tokens, used to turn the
 ///   configured `keep` fraction into an absolute token budget.
 #[must_use]
 pub fn select(
@@ -229,7 +229,7 @@ pub fn select(
     // PERF-038: build the head transcript from the strings already serialised
     // above (no second serialisation pass), then partition the owned history in
     // place by *moving* each retained message into either the head or the recent
-    // tail — no per-message deep clone.
+    // tail - no per-message deep clone.
     //
     // Join the head transcript with a single allocation pre-sized to the exact
     // byte count (segment bytes + two separator bytes between segments).
@@ -290,13 +290,13 @@ pub fn select(
 ///
 /// # Arguments
 ///
-/// * `client` — the LLM client to call.
-/// * `request` — the summarisation request (a single user message).
-/// * `stream_config` — stream timeout configuration (the per-chunk stall cap
+/// * `client` - the LLM client to call.
+/// * `request` - the summarisation request (a single user message).
+/// * `stream_config` - stream timeout configuration (the per-chunk stall cap
 ///   is derived from `timeout_secs`, clamped to the 60 s built-in cap).
-/// * `event_bus` — event bus for compaction progress notices.
-/// * `session_id` — session identifier used in log lines.
-/// * `cancel` — cooperative cancellation flag checked between chunks.
+/// * `event_bus` - event bus for compaction progress notices.
+/// * `session_id` - session identifier used in log lines.
+/// * `cancel` - cooperative cancellation flag checked between chunks.
 ///
 /// # Errors
 ///
@@ -422,7 +422,7 @@ pub fn build_summary_request(
 /// The message carries the summary as a single [`MessagePart::Text`]. The
 /// verbatim recent turns are kept as separate messages in the new history
 /// (see [`compact`]), so the compaction message itself only needs the summary
-/// text — this matches how the history loader (FR-007) reconstructs context:
+/// text - this matches how the history loader (FR-007) reconstructs context:
 /// the compaction summary plus every message from the compaction point onward.
 #[must_use]
 pub fn build_compaction_message(session_id: &str, summary: &str) -> Message {
@@ -441,7 +441,7 @@ pub fn build_compaction_message(session_id: &str, summary: &str) -> Message {
 ///
 /// 1. Selects the verbatim recent tail via [`select`].
 /// 2. Bails out when there is nothing to summarise (empty head and no previous
-///    compaction summary to update) — mirroring OpenCode's guard.
+///    compaction summary to update) - mirroring OpenCode's guard.
 /// 3. Bails out when the summary prompt itself would overflow the context
 ///    window minus the summary output budget.
 /// 4. Emits a compaction-started event, calls the LLM, and collects the summary.
@@ -451,21 +451,21 @@ pub fn build_compaction_message(session_id: &str, summary: &str) -> Message {
 ///
 /// # Arguments
 ///
-/// * `session_id` — the session being compacted.
-/// * `messages` — full conversation history (consumed).
-/// * `model` — the model id to use for the summarisation call.
-/// * `context_window` — the model's context window in tokens (used for the
+/// * `session_id` - the session being compacted.
+/// * `messages` - full conversation history (consumed).
+/// * `model` - the model id to use for the summarisation call.
+/// * `context_window` - the model's context window in tokens (used for the
 ///   overflow guard).
-/// * `output_tokens` — the request's max output tokens; the summary output cap
+/// * `output_tokens` - the request's max output tokens; the summary output cap
 ///   is `min(output_tokens, SUMMARY_OUTPUT_TOKENS)`.
-/// * `config` — compaction configuration.
-/// * `previous_summary` — an existing compaction summary to update, if any
+/// * `config` - compaction configuration.
+/// * `previous_summary` - an existing compaction summary to update, if any
 ///   (FR-010).
-/// * `client` — the LLM client used for the summarisation call.
-/// * `event_bus` — event bus for compaction-lifecycle events.
-/// * `reason` — compaction reason (`"auto"` for pre-send triggers, `"overflow"`
+/// * `client` - the LLM client used for the summarisation call.
+/// * `event_bus` - event bus for compaction-lifecycle events.
+/// * `reason` - compaction reason (`"auto"` for pre-send triggers, `"overflow"`
 ///   for emergency triggers).
-/// * `cancel` — cooperative cancellation flag checked between stream chunks.
+/// * `cancel` - cooperative cancellation flag checked between stream chunks.
 ///
 /// # Errors
 ///
@@ -503,7 +503,7 @@ pub async fn compact(
     //
     //    After the `select` fix that forces at least one message into the head
     //    when there are 2+ messages, this guard now only fires when there is
-    //    literally a single non-compaction message — the entire conversation is
+    //    literally a single non-compaction message - the entire conversation is
     //    one turn. In that case compaction cannot help, so we skip silently
     //    (debug log only) rather than showing a confusing user-visible notice.
     if split.head_messages.is_empty() && previous_summary.is_none() {
@@ -517,7 +517,7 @@ pub async fn compact(
     }
 
     // 3. Build the summarisation prompt. The head transcript was already
-    //    serialised by `select` — reuse it to avoid duplicate work. The cap
+    //    serialised by `select` - reuse it to avoid duplicate work. The cap
     //    adapts to the context window so small local models get a
     //    proportionally smaller prompt instead of a fixed 60k-char one.
     let head_transcript = cap_head_transcript(&split.head_transcript, context_window);
@@ -662,19 +662,19 @@ pub async fn compact(
 /// retries the turn once with the compacted history.
 ///
 /// It is `async` (it calls the LLM to produce the summary) and never silently
-/// drops structured message parts (FR-014) — the serialiser represents them
+/// drops structured message parts (FR-014) - the serialiser represents them
 /// textually inside the summary prompt.
 ///
 /// # Arguments
 ///
-/// * `session_id` — the session being compacted.
-/// * `chat_messages` — provider-facing chat history; replaced in place on
+/// * `session_id` - the session being compacted.
+/// * `chat_messages` - provider-facing chat history; replaced in place on
 ///   success.
-/// * `model` — the model id used for the summarisation call.
-/// * `context_window`, `output_tokens`, `config` — forwarded to [`compact`].
-/// * `client` — the LLM client used for the summarisation call.
-/// * `event_bus` — event bus for compaction-lifecycle events.
-/// * `cancel` — cooperative cancellation flag forwarded to [`compact`].
+/// * `model` - the model id used for the summarisation call.
+/// * `context_window`, `output_tokens`, `config` - forwarded to [`compact`].
+/// * `client` - the LLM client used for the summarisation call.
+/// * `event_bus` - event bus for compaction-lifecycle events.
+/// * `cancel` - cooperative cancellation flag forwarded to [`compact`].
 ///
 /// # Errors
 ///

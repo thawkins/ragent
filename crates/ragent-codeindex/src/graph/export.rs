@@ -2,12 +2,12 @@
 //!
 //! Produces two output formats:
 //!
-//! - **`graph.json`** — a JSON document with `nodes` and `edges` arrays.
+//! - **`graph.json`** - a JSON document with `nodes` and `edges` arrays.
 //!   Each node carries attributes (`id`, `name`, `kind`, `source_file`,
 //!   `line`, `community`, `degree`) and each edge carries attributes
 //!   (`source`, `target`, `kind`, `confidence`, `line`).  This format is
 //!   compatible with common graph-visualisation tools (FR-020).
-//! - **`GRAPH_REPORT.md`** — a human-readable Markdown summary with
+//! - **`GRAPH_REPORT.md`** - a human-readable Markdown summary with
 //!   graph statistics, top god-nodes, and a community breakdown (FR-010).
 //!
 //! Both functions are read-only: they query the `graph_edges`,
@@ -19,6 +19,10 @@ use crate::types::{Confidence, SymbolFilter, SymbolKind};
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+
+/// Number of highest-degree symbols listed in the `GRAPH_REPORT.md`
+/// "Top God-Nodes" table (ANTIPAT M5.3 / audit 3.3).
+const REPORT_TOP_GOD_NODES: usize = 20;
 
 // ── JSON Export (FR-020) ───────────────────────────────────────────────────
 
@@ -183,7 +187,10 @@ pub fn to_report(store: &IndexStore) -> Result<String> {
 
     let mut god_nodes: Vec<(i64, usize)> = degree_map.iter().map(|(&id, &deg)| (id, deg)).collect();
     god_nodes.sort_by(|a, b| b.1.cmp(&a.1));
-    let top_n = god_nodes.iter().take(20).collect::<Vec<_>>();
+    let top_n = god_nodes
+        .iter()
+        .take(REPORT_TOP_GOD_NODES)
+        .collect::<Vec<_>>();
 
     if !top_n.is_empty() {
         report.push_str("## Top God-Nodes (Highest Degree)\n\n");
@@ -206,7 +213,7 @@ pub fn to_report(store: &IndexStore) -> Result<String> {
         report.push('\n');
     }
 
-    // ── Community Breakdown ──��─────────────────────────────────────────
+    // ── Community Breakdown ───────────────────────────────────────────
     if !communities.is_empty() {
         // Group symbols by community.
         let mut comm_groups: HashMap<i64, Vec<(i64, Option<String>)>> = HashMap::new();

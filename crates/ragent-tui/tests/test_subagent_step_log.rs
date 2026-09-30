@@ -7,7 +7,7 @@
 //! the owning agent — so the visible log step count matches the panel column.
 
 use ragent_agent::event::Event;
-use ragent_team::team::{TeamConfig, TeamMember};
+use ragent_agent::team::{TeamConfig, TeamMember};
 use ragent_tui::app::LogLevel;
 use ragent_types::event::ToolCallBatchEntry;
 

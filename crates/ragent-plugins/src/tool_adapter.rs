@@ -45,7 +45,7 @@ use std::sync::Arc;
 use ragent_tools_core::{Tool, ToolContext, ToolOutput};
 use serde_json::Value as JsonValue;
 
-use crate::error::PluginError;
+use crate::error::{PluginError, with_plugin};
 use crate::lifecycle::PluginManager;
 use crate::manifest::PluginToolDecl;
 use crate::runtime::SandboxContext;
@@ -217,8 +217,8 @@ impl PluginManager {
     /// manager-owning thread because rquickjs contexts are `!Send`.
     ///
     /// The returned [`ToolOutput`] follows the v1 marshalling contract
-    /// documented on this module. Any failure — exception, timeout, memory
-    /// ceiling, serialisation error, stale adapter — is contained and
+    /// documented on this module. Any failure - exception, timeout, memory
+    /// ceiling, serialisation error, stale adapter - is contained and
     /// reported as a [`PluginError`], never a panic (FR-026); the returned
     /// boolean is `true` when this call tripped the auto-unload threshold
     /// (the session then deregisters the plugin's tools and records
@@ -277,8 +277,8 @@ impl PluginManager {
 ///
 /// # Errors
 ///
-/// Propagates sandbox failures — [`PluginError::Script`], `Timeout`,
-/// `MemoryLimit`, `Engine` — plus the contract's serialisation and
+/// Propagates sandbox failures - [`PluginError::Script`], `Timeout`,
+/// `MemoryLimit`, `Engine` - plus the contract's serialisation and
 /// invalid-JSON errors, all with `plugin_id` attached (FR-015, FR-026).
 pub fn dispatch_sandbox(
     context: &SandboxContext,
@@ -370,18 +370,6 @@ fn marshal_return(plugin_id: &str, returned: &str) -> Result<ToolOutput, PluginE
         content: value.to_string(),
         metadata: Some(value),
     })
-}
-
-/// Attach the plugin id to a sandbox error (the runtime classifies errors
-/// without knowing which plugin it served).
-fn with_plugin(error: PluginError, plugin_id: &str) -> PluginError {
-    match error {
-        PluginError::Script { detail, .. } => PluginError::Script {
-            plugin: plugin_id.to_string(),
-            detail,
-        },
-        other => other,
-    }
 }
 
 /// Quote a Rust string as a JavaScript string literal (JSON escaping is

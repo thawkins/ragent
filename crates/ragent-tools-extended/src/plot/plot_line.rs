@@ -1,4 +1,4 @@
-//! `plot_line` tool — render a line (XY) plot on the message window.
+//! `plot_line` tool - render a line (XY) plot on the message window.
 //!
 //! Draws one or more series of `[x, y]` points as a line chart using
 //! `ratatui-plt`, rendered off-screen to a plain-text canvas. Useful for
@@ -36,7 +36,7 @@ impl Tool for PlotLineTool {
 
     fn description(&self) -> &'static str {
         "Render a line (XY) plot on the message window. Required parameter: \
-         'series' — either one object {name?, data: [[x,y],...], color?} or an \
+         'series' - either one object {name?, data: [[x,y],...], color?} or an \
          array of such objects. Optional: 'title', 'x_label', 'y_label', \
          'width' (default 80), 'height' (default 20, max 80), 'x_grid', \
          'y_grid', 'show_legend'. Returns the plot as terminal text."

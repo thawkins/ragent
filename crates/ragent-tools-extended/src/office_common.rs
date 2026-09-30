@@ -6,7 +6,6 @@
 use std::path::Path;
 
 use anyhow::{Result, bail};
-use ragent_types::strutil::{floor_char_boundary, truncate_bytes_no_ellipsis};
 
 /// Supported Office document formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +72,7 @@ pub fn detect_format(path: &Path) -> Result<OfficeFormat> {
 pub use ragent_tools_core::path_util::resolve_path;
 
 /// Maximum output size in bytes before truncation (100 KB).
-pub const MAX_OUTPUT_BYTES: usize = 100 * 1024;
+pub use crate::docio::MAX_OUTPUT_BYTES;
 
 /// Truncates output text if it exceeds [`MAX_OUTPUT_BYTES`].
 ///
@@ -86,53 +85,17 @@ pub const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 /// The original text if within limits, or a truncated version with a notice.
 #[must_use]
 pub fn truncate_output(text: String) -> String {
-    if text.len() <= MAX_OUTPUT_BYTES {
-        text
-    } else {
-        // Prepare suffix message first so we can ensure final output is smaller
-        let suffix = format!(
-            "\n\n... [Output truncated at {}KB. Use range/sheet/slide selection to read specific sections.]",
+    crate::docio::truncate_output_with_suffix(
+        text,
+        &format!(
+            "
+
+... [Output truncated at {}KB. Use range/sheet/slide selection to read specific sections.]",
             MAX_OUTPUT_BYTES / 1024
-        );
-        let truncated = truncate_bytes_no_ellipsis(&text, MAX_OUTPUT_BYTES);
-        // Prefer cutting at the last newline, but ensure we leave room for the suffix
-        let max_body = MAX_OUTPUT_BYTES.saturating_sub(suffix.len() + 1);
-        let max_body = max_body.min(truncated.len());
-        let mut boundary = truncated.rfind('\n').unwrap_or(truncated.len());
-        if boundary > max_body {
-            boundary = max_body;
-        }
-        // `max_body` is a byte budget and can land inside a multibyte character;
-        // snap back to a char boundary before slicing (FUNC-003).
-        boundary = floor_char_boundary(&truncated, boundary);
-        format!("{}{}", &truncated[..boundary], suffix)
-    }
+        ),
+    )
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn truncate_output_does_not_panic_on_multibyte_boundary() {
-        // Build a string longer than MAX_OUTPUT_BYTES where the byte limit
-        // falls inside a multi-byte character ("é" is 2 bytes).
-        let chunk = "é".repeat(200);
-        let text = chunk.repeat(MAX_OUTPUT_BYTES / chunk.len() + 1);
-        let result = truncate_output(text);
-        assert!(
-            result.len() <= MAX_OUTPUT_BYTES + 128,
-            "truncated result unexpectedly large"
-        );
-        assert!(
-            result.contains("Output truncated"),
-            "truncated result should include the truncation notice"
-        );
-    }
-
-    #[test]
-    fn truncate_output_keeps_short_text_unchanged() {
-        let text = "Short text with émojis 🎉".to_string();
-        assert_eq!(truncate_output(text.clone()), text);
-    }
-}
+#[path = "../tests/inline/office_common_tests.rs"]
+mod tests;

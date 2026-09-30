@@ -31,15 +31,15 @@
 //!
 //! ## Environment Variables Available to Hooks
 //!
-//! - `RAGENT_TRIGGER` — the trigger name (e.g., `on_session_start`)
-//! - `RAGENT_WORKING_DIR` — the session working directory
-//! - `RAGENT_ERROR` — error message (only for `on_error` trigger)
-//! - `RAGENT_TURN_NUMBER` — current turn/iteration number (for `on_turn_start`/`on_turn_end`)
-//! - `RAGENT_COMPACTION_REASON` — reason for compaction (for `on_compaction`)
-//! - `CLAUDE_PLUGIN_ROOT` — the declaring plugin's root (only for a
+//! - `RAGENT_TRIGGER` - the trigger name (e.g., `on_session_start`)
+//! - `RAGENT_WORKING_DIR` - the session working directory
+//! - `RAGENT_ERROR` - error message (only for `on_error` trigger)
+//! - `RAGENT_TURN_NUMBER` - current turn/iteration number (for `on_turn_start`/`on_turn_end`)
+//! - `RAGENT_COMPACTION_REASON` - reason for compaction (for `on_compaction`)
+//! - `CLAUDE_PLUGIN_ROOT` - the declaring plugin's root (only for a
 //!   plugin-contributed hook whose command references `${CLAUDE_PLUGIN_ROOT}`)
-//! - `CLAUDE_PROJECT_DIR` — alias of `RAGENT_WORKING_DIR`, for plugin hooks
-//! - `RAGENT_TOOL_*` — see [`HookTrigger`] (only for the tool-scoped triggers)
+//! - `CLAUDE_PROJECT_DIR` - alias of `RAGENT_WORKING_DIR`, for plugin hooks
+//! - `RAGENT_TOOL_*` - see [`HookTrigger`] (only for the tool-scoped triggers)
 //!
 //! A plugin-contributed hook additionally receives the event as JSON on stdin
 //! (the Claude hook protocol shape), so a dialect script can read
@@ -427,6 +427,7 @@ fn run_hook_command(
     cmd.stdin(Stdio::piped());
     let mut child = cmd.spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
+        // INTENTIONAL: best-effort hook stdin write; the hook result is checked below
         let _ = stdin.write_all(payload.as_bytes());
     }
     child.wait_with_output()
@@ -440,7 +441,7 @@ pub enum PreToolUseResult {
     /// `hook_approved` is `true` when a hook explicitly decided `{"decision":
     /// "allow"}` (SEC-ragent-agent-001 / SECTASKS T-007). The processor uses
     /// that flag to distinguish "a hook approved this" from "no hook decided",
-    /// so an explicit policy `Deny` is never overridden by a hook — a hook may
+    /// so an explicit policy `Deny` is never overridden by a hook - a hook may
     /// only satisfy an `Ask`.
     Allow {
         /// `true` when a hook explicitly approved the call.
@@ -468,10 +469,10 @@ pub enum PreToolUseResult {
 /// Result of running a post-tool-use hook.
 ///
 /// The exit code of each hook determines the variant:
-/// - `0` → [`Ok`](Self::Ok) with optional modified output from stdout JSON.
-/// - `1` → [`Warn`](Self::Warn) — a warning was emitted.
-/// - `2` → [`Flagged`](Self::Flagged) — the result is policy-violated.
-/// - `>= 3` → treated as a hook failure (no effect on the result).
+/// - `0` -> [`Ok`](Self::Ok) with optional modified output from stdout JSON.
+/// - `1` -> [`Warn`](Self::Warn) - a warning was emitted.
+/// - `2` -> [`Flagged`](Self::Flagged) - the result is policy-violated.
+/// - `>= 3` -> treated as a hook failure (no effect on the result).
 #[derive(Debug, Clone)]
 pub enum PostToolUseResult {
     /// The hook completed successfully; optionally carries modified output and
@@ -686,7 +687,7 @@ pub fn run_pre_tool_use_hooks(
                     trigger = "pre_tool_use",
                     command = %hook.command,
                     error = %e,
-                    "PreToolUse hook spawn failed — treating as hook error (exit >=3)"
+                    "PreToolUse hook spawn failed - treating as hook error (exit >=3)"
                 );
             }
         }
@@ -700,12 +701,12 @@ pub fn run_pre_tool_use_hooks(
 /// This function runs hooks asynchronously and allows them to modify the tool
 /// output. It also interprets exit codes to publish warnings and flags:
 ///
-/// - **Exit code 0** — parse stdout JSON for `modified_output`.
-/// - **Exit code 1** — emit `tracing::warn!` and publish `Event::HookWarning`.
-/// - **Exit code 2** — publish `Event::ToolResultFlagged` with stderr as the
+/// - **Exit code 0** - parse stdout JSON for `modified_output`.
+/// - **Exit code 1** - emit `tracing::warn!` and publish `Event::HookWarning`.
+/// - **Exit code 2** - publish `Event::ToolResultFlagged` with stderr as the
 ///   reason. The tool result is not suppressed, but the flag appears in the
 ///   session log and TUI.
-/// - **Exit code ≥ 3** — treat as a hook failure (`tracing::error!`).
+/// - **Exit code >= 3** - treat as a hook failure (`tracing::error!`).
 ///
 /// `session_id` and `event_bus` are used to publish events. When `event_bus` is
 /// `None`, warnings and flags are only logged.
@@ -876,7 +877,7 @@ pub async fn run_post_tool_use_hooks(
                     trigger = "post_tool_use",
                     command = %command,
                     error = %e,
-                    "PostToolUse hook spawn failed — treating as hook error (exit >=3)"
+                    "PostToolUse hook spawn failed - treating as hook error (exit >=3)"
                 );
             }
             Ok(Err(_)) => {
@@ -891,7 +892,7 @@ pub async fn run_post_tool_use_hooks(
                     trigger = "post_tool_use",
                     command = %command,
                     timeout_secs = hook.timeout_secs,
-                    "PostToolUse hook timed out — treating as hook error (exit >=3)"
+                    "PostToolUse hook timed out - treating as hook error (exit >=3)"
                 );
             }
         }
@@ -914,7 +915,7 @@ pub async fn run_post_tool_use_hooks(
 ///
 /// A hook signals a continuation in three ways, all accepted here:
 ///
-/// - exit code **2** — the hook blocked; its stdout JSON (Claude's
+/// - exit code **2** - the hook blocked; its stdout JSON (Claude's
 ///   `decision: "block"` / `hookSpecificOutput.additionalContext`) and then its
 ///   stderr are captured as the findings;
 /// - exit code **0** with `hookSpecificOutput.additionalContext`;
@@ -1130,6 +1131,7 @@ async fn run_hook_command_async(
     cmd.stdin(Stdio::piped());
     let mut child = cmd.spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
+        // INTENTIONAL: best-effort hook stdin write; the hook result is checked below
         let _ = stdin.write_all(payload.as_bytes()).await;
     }
     child.wait_with_output().await

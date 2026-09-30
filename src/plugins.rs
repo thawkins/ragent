@@ -15,8 +15,8 @@
 //!   [`CliPluginSurface`] seeded from the built-in tool registry and the
 //!   `SLASH_COMMANDS` triggers so collision rejection (FR-024) matches the live
 //!   TUI surface;
-//! - reports print to stdout, with the `From: /plugins …` TUI attribution
-//!   header replaced by a plain `ragent plugins …` line and the `## /plugins`
+//! - reports print to stdout, with the `From: /plugins ...` TUI attribution
+//!   header replaced by a plain `ragent plugins ...` line and the `## /plugins`
 //!   usage title rewritten to `## ragent plugins` (FR-021: plain text for the
 //!   non-TUI surface).
 //!
@@ -32,37 +32,18 @@ use anyhow::Result;
 
 use ragent_plugins::{PLUGIN_SUBCOMMANDS, render_help, run_plugin_subcommand, subcommand_of};
 
-/// The CLI usage block. Structurally mirrors the shared
-/// [`render_help`] body (T-014, FR-014) but uses the non-TUI surface spelling
-/// and the `## ragent plugins` title (FR-021).
-const CLI_USAGE: &str = "\
-## ragent plugins command reference
+/// Render the `ragent plugins` help block from the shared
+/// [`ragent_plugins::render_help`] body.
+///
+/// Delegates to the `ragent-plugins` crate rather than hand-copying the usage
+/// table (see `ANTIPAT.md` M3.10), then rewrites the TUI attribution/heading
+/// for the non-TUI surface.
+#[must_use]
+fn cli_usage() -> String {
+    cli_body(&render_help("help"))
+}
 
-Manage third-party Codex and Claude Code/Desktop plugins loaded in a sandboxed
-JavaScript runtime.
-
-| Command | Arguments | Description |
-|---|---|---|
-| `ragent plugins list [--verbose]` | optional `--verbose` | List discovered plugins with state, contributions, and (with `--verbose`) telemetry counters. The `MCP` and `MCP Tools` columns give each plugin's MCP server count and the total tools those servers advertise (`?` until the server connects). |
-| `ragent plugins add <source> [--force]` | required `source`, optional `--force` | Install a plugin and validate its manifest. It is enabled and loads at the next session start. |
-| `ragent plugins remove <pluginid>` | required `pluginid` | Uninstall a plugin from the store. Refused while the plugin is enabled. |
-| `ragent plugins enable <pluginid>` | required `pluginid` | Mark a plugin enabled, load it now, and register its tools and commands. |
-| `ragent plugins disable <pluginid>` | required `pluginid` | Unload a plugin and deregister its tools and commands without deleting files. |
-| `ragent plugins test <pluginid>` | required `pluginid` | Load a plugin in an isolated harness, invoke each contributed tool once, and report per-step results. |
-| `ragent plugins stores` | optional `--check` | Report each store's effective endpoint and its source; add `--check` to also contact each store and report availability and plugin count. |
-| `ragent plugins help` | none | Show this usage block. |
-
-### Sources accepted by `ragent plugins add`
-
-- a local directory containing a plugin manifest;
-- a local `.zip` or `.tar.gz` package file;
-- an `https://` URL pointing at a `.zip`/`.tar.gz` package (non-`https` URLs are refused).
-
-Existing plugins with the same id are not overwritten unless `--force` is given.
-
-The same operations are available in the TUI as the `/plugins` slash command.";
-
-/// Entry point for `ragent plugins <args…>`, invoked from the CLI dispatcher.
+/// Entry point for `ragent plugins <args...>`, invoked from the CLI dispatcher.
 ///
 /// `args` is everything after the `plugins` verb (may be empty). Prints the
 /// report for the requested subcommand to stdout and returns `Ok(())`; refusal
@@ -78,7 +59,7 @@ pub fn run_cli(args: &[String]) -> Result<()> {
 
     // A bare `ragent plugins` renders usage (FR-014 parity).
     if text.is_empty() {
-        println!("{CLI_USAGE}");
+        println!("{}", cli_usage());
         return Ok(());
     }
 
@@ -88,7 +69,7 @@ pub fn run_cli(args: &[String]) -> Result<()> {
     let known = PLUGIN_SUBCOMMANDS.contains(&sub);
     // `help` and any unrecognised subcommand both render the usage block.
     if sub == "help" || !known {
-        println!("{CLI_USAGE}");
+        println!("{}", cli_usage());
         return Ok(());
     }
 
@@ -148,8 +129,9 @@ fn run_plugin_subcommand_offline(
 }
 
 /// Rewrite a shared `/plugins` report for the CLI surface (FR-021): the TUI
-/// `From: /plugins …` attribution becomes `ragent plugins …`, and the
-/// `## /plugins` usage heading becomes `## ragent plugins`. The body is
+/// `From: /plugins ...` attribution becomes `ragent plugins ...`, the
+/// `## /plugins` usage heading becomes `## ragent plugins`, and the usage-table
+/// rows swap the `/plugins` trigger for `ragent plugins`. The body is
 /// otherwise printed verbatim so both surfaces stay in step.
 #[must_use]
 fn cli_body(report: &str) -> String {
@@ -157,6 +139,8 @@ fn cli_body(report: &str) -> String {
         .strip_prefix("From: /plugins")
         .map(|tail| format!("ragent plugins{tail}"))
         .unwrap_or_else(|| report.to_string());
-    let rewritten = rewritten.replace("## /plugins", "## ragent plugins");
+    let rewritten = rewritten
+        .replace("## /plugins", "## ragent plugins")
+        .replace("`/plugins ", "`ragent plugins ");
     format!("{rewritten}\n")
 }

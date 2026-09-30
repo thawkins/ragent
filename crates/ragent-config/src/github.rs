@@ -4,7 +4,7 @@
 //! ragent can authenticate to GitHub with three credentials, tried in this
 //! order:
 //!
-//! 1. `GITHUB_TOKEN` — an explicit environment override; always wins.
+//! 1. `GITHUB_TOKEN` - an explicit environment override; always wins.
 //! 2. The stored token file written by `/github login`
 //!    (`~/.config/ragent/github_token`, legacy `~/.ragent/github_token`).
 //! 3. The authenticated `gh` CLI (`gh auth token`), used as a fallback.
@@ -32,7 +32,7 @@ use crate::user_dirs::global_github_token_path;
 ///
 /// Used by tests (and by users who do not want ragent to run `gh`) to keep
 /// credential resolution deterministic. The Copilot provider's token
-/// resolution is unaffected — it never consults `gh`.
+/// resolution is unaffected - it never consults `gh`.
 pub const NO_GH_CLI_ENV: &str = "RAGENT_GITHUB_NO_GH_CLI";
 
 /// Cache of the successful `gh auth token` lookup. `None` until the first
@@ -41,12 +41,12 @@ pub const NO_GH_CLI_ENV: &str = "RAGENT_GITHUB_NO_GH_CLI";
 static GH_CLI_TOKEN_CACHE: Mutex<Option<String>> = Mutex::new(None);
 
 /// Read the `GITHUB_TOKEN` environment variable, ignoring a blank value.
+///
+/// Uses [`crate::config::read_env`] so the blank-filter policy matches the
+/// `RAGENT_CONFIG` / `RAGENT_CONFIG_CONTENT` reads (ANTIPAT L-9).
 #[must_use]
 pub fn env_token() -> Option<String> {
-    match std::env::var("GITHUB_TOKEN") {
-        Ok(token) if !token.trim().is_empty() => Some(token.trim().to_owned()),
-        _ => None,
-    }
+    crate::config::read_env("GITHUB_TOKEN").map(|token| token.trim().to_owned())
 }
 
 /// True when `token` is a GitHub App token: `ghu_` (user-to-server) or `ghs_`
@@ -119,8 +119,8 @@ pub fn gh_cli_token() -> Option<String> {
 /// Combine an already-read stored token with the credential chain, spawning
 /// the `gh` CLI only when the stored token is unusable.
 ///
-/// A viable (non-app, non-empty) stored token wins outright. An app token —
-/// which cannot create repositories — defers to the `gh` token when present,
+/// A viable (non-app, non-empty) stored token wins outright. An app token -
+/// which cannot create repositories - defers to the `gh` token when present,
 /// and is otherwise returned unchanged so read-only GitHub tooling keeps
 /// working.
 #[must_use]
@@ -134,7 +134,7 @@ pub fn resolve_from_stored(stored: Option<String>) -> Option<String> {
 /// Apply the credential precedence to an explicit stored token and `gh` token.
 ///
 /// Pure helper (no process access) mirroring [`resolve_from_stored`]; exposed
-/// so callers that already hold a `gh` token — and tests — can combine the
+/// so callers that already hold a `gh` token - and tests - can combine the
 /// two without spawning a subprocess.
 #[must_use]
 pub fn choose_token(stored: Option<String>, gh: Option<String>) -> Option<String> {
@@ -144,7 +144,7 @@ pub fn choose_token(stored: Option<String>, gh: Option<String>) -> Option<String
     }
 }
 
-/// Resolve the effective GitHub token: `GITHUB_TOKEN` env → stored file →
+/// Resolve the effective GitHub token: `GITHUB_TOKEN` env -> stored file ->
 /// `gh` CLI (with the app-token downgrade of [`resolve_from_stored`]).
 ///
 /// Uses the plain (uncached) stored-token read; callers with their own cache

@@ -144,7 +144,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "agents",
-        description: "List all agents — built-in and custom",
+        description: "List all agents - built-in and custom",
         subcommands: AGENT_SUBS,
         flags: EMPTY,
     },
@@ -300,7 +300,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "history",
-        description: "Browse and re-use previous inputs; /history [filter] restricts to matching entries (↑/↓ to select, Enter to insert, c to copy to clipboard); /history help",
+        description: "Browse and re-use previous inputs; /history [filter] restricts to matching entries (^/v to select, Enter to insert, c to copy to clipboard); /history help",
         subcommands: EMPTY,
         flags: EMPTY,
     },
@@ -384,7 +384,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "perf",
-        description: "Alias for /profile — toggle the agent-loop perf panel (/perf on|off|help)",
+        description: "Alias for /profile - toggle the agent-loop perf panel (/perf on|off|help)",
         subcommands: EMPTY,
         flags: EMPTY,
     },
@@ -588,7 +588,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "yolo",
-        description: "Toggle YOLO mode — bypass all command validation and tool restrictions (/yolo help)",
+        description: "Toggle YOLO mode - bypass all command validation and tool restrictions (/yolo help)",
         subcommands: EMPTY,
         flags: EMPTY,
     },

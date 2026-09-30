@@ -4,13 +4,13 @@
 //! exists in a different file, the resolver determines which definition is
 //! the most likely target.  Candidates are ranked by:
 //!
-//! 1. **Same file** — the definition is in the same file as the reference.
-//! 2. **Same module** — the definition is in a file that shares a module
+//! 1. **Same file** - the definition is in the same file as the reference.
+//! 2. **Same module** - the definition is in a file that shares a module
 //!    path prefix (directory) with the reference.
-//! 3. **Same language** — the definition is in a file with the same
+//! 3. **Same language** - the definition is in a file with the same
 //!    language as the reference.
-//! 4. **Highest visibility** — `pub` > `pub(crate)` > `pub(super)` > private.
-//! 5. **First match** — the first definition in database order.
+//! 4. **Highest visibility** - `pub` > `pub(crate)` > `pub(super)` > private.
+//! 5. **First match** - the first definition in database order.
 //!
 //! This resolution is deterministic and does not use an LLM or embeddings
 //! (FR-001).  The resulting confidence tag is `EXTRACTED` for same-file
@@ -27,8 +27,8 @@ pub struct ResolvedSymbol {
     pub id: i64,
     /// The file ID of the resolved symbol.
     pub file_id: i64,
-    /// Whether the resolution was same-file (`true` → `EXTRACTED`) or
-    /// cross-file (`false` → `INFERRED`).
+    /// Whether the resolution was same-file (`true` -> `EXTRACTED`) or
+    /// cross-file (`false` -> `INFERRED`).
     pub same_file: bool,
 }
 

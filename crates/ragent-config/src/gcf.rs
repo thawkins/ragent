@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 pub struct GcfConfig {
     /// Whether GCF encoding of eligible JSON tool results is enabled.
     ///
-    /// Default: `false` — tool results reach the LLM as raw JSON.
+    /// Default: `false` - tool results reach the LLM as raw JSON.
     #[serde(default)]
     pub enabled: bool,
 }

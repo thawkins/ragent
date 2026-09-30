@@ -1,4 +1,4 @@
-//! `stock_options` tool — options chain for a ticker.
+//! `stock_options` tool - options chain for a ticker.
 
 use crate::finance::default_provider;
 use crate::{Tool, ToolContext, ToolOutput};

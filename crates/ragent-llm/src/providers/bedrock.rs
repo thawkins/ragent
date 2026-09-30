@@ -38,16 +38,23 @@ use std::collections::HashMap;
 use std::pin::Pin;
 
 use super::bedrock_credentials::{AwsCredentials, resolve_aws_credentials};
-use super::tool_cache::{ToolFormat, cached_tools};
-
 use super::thinking::{
     anthropic_thinking_levels_for_model, anthropic_thinking_payload_from_request,
     request_uses_unsupported_anthropic_display,
 };
+use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::event::FinishReason;
+
+use super::anthropic::DEFAULT_MAX_OUTPUT_TOKENS;
+use super::media::{extract_base64_from_data_uri, extract_mime_from_data_uri};
+
+/// Fallback context window (tokens) reported for a discovered Bedrock model
+/// whose `ListFoundationModels` entry does not declare one (ANTIPAT M6.10).
+const DEFAULT_DISCOVERED_CONTEXT_WINDOW: usize = 128_000;
 
 // ---------------------------------------------------------------------------
 // Bedrock model ID helpers
@@ -62,7 +69,7 @@ fn is_anthropic_model(model_id: &str) -> bool {
 
 /// Strips the `@bedrock` suffix from a model ID (FR-013).
 ///
-/// Example: `claude-sonnet-4-20250514@bedrock` → `claude-sonnet-4-20250514`
+/// Example: `claude-sonnet-4-20250514@bedrock` -> `claude-sonnet-4-20250514`
 fn strip_bedrock_suffix(model_id: &str) -> String {
     model_id
         .split_once('@')
@@ -160,6 +167,14 @@ impl Provider for BedrockProvider {
         options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
         let credentials = resolve_aws_credentials(options)?;
+        // ANTIPAT 3.6: register the resolved credential material with the
+        // shared redaction registry so any text passed through
+        // `redact_secrets` masks it.
+        ragent_types::sanitize::register_secret(&credentials.access_key);
+        ragent_types::sanitize::register_secret(&credentials.secret_key);
+        if let Some(token) = &credentials.session_token {
+            ragent_types::sanitize::register_secret(token);
+        }
 
         // Determine model ID from options (injected by the session processor)
         let raw_model_id = options
@@ -410,20 +425,8 @@ pub fn bedrock_default_models() -> Vec<ModelInfo> {
 }
 
 // ---------------------------------------------------------------------------
-// BedrockAnthropicClient — Messages API for Claude models (FR-011)
+// BedrockAnthropicClient - Messages API for Claude models (FR-011)
 // ---------------------------------------------------------------------------
-
-/// Extract the MIME type from a `data:<mime>;base64,<data>` URI.
-fn extract_mime_from_data_uri(uri: &str) -> Option<&str> {
-    uri.strip_prefix("data:").and_then(|s| s.split(';').next())
-}
-
-/// Extract the raw base64 payload from a `data:<mime>;base64,<data>` URI.
-fn extract_base64_from_data_uri(uri: &str) -> Option<&str> {
-    uri.find(",base64,")
-        .map(|i| &uri[i + 8..])
-        .or_else(|| uri.find(',').map(|i| &uri[i + 1..]))
-}
 
 /// HTTP client for Anthropic models on Bedrock using the Messages API.
 ///
@@ -489,7 +492,7 @@ impl BedrockAnthropicClient {
         let mut body = json!({
             "anthropic_version": "bedrock-2023-06-01",
             "messages": messages,
-            "max_tokens": request.max_tokens.unwrap_or(8192),
+            "max_tokens": request.max_tokens.unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS),
             "stream": true
         });
 
@@ -580,7 +583,7 @@ impl LlmClient for BedrockAnthropicClient {
 
         let stream = response.bytes_stream();
 
-        // Parse the Anthropic SSE stream — same format as direct Anthropic API
+        // Parse the Anthropic SSE stream - same format as direct Anthropic API
         let event_stream = async_stream::stream! {
             // PERF-063: pre-size the SSE accumulation buffer so a long stream does
             // not repeatedly realloc/copy as it grows.
@@ -612,7 +615,7 @@ impl LlmClient for BedrockAnthropicClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "Bedrock: stream stalled — no data received for {}s",
+                                "Bedrock: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -659,7 +662,15 @@ impl LlmClient for BedrockAnthropicClient {
 
                         let parsed: Value = match serde_json::from_str(data) {
                             Ok(v) => v,
-                            Err(_) => continue,
+                            Err(e) => {
+                                // FUNC-032 (ANTIPAT 3.3): log the dropped frame.
+                                tracing::warn!(
+                                    error = %e,
+                                    frame = %data,
+                                    "Bedrock: dropping malformed SSE data frame"
+                                );
+                                continue;
+                            }
                         };
 
                         // Check for Bedrock-level errors in the event
@@ -762,7 +773,7 @@ impl LlmClient for BedrockAnthropicClient {
 }
 
 // ---------------------------------------------------------------------------
-// BedrockConverseClient — Converse API for non-Anthropic models (FR-012)
+// BedrockConverseClient - Converse API for non-Anthropic models (FR-012)
 // ---------------------------------------------------------------------------
 
 /// HTTP client for non-Anthropic models on Bedrock using the Converse API.
@@ -900,7 +911,7 @@ impl BedrockConverseClient {
 
 /// Converts a MIME type to the Converse API image format string.
 ///
-/// E.g. `image/png` → `png`, `image/jpeg` → `jpeg`
+/// E.g. `image/png` -> `png`, `image/jpeg` -> `jpeg`
 fn mime_to_converse_format(mime: &str) -> &str {
     match mime {
         "image/png" => "png",
@@ -992,7 +1003,7 @@ impl LlmClient for BedrockConverseClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "Bedrock: stream stalled — no data received for {}s",
+                                "Bedrock: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -1039,7 +1050,15 @@ impl LlmClient for BedrockConverseClient {
 
                           let parsed: Value = match serde_json::from_str(data) {
                               Ok(v) => v,
-                              Err(_) => continue,
+                              Err(e) => {
+                                  // FUNC-032 (ANTIPAT 3.3): log the dropped frame.
+                                  tracing::warn!(
+                                      error = %e,
+                                      frame = %data,
+                                      "Bedrock: dropping malformed SSE data frame"
+                                  );
+                                  continue;
+                              }
                           };
 
                           // Check for Bedrock-level errors
@@ -1138,15 +1157,16 @@ impl LlmClient for BedrockConverseClient {
 /// Handles a non-success HTTP response from the Bedrock API.
 ///
 /// Maps Bedrock-specific error types to actionable error messages:
-/// - `ThrottlingException` → retryable (FR-027)
-/// - `ValidationException` → descriptive (FR-028)
-/// - `AccessDeniedException` → permissions (FR-029)
+/// - `ThrottlingException` -> retryable (FR-027)
+/// - `ValidationException` -> descriptive (FR-028)
+/// - `AccessDeniedException` -> permissions (FR-029)
 /// - Never exposes raw AWS keys in errors (FR-030)
 async fn handle_bedrock_error(
     response: reqwest::Response,
 ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
     let status = response.status();
-    let body_text = response.text().await.unwrap_or_default();
+    // ANTIPAT 3.1/3.2: capped error-body read.
+    let body_text = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
 
     // Try to parse as a Bedrock error JSON
     let error_json: Value = serde_json::from_str(&body_text).unwrap_or_default();
@@ -1165,14 +1185,14 @@ async fn handle_bedrock_error(
         .unwrap_or(&body_text);
 
     match error_type {
-        // FR-027: Throttling → retryable error
+        // FR-027: Throttling -> retryable error
         "ThrottlingException" | "ServiceUnavailableException" => {
             tracing::warn!(status = %status, error_type = %error_type, message = %message, "Bedrock throttling error");
             bail!(
                 "Bedrock rate limited ({error_type}): {message}. Please retry after a short wait."
             );
         }
-        // FR-029: Access denied → permissions error
+        // FR-029: Access denied -> permissions error
         "AccessDeniedException" => {
             tracing::error!(status = %status, message = %message, "Bedrock access denied");
             bail!(
@@ -1180,7 +1200,7 @@ async fn handle_bedrock_error(
                  Ensure your AWS principal has 'bedrock:InvokeModel' permission for the requested model."
             );
         }
-        // FR-028: Validation → descriptive error
+        // FR-028: Validation -> descriptive error
         "ValidationException" => {
             tracing::warn!(status = %status, message = %message, "Bedrock validation error");
             bail!("Bedrock validation error: {message}");
@@ -1289,7 +1309,7 @@ pub async fn discover_bedrock_models(
                                         Vec::new()
                                     },
                                 },
-                                context_window: 128_000,
+                                context_window: DEFAULT_DISCOVERED_CONTEXT_WINDOW,
                                 max_output: None,
                                 request_multiplier: None,
                                 thinking_config: None,
@@ -1325,299 +1345,5 @@ pub async fn discover_bedrock_models(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use ragent_types::ToolDefinition;
-
-    use super::*;
-
-    #[test]
-    fn test_bedrock_provider_id_and_name() {
-        let provider = BedrockProvider;
-        assert_eq!(provider.id(), "bedrock");
-        assert_eq!(provider.name(), "Amazon Bedrock");
-    }
-
-    #[test]
-    fn test_bedrock_default_models_non_empty() {
-        let models = bedrock_default_models();
-        assert!(!models.is_empty());
-        assert!(models.len() >= 8, "Expected at least 8 default models");
-
-        // All models should have bedrock provider_id
-        for model in &models {
-            assert_eq!(model.provider_id, "bedrock");
-        }
-    }
-
-    #[test]
-    fn test_is_anthropic_model() {
-        assert!(is_anthropic_model(
-            "anthropic.claude-sonnet-4-20250514-v1:0"
-        ));
-        assert!(is_anthropic_model(
-            "anthropic.claude-3-5-haiku-20241022-v1:0"
-        ));
-        assert!(!is_anthropic_model("amazon.nova-pro-v1:0"));
-        assert!(!is_anthropic_model(
-            "meta.llama4-maverick-17b-instruct-v1:0"
-        ));
-        assert!(!is_anthropic_model("mistral.mistral-large-2407-v1:0"));
-    }
-
-    #[test]
-    fn test_strip_bedrock_suffix() {
-        assert_eq!(
-            strip_bedrock_suffix("claude-sonnet-4-20250514@bedrock"),
-            "claude-sonnet-4-20250514"
-        );
-        assert_eq!(
-            strip_bedrock_suffix("anthropic.claude-sonnet-4-20250514-v1:0"),
-            "anthropic.claude-sonnet-4-20250514-v1:0"
-        );
-        assert_eq!(strip_bedrock_suffix("no-suffix"), "no-suffix");
-    }
-
-    #[test]
-    fn test_resolve_bedrock_model_id_short_aliases() {
-        assert_eq!(
-            resolve_bedrock_model_id("claude-sonnet-4-20250514"),
-            "anthropic.claude-sonnet-4-20250514-v1:0"
-        );
-        assert_eq!(
-            resolve_bedrock_model_id("claude-opus-4-20250514"),
-            "anthropic.claude-opus-4-20250514-v1:0"
-        );
-        assert_eq!(resolve_bedrock_model_id("nova-pro"), "amazon.nova-pro-v1:0");
-        assert_eq!(
-            resolve_bedrock_model_id("nova-lite"),
-            "amazon.nova-lite-v1:0"
-        );
-        assert_eq!(
-            resolve_bedrock_model_id("nova-micro"),
-            "amazon.nova-micro-v1:0"
-        );
-    }
-
-    #[test]
-    fn test_resolve_bedrock_model_id_full_id_passthrough() {
-        // Full Bedrock model IDs should pass through unchanged
-        assert_eq!(
-            resolve_bedrock_model_id("anthropic.claude-sonnet-4-20250514-v1:0"),
-            "anthropic.claude-sonnet-4-20250514-v1:0"
-        );
-    }
-
-    #[test]
-    fn test_resolve_bedrock_model_id_with_suffix() {
-        assert_eq!(
-            resolve_bedrock_model_id("claude-sonnet-4-20250514@bedrock"),
-            "anthropic.claude-sonnet-4-20250514-v1:0"
-        );
-    }
-
-    #[test]
-    fn test_build_bedrock_base_url_default() {
-        let url = build_bedrock_base_url("us-east-1", None);
-        assert_eq!(url, "https://bedrock.us-east-1.amazonaws.com");
-    }
-
-    #[test]
-    fn test_build_bedrock_base_url_custom_endpoint() {
-        let url =
-            build_bedrock_base_url("us-east-1", Some("https://my-vpc-endbedrock.example.com"));
-        assert_eq!(url, "https://my-vpc-endbedrock.example.com");
-    }
-
-    #[test]
-    fn test_build_bedrock_base_url_trailing_slash() {
-        let url = build_bedrock_base_url("eu-west-1", Some("https://endpoint.example.com/"));
-        assert_eq!(url, "https://endpoint.example.com");
-    }
-
-    #[test]
-    fn test_converse_tool_config() {
-        let tools = vec![ToolDefinition {
-            name: "get_weather".to_string(),
-            description: "Get weather for a location".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "location": { "type": "string" }
-                }
-            }),
-        }];
-
-        let config = cached_tools(ToolFormat::Bedrock, &tools).bedrock_tool_config_object();
-
-        // Should have tools array with toolSpec.
-        let tool_specs = config["tools"].as_array().unwrap();
-        assert_eq!(tool_specs.len(), 1);
-        assert_eq!(tool_specs[0]["toolSpec"]["name"], "get_weather");
-        assert_eq!(
-            tool_specs[0]["toolSpec"]["description"],
-            "Get weather for a location"
-        );
-        // inputSchema should wrap parameters in "json" key
-        assert!(tool_specs[0]["toolSpec"]["inputSchema"]["json"].is_object());
-    }
-
-    #[test]
-    fn test_mime_to_converse_format() {
-        assert_eq!(mime_to_converse_format("image/png"), "png");
-        assert_eq!(mime_to_converse_format("image/jpeg"), "jpeg");
-        assert_eq!(mime_to_converse_format("image/gif"), "gif");
-        assert_eq!(mime_to_converse_format("image/webp"), "webp");
-        assert_eq!(mime_to_converse_format("image/unknown"), "png"); // Default
-    }
-
-    #[test]
-    fn test_bedrock_anthropic_request_body() {
-        let creds = AwsCredentials {
-            access_key: "test".to_string(),
-            secret_key: "test".to_string(),
-            session_token: None,
-            region: "us-east-1".to_string(),
-        };
-        let client = BedrockAnthropicClient {
-            credentials: creds,
-            base_url: "https://bedrock.us-east-1.amazonaws.com".to_string(),
-            model_id: "anthropic.claude-sonnet-4-20250514-v1:0".to_string(),
-            http: crate::provider::http_client::create_streaming_http_client(),
-        };
-
-        let request = ChatRequest {
-            model: "anthropic.claude-sonnet-4-20250514-v1:0".to_string(),
-            messages: std::sync::Arc::new(vec![crate::llm::ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("Hello".to_string()),
-            }]),
-            tools: std::sync::Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: Some(1024),
-            system: Some(std::sync::Arc::from("You are helpful")),
-            options: HashMap::new(),
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: None,
-        };
-
-        let body = client.build_request_body(&request);
-
-        // Should have anthropic_version for Bedrock
-        assert_eq!(body["anthropic_version"], "bedrock-2023-06-01");
-        // Should have system prompt
-        assert_eq!(body["system"], "You are helpful");
-        // Should have max_tokens
-        assert_eq!(body["max_tokens"], 1024);
-        // Should have stream enabled
-        assert_eq!(body["stream"], true);
-    }
-
-    #[test]
-    fn test_bedrock_converse_request_body() {
-        let creds = AwsCredentials {
-            access_key: "test".to_string(),
-            secret_key: "test".to_string(),
-            session_token: None,
-            region: "us-east-1".to_string(),
-        };
-        let client = BedrockConverseClient {
-            credentials: creds,
-            base_url: "https://bedrock.us-east-1.amazonaws.com".to_string(),
-            model_id: "amazon.nova-pro-v1:0".to_string(),
-            http: crate::provider::http_client::create_streaming_http_client(),
-        };
-
-        let request = ChatRequest {
-            model: "amazon.nova-pro-v1:0".to_string(),
-            messages: std::sync::Arc::new(vec![crate::llm::ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("Hello".to_string()),
-            }]),
-            tools: std::sync::Arc::new(vec![ToolDefinition {
-                name: "get_time".to_string(),
-                description: "Get current time".to_string(),
-                parameters: json!({"type": "object"}),
-            }]),
-            temperature: Some(0.7),
-            top_p: None,
-            max_tokens: Some(2048),
-            system: Some(std::sync::Arc::from("Be concise")),
-            options: HashMap::new(),
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: None,
-        };
-
-        let body = client.build_request_body(&request);
-
-        // Should have system as array with text
-        let system = body["system"].as_array().unwrap();
-        assert_eq!(system[0]["text"], "Be concise");
-
-        // Should have inferenceConfig
-        // Temperature is f32, JSON float may have precision loss
-        let temp = body["inferenceConfig"]["temperature"].as_f64().unwrap();
-        assert!((temp - 0.7).abs() < 0.01, "Expected ~0.7, got {temp}");
-        assert_eq!(body["inferenceConfig"]["maxTokens"], 2048);
-
-        // Should have toolConfig with toolSpec
-        let tools_arr = body["toolConfig"]["tools"].as_array().unwrap();
-        assert_eq!(tools_arr.len(), 1);
-        assert_eq!(tools_arr[0]["toolSpec"]["name"], "get_time");
-    }
-
-    #[test]
-    fn test_no_api_key_header_in_signed_request() {
-        // FR-016: Verify that SigV4 signing does not produce x-api-key or Bearer auth
-        let creds = AwsCredentials {
-            access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
-            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
-            session_token: None,
-            region: "us-east-1".to_string(),
-        };
-
-        let mut headers: Vec<(String, String)> = Vec::new();
-        super::super::bedrock_sigv4::sign_request(
-            "POST",
-            "https://bedrock.us-east-1.amazonaws.com/model/test/invoke",
-            &mut headers,
-            b"{}",
-            &creds,
-        )
-        .unwrap();
-
-        // No x-api-key header
-        assert!(!headers.iter().any(|(k, _)| k == "x-api-key"));
-        // No Bearer auth
-        assert!(
-            !headers
-                .iter()
-                .any(|(k, v)| k == "Authorization" && v.starts_with("Bearer"))
-        );
-        // Must have AWS4-HMAC-SHA256 auth
-        assert!(
-            headers
-                .iter()
-                .any(|(k, v)| k == "Authorization" && v.starts_with("AWS4-HMAC-SHA256"))
-        );
-    }
-
-    #[test]
-    fn test_credentials_not_in_error_messages() {
-        // FR-030: Verify that error messages don't contain raw keys
-        // We test by checking the resolve function returns credential-related
-        // errors without exposing actual key values
-        let options = HashMap::new();
-        let result = resolve_aws_credentials(&options);
-        if let Err(e) = result {
-            let msg = e.to_string();
-            // The error message should NOT contain actual AWS key patterns
-            assert!(!msg.contains("AKIA"));
-            assert!(!msg.contains("wJalr"));
-        }
-    }
-}
+#[path = "../tests/inline/bedrock_tests.rs"]
+mod tests;

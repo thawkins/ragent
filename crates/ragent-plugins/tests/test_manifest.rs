@@ -4,9 +4,10 @@
 use std::path::{Path, PathBuf};
 
 use ragent_plugins::{
-    HOST_API_VERSION, PluginDialect, PluginError, UNSUP_DESKTOP_MOUNTS, UNSUP_DESKTOP_WINDOW,
-    UNSUP_EXEC, UNSUP_FS, UNSUP_MCP, UNSUP_SKILLS, check_api_version, derive_id,
-    parse_claude_manifest, parse_codex_manifest, parse_manifest, parse_plugin_dir,
+    DEFAULT_PLUGIN_VERSION, HOST_API_VERSION, PluginDialect, PluginError, TIMEOUT_UNIT_THRESHOLD,
+    UNSUP_DESKTOP_MOUNTS, UNSUP_DESKTOP_WINDOW, UNSUP_EXEC, UNSUP_FS, UNSUP_MCP, UNSUP_SKILLS,
+    check_api_version, derive_id, parse_claude_manifest, parse_codex_manifest, parse_manifest,
+    parse_plugin_dir,
 };
 
 fn root() -> PathBuf {
@@ -119,6 +120,102 @@ fn codex_fs_and_exec_permissions_are_recorded_unsupported() {
         vec![UNSUP_FS.to_string(), UNSUP_EXEC.to_string()]
     );
     assert!(parsed.descriptor.requested_permissions.is_empty());
+}
+
+// ── ANTIPAT M11: version required-ness is the same for both dialects ────────
+
+#[test]
+fn codex_manifest_without_version_defaults_to_the_shared_value() {
+    let parsed = parse_codex_manifest(&root(), codex_rel(), br#"{ "name": "w", "entry": "i.js" }"#)
+        .expect("a missing version must not fail the parse");
+    assert_eq!(parsed.descriptor.version, DEFAULT_PLUGIN_VERSION);
+    assert_eq!(parsed.descriptor.version, "0.0.0");
+}
+
+#[test]
+fn both_dialects_default_a_missing_version_identically() {
+    let codex = parse_codex_manifest(&root(), codex_rel(), br#"{ "name": "w" }"#).expect("codex");
+    let claude = parse_claude_manifest(
+        &root(),
+        Path::new(".claude-plugin/plugin.json"),
+        br#"{ "name": "w" }"#,
+    )
+    .expect("claude");
+    assert_eq!(codex.descriptor.version, claude.descriptor.version);
+    assert_eq!(codex.descriptor.version, DEFAULT_PLUGIN_VERSION);
+}
+
+// ── ANTIPAT M12: one permission model for both dialects ─────────────────────
+
+#[test]
+fn codex_and_claude_permissions_normalise_to_the_same_model() {
+    let codex = parse_codex_manifest(
+        &root(),
+        codex_rel(),
+        br#"{ "name": "w", "permissions": { "network": ["outbound", "dns"] } }"#,
+    )
+    .expect("codex");
+    let claude = parse_claude_manifest(
+        &root(),
+        Path::new(".claude-plugin/plugin.json"),
+        br#"{ "name": "w", "permissions": ["network.outbound", "network.dns"] }"#,
+    )
+    .expect("claude");
+    assert_eq!(
+        codex.descriptor.requested_permissions,
+        vec!["network.outbound".to_string(), "network.dns".to_string()]
+    );
+    assert_eq!(
+        codex.descriptor.requested_permissions, claude.descriptor.requested_permissions,
+        "equivalent grants must normalise to the same PermissionRequest list"
+    );
+}
+
+#[test]
+fn claude_permission_phrasing_is_normalised_into_the_shared_model() {
+    // A spaced, mixed-case grant converges on the dotted lowercase form.
+    let parsed = parse_claude_manifest(
+        &root(),
+        Path::new(".claude-plugin/plugin.json"),
+        br#"{ "name": "w", "permissions": ["Filesystem.Read", "  "] }"#,
+    )
+    .expect("claude");
+    assert_eq!(
+        parsed.descriptor.requested_permissions,
+        vec!["filesystem.read".to_string()],
+        "a blank entry contributes nothing"
+    );
+}
+
+#[test]
+fn codex_network_grant_with_existing_prefix_is_not_double_prefixed() {
+    let parsed = parse_codex_manifest(
+        &root(),
+        codex_rel(),
+        br#"{ "name": "w", "permissions": { "network": ["network.inbound"] } }"#,
+    )
+    .expect("codex");
+    assert_eq!(
+        parsed.descriptor.requested_permissions,
+        vec!["network.inbound".to_string()]
+    );
+}
+
+// ── ANTIPAT M13: Codex reports an unbridgeable `skills` section ─────────────
+
+#[test]
+fn codex_unbridgeable_skills_section_is_recorded_unsupported() {
+    let parsed = parse_codex_manifest(
+        &root(),
+        codex_rel(),
+        br#"{ "name": "bad-skills", "skills": { "dir": "./skills" } }"#,
+    )
+    .expect("should parse");
+    assert_eq!(
+        parsed.descriptor.unsupported_capabilities,
+        vec![UNSUP_SKILLS.to_string()],
+        "the Codex parser must flag what the Claude parser already flags"
+    );
 }
 
 #[test]
@@ -760,6 +857,71 @@ fn extract_hooks_accepts_claude_timeout_and_skips_non_command_types() {
     let hooks = ragent_plugins::extract_hooks("p", root().as_path(), Some(&raw));
     assert_eq!(hooks.len(), 1, "non-command entry types are skipped");
     assert_eq!(hooks[0].timeout_secs, Some(180));
+}
+
+#[test]
+fn extract_hooks_honours_explicit_timeout_secs_and_ms_field_names() {
+    // ANTIPAT M16: an explicit unit is never guessed at.
+    let secs = serde_json::json!({
+        "SessionStart": [ { "hooks": [
+            { "type": "command", "command": "a.sh", "timeout_secs": 1500 }
+        ] } ]
+    });
+    let hooks = ragent_plugins::extract_hooks("p", root().as_path(), Some(&secs));
+    assert_eq!(
+        hooks[0].timeout_secs,
+        Some(1500),
+        "an explicit `timeout_secs` of 1500 is 1500s, not misread as milliseconds"
+    );
+
+    let millis = serde_json::json!({
+        "SessionStart": [ { "hooks": [
+            { "type": "command", "command": "a.sh", "timeout_ms": 1500 }
+        ] } ]
+    });
+    let hooks = ragent_plugins::extract_hooks("p", root().as_path(), Some(&millis));
+    assert_eq!(hooks[0].timeout_secs, Some(1), "1500ms truncates to 1s");
+
+    // The alias spellings resolve the same way.
+    let aliases = serde_json::json!({
+        "SessionStart": [ { "hooks": [
+            { "type": "command", "command": "a.sh", "timeout_seconds": 7 },
+            { "type": "command", "command": "b.sh", "timeout_millis": 2500 }
+        ] } ]
+    });
+    let hooks = ragent_plugins::extract_hooks("p", root().as_path(), Some(&aliases));
+    assert_eq!(hooks[0].timeout_secs, Some(7));
+    assert_eq!(hooks[1].timeout_secs, Some(2));
+}
+
+#[test]
+fn extract_hooks_unitless_timeout_falls_back_to_the_documented_threshold() {
+    // The bare Claude `timeout` field keeps the magnitude heuristic: at the
+    // threshold and above is milliseconds, below is seconds.
+    let below = serde_json::json!({
+        "SessionStart": [ { "hooks": [
+            { "type": "command", "command": "a.sh",
+              "timeout": TIMEOUT_UNIT_THRESHOLD - 1 }
+        ] } ]
+    });
+    let hooks = ragent_plugins::extract_hooks("p", root().as_path(), Some(&below));
+    assert_eq!(
+        hooks[0].timeout_secs,
+        Some(TIMEOUT_UNIT_THRESHOLD - 1),
+        "a value below the threshold is read as seconds"
+    );
+
+    let at = serde_json::json!({
+        "SessionStart": [ { "hooks": [
+            { "type": "command", "command": "a.sh", "timeout": TIMEOUT_UNIT_THRESHOLD }
+        ] } ]
+    });
+    let hooks = ragent_plugins::extract_hooks("p", root().as_path(), Some(&at));
+    assert_eq!(
+        hooks[0].timeout_secs,
+        Some(1),
+        "a value at the threshold is read as milliseconds"
+    );
 }
 
 #[test]

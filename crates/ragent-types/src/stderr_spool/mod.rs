@@ -1,7 +1,7 @@
 //! Truncating stderr spool shared by the ragent binary and the TUI.
 //!
 //! The TUI runs on the alternate screen, so anything written to the process's
-//! raw stderr — Rust's default panic hook, `eprintln!`, C-library diagnostics —
+//! raw stderr - Rust's default panic hook, `eprintln!`, C-library diagnostics -
 //! is painted over by the next ratatui frame and effectively lost. The binary
 //! redirects fd 2 into a [`Spool`] before entering the TUI and the TUI attaches
 //! a mirror sink that also surfaces the text in its log panel.
@@ -14,4 +14,4 @@
 
 mod spool;
 
-pub use spool::{SPOOL_MAX_LINES, Spool};
+pub use spool::{SPOOL_MAX_BYTES, SPOOL_MAX_LINES, Spool};

@@ -1,4 +1,4 @@
-//! `git_checkout` — Switch branches or restore files.
+//! `git_checkout` - Switch branches or restore files.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -63,6 +63,10 @@ impl Tool for GitCheckoutTool {
                 return Err(anyhow::anyhow!("Paths array is empty."));
             }
             let source = input["source"].as_str().unwrap_or("HEAD");
+            // SEC-ragent-tools-vcs-00x (ANTIPAT A-1): `source` is LLM-supplied
+            // and precedes the `--` separator, so it could be parsed as an
+            // option. Every operand pushed before the separator is validated.
+            crate::git::reject_option_like(source, "source")?;
             args = vec!["checkout".to_string(), source.to_string(), "--".to_string()];
             for p in ps {
                 if let Some(s) = p.as_str() {
@@ -74,6 +78,7 @@ impl Tool for GitCheckoutTool {
             let branch = input["branch"]
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("Must provide either 'branch' or 'paths'."))?;
+            crate::git::reject_option_like(branch, "branch")?;
 
             let create = input["create_branch"].as_bool().unwrap_or(false);
 

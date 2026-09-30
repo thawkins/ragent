@@ -1,7 +1,7 @@
 //! Edge derivation for the semantic code graph.
 //!
 //! Edges are derived deterministically from the indexed symbols, imports,
-//! and references — no LLM or embeddings are used.  See the parent module
+//! and references - no LLM or embeddings are used.  See the parent module
 //! docs for an overview.
 
 use super::BuildResult;
@@ -28,6 +28,18 @@ const MAX_CANDIDATES_PER_REF: usize = 32;
 /// multiply out. When the budget trips the pass stops and logs, rather than
 /// exhausting memory.
 const MAX_EDGES_PER_PASS: usize = 500_000;
+
+/// Maximum candidate symbols a single `impl` block may fan out to when
+/// deriving `Inherits` / `Implements` edges.
+///
+/// ANTIPAT M6.4 (audit 4.2): `derive_impl_edges` is a cross product over the
+/// whole-repository candidate list for an impl name or trait name, so a common
+/// name defined in thousands of places would otherwise produce an unbounded
+/// pair set - exactly the fan-out [`MAX_CANDIDATES_PER_REF`] already bounds for
+/// ref/import edges. The same bound is applied here so the SEC-ragent-codeindex-004
+/// guard is not defeated by the impl path. Below the cap the behaviour is
+/// unchanged.
+const MAX_IMPL_CANDIDATES: usize = MAX_CANDIDATES_PER_REF;
 
 /// Extract a trait name from an `impl` signature such as
 /// `impl Trait for Type` or `impl Trait<Type> for Type`.
@@ -60,12 +72,12 @@ fn extract_trait_from_signature(sig: &str) -> Option<String> {
 /// Shared name-resolution context built once from all symbols.
 ///
 /// This avoids rebuilding the same `HashMap`s for every file during a full
-/// reindex — the previous code rebuilt them N times (once per file), which
-/// was O(N²) in both time and memory.
+/// reindex - the previous code rebuilt them N times (once per file), which
+/// was O(N^2) in both time and memory.
 struct NameResolution {
-    /// symbol_name → Vec<(symbol_id, file_id)>
+    /// symbol_name -> Vec<(symbol_id, file_id)>
     name_to_symbols: HashMap<String, Vec<(i64, i64)>>,
-    /// symbol_id → file_id
+    /// symbol_id -> file_id
     sym_file_map: HashMap<i64, i64>,
     /// All symbols grouped by file_id for `find_containing_symbol` lookups.
     symbols_by_file: HashMap<i64, Vec<Symbol>>,
@@ -198,7 +210,7 @@ fn derive_import_edges(
 ) -> Vec<GraphEdge> {
     let mut edges = Vec::new();
     // Invert the loop: resolve each import's candidate list once instead of
-    // re-hashing the same import names once per symbol (symbols × imports
+    // re-hashing the same import names once per symbol (symbols x imports
     // hash lookups become imports).
     for imp in imports {
         let Some(candidates) = nr.name_to_symbols.get(&imp.imported_name) else {
@@ -245,7 +257,7 @@ fn derive_impl_edges(file_symbols: &[Symbol], nr: &NameResolution) -> Vec<GraphE
 
         let impl_name = &sym.name;
         if let Some(candidates) = nr.name_to_symbols.get(impl_name) {
-            for &(target_id, target_file_id) in candidates {
+            for &(target_id, target_file_id) in candidates.iter().take(MAX_IMPL_CANDIDATES) {
                 if target_id == sym.id {
                     continue;
                 }
@@ -268,7 +280,8 @@ fn derive_impl_edges(file_symbols: &[Symbol], nr: &NameResolution) -> Vec<GraphE
         if let Some(ref sig) = sym.signature {
             if let Some(trait_name) = extract_trait_from_signature(sig) {
                 if let Some(candidates) = nr.name_to_symbols.get(&trait_name) {
-                    for &(target_id, target_file_id) in candidates {
+                    for &(target_id, target_file_id) in candidates.iter().take(MAX_IMPL_CANDIDATES)
+                    {
                         if target_id == sym.id {
                             continue;
                         }
@@ -311,7 +324,7 @@ pub fn derive_edges_for_file(store: &IndexStore, file_id: i64) -> Result<()> {
 
     let mut edges: Vec<GraphEdge> = Vec::new();
 
-    // Refs for this file only (SQL-level filter — avoids loading all refs).
+    // Refs for this file only (SQL-level filter - avoids loading all refs).
     let file_refs = store.get_file_refs(file_id)?;
     edges.extend(derive_ref_edges(&file_refs, &nr, Some(file_id)));
 
@@ -329,7 +342,7 @@ pub fn derive_edges_for_file(store: &IndexStore, file_id: i64) -> Result<()> {
         store.commit_transaction()?;
     } else {
         // Roll back on error: BEGIN is still active, so issue a ROLLBACK.
-        let _ = store.conn.execute_batch("ROLLBACK");
+        store.rollback_transaction();
     }
     result?;
 
@@ -400,7 +413,7 @@ pub fn load_graph_inputs(store: &IndexStore) -> Result<GraphInputs> {
     })
 }
 
-/// Derive the full edge set from a [`GraphInputs`] snapshot — pure in-memory.
+/// Derive the full edge set from a [`GraphInputs`] snapshot - pure in-memory.
 ///
 /// Performs no store access at all, so callers may run it without any lock
 /// held.  Mirrors the derivation loop of the former long-held-lock
@@ -439,7 +452,7 @@ pub fn derive_edges_from_inputs(
     all_edges
 }
 
-/// Derive the full edge set restricted to a single language — pure in-memory.
+/// Derive the full edge set restricted to a single language - pure in-memory.
 ///
 /// Like [`derive_edges_from_inputs`] but only emits edges whose source and
 /// target symbols live in files of `language` (mirrors the former
@@ -549,12 +562,12 @@ pub fn persist_edges(store: &IndexStore, edges: &[GraphEdge]) -> Result<BuildRes
     if result.is_ok() {
         store.commit_transaction()?;
     } else {
-        let _ = store.conn.execute_batch("ROLLBACK");
+        store.rollback_transaction();
     }
     result?;
 
     // The edge table was just cleared and repopulated with exactly the
-    // `edges` slice, so the confidence split can be counted in memory —
+    // `edges` slice, so the confidence split can be counted in memory -
     // two SQL scans under the store lock are unnecessary.
     let edges_extracted = edges
         .iter()

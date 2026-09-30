@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.121"
+version = "1.0.122"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -16,6 +16,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+keywords = ["ai", "agent", "llm", "cli", "tui"]
+categories = ["command-line-utilities", "development-tools"]
 
 [package.metadata.deb]
 maintainer = "Tim Hawkins <tim.thawkins@gmail.com>"
@@ -93,7 +95,19 @@ default_trait_access = "allow"
 collection_is_never_read = "allow"
 no_effect_underscore_binding = "allow"
 double_must_use = "allow"
-unwrap_used = "allow"
+# `unwrap_used` is deliberately NOT set here. The clippy lint cannot express
+# "no unwrap on user-facing production paths" because every `.unwrap()` in a
+# `#[cfg(test)]` module, a benchmark, or a test-support fixture is legitimate
+# and would trip a deny-level lint. Enforcing the AGENTS-RUST rule with clippy
+# would therefore require per-function `#[allow]` noise across thousands of
+# test sites.
+#
+# The rule is instead enforced by two shrink-only gates that scan production
+# sources only:
+#   * scripts/check-security-unwraps.sh  (panicking unwrap/expect baseline)
+#   * scripts/check-silent-errors.sh     (masked-error baseline)
+# An intentional production `.unwrap()`/`.expect()` is exempted in place with a
+# same-line `// no-panic-ok: <reason>` (see scripts/check_security_unwraps.py).
 unused_async = "allow"
 unused_async_trait_impl = "allow"
 # Additional lints from second auto-fix pass
@@ -147,7 +161,7 @@ ragent-tui = { path = "crates/ragent-tui" }
 
 # ── Hashing / file-locking ───────────────────────────────────────────────
 num_cpus = "1.16"
-sha2 = "0.10"
+sha2 = "0.11"
 blake3 = "1.4"
 fs2 = "0.4"
 
@@ -159,13 +173,13 @@ futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }   # sync → BroadcastStream
 # process-wrap: `KillOnDrop` so a spawned MCP stdio child dies with its
 # transport instead of being orphaned when the client goes away.
-process-wrap = { version = "9", features = ["tokio1", "kill-on-drop"] }
+process-wrap = { version = "10", features = ["tokio1", "kill-on-drop"] }
 async-stream = "0.3"
 
 # ── Serialization ────────────────────────────────────────────────────────
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-serde_yaml = "0.9"
+serde_norway = "0.9"
 
 # ── Error handling ───────────────────────────────────────────────────────
 anyhow = "1"
@@ -189,7 +203,7 @@ tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 # ── Database ─────────────────────────────────────────────────────────────
 # "bundled" compiles SQLite from source — no system libsqlite3 dependency.
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # ── CLI ──────────────────────────────────────────────────────────────────
 clap = { version = "4", features = ["derive"] }
@@ -200,17 +214,17 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # ── TUI ──────────────────────────────────────────────────────────────────
-ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 crossterm = "0.28"
 
 # ── File / path / text ──────────────────────────────────────────────────
 globset = "0.4"
-dirs = "6"
+dirs = "7"
 html2text = "0.16"
-similar = "2"
+similar = "3"
 regex = "1"
 readability-rs = "0.5"
-base64 = "0.22"
+base64 = "0.23"
 rand = "0.9"
 
 # ── ripgrep library crates ───────────────────────────────────────────────
@@ -224,7 +238,7 @@ arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # ── Hardware / IPMI ──────────────────────────────────────────────────────
-rmcp = { version = "1.4", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "3.4", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 
 # ── Document format support ─────────────────────────────────────────────
 docx-rust = "0.1"
@@ -236,7 +250,7 @@ zip = { version = "7", default-features = false, features = ["deflate"] }
 quick-xml = { version = "0.39", features = ["serialize"] }
 spreadsheet-ods = "1.0"
 # default-features = false: only text_layout + raster formats needed.
-printpdf = { version = "0.9", default-features = false, features = ["text_layout", "png", "jpeg"] }
+printpdf = { version = "0.12", default-features = false, features = ["text_layout", "png", "jpeg"] }
 pdf-extract = "0.10"
 lopdf = "0.39"
 
@@ -244,7 +258,7 @@ url = "2"
 
 # ── Concurrent collections ──────────────────────────────────────────────
 dashmap = "6"
-lru = "0.12"
+lru = "0.18"
 rayon = "1"
 parking_lot = "0.12"
 # Unix process-group signal support (killpg) for the bash tool timeout path.
@@ -271,7 +285,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 
 # ── Embeddings (optional, feature-gated) ────────────────────────────────
 ort = { version = "2.0.0-rc.12", features = ["download-binaries", "load-dynamic"] }
-tokenizers = { version = "0.21", features = ["onig"] }
+tokenizers = { version = "0.21", default-features = false, features = ["onig", "esaxx_fast"] }
 ndarray = "0.17"
 
 # ── Natural-language detection ──────────────────────────────────────────

@@ -1,4 +1,4 @@
-//! `initiative` — Durable, cross-session goals with milestone tracking.
+//! `initiative` - Durable, cross-session goals with milestone tracking.
 //!
 //! Implements JCODEPLAN M8 T-070: long-lived initiatives that persist in
 //! SQLite (via `ragent-storage`) and survive compaction, session restarts,
@@ -8,14 +8,14 @@
 //!
 //! # Actions
 //!
-//! - `create`     — register a new initiative with optional milestones
-//! - `read`       — fetch a single initiative with full milestone list
-//! - `update`     — adjust title / description / progress / status
-//! - `checkpoint` — record progress: complete a milestone and/or bump overall
+//! - `create`     - register a new initiative with optional milestones
+//! - `read`       - fetch a single initiative with full milestone list
+//! - `update`     - adjust title / description / progress / status
+//! - `checkpoint` - record progress: complete a milestone and/or bump overall
 //!                  progress with an optional note about what was done
-//! - `list`       — list initiatives (`active` by default, `all` to include
+//! - `list`       - list initiatives (`active` by default, `all` to include
 //!                  closed)
-//! - `close`      — mark `completed` or `abandoned`
+//! - `close`      - mark `completed` or `abandoned`
 //!
 //! # System-prompt surfacing
 //!
@@ -43,7 +43,7 @@ impl Tool for InitiativeTool {
     }
 
     fn description(&self) -> &'static str {
-        "Manage durable initiatives — long-lived project goals with milestones \
+        "Manage durable initiatives - long-lived project goals with milestones \
          that persist across sessions and compaction. Actions: create, read, update, \
          checkpoint (record progress / complete a milestone), list, close. REQUIRED \
          parameter: 'action' (string enum). Conditional required parameters: 'title' for \
@@ -158,7 +158,7 @@ fn dispatch(
     }
 }
 
-/// `create` — register a new initiative.
+/// `create` - register a new initiative.
 fn action_create(
     storage: &Storage,
     project: &str,
@@ -211,7 +211,7 @@ fn action_create(
     storage.create_initiative(&id, title, description, &milestones, project, session_id)?;
 
     let content = format!(
-        "Created initiative `{id}` — **{title}** ({} milestone(s)).\n\
+        "Created initiative `{id}` - **{title}** ({} milestone(s)).\n\
          It is now persisted for this project and will appear in future sessions.",
         milestones.len()
     );
@@ -226,7 +226,7 @@ fn action_create(
     })
 }
 
-/// `read` — fetch one initiative.
+/// `read` - fetch one initiative.
 fn action_read(storage: &Storage, project: &str, input: &Value) -> Result<ToolOutput> {
     let id = require_id(input, "read")?;
     let row = storage
@@ -244,7 +244,7 @@ fn action_read(storage: &Storage, project: &str, input: &Value) -> Result<ToolOu
     })
 }
 
-/// `update` — adjust mutable fields.
+/// `update` - adjust mutable fields.
 fn action_update(storage: &Storage, project: &str, input: &Value) -> Result<ToolOutput> {
     let id = require_id(input, "update")?;
     storage
@@ -300,7 +300,7 @@ fn action_update(storage: &Storage, project: &str, input: &Value) -> Result<Tool
     })
 }
 
-/// `checkpoint` — record progress: complete a milestone and/or bump overall progress.
+/// `checkpoint` - record progress: complete a milestone and/or bump overall progress.
 ///
 /// A `note` (what was accomplished) is appended to the description as a
 /// timestamped `Checkpoint:` line so it never collides with the human-written
@@ -313,7 +313,7 @@ fn action_checkpoint(storage: &Storage, project: &str, input: &Value) -> Result<
 
     if row.status != "active" {
         anyhow::bail!(
-            "Initiative '{id}' is {} — checkpoints are only allowed on active initiatives",
+            "Initiative '{id}' is {} - checkpoints are only allowed on active initiatives",
             row.status
         );
     }
@@ -392,7 +392,7 @@ fn action_checkpoint(storage: &Storage, project: &str, input: &Value) -> Result<
     })
 }
 
-/// `list` — list initiatives (status-filtered, `active` by default).
+/// `list` - list initiatives (status-filtered, `active` by default).
 ///
 /// `status="all"` clears the filter entirely (returns every initiative for
 /// the project, regardless of status).
@@ -426,7 +426,7 @@ fn action_list(storage: &Storage, project: &str, input: &Value) -> Result<ToolOu
         return Ok(ToolOutput {
             content: format!(
                 "No {}initiatives for this project.\n\
-                 Create one with: initiative action=\"create\" title=\"…\"",
+                 Create one with: initiative action=\"create\" title=\"...\"",
                 empty_label
             ),
             metadata: Some(json!({
@@ -466,7 +466,10 @@ fn action_list(storage: &Storage, project: &str, input: &Value) -> Result<ToolOu
         ));
     }
     if rows.len() > limit {
-        lines.push(format!("… and {} more (limit={limit})", rows.len() - limit));
+        lines.push(format!(
+            "... and {} more (limit={limit})",
+            rows.len() - limit
+        ));
     }
 
     Ok(ToolOutput {
@@ -479,7 +482,7 @@ fn action_list(storage: &Storage, project: &str, input: &Value) -> Result<ToolOu
     })
 }
 
-/// `close` — mark completed or abandoned.
+/// `close` - mark completed or abandoned.
 fn action_close(storage: &Storage, project: &str, input: &Value) -> Result<ToolOutput> {
     let id = require_id(input, "close")?;
     let status = input["status"].as_str().unwrap_or("completed");
@@ -526,7 +529,10 @@ fn require_id(input: &Value, action: &str) -> Result<String> {
 /// Validate a user-supplied initiative slug (safe characters, bounded length).
 fn validate_slug(slug: &str) -> Result<()> {
     if slug.len() > 64 {
-        anyhow::bail!("Initiative id must be ≤ 64 characters (got {})", slug.len());
+        anyhow::bail!(
+            "Initiative id must be <= 64 characters (got {})",
+            slug.len()
+        );
     }
     if !slug
         .chars()
@@ -541,7 +547,7 @@ fn validate_slug(slug: &str) -> Result<()> {
 fn render_full(row: &InitiativeRow) -> String {
     let ms = row.milestones();
     let mut out = format!(
-        "### `{}` — {}\n\n\
+        "### `{}` - {}\n\n\
          **Status:** {}  **Progress:** {}%\n",
         row.id, row.title, row.status, row.progress
     );
@@ -556,18 +562,18 @@ fn render_full(row: &InitiativeRow) -> String {
             let mark = if m.done { "[x]" } else { "[ ]" };
             out.push_str(&format!("- {} `{}` {}", mark, m.id, m.title));
             if let Some(ref ts) = m.completed_at {
-                out.push_str(&format!("  ✓ {ts}"));
+                out.push_str(&format!("  [ok] {ts}"));
             }
             out.push('\n');
         }
     }
     out.push_str(&format!(
-        "\n*created {} · updated {}{}*\n",
+        "\n*created {} * updated {}{}*\n",
         row.created_at,
         row.updated_at,
         row.closed_at
             .as_ref()
-            .map(|c| format!(" · closed {c}"))
+            .map(|c| format!(" * closed {c}"))
             .unwrap_or_default()
     ));
     out
@@ -614,17 +620,17 @@ pub fn build_initiatives_prompt_section(
             .map(|m| m.title.as_str())
             .collect();
         section.push_str(&format!(
-            "- **`{}`** ({:>3}%) — {}",
+            "- **`{}`** ({:>3}%) - {}",
             row.id, row.progress, row.title
         ));
         if !pending.is_empty() {
             let preview: Vec<&str> = pending.iter().take(3).copied().collect();
             let more = if pending.len() > 3 {
-                format!(" … (+{} more)", pending.len() - 3)
+                format!(" ... (+{} more)", pending.len() - 3)
             } else {
                 String::new()
             };
-            section.push_str(&format!(" · remaining: {}{}", preview.join(", "), more));
+            section.push_str(&format!(" * remaining: {}{}", preview.join(", "), more));
         }
         section.push('\n');
     }

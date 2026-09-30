@@ -49,7 +49,7 @@ pub fn serialise_embedding(vec: &[f32]) -> Vec<u8> {
 pub fn deserialise_embedding(blob: &[u8], dimensions: usize) -> anyhow::Result<Vec<f32>> {
     if blob.len() != dimensions * 4 {
         anyhow::bail!(
-            "Embedding blob length {} does not match expected {} bytes ({} dims × 4)",
+            "Embedding blob length {} does not match expected {} bytes ({} dims x 4)",
             blob.len(),
             dimensions * 4,
             dimensions

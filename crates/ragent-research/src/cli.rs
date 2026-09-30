@@ -2,7 +2,7 @@
 //!
 //! This module implements the `ragent research` command surface:
 //!
-//! - `ResearchCliCommand` — a lightweight clap-free parser that maps the
+//! - `ResearchCliCommand` - a lightweight clap-free parser that maps the
 //!   `ragent research <verb> [args]` shell syntax into a structured command.
 //! - `render_*` helpers that turn research items, search results, and session
 //!   events into the JSON/terminal formats consumed by the TUI and scripts.
@@ -41,26 +41,26 @@ pub enum ResearchCliCommand {
         tier: Option<String>,
         /// Optional FR-001 `--mode tiered|supervisor|competitive` (specs/opendeepresearch).
         mode: Option<String>,
-        /// `--summarization-model <provider:model>` — lightweight model used
+        /// `--summarization-model <provider:model>` - lightweight model used
         /// to summarize each fetched webpage before synthesis and vault storage
         /// (FR-002, FR-010). When omitted the configured default model is used.
         summarization_model: Option<String>,
-        /// `--research-model <provider:model>` — model used by research agents /
+        /// `--research-model <provider:model>` - model used by research agents /
         /// sub-topic workers (FR-013). When omitted the configured default model
         /// is used.
         research_model: Option<String>,
-        /// `--compression-model <provider:model>` — model used to compress or
+        /// `--compression-model <provider:model>` - model used to compress or
         /// summarize intermediate findings (FR-013). When omitted the configured
         /// default model is used.
         compression_model: Option<String>,
-        /// `--final-report-model <provider:model>` — model used to write the final
+        /// `--final-report-model <provider:model>` - model used to write the final
         /// report (FR-013). When omitted the configured default model is used.
         final_report_model: Option<String>,
-        /// `--max-concurrent-research-units N` — maximum parallel researcher agents
+        /// `--max-concurrent-research-units N` - maximum parallel researcher agents
         /// in supervisor/competitive modes (FR-007, FR-012). When omitted the
         /// configured default or the crate-level default is used.
         max_concurrent_research_units: Option<usize>,
-        /// `--clarify` / `--no-clarify` — ask a single clarifying question
+        /// `--clarify` / `--no-clarify` - ask a single clarifying question
         /// before web searches when the topic is ambiguous (FR-005, FR-017).
         /// Defaults to disabled; use `--clarify` to enable.
         clarify: Option<bool>,
@@ -70,98 +70,98 @@ pub enum ResearchCliCommand {
         sources_dir: Option<String>,
         /// Optional FR-020 `--template <name>`.
         template: Option<String>,
-        /// `--fetch-concurrently N` — override the maximum number of candidate
+        /// `--fetch-concurrently N` - override the maximum number of candidate
         /// pages fetched in parallel during the web-gathering phase. The
         /// default is `ragent_research::DEFAULT_FETCH_CONCURRENCY` (10); `0`
         /// is clamped up to `1`. Larger values reduce wall-clock latency when
         /// a search returns many hits, at the cost of more in-flight HTTP
         /// connections.
         fetch_concurrency: Option<usize>,
-        /// `--local-concurrently N` — override the maximum number of local
+        /// `--local-concurrently N` - override the maximum number of local
         /// candidate scoring/spec-scan tasks that run in parallel. The
         /// default is `ragent_research::DEFAULT_LOCAL_CONCURRENCY` (8); `0`
         /// is clamped up to `1`. Larger values reduce wall-clock latency on
         /// large projects at the cost of more in-flight file handles.
         local_concurrency: Option<usize>,
-        /// `--use-local` — enable the local-file scanning phase.
+        /// `--use-local` - enable the local-file scanning phase.
         use_local: bool,
-        /// `--use-specs` — enable the prior-spec cross-reference phase.
+        /// `--use-specs` - enable the prior-spec cross-reference phase.
         use_specs: bool,
-        /// `--use-low-relevance` — keep web sources that would otherwise be
+        /// `--use-low-relevance` - keep web sources that would otherwise be
         /// filtered out as low-relevance. By default the web-gathering phase
         /// discards sources whose query-match ratio falls below the "Low"
         /// threshold; this flag disables that filter so every fetched page is
         /// retained regardless of relevance score.
         use_low_relevance: bool,
-        /// `--no-papers` — disable scholarly search engines (e.g. OpenAlex)
+        /// `--no-papers` - disable scholarly search engines (e.g. OpenAlex)
         /// during the web-gathering phase. When set, hits from scholarly
         /// backends are filtered out so only general web search results are
         /// captured.
         no_papers: bool,
-        /// `--use-pdf` — allow PDF documents returned by web search or
+        /// `--use-pdf` - allow PDF documents returned by web search or
         /// `--from-url` to be captured as sources. By default PDF web sources
         /// are skipped because they require extra extraction time and are often
         /// paywalled or large.
         use_pdf: bool,
-        /// `--oa-enable` / `--no-oa` — per-run open-access recovery override.
+        /// `--oa-enable` / `--no-oa` - per-run open-access recovery override.
         /// `Some(true)` forces OA recovery on, `Some(false)` forces it off, and
         /// `None` defers to `research.open_access_recovery` in `ragent.json`
         /// (which itself defaults to off).
         oa_recovery: Option<bool>,
-        /// `--fetch-timeout-secs N` — override the per-page fetch timeout.
+        /// `--fetch-timeout-secs N` - override the per-page fetch timeout.
         /// Pages that take longer than this are treated as a fetch failure so
         /// one slow URL cannot stall the whole gather pass. The default is
         /// 30 seconds.
         fetch_timeout_secs: Option<u64>,
-        /// `--web-phase-timeout-secs N` / `--web-time N` — optional
+        /// `--web-phase-timeout-secs N` / `--web-time N` - optional
         /// wall-clock timeout for the entire web-gathering phase (Milestone
         /// H-001). When the deadline passes, everything gathered so far is
         /// ingested and the run proceeds to analysis/synthesis. `0` disables
         /// the timeout.
         web_phase_timeout_secs: Option<u64>,
-        /// `--local-phase-timeout-secs N` — optional wall-clock timeout for the
+        /// `--local-phase-timeout-secs N` - optional wall-clock timeout for the
         /// entire local-gathering phase (Milestone H-001). When set, the phase
         /// is aborted if it exceeds `N` seconds and a diagnostic is emitted so
         /// a slow filesystem scan cannot stall the session. When `None`, no
         /// phase-level timeout is applied.
         local_phase_timeout_secs: Option<u64>,
-        /// `--search-max-retries N` — maximum retry attempts for a failed
+        /// `--search-max-retries N` - maximum retry attempts for a failed
         /// sub-query search (Milestone H-002). Defaults to 2. `0` disables
         /// retries.
         search_max_retries: Option<u32>,
-        /// `--search-retry-base-delay-ms N` — base delay in milliseconds for
+        /// `--search-retry-base-delay-ms N` - base delay in milliseconds for
         /// the first search-retry backoff (Milestone H-002). Subsequent
         /// retries double this value. Defaults to 200 ms.
         search_retry_base_delay_ms: Option<u64>,
-        /// `--max-web-results N` — override the maximum number of web sources
+        /// `--max-web-results N` - override the maximum number of web sources
         /// to capture.
         max_web_results: Option<usize>,
-        /// `--max-search-calls N` — hard cap on the total number of web-search
+        /// `--max-search-calls N` - hard cap on the total number of web-search
         /// calls the run may issue, shared across all supervisor/competitive
         /// researchers and gather passes. When `None`, no cap is applied.
         max_search_calls: Option<usize>,
-        /// `--max-local-sources N` — override the maximum number of in-project
+        /// `--max-local-sources N` - override the maximum number of in-project
         /// local sources to capture.
         max_local_sources: Option<usize>,
-        /// `--max-synthesis-sources N` — override the maximum number of sources
+        /// `--max-synthesis-sources N` - override the maximum number of sources
         /// sent to the LLM synthesis engine.
         max_synthesis_sources: Option<usize>,
-        /// `--max-concepts N` — maximum number of concepts rendered in the
+        /// `--max-concepts N` - maximum number of concepts rendered in the
         /// report's `## Concepts` block. When `None` the configured
         /// `research.max_concepts` value (default 5) is used; `0` means
         /// "unbounded" (FR-006, FR-014, FR-016).
         max_concepts: Option<usize>,
-        /// `--max-findings N` — maximum number of findings rendered in the
+        /// `--max-findings N` - maximum number of findings rendered in the
         /// report's `## Findings` block. When `None` the configured
         /// `research.max_findings` value (default 20) is used; `0` means
         /// "unbounded" (FR-007, FR-014, FR-016).
         max_findings: Option<usize>,
-        /// `--brief <text>` — explicit research brief (FR-004 brief context).
+        /// `--brief <text>` - explicit research brief (FR-004 brief context).
         brief: Option<String>,
-        /// `--evaluate` — run the deterministic self-evaluation scorecard and
+        /// `--evaluate` - run the deterministic self-evaluation scorecard and
         /// append it to the assembled report (FR-008 / T-015).
         evaluate: bool,
-        /// `--url-cloak` — defang web URLs emitted in the `Sources` bullets
+        /// `--url-cloak` - defang web URLs emitted in the `Sources` bullets
         /// and the `References Index` table of `RESEARCH.md` (and the
         /// `Sources Reference` table of `CORPA.md`) so they are written as
         /// plain text rather than clickable links. Used when the report is
@@ -175,30 +175,30 @@ pub enum ResearchCliCommand {
     },
     /// `ragent research list [--all] [--json]`
     List {
-        /// `--all` — include archived items.
+        /// `--all` - include archived items.
         all: bool,
-        /// `--json` — emit JSON instead of a human-readable table.
+        /// `--json` - emit JSON instead of a human-readable table.
         json: bool,
     },
     /// `ragent research show <name> [--json]`
     Show {
         /// URL-safe research item name.
         name: String,
-        /// `--json` — emit JSON instead of a human-readable summary.
+        /// `--json` - emit JSON instead of a human-readable summary.
         json: bool,
     },
     /// `ragent research search <query> [--json]`
     Search {
         /// Free-form search query.
         query: String,
-        /// `--json` — emit JSON instead of a human-readable table.
+        /// `--json` - emit JSON instead of a human-readable table.
         json: bool,
     },
     /// `ragent research delete <name> [--yes]`
     Delete {
         /// URL-safe research item name.
         name: String,
-        /// `--yes` — skip the confirmation prompt.
+        /// `--yes` - skip the confirmation prompt.
         yes: bool,
     },
     /// `ragent research archive <name>`
@@ -218,7 +218,7 @@ pub enum ResearchCliCommand {
         /// Optional follow-up message for the resumed session.
         message: Option<String>,
     },
-    /// `ragent research update <name>` — replay the invocation recorded in
+    /// `ragent research update <name>` - replay the invocation recorded in
     /// the item's frontmatter and overwrite `RESEARCH.md`.
     Update {
         /// URL-safe research item name.
@@ -228,7 +228,7 @@ pub enum ResearchCliCommand {
     Cluster {
         /// URL-safe research item name.
         name: String,
-        /// `--force` — regenerate cluster files even if they already exist.
+        /// `--force` - regenerate cluster files even if they already exist.
         force: bool,
     },
     /// `ragent research export <name> [--output <path>]`
@@ -245,7 +245,7 @@ pub enum ResearchCliCommand {
         /// Optional override for the item name.
         name: Option<String>,
     },
-    /// `ragent research config` — show effective research defaults.
+    /// `ragent research config` - show effective research defaults.
     Config,
     /// `ragent research help`
     Help,
@@ -376,7 +376,6 @@ impl ResearchCliCommand {
                             "--from-file" | "--from-files" => {
                                 from_files.push((*v).to_string());
                             }
-                            "--iterations" => iterations = v.parse().ok(),
                             "--depth" => depth = Some((*v).to_string()),
                             "--tier" => tier = Some((*v).to_string()),
                             "--mode" => mode = Some((*v).to_string()),
@@ -388,29 +387,65 @@ impl ResearchCliCommand {
                             "--final-report-model" => {
                                 final_report_model = Some((*v).to_string());
                             }
-                            "--max-concurrent-research-units" => {
-                                max_concurrent_research_units = v.parse().ok();
-                            }
-                            "--format" => format = Some((*v).to_string()),
                             "--sources-dir" => sources_dir = Some((*v).to_string()),
                             "--template" => template = Some((*v).to_string()),
-                            "--fetch-concurrently" => fetch_concurrency = v.parse().ok(),
-                            "--local-concurrently" => local_concurrency = v.parse().ok(),
-                            "--fetch-timeout-secs" => fetch_timeout_secs = v.parse().ok(),
-                            "--web-phase-timeout-secs" | "--web-time" => {
-                                web_phase_timeout_secs = v.parse().ok();
-                            }
-                            "--local-phase-timeout-secs" => {
-                                local_phase_timeout_secs = v.parse().ok();
-                            }
-                            "--search-max-retries" => search_max_retries = v.parse().ok(),
-                            "--search-retry-base-delay-ms" => {
-                                search_retry_base_delay_ms = v.parse().ok();
-                            }
-                            "--max-web-results" => max_web_results = v.parse().ok(),
-                            "--max-search-calls" => max_search_calls = v.parse().ok(),
-                            "--max-local-sources" => max_local_sources = v.parse().ok(),
-                            "--max-synthesis-sources" => max_synthesis_sources = v.parse().ok(),
+                            "--fetch-concurrently" => match v.parse() {
+                                Ok(n) => fetch_concurrency = Some(n),
+                                Err(_) => invalid = Some(format!("--fetch-concurrently {v}")),
+                            },
+                            "--local-concurrently" => match v.parse() {
+                                Ok(n) => local_concurrency = Some(n),
+                                Err(_) => invalid = Some(format!("--local-concurrently {v}")),
+                            },
+                            "--fetch-timeout-secs" => match v.parse() {
+                                Ok(n) => fetch_timeout_secs = Some(n),
+                                Err(_) => invalid = Some(format!("--fetch-timeout-secs {v}")),
+                            },
+                            "--web-phase-timeout-secs" | "--web-time" => match v.parse() {
+                                Ok(n) => web_phase_timeout_secs = Some(n),
+                                Err(_) => invalid = Some(format!("{arg} {v}")),
+                            },
+                            "--local-phase-timeout-secs" => match v.parse() {
+                                Ok(n) => local_phase_timeout_secs = Some(n),
+                                Err(_) => invalid = Some(format!("--local-phase-timeout-secs {v}")),
+                            },
+                            "--search-max-retries" => match v.parse() {
+                                Ok(n) => search_max_retries = Some(n),
+                                Err(_) => invalid = Some(format!("--search-max-retries {v}")),
+                            },
+                            "--search-retry-base-delay-ms" => match v.parse() {
+                                Ok(n) => search_retry_base_delay_ms = Some(n),
+                                Err(_) => {
+                                    invalid = Some(format!("--search-retry-base-delay-ms {v}"))
+                                }
+                            },
+                            "--max-web-results" => match v.parse() {
+                                Ok(n) => max_web_results = Some(n),
+                                Err(_) => invalid = Some(format!("--max-web-results {v}")),
+                            },
+                            "--max-search-calls" => match v.parse() {
+                                Ok(n) => max_search_calls = Some(n),
+                                Err(_) => invalid = Some(format!("--max-search-calls {v}")),
+                            },
+                            "--max-local-sources" => match v.parse() {
+                                Ok(n) => max_local_sources = Some(n),
+                                Err(_) => invalid = Some(format!("--max-local-sources {v}")),
+                            },
+                            "--max-synthesis-sources" => match v.parse() {
+                                Ok(n) => max_synthesis_sources = Some(n),
+                                Err(_) => invalid = Some(format!("--max-synthesis-sources {v}")),
+                            },
+                            "--iterations" => match v.parse() {
+                                Ok(n) => iterations = Some(n),
+                                Err(_) => invalid = Some(format!("--iterations {v}")),
+                            },
+                            "--max-concurrent-research-units" => match v.parse() {
+                                Ok(n) => max_concurrent_research_units = Some(n),
+                                Err(_) => {
+                                    invalid = Some(format!("--max-concurrent-research-units {v}"))
+                                }
+                            },
+                            "--format" => format = Some((*v).to_string()),
                             "--max-concepts" => match v.parse() {
                                 Ok(n) => max_concepts = Some(n),
                                 Err(_) => invalid = Some(format!("--max-concepts {v}")),
@@ -1188,8 +1223,8 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
 ///
 /// Supports the grammar:
 ///
-/// - `status:archived` — limit to archived items.
-/// - `name:foo` — substring match on item name.
+/// - `status:archived` - limit to archived items.
+/// - `name:foo` - substring match on item name.
 /// - Any other token matches against title/topic.
 #[must_use]
 pub fn parse_search_filters(query: &str) -> SearchFilters {
@@ -1265,425 +1300,8 @@ pub fn parse_mode(s: &str) -> Option<ResearchMode> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_create_basic() {
-        let cmd = ResearchCliCommand::parse("create rust-async async/await idioms in stable Rust");
-        match cmd {
-            ResearchCliCommand::Create {
-                name,
-                topic,
-                sources_dir,
-                template,
-                use_local,
-                use_specs,
-                ..
-            } => {
-                assert_eq!(name, "rust-async");
-                assert_eq!(topic, "async/await idioms in stable Rust");
-                assert!(sources_dir.is_none());
-                assert!(template.is_none());
-                assert!(!use_local);
-                assert!(!use_specs);
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_create_with_sources_dir_and_template() {
-        let cmd = ResearchCliCommand::parse(
-            "create foo topic words --sources-dir /tmp/notes --template deepdive",
-        );
-        match cmd {
-            ResearchCliCommand::Create {
-                name,
-                topic,
-                sources_dir,
-                template,
-                use_local,
-                use_specs,
-                ..
-            } => {
-                assert_eq!(name, "foo");
-                assert_eq!(topic, "topic words");
-                assert_eq!(sources_dir.as_deref(), Some("/tmp/notes"));
-                assert_eq!(template.as_deref(), Some("deepdive"));
-                assert!(!use_local);
-                assert!(!use_specs);
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_create_with_flags() {
-        let cmd = ResearchCliCommand::parse(
-            "create bar topic --use-local --use-specs --use-low-relevance --no-papers --use-pdf",
-        );
-        match cmd {
-            ResearchCliCommand::Create {
-                name,
-                topic,
-                use_local,
-                use_specs,
-                use_low_relevance,
-                no_papers,
-                use_pdf,
-                ..
-            } => {
-                assert_eq!(name, "bar");
-                assert_eq!(topic, "topic");
-                assert!(use_local);
-                assert!(use_specs);
-                assert!(use_low_relevance);
-                assert!(no_papers);
-                assert!(use_pdf);
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_create_accepts_no_scholarly_alias() {
-        // FR-005: the shared parser accepts both `--no-papers` (canonical) and
-        // `--no-scholarly` (legacy alias) so CLI, TUI and HTTP invocations all
-        // toggle the same flag.
-        for flag in ["--no-papers", "--no-scholarly"] {
-            let cmd = ResearchCliCommand::parse(&format!("create alias topic {flag}"));
-            match cmd {
-                ResearchCliCommand::Create { no_papers, .. } => {
-                    assert!(no_papers, "{flag} must set no_papers")
-                }
-                other => panic!("unexpected variant for {flag}: {other:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn parse_create_with_oa_flags() {
-        // No flag defers to config.
-        match ResearchCliCommand::parse("create noflag topic") {
-            ResearchCliCommand::Create { oa_recovery, .. } => assert_eq!(oa_recovery, None),
-            other => panic!("unexpected variant: {other:?}"),
-        }
-        match ResearchCliCommand::parse("create on topic --oa-enable") {
-            ResearchCliCommand::Create { oa_recovery, .. } => {
-                assert_eq!(oa_recovery, Some(true));
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-        match ResearchCliCommand::parse("create off topic --no-oa") {
-            ResearchCliCommand::Create { oa_recovery, .. } => {
-                assert_eq!(oa_recovery, Some(false));
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_create_with_model_flags() {
-        let cmd = ResearchCliCommand::parse(
-            "create baz topic --research-model openai:gpt-4.1 --compression-model openai:gpt-4.1-mini --final-report-model anthropic:claude-sonnet-4",
-        );
-        match cmd {
-            ResearchCliCommand::Create {
-                name,
-                topic,
-                research_model,
-                compression_model,
-                final_report_model,
-                ..
-            } => {
-                assert_eq!(name, "baz");
-                assert_eq!(topic, "topic");
-                assert_eq!(research_model.as_deref(), Some("openai:gpt-4.1"));
-                assert_eq!(compression_model.as_deref(), Some("openai:gpt-4.1-mini"));
-                assert_eq!(
-                    final_report_model.as_deref(),
-                    Some("anthropic:claude-sonnet-4")
-                );
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_create_with_max_concurrent_research_units() {
-        let cmd = ResearchCliCommand::parse("create qux topic --max-concurrent-research-units 4");
-        match cmd {
-            ResearchCliCommand::Create {
-                name,
-                topic,
-                max_concurrent_research_units,
-                ..
-            } => {
-                assert_eq!(name, "qux");
-                assert_eq!(topic, "topic");
-                assert_eq!(max_concurrent_research_units, Some(4));
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_create_with_mode() {
-        let cmd = ResearchCliCommand::parse("create comp topic --mode competitive");
-        match cmd {
-            ResearchCliCommand::Create {
-                name, topic, mode, ..
-            } => {
-                assert_eq!(name, "comp");
-                assert_eq!(topic, "topic");
-                assert_eq!(mode.as_deref(), Some("competitive"));
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_list_json() {
-        assert_eq!(
-            ResearchCliCommand::parse("list --json"),
-            ResearchCliCommand::List {
-                all: false,
-                json: true
-            }
-        );
-        assert_eq!(
-            ResearchCliCommand::parse("list --all"),
-            ResearchCliCommand::List {
-                all: true,
-                json: false
-            }
-        );
-    }
-
-    #[test]
-    fn parse_show_defaults_to_json_false() {
-        match ResearchCliCommand::parse("show my-item") {
-            ResearchCliCommand::Show { name, json } => {
-                assert_eq!(name, "my-item");
-                assert!(!json);
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_search_joins_positional_words() {
-        match ResearchCliCommand::parse("search rust async runtimes") {
-            ResearchCliCommand::Search { query, json } => {
-                assert_eq!(query, "rust async runtimes");
-                assert!(!json);
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_delete_requires_name() {
-        match ResearchCliCommand::parse("delete doomed") {
-            ResearchCliCommand::Delete { name, .. } => assert_eq!(name, "doomed"),
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_export_with_output() {
-        match ResearchCliCommand::parse("export item --output /tmp/out") {
-            ResearchCliCommand::Export { name, output } => {
-                assert_eq!(name, "item");
-                assert_eq!(output.as_deref(), Some("/tmp/out"));
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_import_with_name_override() {
-        match ResearchCliCommand::parse("import /tmp/item.md --name renamed") {
-            ResearchCliCommand::Import { path, name } => {
-                assert_eq!(path, "/tmp/item.md");
-                assert_eq!(name.as_deref(), Some("renamed"));
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_unknown_verb() {
-        assert_eq!(
-            ResearchCliCommand::parse("frobnicate"),
-            ResearchCliCommand::Unknown("frobnicate".to_string())
-        );
-    }
-
-    #[test]
-    fn split_args_respects_quotes() {
-        assert_eq!(
-            split_args("create a \"two words\" --flag value"),
-            vec!["create", "a", "two words", "--flag", "value"]
-        );
-    }
-
-    #[test]
-    fn render_list_output_table_has_aligned_header() {
-        let out = render_list_output(&[(
-            "foo".to_string(),
-            "Foo".to_string(),
-            "topic".to_string(),
-            "complete".to_string(),
-            "2026-01-01T00:00:00+00:00".to_string(),
-            "2026-01-02T00:00:00+00:00".to_string(),
-        )]);
-        assert!(out.contains("NAME"));
-        assert!(out.contains("STATUS"));
-        assert!(out.contains("CREATED"));
-        assert!(out.contains("foo"));
-        assert!(out.contains("complete"));
-        assert!(!out.contains('{'));
-    }
-
-    #[test]
-    fn render_list_output_empty_shows_message() {
-        assert_eq!(render_list_output(&[]), "(no research items)\n");
-    }
-
-    #[test]
-    fn render_list_output_json_is_valid_json() {
-        let json = render_list_output_json(&[(
-            "foo".to_string(),
-            "Foo".to_string(),
-            "topic".to_string(),
-            "complete".to_string(),
-            "2026-01-01T00:00:00+00:00".to_string(),
-            "2026-01-02T00:00:00+00:00".to_string(),
-        )]);
-        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
-        assert_eq!(parsed[0]["name"].as_str(), Some("foo"));
-        assert_eq!(parsed[0]["topic"].as_str(), Some("topic"));
-    }
-
-    #[test]
-    fn render_show_output_includes_sources() {
-        let out = render_show_output(
-            "foo",
-            "Foo",
-            "topic",
-            "complete",
-            "2024-01-01",
-            "2024-01-02",
-            &[(
-                "s1".to_string(),
-                "https://x".to_string(),
-                "X".to_string(),
-                "web".to_string(),
-                None,
-            )],
-        );
-        assert!(out.contains("Research item: foo"));
-        assert!(out.contains("[web] s1: X (https://x)"));
-    }
-
-    #[test]
-    fn render_search_output_bullet_list() {
-        let out =
-            render_search_output(&[("foo".to_string(), "Foo".to_string(), "snippet".to_string())]);
-        assert!(out.contains("* foo - Foo"));
-        assert!(out.contains("snippet"));
-    }
-
-    #[test]
-    fn render_search_output_empty_shows_message() {
-        assert_eq!(render_search_output(&[]), "(no matches)\n");
-    }
-
-    #[test]
-    fn render_search_output_json_is_valid_json() {
-        let json = render_search_output_json(&[(
-            "foo".to_string(),
-            "Foo".to_string(),
-            "snippet".to_string(),
-            "research/foo/RESEARCH.md".to_string(),
-        )]);
-        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
-        assert_eq!(parsed[0]["path"].as_str(), Some("research/foo/RESEARCH.md"));
-    }
-
-    #[test]
-    fn truncate_short_string_passes_through() {
-        assert_eq!(truncate("abc", 5), "abc");
-    }
-
-    #[test]
-    fn truncate_long_string_ellipsises() {
-        let s = "a".repeat(20);
-        let t = truncate(&s, 5);
-        assert_eq!(t.chars().count(), 5);
-        assert!(t.ends_with("..."));
-    }
-
-    #[test]
-    fn parse_search_filters_extracts_status_and_name() {
-        let f = parse_search_filters("status:complete name:rust async");
-        assert_eq!(f.status.as_deref(), Some("complete"));
-        assert_eq!(f.name.as_deref(), Some("rust"));
-        assert_eq!(f.text, vec!["async"]);
-    }
-
-    #[test]
-    fn parse_output_format_defaults_unknown_to_report() {
-        assert_eq!(parse_output_format("weird"), OutputFormat::Report);
-        assert_eq!(parse_output_format("imrad"), OutputFormat::Imrad);
-    }
-
-    #[test]
-    fn parse_depth_returns_none_for_unknown() {
-        assert!(parse_depth("deep").is_some());
-        assert!(parse_depth("weird").is_none());
-    }
-
-    #[test]
-    fn parse_tier_returns_none_for_unknown() {
-        assert!(parse_tier("full").is_some());
-        assert!(parse_tier("weird").is_none());
-    }
-
-    #[test]
-    fn parse_mode_returns_none_for_unknown() {
-        assert!(parse_mode("supervisor").is_some());
-        assert!(parse_mode("weird").is_none());
-    }
-
-    #[test]
-    fn build_index_name_map_assigns_positions() {
-        let map = build_index_name_map("- alpha: title\n- beta: other\n");
-        assert_eq!(map.get("alpha"), Some(&0));
-        assert_eq!(map.get("beta"), Some(&1));
-    }
-
-    #[test]
-    fn session_event_json_round_trips() {
-        let event = crate::session::SessionEvent::Phase {
-            phase: crate::session::SessionPhase::Web,
-        };
-        let json = session_event_json(&event);
-        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
-        assert_eq!(parsed["kind"].as_str(), Some("phase"));
-    }
-
-    #[test]
-    fn render_session_event_json_adds_prefix() {
-        let event = crate::session::SessionEvent::Phase {
-            phase: crate::session::SessionPhase::Web,
-        };
-        let rendered = render_session_event_json(&event);
-        assert!(rendered.starts_with("ragent-research: "));
-    }
-}
+#[path = "../tests/inline/cli_tests.rs"]
+mod tests;
 
 #[test]
 fn parse_create_evaluate_flag() {

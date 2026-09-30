@@ -307,7 +307,9 @@ async fn test_research_delete_with_confirmation() {
         ))
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    // F-L3: the body-carrying success is 200 OK, not 204 (RFC 9110 forbids a
+    // body on 204).
+    assert_eq!(resp.status(), StatusCode::OK);
     let body = body_string(resp).await;
     assert!(body.contains("\"deleted\""));
 

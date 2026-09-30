@@ -6,7 +6,7 @@
 //! - Reasoning tokens and summaries
 //! - Multi-turn conversation continuity via `previous_response_id`
 //! - Cache write tracking for cost optimization
-//! - 409 Conflict retry logic for concurrent modifications
+//! - 409 Conflict surface as a stream error for concurrent modifications
 //!
 //! Unlike the Chat Completions API, the Responses API:
 //! - Uses `input` instead of `messages`
@@ -21,11 +21,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::time::Duration;
 
 use super::http_client::{create_http_client, create_streaming_http_client};
 use super::thinking::openai_thinking_levels_for_model;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::event::FinishReason;
@@ -166,7 +166,8 @@ impl Provider for ResponsesApiProvider {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            // ANTIPAT 3.1/3.2: capped error-body read.
+            let body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
             bail!("OpenAI model discovery failed with {}: {}", status, body);
         }
 
@@ -223,14 +224,18 @@ impl Provider for ResponsesApiProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
+        // ANTIPAT 3.6: register the credential with the shared redaction
+        // registry so any text passed through `redact_secrets` masks it.
+        ragent_types::sanitize::register_secret(api_key);
         let resolved_base = base_url
             .unwrap_or(RESPONSES_API_BASE)
             .trim_end_matches('/')
             .to_string();
         let client = ResponsesApiClient::new(api_key, &resolved_base);
         tracing::info!(
+            provider = "openai_responses",
             responses_endpoint = %format!("{}/responses", resolved_base),
-            "OpenAI Responses API provider initialized"
+            "provider initialized"
         );
         Ok(Box::new(client))
     }
@@ -388,10 +393,10 @@ impl ResponsesApiClient {
         Box::pin(async_stream::stream! {
             // Check for error status first
             if !status.is_success() {
-                let body = match response.text().await {
-                    Ok(b) => b,
-                    Err(e) => format!("Failed to read error body: {}", e),
-                };
+                // ANTIPAT 3.1/3.2: capped error-body read.
+                let body =
+                    read_body_capped(response, MAX_ERROR_BODY_BYTES)
+                        .await;
 
                 // Check for 409 Conflict - retryable error
                 if status == reqwest::StatusCode::CONFLICT {
@@ -434,7 +439,7 @@ impl ResponsesApiClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "OpenAI Responses: stream stalled — no data received for {}s",
+                                "OpenAI Responses: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -463,11 +468,12 @@ impl ResponsesApiClient {
 
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
-                    if line.is_empty() || !line.starts_with("data: ") {
-                        continue;
-                    }
-
-                    let data = &line[6..]; // Remove "data: " prefix
+                    // ANTIPAT 5.2: standard SSE `data:` prefix handling; a line
+                    // without the prefix is not a data frame and is skipped.
+                    let data = match line.strip_prefix("data: ") {
+                        Some(d) => d.trim(),
+                        None => continue,
+                    };
                     if data == "[DONE]" {
                         yield StreamEvent::Finish { reason: FinishReason::Stop };
                         return;
@@ -476,7 +482,7 @@ impl ResponsesApiClient {
                     let event: Value = match serde_json::from_str(data) {
                         Ok(v) => v,
                         Err(e) => {
-                            tracing::warn!(error = %e, data = %data, "Failed to parse SSE event");
+                            tracing::warn!(provider = "openai_responses", error = %e, data = %data, "failed to parse SSE event");
                             continue;
                         }
                     };
@@ -513,7 +519,7 @@ impl ResponsesApiClient {
                                 // arrive. Without emitting `ToolCallStart`
                                 // here, the agent loop never creates a pending
                                 // call and every delta for the unknown id is
-                                // dropped — the tool call was lost entirely.
+                                // dropped - the tool call was lost entirely.
                                 if let Some(item) = event.get("item")
                                     && item.get("type").and_then(|v| v.as_str())
                                         == Some("function_call")
@@ -604,52 +610,25 @@ impl LlmClient for ResponsesApiClient {
             "Sending OpenAI Responses API request"
         );
 
-        // Try initial request and handle 409 Conflict with retries
-        let mut attempt = 0;
-        loop {
-            attempt += 1;
+        // RETRY POLICY (ANTIPAT 3.4): the `/responses` POST is a billed
+        // completion request, so it is sent exactly once. The previous bespoke
+        // 409 retry loop (up to 3 sends) risked double-billing the same
+        // completion; a 409 Conflict is surfaced to the caller as a
+        // stream-level error (which already includes remediation text) instead
+        // of being retried automatically.
+        let response = self
+            .http_client
+            .post(&url)
+            .bearer_auth(&self.api_key)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .context("Failed to send Responses API request")?;
 
-            let response = self
-                .http_client
-                .post(&url)
-                .bearer_auth(&self.api_key)
-                .header("Content-Type", "application/json")
-                .json(&body)
-                .send()
-                .await
-                .context("Failed to send Responses API request")?;
-
-            // Check for 409 Conflict
-            if response.status() == reqwest::StatusCode::CONFLICT {
-                let response_body = response
-                    .text()
-                    .await
-                    .unwrap_or_else(|e| format!("Failed to read body: {}", e));
-
-                tracing::warn!(
-                    body = %response_body,
-                    attempt = %attempt,
-                    "OpenAI Responses API returned 409 Conflict - concurrent modification"
-                );
-
-                // Retry with exponential backoff (up to 3 total attempts)
-                if attempt < 3 {
-                    let delay = Duration::from_millis(100 * 2u64.pow(attempt - 1));
-                    tracing::info!(attempt = %attempt, delay_ms = %delay.as_millis(), "Retrying after 409 Conflict");
-                    tokio::time::sleep(delay).await;
-                    continue;
-                } else {
-                    // Final attempt exhausted - return error
-                    return Err(anyhow::anyhow!(
-                        "OpenAI Responses API returned 409 Conflict after {} attempts",
-                        attempt
-                    ));
-                }
-            }
-
-            // Success - parse the stream
-            return Ok(self.parse_sse_stream(response));
-        }
+        // Success - parse the stream (409 and other non-success statuses are
+        // turned into `StreamEvent::Error` inside `parse_sse_stream`).
+        Ok(self.parse_sse_stream(response))
     }
 }
 
@@ -672,131 +651,5 @@ pub struct ResponsesApiUsage {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::llm::{ChatMessage, ToolDefinition};
-    use std::sync::Arc;
-
-    #[test]
-    fn test_provider_id_and_name() {
-        let provider = ResponsesApiProvider;
-        assert_eq!(provider.id(), "openai_responses");
-        assert_eq!(provider.name(), "OpenAI Responses API");
-    }
-
-    #[test]
-    fn test_default_models() {
-        let provider = ResponsesApiProvider;
-        let models = provider.default_models();
-
-        assert!(!models.is_empty());
-        assert!(models.iter().any(|m| m.id == "gpt-5.6"));
-        assert!(models.iter().any(|m| m.id == "o1"));
-
-        // All models should have reasoning capability
-        for model in &models {
-            assert!(model.capabilities.reasoning);
-        }
-    }
-
-    #[test]
-    fn test_build_request_body_basic() {
-        let client = ResponsesApiClient::new("test-key", "https://api.openai.com");
-        let request = ChatRequest {
-            model: "gpt-5.6".to_string(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("Hello".to_string()),
-            }]),
-            tools: Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            system: None,
-            options: HashMap::new(),
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: None,
-        };
-
-        let body = client.build_request_body(&request);
-
-        assert_eq!(body["model"], "gpt-5.6");
-        assert_eq!(body["reasoning"]["effort"], "medium");
-        assert!(body["stream"].as_bool().unwrap());
-
-        let input = body["input"].as_array().unwrap();
-        assert_eq!(input.len(), 1);
-        assert_eq!(input[0]["role"], "user");
-        assert_eq!(input[0]["content"], "Hello");
-    }
-
-    #[test]
-    fn test_build_request_body_with_tools() {
-        let client = ResponsesApiClient::new("test-key", "https://api.openai.com");
-        let tools = vec![ToolDefinition {
-            name: "test_tool".to_string(),
-            description: "A test tool".to_string(),
-            parameters: json!({"type": "object"}),
-        }];
-
-        let request = ChatRequest {
-            model: "gpt-5.6".to_string(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("Test".to_string()),
-            }]),
-            tools: Arc::new(tools),
-            temperature: None,
-            top_p: None,
-            max_tokens: Some(1000),
-            system: Some("You are helpful".into()),
-            options: HashMap::new(),
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: None,
-        };
-
-        let body = client.build_request_body(&request);
-
-        assert!(body["tools"].is_array());
-        assert_eq!(body["tools"].as_array().unwrap().len(), 1);
-        assert_eq!(body["max_output_tokens"], 1000);
-        assert_eq!(body["instructions"], "You are helpful");
-    }
-
-    #[test]
-    fn test_build_request_body_with_thinking() {
-        use ragent_types::thinking::{ThinkingConfig, ThinkingLevel};
-
-        let client = ResponsesApiClient::new("test-key", "https://api.openai.com");
-        let request = ChatRequest {
-            model: "gpt-5.6".to_string(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("Test".to_string()),
-            }]),
-            tools: Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            system: None,
-            options: HashMap::new(),
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: None,
-            thinking: Some(ThinkingConfig {
-                enabled: true,
-                level: ThinkingLevel::High,
-                budget_tokens: None,
-                display: None,
-            }),
-        };
-
-        let body = client.build_request_body(&request);
-
-        assert_eq!(body["reasoning"]["effort"], "high");
-    }
-}
+#[path = "../tests/inline/openai_responses_tests.rs"]
+mod tests;

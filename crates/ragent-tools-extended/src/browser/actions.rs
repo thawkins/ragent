@@ -55,9 +55,9 @@ pub async fn enable_domains(conn: &CdpConnection) -> Result<()> {
 ///
 /// # Arguments
 ///
-/// * `conn` — the CDP connection.
-/// * `url` — the URL to navigate to.
-/// * `wait` — if `true`, wait for the page load event (up to 30s).
+/// * `conn` - the CDP connection.
+/// * `url` - the URL to navigate to.
+/// * `wait` - if `true`, wait for the page load event (up to 30s).
 ///
 /// # Errors
 ///
@@ -91,13 +91,17 @@ pub async fn action_open(conn: &CdpConnection, url: &str, wait: bool) -> Result<
     if wait {
         // Subscribe to events and wait for Page.loadEventFired.
         let mut events = conn.subscribe();
-        let _ = tokio::time::timeout(Duration::from_secs(30), async {
-            while let Ok(event) = events.recv().await {
-                if event.method == "Page.loadEventFired" {
-                    break;
+        // INTENTIONAL: best-effort CDP teardown with a bounded wait
+        let _ = tokio::time::timeout(
+            Duration::from_secs(crate::masterfetch::http::DEFAULT_TIMEOUT_SECS),
+            async {
+                while let Ok(event) = events.recv().await {
+                    if event.method == "Page.loadEventFired" {
+                        break;
+                    }
                 }
-            }
-        })
+            },
+        )
         .await
         .context("page load event timeout");
     }
@@ -332,7 +336,7 @@ pub async fn action_type(
 ///
 /// # Arguments
 ///
-/// * `fields` — a map of CSS selector → value pairs.
+/// * `fields` - a map of CSS selector -> value pairs.
 ///
 /// # Errors
 ///
@@ -435,10 +439,10 @@ pub async fn action_select(conn: &CdpConnection, selector: &str, value: &str) ->
 ///
 /// # Arguments
 ///
-/// * `condition` — `"load"` (wait for page load), `"selector"` (wait for
+/// * `condition` - `"load"` (wait for page load), `"selector"` (wait for
 ///   element), `"time"` (fixed sleep), or `"none"` (no wait).
-/// * `selector` — CSS selector (required for `condition=selector`).
-/// * `milliseconds` — duration for `condition=time` (default 1000).
+/// * `selector` - CSS selector (required for `condition=selector`).
+/// * `milliseconds` - duration for `condition=time` (default 1000).
 ///
 /// # Errors
 ///
@@ -454,14 +458,17 @@ pub async fn action_wait(
     match condition {
         "load" => {
             let mut events = conn.subscribe();
-            match tokio::time::timeout(Duration::from_secs(30), async {
-                while let Ok(event) = events.recv().await {
-                    if event.method == "Page.loadEventFired" {
-                        return Ok(());
+            match tokio::time::timeout(
+                Duration::from_secs(crate::masterfetch::http::DEFAULT_TIMEOUT_SECS),
+                async {
+                    while let Ok(event) = events.recv().await {
+                        if event.method == "Page.loadEventFired" {
+                            return Ok(());
+                        }
                     }
-                }
-                bail!("connection closed while waiting for load event");
-            })
+                    bail!("connection closed while waiting for load event");
+                },
+            )
             .await
             {
                 Ok(Ok(())) => Ok(json!({ "condition": "load", "waited": true })),
@@ -472,8 +479,9 @@ pub async fn action_wait(
         "selector" => {
             let selector = selector.context("wait condition=selector requires a selector")?;
             let escaped_selector = json!(selector);
-            // Poll for the element every 100ms, up to 30s.
-            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            // Poll for the element every 100ms, up to the default timeout.
+            let deadline = std::time::Instant::now()
+                + Duration::from_secs(crate::masterfetch::http::DEFAULT_TIMEOUT_SECS);
             loop {
                 let expr = format!("document.querySelector({escaped_selector}) !== null");
                 let result = conn
@@ -502,7 +510,7 @@ pub async fn action_wait(
             Ok(json!({ "condition": "time", "milliseconds": ms, "waited": true }))
         }
         _ => {
-            // "none" or unknown — no wait.
+            // "none" or unknown - no wait.
             Ok(json!({ "condition": condition, "waited": false }))
         }
     }
@@ -592,8 +600,8 @@ pub async fn action_scroll(conn: &CdpConnection, x: i64, y: i64) -> Result<Value
 ///
 /// # Arguments
 ///
-/// * `selector` — CSS selector for the `<input type="file">` element.
-/// * `file_path` — absolute path to the file to upload.
+/// * `selector` - CSS selector for the `<input type="file">` element.
+/// * `file_path` - absolute path to the file to upload.
 ///
 /// # Errors
 ///
@@ -632,7 +640,7 @@ pub async fn action_upload(conn: &CdpConnection, selector: &str, file_path: &str
 ///
 /// # Arguments
 ///
-/// * `key` — the key to press (e.g. `"Enter"`, `"Tab"`, `"Escape"`).
+/// * `key` - the key to press (e.g. `"Enter"`, `"Tab"`, `"Escape"`).
 ///
 /// # Errors
 ///
@@ -710,7 +718,7 @@ pub async fn action_screenshot(conn: &CdpConnection, full_page: bool) -> Result<
     }))
 }
 
-// ── Helper functions ─────────────────────────────────────────────��────────
+// ── Helper functions ─────────────────────────────────────────────────────
 
 /// Resolve a CSS selector to a DOM node.
 ///
@@ -749,46 +757,13 @@ async fn resolve_selector(conn: &CdpConnection, selector: &str) -> Result<Value>
     Ok(query_result)
 }
 
-/// Convert HTML to plain text using a lightweight tag-stripping approach.
+/// Convert HTML to plain text using the shared tag-stripper.
 ///
-/// For richer extraction, the masterfetch extractor could be used, but this
-/// keeps the browser module self-contained.
+/// Delegates to [`ragent_types::html::html_to_plain_text`] so the browser
+/// module does not maintain a second, divergent stripper (see `ANTIPAT.md`
+/// M3.8).
 fn html_to_text(html: &str) -> String {
-    // Simple tag stripping: remove everything between < and >.
-    let mut text = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => text.push(ch),
-            _ => {}
-        }
-    }
-
-    // Collapse whitespace.
-    let mut result = String::with_capacity(text.len());
-    let mut prev_ws = false;
-    for ch in text.chars() {
-        if ch.is_whitespace() {
-            if !prev_ws {
-                result.push(' ');
-                prev_ws = true;
-            }
-        } else {
-            result.push(ch);
-            prev_ws = false;
-        }
-    }
-
-    // Decode common HTML entities.
-    result
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ")
+    ragent_types::html::html_to_plain_text(html)
 }
 
 /// Map a key name to its `code` value for CDP `Input.dispatchKeyEvent`.
@@ -858,36 +833,5 @@ pub async fn action_status_raw(http_endpoint: &str) -> Result<Value> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_html_to_text_strips_tags() {
-        let html = "<html><body><h1>Title</h1><p>Hello &amp; world</p></body></html>";
-        let text = html_to_text(html);
-        assert!(text.contains("Title"));
-        assert!(text.contains("Hello & world"));
-        assert!(!text.contains('<'));
-    }
-
-    #[test]
-    fn test_html_to_text_collapses_whitespace() {
-        let html = "<div>  multiple   spaces  </div>";
-        let text = html_to_text(html);
-        assert!(!text.contains("  "));
-    }
-
-    #[test]
-    fn test_key_code_for_enter() {
-        assert_eq!(key_code_for("Enter"), "Enter");
-        assert_eq!(key_code_for("Tab"), "Tab");
-        assert_eq!(key_code_for(" "), "Space");
-    }
-
-    #[test]
-    fn test_virtual_key_code_for_enter() {
-        assert_eq!(virtual_key_code_for("Enter"), 0x0D);
-        assert_eq!(virtual_key_code_for("Tab"), 0x09);
-        assert_eq!(virtual_key_code_for("Escape"), 0x1B);
-    }
-}
+#[path = "../tests/inline/actions_tests.rs"]
+mod tests;

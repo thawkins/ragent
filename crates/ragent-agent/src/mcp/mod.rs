@@ -235,7 +235,7 @@ pub trait McpClientBackend: Send + Sync {
 ///
 /// Wraps either an rmcp [`RunningService`] (for stdio and SSE transports) or
 /// an [`HttpMcpClient`] (for plain HTTP transport, FR-013). Both variants are
-/// wrapped in `Arc` so the enum is cheaply `Clone` — needed when a connection
+/// wrapped in `Arc` so the enum is cheaply `Clone` - needed when a connection
 /// is pulled out of the `RwLock`-guarded map for a per-server refresh.
 #[derive(Clone)]
 enum McpConnection {
@@ -381,8 +381,8 @@ impl McpClient {
     ///
     /// # Arguments
     ///
-    /// * `id` — unique identifier for this server connection
-    /// * `config` — transport and connection configuration
+    /// * `id` - unique identifier for this server connection
+    /// * `config` - transport and connection configuration
     ///
     /// # Errors
     ///
@@ -538,9 +538,9 @@ impl McpClient {
     /// The candidate URLs come from the config's own declared transport, so this
     /// is generic across servers and never hard-coded to one product:
     ///
-    /// - `http` / `sse` — the configured [`McpServerConfig::url`] is the server's
+    /// - `http` / `sse` - the configured [`McpServerConfig::url`] is the server's
     ///   endpoint, so it is the only candidate.
-    /// - `stdio` — a child's stdio pipes are private to its parent, so a stdio
+    /// - `stdio` - a child's stdio pipes are private to its parent, so a stdio
     ///   child cannot be adopted; orphaned copies are instead killed by
     ///   [`kill_orphaned_stdio`] before spawn. The command line is still
     ///   inspected for an `--httpPort <n>` / `--port <n>` style flag; a server
@@ -571,8 +571,8 @@ impl McpClient {
     ///
     /// # Arguments
     ///
-    /// * `id` — server identifier for logging
-    /// * `config` — transport configuration
+    /// * `id` - server identifier for logging
+    /// * `config` - transport configuration
     ///
     /// # Returns
     ///
@@ -723,7 +723,7 @@ impl McpClient {
     ///
     /// # Arguments
     ///
-    /// * `server_id` — the ID of the server to query
+    /// * `server_id` - the ID of the server to query
     ///
     /// # Examples
     ///
@@ -807,7 +807,7 @@ impl McpClient {
             }
         }
 
-        // PERF-076: the manifests changed — rebuild the lookup index. Drop the
+        // PERF-076: the manifests changed - rebuild the lookup index. Drop the
         // connections read guard first so `&mut self` is free to borrow.
         drop(conns);
         self.rebuild_tool_index();
@@ -821,7 +821,7 @@ impl McpClient {
     ///
     /// # Arguments
     ///
-    /// * `server_id` — the ID of the server to refresh
+    /// * `server_id` - the ID of the server to refresh
     ///
     /// # Errors
     ///
@@ -861,7 +861,7 @@ impl McpClient {
         if let Some(server) = self.servers.iter_mut().find(|s| s.id == server_id) {
             server.tools = tool_defs.clone();
         }
-        // PERF-076: the manifest changed — rebuild the lookup index.
+        // PERF-076: the manifest changed - rebuild the lookup index.
         self.rebuild_tool_index();
 
         tracing::info!(
@@ -881,9 +881,9 @@ impl McpClient {
     ///
     /// # Arguments
     ///
-    /// * `server_id` — the ID of the target server
-    /// * `tool_name` — the name of the tool to invoke
-    /// * `input` — JSON arguments matching the tool's input schema
+    /// * `server_id` - the ID of the target server
+    /// * `tool_name` - the name of the tool to invoke
+    /// * `input` - JSON arguments matching the tool's input schema
     ///
     /// # Errors
     ///
@@ -962,8 +962,8 @@ impl McpClient {
     ///
     /// # Arguments
     ///
-    /// * `tool_name` — the name of the tool to invoke
-    /// * `input` — JSON arguments matching the tool's input schema
+    /// * `tool_name` - the name of the tool to invoke
+    /// * `input` - JSON arguments matching the tool's input schema
     ///
     /// # Errors
     ///
@@ -1064,7 +1064,7 @@ impl McpClient {
     ///
     /// # Arguments
     ///
-    /// * `server_id` — the ID of the server to disconnect
+    /// * `server_id` - the ID of the server to disconnect
     ///
     /// # Errors
     ///
@@ -1231,7 +1231,7 @@ impl McpClient {
 
     /// Scan the system for available MCP servers and return them.
     ///
-    /// Does not modify internal state — the caller decides what to do with results.
+    /// Does not modify internal state - the caller decides what to do with results.
     /// Scans `PATH` for known executables, npm global packages, and MCP registry
     /// directories.
     ///
@@ -1720,49 +1720,5 @@ impl McpClientBackend for McpClient {
 }
 
 #[cfg(all(test, unix))]
-mod orphan_sweep_tests {
-    use super::*;
-
-    /// A stdio child leads its own process group (`process_group(0)` at spawn)
-    /// and shutdown kills the *group*: launcher commands (`npx`, ...) fork the
-    /// real server (`node`) and exit, so killing only the recorded pid orphans
-    /// the process actually holding the stdio pipes. Proven with a `sh` child
-    /// that forks a grandchild `sleep` before replacing itself.
-    ///
-    /// No rmcp transport is used: `().serve(transport)` would block on a
-    /// JSON-RPC handshake `sleep` never answers. The shutdown path the fix
-    /// targets only reads the recorded pid and kills the group, which a plain
-    /// child exercises exactly.
-    #[tokio::test]
-    async fn shutdown_kills_the_stdio_child_process_group() {
-        let mut child = tokio::process::Command::new("sh")
-            .args(["-c", "sh -c 'sleep 600' & exec sleep 600"])
-            .process_group(0)
-            .kill_on_drop(true)
-            .spawn()
-            .expect("spawn sh");
-        let leader_pid = child.id().expect("child pid is recorded");
-
-        // Directly exercise the group-kill primitives: this is the same pair
-        // `kill_stdio_child` issues for the pid the stdio spawn records.
-        kill_stdio_child(leader_pid);
-        let _ = child.wait().await;
-
-        // The group must be gone: probing the leader pid (kill with signal 0)
-        // and the process group (killpg with signal 0) must both return ESRCH.
-        #[allow(unsafe_code)]
-        // approved: kill/killpg signal-0 probes are harmless; no safe std alternative
-        unsafe {
-            assert_eq!(
-                libc::kill(leader_pid as libc::pid_t, 0),
-                -1,
-                "leader pid {leader_pid} must be killed by shutdown"
-            );
-            assert_eq!(
-                libc::killpg(leader_pid as libc::pid_t, 0),
-                -1,
-                "process group {leader_pid} must be empty after shutdown"
-            );
-        }
-    }
-}
+#[path = "../tests/inline/mod_orphan_sweep_tests.rs"]
+mod orphan_sweep_tests;

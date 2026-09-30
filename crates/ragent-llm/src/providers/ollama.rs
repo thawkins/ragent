@@ -21,6 +21,7 @@ use super::thinking::{
 };
 use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::ThinkingConfig;
@@ -223,6 +224,9 @@ impl Provider for OllamaProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
+        // ANTIPAT 3.6: register a remote/authenticated server key with the
+        // shared redaction registry (empty keys are ignored by register_secret).
+        ragent_types::sanitize::register_secret(api_key);
         let url = base_url
             .unwrap_or(&self.base_url)
             .trim_end_matches('/')
@@ -260,7 +264,7 @@ impl OllamaClient {
     fn build_request_body(&self, request: &ChatRequest, tools: &[ToolDefinition]) -> Value {
         let mut messages = Vec::new();
 
-        // Build a map of tool_use_id → tool_name so we can include both
+        // Build a map of tool_use_id -> tool_name so we can include both
         // `tool_call_id` (OpenAI-compat) and `tool_name` (native Ollama format).
         let mut tool_id_to_name: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
@@ -445,7 +449,9 @@ impl LlmClient for OllamaClient {
             req_builder = req_builder.header("Authorization", format!("Bearer {key}"));
         }
 
-        let timeout_secs = request.stream_timeout_secs.unwrap_or(600);
+        let timeout_secs = request
+            .stream_timeout_secs
+            .unwrap_or(super::http_client::DEFAULT_STREAM_TIMEOUT_SECS);
         let body_bytes = serde_json::to_vec(&body).context("serialise Ollama request body")?;
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
@@ -453,22 +459,24 @@ impl LlmClient for OllamaClient {
         )
         .await
         .inspect_err(|e| {
-            tracing::warn!(url = %url, error = %e, "Ollama chat request timed out");
+            tracing::warn!(provider = "ollama", url = %url, error = %e, "chat request timed out");
         })
         .map_err(|_| anyhow::anyhow!("Ollama: initial response timed out after {timeout_secs}s"))?
         .inspect_err(|e| {
-            tracing::warn!(url = %url, error = %e, "Ollama chat request failed");
+            tracing::warn!(provider = "ollama", url = %url, error = %e, "chat request failed");
         })
-        .with_context(|| format!("Failed to connect to Ollama server at {url} — is it running?"))?;
+        .with_context(|| format!("Failed to connect to Ollama server at {url} - is it running?"))?;
         if !response.status().is_success() {
             let status = response.status();
-            let error_body = response.text().await.unwrap_or_default();
+            // ANTIPAT 3.1/3.2: capped error-body read.
+            let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
             tracing::warn!(
+                provider = "ollama",
                 url = %url,
                 model = %request.model,
                 status = %status,
                 error = %error_body,
-                "Ollama API error"
+                "API error"
             );
             bail!("Ollama API error ({status}): {error_body}");
         }
@@ -512,7 +520,7 @@ impl LlmClient for OllamaClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "Ollama: stream stalled — no data received for {}s",
+                                "Ollama: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -574,7 +582,7 @@ impl LlmClient for OllamaClient {
                     }                      let parsed: Value = match serde_json::from_str(data) {
                           Ok(v) => v,
                           Err(e) => {
-                              tracing::warn!(line = %data, error = %e, "failed to parse Ollama SSE line");
+                              tracing::warn!(provider = "ollama", line = %data, error = %e, "failed to parse SSE line");
                               continue;
                           }
                       };
@@ -812,47 +820,5 @@ fn format_model_name(name: &str, details: &OllamaModelDetails) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_model_name() {
-        let details = OllamaModelDetails {
-            parameter_size: "70B".to_string(),
-            family: "llama".to_string(),
-        };
-        assert_eq!(
-            format_model_name("llama3.3:latest", &details),
-            "Llama3.3 (70B)"
-        );
-    }
-
-    #[test]
-    fn test_estimate_context_window() {
-        // Modern local models support 128k regardless of parameter size.
-        assert_eq!(estimate_context_window("70B"), 131_072);
-        assert_eq!(estimate_context_window("8B"), 131_072);
-        assert_eq!(estimate_context_window("3B"), 131_072);
-        assert_eq!(estimate_context_window("32B"), 131_072);
-        assert_eq!(estimate_context_window("1B"), 131_072);
-        // Sub-1B models get a conservative 32k fallback.
-        assert_eq!(estimate_context_window("0.5B"), 32_768);
-    }
-
-    #[test]
-    fn test_provider_defaults() {
-        let provider = OllamaProvider::new();
-        assert_eq!(provider.id(), "ollama");
-        assert_eq!(provider.name(), "Ollama");
-        assert!(
-            provider.default_models().is_empty(),
-            "Ollama default_models should be empty; models are discovered at runtime"
-        );
-    }
-
-    #[test]
-    fn test_with_custom_url() {
-        let provider = OllamaProvider::with_url("http://remote:11434/");
-        assert_eq!(provider.base_url, "http://remote:11434");
-    }
-}
+#[path = "../tests/inline/ollama_tests.rs"]
+mod tests;

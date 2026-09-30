@@ -26,21 +26,21 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Requirement One
+### FR-001 - Requirement One
 
 `The system shall do X.`
 
-### FR-002 — Requirement Two
+### FR-002 - Requirement Two
 
 `When Y happens, the system shall do Z.`
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The system shall respond within 2 seconds.`
 
 ## Non-Functional Requirements
 
-### NFR-002 — Reliability
+### NFR-002 - Reliability
 
 `The system shall handle errors gracefully.`
 
@@ -209,10 +209,10 @@ X.
 
 ## Functional Requirements
 
-### FR-001 — One
+### FR-001 - One
 `The system shall do X.`
 
-### FR-001 — Duplicate
+### FR-001 - Duplicate
 `The system shall do Y.`
 
 ## Non-Functional Requirements
@@ -253,10 +253,10 @@ X.
 
 ## Functional Requirements
 
-### FR-001 — One
+### FR-001 - One
 `The system shall do X.`
 
-### FR-003 — Three
+### FR-003 - Three
 `The system shall do Z.`
 
 ## Non-Functional Requirements
@@ -292,7 +292,7 @@ X.
 
 ## Functional Requirements
 
-### FR-001 — One
+### FR-001 - One
 `The system shall do X.`
 
 ## Non-Functional Requirements
@@ -379,13 +379,13 @@ Plan.
 fn test_parse_requirements() {
     let md = r"## Functional Requirements
 
-### FR-001 — First
+### FR-001 - First
 `The system shall do A.`
 
-### FR-002 — Second
+### FR-002 - Second
 `When B, the system shall do C.`
 
-### NFR-001 — Perf
+### NFR-001 - Perf
 `The system shall respond fast.`
 ";
     let reqs = parse_requirements(md);
@@ -399,7 +399,7 @@ fn test_parse_requirements() {
 
 #[test]
 fn test_parse_requirements_no_ears() {
-    let md = "### FR-001 — No EARS\n\nJust text.\n";
+    let md = "### FR-001 - No EARS\n\nJust text.\n";
     let reqs = parse_requirements(md);
     assert_eq!(reqs.len(), 1);
     assert!(
@@ -674,7 +674,7 @@ fn test_detect_clarification_markers_multiple_same_line() {
 fn test_detect_clarification_markers_special_chars() {
     let content = "[NEEDS CLARIFICATION: what about {braces} and [nested] brackets?]";
     let markers = detect_clarification_markers(content);
-    // The regex is non-greedy, so it captures up to the first `]` — but
+    // The regex is non-greedy, so it captures up to the first `]` - but
     // nested brackets may affect capture. Verify we find at least one.
     assert_eq!(markers.len(), 1);
     assert_eq!(markers[0].line, 1);
@@ -722,7 +722,7 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Requirement One
+### FR-001 - Requirement One
 
 `The system shall do X.`
 
@@ -730,7 +730,7 @@ In scope.
 
 ## Non-Functional Requirements
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The system shall respond within 2 seconds.`
 
@@ -798,7 +798,7 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Requirement One
+### FR-001 - Requirement One
 
 `The system shall do X.`
 
@@ -807,7 +807,7 @@ In scope.
 
 ## Non-Functional Requirements
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The system shall respond within 2 seconds.`
 
@@ -1434,7 +1434,7 @@ fn test_detect_gaps_shall_not_testable() {
 
 #[test]
 fn test_detect_gaps_shall_be_with_testable_verb_after() {
-    // "shall be able to store" — extract_action gets "be" as the verb,
+    // "shall be able to store" - extract_action gets "be" as the verb,
     // so this is flagged as VagueOutcome. This is intentional: "shall be
     // able to" is weaker than "shall store".
     let content = "\
@@ -1502,7 +1502,7 @@ fn test_sdd_flags_from_bools() {
     assert!(!flags.feedback_loop);
 }
 
-/// Spec with a `[NEEDS CLARIFICATION]` marker — used by flag-gating tests.
+/// Spec with a `[NEEDS CLARIFICATION]` marker - used by flag-gating tests.
 fn spec_with_clarification_marker() -> Spec {
     let id = SpecId::new("testspec").unwrap();
     let mut spec = Spec::new(id, "Test Spec");
@@ -1525,7 +1525,7 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Requirement One
+### FR-001 - Requirement One
 
 `The system shall do X.`
 
@@ -1533,7 +1533,7 @@ In scope.
 
 ## Non-Functional Requirements
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The system shall respond within 2 seconds.`
 
@@ -1603,7 +1603,7 @@ fn test_validate_backward_compat_includes_clarifications() {
     assert_eq!(report.clarification_count(), 1);
 }
 
-/// Spec with a vague term — used by consistency-check flag-gating tests.
+/// Spec with a vague term - used by consistency-check flag-gating tests.
 fn spec_with_vague_term() -> Spec {
     let id = SpecId::new("testspec").unwrap();
     let mut spec = Spec::new(id, "Test Spec");
@@ -1626,13 +1626,13 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Performance
+### FR-001 - Performance
 
 `The system shall be fast and scalable.`
 
 ## Non-Functional Requirements
 
-### NFR-001 — Reliability
+### NFR-001 - Reliability
 
 `The system shall handle errors gracefully.`
 
@@ -1741,13 +1741,13 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Requirement One
+### FR-001 - Requirement One
 
 `This is not EARS syntax.`
 
 ## Non-Functional Requirements
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The system shall respond within 2 seconds.`
 
@@ -1788,12 +1788,12 @@ fn test_validate_with_flags_both_sdd_checks_enabled() {
     let report = validate_with_flags(&spec, &flags);
     assert!(report.has_clarifications());
     // The "do X" requirement may trigger gap detection (no measurable criterion)
-    // but that's OK — we just verify both categories can coexist.
+    // but that's OK - we just verify both categories can coexist.
 }
 
 #[test]
 fn test_validate_with_flags_selective_enable() {
-    // Only quality_checklists enabled — should not affect validation
+    // Only quality_checklists enabled - should not affect validation
     // (quality_checklists gates template generation, not validation).
     let spec = spec_with_clarification_marker();
     let flags = SddFlags {
@@ -1832,13 +1832,13 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Requirement One
+### FR-001 - Requirement One
 
 `The system shall do X.`
 
 ## Non-Functional Requirements
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The system shall respond within 2 seconds.`
 
@@ -1927,13 +1927,13 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Requirement One
+### FR-001 - Requirement One
 
 `The system shall do X.`
 
 ## Non-Functional Requirements
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The system shall respond within 2 seconds.`
 
@@ -2047,7 +2047,7 @@ fn test_validate_phase_gates_disabled_skips_check() {
 
 #[test]
 fn test_validate_phase_gates_backward_compat_all_enabled() {
-    // validate() uses all_enabled() — should include Phase -1 gate checks
+    // validate() uses all_enabled() - should include Phase -1 gate checks
     let spec = spec_with_unchecked_gates();
     let report = validate(&spec);
     assert!(
@@ -2081,13 +2081,13 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Requirement One
+### FR-001 - Requirement One
 
 `The system shall do X.`
 
 ## Non-Functional Requirements
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The system shall respond within 2 seconds.`
 
@@ -2118,7 +2118,7 @@ In scope.
 
 #[test]
 fn test_validate_phase_gates_all_three_checked_explicitly() {
-    // Test with explicit [x] for all three — verify zero gate issues
+    // Test with explicit [x] for all three - verify zero gate issues
     let spec = spec_with_all_gates_checked();
     let report = validate_phase_minus_one_gates_standalone(&spec);
     assert!(
@@ -2319,21 +2319,21 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Store Data
+### FR-001 - Store Data
 
 `The system shall store all user data.`
 
-### FR-002 — No Storage
+### FR-002 - No Storage
 
 `The system shall not store all user data.`
 
-### FR-003 — Quality
+### FR-003 - Quality
 
 `The system shall be robust.`
 
 ## Non-Functional Requirements
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The system shall respond within 2 seconds.`
 
@@ -2369,7 +2369,7 @@ A plan.
     let report = validate_with_flags(&spec, &flags);
 
     // Should have ambiguity (vague term "robust" → VagueOutcome gap)
-    // Should have contradiction (FR-001 vs FR-002 — negation conflict)
+    // Should have contradiction (FR-001 vs FR-002 - negation conflict)
     // Should have gap (FR-003 "shall be robust" → VagueOutcome)
     assert!(
         report.has_consistency_issues(),
@@ -2386,7 +2386,7 @@ A plan.
 
 #[test]
 fn test_validate_backward_compat_includes_consistency_in_format() {
-    // validate() uses all_enabled() — consistency checks should run
+    // validate() uses all_enabled() - consistency checks should run
     let id = SpecId::new("testspec").unwrap();
     let mut spec = Spec::new(id, "Test Spec");
     spec.spec_md = r"---
@@ -2408,13 +2408,13 @@ In scope.
 
 ## Functional Requirements
 
-### FR-001 — Quality
+### FR-001 - Quality
 
 `The system shall be robust.`
 
 ## Non-Functional Requirements
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The system shall respond within 2 seconds.`
 

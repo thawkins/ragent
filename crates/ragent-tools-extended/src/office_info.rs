@@ -204,7 +204,7 @@ fn info_xlsx(path: &Path, file_size: u64) -> Result<(String, Value)> {
                 "rows": rows,
                 "columns": cols,
             }));
-            content_lines.push(format!("  - {name}: {rows} rows × {cols} columns"));
+            content_lines.push(format!("  - {name}: {rows} rows x {cols} columns"));
         } else {
             sheets_info.push(json!({
                 "name": name,

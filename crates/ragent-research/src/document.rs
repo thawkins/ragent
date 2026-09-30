@@ -1,9 +1,9 @@
-//! RESEARCH.md document assembly — legacy report layout and `IMRaD` layout.
+//! RESEARCH.md document assembly - legacy report layout and `IMRaD` layout.
 //!
 //! `RESEARCH.md` is the single, self-contained deliverable for each
 //! research item. Two layouts are supported:
 //!
-//! 1. **Report** (default) — the original multi-section layout:
+//! 1. **Report** (default) - the original multi-section layout:
 //!
 //!    ```text
 //!    # Title: <title>
@@ -20,7 +20,7 @@
 //!    ## References Index
 //!    ```
 //!
-//! 2. **`IMRaD`** — selected via [`OutputFormat::Imrad`](crate::run_config::OutputFormat);
+//! 2. **`IMRaD`** - selected via [`OutputFormat::Imrad`](crate::run_config::OutputFormat);
 //!    restructures the same content into the scientific/technical report
 //!    convention (Abstract, Introduction, Methods, Results, Discussion,
 //!    References Index) while preserving all existing finding paragraphs,
@@ -50,6 +50,15 @@ use std::sync::OnceLock;
 /// (NFR-006 + the size-cap risk in the PLAN.md Risks table).
 pub const MAX_SOURCE_BODY_BYTES: usize = 256 * 1024;
 
+/// Rough per-source byte estimate used to pre-size the `--format
+/// source-bibliography` output buffer (ANTIPAT F-22).
+///
+/// Each rendered entry is a short header plus a capped `Preview` block, so 512
+/// bytes is a deliberately loose upper-bound hint that avoids a reallocation or
+/// two in the common case. This is an allocation hint only: it never affects
+/// the emitted output.
+const BIBLIOGRAPHY_ENTRY_ESTIMATE_BYTES: usize = 512;
+
 /// The 9 sections that appear in every `RESEARCH.md`, in order (FR-010 + FR-012).
 pub const REQUIRED_SECTIONS: &[&str] = &[
     "Topic",
@@ -74,10 +83,10 @@ pub struct ResearchDocument {
     /// Rendered under `## Executive Summary` in the report layout. In the
     /// IMRaD layout the same text is rendered under `## Abstract`.
     pub summary: String,
-    /// Numbered findings — each entry is the body of one bullet under
+    /// Numbered findings - each entry is the body of one bullet under
     /// `## Findings`. References inside the body use the form `[#N]`.
     pub findings: Vec<String>,
-    /// Top 10 implications — one numbered entry per implication, in rank order.
+    /// Top 10 implications - one numbered entry per implication, in rank order.
     /// In the report layout this section now appears directly under
     /// `## Executive Summary`; in the IMRaD layout it is rendered under
     /// `## Discussion`.
@@ -85,7 +94,7 @@ pub struct ResearchDocument {
     /// In-project cross-references (FR-009). Each entry is one bullet under
     /// `## In-Project Cross-References`.
     pub cross_references: Vec<CrossReference>,
-    /// Open questions — one bullet per question. In the report layout this
+    /// Open questions - one bullet per question. In the report layout this
     /// section appears directly under `## Top 10 Implications`; in the IMRaD
     /// layout it is rendered under `## Discussion`.
     pub open_questions: Vec<String>,
@@ -187,7 +196,7 @@ pub struct CrossReference {
     pub relevance: String,
 }
 
-/// Result of `assemble_document` — the body text plus the rendered file
+/// Result of `assemble_document` - the body text plus the rendered file
 /// payload (frontmatter + body) ready for `atomic_write`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssembledDocument {
@@ -211,7 +220,7 @@ pub struct AssembledDocument {
 /// If the finding contains a `**Headline:**` paragraph, its body is used as the
 /// headline. Otherwise a fallback headline is derived from the first 15 words
 /// of the `**Observation:**` paragraph (or the first sentence if shorter). The
-/// returned headline is trimmed and never empty — it falls back to
+/// returned headline is trimmed and never empty - it falls back to
 /// "Finding {n}" when nothing else is available.
 fn extract_headline(finding: &str, finding_number: usize) -> (String, String) {
     const LABEL: &str = "**Headline:**";
@@ -284,7 +293,7 @@ fn derive_headline_from_observation(finding: &str, finding_number: usize) -> Str
 /// the `# Title:` line, and a body whose section order depends on
 /// `doc.output_format`:
 ///
-/// * [`OutputFormat::Report`](crate::run_config::OutputFormat::Report)
+/// * `OutputFormat::Report`
 ///   (default) and all other existing formats emit the legacy multi-section
 ///   layout: Topic, Search Queries, Executive Summary, Top 10 Implications,
 ///   Open Questions, Findings, Findings Relationship Diagram,
@@ -399,7 +408,7 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
 ///
 /// Each section is emitted only when its artifact was produced, so a light
 /// tier run yields a short file. The `Sources Reference` table is appended by
-/// [`assemble_document`]. The report and IMRaD layouts share one CORPA body —
+/// [`assemble_document`]. The report and IMRaD layouts share one CORPA body -
 /// the companion document always uses top-level `##` headings so it renders
 /// identically regardless of the `RESEARCH.md` layout in use.
 fn assemble_corpa_body(doc: &ResearchDocument) -> String {
@@ -454,7 +463,7 @@ fn assemble_corpa_body(doc: &ResearchDocument) -> String {
                     .map(|i| format!("#{i}"))
                     .collect();
                 let snippets = if locus.snippets.is_empty() {
-                    "—".to_string()
+                    "-".to_string()
                 } else {
                     locus
                         .snippets
@@ -508,7 +517,7 @@ fn assemble_corpa_body(doc: &ResearchDocument) -> String {
         body.push_str(&render_cross_locus_reconcile(reconcile));
     }
 
-    // ── Source Tensions (FR-005, T-009) ──────────────────────────���──────
+    // ── Source Tensions (FR-005, T-009) ────────────────────────────────
     if let Some(tensions) = &doc.source_tensions {
         body.push_str("## Source Tensions\n\n");
         body.push_str(&render_source_tensions(tensions));
@@ -610,7 +619,7 @@ fn render_triple_draft(draft: &TripleDraft) -> String {
     }
     for candidate in &draft.candidates {
         out.push_str(&format!(
-            "### Draft {} — {}\n\n{}\n\n*Sources: {}*\n\n",
+            "### Draft {} - {}\n\n{}\n\n*Sources: {}*\n\n",
             candidate.label,
             escape_pipe(&candidate.note),
             strip_control_chars(&candidate.body).trim(),
@@ -760,8 +769,8 @@ fn render_gap_fetch(result: &crate::corpus_critic::GapFetchResult) -> String {
 }
 
 /// Render a concise "Data Quality & Consistency" summary that synthesizes the
-/// five QA artifacts — corpus critic, contradiction graph, source tensions,
-/// cross-locus reconcile, and synthesis audit — into a single overview block.
+/// five QA artifacts - corpus critic, contradiction graph, source tensions,
+/// cross-locus reconcile, and synthesis audit - into a single overview block.
 ///
 /// Returns an empty string when none of the five artifacts are present, so the
 /// caller can omit the section heading entirely. When at least one artifact is
@@ -793,7 +802,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
         let status = if report.passed { "pass" } else { "review" };
         format!("Corpus critic scored {}/100 ({}).", report.score, status)
     } else {
-        "Quality data available — see metrics below.".to_string()
+        "Quality data available - see metrics below.".to_string()
     };
     out.push_str(&format!("**Overall verdict:** {}\n\n", verdict));
 
@@ -808,7 +817,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
             "Corpus critic".into(),
             format!("{}/100 ({})", report.score, status),
             format!(
-                "coverage {} · evidence {} · balance {} · tension {}",
+                "coverage {} * evidence {} * balance {} * tension {}",
                 report.coverage_score,
                 report.evidence_score,
                 report.balance_score,
@@ -854,7 +863,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
             "Source tensions".into(),
             format!("{total} tension(s)"),
             format!(
-                "{} contradiction · {} shallow · {} isolated",
+                "{} contradiction * {} shallow * {} isolated",
                 contradictions, shallow, isolated
             ),
         ));
@@ -911,7 +920,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
     if let Some(graph) = &doc.contradiction_graph {
         for edge in graph.edges.iter().take(2) {
             concerns.push(format!(
-                "Contradiction: {} vs {} — {}",
+                "Contradiction: {} vs {} - {}",
                 edge.claim_a.source_index,
                 edge.claim_b.source_index,
                 escape_pipe(&edge.note)
@@ -927,7 +936,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             concerns.push(format!(
-                "Tension ({}): {} [{}] — {}",
+                "Tension ({}): {} [{}] - {}",
                 t.kind.as_str(),
                 escape_pipe(&t.label),
                 sources,
@@ -939,7 +948,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
         for pair in reconcile.pairs.iter().take(2) {
             if pair.conflicting_edges > 0 {
                 concerns.push(format!(
-                    "Reconcile: {} ↔ {} — {} conflicting edge(s)",
+                    "Reconcile: {} <-> {} - {} conflicting edge(s)",
                     escape_pipe(&pair.locus_a),
                     escape_pipe(&pair.locus_b),
                     pair.conflicting_edges
@@ -1005,9 +1014,9 @@ fn render_citation_check(result: &crate::cite_checker::CitationCheckResult) -> S
     out.push_str(&format!(
         "**Gate:** {}\n\n",
         if result.gate_open {
-            "open — report may ship"
+            "open - report may ship"
         } else {
-            "closed — human approval required"
+            "closed - human approval required"
         }
     ));
     out
@@ -1071,7 +1080,7 @@ fn render_readability_audit(audit: &crate::readability::ReadabilityAudit) -> Str
 fn render_surgical_patch(result: &crate::patcher::PatchResult) -> String {
     let mut out = String::new();
     out.push_str(&format!(
-        "**Score estimate:** {} → {}\n\n",
+        "**Score estimate:** {} -> {}\n\n",
         result.score_before, result.score_after
     ));
     out.push_str(&format!("**Note:** {}\n\n", escape_pipe(&result.note)));
@@ -1364,6 +1373,7 @@ fn cited_date_span(doc: &ResearchDocument, cited: &[usize]) -> Option<(i32, i32,
 /// difference is the heading level (`##` top-level sections vs `###`
 /// sub-sections) and the surrounding section order. These helpers carry the
 /// shared rendering so each layout stays a thin, ordering-only function.
+#[allow(clippy::redundant_pub_crate)]
 mod layout {
     use super::{
         ResearchDocument, ResearchIo, Utc, escape_pipe, extract_headline, normalize_finding_labels,
@@ -1381,7 +1391,7 @@ mod layout {
         body.push_str("Search Queries\n\n");
         if doc.decomposed_queries.is_empty() {
             body.push_str(
-                "_(no query decomposition was used — the original topic was searched as a single query)_\n\n",
+                "_(no query decomposition was used - the original topic was searched as a single query)_\n\n",
             );
         } else {
             for q in &doc.decomposed_queries {
@@ -1391,7 +1401,7 @@ mod layout {
         }
     }
 
-    /// `Search Engine Summary` block — per-engine breakdown of acquired web
+    /// `Search Engine Summary` block - per-engine breakdown of acquired web
     /// sources by media type, emitted only when at least one web source
     /// carries a non-empty `search_engine` field (absent for skeletons and
     /// pre-gathering documents).
@@ -1405,7 +1415,7 @@ mod layout {
         }
     }
 
-    /// `Search Provider Requests` block — per-provider search-request totals
+    /// `Search Provider Requests` block - per-provider search-request totals
     /// for the run, rendered only when the session recorded at least one
     /// provider call.
     pub(crate) fn push_provider_requests(body: &mut String, doc: &ResearchDocument, level: u8) {
@@ -1439,7 +1449,7 @@ mod layout {
     pub(crate) fn push_findings(body: &mut String, doc: &ResearchDocument) {
         if doc.findings.is_empty() {
             body.push_str(
-                "_(no findings yet — the gathering pass will populate this section)_\n\n",
+                "_(no findings yet - the gathering pass will populate this section)_\n\n",
             );
             return;
         }
@@ -1455,7 +1465,7 @@ mod layout {
                 remainder.push_str(&sources_list);
             }
             body.push_str(&format!(
-                "\n### **Finding {n}** — {headline}\n\n{remainder}\n\n"
+                "\n### **Finding {n}** - {headline}\n\n{remainder}\n\n"
             ));
         }
     }
@@ -1571,7 +1581,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push_str("\n\n");
     }
 
-    // ── Search Queries ──────────���───────────────────────────────────────
+    // ── Search Queries ─────────────────────────────────────────────────
     push_search_queries(&mut body, doc, 1);
 
     // ── Search Engine Summary ──────────────────────────────────────────
@@ -1590,7 +1600,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     // ── Executive Summary ─────────────────────────────────────────────────
     body.push_str("## Executive Summary\n\n");
     if doc.summary.trim().is_empty() {
-        body.push_str("_(no executive summary recorded yet — run a gathering pass to populate)_\n");
+        body.push_str("_(no executive summary recorded yet - run a gathering pass to populate)_\n");
     } else {
         body.push_str(&strip_control_chars(doc.summary.trim()));
         body.push('\n');
@@ -1601,7 +1611,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     body.push_str("## Top 10 Implications\n\n");
     if doc.top_implications.is_empty() {
         body.push_str(
-            "_(no ranked implications yet — the synthesis pass will populate this section)_\n\n",
+            "_(no ranked implications yet - the synthesis pass will populate this section)_\n\n",
         );
     } else {
         for (idx, imp) in doc.top_implications.iter().enumerate() {
@@ -1612,7 +1622,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push('\n');
     }
 
-    // ── Open Questions ─────────────��─────────────────────────────────────
+    // ── Open Questions ──────────────────────────────────────────────────
     push_open_questions(&mut body, doc, 1);
 
     // ── Data Quality & Consistency ──────────────────────────────────────
@@ -1647,7 +1657,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     // Synthesis Audit, Corpus Critic) moved to the per-research CORPA.md
     // companion file -- see `assemble_corpa_body`.
 
-    // QA artifact sub-sections (Digest → Readability Audit) share one
+    // QA artifact sub-sections (Digest -> Readability Audit) share one
     // renderer with the IMRaD layout.
     push_qa_sections(&mut body, doc, 1);
     // NOTE: Cross-Locus Reconcile, Source Tensions, Synthesis Audit, and
@@ -1681,7 +1691,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     body.push_str("## Abstract\n\n");
     if doc.summary.trim().is_empty() {
         body.push_str(
-            "_(no abstract recorded yet — run a gathering pass to populate this section)_\n\n",
+            "_(no abstract recorded yet - run a gathering pass to populate this section)_\n\n",
         );
     } else {
         body.push_str(&strip_control_chars(doc.summary.trim()));
@@ -1709,7 +1719,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         );
     }
 
-    // ── Methods (FR-007) ���─────────────────────────────────────────────────
+    // ── Methods (FR-007) ─────────────────────────────────────────────────
     body.push_str("## Methods\n\n");
     push_search_queries(&mut body, doc, 2);
 
@@ -1731,7 +1741,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
                  produced by the gathering pass.\n\n",
     );
 
-    // ── Concepts (spec researchcluster) ─────────────���──────────────────
+    // ── Concepts (spec researchcluster) ───────────────────────────────
     // In the IMRaD layout the concept list is a Results sub-section rendered
     // directly above the Findings subsection.
     if let Some(concepts) = &doc.concepts {
@@ -1804,7 +1814,7 @@ fn assemble_comparison_table_body(doc: &ResearchDocument, topic: &str) -> String
     // artifact instead of after the entity profiles.
     body.push_str("## Executive Summary\n\n");
     if doc.summary.trim().is_empty() {
-        body.push_str("_(no executive summary recorded yet — the synthesis pass will populate)_\n");
+        body.push_str("_(no executive summary recorded yet - the synthesis pass will populate)_\n");
     } else {
         body.push_str(&strip_control_chars(doc.summary.trim()));
         body.push('\n');
@@ -1824,7 +1834,7 @@ fn assemble_comparison_table_body(doc: &ResearchDocument, topic: &str) -> String
 
     body.push_str("## Findings\n\n");
     if doc.findings.is_empty() {
-        body.push_str("_(no findings yet — the gathering pass will populate this section)_\n\n");
+        body.push_str("_(no findings yet - the gathering pass will populate this section)_\n\n");
     } else {
         for (idx, finding) in doc.findings.iter().enumerate() {
             let n = idx + 1;
@@ -1837,7 +1847,7 @@ fn assemble_comparison_table_body(doc: &ResearchDocument, topic: &str) -> String
                 remainder.push_str(&sources_list);
             }
             body.push_str(&format!(
-                "\n### **Finding {n}** — {headline}\n\n{remainder}\n\n"
+                "\n### **Finding {n}** - {headline}\n\n{remainder}\n\n"
             ));
         }
     }
@@ -1858,7 +1868,7 @@ fn assemble_comparison_table_body(doc: &ResearchDocument, topic: &str) -> String
 ///
 /// The `output_format` argument selects between the legacy report layout and
 /// the `IMRaD` layout; callers that do not care should pass
-/// [`OutputFormat::Report`].
+/// `OutputFormat::Report`.
 #[must_use]
 pub fn render_skeleton(
     name: &ResearchName,
@@ -1872,7 +1882,7 @@ pub fn render_skeleton(
 /// Render the `CORPA.md` companion skeleton written alongside the
 /// `RESEARCH.md` skeleton by [`crate::manager::ResearchManager::create`].
 /// No QA sections have artifacts at creation time, so the skeleton carries
-/// only the header and the `Sources Reference` placeholder table — this
+/// only the header and the `Sources Reference` placeholder table - this
 /// keeps the file well-formed the moment it lands on disk.
 #[must_use]
 pub fn render_corpa_skeleton(
@@ -1935,10 +1945,10 @@ fn placeholder_document(
 ///
 /// Recognised placeholders:
 ///
-/// - `{{title}}` — the research item title.
-/// - `{{topic}}` — the topic description.
-/// - `{{date}}` — the current UTC date (`YYYY-MM-DD`).
-/// - `{{name}}` — the research name.
+/// - `{{title}}` - the research item title.
+/// - `{{topic}}` - the topic description.
+/// - `{{date}}` - the current UTC date (`YYYY-MM-DD`).
+/// - `{{name}}` - the research name.
 ///
 /// Unknown placeholders are left untouched so authors can use other
 /// `{{var}}` syntax (e.g. inside a code fence) without surprises.
@@ -1949,7 +1959,7 @@ pub fn apply_template(template: &str, title: &str, topic: &str) -> String {
         .replace("{{title}}", title)
         .replace("{{topic}}", topic)
         .replace("{{date}}", &date)
-        // {{name}} is substituted only when present in the template — we
+        // {{name}} is substituted only when present in the template - we
         // don't have the name here, so we use a placeholder-friendly default
         // that the caller can replace after the fact if needed.
         .replace("{{name}}", "")
@@ -1964,7 +1974,7 @@ pub fn apply_template(template: &str, title: &str, topic: &str) -> String {
 /// A `**Source date range:**` line is appended after the bullet list showing
 /// the earliest and latest publication dates of the cited *web* sources, so
 /// the reader can judge the relative age of the evidence backing the finding.
-/// The line reads `—` when no cited web source exposes a publication date.
+/// The line reads `-` when no cited web source exposes a publication date.
 ///
 /// When `cloak_urls` is `true`, web sources have their URL defanged with
 /// [`cloak_url`] so the bullet emits it as plain text rather than a clickable
@@ -1993,9 +2003,9 @@ fn render_finding_sources(finding: &str, sources: &[Source], cloak_urls: bool) -
         if let Some(src) = sources.get(idx - 1) {
             any = true;
             let author = src.author().filter(|a| !a.is_empty());
-            let _ = write!(out, "- [{idx}] {}", src.title());
+            let _ = write!(out, "- [{idx}] {}", src.title()); // INTENTIONAL: write to a String buffer is infallible
             if let Some(a) = author {
-                let _ = write!(out, " [{a}]");
+                let _ = write!(out, " [{a}]"); // INTENTIONAL: write to a String buffer is infallible
             }
             // `--url-cloak`: defang web URLs so this bullet carries them as
             // plain text rather than a clickable link.
@@ -2004,9 +2014,9 @@ fn render_finding_sources(finding: &str, sources: &[Source], cloak_urls: bool) -
             } else {
                 src.path_or_url().to_string()
             };
-            let _ = write!(out, " — {location}");
+            let _ = write!(out, " - {location}"); // INTENTIONAL: write to a String buffer is infallible
             if let Some(dt) = src.published_at() {
-                let _ = write!(out, " (published {})", dt.format("%Y-%m-%d"));
+                let _ = write!(out, " (published {})", dt.format("%Y-%m-%d")); // INTENTIONAL: write to a String buffer is infallible
             }
             out.push('\n');
         }
@@ -2033,7 +2043,7 @@ fn render_finding_sources(finding: &str, sources: &[Source], cloak_urls: bool) -
 /// of aborting the whole line. The returned line uses the form
 /// `earliest..latest` (both inclusive, `YYYY-MM-DD`), or a single date when
 /// all dated sources share the same publication date; when the finding cites
-/// web sources but none of them expose a date it reads `—` with an
+/// web sources but none of them expose a date it reads `-` with an
 /// explanatory suffix.
 fn render_finding_date_range(indices: &[usize], sources: &[Source]) -> Option<String> {
     let mut dates: Vec<chrono::DateTime<chrono::Utc>> = Vec::new();
@@ -2057,10 +2067,10 @@ fn render_finding_date_range(indices: &[usize], sources: &[Source]) -> Option<St
         // sources, so the reader knows the dates were unavailable rather than
         // absent.
         return Some(if total_web > 0 {
-            "**Source date range:** — (cited web sources did not expose a publication date)"
+            "**Source date range:** - (cited web sources did not expose a publication date)"
                 .to_string()
         } else {
-            "**Source date range:** — (no web sources cited)".to_string()
+            "**Source date range:** - (no web sources cited)".to_string()
         });
     }
     dates.sort();
@@ -2131,6 +2141,7 @@ pub(crate) fn linkify_urls(text: &str) -> String {
 fn url_regex() -> &'static Regex {
     static URL_RE: OnceLock<Regex> = OnceLock::new();
     URL_RE.get_or_init(|| {
+        // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
         Regex::new(r"(?i)\bhttps?://[a-zA-Z0-9_~:/.?#@!$&'()*+,;=%-]+").expect("valid url regex")
     })
 }
@@ -2138,6 +2149,7 @@ fn url_regex() -> &'static Regex {
 /// Cached fenced-code-block line pattern used by [`linkify_urls`].
 fn fence_re() -> &'static Regex {
     static FENCE_RE: OnceLock<Regex> = OnceLock::new();
+    // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
     FENCE_RE.get_or_init(|| Regex::new(r"(?m)^```.*$").expect("valid fence regex"))
 }
 
@@ -2336,7 +2348,7 @@ pub fn truncate_body_to_bytes(body: &str, max_bytes: usize) -> String {
     }
     let mut out = String::with_capacity(cut + 64);
     out.push_str(&body[..cut]);
-    out.push_str("\n\n… _(truncated — body exceeded the per-source size cap)_\n");
+    out.push_str("\n\n... _(truncated - body exceeded the per-source size cap)_\n");
     out
 }
 
@@ -2351,8 +2363,14 @@ pub fn truncate_body_to_bytes(body: &str, max_bytes: usize) -> String {
 /// When the captured `body` is empty (e.g. older research items loaded from
 /// disk that predate the body field, or a fetch that returned no text) we
 /// emit a clearly-marked placeholder so the file is still self-describing.
+///
+/// When `cloak_urls` is `true`, web-source URLs (the header `- URL:` line and
+/// any open-access recovery URL) are defanged with [`cloak_url`] so the
+/// supporting file emits them as plain text rather than clickable links,
+/// matching the `Sources` bullets and the References Index (`/research create
+/// --url-cloak`; ANTIPAT F-13).
 #[must_use]
-pub fn render_supporting_file(source: &Source) -> Option<String> {
+pub fn render_supporting_file(source: &Source, cloak_urls: bool) -> Option<String> {
     match source {
         Source::Web {
             url,
@@ -2366,14 +2384,23 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
             author,
             ..
         } => {
+            let header_url = if cloak_urls {
+                cloak_url(url)
+            } else {
+                url.clone()
+            };
             let recovery_note = match oa_recovery {
                 Some(r) => {
                     let version = r.version.as_deref().unwrap_or("unspecified");
                     let license = r.license.as_deref().unwrap_or("unspecified");
+                    let recovery_url = if cloak_urls {
+                        cloak_url(&r.url)
+                    } else {
+                        r.url.clone()
+                    };
                     format!(
-                        "- Open-access recovery: full text fetched from {source} ({url}); version={version}, license={license}",
+                        "- Open-access recovery: full text fetched from {source} ({recovery_url}); version={version}, license={license}",
                         source = r.source,
-                        url = r.url
                     )
                 }
                 None => String::new(),
@@ -2389,14 +2416,14 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
                  - Relevance: {relevance}\n\
                  {recovery_note}\n\n\
                  ```text\n{body}\n```\n",
-                url = url,
+                url = header_url,
                 title = title,
-                author = author.as_deref().unwrap_or("—"),
-                language = language.as_deref().unwrap_or("—"),
-                published = published_at.map_or_else(|| "—".to_string(), |dt| dt.to_rfc3339()),
+                author = author.as_deref().unwrap_or("-"),
+                language = language.as_deref().unwrap_or("-"),
+                published = published_at.map_or_else(|| "-".to_string(), |dt| dt.to_rfc3339()),
                 captured = captured_at.to_rfc3339(),
                 relevance = if relevance.is_empty() {
-                    "—"
+                    "-"
                 } else {
                     relevance.as_str()
                 },
@@ -2429,7 +2456,7 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
                 relevance = relevance,
                 captured = captured_at.to_rfc3339(),
                 body = if body.is_empty() {
-                    "(no excerpt captured — file could not be read)"
+                    "(no excerpt captured - file could not be read)"
                 } else {
                     body.as_str()
                 },
@@ -2486,10 +2513,12 @@ static STRIKE_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new()
 fn strip_inline_text_attributes(text: &str) -> String {
     let html = HTML_TAG_RE.get_or_init(|| {
         // HTML/XML-style tags, case-insensitive, preserving inner text.
+        // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
         Regex::new(r"(?i)</?[a-z][a-z0-9]*(?:\s[^>]*)?/?>").expect("valid regex")
     });
     let strike = STRIKE_RE.get_or_init(|| {
         // Markdown strikethrough: ~~...~~
+        // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
         Regex::new(r"~~(.+?)~~").expect("valid regex")
     });
     let mut out = html.replace_all(text, "").to_string();
@@ -2507,7 +2536,7 @@ const SENTENCE_ABBREVIATIONS: &[&str] = &[
 
 /// Split the body of an **Analysis:** paragraph into sentences and place each
 /// sentence on its own line using a blank line separator. Whitespace in the
-/// input — including any embedded newlines — is collapsed to single spaces before
+/// input - including any embedded newlines - is collapsed to single spaces before
 /// splitting so the output is stable regardless of how the analysis was
 /// generated.
 ///
@@ -2603,14 +2632,16 @@ fn normalize_finding_labels(finding: &str) -> String {
     static PARAGRAPH_PREFIX_RE: OnceLock<Regex> = OnceLock::new();
     static LABEL_RE: OnceLock<Regex> = OnceLock::new();
     let paragraph_prefix = PARAGRAPH_PREFIX_RE
-        .get_or_init(|| Regex::new(r"Paragraph\s+\d+\s*—\s*").expect("valid regex"));
+        // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
+        .get_or_init(|| Regex::new(r"Paragraph\s+\d+\s*-\s*").expect("valid regex"));
     let label_re = LABEL_RE.get_or_init(|| {
+        // INVARIANT: compile-time-constant regex; the call cannot fail at runtime.
         Regex::new(r"(\*\*[-A-Za-z/\s]+:\*\*|\*[-A-Za-z/\s]+:\*)").expect("valid regex")
     });
 
     let mut text = finding.trim().replace("\n\n\n", "\n\n");
 
-    // Strip stale "Paragraph N — " prefixes before any label.
+    // Strip stale "Paragraph N - " prefixes before any label.
     text = paragraph_prefix.replace_all(&text, "").to_string();
 
     // Split into alternating non-label / label segments. The first segment is
@@ -2791,41 +2822,78 @@ pub fn render_provider_stats_summary(tool_calls: &[(String, usize)]) -> String {
     out
 }
 
+/// Render the end-of-run per-provider search-request suffix, e.g.
+/// `, 12 search request(s) (mf_search: 12)`.
+///
+/// Returns an empty string when `tool_calls` is empty. Shared by the `ragent
+/// research` CLI and the TUI `/research` surface so their summaries cannot
+/// drift (see `ANTIPAT.md` M3.10).
+#[must_use]
+pub fn provider_calls_suffix(tool_calls: &[(String, usize)]) -> String {
+    if tool_calls.is_empty() {
+        return String::new();
+    }
+    let per_tool = tool_calls
+        .iter()
+        .map(|(tool, count)| format!("{tool}: {count}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let total: usize = tool_calls.iter().map(|(_, count)| count).sum();
+    format!(", {total} search request(s) ({per_tool})")
+}
+
 /// Render a standalone sources appendix / bibliography for the
 /// `--format source-bibliography` artifact (T-011).
 ///
 /// The output is a markdown document listing every source with its type,
-/// title, path/URL, captured timestamp, and (when available) the first 240
-/// characters of its body.
+/// title, path/URL, captured timestamp, and (when available) the first
+/// [`BIBLIOGRAPHY_PREVIEW_CHARS`] characters of its body.
+///
+/// When `cloak_urls` is `true`, web-source URLs are defanged with [`cloak_url`]
+/// so the emitted URL is plain text rather than a clickable link, matching the
+/// `Sources` bullets, the References Index, and the supporting files
+/// (`/research create --url-cloak`; ANTIPAT F-13).
+///
+/// [`BIBLIOGRAPHY_PREVIEW_CHARS`]: crate::limits::BIBLIOGRAPHY_PREVIEW_CHARS
 #[must_use]
-pub fn render_bibliography(sources: &[Source]) -> String {
+pub fn render_bibliography(sources: &[Source], cloak_urls: bool) -> String {
     if sources.is_empty() {
         return "# Sources Bibliography\n\n_(no sources captured)_\n".to_string();
     }
-    let mut out = String::with_capacity(sources.len() * 512);
+    let mut out = String::with_capacity(sources.len() * BIBLIOGRAPHY_ENTRY_ESTIMATE_BYTES);
     out.push_str("# Sources Bibliography\n\n");
     use std::fmt::Write;
+    // Shared limit resolution: `0` would mean "unbounded" (FR-016), a positive
+    // cap truncates to that many characters (ANTIPAT F-15).
+    let preview_cap = crate::limits::effective_limit(crate::limits::BIBLIOGRAPHY_PREVIEW_CHARS);
     for (idx, source) in sources.iter().enumerate() {
         let n = idx + 1;
         let kind = source.type_str();
-        let path = source.path_or_url();
+        let path = if cloak_urls && matches!(source, Source::Web { .. }) {
+            cloak_url(source.path_or_url())
+        } else {
+            source.path_or_url().to_string()
+        };
         let title = source.title();
         let captured = source.captured_at().to_rfc3339();
         let _ = write!(
+            // INTENTIONAL: write to a String buffer is infallible
             out,
             "## [{n}] {title}\n\n- **Type:** {kind}\n- **Path/URL:** {path}\n- **Captured:** {captured}\n"
         );
         if let Some(rel) = source.relevance()
             && !rel.is_empty()
         {
-            let _ = writeln!(out, "- **Relevance:** {rel}");
+            let _ = writeln!(out, "- **Relevance:** {rel}"); // INTENTIONAL: write to a String buffer is infallible
         }
-        if let Some(body) = source.body() {
-            // Short-circuit: only count up to 241 chars to decide whether to
-            // truncate, avoiding a full O(n) scan of large bodies.
-            let needs_truncation = body.chars().take(241).count() > 240;
+        if let Some(body) = source.body()
+            && let Some(cap) = preview_cap
+        {
+            // Short-circuit: only count up to `cap + 1` chars to decide whether
+            // to truncate, avoiding a full O(n) scan of large bodies.
+            let needs_truncation = body.chars().take(cap + 1).count() > cap;
             let preview = if needs_truncation {
-                let mut p = body.chars().take(240).collect::<String>();
+                let mut p = body.chars().take(cap).collect::<String>();
                 p.push('\u{2026}');
                 p
             } else {
@@ -2843,1654 +2911,5 @@ pub fn render_bibliography(sources: &[Source]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::source::Source;
-    use std::path::PathBuf;
-    fn sample_name() -> ResearchName {
-        ResearchName::new("rust-async").expect("name must validate")
-    }
-
-    fn sample_item() -> ResearchItem {
-        ResearchItem::new(sample_name(), "Rust Async Patterns", "async/await idioms")
-    }
-
-    fn sample_doc(item: ResearchItem) -> ResearchDocument {
-        ResearchDocument {
-            item,
-            summary: String::new(),
-            findings: Vec::new(),
-            top_implications: Vec::new(),
-            cross_references: Vec::new(),
-            open_questions: Vec::new(),
-            concepts: None,
-            contradiction_graph: None,
-            loci: None,
-            depth_investigation: None,
-            evidence_digest: None,
-            triple_draft: None,
-            cross_locus_reconcile: None,
-            source_tensions: None,
-            synthesis_audit: None,
-            corpus_critic: None,
-            gap_fetch: None,
-            surgical_patch: None,
-            cite_check: None,
-            polish: None,
-            readability_audit: None,
-            template_body: None,
-            brief: None,
-            decomposed_queries: Vec::new(),
-            output_format: crate::run_config::OutputFormat::Report,
-            comparison_table: None,
-            evaluation_scorecard: None,
-            provider_stats: None,
-        }
-    }
-
-    #[test]
-    fn assemble_document_renders_contradiction_graph_section() {
-        use crate::contradiction::{ContradictionClaim, ContradictionEdge, ContradictionGraph};
-        let sources = [
-            Source::Web {
-                url: "https://a.example".into(),
-                title: "A".into(),
-                captured_at: chrono::Utc::now(),
-                published_at: None,
-                body_path: PathBuf::new(),
-                body: "The intervention improves performance.".into(),
-                relevance: String::new(),
-                search_tool: String::new(),
-                search_engine: String::new(),
-                content_type: None,
-                page_type: None,
-                media_type: "page".into(),
-                language: None,
-                oa_recovery: None,
-                author: None,
-            },
-            Source::Web {
-                url: "https://b.example".into(),
-                title: "B".into(),
-                captured_at: chrono::Utc::now(),
-                published_at: None,
-                body_path: PathBuf::new(),
-                body: "The intervention degrades performance.".into(),
-                relevance: String::new(),
-                search_tool: String::new(),
-                search_engine: String::new(),
-                content_type: None,
-                page_type: None,
-                media_type: "page".into(),
-                language: None,
-                oa_recovery: None,
-                author: None,
-            },
-        ];
-        let mut graph = ContradictionGraph::empty();
-        graph.add_edge(ContradictionEdge {
-            claim_a: ContradictionClaim::from_source("claims better performance", 1, &sources[0]),
-            claim_b: ContradictionClaim::from_source("claims worse performance", 2, &sources[1]),
-            dimension: "performance".into(),
-            note: "opposing performance claims".into(),
-            strength: 50,
-        });
-        let mut doc = sample_doc(sample_item());
-        doc.contradiction_graph = Some(graph);
-        let assembled = assemble_document(&doc);
-        // The contradiction graph renders in the CORPA.md companion payload.
-        assert!(assembled.corpa.contains("## Contradiction Graph"));
-        assert!(!assembled.body.contains("## Contradiction Graph"));
-        assert!(assembled.corpa.contains("performance"));
-        assert!(assembled.corpa.contains("opposing performance claims"));
-        assert!(assembled.corpa.contains("#1"));
-        assert!(assembled.corpa.contains("#2"));
-    }
-
-    #[test]
-    fn assemble_document_contradiction_graph_placeholder_when_empty() {
-        let mut doc = sample_doc(sample_item());
-        doc.contradiction_graph = Some(crate::contradiction::ContradictionGraph::empty());
-        let assembled = assemble_document(&doc);
-        assert!(assembled.corpa.contains("## Contradiction Graph"));
-        assert!(
-            assembled
-                .corpa
-                .contains("no contradictions detected among the gathered sources")
-        );
-    }
-
-    #[test]
-    fn assemble_document_omits_contradiction_section_when_none() {
-        let doc = sample_doc(sample_item());
-        let assembled = assemble_document(&doc);
-        assert!(!assembled.body.contains("## Contradiction Graph"));
-        assert!(!assembled.corpa.contains("## Contradiction Graph"));
-    }
-
-    #[test]
-    fn assemble_document_renders_corpus_critic_and_gap_fetch_sections() {
-        let mut doc = sample_doc(sample_item());
-        doc.corpus_critic = Some(crate::corpus_critic::CorpusCriticReport {
-            score: 72,
-            coverage_score: 80,
-            evidence_score: 70,
-            balance_score: 85,
-            tension_score: 55,
-            issues: vec!["shallow evidence on Cost".into()],
-            gaps: vec!["Add cost evidence".into()],
-            recommendations: vec!["Broaden the width sweep".into()],
-            contested_ratio: 10,
-            shallow_dimensions: vec!["Cost".into()],
-            isolated_sources: vec![3],
-            passed: true,
-        });
-        doc.gap_fetch = Some(crate::corpus_critic::GapFetchResult {
-            queries: vec!["topic cost evidence".into()],
-            new_sources: 2,
-            failed_queries: 0,
-            attempted: true,
-            note: String::new(),
-        });
-        let assembled = assemble_document(&doc);
-        assert!(
-            assembled.corpa.contains("## Corpus Critic"),
-            "CORPA.md should render corpus critic section"
-        );
-        assert!(
-            !assembled.body.contains("## Corpus Critic"),
-            "RESEARCH.md must no longer carry the corpus critic section"
-        );
-        assert!(
-            assembled.body.contains("## Gap-Fill Fetch"),
-            "report layout should render gap-fill section"
-        );
-        assert!(assembled.corpa.contains("72/100"));
-        assert!(assembled.corpa.contains("Broaden the width sweep"));
-        assert!(assembled.body.contains("**New sources captured:** 2"));
-        assert!(assembled.body.contains("topic cost evidence"));
-    }
-
-    #[test]
-    fn assemble_document_renders_surgical_patch_section() {
-        let mut doc = sample_doc(sample_item());
-        doc.surgical_patch = Some(crate::patcher::PatchResult {
-            patches: vec![
-                crate::patcher::SurgicalPatch {
-                    operation: "append_finding".to_string(),
-                    target: "Cost".to_string(),
-                    reason: "Dimension 'Cost' not addressed".to_string(),
-                    applied: true,
-                },
-                crate::patcher::SurgicalPatch {
-                    operation: "noop".to_string(),
-                    target: "logic".to_string(),
-                    reason: "logic critic passed".to_string(),
-                    applied: false,
-                },
-            ],
-            patched_analysis: crate::analysis::AnalysisResult::default(),
-            score_before: 55,
-            score_after: 70,
-            note: "Applied 1 surgical patch".to_string(),
-            patched_finding_count: 1,
-            patched_implication_count: 0,
-            patched_open_question_count: 1,
-        });
-        let assembled = assemble_document(&doc);
-        assert!(
-            assembled.body.contains("## Surgical Patch"),
-            "report layout should render surgical patch section"
-        );
-        assert!(assembled.body.contains("55 → 70"));
-        assert!(assembled.body.contains("Applied 1 surgical patch"));
-        assert!(assembled.body.contains("append_finding"));
-        assert!(assembled.body.contains("Cost"));
-    }
-
-    #[test]
-    fn assemble_document_omits_surgical_patch_section_when_none() {
-        let doc = sample_doc(sample_item());
-        let assembled = assemble_document(&doc);
-        assert!(!assembled.body.contains("## Surgical Patch"));
-    }
-
-    #[test]
-    fn assemble_document_frontmatter_discloses_open_access_recovery() {
-        let mut item = sample_item();
-        item.open_access_recovery = true;
-        let doc = sample_doc(item);
-        let assembled = assemble_document(&doc);
-        assert!(
-            assembled.frontmatter.contains("open_access_recovery: true"),
-            "frontmatter should disclose OA recovery; got:\n{}",
-            assembled.frontmatter
-        );
-    }
-
-    #[test]
-    fn assemble_document_supporting_file_discloses_recovery_version_and_license() {
-        use crate::open_access::{RecoveredOpenAccess, RecoverySource};
-        let mut item = sample_item();
-        item.add_source(Source::Web {
-            url: "https://doi.org/10.1234/example".into(),
-            title: "Example paper".into(),
-            captured_at: chrono::Utc::now(),
-            published_at: None,
-            body_path: std::path::PathBuf::from("sources/web-01.md"),
-            body: "full text".into(),
-            relevance: String::new(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: Some(Box::new(RecoveredOpenAccess {
-                url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC123456/".into(),
-                source: RecoverySource::EuropePmc,
-                license: Some("CC-BY-4.0".into()),
-                version: Some("publishedVersion".into()),
-            })),
-            author: None,
-        });
-        let rendered = render_supporting_file(&item.sources[0]).expect("web source renders");
-        assert!(rendered.contains("Open-access recovery"));
-        assert!(rendered.contains("europepmc"));
-        assert!(rendered.contains("publishedVersion"));
-        assert!(rendered.contains("CC-BY-4.0"));
-    }
-
-    #[test]
-    fn assemble_document_includes_all_ten_sections() {
-        let doc = sample_doc(sample_item());
-        let assembled = assemble_document(&doc);
-        for section in REQUIRED_SECTIONS {
-            assert!(
-                assembled.body.contains(&format!("## {section}")),
-                "missing required section `{section}` in assembled document:\n{}",
-                assembled.body
-            );
-        }
-        // The Title heading is rendered as an H1 (`# Title: ...`) rather than
-        // an H2, so it isn't part of REQUIRED_SECTIONS but must still be
-        // present.
-        assert!(
-            assembled.body.contains("# Title:"),
-            "missing H1 Title heading"
-        );
-    }
-
-    #[test]
-    fn assemble_document_renders_top_implications() {
-        let mut doc = sample_doc(sample_item());
-        doc.top_implications = vec![
-            "Adopt async/await for I/O-bound concurrency.".into(),
-            "Profile blocking calls before migration.".into(),
-        ];
-        let assembled = assemble_document(&doc);
-        let body = &assembled.body;
-        assert!(
-            body.contains("## Top 10 Implications"),
-            "section heading must be present"
-        );
-        assert!(body.contains("1. Adopt async/await for I/O-bound concurrency."));
-        assert!(body.contains("2. Profile blocking calls before migration."));
-    }
-
-    #[test]
-    fn assemble_document_starts_with_frontmatter_block() {
-        let doc = sample_doc(sample_item());
-        let assembled = assemble_document(&doc);
-        assert!(assembled.content.starts_with("---\n"));
-        assert!(assembled.content.contains("name: rust-async"));
-        assert!(assembled.content.contains("status: draft"));
-    }
-
-    #[test]
-    fn assemble_document_normalizes_paragraph_prefixes() {
-        let mut doc = sample_doc(sample_item());
-        doc.findings = vec![
-            "Paragraph 1 — **Observation:** observation text. *Paragraph 2 — Analysis:* analysis text. **Cross-reference / Dependencies:** deps. **Implication:** implication text. **Caveat:** caveat text.".into(),
-        ];
-        let assembled = assemble_document(&doc);
-        let body = &assembled.body;
-        assert!(
-            !body.contains("Paragraph 1"),
-            "paragraph prefixes should be stripped: {body}"
-        );
-        assert!(
-            body.contains("**Observation:**\nobservation text."),
-            "observation label should be on its own line: {body}"
-        );
-        assert!(
-            body.contains("**Analysis:**\nanalysis text."),
-            "analysis label should be on its own line: {body}"
-        );
-        assert!(
-            body.contains("**Cross-reference / Dependencies:**\ndeps."),
-            "cross-reference label should be on its own line: {body}"
-        );
-        assert!(
-            body.contains("**Caveat:**\ncaveat text."),
-            "extra caveat label should be preserved and separated: {body}"
-        );
-    }
-
-    #[test]
-    fn assemble_document_splits_run_on_finding_into_paragraphs() {
-        let mut doc = sample_doc(sample_item());
-        doc.findings = vec![
-            "**Headline:** Observation summary
-
-**Observation:** obs **Analysis:** analysis **Cross-reference / Dependencies:** none **Implication:** impl **Caveat:** caveat".into(),
-        ];
-        let assembled = assemble_document(&doc);
-        let finding = assembled
-            .body
-            .split("### **Finding 1** — Observation summary\n\n")
-            .nth(1)
-            .unwrap();
-        // After "### Finding N — headline\n\n" the required labels should be separated by blank lines.
-        assert!(
-            finding.contains("**Observation:**\nobs\n\n**Analysis:**\nanalysis"),
-            "labels should be separated by blank lines: {finding}"
-        );
-        assert!(
-            finding.contains("**Implication:**\nimpl\n\n**Caveat:**\ncaveat"),
-            "caveat should be separated from implication: {finding}"
-        );
-        assert!(
-            finding.contains("**Cross-reference / Dependencies:**\nnone\n\n**Implication:**\nimpl"),
-            "cross-reference label should be on its own line: {finding}"
-        );
-        assert!(
-            finding
-                .trim_start()
-                .starts_with("**Observation:**\nobs\n\n**Analysis:**\nanalysis"),
-            "label and its body should be on separate lines: {finding}"
-        );
-    }
-
-    #[test]
-    fn assemble_document_emits_one_finding_block_per_entry() {
-        let mut doc = sample_doc(sample_item());
-        doc.findings = vec![
-            "**Headline:** Observation summary
-
-**Observation:** first observation\n\n**Analysis:** first analysis\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** first implication\n\n**Related work:** extra context for finding one.".into(),
-            "**Headline:** Observation summary
-
-**Observation:** second observation\n\n**Analysis:** second analysis\n\n**Cross-reference / Dependencies:** Related to Finding 1.\n\n**Implication:** second implication".into(),
-        ];
-        let assembled = assemble_document(&doc);
-        assert!(assembled.body.contains(
-            "### **Finding 1** — Observation summary\n\n**Observation:**\nfirst observation"
-        ));
-        assert!(assembled.body.contains(
-            "### **Finding 2** — Observation summary\n\n**Observation:**\nsecond observation"
-        ));
-        assert!(assembled.body.contains("Related to Finding 1."));
-        assert!(
-            assembled
-                .body
-                .contains("**Related work:**\nextra context for finding one."),
-            "extra labeled paragraph beyond the five required ones should be preserved: {}",
-            assembled.body
-        );
-    }
-
-    #[test]
-    fn assemble_document_renders_cross_reference_table() {
-        let mut doc = sample_doc(sample_item());
-        doc.cross_references = vec![CrossReference {
-            path: "src/lib.rs".into(),
-            relevance: "Main library entry".into(),
-        }];
-        let assembled = assemble_document(&doc);
-        assert!(assembled.body.contains("| Path | Relevance |"));
-        assert!(
-            assembled
-                .body
-                .contains("| `src/lib.rs` | Main library entry |")
-        );
-    }
-
-    /// Helper: build a `Source::Web` with the given search engine and media type.
-    fn web_source(search_engine: &str, media_type: &str) -> Source {
-        use chrono::Utc;
-        Source::Web {
-            url: format!("https://example.com/{media_type}"),
-            title: format!("Test {media_type}"),
-            captured_at: Utc::now(),
-            published_at: None,
-            body_path: PathBuf::from("sources/web-01.md"),
-            body: String::new(),
-            relevance: String::new(),
-            search_tool: "mf_search".into(),
-            search_engine: search_engine.into(),
-            content_type: None,
-            page_type: None,
-            media_type: media_type.into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        }
-    }
-
-    #[test]
-    fn render_search_engine_summary_counts_pages_pdfs_videos() {
-        let sources = [
-            web_source("openalex, wikipedia", "page"),
-            web_source("openalex", "page"),
-            web_source("wikipedia", "pdf"),
-            web_source("exa", "youtube"),
-            web_source("exa", "page"),
-        ];
-        let table = render_search_engine_summary(&sources);
-        assert!(table.contains("| Engine | Pages | PDFs | Videos | Total |"));
-        // wikipedia: 1 page (from multi-engine source) + 1 pdf = 1 page, 1 pdf, 0 videos, 2 total
-        assert!(table.contains("| wikipedia | 1 | 1 | 0 | 2 |"));
-        // openalex: 2 pages (one from multi-engine, one single) = 2 pages
-        assert!(table.contains("| openalex | 2 | 0 | 0 | 2 |"));
-        // exa: 1 youtube + 1 page = 1 page, 0 pdfs, 1 video, 2 total
-        assert!(table.contains("| exa | 1 | 0 | 1 | 2 |"));
-    }
-
-    #[test]
-    fn render_search_engine_summary_empty_when_no_web_sources() {
-        let sources: Vec<Source> = vec![];
-        let table = render_search_engine_summary(&sources);
-        assert!(table.is_empty());
-    }
-
-    #[test]
-    fn render_search_engine_summary_empty_when_no_engine_field() {
-        // Web sources with empty search_engine should produce no table.
-        let sources = [web_source("", "page")];
-        let table = render_search_engine_summary(&sources);
-        assert!(table.is_empty());
-    }
-
-    #[test]
-    fn assemble_document_renders_search_engine_summary_after_queries() {
-        let mut item = sample_item();
-        item.sources = vec![
-            web_source("openalex", "page"),
-            web_source("wikipedia", "pdf"),
-        ];
-        let mut doc = sample_doc(item);
-        doc.decomposed_queries = vec!["test query".into()];
-        let assembled = assemble_document(&doc);
-        // The summary heading should appear after Search Queries and before
-        // Executive Summary.
-        let queries_pos = assembled.body.find("## Search Queries").unwrap();
-        let summary_pos = assembled
-            .body
-            .find("### Search Engine Summary")
-            .expect("Search Engine Summary section should be present");
-        let exec_pos = assembled.body.find("## Executive Summary").unwrap();
-        assert!(
-            queries_pos < summary_pos,
-            "Search Engine Summary should come after Search Queries"
-        );
-        assert!(
-            summary_pos < exec_pos,
-            "Search Engine Summary should come before Executive Summary"
-        );
-        assert!(assembled.body.contains("| openalex | 1 | 0 | 0 | 1 |"));
-        assert!(assembled.body.contains("| wikipedia | 0 | 1 | 0 | 1 |"));
-    }
-
-    #[test]
-    fn assemble_document_imrad_renders_search_engine_summary() {
-        let mut item = sample_item();
-        item.sources = vec![web_source("exa", "page"), web_source("exa", "youtube")];
-        let mut doc = sample_doc(item);
-        doc.decomposed_queries = vec!["test query".into()];
-        doc.output_format = crate::run_config::OutputFormat::Imrad;
-        let assembled = assemble_document(&doc);
-        // In IMRaD layout the summary appears under Methods after Search Queries.
-        let methods_pos = assembled.body.find("## Methods").unwrap();
-        let queries_pos = assembled.body.find("### Search Queries").unwrap();
-        let summary_pos = assembled
-            .body
-            .find("### Search Engine Summary")
-            .expect("Search Engine Summary should be present in IMRaD layout");
-        let config_pos = assembled.body.find("### Research Configuration").unwrap();
-        assert!(methods_pos < queries_pos);
-        assert!(
-            queries_pos < summary_pos,
-            "Search Engine Summary should come after Search Queries in IMRaD"
-        );
-        assert!(
-            summary_pos < config_pos,
-            "Search Engine Summary should come before Research Configuration in IMRaD"
-        );
-        assert!(assembled.body.contains("| exa | 1 | 0 | 1 | 2 |"));
-    }
-
-    #[test]
-    fn assemble_document_omits_search_engine_summary_for_skeleton() {
-        // A skeleton (no sources) should NOT contain the Search Engine Summary.
-        let doc = sample_doc(sample_item());
-        let assembled = assemble_document(&doc);
-        assert!(
-            !assembled.body.contains("### Search Engine Summary"),
-            "skeleton should not contain Search Engine Summary: {}",
-            assembled.body
-        );
-    }
-
-    #[test]
-    fn assemble_document_escapes_pipes_in_cross_reference_relevance() {
-        let mut doc = sample_doc(sample_item());
-        doc.cross_references = vec![CrossReference {
-            path: "src/lib.rs".into(),
-            relevance: "Has | pipes".into(),
-        }];
-        let assembled = assemble_document(&doc);
-        assert!(
-            assembled.body.contains(r"Has \| pipes"),
-            "expected escaped pipe in: {}",
-            assembled.body
-        );
-    }
-
-    #[test]
-    fn assemble_document_preserves_inline_citation_markers() {
-        let mut doc = sample_doc(sample_item());
-        doc.findings = vec!["Use Tokio [#1] for async runtimes.".into()];
-        let assembled = assemble_document(&doc);
-        assert!(assembled.body.contains("[#1]"));
-    }
-
-    #[test]
-    fn render_skeleton_produces_well_formed_document() {
-        let skeleton = render_skeleton(
-            &sample_name(),
-            "Rust Async",
-            "topic",
-            crate::run_config::OutputFormat::Report,
-        );
-        assert!(skeleton.starts_with("---\n"));
-        assert!(skeleton.contains("status: draft"));
-        assert!(skeleton.contains("## Topic"));
-        assert!(skeleton.contains("## References Index"));
-    }
-
-    #[test]
-    fn template_substitution_replaces_known_placeholders() {
-        let tmpl = "# {{title}}\n\nTopic: {{topic}}\nDate: {{date}}\n";
-        let out = apply_template(tmpl, "Title", "Topic");
-        assert!(out.contains("# Title\n"));
-        assert!(out.contains("Topic: Topic"));
-        assert!(out.contains("Date: 20"));
-    }
-
-    #[test]
-    fn template_substitution_leaves_unknown_placeholders_alone() {
-        let tmpl = "Hello {{name}}, unknown {{foo}}";
-        let out = apply_template(tmpl, "Title", "Topic");
-        assert!(out.contains("Hello , unknown {{foo}}"));
-    }
-
-    #[test]
-    fn fence_source_body_truncates_oversize_input() {
-        let huge = "x".repeat(MAX_SOURCE_BODY_BYTES + 1024);
-        let fenced = fence_source_body(&huge);
-        assert!(fenced.len() < huge.len());
-        assert!(fenced.contains("truncated"));
-    }
-
-    #[test]
-    fn fence_source_body_preserves_small_input() {
-        let small = "hello world";
-        let fenced = fence_source_body(small);
-        assert_eq!(fenced, small);
-    }
-
-    #[test]
-    fn render_supporting_file_returns_none_for_spec() {
-        let source = Source::Spec {
-            spec_id: "foo".into(),
-            captured_at: Utc::now(),
-            relevance: "Related".into(),
-        };
-        assert!(render_supporting_file(&source).is_none());
-    }
-
-    #[test]
-    fn render_supporting_file_produces_web_block() {
-        let source = Source::Web {
-            published_at: None,
-            url: "https://example.com".into(),
-            title: "Example".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-01.md"),
-            relevance: String::new(),
-            body: "page body content".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: Some("English".into()),
-            oa_recovery: None,
-            author: Some("Alice Writer".into()),
-        };
-        let out = render_supporting_file(&source).expect("web must produce a body");
-        assert!(out.contains("# Web source"));
-        assert!(out.contains("URL: https://example.com"));
-        assert!(out.contains("Author(s): Alice Writer"));
-        assert!(out.contains("Language: English"));
-        assert!(out.contains("page body content"));
-    }
-
-    #[test]
-    fn render_supporting_file_web_block_shows_dash_for_missing_author_and_language() {
-        let source = Source::Web {
-            published_at: None,
-            url: "https://example.com".into(),
-            title: "Example".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-01.md"),
-            relevance: String::new(),
-            body: "page body content".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        };
-        let out = render_supporting_file(&source).expect("web must produce a body");
-        assert!(out.contains("Author(s): —"));
-        assert!(out.contains("Language: —"));
-    }
-
-    #[test]
-    fn render_supporting_file_produces_web_placeholder_when_body_empty() {
-        let source = Source::Web {
-            published_at: None,
-            url: "https://example.com".into(),
-            title: "Example".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-01.md"),
-            relevance: String::new(),
-            body: String::new(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        };
-        let out = render_supporting_file(&source).expect("web must produce a body");
-        assert!(out.contains("no body captured"));
-    }
-
-    #[test]
-    fn render_supporting_file_produces_local_block_for_extra() {
-        let source = Source::Local {
-            path: "notes/extra.md".into(),
-            kind: LocalSourceKind::Extra,
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/local-01.md"),
-            relevance: "External notes".into(),
-            body: "excerpt text".into(),
-        };
-        let out = render_supporting_file(&source).expect("local must produce a body");
-        assert!(out.contains("# Local source (extra (--sources-dir))"));
-        assert!(out.contains("Path: notes/extra.md"));
-        assert!(out.contains("excerpt text"));
-    }
-
-    #[test]
-    fn render_supporting_file_produces_local_placeholder_when_body_empty() {
-        let source = Source::Local {
-            path: "missing.md".into(),
-            kind: LocalSourceKind::InProject,
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/local-01.md"),
-            relevance: "could not read".into(),
-            body: String::new(),
-        };
-        let out = render_supporting_file(&source).expect("local must produce a body");
-        assert!(out.contains("no excerpt captured"));
-    }
-
-    #[test]
-    fn render_bibliography_empty_state() {
-        let out = render_bibliography(&[]);
-        assert!(out.contains("Sources Bibliography"));
-        assert!(out.contains("no sources captured"));
-    }
-
-    #[test]
-    fn render_bibliography_includes_source_preview() {
-        let source = Source::Web {
-            published_at: None,
-            url: "https://example.com".into(),
-            title: "Example".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-01.md"),
-            relevance: String::new(),
-            body: "page body content".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        };
-        let out = render_bibliography(&[source]);
-        assert!(out.contains("Example"));
-        assert!(out.contains("https://example.com"));
-        assert!(out.contains("page body content"));
-    }
-
-    #[test]
-    fn mark_in_progress_only_when_not_archived() {
-        let mut item = sample_item();
-        mark_in_progress(&mut item);
-        assert_eq!(item.status, ResearchStatus::InProgress);
-
-        item.set_status(ResearchStatus::Archived);
-        mark_in_progress(&mut item);
-        // Archived is a terminal state — gathering cannot restart it.
-        assert_eq!(item.status, ResearchStatus::Archived);
-    }
-
-    #[test]
-    fn mark_complete_overrides_in_progress() {
-        let mut item = sample_item();
-        mark_in_progress(&mut item);
-        mark_complete(&mut item);
-        assert_eq!(item.status, ResearchStatus::Complete);
-    }
-
-    #[test]
-    fn assemble_document_appends_sources_list_for_citations() {
-        let mut item = sample_item();
-        item.add_source(Source::Web {
-            published_at: None,
-            url: "https://example.com".into(),
-            title: "Example Article".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-01.md"),
-            relevance: String::new(),
-            body: "body".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        });
-        let mut doc = sample_doc(item);
-        doc.findings = vec![
-            "**Headline:** Observation summary
-
-**Observation:** Something important [#1].
-
-**Analysis:** Why it matters.
-
-**Cross-reference / Dependencies:** No direct dependencies.
-
-**Implication:** Do this."
-                .into(),
-        ];
-        let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
-        assert!(
-            finding.contains("**Sources:**"),
-            "finding should contain Sources paragraph: {finding}"
-        );
-        assert!(
-            finding.contains("- [1] Example Article — [https://example.com](https://example.com)"),
-            "Sources bullet should map citation to source title/URL: {finding}"
-        );
-    }
-
-    #[test]
-    fn assemble_document_dedupes_and_sorts_citation_indices() {
-        let mut item = sample_item();
-        item.add_source(Source::Web {
-            published_at: None,
-            url: "https://a".into(),
-            title: "A".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-01.md"),
-            relevance: String::new(),
-            body: "body".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        });
-        item.add_source(Source::Web {
-            published_at: None,
-            url: "https://b".into(),
-            title: "B".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-02.md"),
-            relevance: String::new(),
-            body: "body".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        });
-        let mut doc = sample_doc(item);
-        doc.findings = vec!["Mixed [#2] and [#1] and again [#2].".into()];
-        let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
-        // Sources should be in index order, not citation order, and deduped.
-        let sources_idx = finding.find("**Sources:**").unwrap();
-        let sources_block = &finding[sources_idx..];
-        let first = sources_block.find("- [1] A").unwrap();
-        let second = sources_block.find("- [2] B").unwrap();
-        assert!(
-            first < second,
-            "sources should be sorted by index: {finding}"
-        );
-    }
-
-    #[test]
-    fn assemble_document_appends_source_date_range_for_cited_web_sources() {
-        let mut item = sample_item();
-        item.add_source(Source::Web {
-            published_at: Some(
-                chrono::DateTime::parse_from_rfc3339("2023-01-10T00:00:00Z")
-                    .unwrap()
-                    .with_timezone(&chrono::Utc),
-            ),
-            url: "https://a.example".into(),
-            title: "A".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-01.md"),
-            relevance: String::new(),
-            body: "body".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        });
-        item.add_source(Source::Web {
-            published_at: Some(
-                chrono::DateTime::parse_from_rfc3339("2024-06-01T00:00:00Z")
-                    .unwrap()
-                    .with_timezone(&chrono::Utc),
-            ),
-            url: "https://b.example".into(),
-            title: "B".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-02.md"),
-            relevance: String::new(),
-            body: "body".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        });
-        item.add_source(Source::Web {
-            published_at: None,
-            url: "https://c.example".into(),
-            title: "C".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-03.md"),
-            relevance: String::new(),
-            body: "body".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        });
-        let mut doc = sample_doc(item);
-        doc.findings = vec![
-            "**Headline:** Observation summary
-
-**Observation:** spans [#1], [#2], and [#3]."
-                .into(),
-        ];
-        let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
-        assert!(
-            finding.contains(
-                "**Source date range:** 2023-01-10..2024-06-01 (2 of 3 cited web sources dated)"
-            ),
-            "finding should carry a source date range line: {finding}"
-        );
-        // The bullet for the dated source should include its publication date.
-        assert!(
-            finding.contains("(published 2023-01-10)"),
-            "dated source bullet should include its publication date: {finding}"
-        );
-    }
-
-    #[test]
-    fn assemble_document_notes_undated_web_sources_in_date_range() {
-        let mut item = sample_item();
-        item.add_source(Source::Web {
-            published_at: None,
-            url: "https://a.example".into(),
-            title: "A".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-01.md"),
-            relevance: String::new(),
-            body: "body".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        });
-        let mut doc = sample_doc(item);
-        doc.findings = vec![
-            "**Headline:** Observation summary
-
-**Observation:** only [#1]."
-                .into(),
-        ];
-        let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
-        assert!(
-            finding.contains(
-                "**Source date range:** — (cited web sources did not expose a publication date)"
-            ),
-            "finding should note that cited web sources had no date: {finding}"
-        );
-    }
-
-    #[test]
-    fn assemble_document_omits_sources_paragraph_without_citations() {
-        let doc = sample_doc(sample_item());
-        let assembled = assemble_document(&doc);
-        assert!(
-            !assembled.body.contains("**Sources:**"),
-            "no citations means no Sources paragraph: {}",
-            assembled.body
-        );
-    }
-    #[test]
-    fn assemble_document_skips_sources_list_when_finding_already_has_one() {
-        let mut item = sample_item();
-        item.add_source(Source::Web {
-            published_at: None,
-            url: "https://example.com".into(),
-            title: "Example Article".into(),
-            captured_at: Utc::now(),
-            body_path: PathBuf::from("sources/web-01.md"),
-            relevance: String::new(),
-            body: "body".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        });
-        let mut doc = sample_doc(item);
-        // The LLM already produced its own Sources paragraph.
-        doc.findings = vec![
-            "**Headline:** Observation summary
-
-**Observation:** Something important [#1].
-
-**Sources:**
-- Article A — https://a"
-                .into(),
-        ];
-        let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
-        let count = finding.matches("**Sources:**").count();
-        assert_eq!(
-            count, 1,
-            "should not add a duplicate Sources paragraph: {finding}"
-        );
-    }
-
-    #[test]
-    fn assemble_document_puts_cross_reference_label_on_own_line() {
-        let mut doc = sample_doc(sample_item());
-        doc.findings = vec![
-              "**Headline:** Observation summary
-
-**Observation:** obs\n\n**Analysis:** analysis\n\n**Cross-reference / Dependencies:** none\n\n**Implication:** impl".into(),
-          ];
-        let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
-        assert!(
-            finding.contains("**Cross-reference / Dependencies:**\nnone"),
-            "cross-reference label should stand on its own line: {finding}"
-        );
-    }
-
-    #[test]
-    fn linkify_urls_rewrites_bare_http_urls() {
-        let input = "Visit https://example.com for details.";
-        assert_eq!(
-            linkify_urls(input),
-            "Visit [https://example.com](https://example.com) for details."
-        );
-    }
-
-    #[test]
-    fn linkify_urls_leaves_existing_markdown_links_unchanged() {
-        let input = "See [example](https://example.com).";
-        assert_eq!(linkify_urls(input), input);
-    }
-
-    #[test]
-    fn linkify_urls_leaves_autolink_style_unchanged() {
-        let input = "See <https://example.com>.";
-        assert_eq!(linkify_urls(input), input);
-    }
-
-    #[test]
-    fn linkify_urls_protects_inline_code() {
-        let input = "Use `curl https://example.com` to test.";
-        assert_eq!(linkify_urls(input), input);
-    }
-
-    #[test]
-    fn linkify_urls_protects_fenced_code_blocks() {
-        let input = "```\ncurl https://example.com\n```\nThen visit https://site.org.";
-        assert_eq!(
-            linkify_urls(input),
-            "```\ncurl https://example.com\n```\nThen visit [https://site.org](https://site.org)."
-        );
-    }
-
-    #[test]
-    fn linkify_urls_keeps_trailing_punctuation_outside_link() {
-        let input = "Read https://example.com.";
-        assert_eq!(
-            linkify_urls(input),
-            "Read [https://example.com](https://example.com)."
-        );
-    }
-
-    #[test]
-    fn linkify_urls_keeps_unbalanced_closing_paren_outside_link() {
-        let input = "(see https://example.com))";
-        assert_eq!(
-            linkify_urls(input),
-            "(see [https://example.com](https://example.com)))"
-        );
-    }
-
-    #[test]
-    fn linkify_urls_leaves_supporting_file_url_lines_raw() {
-        // This mirrors the supporting-file table rows produced by
-        // render_supporting_file; linkification is applied only to the
-        // assembled RESEARCH.md body.
-        let input = "URL: https://example.com";
-        assert_eq!(
-            linkify_urls(input),
-            "URL: [https://example.com](https://example.com)"
-        );
-    }
-
-    #[test]
-    fn split_analysis_sentences_places_each_sentence_on_its_own_line() {
-        let body = "This is the first sentence. This is the second one! And a third?";
-        let out = split_analysis_sentences(body);
-        // Three sentences, separated by blank lines.
-        assert_eq!(
-            out,
-            "This is the first sentence.\n\nThis is the second one!\n\nAnd a third?"
-        );
-    }
-
-    #[test]
-    fn split_analysis_sentences_single_sentence_has_no_break() {
-        let body = "Only one sentence here.";
-        let out = split_analysis_sentences(body);
-        assert_eq!(out, "Only one sentence here.");
-    }
-
-    #[test]
-    fn split_analysis_sentences_collapses_embedded_newlines() {
-        let body = "First sentence.\n\nSecond sentence that\nspans lines. Third.";
-        let out = split_analysis_sentences(body);
-        assert_eq!(
-            out,
-            "First sentence.\n\nSecond sentence that spans lines.\n\nThird."
-        );
-    }
-
-    #[test]
-    fn split_analysis_sentences_skips_abbreviation_periods() {
-        let body = "Use e.g. short examples. Then move on. See i.e. the next part.";
-        let out = split_analysis_sentences(body);
-        // "e.g." and "i.e." should not create sentence breaks; only the real
-        // sentence terminators after "examples" and "on" should split.
-        assert_eq!(
-            out,
-            "Use e.g. short examples.\n\nThen move on.\n\nSee i.e. the next part."
-        );
-    }
-
-    #[test]
-    fn split_analysis_sentences_keeps_initials_together() {
-        let body = "J. P. Morgan founded the firm. Later he expanded it.";
-        let out = split_analysis_sentences(body);
-        assert_eq!(
-            out,
-            "J. P. Morgan founded the firm.\n\nLater he expanded it."
-        );
-    }
-
-    #[test]
-    fn assemble_document_renders_citation_check_section() {
-        use crate::cite_checker::CitationCheckResult;
-        let mut doc = sample_doc(sample_item());
-        doc.cite_check = Some(CitationCheckResult {
-            passed: true,
-            checked: 2,
-            failed_claims: Vec::new(),
-            issues: Vec::new(),
-            gate_open: true,
-        });
-        let assembled = assemble_document(&doc);
-        assert!(
-            assembled.body.contains("## Citation Check"),
-            "report layout must contain Citation Check section"
-        );
-        assert!(
-            assembled
-                .body
-                .contains("**Summary:** 2 citation(s) checked, 2 passed, 0 failed; gate open.")
-        );
-        assert!(assembled.body.contains("pass (2 citation(s) checked)"));
-        assert!(assembled.body.contains("open — report may ship"));
-    }
-
-    #[test]
-    fn assemble_document_renders_source_tensions_section() {
-        use crate::reconcile::{SourceTensions, TensionKind, TensionRecord};
-        let mut doc = sample_doc(sample_item());
-        doc.source_tensions = Some(SourceTensions {
-            tensions: vec![TensionRecord {
-                kind: TensionKind::Contradiction,
-                label: "performance".into(),
-                source_indices: vec![1, 2],
-                note: "opposing performance claims".into(),
-            }],
-            sources_scanned: 2,
-        });
-        let assembled = assemble_document(&doc);
-        assert!(
-            assembled.corpa.contains("## Source Tensions"),
-            "CORPA.md must contain Source Tensions section"
-        );
-        assert!(
-            !assembled.body.contains("## Source Tensions"),
-            "RESEARCH.md must no longer carry the Source Tensions section"
-        );
-        assert!(assembled.corpa.contains("contradiction"));
-        assert!(assembled.corpa.contains("performance"));
-        assert!(assembled.corpa.contains("#1, #2"));
-        assert!(assembled.corpa.contains("opposing performance claims"));
-    }
-
-    #[test]
-    fn assemble_document_imrad_renders_source_tensions_subsection() {
-        use crate::reconcile::{SourceTensions, TensionKind, TensionRecord};
-        let mut doc = sample_doc(sample_item());
-        doc.output_format = crate::run_config::OutputFormat::Imrad;
-        doc.source_tensions = Some(SourceTensions {
-            tensions: vec![TensionRecord {
-                kind: TensionKind::ShallowEvidence,
-                label: "cost".into(),
-                source_indices: vec![3],
-                note: "thin coverage".into(),
-            }],
-            sources_scanned: 5,
-        });
-        let assembled = assemble_document(&doc);
-        // IMRaD and report layouts share one CORPA.md companion: the QA
-        // sections always render as top-level `##` headings there.
-        assert!(
-            assembled.corpa.contains("## Source Tensions"),
-            "CORPA.md must render Source Tensions"
-        );
-        assert!(!assembled.body.contains("### Source Tensions"));
-        assert!(assembled.corpa.contains("shallow evidence"));
-        assert!(assembled.corpa.contains("cost"));
-    }
-
-    #[test]
-    fn assemble_document_renders_polish_and_readability_audit_sections() {
-        use crate::readability::{PolishChange, PolishResult, ReadabilityAudit};
-        let mut doc = sample_doc(sample_item());
-        doc.polish = Some(PolishResult {
-            changes: vec![PolishChange {
-                field: "summary".into(),
-                description: "normalized whitespace".into(),
-            }],
-            control_chars_removed: 1,
-            whitespace_normalized: 2,
-            empty_paragraphs_removed: 3,
-            note: "Polished draft".into(),
-        });
-        doc.readability_audit = Some(ReadabilityAudit {
-            score: 85,
-            passed: true,
-            issues: vec!["issue".into()],
-            recommendations: vec!["rec".into()],
-            avg_finding_length: 400,
-            missing_label_count: 0,
-            long_paragraph_count: 0,
-        });
-        let assembled = assemble_document(&doc);
-        assert!(
-            assembled.body.contains("## Polish"),
-            "report layout must contain Polish section"
-        );
-        assert!(assembled.body.contains("1 control character(s) removed"));
-        assert!(
-            assembled.body.contains("## Readability Audit"),
-            "report layout must contain Readability Audit section"
-        );
-        assert!(assembled.body.contains("85/100"));
-        assert!(
-            assembled
-                .body
-                .contains("average finding length 400 characters")
-        );
-    }
-
-    #[test]
-    fn assemble_document_renders_failed_citation_check_with_marker() {
-        use crate::cite_checker::CitationCheckResult;
-        let mut doc = sample_doc(sample_item());
-        doc.cite_check = Some(CitationCheckResult {
-            passed: false,
-            checked: 1,
-            failed_claims: vec!["CITATION_VERIFICATION_FAILED: [#1] missing body".into()],
-            issues: vec!["[#1] has no captured body".into()],
-            gate_open: false,
-        });
-        let assembled = assemble_document(&doc);
-        assert!(assembled.body.contains("CITATION_VERIFICATION_FAILED"));
-        assert!(assembled.body.contains("closed — human approval required"));
-    }
-
-    #[test]
-    fn assemble_document_imrad_renders_citation_check_subsection() {
-        use crate::cite_checker::CitationCheckResult;
-        let mut doc = sample_doc(sample_item());
-        doc.output_format = crate::run_config::OutputFormat::Imrad;
-        doc.cite_check = Some(CitationCheckResult {
-            passed: true,
-            checked: 1,
-            failed_claims: Vec::new(),
-            issues: Vec::new(),
-            gate_open: true,
-        });
-        let assembled = assemble_document(&doc);
-        assert!(
-            assembled.body.contains("### Citation Check"),
-            "IMRaD layout must render Citation Check as a subsection"
-        );
-    }
-
-    #[test]
-    fn split_analysis_sentences_strips_html_and_strikethrough_attributes() {
-        let body = "The claim <del>was wrong</del> is plausible. ~~Crossed out~~ text remains.";
-        let out = split_analysis_sentences(body);
-        assert_eq!(
-            out,
-            "The claim was wrong is plausible.\n\nCrossed out text remains."
-        );
-    }
-
-    #[test]
-    fn assemble_document_splits_analysis_sentences_onto_separate_lines() {
-        let mut doc = sample_doc(sample_item());
-        doc.findings = vec![
-            "**Headline:** Observation summary\n\n\
-             **Observation:** First observation. [#1]\n\n\
-             **Analysis:** Sentence one. Sentence two. Sentence three.\n\n\
-             **Cross-reference / Dependencies:** none\n\n\
-             **Implication:** do something."
-                .into(),
-        ];
-        let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
-        // Each sentence of the Analysis body must be on its own paragraph.
-        assert!(
-            finding.contains("**Analysis:**\nSentence one.\n\nSentence two.\n\nSentence three."),
-            "analysis sentences should be split onto separate lines: {finding}"
-        );
-        // The next label should still be separated from the analysis by a blank
-        // line, preserving the existing label separation.
-        assert!(
-            finding.contains("Sentence three.\n\n**Cross-reference / Dependencies:**"),
-            "cross-reference label should remain separated by a blank line: {finding}"
-        );
-    }
-
-    // ── Data Quality & Consistency summary ────────────────────────────────
-
-    /// Build a `ResearchDocument` with all five QA artifacts populated so the
-    /// Data Quality & Consistency summary has something to synthesize.
-    fn doc_with_all_qa_artifacts() -> ResearchDocument {
-        use crate::contradiction::{ContradictionClaim, ContradictionEdge, ContradictionGraph};
-        use crate::corpus_critic::{CorpusCriticReport, GapFetchResult};
-        use crate::reconcile::{
-            CrossLocusReconcile, ReconcilePair, SourceTensions, TensionKind, TensionRecord,
-        };
-        use crate::synthesis::{CriticReport, SynthesisAudit};
-        use std::path::PathBuf;
-
-        let sources = [
-            Source::Web {
-                url: "https://a.example".into(),
-                title: "A".into(),
-                captured_at: chrono::Utc::now(),
-                published_at: None,
-                body_path: PathBuf::new(),
-                body: "The intervention improves performance.".into(),
-                relevance: String::new(),
-                search_tool: String::new(),
-                search_engine: String::new(),
-                content_type: None,
-                page_type: None,
-                media_type: "page".into(),
-                language: None,
-                oa_recovery: None,
-                author: None,
-            },
-            Source::Web {
-                url: "https://b.example".into(),
-                title: "B".into(),
-                captured_at: chrono::Utc::now(),
-                published_at: None,
-                body_path: PathBuf::new(),
-                body: "The intervention degrades performance.".into(),
-                relevance: String::new(),
-                search_tool: String::new(),
-                search_engine: String::new(),
-                content_type: None,
-                page_type: None,
-                media_type: "page".into(),
-                language: None,
-                oa_recovery: None,
-                author: None,
-            },
-        ];
-
-        let mut graph = ContradictionGraph::empty();
-        graph.add_edge(ContradictionEdge {
-            claim_a: ContradictionClaim::from_source("claims better", 1, &sources[0]),
-            claim_b: ContradictionClaim::from_source("claims worse", 2, &sources[1]),
-            dimension: "performance".into(),
-            note: "opposing performance claims".into(),
-            strength: 72,
-        });
-
-        let tensions = SourceTensions {
-            tensions: vec![
-                TensionRecord {
-                    kind: TensionKind::Contradiction,
-                    label: "performance".into(),
-                    source_indices: vec![1, 2],
-                    note: "opposing claims".into(),
-                },
-                TensionRecord {
-                    kind: TensionKind::ShallowEvidence,
-                    label: "cost".into(),
-                    source_indices: vec![3],
-                    note: "only one source".into(),
-                },
-            ],
-            sources_scanned: 2,
-        };
-
-        let reconcile = CrossLocusReconcile {
-            pairs: vec![ReconcilePair {
-                locus_a: "performance".into(),
-                locus_b: "cost".into(),
-                shared_source_indices: vec![1],
-                shared_sources: 1,
-                conflicting_edges: 1,
-                note: "shared source disagrees".into(),
-            }],
-            sources_scanned: 2,
-        };
-
-        let audit = SynthesisAudit {
-            summary: "Audit complete.".into(),
-            findings: Vec::new(),
-            top_implications: Vec::new(),
-            cross_references: Vec::new(),
-            open_questions: Vec::new(),
-            critic_reports: vec![CriticReport {
-                name: "coverage".into(),
-                score: 60,
-                issues: vec!["thin coverage".into()],
-                gaps: Vec::new(),
-                passed: false,
-            }],
-            overall_score: 65,
-            recommendation: "Proceed with caution — issues: thin coverage.".into(),
-            sources_used: 2,
-        };
-
-        let corpus_critic = CorpusCriticReport {
-            score: 72,
-            coverage_score: 80,
-            evidence_score: 70,
-            balance_score: 85,
-            tension_score: 55,
-            issues: vec!["shallow evidence on Cost".into()],
-            gaps: vec!["Add cost evidence".into()],
-            recommendations: vec!["Broaden the width sweep".into()],
-            contested_ratio: 10,
-            shallow_dimensions: vec!["Cost".into()],
-            isolated_sources: vec![3],
-            passed: true,
-        };
-
-        let gap_fetch = GapFetchResult {
-            queries: vec!["topic cost evidence".into()],
-            new_sources: 2,
-            failed_queries: 0,
-            attempted: true,
-            note: String::new(),
-        };
-
-        let mut doc = sample_doc(sample_item());
-        doc.item.sources = sources.to_vec();
-        doc.contradiction_graph = Some(graph);
-        doc.source_tensions = Some(tensions);
-        doc.cross_locus_reconcile = Some(reconcile);
-        doc.synthesis_audit = Some(audit);
-        doc.corpus_critic = Some(corpus_critic);
-        doc.gap_fetch = Some(gap_fetch);
-        doc
-    }
-
-    #[test]
-    fn render_data_quality_summary_returns_empty_when_no_qa_data() {
-        let doc = sample_doc(sample_item());
-        let rendered = render_data_quality_summary(&doc);
-        assert!(
-            rendered.is_empty(),
-            "expected empty string when no QA artifacts present, got: {rendered}"
-        );
-    }
-
-    #[test]
-    fn render_data_quality_summary_synthesizes_all_artifacts() {
-        let doc = doc_with_all_qa_artifacts();
-        let rendered = render_data_quality_summary(&doc);
-        // Verdict line uses the synthesis-audit recommendation.
-        assert!(
-            rendered.contains("**Overall verdict:** Proceed with caution"),
-            "verdict should come from synthesis audit: {rendered}"
-        );
-        // Metrics table includes rows from every populated artifact.
-        assert!(rendered.contains("| Metric | Value | Detail |"));
-        assert!(
-            rendered.contains("Corpus critic"),
-            "corpus critic row should be present: {rendered}"
-        );
-        assert!(
-            rendered.contains("Contradictions"),
-            "contradictions row should be present: {rendered}"
-        );
-        assert!(
-            rendered.contains("Source tensions"),
-            "source tensions row should be present: {rendered}"
-        );
-        assert!(
-            rendered.contains("Cross-locus reconcile"),
-            "cross-locus reconcile row should be present: {rendered}"
-        );
-        assert!(
-            rendered.contains("Synthesis audit"),
-            "synthesis audit row should be present: {rendered}"
-        );
-        // Key concerns surface the top issue from each artifact.
-        assert!(
-            rendered.contains("**Key concerns:**"),
-            "key concerns section must be present: {rendered}"
-        );
-        assert!(
-            rendered.contains("Corpus: shallow evidence on Cost"),
-            "corpus critic issue should appear: {rendered}"
-        );
-        assert!(
-            rendered.contains("Contradiction: 1 vs 2"),
-            "contradiction edge should appear: {rendered}"
-        );
-        assert!(
-            rendered.contains("Tension (contradiction): performance"),
-            "source tension should appear: {rendered}"
-        );
-        assert!(
-            rendered.contains("Reconcile: performance ↔ cost — 1 conflicting edge(s)"),
-            "reconcile conflict should appear: {rendered}"
-        );
-        assert!(
-            rendered.contains("Audit: Audit complete."),
-            "audit summary should appear: {rendered}"
-        );
-    }
-
-    #[test]
-    fn assemble_document_report_renders_data_quality_summary_after_implications() {
-        let doc = doc_with_all_qa_artifacts();
-        let assembled = assemble_document(&doc);
-        assert!(
-            assembled.body.contains("## Data Quality & Consistency"),
-            "report layout must contain Data Quality & Consistency section"
-        );
-        // The section must appear after Top 10 Implications and before Findings.
-        let implications_pos = assembled.body.find("## Top 10 Implications").unwrap();
-        let dq_pos = assembled
-            .body
-            .find("## Data Quality & Consistency")
-            .expect("DQ section should be present");
-        let findings_pos = assembled.body.find("## Findings").unwrap();
-        assert!(
-            implications_pos < dq_pos,
-            "DQ summary should come after Top 10 Implications"
-        );
-        assert!(
-            dq_pos < findings_pos,
-            "DQ summary should come before Findings"
-        );
-    }
-
-    #[test]
-    fn assemble_document_report_omits_data_quality_summary_when_no_qa() {
-        let doc = sample_doc(sample_item());
-        let assembled = assemble_document(&doc);
-        assert!(
-            !assembled.body.contains("## Data Quality & Consistency"),
-            "skeleton should not contain DQ section: {}",
-            assembled.body
-        );
-    }
-
-    #[test]
-    fn assemble_document_imrad_renders_data_quality_summary_in_discussion() {
-        let mut doc = doc_with_all_qa_artifacts();
-        doc.output_format = crate::run_config::OutputFormat::Imrad;
-        let assembled = assemble_document(&doc);
-        assert!(
-            assembled.body.contains("### Data Quality & Consistency"),
-            "IMRaD layout must render DQ summary as a subsection"
-        );
-        // It must appear inside Discussion, before the Contradiction Graph
-        // subsection.
-        let discussion_pos = assembled.body.find("## Discussion").unwrap();
-        let dq_pos = assembled
-            .body
-            .find("### Data Quality & Consistency")
-            .unwrap();
-        let contradiction_pos = assembled
-            .body
-            .find("### Contradiction Graph")
-            .unwrap_or(usize::MAX);
-        assert!(
-            discussion_pos < dq_pos,
-            "DQ summary should come after Discussion heading"
-        );
-        assert!(
-            dq_pos < contradiction_pos,
-            "DQ summary should come before Contradiction Graph subsection"
-        );
-    }
-
-    #[test]
-    fn assemble_document_imrad_omits_data_quality_summary_when_no_qa() {
-        let mut doc = sample_doc(sample_item());
-        doc.output_format = crate::run_config::OutputFormat::Imrad;
-        let assembled = assemble_document(&doc);
-        assert!(
-            !assembled.body.contains("### Data Quality & Consistency"),
-            "IMRaD skeleton should not contain DQ section: {}",
-            assembled.body
-        );
-    }
-}
+#[path = "../tests/inline/document_tests.rs"]
+mod tests;

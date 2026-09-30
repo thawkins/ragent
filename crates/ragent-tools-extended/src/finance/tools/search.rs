@@ -1,4 +1,4 @@
-//! `stock_search` tool — find tickers by company or asset name.
+//! `stock_search` tool - find tickers by company or asset name.
 
 use crate::finance::default_provider;
 use crate::{Tool, ToolContext, ToolOutput};

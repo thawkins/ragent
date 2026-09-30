@@ -1,4 +1,4 @@
-//! The `list_agents` tool — lists sub-agent tasks for the current session.
+//! The `list_agents` tool - lists sub-agent tasks for the current session.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -23,8 +23,8 @@ impl Tool for ListAgentsTool {
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
         "List sub-agent tasks for the current session. Shows running and completed \
-               background tasks with their status, agent, result summary, and — for \
-               finished tasks — the `output_file` path to the FULL untruncated report \
+               background tasks with their status, agent, result summary, and - for \
+               finished tasks - the `output_file` path to the FULL untruncated report \
                written under `log/subagents/<task-id>.md` (recover truncated output with \
                the `read` tool against that file). No required parameters. Optional: \
                'status' (string enum running/completed/failed/cancelled) to filter, or \
@@ -158,7 +158,7 @@ impl Tool for ListAgentsTool {
                 .result
                 .as_deref()
                 .or(task.error.as_deref())
-                .unwrap_or("—");
+                .unwrap_or("-");
             let summary_short = ragent_types::truncate_bytes(summary, 100);
             let bg = if task.background { "yes" } else { "no" };
             let report_marker = match task.report_status {
@@ -177,7 +177,7 @@ impl Tool for ListAgentsTool {
             // report so the model (and the human) can recover it via the
             // `read` tool when the 100-char summary above is not enough.
             if let Some(ref file) = task.output_file {
-                let _ = write!(output, "\n  ↳ 📄 Full report: `{}`", file.display());
+                let _ = write!(output, "\n  -> [file] Full report: `{}`", file.display());
             }
         }
 
@@ -253,11 +253,11 @@ fn format_task_detail(task: &crate::task::TaskEntry) -> String {
 /// Returns the emoji marker used to visually represent a task status.
 fn status_emoji(status: &crate::task::TaskStatus) -> &'static str {
     match status {
-        crate::task::TaskStatus::Running => "⏳",
-        crate::task::TaskStatus::Completed => "✅",
-        crate::task::TaskStatus::Failed => "❌",
-        crate::task::TaskStatus::Cancelled => "🚫",
-        crate::task::TaskStatus::Suspended => "⏸",
-        crate::task::TaskStatus::Terminating => "💀",
+        crate::task::TaskStatus::Running => "[..]",
+        crate::task::TaskStatus::Completed => "[ok]",
+        crate::task::TaskStatus::Failed => "[x]",
+        crate::task::TaskStatus::Cancelled => "[blocked]",
+        crate::task::TaskStatus::Suspended => "[||]",
+        crate::task::TaskStatus::Terminating => "[skull]",
     }
 }

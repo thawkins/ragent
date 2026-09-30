@@ -57,8 +57,8 @@ const ALLOWED_EXECUTABLES: &[&str] = &[
 ///
 /// # Arguments
 ///
-/// * `body` — The skill body text potentially containing `` !`command` `` patterns.
-/// * `working_dir` — The directory in which to execute commands.
+/// * `body` - The skill body text potentially containing `` !`command` `` patterns.
+/// * `working_dir` - The directory in which to execute commands.
 ///
 /// # Errors
 ///
@@ -240,7 +240,7 @@ async fn execute_command(command: &str, working_dir: &Path) -> String {
     let needs_shell = SHELL_OPERATORS.iter().any(|op| command.contains(op));
 
     let result = if needs_shell {
-        // Pipeline / redirect — must use shell, but first command is allowlisted.
+        // Pipeline / redirect - must use shell, but first command is allowlisted.
         tokio::time::timeout(
             COMMAND_TIMEOUT,
             tokio::process::Command::new("sh")
@@ -251,7 +251,7 @@ async fn execute_command(command: &str, working_dir: &Path) -> String {
         )
         .await
     } else {
-        // Simple command — execute directly without shell.
+        // Simple command - execute directly without shell.
         let tokens = tokenize_command(command);
         if tokens.is_empty() {
             return "[command error: empty command]".to_string();

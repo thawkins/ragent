@@ -37,7 +37,7 @@ fn like_prefix_pattern(name: &str) -> String {
 
 /// Read the nullable `source_module` column as a `String`.
 ///
-/// FUNC-045: SQL `NULL` and the empty string are distinct states — an import
+/// FUNC-045: SQL `NULL` and the empty string are distinct states - an import
 /// with no source module is stored as `NULL`, whereas an empty module is stored
 /// as `""`. Mapping `NULL` to `""` is the intended contract (callers treat both
 /// as "no module"), but the collapse must be explicit and logged with the
@@ -55,20 +55,62 @@ fn read_source_module(row: &rusqlite::Row<'_>, file_id: i64) -> rusqlite::Result
     }
 }
 
-/// Current schema version — bump when migrating.
+/// Drain a row iterator into a `Vec`, capped at [`MAX_GRAPH_LOAD_ROWS`].
+///
+/// The full-table loaders used by graph derivation all route through this
+/// helper so a huge index cannot blow memory (ANTIPAT M6.4 / audit 4.1).
+/// Hitting the cap is logged once; the partial rows are returned so a
+/// pathologically large index degrades to a bounded (possibly incomplete)
+/// graph instead of exhausting memory. For any realistic repository the cap is
+/// never reached, so derived output is unchanged.
+fn collect_bounded_rows<T, I>(rows: I, table: &str) -> Result<Vec<T>>
+where
+    I: IntoIterator<Item = rusqlite::Result<T>>,
+{
+    let mut out = Vec::new();
+    for row in rows {
+        if out.len() >= MAX_GRAPH_LOAD_ROWS {
+            warn!(
+                table,
+                cap = MAX_GRAPH_LOAD_ROWS,
+                "codeindex: graph-derivation load hit MAX_GRAPH_LOAD_ROWS; truncating"
+            );
+            break;
+        }
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+/// Current schema version - bump when migrating.
 ///
 /// v4 (PERF-073): added the `idx_symbols_name_nocase` collation index.
 const SCHEMA_VERSION: i32 = 4;
+
+/// Maximum rows a single graph-derivation load materialises (ANTIPAT M6.4 /
+/// audit 4.1).
+///
+/// The graph edge derivation is a whole-repository cross product, so its
+/// *input* scans (`symbols`, `symbol_refs`, `imports`, `graph_edges`) are the
+/// first place a huge index can exhaust memory. Each unbounded full-table load
+/// is therefore capped at this many rows; the cap is far above any realistic
+/// repository (a normal index has well under a million rows of each kind), so
+/// it never truncates correct output, but it bounds worst-case memory. When a
+/// load does hit the cap the store logs a warning and the derived graph is
+/// marked incomplete rather than aborting the build.
+pub const MAX_GRAPH_LOAD_ROWS: usize = 1_000_000;
 
 /// Persistent store for the code index, backed by `SQLite`.
 pub struct IndexStore {
     /// The SQLite connection.
     ///
-    /// Exposed as `pub(crate)` so that the graph edge-derivation code in
-    /// [`crate::graph::edges`] can issue a `ROLLBACK` when a batch insert
-    /// fails mid-transaction (the `begin_transaction` / `commit_transaction`
-    /// methods only cover the happy path).
-    pub(crate) conn: Connection,
+    /// Private (ANTIPAT M6.4 / audit 4.6): the graph derivation code used to
+    /// reach straight through to this field to issue a raw `ROLLBACK`, which
+    /// leaked the connection and forced the silent `let _ =` error drops fixed
+    /// in M4.10. Rollback now goes through
+    /// [`IndexStore::rollback_transaction`], which logs failures, so no caller
+    /// outside this module needs the raw connection.
+    conn: Connection,
 }
 
 impl IndexStore {
@@ -97,9 +139,9 @@ impl IndexStore {
     /// Create or migrate the database schema.
     ///
     /// Sets performance-oriented pragmas:
-    /// - `WAL` journal mode — dramatically faster writes than rollback journal.
-    /// - `synchronous = NORMAL` — safe with WAL, avoids fsync on every commit.
-    /// - `temp_store = MEMORY` — keeps temp tables/indexes in RAM.
+    /// - `WAL` journal mode - dramatically faster writes than rollback journal.
+    /// - `synchronous = NORMAL` - safe with WAL, avoids fsync on every commit.
+    /// - `temp_store = MEMORY` - keeps temp tables/indexes in RAM.
     fn init_schema(&self) -> Result<()> {
         self.conn.execute_batch(
             "
@@ -320,7 +362,7 @@ impl IndexStore {
 
     /// Look up a symbol's name by its ID with a single indexed query
     /// (H-003). Previously this loaded *all* symbols and linearly searched,
-    /// which is O(N) per call — quadratic when reconstructing a path or
+    /// which is O(N) per call - quadratic when reconstructing a path or
     /// explaining a symbol with many connections.
     pub fn get_symbol_name(&self, sym_id: i64) -> Result<Option<String>> {
         let name: Option<String> = self
@@ -422,7 +464,7 @@ impl IndexStore {
     }
 
     /// List files with their row IDs. Used by the dependency-resolution path
-    /// (H-004) to build a single `id → path` map without a per-row query.
+    /// (H-004) to build a single `id -> path` map without a per-row query.
     pub fn list_files_with_ids(&self) -> Result<Vec<(i64, String)>> {
         let mut stmt = self
             .conn
@@ -439,7 +481,7 @@ impl IndexStore {
 
     /// List all indexed files together with their row IDs in a single scan.
     ///
-    /// Callers that need both the [`FileEntry`] list and the `path → id`
+    /// Callers that need both the [`FileEntry`] list and the `path -> id`
     /// mapping (e.g. the graph-derivation input snapshot) should prefer this
     /// over calling [`Self::list_files`] and [`Self::list_files_with_ids`]
     /// separately, which reads the table twice under the store lock.
@@ -498,7 +540,8 @@ impl IndexStore {
     }
 
     /// Count total indexed files.
-    // NOTE: intentional duplication — see DUPPLAN.md Milestone J
+    ///
+    /// NOTE: intentional duplication - see `DUPPLAN.md` Milestone J.
     pub fn file_count(&self) -> Result<u64> {
         let count: i64 = self
             .conn
@@ -543,12 +586,12 @@ impl IndexStore {
     pub fn get_stale_files(&self, scanned: &[ScannedFile]) -> Result<StaleDiff> {
         // PERF-072: previously this loaded the *entire* `indexed_files` table
         // into a `HashMap` and built a `HashSet` of all scanned paths on every
-        // call — O(total files) memory even when nothing changed.  Instead we
-        // build an O(scanned) index (path → position) plus a `seen` bitmap, then
+        // call - O(total files) memory even when nothing changed.  Instead we
+        // build an O(scanned) index (path -> position) plus a `seen` bitmap, then
         // stream the stored rows once:
-        //   - a stored path absent from `scanned_index`   → remove
-        //   - a stored path whose hash differs            → update
-        // Scanned paths never seen during the stream       → add.
+        //   - a stored path absent from `scanned_index`   -> remove
+        //   - a stored path whose hash differs            -> update
+        // Scanned paths never seen during the stream       -> add.
         // Memory is therefore O(scanned) regardless of how large the index is.
         let mut scanned_index: HashMap<String, usize> = HashMap::with_capacity(scanned.len());
         for (i, file) in scanned.iter().enumerate() {
@@ -567,13 +610,13 @@ impl IndexStore {
             let stored_hash: String = row.get(1)?;
             match scanned_index.get(path.as_str()) {
                 None => {
-                    // Indexed but no longer on disk — remove.
+                    // Indexed but no longer on disk - remove.
                     diff.to_remove.push(path);
                 }
                 Some(&idx) => {
                     seen[idx] = true;
                     if scanned[idx].hash != stored_hash {
-                        // Hash changed — needs re-indexing.
+                        // Hash changed - needs re-indexing.
                         diff.to_update.push(scanned[idx].clone());
                     }
                 }
@@ -582,7 +625,7 @@ impl IndexStore {
         drop(rows);
         drop(stmt);
 
-        // Files on disk that were never seen in the index — add.
+        // Files on disk that were never seen in the index - add.
         for (i, file) in scanned.iter().enumerate() {
             if !seen[i] {
                 diff.to_add.push(file.clone());
@@ -651,6 +694,19 @@ impl IndexStore {
     pub fn commit_transaction(&self) -> Result<()> {
         self.conn.execute_batch("COMMIT")?;
         Ok(())
+    }
+
+    /// Roll back an explicit transaction started by `begin_transaction()`.
+    ///
+    /// ANTIPAT M6.4 (audit 4.6): this replaces the raw `store.conn.execute_batch("ROLLBACK")`
+    /// the graph derivation used to issue directly on the connection. A rollback
+    /// is best-effort - the caller already has the original error to propagate -
+    /// so a failure here is logged rather than returned, but it is never
+    /// silently dropped (AGENTS.md "no silent error swallowing").
+    pub fn rollback_transaction(&self) {
+        if let Err(e) = self.conn.execute_batch("ROLLBACK") {
+            warn!(error = %e, "codeindex: transaction rollback failed");
+        }
     }
 
     /// Insert symbols for a file, replacing any existing symbols for that file.
@@ -740,7 +796,7 @@ impl IndexStore {
             for sym in pending {
                 let Some(real_parent_id) = sym.parent_id.and_then(|pid| id_map.get(&pid).copied())
                 else {
-                    // Parent not inserted yet — try again on the next sweep.
+                    // Parent not inserted yet - try again on the next sweep.
                     still_pending.push(sym);
                     continue;
                 };
@@ -755,7 +811,7 @@ impl IndexStore {
             if !progressed {
                 // A cycle or a dangling parent reference. Insert the remainder
                 // with a NULL parent so nesting is merely truncated, never lost
-                // silently — log each so the parser defect is visible.
+                // silently - log each so the parser defect is visible.
                 for sym in still_pending {
                     warn!(
                         file_id,
@@ -833,6 +889,12 @@ impl IndexStore {
 
         if let Some(limit) = filter.limit {
             sql.push_str(&format!(" LIMIT {limit}"));
+        } else {
+            // ANTIPAT M6.4 (audit 4.1): a filter with no limit is an unbounded
+            // full-table load (the graph derivation loads every symbol this
+            // way). Fetch one row past the cap so an overflow is detectable,
+            // then truncate below.
+            sql.push_str(&format!(" LIMIT {}", MAX_GRAPH_LOAD_ROWS + 1));
         }
 
         let bind_refs: Vec<&dyn rusqlite::types::ToSql> = bind_values
@@ -864,12 +926,20 @@ impl IndexStore {
         for r in rows {
             symbols.push(raw_to_symbol(r?)?);
         }
+        if filter.limit.is_none() && symbols.len() > MAX_GRAPH_LOAD_ROWS {
+            symbols.truncate(MAX_GRAPH_LOAD_ROWS);
+            warn!(
+                table = "symbols",
+                cap = MAX_GRAPH_LOAD_ROWS,
+                "codeindex: graph-derivation load hit MAX_GRAPH_LOAD_ROWS; truncating"
+            );
+        }
         Ok(symbols)
     }
 
     /// Get all symbols for a specific file.
     ///
-    /// Queries directly by `file_id` for efficiency — this avoids loading
+    /// Queries directly by `file_id` for efficiency - this avoids loading
     /// all symbols into memory and filtering in Rust (O(N) per call).
     pub fn get_file_symbols(&self, file_id: i64) -> Result<Vec<Symbol>> {
         let mut stmt = self.conn.prepare_cached(
@@ -998,7 +1068,8 @@ impl IndexStore {
     ///
     /// Used by the graph edge-derivation snapshot ([`crate::graph::edges`])
     /// so the whole import set is read in a single SQL scan under one brief
-    /// store lock instead of one query per file.
+    /// store lock instead of one query per file. The scan is capped at
+    /// [`MAX_GRAPH_LOAD_ROWS`] (ANTIPAT M6.4 / audit 4.1).
     pub fn list_all_imports(&self) -> Result<Vec<(i64, ImportEntry)>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT file_id, imported_name, source_module, alias, line, kind
@@ -1020,11 +1091,7 @@ impl IndexStore {
             ))
         })?;
 
-        let mut imports = Vec::new();
-        for r in rows {
-            imports.push(r?);
-        }
-        Ok(imports)
+        collect_bounded_rows(rows, "imports")
     }
 
     /// Search imports by imported name.
@@ -1164,16 +1231,20 @@ impl IndexStore {
     }
 
     /// Return all references across all files.
+    ///
+    /// Capped at [`MAX_GRAPH_LOAD_ROWS`] (ANTIPAT M6.4 / audit 4.1) so the
+    /// graph-derivation ref scan cannot exhaust memory on a huge index.
     pub fn query_all_refs(&self) -> Result<Vec<SymbolRef>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT r.symbol_name, r.file_id, r.line, r.col, r.kind,
                     COALESCE(f.path, '') as file_path
              FROM symbol_refs r
              LEFT JOIN indexed_files f ON f.id = r.file_id
-             ORDER BY f.path, r.line",
+             ORDER BY f.path, r.line
+             LIMIT ?1",
         )?;
 
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map([(MAX_GRAPH_LOAD_ROWS + 1) as i64], |row| {
             Ok(SymbolRef {
                 symbol_name: row.get(0)?,
                 file_id: row.get(1)?,
@@ -1184,11 +1255,7 @@ impl IndexStore {
             })
         })?;
 
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        Ok(out)
+        collect_bounded_rows(rows, "symbol_refs")
     }
 
     /// Return all references for a single file, filtered at the SQL level.
@@ -1326,7 +1393,8 @@ impl IndexStore {
         Ok(())
     }
 
-    /// Insert or replace a semantic edge using typed [`EdgeKind`] and
+    /// Insert or replace a semantic edge using typed
+    /// [`EdgeKind`](crate::types::EdgeKind) and
     /// [`Confidence`] values.
     pub fn upsert_edge_typed(&self, edge: &GraphEdge) -> Result<()> {
         self.upsert_edge(
@@ -1522,14 +1590,18 @@ impl IndexStore {
 
     /// Query all edges in the graph.  Returns tuples of `(source_sym,
     /// target_sym, kind, confidence, source_file, line)`.
+    ///
+    /// Capped at [`MAX_GRAPH_LOAD_ROWS`] (ANTIPAT M6.4 / audit 4.1) so the
+    /// graph-derivation edge scan cannot exhaust memory on a huge index.
     pub fn query_all_edges(
         &self,
     ) -> Result<Vec<(i64, i64, String, String, Option<i64>, Option<i64>)>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT source_sym, target_sym, kind, confidence, source_file, line
-             FROM graph_edges",
+             FROM graph_edges
+             LIMIT ?1",
         )?;
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map([(MAX_GRAPH_LOAD_ROWS + 1) as i64], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, i64>(1)?,
@@ -1539,11 +1611,7 @@ impl IndexStore {
                 row.get::<_, Option<i64>>(5)?,
             ))
         })?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        Ok(out)
+        collect_bounded_rows(rows, "graph_edges")
     }
 
     // ── Communities ──────────────────────────────────────────────────────────
@@ -1581,22 +1649,20 @@ impl IndexStore {
     }
 
     /// Return all community assignments as `(sym_id, community, label)`.
+    ///
+    /// Capped at [`MAX_GRAPH_LOAD_ROWS`] (ANTIPAT M6.4 / audit 4.1).
     pub fn query_all_communities(&self) -> Result<Vec<(i64, i64, Option<String>)>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT sym_id, community, label FROM communities")?;
-        let rows = stmt.query_map([], |row| {
+            .prepare("SELECT sym_id, community, label FROM communities LIMIT ?1")?;
+        let rows = stmt.query_map([(MAX_GRAPH_LOAD_ROWS + 1) as i64], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, Option<String>>(2)?,
             ))
         })?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        Ok(out)
+        collect_bounded_rows(rows, "communities")
     }
 
     /// Return all symbols in a given community as `(sym_id, label)`.

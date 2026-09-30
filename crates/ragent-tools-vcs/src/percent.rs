@@ -1,13 +1,13 @@
 //! Percent-encoding helpers for VCS API query/path components (FUNC-063).
 //!
 //! These replace the hand-rolled encoders that iterated over `char`s and emitted
-//! `%{:02X}` on the char's scalar value — which is wrong for any non-ASCII
-//! character (e.g. `é` is U+00E9, but must encode as the two UTF-8 bytes
+//! `%{:02X}` on the char's scalar value - which is wrong for any non-ASCII
+//! character (e.g. `e` is U+00E9, but must encode as the two UTF-8 bytes
 //! `%C3%A9`, not `%E9`). Encoding over `&str::bytes()` produces the correct
 //! UTF-8 percent-encoding.
 
 /// Percent-encode a single URI component, leaving RFC 3986 unreserved
-/// characters (`A–Z`, `a–z`, `0–9`, `-`, `_`, `.`, `~`) untouched.
+/// characters (`A-Z`, `a-z`, `0-9`, `-`, `_`, `.`, `~`) untouched.
 ///
 /// Every other byte (including every byte of a multibyte UTF-8 character) is
 /// emitted as `%XX`. Used for query-parameter values and path segments that may
@@ -25,7 +25,7 @@ pub fn encode_component(input: &str) -> String {
             }
             // write! into a String is infallible.
             _ => {
-                write!(out, "%{byte:02X}").expect("BUG: write to String is infallible");
+                write!(out, "%{byte:02X}").expect("BUG: write to String is infallible"); // no-panic-ok: infallible
             }
         }
     }

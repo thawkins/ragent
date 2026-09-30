@@ -1,6 +1,6 @@
 //! Community detection over the symbol graph.
 //!
-//! Implements label propagation — a fast, deterministic community detection
+//! Implements label propagation - a fast, deterministic community detection
 //! algorithm that partitions the symbol graph into subsystems without an LLM
 //! or embeddings (FR-013).  Each detected community receives an auto-generated
 //! label derived from the most frequent symbol-name token or the
@@ -18,7 +18,8 @@
 //!    maximum iteration count is reached.
 //! 5. Persist the final community assignments to the `communities` SQLite
 //!    table via [`IndexStore::upsert_community`].
-//! 6. Generate a label for each community (see [`label_for_community`]).
+//! 6. Generate a label for each community (see the `label_for_community`
+//!    helper below).
 //!
 //! The algorithm is deterministic because ties are always broken in favour
 //! of the smallest label ID.
@@ -45,7 +46,7 @@ const MAX_ITERATIONS: usize = 100;
 pub fn detect_communities(store: &IndexStore) -> Result<Vec<CommunityInfo>> {
     let edges = store.query_all_edges_typed()?;
     if edges.is_empty() {
-        // Nothing to detect — clear any stale assignments and return empty.
+        // Nothing to detect - clear any stale assignments and return empty.
         store.clear_communities()?;
         return Ok(Vec::new());
     }
@@ -190,7 +191,7 @@ pub fn detect_communities(store: &IndexStore) -> Result<Vec<CommunityInfo>> {
     if tx_result.is_ok() {
         store.commit_transaction()?;
     } else {
-        let _ = store.conn.execute_batch("ROLLBACK");
+        store.rollback_transaction();
     }
     tx_result?;
 

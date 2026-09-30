@@ -1,4 +1,4 @@
-//! `team_task_create` — Lead-only tool for adding tasks to the shared task list.
+//! `team_task_create` - Lead-only tool for adding tasks to the shared task list.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -107,7 +107,7 @@ impl Tool for TeamTaskCreateTool {
         let outcome = run_team_hook(&team_dir, HookEvent::TaskCreated, Some(&hook_stdin)).await;
 
         if let HookOutcome::Feedback(feedback) = outcome {
-            // Hook rejected creation — remove the task.
+            // Hook rejected creation - remove the task.
             let task_store = TaskStore::open(&team_dir)?;
             let _ = task_store.remove_task(&task_id);
             return Ok(ToolOutput {

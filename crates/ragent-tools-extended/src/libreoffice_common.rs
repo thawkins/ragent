@@ -14,7 +14,6 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
-use ragent_types::strutil::{floor_char_boundary, truncate_bytes_no_ellipsis};
 
 /// Supported `LibreOffice` / `OpenDocument` formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +62,7 @@ pub fn detect_format(path: &Path) -> Result<LibreFormat> {
 pub use ragent_tools_core::path_util::resolve_path;
 
 /// Maximum output size in bytes before truncation (100 KB).
-pub const MAX_OUTPUT_BYTES: usize = 100 * 1024;
+pub use crate::docio::MAX_OUTPUT_BYTES;
 
 /// Truncates output text if it exceeds [`MAX_OUTPUT_BYTES`].
 ///
@@ -71,21 +70,15 @@ pub const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 /// the last newline before the limit and appends a truncation notice.
 #[must_use]
 pub fn truncate_output(text: String) -> String {
-    if text.len() <= MAX_OUTPUT_BYTES {
-        text
-    } else {
-        let truncated = truncate_bytes_no_ellipsis(&text, MAX_OUTPUT_BYTES);
-        // Clamp to a char boundary: a newline-free body gives `truncated.len()`,
-        // which is always safe, but a future byte-budget cut would not be
-        // (FUNC-003).
-        let boundary =
-            floor_char_boundary(&truncated, truncated.rfind('\n').unwrap_or(truncated.len()));
-        format!(
-            "{}\n\n... [Output truncated at {}KB.]",
-            &truncated[..boundary],
+    crate::docio::truncate_output_with_suffix(
+        text,
+        &format!(
+            "
+
+... [Output truncated at {}KB.]",
             MAX_OUTPUT_BYTES / 1024
-        )
-    }
+        ),
+    )
 }
 
 /// Read the raw content of a named entry from an ODF ZIP archive as UTF-8.
@@ -225,29 +218,5 @@ pub fn attr_value(e: &quick_xml::events::BytesStart<'_>, local_name: &str) -> Op
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn truncate_output_does_not_panic_on_multibyte_boundary() {
-        // Build a string longer than MAX_OUTPUT_BYTES where the byte limit
-        // falls inside a multi-byte character ("é" is 2 bytes).
-        let chunk = "é".repeat(200);
-        let text = chunk.repeat(MAX_OUTPUT_BYTES / chunk.len() + 1);
-        let result = truncate_output(text);
-        assert!(
-            result.len() <= MAX_OUTPUT_BYTES + 64,
-            "truncated result unexpectedly large"
-        );
-        assert!(
-            result.contains("Output truncated"),
-            "truncated result should include the truncation notice"
-        );
-    }
-
-    #[test]
-    fn truncate_output_keeps_short_text_unchanged() {
-        let text = "Short text with émojis 🎉".to_string();
-        assert_eq!(truncate_output(text.clone()), text);
-    }
-}
+#[path = "../tests/inline/libreoffice_common_tests.rs"]
+mod tests;

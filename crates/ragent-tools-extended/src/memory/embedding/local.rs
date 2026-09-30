@@ -34,6 +34,14 @@ const REQUIRED_FILES: &[&str] = &["model.onnx", "tokenizer.json", "config.json"]
 /// Base URL for HuggingFace model hub file downloads.
 const HF_BASE_URL: &str = "https://huggingface.co";
 
+/// Upper bound on a single model-file download, in bytes (ANTIPAT 4.3).
+///
+/// `all-MiniLM-L6-v2`'s `model.onnx` is roughly 90 MiB; the 512 MiB ceiling
+/// leaves generous headroom for larger models while ensuring a hostile or
+/// mis-sized response cannot exhaust memory. The download stream is aborted
+/// once this budget is exceeded rather than buffering the whole body first.
+const MAX_MODEL_DOWNLOAD_BYTES: usize = 512 * 1024 * 1024;
+
 /// Local ONNX Runtime embedding provider.
 ///
 /// Loads a sentence-transformer ONNX model and tokeniser, then runs
@@ -160,34 +168,71 @@ impl LocalEmbeddingProvider {
 
     /// Download a single file from HuggingFace synchronously.
     ///
-    /// Uses a blocking approach via a temporary Tokio runtime, since the
-    /// `reqwest` dependency is async-only (no `blocking` feature). This is
-    /// only called during lazy model initialisation.
+    /// The async `reqwest` transfer runs on a dedicated OS thread with its own
+    /// current-thread Tokio runtime. That thread carries no async-task context,
+    /// so a runtime is never constructed inside an async worker thread (which
+    /// would panic on a current-thread runtime) and the caller's executor is
+    /// never required to host a nested runtime (ANTIPAT 4.3). The blocking join
+    /// only happens during lazy model initialisation.
+    ///
+    /// The response body is streamed and capped at [`MAX_MODEL_DOWNLOAD_BYTES`]
+    /// so a hostile or mis-sized download cannot exhaust memory.
     fn download_file(filename: &str, dest: &PathBuf) -> Result<()> {
         let url = format!("{HF_BASE_URL}/{MODEL_REPO}/resolve/main/{filename}");
+        let dest = dest.clone();
+        let filename_owned = filename.to_string();
+
+        std::thread::Builder::new()
+            .name("ragent-model-download".to_string())
+            .spawn(move || Self::download_file_blocking(&url, &filename_owned, &dest))
+            .context("Failed to spawn model download thread")?
+            .join()
+            .map_err(|_| anyhow::anyhow!("model download thread panicked"))?
+    }
+
+    /// Perform the actual download inside a fresh current-thread runtime.
+    ///
+    /// Runs only on the dedicated thread spawned by [`Self::download_file`], so
+    /// it is never nested inside an async context.
+    fn download_file_blocking(url: &str, filename: &str, dest: &PathBuf) -> Result<()> {
         debug!("Downloading {url}");
 
-        let rt = tokio::runtime::Runtime::new()
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
             .context("Failed to create Tokio runtime for model download")?;
-        let response = rt
-            .block_on(async { reqwest::get(&url).await })
-            .with_context(|| format!("Failed to download {url}"))?;
 
-        if !response.status().is_success() {
-            anyhow::bail!("Failed to download {filename}: HTTP {}", response.status());
-        }
+        rt.block_on(async move {
+            let response = reqwest::get(url)
+                .await
+                .with_context(|| format!("Failed to download {url}"))?;
 
-        let bytes = rt
-            .block_on(async { response.bytes().await })
-            .context("Failed to read download response")?;
+            if !response.status().is_success() {
+                anyhow::bail!("Failed to download {filename}: HTTP {}", response.status());
+            }
 
-        let tmp_path = dest.with_extension("tmp");
-        fs::write(&tmp_path, &bytes)
-            .with_context(|| format!("Failed to write {}", tmp_path.display()))?;
-        fs::rename(&tmp_path, dest)
-            .with_context(|| format!("Failed to rename tmp to {}", dest.display()))?;
+            let bytes =
+                crate::masterfetch::http::read_bytes_capped(response, MAX_MODEL_DOWNLOAD_BYTES)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to read download response: {e}"))?;
 
-        Ok(())
+            // `read_bytes_capped` appends a truncation marker and returns the
+            // bytes only when the stream exceeded the cap; a model file that
+            // large is a failure, not a usable download.
+            if bytes.len() > MAX_MODEL_DOWNLOAD_BYTES {
+                anyhow::bail!(
+                    "model file {filename} exceeded the {MAX_MODEL_DOWNLOAD_BYTES} byte cap"
+                );
+            }
+
+            let tmp_path = dest.with_extension("tmp");
+            fs::write(&tmp_path, &bytes)
+                .with_context(|| format!("Failed to write {}", tmp_path.display()))?;
+            fs::rename(&tmp_path, dest)
+                .with_context(|| format!("Failed to rename tmp to {}", dest.display()))?;
+
+            Ok(())
+        })
     }
 
     /// Run ONNX inference on tokenised input to produce an embedding.

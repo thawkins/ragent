@@ -1,6 +1,6 @@
 //! Update a task status within a spec.
 //!
-//! Transitions a task from pending → in_progress → completed (or blocked).
+//! Transitions a task from pending -> in_progress -> completed (or blocked).
 //!
 //! The call is also mirrored into the session task tracker: if a session
 //! task tagged with the same `spec_id`/`task_id` exists it is updated,
@@ -96,8 +96,8 @@ impl Tool for SpecTaskUpdateTool {
 
         // Mirror the status into the session task tracker: update the
         // matching task if it exists, create one if it does not. A mirror
-        // failure must not fail the tool call — the spec write already
-        // succeeded — so it is logged and noted in the output instead.
+        // failure must not fail the tool call - the spec write already
+        // succeeded - so it is logged and noted in the output instead.
         let mirror_note = mirror_session_task(ctx, &spec, task_id, new_status);
 
         let content = match mirror_note {
@@ -128,7 +128,7 @@ impl Tool for SpecTaskUpdateTool {
 
 /// Maps a spec `TaskStatus` to the session-tracker status strings
 /// (`pending`, `in_progress`, `completed`). The tracker has no `blocked`
-/// status — it is derived from `blocked_by` — so a blocked spec task maps
+/// status - it is derived from `blocked_by` - so a blocked spec task maps
 /// to `pending` (not done, not being worked on).
 fn tracker_status(status: ragent_specs::spec::TaskStatus) -> &'static str {
     match status {
@@ -148,7 +148,7 @@ fn tracker_status(status: ragent_specs::spec::TaskStatus) -> &'static str {
 ///
 /// On success returns `Some(action)` describing the action taken
 /// (`updated` or `created`); `None` means the tracker is unavailable or
-/// the mirror failed (already logged) — the caller surfaces a warning
+/// the mirror failed (already logged) - the caller surfaces a warning
 /// note in its output. Storage being unavailable is not an error:
 /// headless/CLI runs without a database still succeed.
 fn mirror_session_task(
@@ -199,7 +199,7 @@ fn mirror_session_task(
         return Some("updated".to_string());
     }
 
-    // No tracker task yet — create one seeded from the spec's task row.
+    // No tracker task yet - create one seeded from the spec's task row.
     let plan_task = spec.tasks.iter().find(|t| t.id == task_id);
     let subject = plan_task
         .map(|t| t.title.clone())

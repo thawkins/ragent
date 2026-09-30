@@ -96,6 +96,80 @@ jobs:
       - name: Verify no poisoning-panic lock access
         run: bash scripts/check-poison-locks.sh
 
+  security-guards:
+    name: Security guards (SECTASKS MS-05 T-070)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify self-test fails on a seeded uncontained file tool
+        run: bash scripts/check-file-tool-containment.sh --self-test
+      - name: Verify every file tool is contained
+        run: bash scripts/check-file-tool-containment.sh
+      - name: Verify self-test fails on a seeded panicking unwrap
+        run: bash scripts/check-security-unwraps.sh --self-test
+      - name: Verify no new panicking unwrap/expect on a production path
+        run: bash scripts/check-security-unwraps.sh
+      - name: Verify self-test fails on a seeded duplicate guard
+        run: bash scripts/check-shared-guards.sh --self-test
+      - name: Verify each security guard has one shared implementation
+        run: bash scripts/check-shared-guards.sh
+      - name: Verify the VCS duplication guard self-test
+        run: bash scripts/check-vcs-duplication.sh --self-test
+      - name: Verify the git-argument rule is not re-derived
+        run: bash scripts/check-vcs-duplication.sh
+      - name: Verify self-test fails on a seeded team-duplication violation
+        run: bash scripts/check-team-duplication.sh --self-test
+      - name: Verify the team runtime/tools have a single home
+        run: bash scripts/check-team-duplication.sh
+      - name: Verify self-test fails on a seeded non-ASCII codepoint
+        run: bash scripts/check-non-ascii.sh --self-test
+      - name: Verify no non-ASCII glyphs beyond the documented allowlist
+        run: bash scripts/check-non-ascii.sh
+      - name: Verify self-test fails on a seeded inline test module
+        run: bash scripts/check-inline-tests.sh --self-test
+      - name: Verify no genuine inline #[cfg(test)] module in crates/ or src/
+        run: bash scripts/check-inline-tests.sh
+      - name: Verify self-test fails on a seeded silent error drop
+        run: bash scripts/check-silent-errors.sh --self-test
+      - name: Verify no new silent error suppression (ANTIPAT M4)
+        run: bash scripts/check-silent-errors.sh
+      - name: Verify the shared guard regression suite
+        run: cargo test -p ragent-types --test test_shared_guards
+      - name: Verify the unified redaction regression suite
+        run: cargo test -p ragent-types --test test_unified_redaction
+
+  ms0-regression:
+    name: ANTIPAT M0 regression suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_TEST_DEBUG: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Shared guard unit tests
+        run: cargo test -p ragent-types --test test_shared_guards
+      - name: Unified redaction tests
+        run: cargo test -p ragent-types --test test_unified_redaction
+      - name: Research retry-clamp tests (ANTIPAT M0.2)
+        run: cargo test -p ragent-research --test test_search_retry_clamp
+      - name: Git argv-injection guard tests (ANTIPAT M0.3)
+        run: cargo test -p ragent-tools-vcs --test test_ms0_git_arg_guards
+      - name: Config redaction + denylist tests (ANTIPAT M0.8)
+        run: cargo test -p ragent-config --test test_ms0_config_guards
+      - name: Plugin integrity tests (ANTIPAT M0.6)
+        run: cargo test -p ragent-plugins --test test_add
+      - name: Spec containment tests (ANTIPAT M0.7)
+        run: cargo test -p ragent-specs --test test_govcreate_authoring
+      - name: Channel SSRF tests (ANTIPAT M0.5)
+        run: cargo test -p ragent-tools-extended --test test_channels
+      - name: Telemetry toggle tests (ANTIPAT M0.15)
+        run: cargo test -p ragent-telemetry --features telemetry --test test_metric_toggles
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

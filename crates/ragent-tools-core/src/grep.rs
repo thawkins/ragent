@@ -3,10 +3,10 @@
 //! Provides [`GrepTool`], which searches files for a regex or literal pattern
 //! using the ripgrep internal library crates:
 //!
-//! - [`ignore`] — directory walking that honours `.gitignore`, `.ignore`, and
+//! - [`ignore`] - directory walking that honours `.gitignore`, `.ignore`, and
 //!   custom include/exclude glob patterns.
-//! - [`grep_regex`] — regex matcher backed by the `regex` crate.
-//! - [`grep_searcher`] — fast line-oriented searcher with encoding detection
+//! - [`grep_regex`] - regex matcher backed by the `regex` crate.
+//! - [`grep_searcher`] - fast line-oriented searcher with encoding detection
 //!   and automatic binary-file skipping.
 //!
 //! Results are capped at 500 matches and include the relative file path, line
@@ -42,9 +42,9 @@ impl Tool for GrepTool {
     fn description(&self) -> &'static str {
         "Search file contents for a regex pattern using ripgrep, respecting \
          `.gitignore` rules. Required parameter: `pattern` (string) in Rust \
-         regex syntax. Optional parameters: `path` (string) — directory or file \
+         regex syntax. Optional parameters: `path` (string) - directory or file \
          to search (default: working directory); `include` (string) and \
-         `exclude` (string) — glob filters; `case_insensitive` (boolean) and \
+         `exclude` (string) - glob filters; `case_insensitive` (boolean) and \
          `multiline` (boolean); `max_results` (integer, default and max 500). \
          Returns matching lines with file path and line number. Skips binary \
          files automatically."
@@ -76,7 +76,7 @@ impl Tool for GrepTool {
                 },
                 "multiline": {
                     "type": "boolean",
-                    "description": "Enable multiline mode — ^ and $ match line boundaries (default: false)"
+                    "description": "Enable multiline mode - ^ and $ match line boundaries (default: false)"
                 },
                 "max_results": {
                     "type": "integer",
@@ -109,22 +109,15 @@ impl Tool for GrepTool {
             |p| resolve_path(&ctx.working_dir, p),
         );
 
-        // C-002: grep must stay inside the allowed roots.
-        if ctx.allowed_roots.is_empty() {
-            super::check_path_within_root_cached(
-                &search_path,
-                &ctx.working_dir,
-                &ctx.canonical_cache,
-            )?;
-        } else {
-            let root_refs: Vec<&std::path::Path> =
-                ctx.allowed_roots.iter().map(|p| p.as_path()).collect();
-            super::check_path_within_any_root_cached(
-                &search_path,
-                &root_refs,
-                &ctx.canonical_cache,
-            )?;
-        }
+        // C-002 / FUNC-068 (ANTIPAT F-06): grep must stay inside the allowed
+        // roots. The helper falls back to `working_dir` when `allowed_roots` is
+        // empty, so the two branches below are equivalent to the old form.
+        super::check_path_within_allowed_roots_cached(
+            &search_path,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
 
         let include_glob = input["include"].as_str().map(str::to_owned);
         let exclude_glob = input["exclude"].as_str().map(str::to_owned);
@@ -134,7 +127,7 @@ impl Tool for GrepTool {
             .as_u64()
             .map_or(MAX_RESULTS, |n| (n as usize).min(MAX_RESULTS));
 
-        // Build the regex matcher — validates the pattern early before spawning
+        // Build the regex matcher - validates the pattern early before spawning
         let matcher = RegexMatcherBuilder::new()
             .case_insensitive(case_insensitive)
             .multi_line(multiline)
@@ -251,7 +244,7 @@ impl Tool for GrepTool {
                     };
 
                     // Per-file errors (binary, permission denied) are silently ignored
-                    let _ = searcher.search_path(&matcher_par, &path, sink);
+                    let _ = searcher.search_path(&matcher_par, &path, sink); // INTENTIONAL: per-file errors (binary, permission) are skipped by design
                     ignore::WalkState::Continue
                 })
             });

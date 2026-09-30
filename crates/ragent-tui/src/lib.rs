@@ -96,18 +96,18 @@ impl TerminalGuard {
     /// It is safe to call multiple times.
     pub fn restore_terminal(&self) {
         // Disable mouse capture first to stop generating escape sequences
-        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        let _ = execute!(std::io::stdout(), DisableMouseCapture); // INTENTIONAL: terminal teardown is best-effort
 
         // Disable bracketed paste mode
-        let _ = execute!(std::io::stdout(), DisableBracketedPaste);
+        let _ = execute!(std::io::stdout(), DisableBracketedPaste); // INTENTIONAL: terminal teardown is best-effort
 
         if self.keyboard_enhanced {
-            let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
+            let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags); // INTENTIONAL: terminal teardown is best-effort
         }
 
         // Leave alternate screen and disable raw mode
-        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
-        let _ = disable_raw_mode();
+        let _ = execute!(std::io::stdout(), LeaveAlternateScreen); // INTENTIONAL: terminal teardown is best-effort
+        let _ = disable_raw_mode(); // INTENTIONAL: terminal teardown is best-effort
 
         // Drain any buffered terminal events AFTER leaving raw mode
         // so they don't leak into the shell as garbage characters.
@@ -117,7 +117,7 @@ impl TerminalGuard {
         let mut drained = 0u32;
         while drained < 64 && ct_event::poll(std::time::Duration::from_millis(10)).unwrap_or(false)
         {
-            let _ = ct_event::read();
+            let _ = ct_event::read(); // INTENTIONAL: drain a pending terminal event
             drained += 1;
         }
     }
@@ -240,16 +240,16 @@ pub async fn run_tui(
     std::panic::set_hook(Box::new(move |info| {
         // A panic raised inside a deliberate contained-panic container
         // (ragent_types::panic_guard) is caught by its caller: leave the
-        // terminal alone — tearing it down here would destroy the UI even
+        // terminal alone - tearing it down here would destroy the UI even
         // though the application keeps running.
         if ragent_types::panic_guard::is_active() {
             return;
         }
         // Restore terminal state before printing panic message
         // This is best-effort; ignore errors
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
-        let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture); // INTENTIONAL: terminal teardown is best-effort
+        let _ = crossterm::terminal::disable_raw_mode(); // INTENTIONAL: terminal teardown is best-effort
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen); // INTENTIONAL: terminal teardown is best-effort
 
         // Call the default panic hook to print the backtrace
         default_panic_hook(info);
@@ -294,7 +294,7 @@ pub async fn run_tui(
     let stderr_rx = if let Some(spool) = stderr_spool {
         let (tx, rx) = std::sync::mpsc::sync_channel(512);
         spool.set_mirror(Arc::new(move |text: &str| {
-            let _ = tx.try_send(text.to_string());
+            let _ = tx.try_send(text.to_string()); // INTENTIONAL: channel send on a closed receiver is benign
         }));
         Some(rx)
     } else {
@@ -303,7 +303,7 @@ pub async fn run_tui(
 
     // Clean up orphaned clipboard image temp files before the session starts.
     // This is a one-time, best-effort sweep; individual errors are logged.
-    let _ = crate::clipboard::prune_clipboard_temp_files(crate::clipboard::CLIPBOARD_TEMP_MAX_AGE);
+    let _ = crate::clipboard::prune_clipboard_temp_files(crate::clipboard::CLIPBOARD_TEMP_MAX_AGE); // INTENTIONAL: best-effort cache prune
 
     // Merge sub-stages recorded inside App::new() into the main timings.
     if let Some(ref mut app_sub) = app.startup_timings {
@@ -335,16 +335,16 @@ pub async fn run_tui(
     app.config_paths = config_paths;
 
     // -- Render the very first frame so the user sees the TUI immediately --
-    app.status = "starting up…".to_string();
+    app.status = "starting up...".to_string();
     app.force_new_message = true;
-    app.append_assistant_text("[spin] **Starting up…**");
+    app.append_assistant_text("[spin] **Starting up...**");
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
     // -- Provider health check --
     let t0 = Instant::now();
     app.check_provider_health();
     app.append_assistant_text("\n[ok] Provider health check");
-    app.status = "checking provider…".to_string();
+    app.status = "checking provider...".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
     startup.record("Provider health check", t0.elapsed());
 
@@ -433,7 +433,7 @@ pub async fn run_tui(
                 ));
                 // Display the loaded configuration file(s)
                 if app.config_paths.is_empty() {
-                    app.append_assistant_text("\nℹ No config file found; using defaults");
+                    app.append_assistant_text("\n[i] No config file found; using defaults");
                 } else {
                     let mut paths_text = app
                         .config_paths
@@ -518,7 +518,7 @@ pub async fn run_tui(
     // picks up the rest.
     let t0 = Instant::now();
     app.adopt_mcp_client_state(&session_processor).await;
-    let _ = app
+    let _ = app // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
         .wait_for_mcp_connect(&session_processor, MCP_STARTUP_GRACE)
         .await;
     app.report_mcp_startup().await;
@@ -530,7 +530,7 @@ pub async fn run_tui(
     // projects.  We spawn it in a background task so the TUI event loop starts
     // immediately and the index becomes available when ready.
     let t0 = Instant::now();
-    app.status = "starting code index…".to_string();
+    app.status = "starting code index...".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
     /// Result of the background code-index startup, delivered to the main
@@ -591,7 +591,7 @@ pub async fn run_tui(
                                     }
                                 };
                             // Thread-safe: OnceLock can be set from any thread.
-                            let _ = sp.code_index.set(arc_idx.clone());
+                            let _ = sp.code_index.set(arc_idx.clone()); // INTENTIONAL: OnceLock set race is benign
                             tracing::info!(
                                 "Code index initialized at {:?}",
                                 index_config.index_dir
@@ -637,7 +637,7 @@ pub async fn run_tui(
                 }
             }
         };
-        let _ = ci_tx.send(result);
+        let _ = ci_tx.send(result); // INTENTIONAL: channel send on a closed receiver is benign
     });
 
     // Track the fallback reindex thread so we can join it on shutdown.
@@ -652,7 +652,7 @@ pub async fn run_tui(
 
     let t0 = Instant::now();
     let specs_root = std::env::current_dir().unwrap_or_default().join("specs");
-    let _ = session_processor
+    let _ = session_processor // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
         .spec_manager
         .set(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
     app.spec_manager = Some(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
@@ -671,7 +671,7 @@ pub async fn run_tui(
 
     // -- Session resume --
     if let Some(ref sid) = resume_session_id {
-        app.status = "resuming session…".to_string();
+        app.status = "resuming session...".to_string();
         terminal.draw(|frame| layout::render(frame, &mut app))?;
         if let Err(e) = app.load_session(sid) {
             tracing::error!(error = %e, session_id = %sid, "Failed to resume session");
@@ -715,10 +715,10 @@ pub async fn run_tui(
         }
         #[cfg(windows)]
         {
-            let _ = tokio::signal::ctrl_c().await;
+            let _ = tokio::signal::ctrl_c().await; // INTENTIONAL: shutdown-signal wait; result irrelevant
             tracing::info!("Ctrl+C received, initiating graceful shutdown");
         }
-        let _ = shutdown_tx.send(());
+        let _ = shutdown_tx.send(()); // INTENTIONAL: channel send on a closed receiver is benign
         anyhow::Result::<()>::Ok(())
     });
 
@@ -799,8 +799,8 @@ pub async fn run_tui(
                 }
                 ci_startup_recorded = true;
             }
-            // Clear the "starting code index…" status now that setup is done.
-            if app.status == "starting code index…" {
+            // Clear the "starting code index..." status now that setup is done.
+            if app.status == "starting code index..." {
                 app.status = "ready".to_string();
                 app.status_set_at = None;
             }
@@ -985,7 +985,7 @@ pub async fn run_tui(
                             // input to silently stop.  Re-arming here keeps mouse
                             // events flowing without a restart.
                             CtEvent::Resize(_, _) | CtEvent::FocusGained => {
-                                let _ = execute!(std::io::stdout(), EnableMouseCapture);
+                                let _ = execute!(std::io::stdout(), EnableMouseCapture);  // INTENTIONAL: terminal teardown is best-effort
                                 got_input = true;
                             }
                             _ => {}
@@ -1036,8 +1036,8 @@ pub async fn run_tui(
     // recoverable (idle-CPU/exit-hang fix).
     //
     // Spawned on a raw OS thread, NOT a tokio task: the async variant was
-    // cancelled the moment the runtime began dropping at end of main —
-    // exactly the hang scenario it exists to escape — leaving abandoned
+    // cancelled the moment the runtime began dropping at end of main -
+    // exactly the hang scenario it exists to escape - leaving abandoned
     // blocking-pool joins unbounded. A native thread survives runtime drop.
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(3));
@@ -1094,7 +1094,7 @@ pub async fn run_tui(
     // now observes the cancel flag (set above via index.request_stop()), and
     // a timed-out spawn_blocking join kept running anyway while runtime drop
     // then blocked waiting for it at end of main (exit-hang root cause).
-    let _ = code_index_fallback_thread.take();
+    let _ = code_index_fallback_thread.take(); // INTENTIONAL: join-handle drop; the thread is already finished or detached
 
     Ok(())
 }

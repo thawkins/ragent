@@ -1,4 +1,4 @@
-//! Codebase index explain tool — node metadata and connections (FR-011).
+//! Codebase index explain tool - node metadata and connections (FR-011).
 //!
 //! Displays a symbol's node metadata (source file, line, community, degree)
 //! and its incoming/outgoing edges with kind and confidence tags, limited to
@@ -119,7 +119,7 @@ impl Tool for CodeIndexExplainTool {
                             conn.source_file,
                             conn.kind,
                             conn.confidence,
-                            conn.line.map_or("—".to_string(), |l| l.to_string()),
+                            conn.line.map_or("-".to_string(), |l| l.to_string()),
                         ));
                     }
                     output.push('\n');
@@ -139,7 +139,7 @@ impl Tool for CodeIndexExplainTool {
                             conn.source_file,
                             conn.kind,
                             conn.confidence,
-                            conn.line.map_or("—".to_string(), |l| l.to_string()),
+                            conn.line.map_or("-".to_string(), |l| l.to_string()),
                         ));
                     }
                 }

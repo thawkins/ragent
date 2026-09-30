@@ -1,4 +1,4 @@
-//! `mf_cache_clear` tool — clear the masterfetch content cache.
+//! `mf_cache_clear` tool - clear the masterfetch content cache.
 //!
 //! Implements FR-016, FR-022, FR-026.
 //!

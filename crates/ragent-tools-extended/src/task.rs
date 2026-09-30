@@ -1,4 +1,4 @@
-//! Task tools for the todo2tasks migration (T-007, T-008, T-009, T-010, …).
+//! Task tools for the todo2tasks migration (T-007, T-008, T-009, T-010, ...).
 //!
 //! This module hosts the new `task_*` tool surface that replaces the
 //! legacy session task tools with four single-purpose tools mirroring
@@ -6,15 +6,15 @@
 //!
 //! ## Current status
 //!
-//! - **T-006** — Auto-unblock evaluation: `is_available` / `is_blocked`
+//! - **T-006** - Auto-unblock evaluation: `is_available` / `is_blocked`
 //!   derived at read time and surfaced in `task_get` / `task_list`
 //!   output (FR-003, FR-005).
-//! - **T-007** — `TaskCreateTool` implemented (FR-009, FR-011, FR-012).
-//! - **T-008/T-017** — `TaskUpdateTool` implemented with `status=blocked`
+//! - **T-007** - `TaskCreateTool` implemented (FR-009, FR-011, FR-012).
+//! - **T-008/T-017** - `TaskUpdateTool` implemented with `status=blocked`
 //!   rejection (FR-005) and `blocked_by` existence validation (FR-009).
-//! - **T-009** — `TaskGetTool` implemented (FR-011, FR-014).
-//! - **T-010** — `TaskListTool` implemented (FR-011, FR-015).
-//! - T-011 — completed: all four tools registered in
+//! - **T-009** - `TaskGetTool` implemented (FR-011, FR-014).
+//! - **T-010** - `TaskListTool` implemented (FR-011, FR-015).
+//! - T-011 - completed: all four tools registered in
 //!   `create_extended_registry()` and hardwired auto-approve covers
 //!   `task_*` (FR-011, FR-017).
 
@@ -53,7 +53,7 @@ pub(crate) struct TaskDagInfo {
 /// Given a slice of [`TaskRow`] values (typically from
 /// `StorageBackend::list_tasks`), this function:
 ///
-/// 1. Builds a status lookup map (`id` → `status`) for O(1)
+/// 1. Builds a status lookup map (`id` -> `status`) for O(1)
 ///    `blocked_by` resolution.
 /// 2. Computes `is_blocked` per FR-005: status is `"pending"` **and**
 ///    at least one `blocked_by` ID is not `"completed"`.
@@ -67,7 +67,7 @@ pub(crate) struct TaskDagInfo {
 /// `ragent_storage::compute_task_dag`, adapted for the
 /// tools-extended `TaskRow` type.
 pub(crate) fn compute_dag(tasks: &[TaskRow]) -> HashMap<String, TaskDagInfo> {
-    // Build id → status lookup for O(1) blocked_by resolution.
+    // Build id -> status lookup for O(1) blocked_by resolution.
     let status_map: HashMap<&str, &str> = tasks
         .iter()
         .map(|t| (t.id.as_str(), t.status.as_str()))
@@ -130,12 +130,12 @@ pub(crate) fn compute_dag(tasks: &[TaskRow]) -> HashMap<String, TaskDagInfo> {
 /// (free-text, carries acceptance criteria).
 ///
 /// Optional parameters:
-/// - `active_form` — present-continuous phrase for progress indicators
+/// - `active_form` - present-continuous phrase for progress indicators
 ///   (FR-007).
-/// - `owner` — free-form label naming the responsible agent/worker
+/// - `owner` - free-form label naming the responsible agent/worker
 ///   (FR-006).
-/// - `metadata` — arbitrary JSON object of key-value pairs (FR-008).
-/// - `blocked_by` — array of task IDs that must reach `completed` before
+/// - `metadata` - arbitrary JSON object of key-value pairs (FR-008).
+/// - `blocked_by` - array of task IDs that must reach `completed` before
 ///   this task (FR-001).  Each ID is validated to exist in the current
 ///   session (FR-009).
 ///
@@ -354,7 +354,7 @@ fn type_str(v: &Value) -> &'static str {
 // ── TaskUpdateTool (T-008, T-017, FR-004, FR-005, FR-009) ────────────
 
 /// Valid status values for `task_update` (FR-005: `blocked` is NOT
-/// a storable status — it is derived at read time).
+/// a storable status - it is derived at read time).
 const UPDATE_STATUSES: &[&str] = &["pending", "in_progress", "completed"];
 
 /// Detects whether adding proposed `blocked_by` edges would create a
@@ -377,10 +377,10 @@ fn detect_cycle(
     tasks: &[TaskRow],
     task_id: &str,
     proposed_blocked_by: &[String],
-    // task_id → new IDs to merge into that task's blocked_by (from add_blocks)
+    // task_id -> new IDs to merge into that task's blocked_by (from add_blocks)
     add_blocks_targets: &HashMap<String, Vec<String>>,
 ) -> Option<Vec<String>> {
-    // Build adjacency map: task_id → set of IDs it depends on (blocked_by).
+    // Build adjacency map: task_id -> set of IDs it depends on (blocked_by).
     let mut adj: HashMap<&str, Vec<String>> = HashMap::new();
     for t in tasks {
         adj.insert(t.id.as_str(), t.blocked_by.clone());
@@ -419,7 +419,7 @@ fn detect_cycle(
                 return Some(cycle);
             }
             if visiting.contains(dep) {
-                // Already in current DFS path — inner cycle.
+                // Already in current DFS path - inner cycle.
                 let mut cycle = path.clone();
                 cycle.push(dep.clone());
                 return Some(cycle);
@@ -446,18 +446,18 @@ fn detect_cycle(
 /// Required parameter: `task_id`.
 ///
 /// Optional parameters:
-/// - `status` — must be one of `pending`, `in_progress`, `completed`.
+/// - `status` - must be one of `pending`, `in_progress`, `completed`.
 ///   The value `blocked` is **rejected** with a clear error (FR-005):
 ///   blocked-ness is a derived state, not a stored status.
-/// - `subject` — new imperative title.
-/// - `description` — new description text.
-/// - `active_form` — new present-continuous phrase (pass `""` to clear).
-/// - `owner` — new owner label (pass `""` to clear).
-/// - `metadata` — new JSON object (full replacement).
-/// - `add_blocked_by` — array of task IDs to merge into the existing
+/// - `subject` - new imperative title.
+/// - `description` - new description text.
+/// - `active_form` - new present-continuous phrase (pass `""` to clear).
+/// - `owner` - new owner label (pass `""` to clear).
+/// - `metadata` - new JSON object (full replacement).
+/// - `add_blocked_by` - array of task IDs to merge into the existing
 ///   `blocked_by` list.  Each ID is validated to exist in the current
 ///   session (FR-009).  Self-references are rejected.
-/// - `add_blocks` — array of task IDs that should be blocked by this
+/// - `add_blocks` - array of task IDs that should be blocked by this
 ///   task.  For each ID `B` in the list, `task_id` is added to `B`'s
 ///   `blocked_by` list.  Each ID is validated to exist in the current
 ///   session (FR-009).  Self-references are rejected.
@@ -484,11 +484,11 @@ impl Tool for TaskUpdateTool {
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
         "Update an existing task in the current session. \
-         Required: task_id. Optional: status (pending, in_progress, completed — \
+         Required: task_id. Optional: status (pending, in_progress, completed - \
          NOT 'blocked'), subject, description, active_form, owner, metadata, \
          add_blocked_by (array of task IDs to add as dependencies), \
          add_blocks (array of task IDs that should be blocked by this task). \
-         'blocked' status is rejected — blocked-ness is derived from blocked_by. \
+         'blocked' status is rejected - blocked-ness is derived from blocked_by. \
          Cycle-creating edges are rejected (FR-004). \
          Completing a task auto-evaluates dependent tasks (FR-003). \
          Returns the updated task record."
@@ -504,7 +504,7 @@ impl Tool for TaskUpdateTool {
                 },
                 "status": {
                     "type": "string",
-                    "description": "New status: pending, in_progress, or completed. 'blocked' is not allowed — it is a derived state.",
+                    "description": "New status: pending, in_progress, or completed. 'blocked' is not allowed - it is a derived state.",
                     "enum": ["pending", "in_progress", "completed"]
                 },
                 "subject": {
@@ -595,8 +595,8 @@ impl Tool for TaskUpdateTool {
 
         let description = input.get("description").and_then(|v| v.as_str());
 
-        // active_form: string present → Some(Some(v)); empty string →
-        // Some(None) (clear); absent → None (unchanged).
+        // active_form: string present -> Some(Some(v)); empty string ->
+        // Some(None) (clear); absent -> None (unchanged).
         let active_form = if let Some(val) = input.get("active_form") {
             val.as_str()
                 .map(|s| if s.is_empty() { None } else { Some(s) })
@@ -641,7 +641,7 @@ impl Tool for TaskUpdateTool {
             Vec::new()
         };
 
-        // ── add_blocks: inverse edges — target tasks gain task_id ────
+        // ── add_blocks: inverse edges - target tasks gain task_id ────
         let add_blocks: Vec<String> = if let Some(arr) = input.get("add_blocks") {
             if !arr.is_array() {
                 anyhow::bail!(
@@ -719,7 +719,7 @@ impl Tool for TaskUpdateTool {
             );
         }
 
-        // Merge: existing blocked_by ∪ add_blocked_by, deduplicated.
+        // Merge: existing blocked_by union add_blocked_by, deduplicated.
         let merged_blocked_by: Option<Vec<String>> = if add_blocked_by.is_empty() {
             None
         } else {
@@ -764,7 +764,7 @@ impl Tool for TaskUpdateTool {
                     "Dependency cycle detected (FR-004): {}. \
                      Adding these edges would create a circular dependency. \
                      The update was rejected and no changes were persisted.",
-                    cycle.join(" → ")
+                    cycle.join(" -> ")
                 );
             }
         }
@@ -831,7 +831,7 @@ impl Tool for TaskUpdateTool {
         // ── FR-003: Auto-unblock evaluation on completion ────────────
         // When status transitions to `completed`, compute which tasks
         // became available (unblocked) as a result.  This is informational
-        // — the derived `is_available` field is always recomputed at read
+        // - the derived `is_available` field is always recomputed at read
         // time by `compute_dag`.  Here we identify the dependent tasks
         // that are now fully unblocked.
         let unblocked: Vec<String> = if status == Some("completed") {
@@ -894,7 +894,7 @@ impl Tool for TaskUpdateTool {
 /// `metadata`, `blocked_by`, `blocks` (derived), `created_at`,
 /// `updated_at`.
 ///
-/// The `blocks` field is derived at read time — it lists every task
+/// The `blocks` field is derived at read time - it lists every task
 /// ID in the session that includes this task in its `blocked_by`.
 /// This satisfies FR-014 and mirrors the `compute_task_dag` logic
 /// from T-004.
@@ -1062,7 +1062,7 @@ impl Tool for TaskListTool {
         }
 
         // Fetch ALL tasks (unfiltered) so the DAG derivation is correct
-        // even when a status filter is applied — `is_blocked` and
+        // even when a status filter is applied - `is_blocked` and
         // `is_available` depend on the full session task set (T-006,
         // FR-003, FR-005).
         let all_tasks = storage
@@ -1118,21 +1118,28 @@ impl Tool for TaskListTool {
 
 // ── Formatting helpers ──────────────────────────────────────────────
 
+/// The ASCII status marker used in task listings.
+///
+/// Shared by [`format_task_record`] and the task-list renderer so the two
+/// cannot drift (see `ANTIPAT.md` M3.8).
+fn task_status_icon(status: &str) -> &'static str {
+    match status {
+        "pending" => "[..]",
+        "in_progress" => "[refresh]",
+        "completed" | "done" => "[ok]",
+        "blocked" => "[blocked]",
+        _ => "[?]",
+    }
+}
+
 /// Formats a single task as a human-readable markdown record
 /// (FR-014) with derived DAG annotations (FR-003, FR-005).
 ///
-/// When `info.is_blocked` is true, a `[blocked by #id, …]` annotation
+/// When `info.is_blocked` is true, a `[blocked by #id, ...]` annotation
 /// is rendered.  When `info.is_available` is true, an `[available]`
 /// annotation is rendered.  The `blocks` list is shown when non-empty.
 pub(crate) fn format_task_record(task: &TaskRow, info: &TaskDagInfo) -> String {
-    let status_icon = match task.status.as_str() {
-        "pending" => "⏳",
-        "in_progress" => "🔄",
-        "completed" => "✅",
-        "done" => "✅",
-        "blocked" => "🚫",
-        _ => "❓",
-    };
+    let status_icon = task_status_icon(&task.status);
 
     let mut out = String::new();
     out.push_str(&format!("## Task `{}`\n\n", task.id));
@@ -1188,7 +1195,7 @@ pub(crate) fn format_task_record(task: &TaskRow, info: &TaskDagInfo) -> String {
 /// derived DAG annotations (FR-003, FR-005).
 ///
 /// Each entry shows `id`, `subject` (title), `status`, `owner`,
-/// `blocked_by`, and derived `[available]` / `[blocked by #id, …]`
+/// `blocked_by`, and derived `[available]` / `[blocked by #id, ...]`
 /// annotations.
 fn format_task_list(
     tasks: &[TaskRow],
@@ -1206,14 +1213,7 @@ fn format_task_list(
         output.push_str(&format!("## Tasks ({} items)\n\n", tasks.len()));
         for task in tasks {
             let info = dag.get(&task.id).cloned().unwrap_or_default();
-            let status_icon = match task.status.as_str() {
-                "pending" => "⏳",
-                "in_progress" => "🔄",
-                "completed" => "✅",
-                "done" => "✅",
-                "blocked" => "🚫",
-                _ => "❓",
-            };
+            let status_icon = task_status_icon(&task.status);
             output.push_str(&format!(
                 "- {} **{}** `[{}]`\n",
                 status_icon, task.title, task.status

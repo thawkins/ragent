@@ -1,10 +1,10 @@
 //! In-process leader election and `CoordinatorCluster` (Task 5.2).
 //!
 //! Provides:
-//! - [`LeaderEvent`] — broadcast events when leadership changes.
-//! - [`LeaderElector`] — elects a leader among registered node ids using a
+//! - [`LeaderEvent`] - broadcast events when leadership changes.
+//! - [`LeaderElector`] - elects a leader among registered node ids using a
 //!   simple in-process majority-vote mechanism.
-//! - [`CoordinatorCluster`] — manages multiple [`Coordinator`]s and delegates
+//! - [`CoordinatorCluster`] - manages multiple [`Coordinator`]s and delegates
 //!   job execution to the currently elected leader, falling back to any live
 //!   coordinator if the leader is unavailable.
 
@@ -45,7 +45,7 @@ pub enum LeaderEvent {
 /// [`LeaderElector::subscribe`] to monitor leadership changes.
 #[derive(Clone)]
 pub struct LeaderElector {
-    votes: Arc<RwLock<HashMap<String, String>>>, // voter_id → candidate_id
+    votes: Arc<RwLock<HashMap<String, String>>>, // voter_id -> candidate_id
     leader: Arc<RwLock<Option<String>>>,
     tx: Arc<broadcast::Sender<LeaderEvent>>,
 }

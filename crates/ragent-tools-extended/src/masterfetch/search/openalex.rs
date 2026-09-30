@@ -6,11 +6,11 @@
 //!
 //! This module provides an [`OpenAlexEngine`] that implements the
 //! [`SearchEngine`] trait by calling the [OpenAlex REST API](https://api.openalex.org).
-//! OpenAlex is a fully-open catalog of scholarly works (≈240M records) and
-//! requires **no API key** — it is a keyless backend like `DuckDuckGo` and
+//! OpenAlex is a fully-open catalog of scholarly works (~=240M records) and
+//! requires **no API key** - it is a keyless backend like `DuckDuckGo` and
 //! Brave. An optional `mailto` query parameter (resolved from the
 //! `OPENALEX_EMAIL` environment variable or an `openalex_email` config field
-//! — wired in later tasks) participates in the OpenAlex polite pool and raises
+//!   wired in later tasks) participates in the OpenAlex polite pool and raises
 //! the daily request limit (FR-007).
 //!
 //! # Request mapping
@@ -18,17 +18,17 @@
 //! The [`build_request`] helper maps the shared [`SearchOptions`] to OpenAlex
 //! query parameters for the `GET /works` endpoint:
 //!
-//! - `search` — the query verbatim.
-//! - `per_page` — `opts.max_results` clamped to OpenAlex's 1–200 range
+//! - `search` - the query verbatim.
+//! - `per_page` - `opts.max_results` clamped to OpenAlex's 1-200 range
 //!   (FR-012).
-//! - `page` — `opts.page + 1` (OpenAlex pages are 1-indexed); when
+//! - `page` - `opts.page + 1` (OpenAlex pages are 1-indexed); when
 //!   `opts.page` exceeds the documented 10,000-result basic-pagination
 //!   limit, `cursor=*` is used instead (FR-008, handled in T-002).
-//! - `filter` — built from the `site` and `freshness` options:
-//!   - `site` → `primary_location.source.host_organization:<domain>` (FR-004).
-//!   - `freshness` (non-`Any`) → `from_publication_date` / `to_publication_date`
+//! - `filter` - built from the `site` and `freshness` options:
+//!   - `site` -> `primary_location.source.host_organization:<domain>` (FR-004).
+//!   - `freshness` (non-`Any`) -> `from_publication_date` / `to_publication_date`
 //!     date range (FR-005).
-//! - `mailto` — appended when a polite-pool email is configured (FR-007).
+//! - `mailto` - appended when a polite-pool email is configured (FR-007).
 //!
 //! # Response parsing
 //!
@@ -40,7 +40,7 @@
 //!   OpenAlex `id` URI, then to the DOI URL (FR-010).
 //! - `snippet` reconstructed from the work's `abstract_inverted_index` (stripped
 //!   of HTML), truncated to ~200 characters (FR-010).
-//! - `score` set to the `relevance_score` normalised to the 0.0–1.0 range used
+//! - `score` set to the `relevance_score` normalised to the 0.0-1.0 range used
 //!   by the consensus ranker (FR-011).
 //!
 //! Scholarly metadata (DOI, publication year, citation count, open-access URL,
@@ -104,7 +104,7 @@ pub const MAX_QUERY_CHARS: usize = 1_000;
 /// OpenAlex API-backed search backend.
 ///
 /// Implements [`SearchEngine`] by sending an unauthenticated `GET` request to
-/// `https://api.openalex.org/works`. No API key is required — the backend is
+/// `https://api.openalex.org/works`. No API key is required - the backend is
 /// keyless and always-on (FR-003). An optional `mailto` email participates in
 /// the OpenAlex polite pool (FR-007).
 ///
@@ -113,12 +113,12 @@ pub const MAX_QUERY_CHARS: usize = 1_000;
 ///
 /// # Requirements
 ///
-/// - **FR-002** — OpenAlex backend that plugs into the `SearchEngine` trait.
-/// - **FR-010** — result fields (`source`, `url`, `snippet`) populated per spec.
-/// - **FR-012** — `per_page` clamped to 1–200; results truncated to
+/// - **FR-002** - OpenAlex backend that plugs into the `SearchEngine` trait.
+/// - **FR-010** - result fields (`source`, `url`, `snippet`) populated per spec.
+/// - **FR-012** - `per_page` clamped to 1-200; results truncated to
 ///   `opts.max_results`.
-/// - **NFR-001** — uses the shared HTTP client timeout.
-/// - **NFR-005** — no `unsafe` code, no `.unwrap()` on user-facing paths.
+/// - **NFR-001** - uses the shared HTTP client timeout.
+/// - **NFR-005** - no `unsafe` code, no `.unwrap()` on user-facing paths.
 #[derive(Debug, Clone)]
 pub struct OpenAlexEngine {
     /// Optional polite-pool email (appended as `mailto=`). May be empty.
@@ -174,11 +174,7 @@ impl OpenAlexEngine {
 
     /// Return the HTTP client to use for this engine.
     fn get_client(&self) -> Result<reqwest::Client, String> {
-        if let Some(ref c) = self.client {
-            return Ok(c.clone());
-        }
-        crate::masterfetch::http::build_default_client()
-            .map_err(|e| format!("failed to build HTTP client: {e}"))
+        super::engine::engine_http_client(&self.client)
     }
 }
 
@@ -242,17 +238,20 @@ impl SearchEngine for OpenAlexEngine {
             // explaining the reason (e.g. "Insufficient budget ... Resets at
             // midnight UTC"). Surface that message so the per-engine error
             // report is actionable instead of a bare "rate-limited".
-            let detail = response
-                .text()
-                .await
-                .ok()
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-                .and_then(|value| {
-                    value
-                        .get("message")
-                        .and_then(|m| m.as_str())
-                        .map(str::to_string)
-                });
+            // ANTIPAT 4.1: this diagnostic body read is capped too.
+            let detail = crate::masterfetch::http::read_body_capped(
+                response,
+                crate::masterfetch::http::MAX_SMALL_BODY_BYTES,
+            )
+            .await
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|value| {
+                value
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
+            });
             tracing::warn!(status = %status, "openalex: rate-limited");
             return match detail {
                 Some(msg) => EngineReport::blocked(ENGINE_NAME, format!("rate-limited: {msg}")),
@@ -268,7 +267,13 @@ impl SearchEngine for OpenAlexEngine {
             );
         }
 
-        let text = match response.text().await {
+        // ANTIPAT 4.1: bound the response body.
+        let text = match crate::masterfetch::http::read_body_capped(
+            response,
+            crate::masterfetch::http::MAX_RESPONSE_BODY_BYTES,
+        )
+        .await
+        {
             Ok(t) => t,
             Err(e) => {
                 return EngineReport::error(
@@ -300,7 +305,7 @@ impl SearchEngine for OpenAlexEngine {
 }
 
 // ---------------------------------------------------------------------------
-// Request builder (pure, testable) — FR-004, FR-005, FR-008, FR-012
+// Request builder (pure, testable) - FR-004, FR-005, FR-008, FR-012
 // ---------------------------------------------------------------------------
 
 /// Build the OpenAlex request URL and query parameters from a query,
@@ -312,14 +317,14 @@ impl SearchEngine for OpenAlexEngine {
 ///
 /// # Parameter mapping
 ///
-/// - `search` — the trimmed query, capped at [`MAX_QUERY_CHARS`] characters.
-/// - `per_page` — `opts.max_results` clamped to 1–200 (FR-012).
-/// - `page` — `opts.page + 1` (1-indexed) for basic pagination; when
+/// - `search` - the trimmed query, capped at [`MAX_QUERY_CHARS`] characters.
+/// - `per_page` - `opts.max_results` clamped to 1-200 (FR-012).
+/// - `page` - `opts.page + 1` (1-indexed) for basic pagination; when
 ///   `opts.page * per_page` exceeds [`BASIC_PAGINATION_LIMIT`], `cursor=*` is
 ///   used instead and `page` is omitted (FR-008).
-/// - `filter` — `site` and `freshness` filters combined with a comma
+/// - `filter` - `site` and `freshness` filters combined with a comma
 ///   (FR-004, FR-005).
-/// - `mailto` — appended when `mailto` is non-empty (FR-007).
+/// - `mailto` - appended when `mailto` is non-empty (FR-007).
 ///
 /// # Examples
 ///
@@ -385,13 +390,13 @@ pub fn build_request(
 fn build_filter(opts: &SearchOptions) -> String {
     let mut parts: Vec<String> = Vec::new();
 
-    // site → primary_location.source.host_organization (FR-004)
+    // site -> primary_location.source.host_organization (FR-004)
     let site = opts.site.trim();
     if !site.is_empty() {
         parts.push(format!("primary_location.source.host_organization:{site}"));
     }
 
-    // freshness → from_/to_publication_date (FR-005)
+    // freshness -> from_/to_publication_date (FR-005)
     if let Some((from, to)) = freshness_to_date_range(opts.freshness) {
         parts.push(format!("from_publication_date:{from}"));
         parts.push(format!("to_publication_date:{to}"));
@@ -445,20 +450,16 @@ fn date_string(secs: i64) -> String {
 /// character boundaries.
 #[must_use]
 pub fn truncate_query(query: &str) -> String {
-    let trimmed = query.trim();
-    if trimmed.chars().count() <= MAX_QUERY_CHARS {
-        return trimmed.to_string();
-    }
-    trimmed.chars().take(MAX_QUERY_CHARS).collect()
+    super::engine::truncate_query_to(query.trim(), MAX_QUERY_CHARS)
 }
 
 // ---------------------------------------------------------------------------
-// Response parsing (pure, testable) — FR-001, FR-010, FR-011
+// Response parsing (pure, testable) - FR-001, FR-010, FR-011
 // ---------------------------------------------------------------------------
 
 /// Parse an OpenAlex JSON response into [`RawResult`]s.
 ///
-/// Expects the shape `{ "results": [ … ] }`, where each work object contains
+/// Expects the shape `{ "results": [ ... ] }`, where each work object contains
 /// `id`, `title`, `relevance_score`, `abstract_inverted_index`,
 /// `publication_year`, `cited_by_count`, `doi`, `open_access`, and
 /// `primary_location`. Results are returned with `source` set to `"openalex"`.
@@ -511,7 +512,7 @@ pub fn parse_response(value: &serde_json::Value) -> Vec<RawResult> {
                 .unwrap_or_default()
                 .to_string();
 
-            // URL: primary_location.landing_page_url → id → doi (FR-010)
+            // URL: primary_location.landing_page_url -> id -> doi (FR-010)
             let url = work
                 .get("primary_location")
                 .and_then(|pl| pl.get("landing_page_url"))
@@ -522,7 +523,7 @@ pub fn parse_response(value: &serde_json::Value) -> Vec<RawResult> {
                 .or_else(|| work.get("doi").and_then(|d| d.as_str()).map(String::from))
                 .unwrap_or_default();
 
-            // score: relevance_score normalised to 0.0–1.0 (FR-011)
+            // score: relevance_score normalised to 0.0-1.0 (FR-011)
             let score = work
                 .get("relevance_score")
                 .and_then(|s| s.as_f64())
@@ -548,12 +549,12 @@ pub fn parse_response(value: &serde_json::Value) -> Vec<RawResult> {
         .collect()
 }
 
-/// Normalise an OpenAlex `relevance_score` to the 0.0–1.0 range (FR-011).
+/// Normalise an OpenAlex `relevance_score` to the 0.0-1.0 range (FR-011).
 ///
-/// OpenAlex relevance scores are unbounded positive floats (typically 1–100+).
+/// OpenAlex relevance scores are unbounded positive floats (typically 1-100+).
 /// We apply a soft normalisation: divide by a scale factor and clamp to 1.0.
-/// The scale factor of 100.0 keeps typical scores (~5–60) in a 0.05–0.6 band
-/// so top hits retain headroom and do not all saturate at 1.0 — a full-saturation
+/// The scale factor of 100.0 keeps typical scores (~5-60) in a 0.05-0.6 band
+/// so top hits retain headroom and do not all saturate at 1.0 - a full-saturation
 /// tie block would arbitrarily crowd other engines out of the merge cap.
 fn normalise_relevance(score: f64) -> f64 {
     const SCALE: f64 = 100.0;
@@ -565,7 +566,7 @@ fn normalise_relevance(score: f64) -> f64 {
 /// source name) (FR-001, FR-010).
 ///
 /// The abstract is reconstructed from the `abstract_inverted_index` (a map of
-/// word → list of positions) and truncated to ~200 characters. Metadata is
+/// word -> list of positions) and truncated to ~200 characters. Metadata is
 /// appended as a compact suffix.
 fn build_snippet(work: &serde_json::Value) -> String {
     let abstract_text = reconstruct_abstract(
@@ -590,7 +591,7 @@ fn build_snippet(work: &serde_json::Value) -> String {
 /// Reconstruct an abstract from OpenAlex's inverted index representation.
 ///
 /// The `abstract_inverted_index` maps each word to a list of positions. We
-/// invert it into a position → word map and join the words in order.
+/// invert it into a position -> word map and join the words in order.
 fn reconstruct_abstract(inverted: Option<&serde_json::Map<String, serde_json::Value>>) -> String {
     let inverted = match inverted {
         Some(idx) => idx,
@@ -679,16 +680,7 @@ fn build_metadata_suffix(work: &serde_json::Value) -> String {
 /// respecting UTF-8 character boundaries and appending an ellipsis when
 /// truncated.
 fn truncate_snippet(snippet: &str) -> String {
-    if snippet.chars().count() <= MAX_SNIPPETTE_CHARS {
-        return snippet.to_string();
-    }
-    let end = snippet
-        .char_indices()
-        .map(|(i, _)| i)
-        .take_while(|&i| i <= MAX_SNIPPETTE_CHARS)
-        .last()
-        .unwrap_or(0);
-    format!("{}…", &snippet[..end])
+    super::engine::truncate_snippet_bytes(snippet, MAX_SNIPPETTE_CHARS)
 }
 
 // ---------------------------------------------------------------------------

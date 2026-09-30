@@ -1,7 +1,7 @@
 //! Tests for `test_force_cleanup_modal.rs`
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ragent_team::team::{MemberStatus, TeamConfig, TeamMember, TeamStore};
+use ragent_agent::team::{MemberStatus, TeamConfig, TeamMember, TeamStore};
 
 use std::sync::Mutex;
 

@@ -1,4 +1,4 @@
-//! `team_status` — Returns a formatted team status report.
+//! `team_status` - Returns a formatted team status report.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -20,7 +20,7 @@ impl Tool for TeamStatusTool {
          progress summary. REQUIRED parameter: 'team_name' (string). Use this \
          whenever you need to know which teammates are active, idle, stopped, or \
          failed, or how many tasks are pending/in-progress/completed. Common gotcha: \
-         the tool only returns state — it does not read mailbox messages (use \
+         the tool only returns state - it does not read mailbox messages (use \
          team_read_messages for that)."
     }
 
@@ -53,7 +53,7 @@ impl Tool for TeamStatusTool {
 
         let store = TeamStore::load(&team_dir)?;
 
-        // Task store is supplementary — don't fail the whole report if
+        // Task store is supplementary - don't fail the whole report if
         // tasks.json is missing or corrupt.
         let task_list = TaskStore::open(&team_dir)
             .and_then(|ts| ts.read())
@@ -92,15 +92,15 @@ impl Tool for TeamStatusTool {
 
         for m in &store.config.members {
             let status_icon = match m.status {
-                MemberStatus::Working => "🔄",
-                MemberStatus::Idle => "⏸",
-                MemberStatus::PlanPending => "📋",
-                MemberStatus::Blocked => "🔒",
-                MemberStatus::Suspended => "⏸️",
-                MemberStatus::ShuttingDown => "🛑",
-                MemberStatus::Stopped => "⬛",
-                MemberStatus::Spawning => "🚀",
-                MemberStatus::Failed => "❌",
+                MemberStatus::Working => "[refresh]",
+                MemberStatus::Idle => "[||]",
+                MemberStatus::PlanPending => "[notice]",
+                MemberStatus::Blocked => "[locked]",
+                MemberStatus::Suspended => "[||]",
+                MemberStatus::ShuttingDown => "[stop]",
+                MemberStatus::Stopped => "#",
+                MemberStatus::Spawning => "[rocket]",
+                MemberStatus::Failed => "[x]",
             };
             let task_info = m
                 .current_task_id

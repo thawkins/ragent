@@ -10,7 +10,7 @@
 //! require an LLM call, so it works offline and is easy to test. Complex topics
 //! are split on sentence/clause boundaries when possible; short topics are
 //! expanded with standard dissertation dimensions (background, methods,
-//! findings, discussion, future work, …).
+//! findings, discussion, future work, ...).
 
 use serde::{Deserialize, Serialize};
 
@@ -64,7 +64,7 @@ impl ChapterPlan {
 ///    chapters and derive each chapter title from the first segment of the
 ///    group.
 /// 3. Otherwise, fall back to a fixed set of dissertation dimensions
-///    (overview, methods, findings, analysis, implications, …) appended to the
+///    (overview, methods, findings, analysis, implications, ...) appended to the
 ///    original topic.
 ///
 /// `count` is clamped to at least 1 and at most 12 to keep plans readable.
@@ -120,7 +120,7 @@ fn build_plan_from_segments(segments: &[String], count: usize) -> ChapterPlan {
         let title = if group_len == 1 {
             group[0].clone()
         } else {
-            format!("{} … {}", group[0], group.last().unwrap())
+            format!("{} ... {}", group[0], group.last().unwrap())
         };
         chapters.push(Chapter {
             title,
@@ -152,7 +152,7 @@ fn build_plan_from_dimensions(topic: &str, count: usize) -> ChapterPlan {
         .take(count)
         .enumerate()
         .map(|(i, dim)| {
-            let title = format!("Chapter {}: {} — {}", i + 1, topic, dim);
+            let title = format!("Chapter {}: {} - {}", i + 1, topic, dim);
             let query = format!("{} {}", topic, dim);
             Chapter {
                 title,
@@ -164,51 +164,6 @@ fn build_plan_from_dimensions(topic: &str, count: usize) -> ChapterPlan {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "../tests/inline/chapter_tests.rs"]
+mod tests;
 
-    #[test]
-    fn partition_defaults_to_one_when_count_zero() {
-        let plan = partition_topic("impact of GLP-1 drugs", 0);
-        assert_eq!(plan.chapters.len(), 1);
-    }
-
-    #[test]
-    fn partition_clamps_count_to_twelve() {
-        let plan = partition_topic("topic", 100);
-        assert_eq!(plan.chapters.len(), 12);
-    }
-
-    #[test]
-    fn partition_empty_topic_produces_numbered_chapters() {
-        let plan = partition_topic("", 3);
-        assert_eq!(plan.chapters.len(), 3);
-        assert_eq!(plan.chapters[0].title, "Chapter 1");
-        assert!(plan.chapters[0].queries.is_empty());
-    }
-
-    #[test]
-    fn partition_uses_segments_when_enough_available() {
-        let topic = "background; methods; findings; discussion; conclusion";
-        let plan = partition_topic(topic, 3);
-        assert_eq!(plan.chapters.len(), 3);
-        assert!(plan.chapters[0].title.starts_with("Chapter 1:"));
-        assert!(plan.chapters[0].queries.contains(&"background".to_string()));
-        assert!(plan.total_queries() >= 5);
-    }
-
-    #[test]
-    fn partition_falls_back_to_dimensions_for_short_topic() {
-        let plan = partition_topic("GLP-1 cardiovascular outcomes", 5);
-        assert_eq!(plan.chapters.len(), 5);
-        assert!(plan.chapters[0].title.contains("overview and background"));
-        assert!(plan.chapters[4].title.contains("implications"));
-    }
-
-    #[test]
-    fn chapter_plan_collects_titles_and_queries() {
-        let plan = partition_topic("a; b; c; d", 2);
-        assert_eq!(plan.titles().len(), 2);
-        assert_eq!(plan.queries_by_chapter().len(), 2);
-    }
-}

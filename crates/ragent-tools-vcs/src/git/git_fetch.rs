@@ -1,4 +1,4 @@
-//! `git_fetch` — Fetch from remote without merging.
+//! `git_fetch` - Fetch from remote without merging.
 
 use anyhow::Result;
 use serde_json::{Value, json};

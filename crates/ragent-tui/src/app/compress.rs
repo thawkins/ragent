@@ -2,7 +2,7 @@
 //!
 //! `/compact` runs the dedicated compaction runner
 //! ([`ragent_agent::session::processor::SessionProcessor::compact_session`])
-//! — a single no-tools LLM summarisation call — and replaces the in-memory
+//!   a single no-tools LLM summarisation call - and replaces the in-memory
 //! message list with the returned `[compaction, ...recent]` history (FR-009).
 //! The legacy `/compress` slash command is a deprecated alias that forwards to
 //! the same path.
@@ -95,7 +95,7 @@ impl App {
             })
             .or_else(|| self.agent_info.model.clone());
         let Some(model_ref) = resolved_model else {
-            self.status = "[warn] No model selected — use /model to choose".to_string();
+            self.status = "[warn] No model selected - use /model to choose".to_string();
             return false;
         };
 
@@ -104,10 +104,10 @@ impl App {
         self.needs_redraw = true;
         if auto_triggered {
             self.auto_compact_failed = false;
-            self.status = "compacting before send…".to_string();
+            self.status = "compacting before send...".to_string();
             self.push_log_no_agent(LogLevel::Warn, "Auto-compaction triggered".to_string());
         } else {
-            self.status = "compacting…".to_string();
+            self.status = "compacting...".to_string();
             self.push_log_no_agent(LogLevel::Info, "Compaction started".to_string());
         }
 

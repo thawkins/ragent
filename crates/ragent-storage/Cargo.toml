@@ -25,19 +25,19 @@ thiserror = "1.0"
 tracing = "0.1"
 
 # Database
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { workspace = true }
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
-similar = "2.6"
+similar = { workspace = true }
 blake3 = "1.6"
-base64 = "0.22"
+base64 = { workspace = true }
 # SEC-ragent-storage-001 (SECTASKS T-017): AEAD for the credential store
 # (replaces the unauthenticated XOR stream cipher).
 chacha20poly1305 = "0.10"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 rand = "0.8"
-dirs = "5.0"
+dirs = { workspace = true }
 
 [dev-dependencies]
 chrono = { workspace = true }

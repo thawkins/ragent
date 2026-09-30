@@ -1,4 +1,4 @@
-//! Query decomposition — break a research topic into focused sub-queries for
+//! Query decomposition - break a research topic into focused sub-queries for
 //! parallel web search.
 //!
 //! These helpers were previously inline in `web_gatherer.rs`.

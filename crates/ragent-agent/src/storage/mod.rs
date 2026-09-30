@@ -18,7 +18,7 @@
 //! crate's `memory::knowledge_graph` / `memory::embedding` modules into
 //! their richer `Entity` / `Relationship` / `SimilarityResult` types.
 //!
-//! All existing `use crate::storage::{…}` sites in `ragent-agent` continue
+//! All existing `use crate::storage::{...}` sites in `ragent-agent` continue
 //! to resolve via the re-exports below.
 
 pub use ragent_storage::{

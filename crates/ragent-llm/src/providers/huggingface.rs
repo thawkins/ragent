@@ -18,6 +18,7 @@ use std::pin::Pin;
 use super::thinking::should_warn_unsupported_thinking;
 use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::event::FinishReason;
@@ -29,6 +30,14 @@ pub const HF_API_BASE: &str = "https://router.huggingface.co";
 
 /// Maximum number of models to return from dynamic discovery.
 const MAX_DISCOVERED_MODELS: usize = 50;
+
+/// Fallback context window (tokens) when neither the live providers nor the
+/// model-ID heuristic declare one (ANTIPAT M6.10).
+const DEFAULT_CONTEXT_WINDOW: usize = 32_000;
+
+/// Fallback max-output (tokens) when no live provider declares one, and the
+/// default used by the curated catalog entries (ANTIPAT M6.10).
+const DEFAULT_MAX_OUTPUT: usize = 4_096;
 
 /// Provider implementation for the HuggingFace Inference API.
 pub struct HuggingFaceProvider;
@@ -96,6 +105,8 @@ impl Provider for HuggingFaceProvider {
         if api_key.is_empty() {
             bail!("HuggingFace requires an API token. Set HF_TOKEN or configure it in ragent.");
         }
+        // ANTIPAT 3.6: register the token with the shared redaction registry.
+        ragent_types::sanitize::register_secret(api_key);
 
         let wait_for_model = options
             .get("wait_for_model")
@@ -303,7 +314,7 @@ impl HuggingFaceClient {
         names.sort_by_key(|b| std::cmp::Reverse(b.len()));
         for name in names {
             let safe = Self::safe_tool_name(name);
-            // Only replace bare occurrences — skip if already prefixed
+            // Only replace bare occurrences - skip if already prefixed
             result = result.replace(name, &safe);
         }
         result
@@ -432,7 +443,7 @@ impl HuggingFaceClient {
         }
         if !request.tools.is_empty() {
             // F3: capability gating. Models declared `tool_use: false`
-            // (e.g. DeepSeek-R1) cannot return native tool calls — sending
+            // (e.g. DeepSeek-R1) cannot return native tool calls - sending
             // the tools array only invites the model to narrate the
             // invocation as text. Skip attaching the tools entirely.
             let model_supports_tools = huggingface_model_tool_use(&request.model).unwrap_or(true);
@@ -506,10 +517,8 @@ impl LlmClient for HuggingFaceClient {
             .with_context(|| format!("Failed to send request to HuggingFace API at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
-            let body_text = response.text().await.unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "Failed to read HuggingFace error response body");
-                String::new()
-            });
+            // ANTIPAT 3.1/3.2: capped error-body read.
+            let body_text = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
 
             // Parse HF-specific error responses
             if status.as_u16() == 503
@@ -529,7 +538,7 @@ impl LlmClient for HuggingFaceClient {
             if status.as_u16() == 403 {
                 bail!(
                     "HuggingFace: access denied for model '{}'. \
-                     This model may be gated — visit the model page on huggingface.co \
+                     This model may be gated - visit the model page on huggingface.co \
                      to accept the license agreement. Error: {body_text}",
                     request.model
                 );
@@ -589,7 +598,7 @@ impl LlmClient for HuggingFaceClient {
                     Err(_) => {
                         yield StreamEvent::Error {
                             message: format!(
-                                "HuggingFace: stream stalled — no data received for {}s",
+                                "HuggingFace: stream stalled - no data received for {}s",
                                 super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
                             ),
                         };
@@ -633,7 +642,15 @@ impl LlmClient for HuggingFaceClient {
 
                     let parsed: Value = match serde_json::from_str(data) {
                         Ok(v) => v,
-                        Err(_) => continue,
+                        Err(e) => {
+                            // FUNC-032 (ANTIPAT 3.3): log the dropped frame.
+                            tracing::warn!(
+                                error = %e,
+                                frame = %data,
+                                "HuggingFace: dropping malformed SSE data frame"
+                            );
+                            continue;
+                        }
                     };
 
                     // Handle usage info
@@ -868,7 +885,7 @@ fn router_model_to_info(model: HfRouterModelEntry) -> Option<ModelInfo> {
         .iter()
         .filter_map(|provider| provider.max_output)
         .max()
-        .or(Some(4_096));
+        .or(Some(DEFAULT_MAX_OUTPUT));
     let input_cost = live_providers
         .iter()
         .filter_map(|provider| provider.pricing.as_ref().map(|pricing| pricing.input))
@@ -961,7 +978,7 @@ struct HfRouterPricing {
 /// Formats a HuggingFace model ID into a human-readable display name.
 ///
 /// Strips the org prefix and converts hyphens/underscores to spaces.
-/// Examples: `"meta-llama/Llama-3.1-70B-Instruct"` → `"Llama 3.1 70B Instruct"`
+/// Examples: `"meta-llama/Llama-3.1-70B-Instruct"` -> `"Llama 3.1 70B Instruct"`
 fn format_model_display_name(model_id: &str) -> String {
     let (repo_id, provider_suffix) =
         model_id
@@ -1025,7 +1042,7 @@ fn estimate_context_from_id(model_id: &str) -> usize {
     }
 
     // Default for most modern models
-    32_000
+    DEFAULT_CONTEXT_WINDOW
 }
 
 #[cfg(test)]

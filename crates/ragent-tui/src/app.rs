@@ -80,6 +80,16 @@ pub fn spec_reverse_args_for_tests(
     ))
 }
 
+/// Test hook: drive the `/reverse` text grammar end to end (the production
+/// `/spec reverse` path calls [`App::run_spec_reverse`] with pre-parsed args,
+/// so this is the only way to exercise `parse_reverse_args` against a live
+/// `App`). Kept reachable for the integration tests without widening the
+/// production slash-command surface.
+#[doc(hidden)]
+pub fn reverse_command_for_tests(app: &mut App, args: &str) {
+    app.handle_reverse_command(args);
+}
+
 pub use self::loop_dialog::{
     LoopOverrides, LoopSetupField, LoopSetupState, apply_loop_overrides, build_spec_from_state,
     handle_loop_setup_key, open_loop_setup, parse_comma_list, parse_loop_flags, parse_optional_u64,

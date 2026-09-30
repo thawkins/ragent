@@ -1,13 +1,13 @@
 //! Shared rendering helpers for the `plot_*` tool family.
 //!
 //! These tools render graphs on the ragent message window by drawing with
-//! [`ratatui-plt`](https://crates.io/crates/ratatui-plt) — a GPL-3.0
+//! [`ratatui-plt`](https://crates.io/crates/ratatui-plt) - a GPL-3.0
 //! scientific-plotting widget set built on ratatui. Each tool builds a widget
 //! (line, scatter, bar, histogram, pie, or heatmap) and renders it off-screen
 //! to a terminal-friendly plain-text canvas that the message window displays
 //! inline, in the same way it renders Mermaid diagrams.
 //!
-//! Rendering is fully local — no network requests are made, and the widgets
+//! Rendering is fully local - no network requests are made, and the widgets
 //! are rendered into an off-screen ratatui [`Buffer`] then flattened to text
 //! via [`render_to_buffer`] + [`buffer_to_text`].
 //!
@@ -47,6 +47,28 @@ pub const MAX_WIDTH: u16 = 220;
 
 /// The maximum canvas height we are willing to produce.
 pub const MAX_HEIGHT: u16 = 80;
+
+/// Upper bound on the length of any single LLM-supplied plot argument array
+/// (points, series, labels, grid rows/columns).
+///
+/// Plot arguments are raw JSON from the model and can be arbitrarily large.
+/// Validating the length against this ceiling *before* the `Vec::with_capacity`
+/// pre-allocation prevents a huge array from forcing a large up-front
+/// allocation (ANTIPAT 4.4). A 220x80 canvas cannot display anywhere near this
+/// many points, so the cap is generous.
+pub const MAX_PLOT_ITEMS: usize = 100_000;
+
+/// Return `arr.len()` after checking it does not exceed [`MAX_PLOT_ITEMS`].
+///
+/// Used to validate an untrusted array length before sizing a pre-allocation
+/// from it (ANTIPAT 4.4).
+fn checked_len(arr: &[Value], what: &str) -> Result<usize> {
+    let len = arr.len();
+    if len > MAX_PLOT_ITEMS {
+        bail!("{what} has {len} entries, exceeding the {MAX_PLOT_ITEMS} entry limit");
+    }
+    Ok(len)
+}
 
 /// Render any ratatui widget to a plain-text canvas.
 ///
@@ -152,7 +174,7 @@ pub fn parse_pairs(v: &Value) -> Result<Vec<(f64, f64)>> {
     let arr = v
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("expected an array of [x, y] points, got {v}"))?;
-    let mut out = Vec::with_capacity(arr.len());
+    let mut out = Vec::with_capacity(checked_len(arr, "'points'")?);
     for item in arr {
         let (x, y) = match item {
             Value::Array(pair) if pair.len() == 2 => {
@@ -209,7 +231,7 @@ pub fn parse_floats(v: &Value) -> Result<Vec<f64>> {
     let arr = v
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("expected an array of numbers, got {v}"))?;
-    let mut out = Vec::with_capacity(arr.len());
+    let mut out = Vec::with_capacity(checked_len(arr, "numeric array")?);
     for item in arr {
         let f = item
             .as_f64()
@@ -225,7 +247,7 @@ pub fn parse_labels(v: &Value) -> Result<Vec<String>> {
     let arr = v
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("expected an array of strings, got {v}"))?;
-    let mut out = Vec::with_capacity(arr.len());
+    let mut out = Vec::with_capacity(checked_len(arr, "label array")?);
     for item in arr {
         let s = item
             .as_str()
@@ -253,7 +275,10 @@ pub struct SeriesSpec {
 pub fn parse_series(input: &Value) -> Result<Vec<SeriesSpec>> {
     let input = &coerce_json(input);
     let arr = match input {
-        Value::Array(a) => a.clone(),
+        Value::Array(a) => {
+            checked_len(a, "'series'")?;
+            a.clone()
+        }
         Value::Object(_) => vec![input.clone()],
         other => bail!("expected a series or array of series, got {other}"),
     };
@@ -317,7 +342,7 @@ pub fn parse_grid(input: &Value) -> Result<GridData> {
     let values_arr = values_val
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("'values' must be a 2D array of numbers"))?;
-    let mut values = Vec::with_capacity(values_arr.len());
+    let mut values = Vec::with_capacity(checked_len(values_arr, "'values' rows")?);
     for row in values_arr {
         values.push(parse_floats(row)?);
     }

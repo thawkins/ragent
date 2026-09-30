@@ -14,7 +14,7 @@
 use std::sync::Mutex;
 
 use ragent_agent::event::Event;
-use ragent_team::team::{MemberStatus, Task, TaskStatus, TeamConfig, TeamMember, TeamStore};
+use ragent_agent::team::{MemberStatus, Task, TaskStatus, TeamConfig, TeamMember, TeamStore};
 use ragent_tui::app::LogLevel;
 use ratatui::{Terminal, backend::TestBackend};
 

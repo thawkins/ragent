@@ -3,8 +3,8 @@
 //! ragent consolidates ALL user-global state under `~/.config/ragent/`
 //! (the XDG config directory). Legacy locations are:
 //!
-//! - `~/.ragent/`            — legacy home-dir root
-//! - `~/.local/share/ragent/` — legacy XDG data root
+//! - `~/.ragent/`            - legacy home-dir root
+//! - `~/.local/share/ragent/` - legacy XDG data root
 //!
 //! This module exposes `Config::global_state_dir()` as the single source of
 //! truth for the global root, plus one helper per state subdirectory. Use
@@ -185,7 +185,7 @@ pub fn global_embedding_model_dir() -> Option<PathBuf> {
 /// This is the directory that `collect_agents_md_content_with_discovery`
 /// resolves as "the global directory" for `AGENTS.md` / `CLAUDE.md` /
 /// `INSTRUCTIONS.md` files when the project root has no instruction file.
-/// The resolved path is used for discovery only — actual loading is
+/// The resolved path is used for discovery only - actual loading is
 /// per-file inside the walker.
 #[must_use]
 pub fn global_instructions_dir() -> Option<PathBuf> {

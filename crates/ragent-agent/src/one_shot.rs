@@ -76,12 +76,12 @@ fn resolve_api_key(provider_id: &str, storage: Option<&Arc<Storage>>) -> Result<
 ///
 /// # Arguments
 ///
-/// * `provider_registry` — registry of available providers.
-/// * `storage` — optional storage used to look up stored API keys.
-/// * `model_ref` — provider/model binding.
-/// * `system` — optional system prompt.
-/// * `prompt` — the user prompt (e.g. the output of [`ragent_research::build_concept_extraction_prompt`]).
-/// * `max_tokens` — optional cap on the model's output tokens.
+/// * `provider_registry` - registry of available providers.
+/// * `storage` - optional storage used to look up stored API keys.
+/// * `model_ref` - provider/model binding.
+/// * `system` - optional system prompt.
+/// * `prompt` - the user prompt (e.g. the output of [`ragent_research::build_concept_extraction_prompt`]).
+/// * `max_tokens` - optional cap on the model's output tokens.
 ///
 /// # Errors
 ///

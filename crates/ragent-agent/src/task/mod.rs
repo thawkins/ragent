@@ -9,12 +9,12 @@
 //! ```text
 //! Parent Session
 //!   │
-//!   ├─ new_agent(agent: "explore", background: false)  ← blocks until done
+//!   ├─ new_agent(agent: "explore", background: false)  <- blocks until done
 //!   │   └─ TaskEntry { status: Completed, result: "..." }
 //!   │
-//!   └─ new_agent(agent: "build", background: true)     ← returns immediately
+//!   └─ new_agent(agent: "build", background: true)     <- returns immediately
 //!       └─ TaskEntry { status: Running }
-//!           ↓ (later)
+//!           v (later)
 //!       └─ SubagentComplete event published
 //! ```
 
@@ -68,7 +68,7 @@ pub fn persist_task_output(
     let write_body = |path: &std::path::Path| -> std::io::Result<()> {
         use std::io::Write as _;
         let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
-        write!(out, "# {task_id} — {agent_name}\n\n")?;
+        write!(out, "# {task_id} - {agent_name}\n\n")?;
         write!(out, "task: {task_prompt}\n\n")?;
         write!(out, "duration_ms: {duration_ms}\n\n")?;
         out.write_all(b"---\n\n")?;
@@ -272,7 +272,7 @@ pub struct TaskEntry {
     pub background: bool,
     /// Fire-and-forget flag: a detached task runs in the background but is
     /// never waited on (`wait_agents`), never listed (`list_agents`), and
-    /// never announced to the session as a run-completion injection target —
+    /// never announced to the session as a run-completion injection target -
     /// it belongs to a fire-and-forget consumer (`/spawn`, future cron paths)
     /// rather than to the agent delegation pipeline.
     #[serde(default)]
@@ -306,7 +306,7 @@ pub struct TaskEntry {
     ///
     /// In-memory copies (`result`, `SubagentComplete::summary`) and the
     /// `wait_agents` tool output are all subject to truncation before they
-    /// reach the parent model's context; this file is the recovery path —
+    /// reach the parent model's context; this file is the recovery path -
     /// a sub-agent finding can never be silently lost because it is always
     /// readable from disk via the `read` tool.
     #[serde(default)]
@@ -367,7 +367,7 @@ impl Drop for AgentManager {
     /// R-4: On drop, set all cancel flags so detached sub-agent tasks stop
     /// promptly. Without this, spawned background tasks hold an
     /// `Arc<SessionProcessor>` (and its storage, caches, event bus)
-    /// indefinitely — a stalled sub-agent pins the entire processor.
+    /// indefinitely - a stalled sub-agent pins the entire processor.
     fn drop(&mut self) {
         for entry in self.cancel_flags.iter() {
             entry.store(true, Ordering::Relaxed);
@@ -430,7 +430,7 @@ impl AgentManager {
         self.tasks.insert(task_id.clone(), entry);
         // P-11: spawn_sync tasks are not background (they block the caller),
         // so they are never drained by `drain_completed`. We do not set the
-        // flag here — only `spawn_background` sets it.
+        // flag here - only `spawn_background` sets it.
 
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.cancel_flags
@@ -543,7 +543,7 @@ impl AgentManager {
     /// background and publishes [`Event::SubagentComplete`] like any other,
     /// but it is flagged `detached` so it is EXCLUDED from `list_agents` and
     /// `wait_agents` (explicit or omit-`task_ids` waits) and its completion is
-    /// never injected into the parent session's message stream — the task is
+    /// never injected into the parent session's message stream - the task is
     /// simply reaped when done. Used by the TUI `/spawn` command.
     pub async fn spawn_detached(
         &self,
@@ -603,7 +603,7 @@ impl AgentManager {
         let child_sid = child_session.id.clone();
         // The child session's own directory is the project root this
         // sub-agent actually runs in, so `log/subagents/` must be resolved
-        // against it — resolving against the PARENT's session directory
+        // against it - resolving against the PARENT's session directory
         // wrote the report somewhere the child's `working_dir` never
         // implied. Empty (in-memory test storage) falls back to the
         // caller-supplied `working_dir`.
@@ -745,7 +745,7 @@ impl AgentManager {
                     let report_status = ReportStatus::from_finish_reason_label(finish_reason);
                     // Persist the FULL untruncated output so the
                     // `output_file` recovery path documented for
-                    // `wait_agents`/`list_agents` actually exists — before
+                    // `wait_agents`/`list_agents` actually exists - before
                     // this fix `output_file` was always `None` and no
                     // `log/subagents/<task-id>.md` was ever written.
                     let output_file = persist_task_output(
@@ -756,6 +756,17 @@ impl AgentManager {
                         duration_ms,
                         &response,
                     );
+                    // ANTIPAT: the report is the documented durable recovery
+                    // path (`TaskEntry::output_file`), so a silent `None` made
+                    // report loss invisible. Warn with the concrete path that
+                    // could not be written.
+                    if output_file.is_none() {
+                        tracing::warn!(
+                            task_id = %tid,
+                            dir = %report_dir.join("log").join("subagents").display(),
+                            "sub-agent report could not be persisted; the result                              is only available in memory and will not survive                              a restart"
+                        );
+                    }
                     {
                         if let Some(mut entry) = tasks.get_mut(&tid) {
                             entry.status = TaskStatus::Completed;
@@ -822,7 +833,7 @@ impl AgentManager {
 
     /// Cancels a running task by setting its cancel flag.
     pub async fn cancel_agent(&self, task_id: &str) -> anyhow::Result<()> {
-        // PERF (FR-016): DashMap — get returns a short-lived shard guard.
+        // PERF (FR-016): DashMap - get returns a short-lived shard guard.
         if let Some(flag) = self.cancel_flags.get(task_id) {
             flag.store(true, Ordering::Relaxed);
             tracing::info!(task_id, "Cancel requested for sub-agent task");
@@ -835,7 +846,7 @@ impl AgentManager {
     /// cancelling).
     ///
     /// **Decision (M7-T1):** suspension is not implemented because the session
-    /// processor's agent loop does not honour `suspend_flags` — the loop keeps
+    /// processor's agent loop does not honour `suspend_flags` - the loop keeps
     /// running and consuming tokens. Rather than ship a misleading no-op, the
     /// method returns a clear error explaining that suspension is unavailable,
     /// and the `SubagentSuspended` / `SubagentResumed` events are never
@@ -845,15 +856,15 @@ impl AgentManager {
     /// See `docs/team-unification-decision.md` for the rationale.
     pub async fn suspend_task(&self, _task_id: &str) -> anyhow::Result<()> {
         anyhow::bail!(
-            "suspend_task is not implemented — the agent loop does not honour \
+            "suspend_task is not implemented - the agent loop does not honour \
                suspend flags. Use cancel_agent to stop a running sub-agent instead."
         )
     }
 
-    /// M7-T1: Resume a suspended task — not implemented (see [`AgentManager::suspend_task`]).
+    /// M7-T1: Resume a suspended task - not implemented (see [`AgentManager::suspend_task`]).
     pub async fn resume_task(&self, _task_id: &str) -> anyhow::Result<()> {
         anyhow::bail!(
-            "resume_task is not implemented — the agent loop does not honour \
+            "resume_task is not implemented - the agent loop does not honour \
                suspend flags. Use cancel_agent and re-spawn instead."
         )
     }
@@ -864,7 +875,7 @@ impl AgentManager {
     /// the cancel signal is never lost; the 10-second force-kill escalation
     /// path remains for tasks that don't observe the flag in time.
     pub async fn kill_task(&self, task_id: &str) -> anyhow::Result<()> {
-        // PERF (FR-016): DashMap — get_mut returns a short-lived shard guard.
+        // PERF (FR-016): DashMap - get_mut returns a short-lived shard guard.
         let mut entry = self
             .tasks
             .get_mut(task_id)
@@ -880,7 +891,7 @@ impl AgentManager {
         let child = entry.child_session_id.clone();
         drop(entry);
 
-        // PERF (FR-016): DashMap — no async write guard needed; the cancel
+        // PERF (FR-016): DashMap - no async write guard needed; the cancel
         // flag is set atomically regardless of shard contention.
         {
             if let Some(cf) = self.cancel_flags.get(task_id) {
@@ -902,7 +913,7 @@ impl AgentManager {
         let tid = task_id.to_string();
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-            // PERF (FR-016): DashMap — get_mut returns a short-lived guard.
+            // PERF (FR-016): DashMap - get_mut returns a short-lived guard.
             // The escalation is only relevant while the task is still
             // terminating: a task that completed (or was already reaped)
             // must not receive a spurious force-kill event.
@@ -964,7 +975,7 @@ impl AgentManager {
 
     /// Cancels all running tasks for a given parent session.
     pub async fn cancel_all(&self, parent_session_id: &str) {
-        // PERF (FR-016): DashMap — iterate tasks; for each running task,
+        // PERF (FR-016): DashMap - iterate tasks; for each running task,
         // look up its cancel flag by task ID. No global read lock held
         // across both maps.
         for entry in self.tasks.iter() {
@@ -991,12 +1002,12 @@ impl AgentManager {
     /// actively waited on via wait_agents tool and should not be redundantly
     /// injected into the conversation.
     pub async fn drain_completed(&self, parent_session_id: &str) -> Vec<TaskEntry> {
-        // P-11: fast path — if no background tasks have ever been spawned,
+        // P-11: fast path - if no background tasks have ever been spawned,
         // skip the lock acquisition and map scan entirely.
         if !self.has_pending_background.load(Ordering::Relaxed) {
             return Vec::new();
         }
-        // PERF (FR-016): DashMap — iter_mut yields short-lived RefMut
+        // PERF (FR-016): DashMap - iter_mut yields short-lived RefMut
         // guards one shard at a time. No global write lock held across
         // the entire scan.
         let mut completed = Vec::new();
@@ -1009,7 +1020,7 @@ impl AgentManager {
             {
                 entry.reported = true;
                 // Detached tasks (fire-and-forget /spawn) are reaped but
-                // never injected into the conversation — dropping them here
+                // never injected into the conversation - dropping them here
                 // is the designed behavior.
                 if !entry.detached {
                     completed.push(entry.clone());
@@ -1074,7 +1085,7 @@ impl AgentManager {
     /// was still waiting.
     #[must_use]
     pub async fn increment_waiter(&self, task_id: &str) -> bool {
-        // PERF (FR-016): DashMap — get_mut returns a short-lived shard guard.
+        // PERF (FR-016): DashMap - get_mut returns a short-lived shard guard.
         if let Some(mut entry) = self.tasks.get_mut(task_id) {
             if entry.status == TaskStatus::Running {
                 entry.waiter_count = entry.waiter_count.saturating_add(1);
@@ -1088,11 +1099,11 @@ impl AgentManager {
             tracing::debug!(
                 task_id,
                 status = %entry.status,
-                "M7-T3: increment_waiter skipped — task already completed"
+                "M7-T3: increment_waiter skipped - task already completed"
             );
             return false;
         }
-        tracing::debug!(task_id, "M7-T3: increment_waiter skipped — task not found");
+        tracing::debug!(task_id, "M7-T3: increment_waiter skipped - task not found");
         false
     }
 
@@ -1106,7 +1117,7 @@ impl AgentManager {
     /// was still waiting. Now, `decrement_waiter` is a no-op if the task
     /// doesn't exist or if `waiter_count == 0`.
     pub async fn decrement_waiter(&self, task_id: &str) {
-        // PERF (FR-016): DashMap — get_mut returns a short-lived shard guard.
+        // PERF (FR-016): DashMap - get_mut returns a short-lived shard guard.
         if let Some(mut entry) = self.tasks.get_mut(task_id) {
             if entry.waiter_count > 0 {
                 entry.waiter_count = entry.waiter_count.saturating_sub(1);
@@ -1119,7 +1130,7 @@ impl AgentManager {
                 tracing::debug!(
                     task_id,
                     waiter_count = entry.waiter_count,
-                    "M7-T3: decrement_waiter skipped — count already 0 (no spurious decrement)"
+                    "M7-T3: decrement_waiter skipped - count already 0 (no spurious decrement)"
                 );
             }
         }
@@ -1229,7 +1240,7 @@ fn apply_model_override(
     }
 }
 
-/// Truncate a string to `max_len` characters, appending "…" if truncated.
+/// Truncate a string to `max_len` characters, appending "..." if truncated.
 ///
 /// Returns a borrowed slice when no truncation is needed, avoiding an
 /// allocation on the common no-op path.
@@ -1237,7 +1248,7 @@ fn truncate_str(s: &str, max_len: usize) -> std::borrow::Cow<'_, str> {
     match s.char_indices().nth(max_len) {
         Some((byte_idx, _)) => {
             let mut truncated = String::from(&s[..byte_idx]);
-            truncated.push('\u{2026}');
+            truncated.push_str("...");
             std::borrow::Cow::Owned(truncated)
         }
         None => std::borrow::Cow::Borrowed(s),
@@ -1275,125 +1286,5 @@ fn is_cancel_error(err: &anyhow::Error) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_task_status_serialization() {
-        let status = TaskStatus::Running;
-        let json = serde_json::to_string(&status).unwrap();
-        assert_eq!(json, "\"running\"");
-
-        let status: TaskStatus = serde_json::from_str("\"completed\"").unwrap();
-        assert_eq!(status, TaskStatus::Completed);
-    }
-
-    #[test]
-    fn test_truncate_str_short() {
-        assert_eq!(truncate_str("hello", 10).as_ref(), "hello");
-    }
-
-    #[test]
-    fn test_truncate_str_exact() {
-        assert_eq!(truncate_str("hello", 5).as_ref(), "hello");
-    }
-
-    #[test]
-    fn test_truncate_str_long() {
-        let result = truncate_str("hello world", 5);
-        assert_eq!(result.as_ref(), "hello\u{2026}");
-    }
-
-    #[test]
-    fn test_truncate_str_multibyte_boundary_safe() {
-        let s = "caf\u{e9} na\u{ef}ve r\u{e9}sum\u{e9}";
-        let result = truncate_str(s, 6);
-        assert_eq!(result.as_ref(), "caf\u{e9} n\u{2026}");
-    }
-
-    #[test]
-    fn test_truncate_str_multibyte_not_truncated_when_shorter() {
-        let s = "na\u{ef}ve";
-        let result = truncate_str(s, 10);
-        assert_eq!(result.as_ref(), "na\u{ef}ve");
-    }
-
-    #[test]
-    fn test_task_entry_serialization() {
-        let entry = TaskEntry {
-            id: "task-1".to_string(),
-            parent_session_id: "parent-1".to_string(),
-            child_session_id: "child-1".to_string(),
-            agent_name: "explore".to_string(),
-            task_prompt: "Find auth code".to_string(),
-            background: true,
-            detached: false,
-            status: TaskStatus::Running,
-            result: None,
-            error: None,
-            created_at: Utc::now(),
-            completed_at: None,
-            reported: false,
-            waiter_count: 0,
-            output_file: None,
-            report_status: ReportStatus::Complete,
-        };
-        let json = serde_json::to_string(&entry).unwrap();
-        assert!(json.contains("\"explore\""));
-        assert!(json.contains("\"running\""));
-    }
-
-    // D4 fix: Tests for sanitize_for_id
-    #[test]
-    fn test_sanitize_for_id_basic() {
-        assert_eq!(sanitize_for_id("explore"), "explore");
-        assert_eq!(sanitize_for_id("code-review"), "code-review");
-    }
-
-    #[test]
-    fn test_sanitize_for_id_with_spaces() {
-        assert_eq!(sanitize_for_id("Code Review"), "code-review");
-        assert_eq!(sanitize_for_id("  spaced  "), "spaced");
-    }
-
-    #[test]
-    fn test_sanitize_for_id_with_special_chars() {
-        assert_eq!(sanitize_for_id("test@agent"), "test-agent");
-        assert_eq!(sanitize_for_id("agent.name"), "agent-name");
-    }
-
-    #[test]
-    fn test_sanitize_for_id_consecutive_specials() {
-        assert_eq!(sanitize_for_id("a--b"), "a-b");
-        assert_eq!(sanitize_for_id("a---b"), "a-b");
-    }
-
-    #[test]
-    fn test_sanitize_for_id_trims_leading_trailing() {
-        assert_eq!(sanitize_for_id("-leading"), "leading");
-        assert_eq!(sanitize_for_id("trailing-"), "trailing");
-    }
-
-    #[test]
-    fn test_sanitize_for_id_empty_fallback() {
-        assert_eq!(sanitize_for_id(""), "task");
-        assert_eq!(sanitize_for_id("---"), "task");
-    }
-
-    #[test]
-    fn test_sanitize_for_id_length_limit() {
-        let long = "a".repeat(50);
-        let result = sanitize_for_id(&long);
-        assert!(result.len() <= 20, "Result should be limited to 20 chars");
-    }
-
-    /// The `SubagentComplete` event `summary` remains truncated to 2000
-    /// chars for TUI display — this is separate from the full result.
-    #[test]
-    fn test_event_summary_is_short() {
-        let long = "z".repeat(10_000);
-        let summary = truncate_str(&long, 2000).into_owned();
-        assert!(summary.len() < long.len());
-        assert!(summary.ends_with('…'));
-    }
-}
+#[path = "../tests/inline/task_mod_tests.rs"]
+mod tests;

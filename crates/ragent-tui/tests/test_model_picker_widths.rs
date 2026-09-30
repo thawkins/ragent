@@ -97,7 +97,7 @@ fn test_select_model_renders_widest_cost_and_thinking_cells_untruncated() {
         "widest thinking cell must not be truncated: {text}"
     );
     assert!(
-        text.contains("▸ Claude Sonnet 4"),
+        text.contains("> Claude Sonnet 4"),
         "selection indicator plus name must render untruncated: {text}"
     );
 }
@@ -167,7 +167,7 @@ async fn test_model_picker_down_moves_selection_indicator() {
 
     let text = render_to_string(&mut app, 120, 40);
     assert!(
-        text.contains("▸ A Second Model Whose Row Is Also Fully Rendered"),
+        text.contains("> A Second Model Whose Row Is Also Fully Rendered"),
         "selected row must show the indicator and full name: {text}"
     );
 }

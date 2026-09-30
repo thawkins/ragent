@@ -19,7 +19,7 @@
 //!
 //! The plugin manager owns `rquickjs` sandbox contexts, which are `!Send` and
 //! `!Sync`. The [`PluginSession`] is therefore created, used, and dropped
-//! entirely inside one synchronous [`handle_plugins_command`] call — it is
+//! entirely inside one synchronous [`handle_plugins_command`] call - it is
 //! never stored on [`App`](crate::app::App) and never crosses an `.await`, so
 //! `App` stays `Send + Sync` for the async event loop.
 
@@ -90,7 +90,7 @@ pub(super) fn handle_plugins_command(app: &mut crate::app::App, args: &str) -> O
 
     let workdir = current_working_dir();
     // A plugin's `mcpServers` entry is a separate process, so the number of tools
-    // it exposes is only known after it connects — never derivable from the
+    // it exposes is only known after it connects - never derivable from the
     // manifest. `--mcp` is meaningful on `list` only: gate on the subcommand
     // so `/plugins remove foo --mcp` still executes the removal rather than
     // silently printing the MCP inventory.
@@ -126,7 +126,7 @@ pub(super) fn handle_plugins_command(app: &mut crate::app::App, args: &str) -> O
 /// The count can only come from the live client: a plugin manifest declares
 /// which servers to start, never how many tools they advertise. `App::mcp_servers`
 /// is the TUI's copy of that client state, keyed by the bridged id
-/// (`<plugin-id>.<server>`) — the same key the renderer reports, so no lookup by
+/// (`<plugin-id>.<server>`) - the same key the renderer reports, so no lookup by
 /// declared server name is needed. A server with no tools yet is absent, and the
 /// renderer prints `?` (unknown), not `0`.
 fn live_mcp_tool_counts(app: &crate::app::App) -> std::collections::BTreeMap<String, usize> {

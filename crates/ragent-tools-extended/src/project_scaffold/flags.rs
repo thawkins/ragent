@@ -1,6 +1,6 @@
 //! Scaffold flag types, parsing, validation, and error enum.
 //!
-//! Pure logic only — no filesystem access. Covers FR-002 (empty-directory
+//! Pure logic only - no filesystem access. Covers FR-002 (empty-directory
 //! guard decision), FR-003 (required flag validation), and FR-009 (mutual
 //! exclusion of hosting flags) for spec `newproj`.
 //!
@@ -509,7 +509,7 @@ pub fn is_help(args: &[&str]) -> bool {
 /// unknown flag, unknown `--language`/`--type` value, duplicate flag,
 /// missing flag value, missing required flags (FR-003), stray positional
 /// argument, or the FR-009 hosting conflict. Validation happens before any
-/// filesystem access by contract — the caller must not have mutated anything
+/// filesystem access by contract - the caller must not have mutated anything
 /// before calling this function.
 pub fn parse_flags(args: &[&str]) -> Result<ScaffoldRequest, ScaffoldError> {
     if is_help(args) {

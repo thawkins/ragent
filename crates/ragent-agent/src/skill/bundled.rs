@@ -69,10 +69,10 @@ pub fn make_bundled_skill(
 /// Returns the set of skills bundled with ragent.
 ///
 /// Bundled skills include:
-/// - `/simplify [output_path]` — Reviews recently changed files for quality improvements
-/// - `/batch` — Orchestrates large-scale parallel changes
-/// - `/debug` — Troubleshoots the current session via debug logs
-/// - `/loop` — Runs a prompt repeatedly on an interval
+/// - `/simplify [output_path]` - Reviews recently changed files for quality improvements
+/// - `/batch` - Orchestrates large-scale parallel changes
+/// - `/debug` - Troubleshoots the current session via debug logs
+/// - `/loop` - Runs a prompt repeatedly on an interval
 ///
 /// # Examples
 ///
@@ -93,7 +93,7 @@ pub fn bundled_skills() -> Vec<SkillInfo> {
     vec![simplify_skill(), batch_skill(), debug_skill(), loop_skill()]
 }
 
-/// `/simplify [output_path]` — Reviews recently changed files for code quality, reuse,
+/// `/simplify [output_path]` - Reviews recently changed files for code quality, reuse,
 /// and efficiency issues. Optionally saves summary to the specified file path.
 fn simplify_skill() -> SkillInfo {
     make_bundled_skill(
@@ -125,7 +125,7 @@ fn simplify_skill() -> SkillInfo {
     )
 }
 
-/// `/batch <instruction>` — Orchestrates large-scale parallel changes
+/// `/batch <instruction>` - Orchestrates large-scale parallel changes
 /// across a codebase.
 fn batch_skill() -> SkillInfo {
     make_bundled_skill(
@@ -155,7 +155,7 @@ fn batch_skill() -> SkillInfo {
     )
 }
 
-/// `/debug [description]` — Troubleshoots the current session by reading
+/// `/debug [description]` - Troubleshoots the current session by reading
 /// debug logs.
 fn debug_skill() -> SkillInfo {
     make_bundled_skill(
@@ -168,7 +168,7 @@ fn debug_skill() -> SkillInfo {
     )
 }
 
-/// `/loop [interval] <prompt>` — Runs a prompt repeatedly on an interval
+/// `/loop [interval] <prompt>` - Runs a prompt repeatedly on an interval
 /// for scheduled tasks.
 fn loop_skill() -> SkillInfo {
     make_bundled_skill(
@@ -205,12 +205,12 @@ Steps:
 4. For each issue found, explain the problem and suggest a concrete fix
 5. Apply fixes:
    - **Default (no argument):** Apply only safe and straightforward fixes
-   - **`all` argument:** Apply EVERY issue found — including larger refactors,
+   - **`all` argument:** Apply EVERY issue found - including larger refactors,
      duplicated logic extraction, and complex changes. Do NOT skip issues just
      because they are large; break them down and apply them one by one.
    - In both cases, after applying fixes, run `cargo fmt` and verify with `cargo check`
 
-Focus on substance over style — ignore formatting and naming preferences.
+Focus on substance over style - ignore formatting and naming preferences.
 
 **IMPORTANT - Output file requirement:**
 If a file path was provided (not `all` and not empty), you MUST:
@@ -236,7 +236,7 @@ Steps:
 4. After all changes, run any available linters or tests to verify nothing is broken
 5. Summarize all changes made
 
-Be thorough — ensure every matching file is updated consistently.";
+Be thorough - ensure every matching file is updated consistently.";
 
 const DEBUG_BODY: &str = "\
 Troubleshoot the current issue by examining debug logs and session state.
@@ -277,119 +277,5 @@ Continue until cancelled by the user (ESC).
 Note: This skill provides the instruction framework. The actual scheduling \
 loop must be implemented by the agent runtime.";
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_bundled_skills_count() {
-        let skills = bundled_skills();
-        assert_eq!(skills.len(), 4);
-    }
-
-    #[test]
-    fn test_bundled_skill_names() {
-        let skills = bundled_skills();
-        let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"simplify"));
-        assert!(names.contains(&"batch"));
-        assert!(names.contains(&"debug"));
-        assert!(names.contains(&"loop"));
-    }
-
-    #[test]
-    fn test_bundled_skills_scope() {
-        for skill in bundled_skills() {
-            assert_eq!(
-                skill.scope,
-                SkillScope::Bundled,
-                "Skill '{}' should have Bundled scope",
-                skill.name
-            );
-        }
-    }
-
-    #[test]
-    fn test_bundled_skills_have_descriptions() {
-        for skill in bundled_skills() {
-            assert!(
-                skill.description.is_some(),
-                "Skill '{}' should have a description",
-                skill.name
-            );
-        }
-    }
-
-    #[test]
-    fn test_bundled_skills_user_invocable() {
-        for skill in bundled_skills() {
-            assert!(
-                skill.user_invocable,
-                "Skill '{}' should be user-invocable",
-                skill.name
-            );
-        }
-    }
-
-    #[test]
-    fn test_simplify_skill() {
-        let skill = simplify_skill();
-        assert_eq!(skill.name, "simplify");
-        assert!(skill.body.contains("git diff"));
-        assert!(!skill.disable_model_invocation);
-        assert_eq!(skill.argument_hint.as_deref(), Some("[all|output_path]"));
-    }
-
-    #[test]
-    fn test_batch_skill() {
-        let skill = batch_skill();
-        assert_eq!(skill.name, "batch");
-        assert!(skill.body.contains("$ARGUMENTS"));
-        assert!(skill.disable_model_invocation, "batch is user-only");
-        assert_eq!(skill.argument_hint.as_deref(), Some("<instruction>"));
-    }
-
-    #[test]
-    fn test_debug_skill() {
-        let skill = debug_skill();
-        assert_eq!(skill.name, "debug");
-        assert!(skill.body.contains("$ARGUMENTS"));
-        assert!(!skill.disable_model_invocation);
-        assert_eq!(skill.argument_hint.as_deref(), Some("[description]"));
-    }
-
-    #[test]
-    fn test_loop_skill() {
-        let skill = loop_skill();
-        assert_eq!(skill.name, "loop");
-        assert!(skill.body.contains("$ARGUMENTS"));
-        assert!(skill.disable_model_invocation, "loop is user-only");
-        assert_eq!(skill.argument_hint.as_deref(), Some("[interval] <prompt>"));
-    }
-
-    #[test]
-    fn test_bundled_skills_have_nonempty_bodies() {
-        for skill in bundled_skills() {
-            assert!(
-                !skill.body.is_empty(),
-                "Skill '{}' should have a non-empty body",
-                skill.name
-            );
-        }
-    }
-
-    #[test]
-    fn test_bundled_skills_have_allowed_tools() {
-        for skill in bundled_skills() {
-            assert!(
-                !skill.allowed_tools.is_empty(),
-                "Skill '{}' should have at least one allowed tool",
-                skill.name
-            );
-            assert!(
-                skill.allowed_tools.contains(&"bash".to_string()),
-                "Skill '{}' should allow bash",
-                skill.name
-            );
-        }
-    }
-}
+#[path = "../tests/inline/bundled_tests.rs"]
+mod tests;

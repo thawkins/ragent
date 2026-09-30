@@ -2,13 +2,13 @@
 //!
 //! Exposes the `ragent-research` crate behind a thin REST surface:
 //!
-//! - `GET    /research`              — list every research item (FR-012)
-//! - `POST   /research`              — create + run a gathering session in
+//! - `GET    /research`              - list every research item (FR-012)
+//! - `POST   /research`              - create + run a gathering session in
 //!   the background; returns 202 Accepted with the events URL in `Location`
-//! - `GET    /research/{name}`       — show one item (`?full=true` includes
+//! - `GET    /research/{name}`       - show one item (`?full=true` includes
 //!   extended metadata)
-//! - `DELETE /research/{name}`       — remove an item (with confirmation)
-//! - `GET    /research/{name}/events` — SSE stream of live events for a
+//! - `DELETE /research/{name}`       - remove an item (with confirmation)
+//! - `GET    /research/{name}/events` - SSE stream of live events for a
 //!   background run (subscribes to the broadcast channel registered by POST)
 //!
 //! All endpoints are mounted under the auth-protected router in
@@ -38,15 +38,25 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::error_response;
+use super::internal_error_response;
 use crate::routes::AppState;
 
 use ragent_agent::research_adapter::build_research_session;
 
 use ragent_research::{ResearchManager, SearchHit, SessionEvent, SessionObserver};
 
+/// Capacity of the per-run broadcast channel carrying live research events
+/// (F-L1). Sized to absorb a burst of gathering events before a slow SSE
+/// subscriber lags; `SessionEvent` values are small.
+const SSE_CHANNEL_CAPACITY: usize = 256;
+
+/// Maximum number of related-research hits returned alongside a shown item
+/// (F-L1).
+const RELATED_RESEARCH_LIMIT: usize = 5;
+
 /// Build the `/research` sub-router.
 ///
-/// Routes are relative — the router is nested under `/research` in
+/// Routes are relative - the router is nested under `/research` in
 /// `routes/mod.rs`, so the full paths become `/research`, `/research/{name}`,
 /// and `/research/{name}/events`.
 pub fn research_routes() -> Router<AppState> {
@@ -120,7 +130,7 @@ async fn list_research(State(_state): State<AppState>) -> impl IntoResponse {
                 })),
             )
         }
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => internal_error_response("research route", e),
     }
 }
 
@@ -298,11 +308,11 @@ struct CreateResearchRequest {
     /// (FR-012).
     #[serde(default)]
     max_concurrent_research_units: Option<usize>,
-    /// `--evaluate` — run the deterministic self-evaluation scorecard and
+    /// `--evaluate` - run the deterministic self-evaluation scorecard and
     /// append it to the assembled report (FR-008 / T-015).
     #[serde(default)]
     evaluate: bool,
-    /// `--url-cloak` — defang web URLs in the generated `RESEARCH.md`
+    /// `--url-cloak` - defang web URLs in the generated `RESEARCH.md`
     /// (`Sources` bullets and the `References Index`) and `CORPA.md`
     /// (`Sources Reference`) so they are written as plain text rather than
     /// clickable links.
@@ -590,7 +600,7 @@ async fn create_research(
 
     // Spawn the research run as a background task so the HTTP response
     // returns immediately with 202 Accepted. The SSE sender is cloned so a
-    // failed run can still deliver a terminal RunStep event to subscribers —
+    // failed run can still deliver a terminal RunStep event to subscribers -
     // without it, the stream would simply close and look like a successful
     // run that emitted no events.
     let name_clone = req.name.clone();
@@ -677,7 +687,7 @@ impl BroadcastObserver {
         if runs.contains_key(&name) {
             return None;
         }
-        let (tx, _rx) = tokio::sync::broadcast::channel::<SessionEvent>(256);
+        let (tx, _rx) = tokio::sync::broadcast::channel::<SessionEvent>(SSE_CHANNEL_CAPACITY);
         runs.insert(name, tx.clone());
         Some(Self(tx))
     }
@@ -686,7 +696,7 @@ impl BroadcastObserver {
 impl SessionObserver for BroadcastObserver {
     fn on_event(&self, event: SessionEvent) {
         // Best-effort send; if there are no subscribers the event is
-        // simply dropped (this is expected — the channel has no
+        // simply dropped (this is expected - the channel has no
         // receivers when nobody is listening to the SSE stream).
         // FUNC-066: log the drop so a lost terminal/failure event is visible
         // rather than silently invisible when a client disconnects.
@@ -729,8 +739,7 @@ async fn update_research(
                 .into_response();
         }
         Err(e) => {
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-                .into_response();
+            return internal_error_response("research route", e).into_response();
         }
     };
     let Some(recorded) = item.invocation.clone() else {
@@ -881,17 +890,18 @@ async fn show_research(
             // Search before building the row so `item.title` can be moved
             // into the row instead of cloned. FUNC-037: a search failure is
             // logged rather than silently conflated with "no hits".
-            let search_hits: Vec<SearchHit> = match manager.search(&item.title, 5).await {
-                Ok(hits) => hits,
-                Err(e) => {
-                    tracing::warn!(
-                        name = %name,
-                        error = %e,
-                        "related-research search failed"
-                    );
-                    Vec::new()
-                }
-            };
+            let search_hits: Vec<SearchHit> =
+                match manager.search(&item.title, RELATED_RESEARCH_LIMIT).await {
+                    Ok(hits) => hits,
+                    Err(e) => {
+                        tracing::warn!(
+                            name = %name,
+                            error = %e,
+                            "related-research search failed"
+                        );
+                        Vec::new()
+                    }
+                };
             let row = ResearchItemRow::from_item(item, q.full);
             (
                 StatusCode::OK,
@@ -915,7 +925,7 @@ async fn show_research(
         Err(ragent_research::ResearchError::InvalidName(_)) => {
             error_response(StatusCode::BAD_REQUEST, "invalid research name")
         }
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => internal_error_response("research route", e),
     }
 }
 
@@ -941,15 +951,14 @@ async fn delete_research(
         );
     }
     match manager.delete(&name).await {
-        Ok(()) => (
-            StatusCode::NO_CONTENT,
-            Json(serde_json::json!({ "deleted": name })),
-        ),
+        // F-L3: RFC 9110 forbids a body on 204, so a body-carrying success is
+        // reported as 200 OK (the client still learns the deleted name).
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "deleted": name }))),
         Err(ragent_research::ResearchError::NotFound(name, suggestions)) => error_response(
             StatusCode::NOT_FOUND,
             format!("research item '{name}' not found. Closest matches: {suggestions}"),
         ),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => internal_error_response("research route", e),
     }
 }
 
@@ -979,11 +988,11 @@ async fn research_events_stream(
     };
 
     let Some(tx) = tx else {
-        // No active run — return 404 or check if the item exists on disk.
+        // No active run - return 404 or check if the item exists on disk.
         let manager = ResearchManager::new(research_root());
         match manager.show(&name).await {
             Ok(item) => {
-                // Item exists but no active run — return its current status.
+                // Item exists but no active run - return its current status.
                 // `Json` already sets the content-type header.
                 return (
                     StatusCode::OK,
@@ -1032,172 +1041,5 @@ async fn research_events_stream(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::CreateResearchRequest;
-
-    #[test]
-    fn to_run_request_maps_new_mode_and_summarization_and_evaluate() {
-        let req = CreateResearchRequest {
-            topic: "Compare A and B".into(),
-            format: Some("comparison-table".into()),
-            mode: Some("competitive".into()),
-            summarization_model: Some("ollama:phi4".into()),
-            tier: Some("light".into()),
-            research_model: Some("anthropic:claude-sonnet-4".into()),
-            max_concurrent_research_units: Some(3),
-            evaluate: true,
-            ..minimal_request("compete", false)
-        };
-
-        let run = req.to_run_request();
-        assert_eq!(run.mode, Some("competitive".into()));
-        assert_eq!(run.output_format, Some("comparison-table".into()));
-        assert_eq!(run.summarization_model, Some("ollama:phi4".into()));
-        assert_eq!(run.evaluate, Some(true));
-        assert_eq!(run.tier, Some("light".into()));
-        assert_eq!(run.research_model, Some("anthropic:claude-sonnet-4".into()));
-        assert_eq!(run.max_concurrent_research_units, Some(3));
-    }
-
-    #[test]
-    fn to_run_request_preserves_defaults_when_optional_fields_omitted() {
-        let req = CreateResearchRequest {
-            topic: "Rust".into(),
-            ..minimal_request("plain", false)
-        };
-
-        let run = req.to_run_request();
-        assert!(run.mode.is_none());
-        assert!(run.summarization_model.is_none());
-        assert_eq!(run.evaluate, Some(false));
-    }
-
-    /// Build a minimal request with every optional field defaulted, for the
-    /// scholarly-exclusion invocation tests (FR-009).
-    fn minimal_request(name: &str, no_scholarly: bool) -> CreateResearchRequest {
-        CreateResearchRequest {
-            name: name.into(),
-            topic: "Rust async".into(),
-            title: None,
-            sources_dir: None,
-            template: None,
-            from_urls: Vec::new(),
-            from_files: Vec::new(),
-            use_local: false,
-            use_specs: false,
-            use_low_relevance: false,
-            no_scholarly,
-            use_pdf: false,
-            oa_recovery: None,
-            fetch_concurrency: None,
-            fetch_timeout_secs: None,
-            local_concurrency: None,
-            depth: None,
-            iterations: None,
-            format: None,
-            mode: None,
-            summarization_model: None,
-            tier: None,
-            web_phase_timeout_secs: None,
-            local_phase_timeout_secs: None,
-            search_max_retries: None,
-            search_retry_base_delay_ms: None,
-            max_web_results: None,
-            max_search_calls: None,
-            max_local_sources: None,
-            max_synthesis_sources: None,
-            max_concepts: None,
-            max_findings: None,
-            brief: None,
-            research_model: None,
-            compression_model: None,
-            final_report_model: None,
-            max_concurrent_research_units: None,
-            evaluate: false,
-            url_cloak: false,
-        }
-    }
-
-    #[test]
-    fn invocation_summary_emits_canonical_no_papers_spelling() {
-        // FR-005/FR-009: the server must emit the canonical `--no-papers`
-        // spelling so the recorded invocation replays on every front-end.
-        let req = minimal_request("excl-on", true);
-        let summary = req.invocation_summary();
-        assert!(
-            summary.contains("--no-papers"),
-            "summary should carry the canonical flag: {summary}"
-        );
-        assert!(
-            !summary.contains("--no-scholarly"),
-            "summary should not emit the legacy alias: {summary}"
-        );
-        // The recorded invocation must round-trip through the shared parser.
-        let replayed = ragent_research::ResearchRunRequest::from_invocation(&summary)
-            .expect("canonical summary must replay");
-        assert!(replayed.no_scholarly);
-    }
-
-    #[test]
-    fn invocation_summary_omits_flag_when_exclusion_off() {
-        let req = minimal_request("excl-off", false);
-        let summary = req.invocation_summary();
-        assert!(
-            !summary.contains("--no-papers"),
-            "summary should not carry the flag when disabled: {summary}"
-        );
-    }
-
-    #[test]
-    fn to_run_request_forwards_scholarly_exclusion() {
-        let req = minimal_request("forward", true);
-        let run = req.to_run_request();
-        assert!(run.no_scholarly);
-    }
-
-    #[test]
-    fn to_run_request_forwards_concept_and_finding_limits() {
-        // FR-012: the HTTP limits must reach the shared run request.
-        let req = CreateResearchRequest {
-            max_concepts: Some(2),
-            max_findings: Some(3),
-            ..minimal_request("limits", false)
-        };
-        let run = req.to_run_request();
-        assert_eq!(run.max_concepts, Some(2));
-        assert_eq!(run.max_findings, Some(3));
-    }
-
-    #[test]
-    fn invocation_summary_round_trips_concept_and_finding_limits() {
-        // FR-013: the summary emits the flags only when set, and the recorded
-        // invocation replays through the hand parser.
-        let req = CreateResearchRequest {
-            max_concepts: Some(2),
-            max_findings: Some(3),
-            ..minimal_request("limits-rt", false)
-        };
-        let summary = req.invocation_summary();
-        assert!(
-            summary.contains("--max-concepts 2"),
-            "summary missing concept limit: {summary}"
-        );
-        assert!(
-            summary.contains("--max-findings 3"),
-            "summary missing finding limit: {summary}"
-        );
-        let replayed = ragent_research::ResearchRunRequest::from_invocation(&summary)
-            .expect("summary with limits must replay");
-        assert_eq!(replayed.max_concepts, Some(2));
-        assert_eq!(replayed.max_findings, Some(3));
-    }
-
-    #[test]
-    fn invocation_summary_omits_limits_when_unset() {
-        let summary = minimal_request("limits-off", false).invocation_summary();
-        assert!(
-            !summary.contains("--max-concepts") && !summary.contains("--max-findings"),
-            "summary must omit the limits when unset: {summary}"
-        );
-    }
-}
+#[path = "../tests/inline/research_tests.rs"]
+mod tests;

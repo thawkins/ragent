@@ -82,7 +82,9 @@ Builds can take a long time, so allow up to 1000 seconds for a rebuild.
 
 ## Test Commands
 
-Use the Bash tool to run the following `cargo` commands
+Use the Bash tool to run the following `cargo` commands.
+
+Test running is very very expensive, it can take 40 minutes to run a full test suite, you have to strive to minimize the number of times a test suite is run, if you need to run a full test suite, make sure you capture the output in a file and use that file to run any subsequent passes that require reinterpretation of the output instead of rerunning the test suite.
 
 - `cargo test` — Run all tests
 - `cargo test <test_function_name>` — Run specific test function
@@ -141,7 +143,7 @@ Use the `Bash` tool to run the following cargo commands:
 - **Imports**: Group std, external crates, then local modules.
 - **Error Handling**: Use `Result<T, E>` with `?`, `anyhow::Result` for main, and `thiserror` for custom errors.
 - **Types**: Prefer explicit types, and use type aliases for complex types.
-- **Logging**: Use the `tracing` crate with structured logging; avoid `println!` or `eprintln!` in application code. For performance profiling, use `debug!()` for non-hot paths and `trace!()` for debug scenarios.
+- **Logging**: Use the `tracing` crate with structured logging; avoid `println!` or `eprintln!` in application code. For performance profiling, use `debug!()` for non-hot paths and `trace!()` for debug scenarios. **Documented exception:** the root `ragent` binary's *CLI presentation surface* is allowed to use `println!`/`eprintln!` for user-facing command output (help text, tables, JSON reports, and the interactive TUI's stdout) and for panic/abort diagnostics that must be emitted before the tracing subscriber is installed (`src/panic_hook.rs`, the crash-marker warnings, and the `--log-level` parse fallback in `src/main.rs`). Any diagnostic emitted *after* tracing is initialised must use `tracing` instead (ANTIPAT M2.16 R-05).
 - **Logging Cleanliness**: After an issue has been resolved, remove temporary `debug!()` and `tracing::debug!()` calls in the relevant code.
 - **Documentation**: Use `//!` for crate/module docs, `///` for public APIs, and `//` for internal comments.
 - **Linting**: No wildcard imports in production code. This rule does not apply
@@ -149,7 +151,6 @@ Use the `Bash` tool to run the following cargo commands:
   globs (both are idiomatic and allowed). Treat cognitive complexity ≤30 and
   missing docs warnings as review targets rather than guaranteed
   compiler-enforced limits.
-  
 - **Best Practices**: Read the best practices at https://www.djamware.com/post/68b2c7c451ce620c6f5efc56/rust-project-structure-and-best-practices-for-clean-scalable-code and apply them to the project where relevant.
 
 ### Core Code Rules
@@ -174,7 +175,6 @@ Use the `Bash` tool to run the following cargo commands:
 
 ## Idiomatic Rust Practices
 
-
 Follow idiomatic Rust practices and community standards. This section
 supplements Code Style Guidelines above; on any conflict, the earlier, more
 specific section (Code Style Guidelines / Core Code Rules) wins. These
@@ -198,7 +198,6 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 - Ensure code compiles without warnings.
 
 ### Patterns to Follow
-
 
 - Use modules (`mod`) and public interfaces (`pub`) to encapsulate logic.
 - Handle errors properly using `?`, `match`, or `if let`.
@@ -268,7 +267,6 @@ Future proofing:
 - All public types must implement `Debug`
 
 ### Testing and Documentation
-
 
 - Write comprehensive unit tests. In this workspace, prefer keeping tests in each crate's `tests/` directory; see the "Test Organization" section above for the migration rules.
 - Write integration tests in `tests/` directory with descriptive filenames.

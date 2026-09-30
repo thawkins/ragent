@@ -104,7 +104,7 @@ pub struct OasfModule {
     pub payload: serde_json::Value,
 }
 
-/// Payload of a `ragent/agent/v1` module — the ragent-specific agent definition.
+/// Payload of a `ragent/agent/v1` module - the ragent-specific agent definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RagentAgentPayload {
     /// System prompt for the agent.
@@ -120,7 +120,7 @@ pub struct RagentAgentPayload {
     /// Maximum number of agentic loop iterations. Defaults to `1024`.
     pub max_steps: Option<u32>,
 
-    /// Model sampling temperature override (0.0–2.0).
+    /// Model sampling temperature override (0.0-2.0).
     pub temperature: Option<f32>,
 
     /// Nucleus sampling override.

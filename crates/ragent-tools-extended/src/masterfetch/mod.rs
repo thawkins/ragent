@@ -1,4 +1,4 @@
-//! `MasterFetch` — integrated web-access tools for ragent.
+//! `MasterFetch` - integrated web-access tools for ragent.
 //!
 //! This module re-implements Hound's six web-access tools
 //! ([`mf_fetch`][super], `mf_crawl`, `mf_search`, `mf_screenshot`,
@@ -14,8 +14,8 @@
 //!
 //! # Requirements
 //!
-//! - **FR-001** — native Rust re-implementation of all six Hound tools.
-//! - **NFR-004** — every public item carries a `///` doc comment; the module
+//! - **FR-001** - native Rust re-implementation of all six Hound tools.
+//! - **NFR-004** - every public item carries a `///` doc comment; the module
 //!   carries a `//!` doc comment.
 //!
 //! # Design
@@ -49,7 +49,7 @@ pub mod youtube;
 // Integration version (FR-017)
 // ---------------------------------------------------------------------------
 
-/// Masterfetch integration version — embedded in the `fetcher_used` signal
+/// Masterfetch integration version - embedded in the `fetcher_used` signal
 /// and returned by the `mf_version` tool.
 ///
 /// This is the version of the masterfetch *integration* (the native Rust

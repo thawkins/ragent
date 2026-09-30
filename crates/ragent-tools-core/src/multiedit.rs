@@ -2,12 +2,12 @@
 //!
 //! Provides [`MultiEditTool`], which applies multiple search-and-replace
 //! operations across one or more files atomically. All edits are validated
-//! before any files are written — if any match fails, no files are modified.
+//! before any files are written - if any match fails, no files are modified.
 //!
 //! # Matching (editrenewal FR-004 / FR-009, amended by editplan P2)
 //!
 //! Each edit is resolved with the fallback cascade in
-//! [`find_replacement_cascade`]: exact → whitespace-flexible →
+//! [`find_replacement_cascade`]: exact -> whitespace-flexible ->
 //! indent-normalised. The first lane producing exactly one match wins. If
 //! every lane fails, the error carries a line-similarity hint (P2.6) or
 //! multi-match disambiguation (P2.7) so the model's next attempt lands closer.
@@ -51,7 +51,7 @@ use crate::check_path_within_allowed_roots_cached;
 /// An edit match failed with `outcome`; log the failure (with the match lane
 /// and a length note) and return it as the tool error.
 ///
-/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// `#[allow(dead_code)]` - used by the lib build but not by the test target that
 /// re-imports this source via `#[path]`.
 #[allow(dead_code)]
 fn fail_match(
@@ -86,7 +86,7 @@ fn fail_match(
 /// its target file). Only after all validations pass are the files written. If
 /// any edit fails validation, no files are modified.
 ///
-/// `#[allow(dead_code)]` — the type is registered and used by the lib target,
+/// `#[allow(dead_code)]` - the type is registered and used by the lib target,
 /// but it is never directly constructed by the external integration test target
 /// that re-imports this source via `#[path]`.
 #[allow(dead_code)]
@@ -98,7 +98,7 @@ pub struct MultiEditTool;
 // registry.
 /// A single edit operation parsed from the input JSON.
 ///
-/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// `#[allow(dead_code)]` - used by the lib build but not by the test target that
 /// re-imports this source via `#[path]`.
 #[allow(dead_code)]
 struct EditOp {
@@ -112,7 +112,7 @@ struct EditOp {
 /// A resolved edit: the original input index, the byte range against the
 /// original file content, and the replacement text.
 ///
-/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// `#[allow(dead_code)]` - used by the lib build but not by the test target that
 /// re-imports this source via `#[path]`.
 #[allow(dead_code)]
 struct ResolvedEdit {
@@ -124,7 +124,7 @@ struct ResolvedEdit {
     start: usize,
     /// Exclusive end byte offset against the original file content.
     end: usize,
-    /// Replacement text (inserted verbatim — never re-indented).
+    /// Replacement text (inserted verbatim - never re-indented).
     effective_new: String,
     /// Original `old_str` line count (for stats).
     old_lines: usize,
@@ -371,7 +371,7 @@ impl Tool for MultiEditTool {
                     }
                 }
                 bail!(
-                    "{e}. The session's read timestamp has been refreshed — \
+                    "{e}. The session's read timestamp has been refreshed - \
                      re-issue the batch against the live content."
                 );
             }

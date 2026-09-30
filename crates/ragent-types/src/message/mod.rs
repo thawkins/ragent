@@ -294,7 +294,7 @@ impl fmt::Display for Message {
             while end > 0 && !text.is_char_boundary(end) {
                 end -= 1;
             }
-            format!("{}…", &text[..end])
+            format!("{}...", &text[..end])
         } else {
             text
         };

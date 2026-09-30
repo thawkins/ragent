@@ -1,10 +1,11 @@
-//! Team module — Agent Team Coordination for ragent.
+//! Team module - Agent Team Coordination for ragent.
 //!
 //! This module owns the team runtime (config, task, mailbox, store, manager,
-//! swarm, classify) natively in `ragent-agent`.  Previously these sources
-//! lived in `ragent-team` and were compiled into `ragent-agent` via
-//! `#[path]` attributes; they have been moved here to eliminate the
-//! `#[path]` cycle workaround (see `REMPLAN.md` M3 / T3.3).
+//! swarm, classify) natively in `ragent-agent`.  The separate `ragent-team`
+//! re-export shim crate was retired in ANTIPAT M7.8 (see
+//! `docs/team-unification-decision.md`); previously these sources lived in
+//! that crate and were compiled into `ragent-agent` via `#[path]`
+//! attributes (see `REMPLAN.md` M3 / T3.3).
 //!
 //! A team consists of a lead session and one or more named *teammate*
 //! sessions that coordinate via a shared task list and per-agent mailboxes
@@ -27,7 +28,7 @@ pub mod config;
 pub mod mailbox;
 pub mod manager;
 pub mod store;
-/// Swarm — fleet-style auto-decomposition into parallel subtasks.
+/// Swarm - fleet-style auto-decomposition into parallel subtasks.
 pub mod swarm;
 pub mod task;
 

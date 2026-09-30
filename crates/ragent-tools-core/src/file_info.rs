@@ -50,7 +50,14 @@ impl Tool for FileInfoTool {
             .context("Missing required 'path' parameter")?;
 
         let path = resolve_path(&ctx.working_dir, path_str);
-        super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
+        // FUNC-068 (ANTIPAT F-06): honour `allowed_roots`, not just the
+        // working directory, so a whitelisted root is accepted here too.
+        super::check_path_within_allowed_roots_cached(
+            &path,
+            &ctx.working_dir,
+            &ctx.allowed_roots,
+            &ctx.canonical_cache,
+        )?;
 
         if !path.exists() {
             return Ok(ToolOutput {

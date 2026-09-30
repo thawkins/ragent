@@ -134,10 +134,10 @@ fn which_binary(name: &str) -> Result<PathBuf> {
 ///
 /// # Arguments
 ///
-/// * `binary` — path to the Chrome/Chromium binary.
-/// * `port` — remote debugging port (default 9222).
-/// * `headless` — if `true`, run in headless mode.
-/// * `user_data_dir` — optional user data directory (temp dir if not supplied).
+/// * `binary` - path to the Chrome/Chromium binary.
+/// * `port` - remote debugging port (default 9222).
+/// * `headless` - if `true`, run in headless mode.
+/// * `user_data_dir` - optional user data directory (temp dir if not supplied).
 ///
 /// # Errors
 ///
@@ -195,8 +195,8 @@ pub async fn launch_browser(
 ///
 /// # Arguments
 ///
-/// * `http_endpoint` — the HTTP base URL (e.g. `"http://127.0.0.1:9222"`).
-/// * `timeout_secs` — maximum time to wait.
+/// * `http_endpoint` - the HTTP base URL (e.g. `"http://127.0.0.1:9222"`).
+/// * `timeout_secs` - maximum time to wait.
 ///
 /// # Errors
 ///
@@ -255,7 +255,7 @@ pub async fn action_setup(port: Option<u16>, headless: bool) -> Result<Value> {
     // Wait for the CDP endpoint.
     if let Err(e) = wait_for_endpoint(&http_endpoint, DEFAULT_STARTUP_TIMEOUT_SECS).await {
         // Kill the child process if the endpoint didn't come up.
-        let _ = child.kill().await;
+        let _ = child.kill().await; // INTENTIONAL: process teardown is best-effort
         bail!("browser launched but CDP endpoint not ready: {e}");
     }
 
@@ -264,11 +264,11 @@ pub async fn action_setup(port: Option<u16>, headless: bool) -> Result<Value> {
 
     // R-16: The browser process runs independently. Tokio's default
     // `kill_on_drop = false` means dropping the `Child` handle does NOT
-    // kill the process — the browser keeps running. We read the PID for
+    // kill the process - the browser keeps running. We read the PID for
     // the response payload, then let the `Child` handle drop naturally.
     // Tokio's internal process reaper prevents zombie accumulation.
     let pid = child.id().map(|p| json!(p)).unwrap_or(Value::Null);
-    // Intentionally do not call `child.kill()` — the browser should persist.
+    // Intentionally do not call `child.kill()` - the browser should persist.
 
     Ok(json!({
         "action": "setup",
@@ -283,30 +283,5 @@ pub async fn action_setup(port: Option<u16>, headless: bool) -> Result<Value> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_browser_binary_candidates_nonempty() {
-        let candidates = browser_binary_candidates();
-        // On any platform, we should have at least one candidate path.
-        // On unknown platforms, the list may be empty — skip the assertion.
-        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-        assert!(
-            !candidates.is_empty(),
-            "should have platform-specific browser candidates"
-        );
-    }
-
-    #[test]
-    fn test_default_debug_port() {
-        assert_eq!(DEFAULT_DEBUG_PORT, 9222);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_which_binary_nonexistent() {
-        let result = which_binary("this-binary-definitely-does-not-exist-12345");
-        assert!(result.is_err());
-    }
-}
+#[path = "../tests/inline/launch_tests.rs"]
+mod tests;

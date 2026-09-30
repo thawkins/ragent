@@ -1,8 +1,8 @@
 //! Startup timing instrumentation.
 //!
 //! [`StartupTimings`] records the duration of each stage in the ragent startup
-//! pipeline (CLI parse → config load → storage open → provider/tool registries
-//! → TUI init → session create → code index, etc.).
+//! pipeline (CLI parse -> config load -> storage open -> provider/tool registries
+//! -> TUI init -> session create -> code index, etc.).
 //!
 //! The collected data is displayed via the `/startup` TUI slash command so
 //! users can identify which stages contribute most to the perceived startup

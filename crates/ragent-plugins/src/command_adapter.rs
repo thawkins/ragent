@@ -34,7 +34,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::error::PluginError;
+use crate::error::{PluginError, with_plugin};
 use crate::lifecycle::PluginManager;
 use crate::manifest::PluginCommandDef;
 use crate::runtime::SandboxContext;
@@ -193,7 +193,7 @@ impl PluginManager {
         };
 
         // A prompt command has no JavaScript handler: its body is the rendered
-        // result. Returning the body here keeps the TUI dispatch uniform — the
+        // result. Returning the body here keeps the TUI dispatch uniform - the
         // session decides whether to show it or inject it into the agent (FR-031).
         if let Some(body) = self.prompt_for(registry_name) {
             return (
@@ -278,13 +278,13 @@ pub fn substitute_command_args(body: &str, args: &str, plugin_id: &str, command:
 /// The handler is resolved from `globalThis.__ragent_commands[name]` (the
 /// map `register_command` populates when the entry ran). Returns
 /// `Ok(text)`: bare strings pass through, `undefined`/`null` produce an
-/// empty string, and any other JSON value is `JSON.stringify`-compacted —
+/// empty string, and any other JSON value is `JSON.stringify`-compacted -
 /// the session prints the text into the message window.
 ///
 /// # Errors
 ///
-/// Propagates sandbox failures — [`PluginError::Script`], `Timeout`,
-/// `MemoryLimit`, `Engine` — plus the contract's serialisation errors, all
+/// Propagates sandbox failures - [`PluginError::Script`], `Timeout`,
+/// `MemoryLimit`, `Engine` - plus the contract's serialisation errors, all
 /// with `plugin_id` attached (FR-015, FR-026).
 pub fn dispatch_command_sandbox(
     context: &SandboxContext,
@@ -319,16 +319,4 @@ pub fn dispatch_command_sandbox(
     context
         .eval_to_string(&source)
         .map_err(|e| with_plugin(e, plugin_id))
-}
-
-/// Attach the plugin id to a sandbox error (the runtime classifies errors
-/// without knowing which plugin it served).
-fn with_plugin(error: PluginError, plugin_id: &str) -> PluginError {
-    match error {
-        PluginError::Script { detail, .. } => PluginError::Script {
-            plugin: plugin_id.to_string(),
-            detail,
-        },
-        other => other,
-    }
 }

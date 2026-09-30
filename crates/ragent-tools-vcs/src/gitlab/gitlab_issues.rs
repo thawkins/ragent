@@ -1,30 +1,13 @@
-//! GitLab issue tools — list, get, create, comment, and close issues.
+//! GitLab issue tools - list, get, create, comment, and close issues.
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use crate::gitlab::GitLabClient;
+use super::helpers::{detect_project, make_client};
+use crate::limits::{DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, NOTES_PER_PAGE};
+use crate::vocab::normalize_gitlab_issue_state;
 
 use super::{Tool, ToolContext, ToolOutput};
-
-/// Returns the authenticated `GitLabClient` or a human-readable error.
-fn make_client(ctx: &ToolContext) -> Result<GitLabClient> {
-    let storage = ctx
-        .storage
-        .as_deref()
-        .context("Storage not available for GitLab client")?;
-    GitLabClient::new(storage).context("GitLab not configured. Run /gitlab setup to configure.")
-}
-
-/// Resolve the URL-encoded project path from the working directory.
-fn detect_project(ctx: &ToolContext) -> Result<String> {
-    GitLabClient::detect_project(&ctx.working_dir).ok_or_else(|| {
-        anyhow::anyhow!(
-            "Could not detect GitLab project from git remote. \
-             Ensure you're in a git repo with a GitLab remote."
-        )
-    })
-}
 
 // ---------------------------------------------------------------------------
 // 1. GitlabListIssuesTool
@@ -42,9 +25,11 @@ impl Tool for GitlabListIssuesTool {
     fn description(&self) -> &'static str {
         "List GitLab issues in the project detected from the current working directory. \
          No required parameters. 'state' (enum 'opened', 'closed', 'all', default 'opened') filters by issue state; \
+         both 'opened' and GitHub's 'open' spelling are accepted. \
          'labels' (string) is a comma-separated list of label names; 'limit' (integer, default 20, max 100) caps the result count. \
          Requires GitLab configuration and a GitLab-backed git repo (see /gitlab setup). \
-         Common gotcha: labels must exactly match existing project labels; large issue lists are capped by 'limit' without pagination."
+         Common gotcha: labels must exactly match existing project labels; large issue lists are capped by 'limit' without pagination. \
+         Cross-provider note: GitLab calls the item id 'iid' where GitHub uses 'number'."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -55,7 +40,7 @@ impl Tool for GitlabListIssuesTool {
                 "state": {
                     "type": "string",
                     "enum": ["opened", "closed", "all"],
-                    "description": "Filter by issue state (default: opened)"
+                    "description": "Filter by issue state (default: opened; GitHub's 'open' is also accepted)"
                 },
                 "labels": {
                     "type": "string",
@@ -77,8 +62,11 @@ impl Tool for GitlabListIssuesTool {
         let client = make_client(ctx)?;
         let project = detect_project(ctx)?;
 
-        let state = input["state"].as_str().unwrap_or("opened");
-        let limit = input["limit"].as_u64().unwrap_or(20).min(100);
+        let state = normalize_gitlab_issue_state(input["state"].as_str().unwrap_or("opened"));
+        let limit = input["limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_PAGE_LIMIT)
+            .min(MAX_PAGE_LIMIT);
 
         let mut path = format!("/projects/{project}/issues?state={state}&per_page={limit}");
         if let Some(labels) = input["labels"].as_str()
@@ -170,7 +158,7 @@ impl Tool for GitlabGetIssueTool {
             .await?;
         let notes_val = client
             .get(&format!(
-                "/projects/{project}/issues/{iid}/notes?per_page=10"
+                "/projects/{project}/issues/{iid}/notes?per_page={NOTES_PER_PAGE}"
             ))
             .await?;
 
@@ -214,7 +202,7 @@ impl Tool for GitlabGetIssueTool {
             let total = user_notes.len();
             if total > 0 {
                 md.push_str(&format!("\n## Notes ({total})\n"));
-                for note in user_notes.iter().take(10) {
+                for note in user_notes.iter().take(NOTES_PER_PAGE as usize) {
                     let commenter = note["author"]["username"].as_str().unwrap_or("?");
                     let created = note["created_at"].as_str().unwrap_or("");
                     let nbody = note["body"].as_str().unwrap_or("");
@@ -300,7 +288,7 @@ impl Tool for GitlabCreateIssueTool {
         }
         if let Some(assignee_ids) = input["assignee_ids"].as_str() {
             // FUNC-069: a non-numeric token must surface an error naming the
-            // bad id rather than being silently dropped — a partial assignee
+            // bad id rather than being silently dropped - a partial assignee
             // set is misleading (the issue is created without the requested
             // assignee and no failure is reported).
             let mut ids: Vec<u64> = Vec::new();

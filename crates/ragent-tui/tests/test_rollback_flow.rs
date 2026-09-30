@@ -390,16 +390,28 @@ fn last_transcript(app: &App) -> String {
 #[tokio::test]
 async fn test_loop_terminated_banner_is_status_aware() {
     let cases = [
-        ("completed", "✓", "Goal loop completed", 2, "2 iterations"),
-        ("error", "✗", "Goal loop failed", 1, "1 iteration"),
+        (
+            "completed",
+            "[ok]",
+            "Goal loop completed",
+            2,
+            "2 iterations",
+        ),
+        ("error", "[x]", "Goal loop failed", 1, "1 iteration"),
         (
             "budget_exhausted",
-            "⏳",
-            "budget exhausted",
+            "[..]",
+            "Goal loop budget exhausted",
             5,
             "5 iterations",
         ),
-        ("interrupted", "⏹", "interrupted", 3, "3 iterations"),
+        (
+            "interrupted",
+            "[stop]",
+            "Goal loop interrupted",
+            3,
+            "3 iterations",
+        ),
     ];
     for (status, icon, phrase, iterations, iterations_label) in cases {
         let mut app = make_scripted_app();

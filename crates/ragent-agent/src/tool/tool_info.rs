@@ -1,4 +1,4 @@
-//! `tool_info` and `commands_info` — read-only registry introspection tools.
+//! `tool_info` and `commands_info` - read-only registry introspection tools.
 //!
 //! `tool_info` returns a JSON dump of every tool registered in the agent's
 //! [`ToolRegistry`] (name, description, parameters schema, permission

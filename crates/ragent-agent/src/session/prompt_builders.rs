@@ -13,21 +13,21 @@ use std::fmt::Write as _;
 /// Universal tool-calling guidance injected into every session's system prompt.
 ///
 /// Previously this was an Ollama-specific constant (`OLLAMA_TOOL_GUIDANCE`),
-/// but the directives are universally useful — all providers benefit from clear
+/// but the directives are universally useful - all providers benefit from clear
 /// "call tools immediately, don't narrate" instructions.  The file-reading
 /// guidance that used to be here has been removed because it is already built
 /// into the base system prompt (`build_system_prompt_with_storage`), so
 /// duplicating it here was redundant and created a maintenance drift risk.
-pub const TOOL_CALLING_GUIDANCE: &str = "\n## Tool Use — Critical Instructions\n\n\
+pub const TOOL_CALLING_GUIDANCE: &str = "\n## Tool Use - Critical Instructions\n\n\
     IMPORTANT: When you need to take any action, call the appropriate tool IMMEDIATELY.\n\
-    Do NOT write text describing what you are going to do — just call the tool.\n\
-    Do NOT say 'Let me explore...' or 'I will analyze...' — instead, call the relevant tool now.\n\n\
+    Do NOT write text describing what you are going to do - just call the tool.\n\
+    Do NOT say 'Let me explore...' or 'I will analyze...' - instead, call the relevant tool now.\n\n\
     Rule: every response where you need information or need to act MUST start with a tool call.\n\n";
 
 /// Compose the structured goal section (FR-006) for a goal-driven loop.
 ///
 /// Rendered once when a loop turn starts and pushed into the loop's system
-/// prompt so the model knows — before its first action — what must be true
+/// prompt so the model knows - before its first action - what must be true
 /// to succeed, how success will be verified, which paths are in scope, which
 /// paths are read-only, and which budget limits bound the run.
 ///
@@ -72,7 +72,7 @@ pub fn build_goal_loop_section(spec: &LoopSpec) -> String {
             section,
             "### Read-only constraints\n\n\
              These patterns are read-only. Writes are denied and returned as \
-             observations — never satisfy the goal by modifying them: {}\n\n",
+             observations - never satisfy the goal by modifying them: {}\n\n",
             spec.read_only.join(", ")
         );
     }
@@ -109,23 +109,23 @@ pub fn build_goal_loop_section(spec: &LoopSpec) -> String {
 /// Uses strong directive language to steer the LLM away from `grep`/`search`
 /// for any query that involves code symbols, types, or structure.
 pub(crate) fn build_codeindex_guidance_section_active() -> String {
-    "\n## Code Intelligence — Codebase Index Tools\n\n\
+    "\n## Code Intelligence - Codebase Index Tools\n\n\
             A **codebase index** is active for this project. It provides fast, structured \
-            search across all indexed source files — symbols, references, dependencies, \
+            search across all indexed source files - symbols, references, dependencies, \
             and documentation.\n\n\
-            **MANDATORY — You MUST use codeindex tools instead of grep for code symbol queries.**\n\
+            **MANDATORY - You MUST use codeindex tools instead of grep for code symbol queries.**\n\
             When the index is active, `grep` is the WRONG choice for finding \
             functions, types, structs, enums, traits, or any named code entity. The index \
             is faster, returns structured results with file/line/signature, and understands \
             symbol kinds.\n\n\
-            **Decision flow — which tool to use:**\n\
-            - \"Where is function X defined?\" → `codeindex_search` (NOT grep)\n\
-            - \"Find all structs matching Y\" → `codeindex_symbols` with kind=struct (NOT grep)\n\
-            - \"Who calls function Z?\" → `codeindex_references` (NOT grep)\n\
-            - \"What does file A import?\" → `codeindex_dependencies` (NOT grep for imports)\n\
-            - \"List all functions in file B\" → `codeindex_symbols` with file_path (NOT grep)\n\
-            - \"Is the index working?\" → `codeindex_status`\n\
-            - \"Re-index after bulk edits\" → `codeindex_reindex`\n\n\
+            **Decision flow - which tool to use:**\n\
+            - \"Where is function X defined?\" -> `codeindex_search` (NOT grep)\n\
+            - \"Find all structs matching Y\" -> `codeindex_symbols` with kind=struct (NOT grep)\n\
+            - \"Who calls function Z?\" -> `codeindex_references` (NOT grep)\n\
+            - \"What does file A import?\" -> `codeindex_dependencies` (NOT grep for imports)\n\
+            - \"List all functions in file B\" -> `codeindex_symbols` with file_path (NOT grep)\n\
+            - \"Is the index working?\" -> `codeindex_status`\n\
+            - \"Re-index after bulk edits\" -> `codeindex_reindex`\n\n\
             **When grep IS appropriate:**\n\
             - Searching for arbitrary text strings, comments, or prose (not symbols)\n\
             - Finding TODO/FIXME/HACK comments\n\
@@ -134,7 +134,7 @@ pub(crate) fn build_codeindex_guidance_section_active() -> String {
             **Rule of thumb:** If you are looking for a named code entity (function, type, \
             variable, import), use codeindex. If you are searching for a text pattern that \
             is NOT a code symbol, use grep with the `pattern` parameter.\n\n\
-            **CRITICAL — grep parameter requirement:**\n\
+            **CRITICAL - grep parameter requirement:**\n\
             The `grep` tool requires the `pattern` parameter. This is the ONLY required field. \
             Do NOT omit it. Example: `grep(pattern: \"fn main\", path: \"src\")`\n\n\
             **Codeindex options and limits:**\n\n\
@@ -155,14 +155,14 @@ pub(crate) fn build_codeindex_guidance_section_active() -> String {
 /// Informs the LLM that codeindex tools will return "not available" and
 /// that grep/search should be used as fallback. Suggests enabling the index.
 pub(crate) fn build_codeindex_guidance_section_disabled() -> String {
-    "\n## Code Intelligence — Codebase Index Tools\n\n\
+    "\n## Code Intelligence - Codebase Index Tools\n\n\
             The codebase index is **not active** for this project. Code index tools \
             (`codeindex_search`, `codeindex_symbols`, `codeindex_references`, \
             `codeindex_dependencies`) will return \"not available\" if called.\n\n\
             Use `grep` with the `pattern` parameter for code lookups in the meantime. You can suggest \
             the user enable the index with `/codeindex on` for faster, structured \
             symbol search.\n\n\
-            **CRITICAL — grep parameter requirement:**\n\
+            **CRITICAL - grep parameter requirement:**\n\
             The `grep` tool requires the `pattern` parameter. This is the ONLY required field. \
             Do NOT omit it. Example: `grep(pattern: \"fn main\", path: \"src\")`\n\n"
         .to_string()
@@ -185,12 +185,12 @@ pub fn build_tool_reference_from_defs(defs: &[ToolDefinition]) -> String {
     }
     let mut section = String::from(
         "## Available Tools\n\nYou have access to the following tools. \
-          Use ONLY these exact tool names — do not invent or guess tool names.\n\n",
+          Use ONLY these exact tool names - do not invent or guess tool names.\n\n",
     );
     for def in defs.iter() {
         // Truncate long descriptions to keep the prompt compact.
         let desc = ragent_types::truncate_bytes(&def.description, 120);
-        section.push_str(&format!("- `{}` — {}\n", def.name, desc));
+        section.push_str(&format!("- `{}` - {}\n", def.name, desc));
     }
     section.push('\n');
     section
@@ -218,7 +218,7 @@ pub fn build_detailed_tool_reference_from_defs(defs: &[ToolDefinition]) -> Strin
     let mut section = String::from(
         "## Available Tools\n\n\
         You have access to the following tools. Use ONLY these exact tool \
-        names — do not invent or guess tool names. Each tool's parameters are \
+        names - do not invent or guess tool names. Each tool's parameters are \
         listed with their type and whether they are required (required).\n\n",
     );
 
@@ -262,7 +262,7 @@ pub fn build_detailed_tool_reference_from_defs(defs: &[ToolDefinition]) -> Strin
                 };
 
                 section.push_str(&format!(
-                    "- `{}` (`{}`{}) — {}\n",
+                    "- `{}` (`{}`{}) - {}\n",
                     param_name, param_type, req_marker, param_desc
                 ));
             }

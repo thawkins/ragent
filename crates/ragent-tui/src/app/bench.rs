@@ -115,7 +115,7 @@ impl App {
                 self.status = "bench: done".to_string();
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("Finished /bench run — {} workbook(s)", workbook_paths.len()),
+                    format!("Finished /bench run - {} workbook(s)", workbook_paths.len()),
                 );
                 // Arm the status auto-expiry timer so "bench: done" transitions
                 // to "ready" after the grace period.
@@ -151,7 +151,7 @@ impl App {
                 total_cases,
             } => {
                 format!(
-                    "From: /bench run\n[wait] Running `{suite_id}` [{language}] — {total_cases} case(s)."
+                    "From: /bench run\n[wait] Running `{suite_id}` [{language}] - {total_cases} case(s)."
                 )
             }
             ragent_bench::BenchRunEvent::CaseFinished {
@@ -186,7 +186,7 @@ impl App {
                 } else {
                     "Loading benchmark data for"
                 };
-                format!("From: /bench init\n[wait] {action} `{suite_id}` [{language}]…")
+                format!("From: /bench init\n[wait] {action} `{suite_id}` [{language}]...")
             }
             ragent_bench::BenchInitProgressEvent::Finished {
                 suite_id,
@@ -314,7 +314,7 @@ impl App {
                 .and_then(ragent_bench::BenchProgressHandle::snapshot)
                 .map(|progress| {
                     format!(
-                        "\n- **Progress:** suite `{}` ({}/{}) — case `{}/{}`",
+                        "\n- **Progress:** suite `{}` ({}/{}) - case `{}/{}`",
                         progress.suite_id,
                         progress.suite_index,
                         progress.total_suites,
@@ -372,7 +372,7 @@ impl App {
             Some(model) => model,
             None => {
                 self.status =
-                    "[warn] /bench run requires a configured model — use /model".to_string();
+                    "[warn] /bench run requires a configured model - use /model".to_string();
                 return;
             }
         };
@@ -421,7 +421,7 @@ impl App {
         self.active_bench_started_at = Some(chrono::Utc::now());
         self.active_bench_cancel = Some(cancel.clone());
         self.active_bench_progress = Some(progress.clone());
-        self.status = "[wait] bench: running…".to_string();
+        self.status = "[wait] bench: running...".to_string();
         self.push_log_no_agent(LogLevel::Info, format!("benchmark task started: {task_id}"));
         self.append_assistant_text(&format!(
             "From: /bench run\n[wait] Started benchmark run for `{}` on `{}/{}.`\n\n- **Task ID:** `{}`\n- **Use:** `/bench status` for progress, `/bench cancel` to stop, `/bench open last` after completion.",

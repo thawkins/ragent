@@ -35,7 +35,7 @@ The Spec Management System covers:
 
 ## Functional Requirements
 
-### FR-001 — Spec Directory Structure
+### FR-001 - Spec Directory Structure
 
 The ragent Spec Management System shall enforce a standard directory layout for specifications under `specs/`.
 
@@ -43,13 +43,13 @@ The ragent Spec Management System shall enforce a standard directory layout for 
 
 `When <a spec is created>, the <ragent Spec Management System> shall <generate the directory specs/<spec-id>/ and place both SPEC.md and PLAN.md inside it>.`
 
-### FR-002 — EARS Template Generation
+### FR-002 - EARS Template Generation
 
 `The <ragent Spec Management System> shall <provide a CLI and TUI command to generate a new spec from an EARS-aware template>.`
 
 `When <the user runs "/spec create <spec-id>" or the equivalent CLI command>, the <ragent Spec Management System> shall <create a new spec directory and populate SPEC.md with the EARS template sections and numbered requirement placeholders>.`
 
-### FR-003 — EARS Syntax Validation
+### FR-003 - EARS Syntax Validation
 
 `The <ragent Spec Management System> shall <validate that every requirement in a SPEC.md conforms to one of the five EARS templates>.`
 
@@ -57,7 +57,7 @@ The ragent Spec Management System shall enforce a standard directory layout for 
 
 `If <a spec is submitted for approval and contains requirements that do not match any EARS template>, the <ragent Spec Management System> shall <reject the submission and report the offending lines>.`
 
-### FR-004 — Mandatory Plan Pairing
+### FR-004 - Mandatory Plan Pairing
 
 `The <ragent Spec Management System> shall <require that every SPEC.md has a sibling PLAN.md in the same directory>.`
 
@@ -65,7 +65,7 @@ The ragent Spec Management System shall enforce a standard directory layout for 
 
 `When <a spec is created>, the <ragent Spec Management System> shall <generate a PLAN.md alongside SPEC.md containing the standard implementation plan template>.`
 
-### FR-005 — Spec Status Tracking
+### FR-005 - Spec Status Tracking
 
 `The <ragent Spec Management System> shall <maintain a status field for each spec through its lifecycle>.`
 
@@ -77,7 +77,7 @@ The ragent Spec Management System shall enforce a standard directory layout for 
 
 `If <a user attempts to transition a spec to Implemented without all linked tasks being completed>, the <ragent Spec Management System> shall <reject the transition and report the open tasks>.`
 
-### FR-006 — Status Transition Rules
+### FR-006 - Status Transition Rules
 
 `The <ragent Spec Management System> shall <enforce valid status transitions according to a state machine>.`
 
@@ -93,7 +93,7 @@ Allowed transitions:
 - Verified → Archived
 - Any → Draft (reopen)
 
-### FR-007 — Spec Listing and Filtering
+### FR-007 - Spec Listing and Filtering
 
 `The <ragent Spec Management System> shall <provide a command to list all specs with their status, title, and last modified date>.`
 
@@ -101,7 +101,7 @@ Allowed transitions:
 
 `Where <filter arguments are provided>, the <ragent Spec Management System> shall <filter the list by status, spec ID prefix, or date range>.`
 
-### FR-008 — Spec Search
+### FR-008 - Spec Search
 
 `The <ragent Spec Management System> shall <support full-text search across all SPEC.md, PLAN.md, and REVIEW.md files>.`
 
@@ -109,7 +109,7 @@ Allowed transitions:
 
 `If <a spec is Archived>, the <ragent Spec Management System> shall <exclude it from search results unless the user explicitly requests archived specs via the include_archived flag>.`
 
-### FR-009 — Requirement Traceability
+### FR-009 - Requirement Traceability
 
 `The <ragent Spec Management System> shall <track the implementation state of each requirement within a spec>.`
 
@@ -117,7 +117,7 @@ Allowed transitions:
 
 `When <a spec is queried for its implementation coverage>, the <ragent Spec Management System> shall <report the percentage of requirements with completed linked tasks>.`
 
-### FR-010 — Spec Review Workflow
+### FR-010 - Spec Review Workflow
 
 `The <ragent Spec Management System> shall <support a review workflow where specs can be assigned reviewers via YAML frontmatter (reviewers: [list]) and review comments recorded>.`
 
@@ -127,7 +127,7 @@ Allowed transitions:
 
 `The <ragent Spec Management System> shall <parse reviewers: from SPEC.md YAML frontmatter on read and persist them on write>.`
 
-### FR-011 — Spec Versioning
+### FR-011 - Spec Versioning
 
 `The <ragent Spec Management System> shall <record the version of each spec and append an audit trail entry on every status change>.`
 
@@ -135,13 +135,13 @@ Allowed transitions:
 
 `The <ragent Spec Management System> shall <store version history as Git commits, relying on the repository for full versioning>.`
 
-### FR-012 — Compliance Validation
+### FR-012 - Compliance Validation
 
 `The <ragent Spec Management System> shall <provide a validation command that checks all specs for structural compliance>.`
 
 `When <the user runs "/spec validate" or the equivalent CLI command>, the <ragent Spec Management System> shall <scan all specs and report violations such as missing PLAN.md, invalid EARS syntax, unknown status values, or orphaned requirements>.`
 
-### FR-013 — Integration with Agent Workflow
+### FR-013 - Integration with Agent Workflow
 
 `Where <ragent is operating in agent mode>, the <ragent Spec Management System> shall <allow an agent to read the spec before implementation and update task status in PLAN.md as work progresses via the spec_read, spec_search, spec_list, spec_task_update, and spec_coverage tools>.`
 
@@ -151,7 +151,7 @@ Allowed transitions:
 
 `When <the user runs "/spec deactivate">, the <ragent Spec Management System> shall <remove spec context from subsequent agent prompts>.`
 
-### FR-014 — Spec Archival
+### FR-014 - Spec Archival
 
 `The <ragent Spec Management System> shall <support archiving completed specs via the Verified → Archived status transition to reduce noise in active listings>.`
 
@@ -159,7 +159,7 @@ Allowed transitions:
 
 `If <the user explicitly requests archived specs via the SpecFilter.with_archived() or search_specs_with_archived() API>, the <ragent Spec Management System> shall <include them in list and search output>.`
 
-### FR-015 — Plan Task Management
+### FR-015 - Plan Task Management
 
 `The <ragent Spec Management System> shall <allow tasks in PLAN.md to be created, updated, and marked complete via commands>.`
 
@@ -171,43 +171,43 @@ Allowed transitions:
 
 ## Non-Functional Requirements
 
-### NFR-001 — Performance
+### NFR-001 - Performance
 
 `The <ragent Spec Management System> shall <list all specs in a project containing up to 1,000 specs within 500 milliseconds>.`
 
 `The <ragent Spec Management System> shall <perform a full-text search across all specs within 2 seconds for projects with up to 1,000 specs>.`
 
-### NFR-002 — Scalability
+### NFR-002 - Scalability
 
 `The <ragent Spec Management System> shall <support projects with up to 10,000 specs without degradation in listing or search performance>.`
 
 `Where <a project exceeds 10,000 specs>, the <ragent Spec Management System> shall <recommend archiving old specs and using spec ID prefixes for filtering>.`
 
-### NFR-003 — Reliability
+### NFR-003 - Reliability
 
 `The <ragent Spec Management System> shall <not corrupt or lose spec data during status transitions or editing operations>.`
 
 `If <a write operation fails>, the <ragent Spec Management System> shall <leave the original files unchanged and report the error>.`
 
-### NFR-004 — Usability
+### NFR-004 - Usability
 
 `The <ragent Spec Management System> shall <provide both TUI slash commands ("/spec ...") and CLI subcommands for all operations>.`
 
 `The <ragent Spec Management System> shall <display clear error messages that include the spec ID, file path, and corrective action when validation fails>.`
 
-### NFR-005 — Maintainability
+### NFR-005 - Maintainability
 
 `The <ragent Spec Management System> shall <be implemented as a module within ragent-agent or a dedicated ragent-specs crate with no circular dependencies>.`
 
 `The <ragent Spec Management System> shall <use plain Markdown files for storage so specs remain readable without ragent>.`
 
-### NFR-006 — Security
+### NFR-006 - Security
 
 `The <ragent Spec Management System> shall <respect the project's file permission system and require appropriate permissions for spec creation and modification>.`
 
 `If <the user lacks file:write permission for the specs/ directory>, the <ragent Spec Management System> shall <request permission before creating or modifying spec files>.`
 
-### NFR-007 — Portability
+### NFR-007 - Portability
 
 `The <ragent Spec Management System> shall <work identically across all platforms supported by ragent (Linux, macOS, Windows)>.`
 
@@ -255,11 +255,11 @@ Allowed transitions:
 
 ### Dependencies on Existing ragent Crates
 
-- `ragent-types` — for `SpecId`, `SpecStatus` enums, and event types
-- `ragent-config` — for reading `specs.*` configuration keys
-- `ragent-storage` — for SQLite-based spec index (optional, for performance)
-- `ragent-tui` — for slash command registration and UI rendering
-- `ragent-agent` — for agent workflow integration
+- `ragent-types` - for `SpecId`, `SpecStatus` enums, and event types
+- `ragent-config` - for reading `specs.*` configuration keys
+- `ragent-storage` - for SQLite-based spec index (optional, for performance)
+- `ragent-tui` - for slash command registration and UI rendering
+- `ragent-agent` - for agent workflow integration
 
 ---
 
@@ -267,7 +267,7 @@ Allowed transitions:
 
 | Term | Definition |
 |------|------------|
-| **EARS** | Easy Approach to Requirements Syntax — a constrained natural language for writing requirements using five templates: Ubiquitous, Event-driven, State-driven, Optional, and Unwanted behaviour. |
+| **EARS** | Easy Approach to Requirements Syntax - a constrained natural language for writing requirements using five templates: Ubiquitous, Event-driven, State-driven, Optional, and Unwanted behaviour. |
 | **SPEC.md** | The primary specification document for a feature, containing EARS-formatted requirements. |
 | **PLAN.md** | The implementation plan document paired with a SPEC.md, containing milestones, tasks, and risk analysis. |
 | **Spec ID** | A unique, URL-safe identifier for a spec, used as the directory name (e.g., `spec-mgt-v1`). |

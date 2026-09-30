@@ -12,11 +12,11 @@
 //! The [`build_request_body`] helper maps the shared [`SearchOptions`] to
 //! the Serper JSON body:
 //!
-//! - `q` — the search query verbatim, with `site:` and `-site:` operators
+//! - `q` - the search query verbatim, with `site:` and `-site:` operators
 //!   appended for the `site` / `exclude_sites` filters.
-//! - `num` — `opts.per_engine_results` clamped to 1–100.
-//! - `page` — `opts.page + 1` (Serper pages are 1-indexed, default 1).
-//! - `tbs` — derived from `opts.freshness` (`qdr:d` / `qdr:w` / `qdr:m` /
+//! - `num` - `opts.per_engine_results` clamped to 1-100.
+//! - `page` - `opts.page + 1` (Serper pages are 1-indexed, default 1).
+//! - `tbs` - derived from `opts.freshness` (`qdr:d` / `qdr:w` / `qdr:m` /
 //!   `qdr:y`); omitted when freshness is `Any`.
 //!
 //! # Response parsing
@@ -209,11 +209,11 @@ impl SearchEngine for SerperEngine {
 ///
 /// The returned [`serde_json::Value`] contains:
 ///
-/// - `q` — the query with `site:` / `-site:` operators appended for the
+/// - `q` - the query with `site:` / `-site:` operators appended for the
 ///   site filters.
-/// - `num` — clamped to 1–100.
-/// - `page` — `opts.page + 1` (Serper pages are 1-indexed).
-/// - `tbs` — freshness mapping when freshness is not `Any`.
+/// - `num` - clamped to 1-100.
+/// - `page` - `opts.page + 1` (Serper pages are 1-indexed).
+/// - `tbs` - freshness mapping when freshness is not `Any`.
 ///
 /// # Examples
 ///

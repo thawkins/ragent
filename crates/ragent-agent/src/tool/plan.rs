@@ -118,7 +118,7 @@ impl Tool for PlanExitTool {
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
         "Return control from the plan agent to the previous agent. REQUIRED parameter: \
-             'summary' (string) — the plan or analysis result to return. Use this only when \
+             'summary' (string) - the plan or analysis result to return. Use this only when \
              you are inside a plan session and have finished the requested analysis. \
              Common gotcha: this tool does not modify files; if implementation is needed, \
              surface the plan summary to the caller."

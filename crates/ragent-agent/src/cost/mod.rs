@@ -88,14 +88,14 @@ pub type PriceTable = HashMap<String, (f64, f64)>;
 pub fn builtin_prices() -> PriceTable {
     let mut table = PriceTable::with_capacity(16);
 
-    // Anthropic — approximate rates per 1M tokens.
+    // Anthropic - approximate rates per 1M tokens.
     table.insert("claude-sonnet-4-20250514".to_string(), (3.0, 15.0));
     table.insert("claude-sonnet-4-20250601".to_string(), (3.0, 15.0));
     table.insert("claude-opus-4-20250514".to_string(), (15.0, 75.0));
     table.insert("claude-opus-4-20250601".to_string(), (15.0, 75.0));
     table.insert("claude-haiku-4-20250514".to_string(), (0.25, 1.25));
 
-    // OpenAI — approximate rates per 1M tokens.
+    // OpenAI - approximate rates per 1M tokens.
     table.insert("gpt-4o".to_string(), (2.50, 10.0));
     table.insert("gpt-4o-mini".to_string(), (0.15, 0.60));
     table.insert("gpt-4.1".to_string(), (2.0, 8.0));
@@ -104,7 +104,7 @@ pub fn builtin_prices() -> PriceTable {
     table.insert("o4-mini".to_string(), (1.10, 4.40));
     table.insert("o3-mini".to_string(), (1.10, 4.40));
 
-    // Google Gemini — approximate rates per 1M tokens.
+    // Google Gemini - approximate rates per 1M tokens.
     table.insert("gemini-2.5-flash-preview-05-20".to_string(), (0.15, 0.60));
     table.insert("gemini-2.5-pro-preview-05-06".to_string(), (1.25, 10.0));
     table.insert("gemini-2.0-flash".to_string(), (0.10, 0.40));
@@ -112,7 +112,7 @@ pub fn builtin_prices() -> PriceTable {
     table.insert("gemini-1.5-flash".to_string(), (0.075, 0.30));
     table.insert("gemini-1.5-pro".to_string(), (1.25, 5.0));
 
-    // Ollama — local inference, no hosted cost.
+    // Ollama - local inference, no hosted cost.
     table.insert("ollama".to_string(), (0.0, 0.0));
 
     table
@@ -146,7 +146,7 @@ pub fn merged_prices(overrides: &[ragent_config::PriceEntry]) -> PriceTable {
 ///
 /// # Type parameters
 ///
-/// * `I` — any iterator yielding `UsageRecord` (e.g. `Vec`, slice, `Iterator`).
+/// * `I` - any iterator yielding `UsageRecord` (e.g. `Vec`, slice, `Iterator`).
 ///
 /// # Examples
 ///

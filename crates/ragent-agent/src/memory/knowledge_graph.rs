@@ -158,7 +158,7 @@ pub struct Relationship {
     pub target_id: i64,
     /// Relationship type.
     pub relation_type: String,
-    /// Confidence in this relationship (0.0–1.0).
+    /// Confidence in this relationship (0.0-1.0).
     pub confidence: f64,
     /// The memory ID that established this relationship.
     pub source_memory_id: Option<i64>,
@@ -166,7 +166,7 @@ pub struct Relationship {
     pub created_at: String,
 }
 
-// NOTE: intentional duplication — see DUPPLAN.md Milestone J.
+// NOTE: intentional duplication - see DUPPLAN.md Milestone J.
 // Per-type conversions; cannot be genericised.
 impl From<crate::storage::KgEntityRow> for Entity {
     /// Map a storage-row entity into the agent's [`Entity`] type.

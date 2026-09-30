@@ -1,13 +1,13 @@
-//! `team_read_messages` — Peek unread messages from the caller's mailbox.
+//! `team_read_messages` - Peek unread messages from the caller's mailbox.
 //!
 //! M4-T1: this tool uses [`Mailbox::peek_unread`] + [`Mailbox::acknowledge`]
 //! so that messages are only marked read **after** the tool successfully
 //! returns them to the model. If the tool fails (e.g. serialization error),
-//! the messages stay unread and are redelivered on the next call —
+//! the messages stay unread and are redelivered on the next call -
 //! at-least-once delivery semantics.
 //!
 //! M4-T5: the JSON metadata uses `serde_json::to_value(&m.message_type)`
-//! (snake_case, matching the on-disk format) instead of `format!("{:?}", …)`
+//! (snake_case, matching the on-disk format) instead of `format!("{:?}", ...)`
 //! (PascalCase), and includes the `to` and `read` fields so P2P messages
 //! carry recipient context.
 
@@ -147,8 +147,8 @@ impl Tool for TeamReadMessagesTool {
         // PERF-020: previously this called `mailbox.acknowledge(&m.message_id)`
         // once per message, producing N full read-modify-write file cycles for
         // N messages. Now we collect the message IDs and mark them all read in
-        // a single lock → read → mark all → write → unlock cycle via
-        // `Mailbox::mark_all_read`. A failed batch ack is non-fatal — the
+        // a single lock -> read -> mark all -> write -> unlock cycle via
+        // `Mailbox::mark_all_read`. A failed batch ack is non-fatal - the
         // affected messages stay unread and are re-peeked next time
         // (idempotent `mark_read`).
         let ids: Vec<String> = unread.iter().map(|m| m.message_id.clone()).collect();

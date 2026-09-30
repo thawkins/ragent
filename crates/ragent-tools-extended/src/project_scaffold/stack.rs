@@ -13,7 +13,7 @@
 //! [`StackOverlay::Unknown`]; the caller warns and continues with the base
 //! layout (FR-007: "warn and continue").
 //!
-//! Pure logic — no filesystem access. [`apply_stack_overlay`] mutates an
+//! Pure logic - no filesystem access. [`apply_stack_overlay`] mutates an
 //! existing [`AppLayout`] in place so the emitted file count and FR-016
 //! semantics stay identical to the base layout.
 

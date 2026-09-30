@@ -1,4 +1,4 @@
-//! `conversation_search` — Search within the current session transcript.
+//! `conversation_search` - Search within the current session transcript.
 //!
 //! Provides keyword search, turn-range retrieval, and conversation statistics
 //! for the active session.  The tool is read-only and uses the SQLite-backed
@@ -6,6 +6,7 @@
 //! `ragent_storage`.
 
 use anyhow::{Context, Result};
+use ragent_types::strutil::truncate_bytes_no_ellipsis;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
@@ -202,7 +203,7 @@ impl ConversationSearchTool {
 
         let mut output = String::new();
         output.push_str(&format!(
-            "Turns {}–{} of {} in the current session:\n\n",
+            "Turns {}-{} of {} in the current session:\n\n",
             start + 1,
             end + 1,
             messages.len()
@@ -211,12 +212,12 @@ impl ConversationSearchTool {
         for (idx, msg) in messages[start..=end].iter().enumerate() {
             let turn = start + idx + 1;
             let text = msg.text_content();
-            let preview = truncate(&text, 300);
+            let preview = truncate_bytes_no_ellipsis(&text, 300);
             output.push_str(&format!(
                 "Turn {turn} [{}] {}: {preview}{suffix}\n",
                 msg.created_at.to_rfc3339(),
                 msg.role,
-                suffix = if text.len() > 300 { "…" } else { "" }
+                suffix = if text.len() > 300 { "..." } else { "" }
             ));
         }
 
@@ -286,9 +287,9 @@ impl ConversationSearchTool {
 
 /// Format a single keyword search result for display.
 fn format_message_result(rank: usize, result: &ragent_storage::MessageSearchResult) -> String {
-    let preview = truncate(&result.content, 300);
+    let preview = truncate_bytes_no_ellipsis(&result.content, 300);
     let suffix = if result.content.len() > 300 {
-        "…"
+        "..."
     } else {
         ""
     };
@@ -316,26 +317,14 @@ fn append_context(
     output.push_str("   Context:\n");
     for (offset, msg) in messages[start..=end].iter().enumerate() {
         let idx = start + offset;
-        let marker = if idx == pos { "▶" } else { " " };
+        let marker = if idx == pos { ">" } else { " " };
         let text = msg.text_content();
-        let preview = truncate(&text, 200);
-        let suffix = if text.len() > 200 { "…" } else { "" };
+        let preview = truncate_bytes_no_ellipsis(&text, 200);
+        let suffix = if text.len() > 200 { "..." } else { "" };
         output.push_str(&format!(
             "   {marker} turn {} [{}]: {preview}{suffix}\n",
             idx + 1,
             msg.role
         ));
     }
-}
-
-/// Truncate a string to `max` bytes without breaking UTF-8 boundaries.
-fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
 }
