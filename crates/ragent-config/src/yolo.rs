@@ -27,10 +27,19 @@ pub fn set_enabled(enabled: bool) {
 /// Persist the requested YOLO state to the config file and update the runtime
 /// flag.
 ///
+/// YOLO is a privileged, user-only toggle: the value always lands in the
+/// **user-global** config (`~/.config/ragent/ragent.json`), never the
+/// project-local `.ragent/ragent.json`. Project config is untrusted repository
+/// content whose `yolo` key is stripped by
+/// [`Config::merge_project`](crate::config::Config::merge_project)
+/// (SECTASKS T-011), so a project-file write could never round-trip on the next
+/// load. A repo therefore cannot turn YOLO on for a reviewer, while a user's own
+/// `/yolo` toggle still persists across restarts.
+///
 /// Any error during persistence is returned so callers can decide how to
 /// report it.
 pub fn persist_yolo(enabled: bool) -> anyhow::Result<()> {
-    YOLO_MODE.persist(enabled)
+    YOLO_MODE.persist_to_global(enabled)
 }
 
 /// Load the current config and update the runtime YOLO flag from its value.
@@ -44,9 +53,10 @@ pub fn sync_from_config_value(enabled: bool) {
     YOLO_MODE.set_enabled(enabled);
 }
 
-/// Toggle YOLO mode, persist the new state, and return it.
+/// Toggle YOLO mode, persist the new state to the user-global config, and
+/// return it.
 ///
 /// This is the recommended path for UI toggles (`Alt+Y`, `/yolo`).
 pub fn toggle_persist() -> anyhow::Result<bool> {
-    YOLO_MODE.toggle_persist()
+    YOLO_MODE.toggle_persist_global()
 }

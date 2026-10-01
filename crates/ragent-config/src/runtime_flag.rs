@@ -57,6 +57,37 @@ impl RuntimeFlag {
         Ok(())
     }
 
+    /// Persist the requested state to the **user-global** config file and update
+    /// the runtime flag.
+    ///
+    /// Unlike [`RuntimeFlag::persist`], which writes back to whichever source
+    /// file was loaded (project preferred over global), this always targets the
+    /// global config (`~/.config/ragent/ragent.json`). It exists for
+    /// privileged, user-only toggles such as YOLO mode: the project-local
+    /// config is untrusted repository content whose `yolo` value is stripped by
+    /// [`Config::merge_project`](crate::config::Config::merge_project)
+    /// (SECTASKS T-011), so a project-file write would never round-trip on the
+    /// next load.
+    ///
+    /// If the config file cannot be loaded (e.g. it is corrupt), the error is
+    /// propagated rather than silently overwriting the file with defaults.
+    pub fn persist_to_global(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut config = crate::config::Config::load()
+            .with_context(|| format!("failed to load config before persisting {}", self.name))?;
+        self.apply_to_config(&mut config, enabled);
+        config.save(false)?;
+        self.set_enabled(enabled);
+        Ok(())
+    }
+
+    /// Toggle the flag and persist the new state to the **user-global** config
+    /// file (see [`RuntimeFlag::persist_to_global`]); returns the new state.
+    pub fn toggle_persist_global(&self) -> anyhow::Result<bool> {
+        let new_state = !self.is_enabled();
+        self.persist_to_global(new_state)?;
+        Ok(new_state)
+    }
+
     /// Load the current config and update the runtime flag from its value,
     /// falling back to `default` on load failure.
     pub fn sync_from_config(&self, default: bool) {

@@ -1,0 +1,16 @@
+{
+  "id": "echo",
+  "name": "Echo",
+  "description": "A healthy single-server connector whose echo tool returns its input",
+  "category": "productivity",
+  "tags": ["echo", "fixture", "stdio"],
+  "auth": "none",
+  "servers": [
+    {
+      "id": "echo",
+      "transport": "stdio",
+      "command": "mcp-server-filesystem",
+      "args": ["--echo"]
+    }
+  ]
+}

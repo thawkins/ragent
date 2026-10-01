@@ -59,6 +59,7 @@ the project root `README.md` and the **Tutorial** in
    - 7.36 [`activity_log`](#736-activity_log)
     - 7.37 [`plugins`](#737-plugins)
     - 7.38 [`input_queue_capacity`](#738-input_queue_capacity)
+    - 7.39 [`connectors`](#739-connectors)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -189,6 +190,7 @@ different merge strategies:
 | `telemetry` | If overlay enables telemetry, the whole overlay `otel` block replaces the base. Otherwise maps (`resource_attributes`, `metrics`) are unioned. |
 | `experimental` | `open_telemetry` and `parallel_tool_calls`: OR semantics. Other fields: overlay defaults. |
 | `plugins` | Overlay wins wholesale when the `plugins` section is present, so a project-level block is not discarded by an absent user-global block. |
+| `connectors` | Overlay wins wholesale when the `connectors` section is present, so a project-level block is not discarded by an absent user-global block. |
 | `input_queue_capacity` | Overlay wins when explicitly set, so a project-level override is not discarded by an absent user-global value. |
 
 The `config_paths` field records every file that contributed to the final
@@ -1084,7 +1086,10 @@ When enabled, the following safety checks are skipped:
 and its inputs completely, or for local development/debugging.
 
 The `Alt+Y` keybinding and `/yolo` slash command toggle this at runtime and
-persist the change. See [`docs/howtos/permissions.md`](permissions.md).
+persist the change to the **user-global** config
+(`~/.config/ragent/ragent.json`); a project-local `yolo` value is ignored
+(untrusted repository content, SECTASKS T-011). See
+[`docs/howtos/permissions.md`](permissions.md).
 
 ---
 
@@ -1623,6 +1628,46 @@ absent user-global value. The per-run queue is in memory only and is never
 persisted. Manage the queue with the `Alt+Q` menu or the `/queue` slash command
 (see `docs/howtos/slashcommands/queue.md` and `TUI-QUICKSTART.md` §4).
 
+### 7.39 `connectors`
+
+Connector subsystem configuration (spec `connectors`). Controls the master
+switch, the connector store location, the catalogue endpoints and fetch budgets,
+and the non-secret credential-name mapping.
+
+```jsonc
+{
+  "connectors": {
+    "enabled": true,                       // master switch; default true
+    "store_dir": null,                     // optional override of the connector store path
+    "stores": {                            // catalogue endpoints
+      "community": { "url": "https://example.org/connectors/index.json" },
+      "timeout_ms": 10000,
+      "max_index_bytes": 2097152,
+      "cache_ttl_secs": 3600
+    },
+    "credentials": {                       // non-secret credential-name mapping
+      "google-drive": { "token": "GDRIVE_TOKEN" }
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `enabled` | `bool` | `true` | Master switch. When `false`, the connector subsystem performs no discovery, no catalogue fetch, and no connection, and `/connectors` subcommands other than `help` report that the system is disabled. |
+| `store_dir` | `string?` | `null` | Optional override of the connector store directory. When `null`, the store is discovered at `.ragent/connectors/` (project), falling back to `~/.config/ragent/connectors/` (user-global). |
+| `stores` | `object?` | `null` | Catalogue endpoints and shared fetch budgets. When `null`, the compiled default endpoints and budgets apply. |
+| `stores.<name>` | `object` | `{}` | One named catalogue endpoint, for example `claude` or `community`. |
+| `stores.<name>.url` | `string?` | `null` | Catalogue-index `https://` URL. A `null`, empty, or whitespace-only value falls back to the compiled default endpoint for that catalogue; a non-`https` or host-less value is refused when the catalogue is fetched. |
+| `stores.timeout_ms` | `u64` | `10000` | Per-fetch wall-clock budget in milliseconds, shared by every catalogue. |
+| `stores.max_index_bytes` | `u64` | `2097152` | Maximum accepted catalogue-index size in bytes; a larger index aborts the fetch, shared by every catalogue. |
+| `stores.cache_ttl_secs` | `u64` | `3600` | Time-to-live for a cached catalogue in seconds; `0` disables the index cache. |
+| `credentials` | `map<string, object>` | `{}` | Non-secret credential-name mapping keyed by connector id. Each value holds the **name** of a credential in the encrypted credential store, never the secret value. |
+
+The section merges with overlay-wins precedence (project config overrides
+user-global). Manage connectors with `/connectors list|search|add|remove|enable|disable|connect|disconnect|auth|test|stores|help`
+in the TUI or `ragent connectors <sub>` from the CLI.
+
 ---
 
 ## 8. Full Example File
@@ -1905,6 +1950,17 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "max_memory_mb": 64,
     "store_dir": null,
     "permissions": {}
+  },
+
+  "connectors": {
+    "enabled": true,
+    "store_dir": null,
+    "stores": {
+      "timeout_ms": 10000,
+      "max_index_bytes": 2097152,
+      "cache_ttl_secs": 3600
+    },
+    "credentials": {}
   },
 
   "input_queue_capacity": 32

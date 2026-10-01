@@ -2,7 +2,7 @@
 //!
 //! Provides a ratatui-based interactive TUI that displays agent messages,
 //! tool call status, permission dialogs, and a text input prompt. The TUI
-//! reacts to real-time events from the ragent [`EventBus`](ragent_agent::event::EventBus).
+//! reacts to real-time events from the ragent [`EventBus`].
 
 pub mod app;
 pub mod clipboard;
@@ -871,6 +871,12 @@ pub async fn run_tui(
 
             // Surface the `/plugins stores --check` availability probe.
             app.poll_plugin_store_probe_result();
+
+            // Apply a completed off-loop connector-catalogue fetch.
+            app.poll_connector_catalogue_result();
+
+            // Apply a completed off-loop connector-catalogue install.
+            app.poll_connector_catalogue_install_result();
 
             // Check for completed off-thread codeindex graph builds / reindexes.
             app.poll_codeindex_bg_result();

@@ -253,6 +253,225 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         app.plugin_store_area = Rect::default();
     }
+    // Connector-catalogue browse panel (`/connectors claude`) - drawn last so it
+    // sits above every other overlay while it owns the keyboard.
+    if app.connector_store.is_some() {
+        render_connector_catalogue_panel(frame, app);
+    } else {
+        app.connector_store_area = Rect::default();
+    }
+}
+
+/// Render the connector-catalogue browse panel (`/connectors claude`).
+///
+/// Modelled on [`render_plugin_store_panel`]: a bordered, titled modal overlay
+/// presenting a title line with the catalogue name, the current search query,
+/// the active category, and the visible/total result count; a scrollable result
+/// list; and a footer of key hints. Only ASCII glyphs are used in the body.
+///
+/// The highlighted result row carries the block cursor: a full-row background
+/// applied through [`ratatui::widgets::List::highlight_style`]. A row whose
+/// connector id is in the derived installed set is painted in the installed
+/// colour and carries an `[installed]` marker, independent of the cursor.
+///
+/// The body renders an explicit state line rather than a blank list when there
+/// is nothing to show: a loading row while the fetch is in flight, an inline
+/// error row naming the cause when it failed, and a `no matching connectors`
+/// line when the catalogue, the query, or the category yields no results.
+///
+/// The panel area is recomputed from `Frame::area` every frame, so a terminal
+/// resize re-derives a centred, fully visible modal; it is stored back in
+/// [`App::connector_store_area`] for tests and hit-testing.
+fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    let Some(browser) = app.connector_store.as_ref() else {
+        return;
+    };
+
+    let screen = frame.area();
+    let width = screen
+        .width
+        .saturating_sub(4)
+        .clamp(30, 100)
+        .min(screen.width);
+    let height = screen
+        .height
+        .saturating_sub(2)
+        .clamp(8, 24)
+        .min(screen.height);
+    let area = centered_rect_fixed(width, height, screen);
+    frame.render_widget(Clear, area);
+    app.connector_store_area = area;
+
+    let title = connector_catalogue_title(browser);
+    let visible = browser.filtered.len();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(PLUGIN_STORE_ASCII_BORDER)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Magenta));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+    let list_area = chunks[0];
+    let footer_area = chunks[1];
+
+    let cursor_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
+    let normal_style = Style::default().fg(Color::White);
+    let installed_style = Style::default().fg(Color::Green);
+    let dim_style = Style::default().fg(Color::DarkGray);
+
+    match connector_catalogue_body(browser) {
+        PluginStoreBody::Rows => {
+            let items: Vec<ListItem> = browser
+                .filtered
+                .iter()
+                .map(|&index| {
+                    let entry = &browser.all[index];
+                    let id = entry.id.as_str();
+                    let marker = if browser.is_installed(id) {
+                        " [installed]"
+                    } else {
+                        ""
+                    };
+                    let style = if browser.is_installed(id) {
+                        installed_style
+                    } else {
+                        normal_style
+                    };
+                    let row = format!(
+                        "> {:<22} {:<12} {}{}",
+                        truncate_bytes_no_ellipsis(id, 22),
+                        truncate_bytes_no_ellipsis(&entry.category, 12),
+                        truncate_bytes_no_ellipsis(
+                            &entry.description,
+                            PLUGIN_STORE_DESC_MAX as usize
+                        ),
+                        marker,
+                    );
+                    ListItem::new(Line::from(Span::styled(row, style)))
+                })
+                .collect();
+            let selected = browser.cursor.min(visible.saturating_sub(1));
+            let list = List::new(items)
+                .highlight_style(cursor_style)
+                .highlight_symbol("");
+            let mut state = ListState::default();
+            state.select(Some(selected));
+            frame.render_stateful_widget(list, list_area, &mut state);
+        }
+        PluginStoreBody::Line(text, style) => {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(text, style)))
+                    .block(Block::default())
+                    .style(Style::default()),
+                list_area,
+            );
+        }
+    }
+
+    let footer = connector_catalogue_footer(browser, dim_style, installed_style);
+    frame.render_widget(
+        Paragraph::new(footer)
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true }),
+        footer_area,
+    );
+}
+
+/// The panel title line for the connector-catalogue browser.
+///
+/// Names the catalogue, the live search field, the active category, the
+/// visible/total counts, and - when the parser skipped any malformed entries -
+/// the skipped count, so a partial result set is visible at a glance rather than
+/// silently short. ASCII only.
+fn connector_catalogue_title(browser: &ragent_connectors::CatalogueBrowser) -> String {
+    let total = browser.all.len();
+    let visible = browser.filtered.len();
+    let mut title = format!(
+        " Claude Connectors -- search: {} -- {} of {} -- category {}",
+        browser.query,
+        visible,
+        total,
+        browser.selected_category_label(),
+    );
+    if browser.skipped > 0 {
+        title.push_str(&format!(" -- {} skipped", browser.skipped));
+    }
+    title.push(' ');
+    title
+}
+
+/// Decide what the connector-catalogue panel body should show.
+fn connector_catalogue_body(browser: &ragent_connectors::CatalogueBrowser) -> PluginStoreBody {
+    use crate::app::ConnectorBrowseStatus;
+
+    match &browser.status {
+        ConnectorBrowseStatus::Loading => PluginStoreBody::Line(
+            "loading connector catalogue...".to_string(),
+            Style::default().fg(Color::Cyan),
+        ),
+        ConnectorBrowseStatus::Failed(reason) => PluginStoreBody::Line(
+            format!("catalogue failed: {reason}"),
+            Style::default().fg(Color::Red),
+        ),
+        ConnectorBrowseStatus::Empty | ConnectorBrowseStatus::Ready => {
+            if browser.has_results() {
+                PluginStoreBody::Rows
+            } else {
+                PluginStoreBody::Line(
+                    connector_catalogue_empty_line(browser),
+                    Style::default().fg(Color::DarkGray),
+                )
+            }
+        }
+    }
+}
+
+/// The panel's empty-state line: the no-entries or no-match text, plus the
+/// malformed-entry count when the parser skipped any.
+fn connector_catalogue_empty_line(browser: &ragent_connectors::CatalogueBrowser) -> String {
+    let skipped = browser.skipped;
+    if browser.all.is_empty() {
+        if skipped == 0 {
+            "no connectors in this catalogue".to_string()
+        } else {
+            format!("no connectors in this catalogue ({skipped} malformed entries skipped)")
+        }
+    } else if skipped == 0 {
+        "no matching connectors".to_string()
+    } else {
+        format!("no matching connectors ({skipped} malformed entries skipped)")
+    }
+}
+
+/// The footer line: the most recent install notice when one is present,
+/// otherwise the key-hint line.
+fn connector_catalogue_footer(
+    browser: &ragent_connectors::CatalogueBrowser,
+    dim_style: Style,
+    installed_style: Style,
+) -> Line<'static> {
+    if let Some(notice) = browser.last_install.as_deref() {
+        return Line::from(Span::styled(notice.to_string(), installed_style));
+    }
+    Line::from(Span::styled(
+        "Up/Down move  Enter install  Esc close".to_string(),
+        dim_style,
+    ))
 }
 
 /// Render the transient run-complete banner as a centered one-line popup
@@ -5634,7 +5853,7 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
     let bg = Color::Rgb(30, 30, 40);
     let mut spans: Vec<Span<'_>> = Vec::new();
     spans.push(Span::styled(
-        " [people] ",
+        " [team] ",
         Style::default().fg(Color::Blue).bg(bg),
     ));
 
@@ -5642,15 +5861,15 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
         let is_focused = app.focused_teammate.as_ref() == Some(&member.agent_id);
 
         let (status_icon, status_color) = match member.status {
-            MemberStatus::Working => (">", Color::Cyan),
-            MemberStatus::Idle => ("*", Color::Green),
-            MemberStatus::Spawning => ("o", Color::Yellow),
-            MemberStatus::Blocked => ("*", Color::DarkGray),
-            MemberStatus::PlanPending => ("o", Color::Magenta),
+            MemberStatus::Working => ("▶", Color::Cyan),
+            MemberStatus::Idle => ("●", Color::Green),
+            MemberStatus::Spawning => ("◌", Color::Yellow),
+            MemberStatus::Blocked => ("◈", Color::DarkGray),
+            MemberStatus::PlanPending => ("◎", Color::Magenta),
             MemberStatus::Suspended => ("[pause]", Color::DarkGray),
-            MemberStatus::ShuttingDown => ("o", Color::Yellow),
-            MemberStatus::Stopped => ("o", Color::DarkGray),
-            MemberStatus::Failed => ("[x]", Color::Red),
+            MemberStatus::ShuttingDown => ("◌", Color::Yellow),
+            MemberStatus::Stopped => ("○", Color::DarkGray),
+            MemberStatus::Failed => ("✗", Color::Red),
         };
 
         let pill_bg = if is_focused {
@@ -5663,7 +5882,7 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             Color::Gray
         };
-        let border_char = if is_focused { ">" } else { " " };
+        let border_char = if is_focused { "▸" } else { " " };
 
         spans.push(Span::styled(
             format!("{border_char}{status_icon} "),
@@ -6033,13 +6252,13 @@ fn messages_to_lines(
                                 .unwrap_or_default();
                             if summary.is_empty() {
                                 lines.push(Line::from(Span::styled(
-                                    "  └ [ok] Task complete",
+                                    "  \\- Task complete",
                                     Style::default().fg(Color::Green),
                                 )));
                             } else {
                                 for line in summary.lines() {
                                     lines.push(Line::from(Span::styled(
-                                        format!("  └ [ok] {line}"),
+                                        format!("  \\- {line}"),
                                         Style::default().fg(Color::Green),
                                     )));
                                 }

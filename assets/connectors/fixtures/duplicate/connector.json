@@ -1,0 +1,16 @@
+{
+  "id": "echo",
+  "name": "Duplicate Echo",
+  "description": "A second connector whose manifest reuses the id echo, to exercise the id-collision refusal",
+  "category": "data",
+  "tags": ["collision", "fixture"],
+  "auth": "none",
+  "servers": [
+    {
+      "id": "main",
+      "transport": "stdio",
+      "command": "mcp-server-filesystem",
+      "args": ["--duplicate"]
+    }
+  ]
+}

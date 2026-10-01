@@ -14,8 +14,9 @@ use ratatui::{
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 use ragent_types::sanitize_terminal::sanitize_terminal;
 
-/// Sentinel prefix used to identify agent-notice chat bubbles (ANTIPAT M1:
-/// ASCII marker `[notice]` plus the plain-text label).
+/// Sentinel prefix used to identify agent-notice chat bubbles. The event
+/// handler emits the bubble text as `Agent Notice\n<summary>` (ANTIPAT M1:
+/// the emoji prefix was replaced with the plain-text label).
 const AGENT_NOTICE_PREFIX: &str = "Agent Notice";
 
 /// Static run of spaces used to indent continuation lines of a text part.
@@ -26,16 +27,8 @@ const AGENT_NOTICE_PREFIX: &str = "Agent Notice";
 pub(crate) const INDENT_SPACES: &str = "                ";
 
 /// Returns true if the text is an agent-notice bubble.
-///
-/// The bubble text is emitted by the event handler as
-/// `[notice] Agent Notice\n...`; strip the leading `[notice]` tag and match the
-/// plain-text label at the start of any line.
 pub(crate) fn is_agent_notice(text: &str) -> bool {
-    text.lines().any(|line| {
-        let line = line.trim_start();
-        let line = line.strip_prefix("[notice]").map_or(line, str::trim_start);
-        line.starts_with(AGENT_NOTICE_PREFIX)
-    })
+    text.trim_start().starts_with(AGENT_NOTICE_PREFIX)
 }
 
 /// Parse a `[red]...[/red]` span marker into a red-styled [`Line`], or `None`
@@ -213,7 +206,7 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 /// Tool categories with their associated emoji icons:
 /// - 📄 File Operations: read, write, create, edit, patch, rm, multiedit
 /// - 📁 Directory Operations: list, make_directory/mkdir
-/// - [i]️  File Info: file_info
+/// - ℹ️  File Info: file_info
 /// - 🔍 Search Operations: search, grep, glob
 /// - ⚡ Execution: bash, calculator
 /// - 🌐 Network: webfetch, websearch, http_request
@@ -386,7 +379,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
 
         // ═══════════════════════════════════════════════════════════════════
-        // [i]️ FILE INFO
+        // ℹ️ FILE INFO
         // ═══════════════════════════════════════════════════════════════════
         "file_info" => {
             let path = get_relative_path(&["path"]);
@@ -706,7 +699,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("📋 filter: {}", status)
         }
         // ═══════════════════════════════════════════════════════════════════
-        // SUB-AGENT
+        // 🤖 SUB-AGENT
         // ═══════════════════════════════════════════════════════════════════
         "new_agent" => {
             let agent = input.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
@@ -1945,7 +1938,7 @@ pub fn tool_result_summary(
         }
         "make_directory" | "mkdir" => Some("directory created".to_string()),
         // ═══════════════════════════════════════════════════════════════════
-        // [i]️ FILE INFO
+        // ℹ️ FILE INFO
         // ═══════════════════════════════════════════════════════════════════
         "file_info" => {
             let kind = out.get("kind").and_then(|v| v.as_str()).unwrap_or("file");

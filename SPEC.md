@@ -98,16 +98,66 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.109). The core architecture, tool system,
+Ragent is in **beta** (v1.0.122). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
-and release packaging are
+plugin system, connector system (§19C), and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.107 → v1.0.109, incl. uncommitted work):**
+**Current uncommitted work (on top of v1.0.122):**
 
-- **Uncommitted (on top of v1.0.109)** — TUI paint-safety fix: `should_render`
+- **Connector system (spec `connectors`, §19C)** — a new `ragent-connectors`
+  crate (the workspace advances from 16 to 17 crates) adds a
+  Claude-connector-equivalent integration catalogue over MCP: a connector is a
+  named integration (Google Drive, Slack, GitHub, Git, Postgres, Puppeteer, and
+  the wider community catalogue) carrying a category, an auth shape, and one or
+  more MCP servers, resolved onto the existing `McpClient` and the durable
+  `mcp_state.json` enable ledger. It is driven by the twelve-subcommand
+  `/connectors` family (with an interactive off-the-event-loop catalogue browser
+  `/connectors claude`, an isolated `test` harness, and endpoint-provenance
+  reporting via `stores [--check]`), a `ragent connectors` CLI parity surface,
+  and a `connectors` config block (master switch, store dir, catalogue endpoints
+  and fetch budgets, credential-name mapping). Spec `connectors` FR-001..FR-041
+  / NFR-001..003, plan T-001..T-021, plus `assets/connectors/fixtures/` and an
+  acceptance walk.
+- **ANTIPAT M1 ASCII sweep (TUI)** — the message-window tool-category icons and
+  the status-bar service icons are now plain ASCII marker prefixes (`[file]`,
+  `[dir]`, `[search]`, `[exec]`, `[git]`, `[team]`, ...) and short text tags
+  (`CDX:`, `LOG:`, `AUTO:`, `EDIT:`, `TELE:`, `YOLO:`, `GCF:`, `BUSY: `)
+  instead of emoji; `shorten_middle` / `truncate_with_ellipsis` budget the
+  single-character ellipsis glyph (U+2026).
+- **`/yolo` persists to the user-global config only** — the toggle always writes
+  `~/.config/ragent/ragent.json`, never the project-local `.ragent/ragent.json`
+  (SECTASKS T-011).
+- **Spec plan parser** — dependency-range expansion accepts `T-001..T-014` and
+  `T-001...T-014` in addition to the existing dash and `through` spellings.
+- **Guards** — new `scripts/check-connector-endpoint-literal.sh` (FR-038,
+  NFR-001) wired into `pre-flight.sh` and CI; the retired
+  `scripts/check-non-ascii.sh` guard removed.
+
+**Current Release Highlights (v1.0.107 → v1.0.122):**
+
+- **v1.0.122 — Security and anti-pattern remediation sweep.** The `ANTIPAT.md`
+  milestones M0 and M2-M7 plus the `SECTASKS.md` remediation programme through
+  MS-05: the two shipping defects and highest-severity containment holes (M0),
+  standards conformance / shared-helper de-duplication / silent-error suppression
+  / vocabulary unification / structural debt / dependency hygiene (M2-M7 - major
+  bumps `rmcp` 3.5, `rusqlite` 0.40, `ratatui` 0.30, ..., and the retired
+  `ragent-team` shim crate, 17 -> 16 crates), and the shared `ragent_types::guard`
+  module with a single `ragent_types::sanitize` redaction chokepoint and four
+  `security-guards` CI gates (MS-05). Only `ANTIPAT.md` M1 (ASCII conformance)
+  remained open, now addressed by the uncommitted work above.
+
+- **Earlier highlights (v1.0.107 → v1.0.121)** — `/simplify` phases, config rules
+  and fixes, `/spec govcreate`, research output limits and engine exclusion,
+  `--url-cloak` source defanging, the message input queue, plugin component
+  bridging (skills/MCP/commands/agents/hooks), durable global MCP
+  enable/disable state, sessionful Streamable-HTTP MCP support, and the
+  introspection tools `tool_info` / `commands_info` (169 -> 171 tools in
+  v1.0.121).
+
+- **Uncommitted (older, on top of v1.0.109)** — TUI paint-safety fix: `should_render`
   (`crates/ragent-tui/src/lib.rs`) now also forces the safety-interval paint
   when a message-cache group is still pending (`message_cache_dirty_from <
   messages.len()`), closing the PERF-042 throttle-tail stall where a tool-call
@@ -483,6 +533,7 @@ graph TB
 |-------|----------------|---------------|
 | `ragent-types` | Shared IDs, events, messages, errors, sanitisation | ~2,700 |
 | `ragent-config` | Configuration loading, defaults, permission rules | ~1,850 |
+| `ragent-connectors` | Connector descriptors, store/ledger, catalogue providers, MCP bridge, `/connectors` surface | ~16,400 |
 | `ragent-storage` | SQLite persistence, snapshots, encrypted credentials | ~2,800 |
 | `ragent-llm` | Provider clients and model/provider registry | ~6,700 |
 | `ragent-tools-core` | File, shell, search, and utility tools | ~4,100 |
@@ -516,6 +567,7 @@ graph TD
     RS[ragent-research]
     B[ragent-bench]
     PL[ragent-plugins]
+    CN[ragent-connectors]
 
     T --> D
     T --> S
@@ -526,9 +578,11 @@ graph TD
     T --> CI
     T --> SP
     T --> RS
+    T --> CN
     D --> L
     D --> A
     D --> TU
+    D --> CN
     S --> A
     S --> TU
     L --> A
@@ -546,6 +600,7 @@ graph TD
     B --> SV
     PL --> A
     PL --> TU
+    CN --> TU
 ```
 
 **Figure 3:** Crate Dependency Graph — Inter-crate dependency relationships
@@ -1508,6 +1563,18 @@ The format is compatible with OpenCode's `opencode.json`.
     "timeout_secs": 120,
     "initial_response_timeout_secs": 300
   },
+  // Connector subsystem (spec `connectors`). `enabled: false` makes the whole
+  // subsystem inert (no discovery, catalogue fetch, or connection).
+  "connectors": {
+    "enabled": true,
+    "store_dir": null,
+    "stores": {
+      "timeout_ms": 10000,
+      "max_index_bytes": 2097152,
+      "cache_ttl_secs": 3600
+    },
+    "credentials": {}
+  },
   "dirs": {
     "allowlist": ["src/**", "tests/**"],
     "denylist": ["secrets/**", ".env"],
@@ -1684,6 +1751,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
 | `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex` and `/plugins claude` browse each store's official marketplace (its own document shape is normalised by that store's `StoreProvider`); `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
+| `/connectors list\|search\|claude\|add\|remove\|enable\|disable\|connect\|disconnect\|auth\|test\|stores\|help` | Manage MCP-backed connectors (named integrations carrying a category, an auth shape, and one or more MCP servers); `/connectors claude` opens the interactive catalogue browser; `/connectors test` runs an isolated connect-and-invoke harness; `/connectors stores [--check]` reports each catalogue endpoint's provenance; `/connectors add` accepts a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL; CLI parity via `ragent connectors` (spec `connectors`, section 19C) |
 | `/queue list\|clear\|next\|help` | Inspect the message input queue (messages and slash commands submitted while the agent executes; spec `inputqueue` FR-013/FR-017 amendment) |
 | `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
 | `/config show` | Show resolved configuration |
@@ -3336,6 +3404,151 @@ Registered under the `skill:manage` permission category.
 
 ---
 
+## 19C. Connector System (Claude-Connector-Equivalent Integrations over MCP)
+
+Spec: `specs/connectors/` (`SPEC.md` FR-001..FR-041, NFR-001..003; `PLAN.md`
+T-001..T-021; `TESTPLAN.md`). Crate: `crates/ragent-connectors` (17th workspace
+crate).
+
+A **connector** is a named, user-facing integration (Google Drive, Slack,
+GitHub, Git, Postgres, Puppeteer, and the wider community catalogue) that reaches
+an external system through the **Model Context Protocol (MCP)**. A connector is
+a catalogue entry carrying a display name, a category, an authentication
+requirement, and one or more MCP servers; the MCP server remains the transport
+ragent already speaks (`McpClient`, §19). The connector system is therefore a
+**catalogue and management layer** over machinery that already exists (the MCP
+client, the durable `mcp_state.json` enable ledger, and the encrypted credential
+store), adding the connector abstraction and one coherent surface.
+
+### 19C.1 Descriptor model
+
+A connector is a normalised `ConnectorDescriptor` holding its id, display name,
+category, one or more server definitions, an authentication shape, and an
+optional credential *name*. Validation (FR-002, FR-025) rejects a descriptor
+that cannot be expressed as one or more MCP servers (an unexpressible transport
+such as `grpc` is recorded with the label `server transport` rather than treated
+as fatal). A malformed catalogue entry is skipped and counted, never fatal
+(FR-031).
+
+### 19C.2 Store and enable ledger
+
+The connector store is discovered under `.ragent/connectors/` (project),
+falling back to `~/.config/ragent/connectors/` (user-global) (FR-001), with an
+optional `connectors.store_dir` override. A connector install is
+**path-traversal-safe**: an archive member that escapes the store root (for
+example `../../escape.json`) is refused (FR-029), and a non-`https` package URL
+is refused (FR-028). A freshly installed connector is recorded **disabled** and
+is enabled explicitly (FR-011). The durable enable state is the **existing**
+`ragent_agent::mcp::enable_state` ledger (`mcp_state.json`), so a connector
+disabled once stays disabled everywhere and the connector crate adds no second
+enable file (FR-018). `remove` is refused while the connector is enabled
+(FR-030), and a duplicate connector id is refused (FR-027).
+
+### 19C.3 Catalogue, providers, and the default endpoint
+
+A catalogue index is fetched over `https` under a byte cap, a per-fetch
+wall-clock timeout, and a TTL cache (FR-024, FR-031). Each catalogue is
+normalised through a `ConnectorProvider` shaped like
+`ragent_plugins::store_provider::StoreProvider` (tolerant per-entry skip with a
+`skipped` counter), so the browser domain stays catalogue-agnostic. A compiled
+default Claude connector-catalogue endpoint constant and a pure, offline
+provenance resolver (FR-034..FR-038, NFR-001..003) mirror the plugin store's
+`DEFAULT_CLAUDE_STORE_URL` / `effective_endpoint_with_source` discipline; the
+literal is declared exactly once, enforced by
+`scripts/check-connector-endpoint-literal.sh` (FR-038, NFR-001).
+`/connectors stores [--check]` reports each endpoint with its provenance
+(`default` or `config`) and, with `--check`, probes it (FR-036).
+
+### 19C.4 Bridge to the MCP client
+
+The bridge resolves every enabled connector's server definitions into
+`(bridged_server_id, McpServerConfig)` pairs (FR-003). Bridged server ids are
+`<connector-id>.<server>`, the same collision-avoidance shape the plugin MCP
+bridge uses (spec `plugins` FR-030); a collision is refused (FR-033). The
+session feeds those configs to the existing `McpClient`, so no new transport is
+written: every connector resolves to stdio, SSE, or HTTP exactly as a configured
+MCP server does, and its tools surface under the normal
+`mcp_<sanitized-server>_<tool>` names (FR-020). A bridged server that fails to
+connect or returns a tool error is contained and named (FR-016); a disabled
+connector starts nothing and is invisible to the model (FR-018).
+
+### 19C.5 Authentication
+
+A connector's secrets (tokens, client secrets, refresh tokens) live in the
+existing **encrypted credential store**; the connector manifest stores only the
+credential *name*, never the value (FR-005). `/connectors auth <id>` reports a
+connector's auth state and lets a token be supplied (FR-014); a connector that
+needs authentication and has no valid credential reports `needs auth` and its
+servers are refused until it is satisfied (FR-022, FR-023, FR-032), with no
+retry loop on an auth failure. The `connectors.credentials` config block maps a
+connector id to non-secret credential **names** for environments where the
+credential must be resolved from an environment variable.
+
+### 19C.6 The `/connectors` command family
+
+Twelve subcommands, dispatched through
+`crates/ragent-tui/src/app/connector.rs`, registered in `SLASH_COMMANDS`, and
+listed in the command catalog and the `/` autocomplete menu (seeded from the
+crate's `autocomplete_tokens` so the menu cannot drift from the usage block)
+(FR-004):
+
+| Subcommand | Purpose |
+|------------|---------|
+| `/connectors list [--verbose] [--category <name>]` | List installed connectors with state, auth state, category, and bridged server/tool counts (FR-009) |
+| `/connectors search <query> [--category <name>]` | Search the catalogue by name, category, or tag (FR-010) |
+| `/connectors claude [query] [--refresh]` | Open the interactive catalogue browser |
+| `/connectors add <id\|source> [--force]` | Install a connector (recorded disabled; FR-011) |
+| `/connectors remove <id>` | Uninstall (refused while enabled; FR-030) |
+| `/connectors enable <id>` | Enable and connect the connector's servers now (FR-012) |
+| `/connectors disable <id>` | Disable and disconnect (FR-013) |
+| `/connectors connect <id>` | Connect an enabled connector's servers without a restart (FR-019) |
+| `/connectors disconnect <id>` | Disconnect, leaving the connector enabled (FR-019) |
+| `/connectors auth <id>` | Manage the credential and report auth state (FR-014) |
+| `/connectors test <id>` | Isolated connect-and-invoke harness (FR-015, FR-016) |
+| `/connectors stores [--check]` | Report each catalogue endpoint's provenance (FR-036) |
+| `/connectors help` | Usage block (FR-017) |
+
+A bare `/connectors`, `/connectors help`, and an unrecognised subcommand all
+render the same usage block. Every report carries a `From: /connectors <sub>`
+attribution line and is ASCII-only (FR-006). The category filter (FR-039,
+FR-040, FR-041) restricts the displayed rows; `ALL` (any case) or a blank value
+clears it, and an unknown category is refused with an `[err]` row and changes no
+state.
+
+### 19C.7 Catalogue browser (`/connectors claude`)
+
+A modal overlay in `crates/ragent-tui/src/layout.rs`, modelled on the
+plugin-store panel: a title line (catalogue name, query, active category, and
+visible/total result count), a scrollable result list with the block cursor on
+the highlighted row, an `[installed]` marker and distinct colour on
+already-installed connectors, and a footer of key hints. The catalogue fetch and
+the `ENTER` install both run **off the event loop** on a blocking worker and
+deposit their result for the UI thread to drain, so the fetch never blocks the
+loop or an agent turn. While open the panel owns the keyboard (`Up`/`Down` move
+the cursor, `ENTER` installs, `Backspace`/`Esc` edit the query, and `Esc` on an
+empty query dismisses the panel).
+
+### 19C.8 Configuration
+
+The `connectors` block in `ragent.json` (§5.2) controls the master switch
+(`connectors.enabled`, default `true`), the store directory override, the
+catalogue endpoints and shared fetch budgets (`timeout_ms`, `max_index_bytes`,
+`cache_ttl_secs`), and the non-secret credential-name mapping. The section
+merges overlay-wins (project over user-global) (FR-007, FR-021, FR-024). With
+`connectors.enabled: false` the subsystem performs no discovery, no catalogue
+fetch, and no connection, and every subcommand other than `help` reports that it
+is disabled (FR-021).
+
+### 19C.9 CLI parity
+
+The same operations are available from a shell via the `ragent connectors <sub>`
+CLI parity surface (`src/connectors.rs`), mirroring `src/plugins.rs`: the
+session-free subcommands, the management subcommands (over an ephemeral
+lifecycle session), and the `test` harness. The report is re-spelled for the CLI
+surface (`From: /connectors X` -> `ragent connectors X`).
+
+---
+
 # Part VII: Operations & Reference
 
 ---
@@ -3400,6 +3613,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| Uncommitted (post-v1.0.122) | 2026-09-30 | Connector system (spec `connectors`, §19C): a new `ragent-connectors` crate (17th workspace crate) adds a Claude-connector-equivalent integration catalogue over MCP - a connector is a named integration carrying a category, an auth shape, and one or more MCP servers, resolved onto the existing `McpClient` and the durable `mcp_state.json` enable ledger; driven by the twelve-subcommand `/connectors` family (interactive off-the-event-loop `/connectors claude` browser, isolated `test` harness, `stores [--check]` provenance), a `ragent connectors` CLI parity surface, and a `connectors` config block (master switch, store dir, catalogue endpoints and fetch budgets, credential-name mapping). Fixtures under `assets/connectors/fixtures/` and an acceptance walk. Also: ANTIPAT M1 ASCII sweep (TUI tool-category and status-bar emoji replaced with ASCII marker prefixes; `shorten_middle`/`truncate_with_ellipsis` use the U+2026 glyph); `/yolo` persists to the user-global config only; spec plan parser accepts `T-001..T-014` dependency ranges; new `check-connector-endpoint-literal.sh` guard wired into CI and `pre-flight.sh`, retired `check-non-ascii.sh`. |
 | v1.0.122 | 2026-09-30 | Security and anti-pattern remediation sweep, folding in the staged working tree on top of `6cf0b60f` (MS-04). `ANTIPAT.md` M0 (the two shipping defects - crash-marker ordering and search-retry shift overflow - plus the highest-severity containment holes) and M2-M7 complete: `ragent-team` shim crate deleted (17 -> 16 workspace crates), major dependency bumps (`rmcp` 3.5, `rusqlite` 0.40, `ratatui` 0.30, ...), and `SECTASKS.md` MS-05 "prevent recurrence" - new `ragent_types::guard` (re-exported as `ragent_tools_core::guard`) owns `reject_option_like`, `is_safe_operand`, `validate_identifier`, `validate_relative_component`, `contained_join`, `clamp_retry_after` and `cap_read`; `ragent-agent`/`ragent-storage`/`ragent-tools-core` re-export `ragent_types::sanitize` so there is one secret registry and one redaction chokepoint (`Event` no longer derives `Debug`); the `security-guards` CI job runs `check-file-tool-containment.sh`, `check-security-unwraps.sh`, `check-shared-guards.sh` and `check-vcs-duplication.sh` (each with a `--self-test`); `SECTASKS.md` records the accepted-risk register (T-071). `SPEC.md` §4.6a-§4.6e document the guards and call sites. Earlier commits on the tree: MS-03 network/secret hardening (`da83d927`) and MS-04 defence in depth (`6cf0b60f`). Verification: `cargo check --workspace`, `cargo clippy --all-targets`, `cargo fmt --all -- --check`, `cargo audit` clean; workspace test suite green. |
 | v1.0.121 | 2026-09-27 | Introspection and MCP hygiene release. New read-only, hardwired auto-approve tools `tool_info` (JSON dump of the tool registry: name, description, parameters schema, permission category, source family, hidden state, MCP server/tool provenance) and `commands_info` (JSON catalog of every slash command — built-in TUI set from a drift-tested static mirror plus plugin-contributed commands resolved live) take the registry from 169 to 171 tools; the TUI `/tools` report and `tool_info` now share one source classifier built on `Tool::mcp_wrapper_info`. MCP lifecycle: `McpClient::connect` sweeps orphaned stdio server processes before spawning (a process counts as an orphan only when re-parented to init — `/proc/<pid>/stat` field 4 — so a live sibling ragent's server is never killed, fixing cross-instance `Transport closed`), and `shutdown` kills the whole spawned process group (`process_group(0)` + `killpg`) so no `npx`/`node` children survive exit. Fixes: post-loop rollback removes the capture from `active_loop_captures` only after the restore fully completes (a failed restore stays pending for retry — CI flake `test_rollback_accept_restores_snapshot`); OpenSkills discovery covers `~/.agents/skills/` and `.agents/skills/`; the Claude store's self-describing `*-lsp` stubs (e.g. `rust-analyzer-lsp`) install by materialising the marketplace document's inline `lspServers` manifest into `.claude-plugin/plugin.json` (recorded under `sha256(origin-url + bytes)`, never overwriting an existing manifest); plugins shipping a conventional `skills/` directory without a `skills` manifest section now bridge those skills. A `/simplify all` pass over the 50-file changed set: scoped-block lock release in `ToolRegistry::remove_all`, single SHA-256 + no JSON round-trip in the store provider, shared `merge_scanned_skills` in the plugins manifests, awaited (no nested `block_in_place`/`block_on`) `/mcp connect|disconnect|discover` arms, and validation-before-ledger in `set_mcp_server_enabled`. Verification: `cargo check --workspace --all-targets`, full `ragent-agent`/`ragent-plugins`/`ragent-tui` test suites, `cargo fmt --all -- --check`, `cargo audit` all green. |
 | v1.0.119 | 2026-09-26 | User headline "mcp fixes": a sessionful Streamable-HTTP MCP server (the MongoDB MCP server) now reports its tools — `HttpMcpClient::initialize` negotiates the session, replays the returned `mcp-session-id`, advertises `text/event-stream`, and unwraps SSE frames, and `McpClient::adopt_connected` adopts an already-running server through that client; the HTTP client is built lazily so it no longer panics outside a Tokio runtime. The TUI startup MCP report awaits the shared client lock with a `MCP_STARTUP_GRACE = 3s` connect wait, `/plugins list` resolves live MCP tool counts via `run_control_command`, and `/plugins list --mcp` sorts server ids for a deterministic contributions block. A `/simplify all` pass over v1.0.116–v1.0.118 fixed the `/swarm status` progress-bar overflow, the `/spawn` pending-marker race, `/plugins <non-list> --mcp` handling, swarm unblock persistence, and `/alog` error propagation. Rust-hygiene sweep green: `cargo check --workspace --all-targets`, `cargo check --tests --workspace`, `cargo test --workspace`, dead-code lint and reason checks, `cargo clippy --workspace --all-targets`, `cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`. |

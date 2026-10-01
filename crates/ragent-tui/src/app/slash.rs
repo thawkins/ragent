@@ -982,6 +982,10 @@ impl App {
                 "--verbose".to_string(),
                 "--force".to_string(),
             ],
+            // `/connectors` subcommands + the flags the family accepts, seeded
+            // from the shared token list so the menu cannot drift from the usage
+            // block (spec `connectors` FR-004, FR-006, FR-041, FR-017).
+            "connectors" => ragent_connectors::autocomplete_tokens(),
             "alog" => {
                 vec![
                     "help".to_string(),
@@ -6995,6 +6999,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     self.append_assistant_text(&report);
                 }
                 self.status = "plugins".to_string();
+            }
+
+            // ── /connectors ──────────────────────────────────────────────
+            // Spec `connectors` FR-004, FR-006, FR-017: a bare `/connectors`,
+            // `/connectors help`, and an unrecognised subcommand all render the
+            // usage block. The shared dispatcher honours the master switch
+            // `connectors.enabled` (FR-021) and forwards the store subcommands.
+            "connectors" => {
+                let report = crate::app::connector::handle_connectors_command(self, args).await;
+                self.append_assistant_text(&report);
+                self.status = "connectors".to_string();
             }
 
             // ── /new ────────────────────────────────────────────────────

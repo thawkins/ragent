@@ -5851,9 +5851,10 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "ragent"
-version = "1.0.122"
+version = "1.0.123"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "clap",
  "futures",
@@ -5861,6 +5862,7 @@ dependencies = [
  "parking_lot",
  "ragent-agent",
  "ragent-config",
+ "ragent-connectors",
  "ragent-llm",
  "ragent-plugins",
  "ragent-research",
@@ -5880,7 +5882,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.122"
+version = "1.0.123"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5938,7 +5940,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.122"
+version = "1.0.123"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5963,7 +5965,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.122"
+version = "1.0.123"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6015,6 +6017,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "ragent-connectors"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "flate2",
+ "hex",
+ "ragent-config",
+ "ragent-types",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tar",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+ "zip 7.2.0",
+]
+
+[[package]]
 name = "ragent-llm"
 version = "0.1.0"
 dependencies = [
@@ -6063,7 +6086,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.122"
+version = "1.0.123"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6093,7 +6116,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.122"
+version = "1.0.123"
 dependencies = [
  "anyhow",
  "axum",
@@ -6269,7 +6292,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.122"
+version = "1.0.123"
 dependencies = [
  "anyhow",
  "arboard",
@@ -6290,6 +6313,7 @@ dependencies = [
  "ragent-bench",
  "ragent-codeindex",
  "ragent-config",
+ "ragent-connectors",
  "ragent-llm",
  "ragent-plugins",
  "ragent-research",

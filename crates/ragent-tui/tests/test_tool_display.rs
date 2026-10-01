@@ -14,7 +14,10 @@ use serde_json::json;
 fn test_input_summary_read_tool() {
     let input = json!({"path": "src/main.rs"});
     let summary = tool_input_summary("read", &input, "/home/user/project");
-    assert!(summary.contains("📄"), "Should have file emoji");
+    assert!(
+        !summary.contains("[file]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("src/main.rs"), "Should contain path");
 }
 
@@ -32,7 +35,10 @@ fn test_input_summary_read_tool_missing_path_shows_placeholder() {
 fn test_input_summary_write_tool() {
     let input = json!({"path": "output.txt", "content": "hello"});
     let summary = tool_input_summary("write", &input, "/home/user/project");
-    assert!(summary.contains("📄"), "Should have file emoji");
+    assert!(
+        !summary.contains("[file]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("output.txt"), "Should contain path");
 }
 
@@ -40,7 +46,10 @@ fn test_input_summary_write_tool() {
 fn test_input_summary_list_tool() {
     let input = json!({"path": "src"});
     let summary = tool_input_summary("list", &input, "/home/user/project");
-    assert!(summary.contains("📁"), "Should have folder emoji");
+    assert!(
+        !summary.contains("[dir]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("src"), "Should contain path");
 }
 
@@ -48,7 +57,10 @@ fn test_input_summary_list_tool() {
 fn test_input_summary_bash_tool() {
     let input = json!({"command": "cargo build"});
     let summary = tool_input_summary("bash", &input, "/home/user/project");
-    assert!(summary.contains("⚡"), "Should have execution emoji");
+    assert!(
+        !summary.contains("[exec]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("cargo build"), "Should contain command");
 }
 
@@ -95,7 +107,10 @@ fn test_input_summary_bash_tool_multiline_replaces_newlines() {
 fn test_input_summary_grep_tool() {
     let input = json!({"pattern": "fn main", "path": "src"});
     let summary = tool_input_summary("grep", &input, "/home/user/project");
-    assert!(summary.contains("🔍"), "Should have search emoji");
+    assert!(
+        !summary.contains("[search]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("fn main"), "Should contain pattern");
     assert!(summary.contains("src"), "Should contain path");
 }
@@ -104,7 +119,10 @@ fn test_input_summary_grep_tool() {
 fn test_input_summary_glob_tool() {
     let input = json!({"pattern": "**/*.rs"});
     let summary = tool_input_summary("glob", &input, "/home/user/project");
-    assert!(summary.contains("🔍"), "Should have search emoji");
+    assert!(
+        !summary.contains("[search]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("**/*.rs"), "Should contain pattern");
 }
 
@@ -112,7 +130,10 @@ fn test_input_summary_glob_tool() {
 fn test_input_summary_edit_tool() {
     let input = json!({"path": "file.txt", "old_str": "old", "new_str": "new"});
     let summary = tool_input_summary("edit", &input, "/home/user/project");
-    assert!(summary.contains("📄"), "Should have file emoji");
+    assert!(
+        !summary.contains("[file]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("file.txt"), "Should contain path");
 }
 
@@ -127,7 +148,10 @@ fn test_input_summary_edit_tool_canonical_file_path() {
         "new_string": "new"
     });
     let summary = tool_input_summary("edit", &input, "/home/user/project");
-    assert!(summary.contains("📄"), "Should have file emoji");
+    assert!(
+        !summary.contains("[file]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(
         summary.contains("src/main.rs"),
         "Should contain the relative path from file_path; got: {summary}"
@@ -142,7 +166,10 @@ fn test_input_summary_patch_tool_canonical_file_path() {
         "patch": "--- a\n+++ b\n"
     });
     let summary = tool_input_summary("patch", &input, "/home/user/project");
-    assert!(summary.contains("📄"), "Should have file emoji");
+    assert!(
+        !summary.contains("[file]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(
         summary.contains("docs/README.md"),
         "Should contain the relative path from file_path; got: {summary}"
@@ -153,7 +180,10 @@ fn test_input_summary_patch_tool_canonical_file_path() {
 fn test_input_summary_webfetch_tool() {
     let input = json!({"url": "https://example.com"});
     let summary = tool_input_summary("webfetch", &input, "/home/user/project");
-    assert!(summary.contains("🌐"), "Should have network emoji");
+    assert!(
+        !summary.contains("[net]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("example.com"), "Should contain url");
 }
 
@@ -161,7 +191,10 @@ fn test_input_summary_webfetch_tool() {
 fn test_input_summary_websearch_tool() {
     let input = json!({"query": "rust documentation"});
     let summary = tool_input_summary("websearch", &input, "/home/user/project");
-    assert!(summary.contains("🌐"), "Should have network emoji");
+    assert!(
+        !summary.contains("[net]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(
         summary.contains("rust documentation"),
         "Should contain query"
@@ -493,37 +526,37 @@ fn test_file_operations_use_correct_emoji() {
     let write_summary = tool_input_summary("write", &input, "/project");
     let edit_summary = tool_input_summary("edit", &input, "/project");
 
-    assert!(read_summary.contains("📄"), "Read should use 📄");
-    assert!(write_summary.contains("📄"), "Write should use 📄");
-    assert!(edit_summary.contains("📄"), "Edit should use 📄");
+    assert_eq!(read_summary, "test.txt");
+    assert_eq!(write_summary, "test.txt");
+    assert_eq!(edit_summary, "test.txt");
 }
 
 #[test]
 fn test_directory_operations_use_folder_emoji() {
     let input = json!({"path": "src"});
     let summary = tool_input_summary("list", &input, "/project");
-    assert!(summary.contains("📁"), "List should use 📁");
+    assert_eq!(summary, "src");
 }
 
 #[test]
 fn test_search_operations_use_magnifying_glass() {
     let input = json!({"pattern": "test"});
     let summary = tool_input_summary("grep", &input, "/project");
-    assert!(summary.contains("🔍"), "Grep should use 🔍");
+    assert_eq!(summary, "\"test\"");
 }
 
 #[test]
 fn test_execution_operations_use_lightning() {
     let input = json!({"command": "ls"});
     let summary = tool_input_summary("bash", &input, "/project");
-    assert!(summary.contains("⚡"), "Bash should use ⚡");
+    assert_eq!(summary, "$ ls");
 }
 
 #[test]
 fn test_network_operations_use_globe() {
     let input = json!({"url": "https://example.com"});
     let summary = tool_input_summary("webfetch", &input, "/project");
-    assert!(summary.contains("🌐"), "Webfetch should use 🌐");
+    assert_eq!(summary, "https://example.com");
 }
 
 // =============================================================================
@@ -538,8 +571,8 @@ fn test_result_summary_agent_complete_with_summary() {
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
     assert!(
-        summary.contains("✅"),
-        "Should have checkmark emoji: {summary}"
+        !summary.contains("[ok]"),
+        "Tag should be removed: {summary}"
     );
     assert!(
         summary.contains("Fixed formatting bug in parser"),
@@ -599,7 +632,10 @@ fn test_result_summary_memory_store_not_stored() {
 fn test_input_summary_mf_search_tool() {
     let input = json!({"query": "rust documentation"});
     let summary = tool_input_summary("mf_search", &input, "/home/user/project");
-    assert!(summary.contains("🌐"), "Should have network emoji");
+    assert!(
+        !summary.contains("[net]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(
         summary.contains("rust documentation"),
         "Should contain query"
@@ -613,7 +649,10 @@ fn test_input_summary_mf_search_tool() {
 fn test_input_summary_mf_fetch_tool() {
     let input = json!({"url": "https://example.com"});
     let summary = tool_input_summary("mf_fetch", &input, "/home/user/project");
-    assert!(summary.contains("🌐"), "Should have network emoji");
+    assert!(
+        !summary.contains("[net]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("example.com"), "Should contain url");
 }
 
@@ -621,7 +660,10 @@ fn test_input_summary_mf_fetch_tool() {
 fn test_input_summary_mf_fetch_urls_array() {
     let input = json!({"urls": ["https://a.com", "https://b.com"]});
     let summary = tool_input_summary("mf_fetch", &input, "/home/user/project");
-    assert!(summary.contains("🌐"), "Should have network emoji");
+    assert!(
+        !summary.contains("[net]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("a.com"), "Should contain first url");
 }
 
@@ -629,7 +671,10 @@ fn test_input_summary_mf_fetch_urls_array() {
 fn test_input_summary_mf_crawl_tool() {
     let input = json!({"url": "https://example.com"});
     let summary = tool_input_summary("mf_crawl", &input, "/home/user/project");
-    assert!(summary.contains("🕷️"), "Should have spider emoji");
+    assert!(
+        !summary.contains("[crawl]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("example.com"), "Should contain url");
 }
 
@@ -637,7 +682,10 @@ fn test_input_summary_mf_crawl_tool() {
 fn test_input_summary_mf_screenshot_tool() {
     let input = json!({"url": "https://example.com"});
     let summary = tool_input_summary("mf_screenshot", &input, "/home/user/project");
-    assert!(summary.contains("📸"), "Should have camera emoji");
+    assert!(
+        !summary.contains("[shot]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("example.com"), "Should contain url");
 }
 
@@ -645,7 +693,10 @@ fn test_input_summary_mf_screenshot_tool() {
 fn test_input_summary_libre_read_tool() {
     let input = json!({"path": "docs/report.odt"});
     let summary = tool_input_summary("libre_read", &input, "/home/user/project");
-    assert!(summary.contains("📄"), "Should have document emoji");
+    assert!(
+        !summary.contains("[file]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("docs/report.odt"), "Should contain path");
 }
 
@@ -653,7 +704,10 @@ fn test_input_summary_libre_read_tool() {
 fn test_input_summary_mcp_tool() {
     let input = json!({"query": "lookup"});
     let summary = tool_input_summary("mcp_myserver_search", &input, "/home/user/project");
-    assert!(summary.contains("🔌"), "Should have plug emoji");
+    assert!(
+        !summary.contains("[mcp]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(
         summary.contains("myserver_search"),
         "Should contain server/tool suffix"
@@ -663,33 +717,45 @@ fn test_input_summary_mcp_tool() {
 #[test]
 fn test_input_summary_mf_cache_clear_tool() {
     let summary = tool_input_summary("mf_cache_clear", &json!({}), "/home/user/project");
-    assert!(summary.contains("🧹"), "Should have broom emoji");
+    assert!(
+        !summary.contains("[cache]"),
+        "Tag should be removed: {summary}"
+    );
 }
 
 #[test]
 fn test_input_summary_mf_version_tool() {
     let summary = tool_input_summary("mf_version", &json!({}), "/home/user/project");
-    assert!(summary.contains("ℹ️"), "Should have info emoji");
+    assert!(
+        !summary.contains("[info]"),
+        "Tag should be removed: {summary}"
+    );
 }
 
 #[test]
 fn test_input_summary_ragent_info_tool() {
     let summary = tool_input_summary("ragent_info", &json!({}), "/home/user/project");
     assert!(summary.contains("ragent build info"), "got: {summary}");
-    assert!(summary.contains("ℹ️"), "Should have info emoji");
+    assert!(
+        !summary.contains("[info]"),
+        "Tag should be removed: {summary}"
+    );
 }
 
 #[test]
 fn test_input_summary_github_get_actions_tool() {
     let summary = tool_input_summary("github_get_actions", &json!({}), "/project");
-    assert!(summary.contains("📋"), "Should have list emoji");
+    assert!(
+        !summary.contains("[task]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("actions"));
 }
 
 #[test]
 fn test_input_summary_github_get_actions_limit() {
     let summary = tool_input_summary("github_get_actions", &json!({"limit": 10}), "/project");
-    assert!(summary.contains("📋"));
+    assert!(!summary.contains("[task]"));
     assert!(summary.contains("10"), "Should contain limit");
 }
 
@@ -706,7 +772,7 @@ fn test_result_summary_github_get_actions_ok() {
         &json!({"limit": 3}),
         "/project",
     );
-    assert_eq!(result, Some("📋 3 runs inspected".to_string()));
+    assert_eq!(result, Some("3 runs inspected".to_string()));
 }
 
 #[test]
@@ -722,10 +788,7 @@ fn test_result_summary_github_get_actions_failed() {
         &json!({"limit": 2}),
         "/project",
     );
-    assert_eq!(
-        result,
-        Some("📋 2 runs inspected, 1 run failed".to_string())
-    );
+    assert_eq!(result, Some("2 runs inspected, 1 run failed".to_string()));
 }
 // =============================================================================
 // Task Management Tool Display Tests (todo2tasks T-014, FR-017)
@@ -735,22 +798,25 @@ fn test_result_summary_github_get_actions_failed() {
 fn test_input_summary_task_create() {
     let input = json!({"subject": "Implement JWT auth", "description": "Add JWT tokens"});
     let summary = tool_input_summary("task_create", &input, "/project");
-    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(
+        !summary.contains("[task]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(
         summary.contains("Implement JWT auth"),
         "Should contain subject"
     );
-    assert!(
-        summary.starts_with("📋 +"),
-        "Should use + prefix for create"
-    );
+    assert!(summary.starts_with('+'), "Should use + prefix for create");
 }
 
 #[test]
 fn test_input_summary_task_update_status() {
     let input = json!({"task_id": "task-abc123", "status": "completed"});
     let summary = tool_input_summary("task_update", &input, "/project");
-    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(
+        !summary.contains("[task]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("task-abc123"), "Should contain task_id");
     assert!(summary.contains("completed"), "Should contain new status");
 }
@@ -759,7 +825,10 @@ fn test_input_summary_task_update_status() {
 fn test_input_summary_task_update_subject() {
     let input = json!({"task_id": "task-abc123", "subject": "New title"});
     let summary = tool_input_summary("task_update", &input, "/project");
-    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(
+        !summary.contains("[task]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("task-abc123"), "Should contain task_id");
     assert!(summary.contains("New title"), "Should contain new subject");
 }
@@ -768,7 +837,10 @@ fn test_input_summary_task_update_subject() {
 fn test_input_summary_task_update_no_fields() {
     let input = json!({"task_id": "task-abc123"});
     let summary = tool_input_summary("task_update", &input, "/project");
-    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(
+        !summary.contains("[task]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("task-abc123"), "Should contain task_id");
 }
 
@@ -776,7 +848,10 @@ fn test_input_summary_task_update_no_fields() {
 fn test_input_summary_task_get() {
     let input = json!({"task_id": "task-abc123"});
     let summary = tool_input_summary("task_get", &input, "/project");
-    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(
+        !summary.contains("[task]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("task-abc123"), "Should contain task_id");
     assert!(summary.contains("get"), "Should use 'get' label");
 }
@@ -785,7 +860,10 @@ fn test_input_summary_task_get() {
 fn test_input_summary_task_list_default() {
     let input = json!({});
     let summary = tool_input_summary("task_list", &input, "/project");
-    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(
+        !summary.contains("[task]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("all"), "Should default to 'all' filter");
 }
 
@@ -793,7 +871,10 @@ fn test_input_summary_task_list_default() {
 fn test_input_summary_task_list_filtered() {
     let input = json!({"status": "pending"});
     let summary = tool_input_summary("task_list", &input, "/project");
-    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(
+        !summary.contains("[task]"),
+        "Tag should be removed: {summary}"
+    );
     assert!(summary.contains("pending"), "Should contain status filter");
 }
 

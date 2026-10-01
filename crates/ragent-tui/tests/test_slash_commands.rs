@@ -250,7 +250,7 @@ async fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
     let cells = terminal.backend().buffer().content.clone();
     let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
     assert!(
-        text.contains("✏️") && text.contains("✓"),
+        text.contains("✏") && text.contains("✓"),
         "status bar should show enabled edit-log icon: {text}"
     );
 
@@ -268,7 +268,7 @@ async fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
     let cells = terminal.backend().buffer().content.clone();
     let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
     assert!(
-        text.contains("✏️") && text.contains("✗"),
+        text.contains("✏") && text.contains("✗"),
         "status bar should show disabled edit-log icon: {text}"
     );
 }
@@ -3704,7 +3704,7 @@ async fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     let cells = terminal.backend().buffer().content.clone();
     let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
     assert!(
-        text.contains("⚠️") && text.contains("✓"),
+        text.contains("⚠") && text.contains("✓"),
         "status bar should show enabled YOLO icon: {text}"
     );
 
@@ -3723,7 +3723,7 @@ async fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     let cells = terminal.backend().buffer().content.clone();
     let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
     assert!(
-        text.contains("⚠️") && text.contains("✗"),
+        text.contains("⚠") && text.contains("✗"),
         "status bar should show disabled YOLO icon: {text}"
     );
 }

@@ -22,6 +22,9 @@ use ragent_agent::storage::Storage;
 use ragent_agent::team::{MemberStatus, SwarmState, TeamConfig, TeamMember};
 use ragent_agent::trigger::TriggerRuntime;
 use ragent_config::OtelProtocol;
+use ragent_connectors::CatalogueBrowser;
+
+pub use ragent_connectors::CatalogueBrowseStatus as ConnectorBrowseStatus;
 use ragent_plugins::{StoreEntry, StoreError, StoreIndex, StoreIndexFetcher, StoreKind};
 use serde::Serialize;
 
@@ -908,6 +911,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | stores | help",
     },
     SlashCommandDef {
+        trigger: "connectors",
+        description: "Connector management: /connectors list [--verbose] [--category <name>] | search <query> [--category <name>] | claude [query] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help",
+    },
+    SlashCommandDef {
         trigger: "research",
         description: "Research system: /research create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> | list | open | search | show | delete | archive | cluster",
     },
@@ -1443,6 +1450,43 @@ pub struct PluginStoreInstallResult {
     pub succeeded: bool,
 }
 
+/// The outcome of one off-loop connector-catalogue fetch.
+///
+/// The spawned fetch deposits this into [`App::connector_catalogue_result`]; the
+/// UI thread drains it in [`App::poll_connector_catalogue_result`]. Carrying the
+/// descriptors plus the parser's skip count keeps the browser able to report a
+/// short list as a partial result rather than a silent one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorCatalogueResult {
+    /// The parsed descriptors on success, or the contained cause on failure.
+    pub outcome: Result<Vec<ragent_connectors::ConnectorDescriptor>, String>,
+    /// How many catalogue entries the parser skipped as malformed or
+    /// unexpressible.
+    pub skipped: usize,
+}
+
+/// The outcome of one off-loop `ENTER` install from the connector-catalogue
+/// browser.
+///
+/// The spawned install worker runs `ragent_connectors::add` off the event loop
+/// and turns its result into this value, which the UI thread drains in
+/// [`App::poll_connector_catalogue_install_result`]. Carrying the finished report
+/// text (rather than the raw outcome) keeps every field `Send`, so the result
+/// crosses the worker boundary without the installed descriptor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorCatalogueInstallResult {
+    /// The connector id the install committed (success) or was requested for
+    /// (failure).
+    pub id: String,
+    /// Short panel-footer notice: `installed <id>` or `install failed: <cause>`.
+    pub notice: String,
+    /// The full message-window report.
+    pub report: String,
+    /// Whether the install committed, so the poll re-derives the installed set
+    /// and the row re-colours.
+    pub succeeded: bool,
+}
+
 /// The load state of a plugin-store browser (spec `pluginstores` T-004;
 /// FR-013, FR-016, FR-017).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1971,6 +2015,32 @@ pub struct App {
     /// a centred, fully visible modal without any stored size to go stale
     /// (FR-018); tests read it back to locate the painted panel.
     pub plugin_store_area: Rect,
+    /// Active connector-catalogue browser, present while the `/connectors claude`
+    /// browse panel is open. `None` when no panel is showing.
+    ///
+    /// Mirrors [`Self::plugin_store`]: while it is `Some`, the panel swallows
+    /// every keystroke and locks the input field and the queue.
+    pub connector_store: Option<CatalogueBrowser>,
+    /// Pending result from the off-loop connector-catalogue fetch.
+    ///
+    /// The spawned fetch deposits the
+    /// descriptors (or the contained cause) here; the UI thread drains it in
+    /// [`App::poll_connector_catalogue_result`] and applies it to
+    /// [`Self::connector_store`], so the fetch never blocks the event loop or the
+    /// agent turn.
+    pub connector_catalogue_result: Arc<std::sync::Mutex<Option<ConnectorCatalogueResult>>>,
+    /// Pending result from the off-loop `ENTER` install.
+    ///
+    /// The spawned install worker
+    /// deposits the finished report here; the UI thread drains it in
+    /// [`App::poll_connector_catalogue_install_result`], appends the report to the
+    /// message window, records the footer notice, and (on success) re-derives the
+    /// installed set so the newly installed row re-colours.
+    pub connector_catalogue_install_result:
+        Arc<std::sync::Mutex<Option<ConnectorCatalogueInstallResult>>>,
+    /// Cached area of the connector-catalogue browse panel (set during render).
+    /// Kept in [`Rect::default`] while no panel is open.
+    pub connector_store_area: Rect,
     /// Cursor position (character index) within the input line.
     pub input_cursor: usize,
     /// Keyboard selection anchor (character index). When `Some(n)`, the region

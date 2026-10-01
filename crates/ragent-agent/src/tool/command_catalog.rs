@@ -111,6 +111,21 @@ const PLUGINS_SUBS: &[&str] = &[
     "list", "add", "remove", "enable", "disable", "test", "stores", "help",
 ];
 const PLUGINS_FLAGS: &[&str] = &["--verbose", "--force"];
+const CONNECTORS_SUBS: &[&str] = &[
+    "list",
+    "search",
+    "add",
+    "remove",
+    "enable",
+    "disable",
+    "connect",
+    "disconnect",
+    "auth",
+    "test",
+    "stores",
+    "help",
+];
+const CONNECTORS_FLAGS: &[&str] = &["--verbose", "--category", "--force", "--check"];
 const ALOG_SUBS: &[&str] = &[
     "help", "on", "off", "config", "list", "status", "delete", "export",
 ];
@@ -399,6 +414,12 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
         description: "Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | stores | help",
         subcommands: PLUGINS_SUBS,
         flags: PLUGINS_FLAGS,
+    },
+    CommandCatalogEntry {
+        trigger: "connectors",
+        description: "Connector management: /connectors list [--verbose] [--category <name>] | search <query> [--category <name>] | claude [query] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help",
+        subcommands: CONNECTORS_SUBS,
+        flags: CONNECTORS_FLAGS,
     },
     CommandCatalogEntry {
         trigger: "profile",

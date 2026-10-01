@@ -1,0 +1,16 @@
+{
+  "id": "bad-server",
+  "name": "Bad Server",
+  "description": "A connector whose stdio command does not exist, so the connect step fails",
+  "category": "developer",
+  "tags": ["failing", "fixture", "stdio"],
+  "auth": "none",
+  "servers": [
+    {
+      "id": "main",
+      "transport": "stdio",
+      "command": "ragent-fixture-missing-command",
+      "args": []
+    }
+  ]
+}

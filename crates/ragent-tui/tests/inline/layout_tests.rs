@@ -13,7 +13,7 @@ fn test_messages_to_lines_renders_agent_notice_bright_yellow_one_line_per_item()
         "s1",
         Role::Assistant,
         vec![MessagePart::Text {
-            text: "[notice] Agent Notice\nFirst item\nSecond item".to_string(),
+            text: "Agent Notice\nFirst item\nSecond item".to_string(),
         }],
     );
 
@@ -26,9 +26,13 @@ fn test_messages_to_lines_renders_agent_notice_bright_yellow_one_line_per_item()
     assert!(rendered.iter().any(|line| line.contains("Second item")));
 
     // All notice lines are styled bright yellow + bold.
-    for line in &lines {
+    for line in lines.iter().filter(|l| !l.spans.is_empty()) {
         for span in line.spans.iter() {
-            assert_eq!(span.style.fg, Some(ratatui::style::Color::Yellow));
+            assert_eq!(
+                span.style.fg,
+                Some(ratatui::style::Color::Yellow),
+                "notice span styled {span:?}"
+            );
             assert!(
                 span.style
                     .add_modifier
@@ -116,13 +120,13 @@ fn test_messages_to_lines_renders_full_agent_complete_output_multiline() {
     assert!(
         rendered
             .iter()
-            .any(|line| line.contains("  └ [ok] First line.")),
+            .any(|line| line.contains("  \\- First line.")),
         "Expected first summary line on its own rendered line: {rendered:?}"
     );
     assert!(
         rendered
             .iter()
-            .any(|line| line.contains("  └ [ok] Second line.")),
+            .any(|line| line.contains("  \\- Second line.")),
         "Expected second summary line on its own rendered line: {rendered:?}"
     );
     assert!(

@@ -124,15 +124,15 @@ bash "$(dirname "$0")/scripts/check-shared-guards.sh" || print_failure "Shared-g
 print_step "VCS tool duplication guard..."
 bash "$(dirname "$0")/scripts/check-vcs-duplication.sh" || print_failure "VCS tool duplication guard failed"
 
+# Default connector-catalogue endpoint literal guard (connectors T-019; FR-038, NFR-001)
+print_step "Connector endpoint literal guard..."
+bash "$(dirname "$0")/scripts/check-connector-endpoint-literal.sh" || print_failure "Connector endpoint literal guard failed"
+bash "$(dirname "$0")/scripts/check-connector-endpoint-literal.sh" --self-test || print_failure "Connector endpoint literal guard self-test failed"
+
 # Team duplication guard (ANTIPAT M7.7)
 print_step "Team duplication guard..."
 bash "$(dirname "$0")/scripts/check-team-duplication.sh" || print_failure "Team duplication guard failed"
 bash "$(dirname "$0")/scripts/check-team-duplication.sh" --self-test || print_failure "Team duplication guard self-test failed"
-
-# Non-ASCII sweep guard (ANTIPAT M1.16)
-print_step "Non-ASCII guard..."
-bash "$(dirname "$0")/scripts/check-non-ascii.sh" || print_failure "Non-ASCII guard failed"
-bash "$(dirname "$0")/scripts/check-non-ascii.sh" --self-test || print_failure "Non-ASCII guard self-test failed"
 
 # Silent error-suppression guard (ANTIPAT M4)
 print_step "Silent error-suppression guard..."

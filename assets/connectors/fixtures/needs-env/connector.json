@@ -1,0 +1,17 @@
+{
+  "id": "needs-env",
+  "name": "Needs Env",
+  "description": "A connector whose authentication is read from an environment variable",
+  "category": "data",
+  "tags": ["auth", "env", "fixture"],
+  "auth": "env",
+  "credential": "ECHO_TOKEN",
+  "servers": [
+    {
+      "id": "main",
+      "transport": "stdio",
+      "command": "mcp-server-filesystem",
+      "args": ["--env"]
+    }
+  ]
+}

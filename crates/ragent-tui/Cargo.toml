@@ -45,6 +45,7 @@ ragent-specs = { path = "../ragent-specs" }
 ragent-research = { path = "../ragent-research" }
 ragent-llm = { path = "../ragent-llm" }
 ragent-plugins = { path = "../ragent-plugins" }
+ragent-connectors = { path = "../ragent-connectors" }
 async-trait = { workspace = true }
 fs2 = { workspace = true }
 lru = { workspace = true }

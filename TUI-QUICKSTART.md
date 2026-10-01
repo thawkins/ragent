@@ -4,6 +4,28 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (uncommitted, on top of v1.0.122)
+
+- **`/connectors` slash family** — manage MCP-backed connectors (named
+  integrations carrying a category, an auth shape, and one or more MCP servers)
+  from the TUI: `list`, `search`, `claude`, `add`, `remove`, `enable`,
+  `disable`, `connect`, `disconnect`, `auth`, `test`, `stores`, and `help`.
+  `/connectors claude` opens a modal catalogue browser (filter, browse by
+  category, install with one key); `/connectors test <id>` runs an isolated
+  connect-and-invoke harness; `/connectors stores [--check]` reports each
+  catalogue endpoint's provenance. A bare `/connectors` or an unknown subcommand
+  prints the usage block. The same operations are available as
+  `ragent connectors <sub>`. See
+  [`docs/howtos/slashcommands/connectors.md`](docs/howtos/slashcommands/connectors.md).
+- **ASCII status-bar and tool markers** — the status-bar service icons and the
+  message-window tool-category icons are now plain ASCII text tags (`CDX:`,
+  `LOG:`, `AUTO:`, `EDIT:`, `TELE:`, `YOLO:`, `GCF:`, `BUSY: `) and marker
+  prefixes (`[file]`, `[dir]`, `[git]`, `[team]`, ...) instead of emoji, so the
+  status bar and log panel render identically on fonts without emoji glyphs.
+- **`/yolo` persists globally** — the `/yolo` command and `Alt+Y` shortcut now
+  write the YOLO flag to the user-global config
+  (`~/.config/ragent/ragent.json`) only, never the project-local config.
+
 ## Highlights (v1.0.122)
 
 - **`ragent-team` shim removed** — the workspace is now 16 crates; the team

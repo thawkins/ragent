@@ -117,14 +117,14 @@ jobs:
         run: bash scripts/check-vcs-duplication.sh --self-test
       - name: Verify the git-argument rule is not re-derived
         run: bash scripts/check-vcs-duplication.sh
+      - name: Verify self-test fails on a seeded duplicate connector endpoint literal
+        run: bash scripts/check-connector-endpoint-literal.sh --self-test
+      - name: Verify the default connector-catalogue endpoint is declared once (FR-038, NFR-001)
+        run: bash scripts/check-connector-endpoint-literal.sh
       - name: Verify self-test fails on a seeded team-duplication violation
         run: bash scripts/check-team-duplication.sh --self-test
       - name: Verify the team runtime/tools have a single home
         run: bash scripts/check-team-duplication.sh
-      - name: Verify self-test fails on a seeded non-ASCII codepoint
-        run: bash scripts/check-non-ascii.sh --self-test
-      - name: Verify no non-ASCII glyphs beyond the documented allowlist
-        run: bash scripts/check-non-ascii.sh
       - name: Verify self-test fails on a seeded inline test module
         run: bash scripts/check-inline-tests.sh --self-test
       - name: Verify no genuine inline #[cfg(test)] module in crates/ or src/

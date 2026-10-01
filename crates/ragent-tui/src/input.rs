@@ -306,6 +306,28 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         return None;
     }
 
+    // While the connector-catalogue browse panel (`/connectors claude`) is open
+    // it owns the keyboard exactly as the plugin-store panel does: `Up`/`Down`
+    // move the block cursor, `ENTER` installs the highlighted result,
+    // `Backspace` and `Esc` edit the query (and `Esc` on an empty query dismisses
+    // the panel), and printable characters type into the panel's own search
+    // field. Every other key is swallowed and the input field stays locked.
+    if app.connector_store.is_some() {
+        match key.code {
+            KeyCode::Up => app.connector_catalogue_move_up(),
+            KeyCode::Down => app.connector_catalogue_move_down(),
+            KeyCode::Enter => app.connector_catalogue_install_selected(),
+            KeyCode::Backspace | KeyCode::Esc => {
+                app.connector_catalogue_edit_or_close();
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.connector_catalogue_push_char(c);
+            }
+            _ => {}
+        }
+        return None;
+    }
+
     // While the queue-entry panel (ALT-Q `Show` row) is open it swallows every
     // keystroke so none of them can mutate the editable input buffer: `Up`/`Down`
     // move the highlight, `Enter` moves the highlighted entry one step toward the

@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.122"
+version = "1.0.123"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -154,6 +154,7 @@ unsafe_code = "deny"
 # ── Internal crates ───────────────────────────────────────────────────────
 ragent-agent = { path = "crates/ragent-agent" }
 ragent-config = { path = "crates/ragent-config" }
+ragent-connectors = { path = "crates/ragent-connectors" }
 ragent-llm = { path = "crates/ragent-llm" }
 ragent-plugins = { path = "crates/ragent-plugins" }
 ragent-server = { path = "crates/ragent-server" }
@@ -330,6 +331,7 @@ debug = "line-tables-only"
 [dependencies]
 ragent-agent = { workspace = true }
 ragent-config = { workspace = true }
+ragent-connectors = { workspace = true }
 ragent-llm = { workspace = true }
 ragent-plugins = { workspace = true }
 ragent-server = { workspace = true }
@@ -338,6 +340,7 @@ ragent-specs = { workspace = true }
 ragent-research = { workspace = true }
 ragent-types = { workspace = true }
 ragent-tools-extended = { workspace = true }
+async-trait = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }

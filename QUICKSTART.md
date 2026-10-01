@@ -434,6 +434,21 @@ Ragent loads configuration from multiple sources (last wins):
     "max_memory_mb": 64         // per-JS-context memory ceiling
     // "store_dir": "/path/to/plugins"          // override the plugin store path
     // "permissions": { "my-plugin": ["network.outbound"] }
+  },
+
+  // Connector subsystem (optional; defaults shown). A connector is a named
+  // integration (Google Drive, Slack, GitHub, ...) reached through one or more
+  // MCP servers. `enabled: false` makes the whole subsystem inert (no
+  // discovery, catalogue fetch, or connection).
+  "connectors": {
+    "enabled": true,
+    "store_dir": null,          // override the connector store path
+    "stores": {                 // catalogue endpoints + shared fetch budgets
+      "timeout_ms": 10000,
+      "max_index_bytes": 2097152,
+      "cache_ttl_secs": 3600
+    },
+    "credentials": {}           // non-secret credential-name mapping by connector id
   }
 }
 ```
@@ -932,6 +947,44 @@ bridged into the session:
   can feed findings back to the model before the turn ends. The trigger name
   accepts both ragent's `pre_tool_use` and the Claude `PreToolUse` spellings, and
   configured `ragent.json` hooks run first at a shared trigger.
+
+---
+
+## 7c. Connectors
+
+Connectors are named integrations (Google Drive, Slack, GitHub, Git, Postgres,
+Puppeteer, and the wider community catalogue) that reach an external system
+through one or more **MCP servers** — the transport ragent already speaks. A
+connector is a catalogue entry carrying a display name, a category, an auth
+shape, and one or more servers; adding one installs the entry, and enabling it
+connects its servers and exposes their tools to the model. The system is
+specified in [`specs/connectors/SPEC.md`](specs/connectors/SPEC.md) (FR-001..FR-041).
+
+Manage connectors from the TUI or the CLI:
+
+| Command | Description |
+|---|---|
+| `/connectors list [--verbose] [--category <name>]` | List installed connectors with state, auth state, category, and bridged server/tool counts; `--category` filters the rows (`ALL` clears the filter) |
+| `/connectors search <query> [--category <name>]` | Search the catalogue by name, category, or tag |
+| `/connectors claude [query] [--refresh]` | Open the interactive Claude connector-catalogue browser (filter, browse, install with one key); `--refresh` bypasses the cache |
+| `/connectors add <id\|source> [--force]` | Install a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL (recorded **disabled**) |
+| `/connectors remove <id>` | Uninstall a connector (refused while enabled) |
+| `/connectors enable <id>` | Enable a connector and connect its servers now |
+| `/connectors disable <id>` | Disable a connector and disconnect its servers |
+| `/connectors connect <id>` | Connect an enabled connector's servers without a restart |
+| `/connectors disconnect <id>` | Disconnect a connector's servers, leaving it enabled |
+| `/connectors auth <id>` | Manage a connector's credential and report its auth state |
+| `/connectors test <id>` | Connect in isolation, invoke one tool, and report per-step results |
+| `/connectors stores [--check]` | Report each catalogue endpoint and its source; `--check` probes it |
+| `/connectors help` | Show the usage block |
+
+The same operations are available from a shell as `ragent connectors <sub> …`.
+Connectors are discovered under `.ragent/connectors/` (project) or
+`~/.config/ragent/connectors/` (user-global). Their secrets live in the encrypted
+credential store — the manifest stores only the credential *name*. Set
+`connectors.enabled: false` to make the whole subsystem inert. See
+[`docs/howtos/slashcommands/connectors.md`](docs/howtos/slashcommands/connectors.md)
+and [`docs/howtos/config.md`](docs/howtos/config.md) §7.39.
 
 ---
 

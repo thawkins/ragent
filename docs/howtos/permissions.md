@@ -815,20 +815,23 @@ ragent --no-prompt
 > it only lasts for the current session.
 
 The `/yolo` slash command and `Alt+Y` shortcut toggle the persistent YOLO
-flag, which is saved to `ragent.json` and restored on the next startup.
+flag, which is saved to the **user-global** `ragent.json`
+(`~/.config/ragent/ragent.json`) and restored on the next startup.
 
 ### 7.3 Persistence
 
-YOLO state is persisted to the config file (`ragent.json`) via
-`persist_yolo`:
+YOLO is a user-only toggle, so it is always written to the user-global config
+- never the project-local `.ragent/ragent.json`. Project config is untrusted
+repository content whose `yolo` key is stripped by `Config::merge_project`
+(SECTASKS T-011), so a project-file write could never round-trip on the next
+load (and would let a repo turn YOLO on for a reviewer). YOLO state is
+persisted via `persist_yolo`, which delegates to the runtime-flag helper's
+`persist_to_global` (`Config::save(false)`):
 
 ```rust
 pub fn persist_yolo(enabled: bool) -> anyhow::Result<()> {
-    let mut config = crate::config::Config::load().unwrap_or_default();
-    config.yolo = enabled;
-    config.save_to_source()?;
-    set_enabled(enabled);
-    Ok(())
+    // RuntimeFlag::persist_to_global: load, set the field, Config::save(false).
+    YOLO_MODE.persist_to_global(enabled)
 }
 ```
 

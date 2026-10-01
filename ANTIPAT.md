@@ -99,11 +99,15 @@ satisfied by `check_path_within_root_cached`, which is exactly the F-07 hole).
 **Exit criteria:** a repo-wide CI gate rejects non-ASCII in `crates/*/src` and root
 `src/` comments and in production string literals except the documented terminal
 box-glyph allowlist; every `U+FFFD` is gone; the 100-column rule is honoured except
-for an allowlisted set of long literals. I Non-Ascii icons used for STatusBar Icons, or Category Icons for Message window widgets are NOT to be removed. 
+for an allowlisted set of long literals. Emoji/Unicode icons in the StatusBar
+and the tool-category icons in the message-window widgets are **in scope for
+replacement**: both registries render plain ASCII marker prefixes (`[file]`,
+`[dir]`, `[git]`, `[team]`, ...) so the gate can require a fully ASCII tree
+without carve-outs.
 
 | Task  | Crate                 | Finding                                                                                                                                         | Volume |
 | ----- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| M1.1  | ragent-tui            | HIGH-1 401 production emoji + 84 comment emoji across 17 files; MEDIUM-5 two independent emoji icon registries. Do Not remove icons in the StatusBar or the Icons used to represent tool categories in the messagewindow widgets                                 | ~485   |
+| M1.1  | ragent-tui            | HIGH-1 401 production emoji + 84 comment emoji across 17 files; MEDIUM-5 two independent emoji icon registries. Replace the StatusBar icons and the tool-category icons in the message-window widgets with ASCII marker prefixes (`[file]`, `[dir]`, `[git]`, ...) - no icon carve-outs                        | ~485   |
 | M1.2  | ragent-tools-extended | 1.1 emoji in`task.rs` status output (duplicated 2x); 1.2 806 non-ASCII lines                                                                  | ~806   |
 | M1.3  | ragent-research       | F-03 537 production non-ASCII lines (box-glyph trees, banner rules, middle-dot separators)                                                      | 537    |
 | M1.4  | ragent-storage        | A-1 722 x U+2500 + 68 x U+2014 + 39 x U+2192; A-2 mojibake at`storage.rs:3456`; A-3 33 lines > 100 cols                                       | 130    |

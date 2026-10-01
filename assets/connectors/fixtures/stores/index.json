@@ -1,0 +1,51 @@
+{
+  "connectors": [
+    {
+      "id": "echo",
+      "name": "Echo",
+      "description": "A working single-server connector whose echo tool returns its input",
+      "category": "productivity",
+      "tags": ["echo", "fixture", "stdio"],
+      "auth": "none",
+      "servers": [
+        {
+          "id": "echo",
+          "transport": "stdio",
+          "command": "mcp-server-filesystem",
+          "args": ["--echo"]
+        }
+      ]
+    },
+    {
+      "id": "unsupported",
+      "name": "Unsupported",
+      "description": "An entry declaring a transport ragent does not speak, skipped and counted",
+      "category": "developer",
+      "tags": ["unsupported", "fixture"],
+      "auth": "none",
+      "servers": [
+        {
+          "id": "main",
+          "type": "grpc",
+          "url": "grpc://example.org:50051"
+        }
+      ]
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "description": "A placeholder entry carrying an OAuth authentication shape",
+      "category": "developer",
+      "tags": ["oauth", "fixture"],
+      "auth": "oauth",
+      "auth_scope": ["repo", "read:org"],
+      "servers": [
+        {
+          "id": "main",
+          "transport": "http",
+          "url": "https://mcp.example.org/github"
+        }
+      ]
+    }
+  ]
+}

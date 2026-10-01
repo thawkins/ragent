@@ -157,6 +157,39 @@ fn test_dependency_range_schedules_verify_task_last() {
 }
 
 #[test]
+fn test_dependency_ellipsis_range_schedules_verify_task_last() {
+    // The plan-authoring prompt emits the `T-001..T-014` ellipsis range form in
+    // the Dependencies cell. It must expand like the dash forms, otherwise the
+    // final verification task is treated as having no dependencies and
+    // `/spec impl` jumps straight to it (the connectors spec bug).
+    let mut md = String::from(
+        "## Tasks\n\n\
+         | ID | Title | Requirement | Effort | Priority | Status | Dependencies |\n\
+         |---|---|---|---|---|---|---|\n",
+    );
+    for n in 1..=14 {
+        md.push_str(&format!(
+            "| T-{n:03} | Task {n} | FR-{n:03} | S | High | pending | - |\n"
+        ));
+    }
+    md.push_str("| T-015 | Verify | NFR-002 | M | High | pending | T-001..T-014 |\n");
+
+    let tasks = PlanParser::parse(&md).unwrap();
+    assert_eq!(tasks.len(), 15);
+    assert_eq!(tasks[14].dependencies.len(), 14);
+    assert_eq!(tasks[14].dependencies[0], "T-001");
+    assert_eq!(tasks[14].dependencies[13], "T-014");
+
+    let order = resolve_execution_order(&tasks).unwrap();
+    let verify_pos = order.iter().position(|&i| tasks[i].id == "T-015").unwrap();
+    assert_eq!(
+        verify_pos,
+        order.len() - 1,
+        "T-015 must be scheduled last once its `..` range dependency expands"
+    );
+}
+
+#[test]
 fn test_dependency_range_dash_variants_and_commas() {
     let md = r"
 ## Tasks

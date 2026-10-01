@@ -21,5 +21,5 @@ fn test_shorten_path() {
     let long_path = "/very/long/path/that/exceeds/maximum";
     let shortened = shorten_path(long_path, 20);
     assert!(shortened.chars().count() <= 20);
-    assert!(shortened.contains("..."));
+    assert!(shortened.contains('\u{2026}'));
 }

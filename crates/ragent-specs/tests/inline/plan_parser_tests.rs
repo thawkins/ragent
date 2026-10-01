@@ -40,6 +40,16 @@ fn test_parse_dependencies() {
     assert_eq!(PlanParser::parse_dependencies("-"), Vec::<String>::new());
     assert_eq!(PlanParser::parse_dependencies(""), Vec::<String>::new());
     assert_eq!(PlanParser::parse_dependencies("T-003"), vec!["T-003"]);
+    // `T-001..T-014` (and `...`) is the ellipsis range form the plan authoring
+    // prompt uses; it must expand like the dash forms.
+    assert_eq!(
+        PlanParser::parse_dependencies("T-001..T-003"),
+        vec!["T-001", "T-002", "T-003"]
+    );
+    assert_eq!(
+        PlanParser::parse_dependencies("T-001...T-003"),
+        vec!["T-001", "T-002", "T-003"]
+    );
 }
 
 #[test]

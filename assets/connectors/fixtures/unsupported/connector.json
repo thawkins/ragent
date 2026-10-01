@@ -1,0 +1,15 @@
+{
+  "id": "unsupported",
+  "name": "Unsupported",
+  "description": "A connector declaring a transport ragent does not speak, so it is skipped and labelled",
+  "category": "developer",
+  "tags": ["unsupported", "fixture", "grpc"],
+  "auth": "none",
+  "servers": [
+    {
+      "id": "main",
+      "transport": "grpc",
+      "url": "grpc://example.org:50051"
+    }
+  ]
+}

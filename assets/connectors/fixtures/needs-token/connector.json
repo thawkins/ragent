@@ -1,0 +1,17 @@
+{
+  "id": "needs-token",
+  "name": "Needs Token",
+  "description": "A connector with a token auth shape; never store a secret in the manifest",
+  "category": "data",
+  "tags": ["auth", "token", "fixture"],
+  "auth": "token",
+  "credential": "NEEDS_TOKEN_VALUE",
+  "servers": [
+    {
+      "id": "main",
+      "transport": "stdio",
+      "command": "mcp-server-filesystem",
+      "args": ["--token"]
+    }
+  ]
+}

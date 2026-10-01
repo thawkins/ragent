@@ -1,0 +1,22 @@
+{
+  "id": "two-server",
+  "name": "Two Server",
+  "description": "A connector wrapping two stdio servers, alpha and beta",
+  "category": "developer",
+  "tags": ["multi-server", "fixture", "stdio"],
+  "auth": "none",
+  "servers": [
+    {
+      "id": "alpha",
+      "transport": "stdio",
+      "command": "mcp-server-filesystem",
+      "args": ["--alpha"]
+    },
+    {
+      "id": "beta",
+      "transport": "stdio",
+      "command": "mcp-server-filesystem",
+      "args": ["--beta"]
+    }
+  ]
+}

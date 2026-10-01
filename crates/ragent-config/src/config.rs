@@ -268,6 +268,14 @@ pub struct Config {
     /// overrides user-global). `None` means the compiled defaults apply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugins: Option<crate::plugins::PluginsConfig>,
+    /// Connector subsystem configuration (spec `connectors` FR-007, FR-021,
+    /// FR-024).
+    ///
+    /// Loaded and merged with the same precedence as other optional config
+    /// sections: the overlay section wins when present (project config
+    /// overrides user-global). `None` means the compiled defaults apply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connectors: Option<crate::connectors::ConnectorsConfig>,
     /// Maximum number of messages the TUI message input queue may hold
     /// (spec `inputqueue` FR-015).
     ///
@@ -337,6 +345,7 @@ impl Default for Config {
             research: ResearchConfig::default(),
             finance: crate::finance::FinanceProviderConfig::default(),
             plugins: None,
+            connectors: None,
             input_queue_capacity: None,
             config_paths: Vec::new(),
         }
@@ -2610,6 +2619,13 @@ impl Config {
         // absent user-global block (spec `plugins` T-001).
         if overlay.plugins.is_some() {
             base.plugins = overlay.plugins;
+        }
+
+        // Connectors config: the overlay section wins wholesale when present, so
+        // project-level `connectors` settings are not silently discarded by an
+        // absent user-global block (spec `connectors` FR-007, FR-024).
+        if overlay.connectors.is_some() {
+            base.connectors = overlay.connectors;
         }
 
         // Input-queue capacity: overlay wins when explicitly set (spec

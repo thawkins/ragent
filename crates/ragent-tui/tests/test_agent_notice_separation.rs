@@ -51,8 +51,7 @@ async fn test_consecutive_agent_notices_get_separate_messages() {
         notices[0]
     );
     assert!(
-        notices[1].starts_with("[notice] Agent Notice")
-            && notices[1].contains("Second notice item"),
+        notices[1].starts_with("Agent Notice") && notices[1].contains("Second notice item"),
         "second notice must start its own bubble, got: {:?}",
         notices[1]
     );
@@ -88,7 +87,7 @@ async fn test_agent_notice_does_not_absorb_subsequent_streamed_text() {
 
     let notice = assistant_texts
         .iter()
-        .find(|t| t.starts_with("[notice] Agent Notice"))
+        .find(|t| t.starts_with("Agent Notice"))
         .expect("notice bubble must exist");
     assert!(
         !notice.contains("Here is the actual answer"),
@@ -131,7 +130,7 @@ async fn test_agent_notice_splits_streamed_message() {
 
     let notice_idx = assistant_texts
         .iter()
-        .position(|t| t.starts_with("[notice] Agent Notice"))
+        .position(|t| t.starts_with("Agent Notice"))
         .expect("notice bubble must exist");
     assert!(
         notice_idx > 0,

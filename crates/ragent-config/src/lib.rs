@@ -11,6 +11,7 @@ pub mod activity_log;
 pub mod bash_lists;
 pub mod compaction;
 pub mod config;
+pub mod connectors;
 pub mod dir_lists;
 pub mod edit_log;
 pub mod finance;
@@ -34,6 +35,9 @@ pub use config::{
     ProviderConfig, ResearchConfig, ResearchEvaluateConfig, ResearchModelsConfig,
     ResearchSupervisorConfig, SddConfig, StreamConfig, TelegramChannelConfig, ToolVisibilityConfig,
     tool_family_names,
+};
+pub use connectors::{
+    ConnectorCredentialsConfig, ConnectorStoreEndpoint, ConnectorStoresConfig, ConnectorsConfig,
 };
 pub use gcf::GcfConfig;
 pub use permission::{

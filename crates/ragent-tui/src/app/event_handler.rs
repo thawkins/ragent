@@ -934,12 +934,8 @@ impl App {
                 // other, and again afterwards so streamed text does not merge
                 // into the notice bubble (the renderer adds a trailing blank
                 // line after every notice for separation).
-                // A `[notice] ` marker is prepended so the renderer can style
-                // the bubble (see `is_agent_notice`); the plain-text prefix
-                // `Agent Notice` is what the widget matches on (ANTIPAT M1:
-                // the emoji prefix was replaced with the ASCII marker).
                 self.force_new_message = true;
-                self.append_assistant_text(&format!("[notice] Agent Notice\n{}", message));
+                self.append_assistant_text(&format!("{}\n{}", "Agent Notice", message));
                 self.force_new_message = true;
             }
             Event::AgentError {

@@ -28,6 +28,7 @@ use ragent_agent::{
 use ragent_config::{activity_log, edit_log, gcf, yolo};
 
 mod cli;
+mod connectors;
 mod crash_dump;
 mod panic_hook;
 mod plugins;
@@ -152,6 +153,14 @@ enum Commands {
     #[command(name = "plugins")]
     Plugins {
         /// Subcommand and arguments: `list|add|remove|enable|disable|test|help`
+        #[arg(value_name = "ARGS", trailing_var_arg = true, num_args = 0..)]
+        args: Vec<String>,
+    },
+    /// Manage connectors (the `/connectors` slash-command parity surface)
+    #[command(name = "connectors")]
+    Connectors {
+        /// Subcommand and arguments:
+        /// `list|search|add|remove|enable|disable|connect|disconnect|auth|test|stores|help`
         #[arg(value_name = "ARGS", trailing_var_arg = true, num_args = 0..)]
         args: Vec<String>,
     },
@@ -1418,6 +1427,12 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
             // contexts, so it must not cross an `.await`. `run_cli` is fully
             // synchronous, keeping this future `Send` for the async runtime.
             plugins::run_cli(&args)?;
+        }
+        Some(Commands::Connectors { args }) => {
+            // The connector surface drives an ephemeral lifecycle session over
+            // the CLI connection seam and never touches a live TUI client, so it
+            // is safe to await on the main task.
+            connectors::run_cli(&args).await?;
         }
     }
     Ok(())

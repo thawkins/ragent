@@ -1,0 +1,11 @@
+{
+  "connectors": [
+    {
+      "id": "truncated",
+      "name": "Truncated",
+      "description": "A deliberately malformed catalogue document (truncated JSON)",
+      "servers": [
+        {
+          "id": "main",
+          "transport": "stdio",
+          "command": "mcp-server-filesystem"

@@ -12,6 +12,7 @@ use ragent_agent::{
     message::{Message, MessagePart, Role},
     session::processor::estimate_tool_definition_bytes,
 };
+use ragent_connectors::CatalogueBrowser;
 use ragent_llm::provider::tool_cache::{ToolFormat, cached_tools};
 use ragent_plugins::{
     FetchLimits, StoreDirs, StoreError, StoreIndex, StoreIndexFetcher, StoreKind, add,
@@ -24,8 +25,9 @@ use ragent_tools_core::{Tool, ToolContext};
 
 // State types from app/state.rs
 use crate::app::state::{
-    App, ContextAction, ContextPartitionSnapshot, FileMenuEntry, FileMenuState, LlmRequestStat,
-    LlmStatsSummary, LogEntry, LogLevel, OutputViewState, OutputViewTarget, PluginStoreBrowser,
+    App, ConnectorCatalogueInstallResult, ConnectorCatalogueResult, ContextAction,
+    ContextPartitionSnapshot, FileMenuEntry, FileMenuState, LlmRequestStat, LlmStatsSummary,
+    LogEntry, LogLevel, OutputViewState, OutputViewTarget, PluginStoreBrowser,
     PluginStoreFetchResult, PluginStoreInstallResult, ProviderSetupStep, QueuedInput, ScreenMode,
     ScrollbarDragPane, SelectionPane, TextSelection, atomic_config_update, is_image_path,
     percent_decode_path, save_clipboard_image_to_temp,
@@ -83,6 +85,52 @@ fn run_plugin_store_install(
             id: id.to_string(),
             notice: format!("install failed: {err}"),
             report: add_error_report(&err),
+            succeeded: false,
+        },
+    }
+}
+
+/// Run one connector-catalogue install through the shared `add` entry point and
+/// map its result to a TUI report.
+///
+/// The catalogue-id install path resolves the descriptor from the live catalogue
+/// (the same fetch `search` uses), so the store is written exactly as
+/// `/connectors add <id>` would write it: the collision guard applies and the
+/// connector is recorded **disabled**. The success report names the installed id
+/// and its disabled posture; every refusal becomes the `[err]` report naming the
+/// cause. Never panics.
+fn run_connector_catalogue_install(
+    dirs: &ragent_connectors::StoreDirs,
+    workdir: &std::path::Path,
+    config: &ragent_config::ConnectorsConfig,
+    id: &str,
+) -> ConnectorCatalogueInstallResult {
+    // A catalogue fetch failure is surfaced as a fetch error, not silently
+    // folded into "the catalogue holds no connector with this id" (which an
+    // empty catalogue would otherwise cause).
+    let catalogue = match ragent_connectors::fetch_catalogue_descriptors_network(config) {
+        Ok(catalogue) => catalogue,
+        Err(err) => {
+            let detail = format!("could not fetch the connector catalogue: {err}");
+            return ConnectorCatalogueInstallResult {
+                id: id.to_string(),
+                notice: format!("install failed: {detail}"),
+                report: format!("[err] {detail}"),
+                succeeded: false,
+            };
+        }
+    };
+    match ragent_connectors::add(dirs, workdir, id, false, &catalogue) {
+        Ok(outcome) => ConnectorCatalogueInstallResult {
+            id: outcome.descriptor.id.as_str().to_string(),
+            notice: format!("installed {id}"),
+            report: ragent_connectors::browse_install_report(id, &outcome),
+            succeeded: true,
+        },
+        Err(err) => ConnectorCatalogueInstallResult {
+            id: id.to_string(),
+            notice: format!("install failed: {err}"),
+            report: format!("[err] {err}"),
             succeeded: false,
         },
     }
@@ -1601,6 +1649,286 @@ impl App {
     pub fn plugin_store_move_down(&mut self) {
         if let Some(browser) = self.plugin_store.as_mut() {
             browser.move_down();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Open the connector-catalogue browse panel for `/connectors claude`,
+    /// pre-filling the search field from `prefill`.
+    ///
+    /// Mirrors [`Self::open_plugin_store`]: the panel opens in the `Loading`
+    /// state and its catalogue fetch is started off-loop, so the event loop and
+    /// any in-progress agent turn keep animating. Opening the panel installs
+    /// nothing; while it is open the input field and the queue are locked.
+    ///
+    /// The installed-connector-id set is derived once from the store scan on open
+    /// so the renderer can colour already-present rows.
+    pub fn open_connector_catalogue(&mut self, prefill: &str, refresh: bool) {
+        let installed = self.derive_installed_connector_set();
+        let mut browser = CatalogueBrowser::new(prefill, refresh);
+        browser.set_installed(installed);
+        self.connector_store = Some(browser);
+        self.needs_redraw = true;
+        self.spawn_connector_catalogue_fetch();
+    }
+
+    /// Start the connector-catalogue fetch off the event loop.
+    ///
+    /// The fetch is blocking (`reqwest::blocking` builds and drops its own tokio
+    /// runtime), so it runs on a plain OS thread rather than
+    /// `tokio::task::spawn_blocking`: dropping a runtime inside a blocking-pool
+    /// worker panics with "Cannot drop a runtime in a context where blocking is
+    /// not allowed". The descriptors (or the contained cause) are delivered back
+    /// through [`App::connector_catalogue_result`] and applied by
+    /// [`App::poll_connector_catalogue_result`] on a later frame, so the panel
+    /// renders its loading row until the result lands.
+    pub(crate) fn spawn_connector_catalogue_fetch(&mut self) {
+        let config = ragent_connectors::store_and_config(&self.cwd_path).1;
+        if !config.is_enabled() {
+            // A disabled subsystem is inert: no catalogue fetch is attempted.
+            self.connector_catalogue_failed("connectors.enabled = false".to_string());
+            return;
+        }
+        let slot = Arc::clone(&self.connector_catalogue_result);
+        std::thread::spawn(move || {
+            let outcome = ragent_connectors::fetch_catalogue_descriptors_with_skipped(&config);
+            let result = match outcome {
+                Ok((descriptors, skipped)) => ConnectorCatalogueResult {
+                    outcome: Ok(descriptors),
+                    skipped,
+                },
+                Err(cause) => ConnectorCatalogueResult {
+                    outcome: Err(cause),
+                    skipped: 0,
+                },
+            };
+            *recover_poisoned(slot.lock(), "connector_catalogue_result") = Some(result);
+        });
+    }
+
+    /// Drain a completed off-loop connector-catalogue fetch and apply it.
+    ///
+    /// A no-op when no panel is open, so a late result never fills a closed
+    /// browser.
+    pub fn poll_connector_catalogue_result(&mut self) {
+        let result = {
+            let mut guard = recover_poisoned(
+                self.connector_catalogue_result.lock(),
+                "connector_catalogue_result",
+            );
+            guard.take()
+        };
+        let Some(result) = result else {
+            return;
+        };
+        if self.connector_store.is_none() {
+            return;
+        }
+        match result.outcome {
+            Ok(entries) => {
+                if let Some(browser) = self.connector_store.as_mut() {
+                    browser.set_entries(entries, result.skipped);
+                }
+            }
+            Err(cause) => self.connector_catalogue_failed(cause),
+        }
+        self.needs_redraw = true;
+    }
+
+    /// Apply an inline failure detail to the open connector-catalogue browser.
+    ///
+    /// A no-op when the panel is closed, so a late failure never corrupts an
+    /// unrelated panel.
+    fn connector_catalogue_failed(&mut self, detail: String) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.set_failed(detail);
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Derive the installed-connector-id set for the current working directory
+    /// from the connector store scan. Never fails: an absent or unreadable store
+    /// scans as empty.
+    fn derive_installed_connector_set(&self) -> BTreeSet<String> {
+        let (dirs, _config) = ragent_connectors::store_and_config(&self.cwd_path);
+        ragent_connectors::scan_dirs(dirs)
+            .into_iter()
+            .filter_map(|connector| connector.outcome.ok())
+            .map(|descriptor| descriptor.id.as_str().to_string())
+            .collect()
+    }
+
+    /// Re-derive the panel's installed-connector-id set from the store scan.
+    ///
+    /// Called after an install commits so a newly installed row re-colours. A
+    /// no-op when no panel is open.
+    pub fn refresh_connector_catalogue_installed(&mut self) {
+        if self.connector_store.is_none() {
+            return;
+        }
+        let installed = self.derive_installed_connector_set();
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.set_installed(installed);
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Handle `ENTER` on the highlighted connector-catalogue result.
+    ///
+    /// A highlighted result whose id is already in the store scan is refused
+    /// with an already-installed notice and nothing is written. A not-installed
+    /// result starts the off-loop install of the catalogue id, which the poll
+    /// later drains to report the installed id and re-derive the installed set so
+    /// the row re-colours. An empty result set records a neutral notice and
+    /// installs nothing. No path panics.
+    ///
+    /// Installing is only ever reached from this explicit `ENTER`: opening,
+    /// typing, and moving never call it, so nothing is installed without a
+    /// deliberate key press.
+    pub fn connector_catalogue_install_selected(&mut self) {
+        let Some(browser) = self.connector_store.as_mut() else {
+            return;
+        };
+        let Some(entry) = browser.selected() else {
+            browser.last_install = Some("no result highlighted".to_string());
+            self.needs_redraw = true;
+            return;
+        };
+        let id = entry.id.as_str().to_string();
+        if browser.is_installed(&id) {
+            browser.last_install = Some(format!("connector {id} is already installed"));
+            self.needs_redraw = true;
+            return;
+        }
+        browser.last_install = Some(format!("installing {id}..."));
+        self.needs_redraw = true;
+        self.spawn_connector_catalogue_install(id);
+    }
+
+    /// Start the install of catalogued connector `id` off the event loop.
+    ///
+    /// The catalogue-id install reuses the shared [`ragent_connectors::add`]
+    /// entry point, which applies its own collision guard and records the
+    /// connector **disabled**; no MCP server is contacted. The worker turns the
+    /// outcome into a [`ConnectorCatalogueInstallResult`] and deposits it for
+    /// [`App::poll_connector_catalogue_install_result`]. When no worker thread can
+    /// be spawned the install runs inline so the action still completes. No path
+    /// panics.
+    fn spawn_connector_catalogue_install(&mut self, id: String) {
+        let (dirs, config) = ragent_connectors::store_and_config(&self.cwd_path);
+        let workdir = self.cwd_path.clone();
+        let slot = Arc::clone(&self.connector_catalogue_install_result);
+
+        let worker_id = id.clone();
+        let worker_dirs = dirs.clone();
+        let worker_workdir = workdir.clone();
+        let worker_config = config.clone();
+        let spawn = std::thread::Builder::new()
+            .name("connector-catalogue-install".to_owned())
+            .spawn(move || {
+                let result = run_connector_catalogue_install(
+                    &worker_dirs,
+                    &worker_workdir,
+                    &worker_config,
+                    &worker_id,
+                );
+                *recover_poisoned(slot.lock(), "connector_catalogue_install_result") = Some(result);
+            });
+
+        match spawn {
+            Ok(handle) => {
+                // The worker owns the install now and deposits its result for
+                // the next poll to drain.
+                drop(handle);
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "connector-catalogue install worker spawn failed; running inline");
+                let result = run_connector_catalogue_install(&dirs, &workdir, &config, &id);
+                if result.succeeded {
+                    self.refresh_connector_catalogue_installed();
+                }
+                self.apply_connector_catalogue_install_result(result);
+            }
+        }
+    }
+
+    /// Drain a completed off-loop install and apply it.
+    pub fn poll_connector_catalogue_install_result(&mut self) {
+        let result = {
+            let mut guard = recover_poisoned(
+                self.connector_catalogue_install_result.lock(),
+                "connector_catalogue_install_result",
+            );
+            guard.take()
+        };
+        let Some(result) = result else {
+            return;
+        };
+        if result.succeeded {
+            self.refresh_connector_catalogue_installed();
+        }
+        self.apply_connector_catalogue_install_result(result);
+    }
+
+    /// Apply one install result: record the panel-footer notice, and append the
+    /// report to the message window.
+    fn apply_connector_catalogue_install_result(
+        &mut self,
+        result: ConnectorCatalogueInstallResult,
+    ) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.last_install = Some(result.notice);
+        }
+        self.append_assistant_text(&result.report);
+        self.needs_redraw = true;
+    }
+
+    /// Handle the shared `Backspace` / `Esc` query-editing key while the
+    /// connector-catalogue panel is open.
+    ///
+    /// Removes the last query character and returns `true` when the query is
+    /// non-empty; when it is already empty, dismisses the panel and returns
+    /// `false`.
+    pub fn connector_catalogue_edit_or_close(&mut self) -> bool {
+        let Some(browser) = self.connector_store.as_mut() else {
+            return false;
+        };
+        if browser.backspace() {
+            self.needs_redraw = true;
+            true
+        } else {
+            self.close_connector_catalogue();
+            false
+        }
+    }
+
+    /// Append a typed character to the connector-catalogue panel's search query.
+    pub fn connector_catalogue_push_char(&mut self, c: char) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.push_char(c);
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the connector-catalogue panel's block cursor up one result.
+    pub fn connector_catalogue_move_up(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.move_up();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the connector-catalogue panel's block cursor down one result.
+    pub fn connector_catalogue_move_down(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.move_down();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Close the connector-catalogue browse panel.
+    pub fn close_connector_catalogue(&mut self) {
+        if self.connector_store.take().is_some() {
             self.needs_redraw = true;
         }
     }

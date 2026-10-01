@@ -633,13 +633,14 @@ impl PlanParser {
     /// Regex matching an inclusive task-ID range in a Dependencies cell.
     ///
     /// Endpoints are well-formed task IDs separated by an ASCII hyphen, an en
-    /// dash, an em dash, or the words `to` / `through` (all seen in existing
-    /// PLAN.md files), with optional surrounding spaces. Anchored so a bare
-    /// `T-003` (whose hyphen sits inside the ID) never matches.
+    /// dash, an em dash, a `..` / `...` ellipsis, or the words `to` / `through`
+    /// (all seen in existing PLAN.md files), with optional surrounding spaces.
+    /// Anchored so a bare `T-003` (whose hyphen sits inside the ID) never
+    /// matches.
     fn dependency_range_re() -> &'static Regex {
         static DEP_RANGE_RE: OnceLock<Regex> = OnceLock::new();
         DEP_RANGE_RE.get_or_init(|| {
-            Regex::new(r"^(T-\d+)\s*(?:[-\u{2013}\u{2014}]|\bthrough\b|\bto\b)\s*(T-\d+)$")
+            Regex::new(r"^(T-\d+)\s*(?:[-\u{2013}\u{2014}]|\.{2,}|\bthrough\b|\bto\b)\s*(T-\d+)$")
                 .expect("valid dependency range regex")
         })
     }
@@ -647,8 +648,8 @@ impl PlanParser {
     /// Parse the Dependencies table column into a flat list of task IDs.
     ///
     /// Accepts a comma-separated list of IDs, or the empty markers `-` / `-`,
-    /// and expands an inclusive range such as `T-001-T-014` (or
-    /// `T-001 through T-014`) into every ID it spans. Without expansion a range
+    /// and expands an inclusive range such as `T-001-T-014`, `T-001..T-014`, or
+    /// `T-001 through T-014` into every ID it spans. Without expansion a range
     /// is a single unknown ID, so a final verification task that depends on the
     /// whole plan is treated as having no dependencies and gets scheduled first
     /// instead of last (FR-006).

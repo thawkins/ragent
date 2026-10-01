@@ -96,7 +96,7 @@ pub mod indicators {
     pub const DIVERGED: &str = "↕";
 
     /// Busy/processing/loading indicator
-    pub const BUSY: &str = "⟳";
+    pub const BUSY: &str = "BUSY:";
 
     /// Unknown/pending status
     pub const UNKNOWN: &str = "•";
@@ -118,25 +118,26 @@ pub mod service_icons {
     use ratatui::style::Color;
 
     /// Code Index - magnifying glass over a document.
-    pub const CODE_INDEX: (&str, Color) = ("🔍", Color::Cyan);
+    pub const CODE_INDEX: (&str, Color) = ("CDX:", Color::Yellow);
 
     /// Activity Log - scroll/parchment.
-    pub const ACTIVITY_LOG: (&str, Color) = ("📜", Color::Yellow);
+    pub const ACTIVITY_LOG: (&str, Color) = ("LOG:", Color::Yellow);
 
-    /// Autopilot - airplane.
-    pub const AUTOPILOT: (&str, Color) = ("✈️", Color::Magenta);
+    /// selector breaks terminal width/cell tracking when rendered).
+    pub const AUTOPILOT: (&str, Color) = ("AUTO:", Color::Yellow);
 
-    /// Edit Log - pencil.
-    pub const EDIT_LOG: (&str, Color) = ("✏️", Color::LightBlue);
+    /// Edit Log - pencil (base glyph without U+FE0F, see AUTOPILOT).
+    pub const EDIT_LOG: (&str, Color) = ("EDIT:", Color::Yellow);
 
     /// Telemetry - satellite dish / signal.
-    pub const TELEMETRY: (&str, Color) = ("📡", Color::LightGreen);
+    pub const TELEMETRY: (&str, Color) = ("TELE:", Color::Yellow);
 
-    /// YOLO - warning triangle (bold, changes command-validation behaviour).
-    pub const YOLO: (&str, Color) = ("⚠️", Color::LightRed);
+    /// YOLO - warning triangle (bold, changes command-validation behaviour;
+    /// base glyph without U+FE0F, see AUTOPILOT).
+    pub const YOLO: (&str, Color) = ("YOLO:", Color::Yellow);
 
     /// GCF encoding - compression clamp (token-efficient tool-result encoding).
-    pub const GCF: (&str, Color) = ("🗜", Color::LightMagenta);
+    pub const GCF: (&str, Color) = ("GCF:", Color::Yellow);
 }
 
 /// Label abbreviations for compact and minimal modes.
@@ -295,7 +296,7 @@ fn build_line1(
     let center_width = spans_width(&center);
     let right_width = spans_width(&right);
 
-    let prompt_tag = prompt_display_text(&app.last_prompt, 32);
+    let prompt_tag = prompt_display_text(&app.last_prompt, 48);
     // The branch section and the tag render adjacently, separated by one space,
     // as a single group placed immediately after the cwd section.
     let group_width = if prompt_tag.is_empty() {
@@ -429,7 +430,7 @@ fn build_line2(
     let mut busy: Vec<Span<'static>> = Vec::new();
     if app.code_index_busy {
         busy.push(Span::styled(
-            format!("{}idx ", indicators::BUSY),
+            format!("{}cdx-idx ", indicators::BUSY),
             Style::default()
                 .fg(colors::WARNING)
                 .add_modifier(Modifier::BOLD),
@@ -437,7 +438,7 @@ fn build_line2(
     }
     if app.code_index_graph_busy {
         busy.push(Span::styled(
-            format!("{}graph ", indicators::BUSY),
+            format!("{}cdx-graph ", indicators::BUSY),
             Style::default()
                 .fg(colors::IN_PROGRESS)
                 .add_modifier(Modifier::BOLD),
@@ -625,6 +626,12 @@ fn build_line2_left(
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
+            format!("Model: "),
+            Style::default()
+                .fg(colors::WARNING)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
             format!("{} ", label),
             Style::default()
                 .fg(colors::TEXT)
@@ -635,11 +642,7 @@ fn build_line2_left(
     // Thinking level indicator
     if let Some(level) = app.selected_thinking_level {
         let short = App::thinking_level_short(level);
-        let (level_color, level_icon) = if level.is_enabled() {
-            (colors::HEALTHY, "🧠")
-        } else {
-            (colors::LABEL, "💭")
-        };
+        let (level_color, level_icon) = (colors::LABEL, " Thinking:");
         let level_str = if mode == ResponsiveMode::Full || mode == ResponsiveMode::Compact {
             format!("{} {} ", level_icon, short)
         } else {

@@ -1,6 +1,133 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.123] - 2026-10-01
+
+Adds the connector system and fixes.
+
+### Added
+
+- **Connector system - a Claude-connector-equivalent integration catalogue over
+  MCP (spec `connectors`, `specs/connectors/`).** A *connector* is a named,
+  user-facing integration (Google Drive, Slack, GitHub, Git, Postgres,
+  Puppeteer, and the wider community catalogue) that reaches an external system
+  through one or more MCP servers. The MCP server remains the transport ragent
+  already speaks (`McpClient`); the connector layer adds the catalogue entry
+  (display name, category, auth shape, and one or more servers) and a
+  management surface on top of it.
+  - **New crate `crates/ragent-connectors` (37 files, ~16.4k lines, 16 test
+    files).** Owns the normalised descriptor model and its validation
+    (FR-002, FR-025), the connector store paths / scan / `_state.json` ledger
+    (FR-001), manifest read-write and install staging with a path-traversal-safe
+    archive extraction (FR-011, FR-027, FR-029), the HTTPS catalogue fetch
+    (byte cap, timeout, cache) plus per-store normalisation providers and the
+    compiled default Claude connector-catalogue endpoint and its provenance
+    resolver (FR-024, FR-025, FR-031, FR-034..FR-038, NFR-001..003), auth-shape
+    handling over the existing encrypted credential store (FR-005, FR-014,
+    FR-022, FR-023, FR-032), and the bridge that resolves every enabled
+    connector's servers into `(bridged_server_id, McpServerConfig)` pairs
+    (FR-003, FR-020, FR-026, FR-033). Bridged server ids are
+    `<connector-id>.<server>`, the same collision-avoidance shape the plugin MCP
+    bridge uses; the durable enable ledger is the **existing**
+    `ragent_agent::mcp::enable_state` (`mcp_state.json`), so a connector
+    disabled once stays disabled everywhere and no second enable file is added.
+  - **`/connectors` slash-command family (FR-004, FR-006, FR-009..FR-019,
+    FR-022, FR-023, FR-025, FR-036, FR-039..FR-041).** Twelve subcommands -
+    `list [--verbose] [--category <name>]`, `search <query> [--category <name>]`,
+    `claude [query] [--refresh]`, `add <id|source> [--force]`, `remove <id>`,
+    `enable <id>`, `disable <id>`, `connect <id>`, `disconnect <id>`,
+    `auth <id>`, `test <id>`, `stores [--check]`, `help` - dispatched through a
+    new `crates/ragent-tui/src/app/connector.rs` glue module, registered in
+    `SLASH_COMMANDS`, and listed in the command catalog and the `/` autocomplete
+    menu (seeded from the crate's shared token list so it cannot drift from the
+    usage block). A bare `/connectors`, `/connectors help`, and an unrecognised
+    subcommand all render the same usage block. Every report carries a
+    `From: /connectors <sub>` attribution line and is ASCII-only; an unknown
+    `--category` value is refused with an `[err]` row and changes no state,
+    while `ALL` (any case) or a blank value clears the filter.
+  - **Interactive connector-catalogue browser (`/connectors claude`).** A new
+    modal overlay in `crates/ragent-tui/src/layout.rs` mirrors the plugin-store
+    panel: a title line (catalogue name, query, active category, visible/total
+    count), a scrollable result list with the block cursor on the highlighted
+    row, an `[installed]` marker and distinct colour on already-installed
+    connectors, and a footer of key hints. The catalogue fetch and the `ENTER`
+    install both run **off the event loop** on a blocking worker
+    (`spawn_connector_catalogue_fetch` / `spawn_connector_catalogue_install`),
+    depositing their result for the UI thread to drain
+    (`poll_connector_catalogue_result` / `poll_connector_catalogue_install_result`),
+    so the fetch never blocks the loop or an agent turn. The panel owns the
+    keyboard while open (`Up`/`Down` move the cursor, `ENTER` installs,
+    `Backspace`/`Esc` edit the query, and `Esc` on an empty query dismisses it).
+  - **`/connectors test <id>` isolated harness (FR-015, FR-016).** Connects the
+    connector's servers in isolation with a throwaway probe, invokes one tool,
+    and reports per-step `[ ok ]`/`[fail]` results, so a failing server is
+    named without touching the live session.
+  - **CLI parity (`ragent connectors <sub>`).** A new `src/connectors.rs`
+    entry point mirrors `src/plugins.rs`: the session-free subcommands, the
+    management subcommands (over an ephemeral lifecycle session), and the `test`
+    harness are all reachable from the shell, with the report re-spelled for the
+    CLI surface.
+  - **`connectors` configuration block (FR-007, FR-021, FR-024).** A new
+    `ConnectorsConfig` in `ragent-config` controls the master switch
+    (`connectors.enabled`, default `true`), the connector store directory
+    override, the catalogue endpoints and shared fetch budgets (`timeout_ms`,
+    `max_index_bytes`, `cache_ttl_secs`), and a non-secret credential-name
+    mapping keyed by connector id (only the credential *name* is stored, never
+    the value). The section merges overlay-wins (project over user-global). With
+    `connectors.enabled: false` the subsystem performs no discovery, no catalogue
+    fetch, and no connection, and every subcommand other than `help` reports it
+    is disabled.
+  - **Fixtures and acceptance walk (T-015).** `assets/connectors/fixtures/`
+    holds connector directories, catalogue indices (including a malformed and an
+    oversize index), and archive fixtures (`.zip`/`.tar.gz`, plus a
+    path-traversal `escape.zip`);
+    `crates/ragent-connectors/tests/test_connector_fixtures.rs` drives the real
+    `add`/`remove`/`scan_dirs`/`render_list`/`render_search`/`test_connector`/
+    dispatcher paths over them. `specs/connectors/` carries `SPEC.md`
+    (FR-001..FR-041, NFR-001..003), `PLAN.md` (T-001..T-021), and `TESTPLAN.md`.
+
+### Changed
+
+- **TUI tool-category and status-bar markers are now plain ASCII (ANTIPAT M1).**
+  The message-window tool-category icons and the status-bar service icons are
+  rendered as plain ASCII marker prefixes (`[file]`, `[dir]`, `[search]`,
+  `[exec]`, `[git]`, `[team]`, ...) instead of emoji, and the status-bar
+  indicators use short text tags (`CDX:`, `LOG:`, `AUTO:`, `EDIT:`, `TELE:`,
+  `YOLO:`, `GCF:`, `BUSY: `) rather than emoji glyphs, so the non-ASCII CI gate
+  can require a fully ASCII tree with no icon carve-outs. `shorten_middle` and
+  `truncate_with_ellipsis` now budget the single-character ellipsis glyph
+  (U+2026) rather than the three-character `...` separator; the agent-notice
+  bubble continues to be matched on its plain-text `Agent Notice` label.
+- **`/yolo` and `Alt+Y` now persist to the user-global config only**
+  (`~/.config/ragent/ragent.json`), never the project-local
+  `.ragent/ragent.json` - see the Fixed entry below.
+- **Default connector-catalogue endpoint literal guard.** New
+  `scripts/check-connector-endpoint-literal.sh` (with `--self-test`) fails if the
+  compiled default endpoint is declared more than once (FR-038, NFR-001), wired
+  into `pre-flight.sh` and a new `ci.yml` step. The retired
+  `scripts/check-non-ascii.sh` / `scripts/check_non_ascii.py` guard and its
+  `ci.yml`/`pre-flight.sh` steps are removed (superseded by the M1 ASCII
+  conformance work).
+- **Spec plan-parser dependency ranges accept a `..` / `...` ellipsis.** The
+  `Dependencies` range regex in `ragent-specs` now expands `T-001..T-014` and
+  `T-001...T-014` in addition to `T-001-T-014`, `T-001 through T-014`, and the
+  en/em dash spellings already supported.
+
+### Fixed
+
+- **YOLO toggle now persists to the user-global config (CI `Check & Test`
+  failure).** `Config::save_to_source` writes back to whichever config file was
+  loaded (project preferred over global), and `Config::load` creates a
+  project-local `.ragent/ragent.json` on first run. In a clean checkout with a
+  fresh config dir the YOLO `/yolo` / `Alt+Y` toggle therefore persisted into the
+  project file - where `Config::merge_project` strips `yolo` as untrusted
+  repository content (SECTASKS T-011) - so the next load never saw the change and
+  `test_yolo_persist_helper_updates_config_file` failed. YOLO is a user-only
+  toggle: `runtime_flag::RuntimeFlag` gains `persist_to_global` /
+  `toggle_persist_global` (which write via `Config::save(false)` to
+  `~/.config/ragent/ragent.json`), and `yolo::persist_yolo` / `yolo::toggle_persist`
+  now use them. This also stops the toggle polluting the working directory's
+  project config. The regression test is retargeted to the global path (via an
+  `XDG_CONFIG_HOME` redirect) so it actually exercises the failure mode.
 
 ## [1.0.122] - 2026-09-30
 

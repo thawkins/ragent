@@ -20,6 +20,7 @@ mod loop_dialog;
 pub mod md_worker;
 pub use self::md_worker::MdWorker;
 
+mod connector;
 mod models;
 mod newproj;
 mod plugin;

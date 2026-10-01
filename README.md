@@ -188,6 +188,23 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   the install); managed through
   `/plugins list|add|remove|enable|disable|test|stores|help` in the TUI and the
   `ragent plugins <sub>` CLI; `plugins.enabled: false` makes the subsystem inert
+- **Connector system** — a Claude-connector-equivalent catalogue of named
+  integrations (Google Drive, Slack, GitHub, Git, Postgres, Puppeteer, and the
+  wider community catalogue) that reach an external system through one or more
+  MCP servers; a connector is a catalogue entry (display name, category, auth
+  shape, and one or more servers) on top of the MCP transport ragent already
+  speaks. Managed through the twelve-subcommand `/connectors` family
+  (`list [--verbose] [--category <name>]`, `search <query> [--category <name>]`,
+  `claude [query] [--refresh]`, `add <id|source> [--force]`, `remove <id>`,
+  `enable <id>`, `disable <id>`, `connect <id>`, `disconnect <id>`,
+  `auth <id>`, `test <id>`, `stores [--check]`, `help`) in the TUI and the
+  `ragent connectors <sub>` CLI. `/connectors claude` opens an interactive,
+  off-the-event-loop catalogue browser (filter, browse, install with one key),
+  `/connectors test <id>` runs an isolated connect-and-invoke harness that
+  never touches the live session, and `/connectors stores [--check]` reports
+  each catalogue endpoint and its provenance. Connectors install disabled;
+  `enable` connects their servers now. `connectors.enabled: false` makes the
+  subsystem inert
 - **Input queue** — the TUI input field stays editable while the primary agent
   executes: each `Enter` appends the message to a bounded FIFO queue (default 32
   entries, configurable via `input_queue_capacity`), a two-digit counter appears
@@ -274,6 +291,7 @@ Commands:
   config   Show resolved configuration
   new      Scaffold a new project in the current directory
   plugins  Manage plugins (the `/plugins` slash-command parity surface)
+  connectors  Manage connectors (the `/connectors` slash-command parity surface)
 
 Options:
       --model <MODEL>          Override model (provider/model format)
@@ -339,6 +357,18 @@ with OpenCode's `opencode.json`.
     "max_execution_ms": 5000,
     "max_entry_ms": 10000,
     "max_memory_mb": 64
+  },
+  // Connector subsystem (defaults shown). `enabled: false` makes the whole
+  // subsystem inert (no discovery, catalogue fetch, or connection).
+  "connectors": {
+    "enabled": true,
+    "store_dir": null,
+    "stores": {
+      "timeout_ms": 10000,
+      "max_index_bytes": 2097152,
+      "cache_ttl_secs": 3600
+    },
+    "credentials": {}
   }
 }
 ```
@@ -420,7 +450,7 @@ Docs and examples:
 
 ## Architecture
 
-The project is a Cargo workspace built from 16 focused crates:
+The project is a Cargo workspace built from 17 focused crates:
 
 | Crate                     | Purpose                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -428,6 +458,7 @@ The project is a Cargo workspace built from 16 focused crates:
 | `ragent-bench`          | Benchmark runner shared between TUI and CLI                                                                                                                                                       |
 | `ragent-codeindex`      | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher                                                                                                                   |
 | `ragent-config`         | Configuration types, defaults, and parsing                                                                                                                                                        |
+| `ragent-connectors`     | Connector system: catalogue descriptors, store, providers, MCP bridge, `/connectors` surface                                                                                                     |
 | `ragent-llm`            | Provider clients and model/provider registry (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock, Microsoft Foundry Local) |
 | `ragent-plugins`        | Plugin system: Codex/Claude dialect manifests, sandboxed JS runtime, lifecycle, `/plugins` surface                                                                                                |
 | `ragent-research`       | Research system: web/local gathering, synthesis, RESEARCH.md output                                                                                                                               |
@@ -494,6 +525,21 @@ research system, plugin system, and multi-layered security are functional and un
 active development.
 
 Recent highlights:
+
+- **Uncommitted — connector system (spec `connectors`)** — a new
+  `ragent-connectors` crate (the workspace now has 17) adds a
+  Claude-connector-equivalent catalogue over MCP: a connector is a named
+  integration (Google Drive, Slack, GitHub, ...) carrying a category, an auth
+  shape, and one or more MCP servers, resolved onto the existing `McpClient` and
+  the durable `mcp_state.json` ledger. It is driven by the twelve-subcommand
+  `/connectors` family and the `ragent connectors` CLI, with an interactive
+  off-the-event-loop catalogue browser (`/connectors claude`), an isolated
+  `test` harness, endpoint-provenance reporting (`stores [--check]`), and a
+  `connectors` config block (master switch, store dir, catalogue endpoints and
+  fetch budgets, credential-name mapping). Alongside it, the ANTIPAT M1 ASCII
+  sweep replaces the TUI tool-category and status-bar emoji with plain ASCII
+  marker prefixes; `/yolo` now persists to the user-global config only; and the
+  spec plan parser accepts `T-001..T-014` dependency ranges.
 
 - **Version 1.0.122 — security and anti-pattern remediation sweep** — the
   `ANTIPAT.md` milestones M0 and M2-M7 landed (standards conformance, shared-helper

@@ -40,20 +40,17 @@ pub fn shorten_middle(s: &str, max_chars: usize) -> String {
     if total <= max_chars {
         return s.to_string();
     }
-    if max_chars <= 1 {
-        return "...".to_string();
+    // The separator is the single-character ellipsis glyph, so the budget it
+    // consumes is 1. A budget of 2 or 3 cannot fit any end char around the
+    // separator, so only the ellipsis is returned.
+    if max_chars <= 3 {
+        return "\u{2026}".to_string();
     }
-    // The separator is the 3-char ASCII ellipsis (ANTIPAT M1 moved off U+2026),
-    // so the budget it consumes must be 3, not 1 - otherwise the result exceeds
-    // `max_chars` by two.
-    let keep_left = (max_chars - 3) / 2;
-    let keep_right = max_chars - 3 - keep_left;
-    if keep_left == 0 || keep_right == 0 {
-        return "...".to_string();
-    }
+    let keep_left = (max_chars - 1) / 2;
+    let keep_right = max_chars - 1 - keep_left;
     let left: String = s.chars().take(keep_left).collect();
     let right: String = s.chars().skip(total.saturating_sub(keep_right)).collect();
-    format!("{left}...{right}")
+    format!("{left}\u{2026}{right}")
 }
 
 /// Responsive layout constraints based on terminal width.
@@ -200,17 +197,18 @@ pub fn centered_rect_fixed(width: u16, height: u16, area: Rect) -> Rect {
 /// Truncate text with ellipsis if it exceeds the maximum length.
 ///
 /// Returns the original string if it's within bounds, otherwise
-/// returns a truncated version with "..." at the end.
+/// returns a truncated version with the ellipsis glyph at the end. For a
+/// budget of one character or fewer only the ellipsis is returned.
 pub fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
     let count = text.chars().count();
     if count <= max_chars {
         text.to_string()
     } else if max_chars <= 1 {
-        "...".to_string()
+        "\u{2026}".to_string()
     } else {
         text.chars()
             .take(max_chars.saturating_sub(1))
             .collect::<String>()
-            + "..."
+            + "\u{2026}"
     }
 }
